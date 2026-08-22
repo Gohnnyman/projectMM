@@ -6,8 +6,8 @@ class GridLayout {
   uint8_t rows = 16;
 
   defineControls() {
-    addUint8("cols", cols, 1, 64);
-    addUint8("rows", rows, 1, 64);
+    addUint8("cols", cols, 1, 128);
+    addUint8("rows", rows, 1, 128);
   }
 
   placeLights() {

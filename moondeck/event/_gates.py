@@ -164,6 +164,9 @@ def mechanical_gates(firmware, esp32="freshness", triggered=True):
 
     gates = [
         Gate("spec check", UV + ["moondeck/check/check_specs.py"]),
+        # Cheap and triggered: only the three front pages can break it.
+        Gate("front pages agree", UV + ["moondeck/check/check_taglines.py"],
+             when("README.md", "docs/index.md", "CLAUDE.md")),
         Gate("desktop build (zero warnings)", ["cmake", "--build", host_build_dir()],
              when(*COMPILES_DESKTOP)),
         # --no-tests=error, because "no tests found" is a BROKEN GATE, not a pass: ctest exits 0

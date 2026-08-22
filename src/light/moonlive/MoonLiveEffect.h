@@ -3,6 +3,7 @@
 #include "light/effects/EffectBase.h"
 #include "core/moonlive/MoonLive.h"
 #include "light/moonlive/MoonLiveScript.h"
+#include "light/moonlive/MoonLiveParticles.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include <cstring>
 #include <cstdio>
@@ -60,6 +61,10 @@ public:
     // unchanged script costs a read rather than a re-JIT. It reports the status and the dynamic
     // bytes itself, which is why nothing here repeats that.
     void prepare() override {
+        // The script sizes its own pool from defineControls(), which sync() runs after a compile.
+        script_.setPoolSizer([](void* ctx, uint16_t n) -> uint16_t {
+            return static_cast<MoonLiveEffect*>(ctx)->particles_.resize(n);
+        }, this);
         script_.sync(moonlive::effectSysVars(), *this);
         // The compile re-derives the declared-control set, so rebuild the control list to surface
         // it (the same rebuildControls() pattern NetworkModule uses when a state change reshapes
@@ -85,17 +90,31 @@ public:
         // installed for exactly one run and detached after, so a script can only ever draw into
         // the layer it is ticking in.
         moonlive::setDrawCanvas(canvas());
+        // fade(amt) asks the LAYER, which collects the request and applies it once per frame.
+        // Installed in the same bracket as the canvas so it detaches on the same path.
+        moonlive::setFadeSink([](void* ctx, uint8_t amt) {
+            if (Layer* l = static_cast<MoonLiveEffect*>(ctx)->layer()) l->fadeToBlackBy(amt);
+        }, this);
+        // The particle builtins reach this effect's own pool, with the frame scale the binding
+        // computed: framerate independence is the system's property, not the script author's.
+        if (particles_.count() > 0)
+            moonlive::setPoolSink(&particles_.pool(), particles_.advance(elapsed()));
         // The frame moment: run `tick` if the script defined one. A script that defines only
         // `modifyLogical` renders nothing here and folds coordinates instead, which is the author's
         // choice rather than an error.
         if (script_.engine().hasEntry(moonlive::kEntryTick))
             script_.engine().run(buffer(), nrOfLights(), cpl, elapsed(), moonlive::kEntryTick);
+        moonlive::setPoolSink(nullptr, 0);
+        moonlive::setFadeSink(nullptr, nullptr);
         moonlive::setDrawCanvas({});
     }
 
     void release() override {
+        particles_.release();      // zero the pool BEFORE the base frees its buffers, or it would
+                                   // be left naming freed memory
         script_.engine().free();   // release the exec block: the destructor role
         script_.invalidate();     // and forget what was compiled, so re-enabling rebuilds it
+        script_.releaseReporting(*this);
         EffectBase::release();
     }
 
@@ -118,6 +137,7 @@ private:
     // that decides whether a prepare has anything to do. A fresh card starts with NO script and
     // renders nothing until one is named, rather than every new module compiling the same effect.
     moonlive::MoonLiveScript script_;
+    moonlive::MoonLiveParticles particles_{*this};
 };
 
 }  // namespace mm

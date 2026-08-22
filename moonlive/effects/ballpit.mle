@@ -1,0 +1,35 @@
+// Ballpit: balls dropped into a box, falling on each other and piling up.
+// collide() is the trick: without it they fall straight through one another.
+
+class BallpitEffect {
+  uint8_t balls = 24;
+  uint8_t size = 2;
+  uint8_t bouncy = 180;
+
+  uint16_t last = 0;
+
+  defineControls() {
+    pool(64);
+    addUint8("balls", balls, 4, 60);
+    addUint8("size", size, 1, 5);
+    addUint8("bouncy", bouncy, 60, 255);
+  }
+
+  tick() {
+    fill(0, 0, 0);
+
+    // A ball roughly ten times a second, on the clock rather than per frame, so the pit fills at
+    // the same rate on any device.
+    if (scale(beat(600, t), 2) != last) {
+      last = scale(beat(600, t), 2);
+      emit(random16(width), 0, 16384, 30, 1, balls * 5, scale(beat(5, t), 256));
+    }
+
+    gravity(30);
+    collide(size);      // before step(), or a shove can push a ball through a wall
+    step();
+    bounce(bouncy);
+    age(1);
+    render(balls * 5);
+  }
+}

@@ -58,6 +58,17 @@ void Scheduler::setup() {
         modules_[i]->applyState();
     }
 
+    // Phase 5: re-apply saved VALUES, now that every module has prepared. A schema that depends on
+    // prepare()'s own WORK does not exist during phase 2's load: a MoonLive script's declared
+    // controls appear only once the script has compiled, which prepare() just did, so their saved
+    // values had no control to land on and prepare() seeded them from the script's defaults. Values
+    // only, and once: after boot the live values are the truth, and re-reading the file would undo
+    // the edit that triggered any later prepare.
+    if (!valuesReapplied_) {
+        valuesReapplied_ = true;
+        if (reapplyValuesHook_) reapplyValuesHook_(this);
+    }
+
     lastLoop20ms_ = platform::millis();
     lastLoop1s_ = platform::millis();
     lastTimingUpdate_ = platform::millis();

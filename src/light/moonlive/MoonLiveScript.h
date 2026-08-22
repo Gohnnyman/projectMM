@@ -22,6 +22,10 @@ namespace mm::moonlive {
 /// re-read the file each time. Same question, one answer.
 class MoonLiveScript {
 public:
+    /// Let a binding that owns a particle pool size it from the script's defineControls(). Null for
+    /// a binding with no particles, which is every binding but the effect today.
+    void setPoolSizer(PoolSizeFn fn, void* ctx) { sizePool_ = fn; poolCtx_ = ctx; }
+
     /// Re-read the file and recompile IFF its content hash moved.
     ///
     /// Returns true when a NEW program was installed. That return value is load-bearing rather than
@@ -68,7 +72,7 @@ public:
             // Declare the controls the script asks for, the way a compiled module does: by RUNNING
             // defineControls(). Before the binding's rebuildControls(), which turns the declared
             // list into UI cards.
-            runDefineControls(engine_);
+            runDefineControls(engine_, sizePool_, poolCtx_);
             // A compiled script is not an error, but it has something to say: how big it is, and
             // the one budget it is closest to using up. The card's memory figure is the ALLOCATION,
             // word-rounded, which says nothing about the program itself.
@@ -88,7 +92,14 @@ public:
         // every prepare sweep, which is the cost this comparison exists to avoid.
         compiledHash_ = hash;
         haveCompiled_ = engine_.ok();   // a FAILED compile has no program, whatever the file hashed to
-        owner.setDynamicBytes(engine_.heapBytes());
+        // ADD the engine's heap to whatever else the owner holds, rather than assigning it: a
+        // binding may also own ScratchBuffers (a particle pool), and those report themselves
+        // through the buffer's own delta hook. Assigning here would erase them, which is the
+        // "don't mix addDynamicBytes with setDynamicBytes" contract MoonModule states. Tracking
+        // what this script last reported keeps it a delta rather than a running total.
+        const size_t nowBytes = engine_.heapBytes();
+        owner.setDynamicBytes(owner.dynamicBytes() - reportedBytes_ + nowBytes);
+        reportedBytes_ = nowBytes;
         return true;
     }
 
@@ -104,6 +115,19 @@ public:
         if (!n) return;
         std::snprintf(name_, sizeof(name_), "%s", n);
         invalidate();
+    }
+
+    /// Hand back everything this script reported to its owner. Called from a binding's release(),
+    /// AFTER engine().free(): the exec block is gone, so the owner's card must stop counting it.
+    ///
+    /// One home for all three bindings rather than two lines each: MoonLive::free() does not touch
+    /// the owner's total, so a binding that forgets this leaves a disabled module reporting memory
+    /// it no longer holds. Subtracting rather than zeroing is what lets a binding own OTHER memory
+    /// too (the effect's particle pool), which a setDynamicBytes(0) would wrongly erase.
+    void releaseReporting(MoonModule& owner) {
+        const size_t held = owner.dynamicBytes();
+        owner.setDynamicBytes(held > reportedBytes_ ? held - reportedBytes_ : 0);
+        reportedBytes_ = 0;
     }
 
     /// Forget what is compiled, so the next sync() rebuilds. For a module coming back from
@@ -165,6 +189,10 @@ private:
     bool     failedReadable_ = false;   // was there a file at all when it failed?
     uint32_t failedHash_ = 0;
     char     failedScript_[kMaxScriptName + 1] = "";
+
+    size_t     reportedBytes_ = 0;   // what this script last added to the owner's total
+    PoolSizeFn sizePool_ = nullptr;
+    void*      poolCtx_  = nullptr;
 };
 
 }  // namespace mm::moonlive

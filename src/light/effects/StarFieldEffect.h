@@ -36,7 +36,7 @@ public:
 
     uint8_t speed      = 20;     // advance rate (0..30); 0 = paused. Throttle is 1000/speed ms.
     uint8_t numStars   = 16;     // active stars (1..255)
-    uint8_t blur       = 128;    // per-frame fade-to-black amount (0..255); higher = stronger fade = shorter streaks (draw::fade keep = 255-blur, matching MoonLight's fadeToBlackBy(blur))
+    uint8_t blur       = 128;    // fade-to-black RATE per reference frame (0..255); higher = stronger fade = shorter streaks (draw::fade keep = 255-blur, matching MoonLight's fadeToBlackBy(blur))
     bool    usePalette = false;  // color stars from the palette instead of greyscale
 
     void defineControls() override {
@@ -77,12 +77,16 @@ public:
         // Throttle: pause when speed==0, else advance at most once per 1000/speed ms.
         if (speed == 0) return;
         const uint32_t now = elapsed();
+
+        // The streak fade is requested EVERY frame, outside the step gate below. fadeToBlackBy is
+        // a rate the Layer scales by elapsed time, so asking only on stepping frames would throttle
+        // it twice: once by this gate and again by the scale, leaving the streaks far longer on a
+        // fast device than on a slow one.
+        layer()->fadeToBlackBy(blur);
+
         if (now - step_ < 1000u / speed) return;
 
         const draw::Canvas cv = canvas();
-
-        // Motion streaks: fade the previous frame rather than clearing it.
-        layer()->fadeToBlackBy(blur);
 
         const int sizeX = w;
         const int sizeY = h;

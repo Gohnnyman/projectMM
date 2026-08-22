@@ -104,6 +104,31 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centred at 32768 |
 | `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
 | `print(v)` | log a value and return it ([what it costs](writing-scripts.md#debugging-print)) |
+| `a / b`, `a % b` | divide and remainder. Both are host calls: cheap on a cold path, deliberate per light |
+| `smoothstep(e0, e1, v)` | a soft `0..65535` ramp between two edges, the anti-aliasing primitive |
+| `uvX(x, w, h)`, `uvY(y, w, h)` | shader space: centered, normalized on the short side so a circle stays round on a wide panel |
+| `smin(a, b, k)` | the smooth minimum of two distances, so shapes melt into one surface rather than overlapping |
+| `fade(amt)` | dim every light toward black, FastLED's `fadeToBlackBy`. The trail primitive |
+| `polarA(dx, dy)`, `polarR(dx, dy)` | angle and distance from a center, for a radial effect |
+| `setPaletteColor(x, y, index, bri)` | one light from the ACTIVE palette, in one call |
+| `paletteR(i, bri)`, `paletteG`, `paletteB` | one palette channel, when a script needs the value rather than a pixel |
+| `pool(n)` | size this script's particle pool, from `defineControls()`. Returns what it got |
+| `emit(x, y, angle, speed, n, life, hue)` | throw `n` particles from a point |
+| `gravity(g)`, `drag(k)` | the two forces |
+| `step()` | move every particle, and drop what left the grid |
+| `age(rate)` | count down life; a dead particle frees its slot |
+| `bounce(e)` | reflect off the grid walls, keeping `e`/256 of the speed |
+| `collide(radius)` | particles notice each other and pile up. NOT linear in pool size |
+| `render(maxLife)` | draw the pool from the active palette |
+
+The particle calls are each ONE PASS OVER THE WHOLE POOL, once per frame rather than once per
+light, so a 300-spark script costs far less than a shader touching every pixel (`fountain.mle`
+measures 1.1 ms on an 80x48 against `metal.mle`'s 59.6 ms). Size the pool from `defineControls()`:
+`pool()` anywhere else reports the live count and allocates nothing, which is what keeps a malloc
+off the render path. `collide()` is the exception to the cost model, being an N-body check: a few
+dozen particles pile convincingly, a few hundred cost more than the rest of the frame. The
+vocabulary follows the [WLED Particle System](https://github.com/wled/WLED) by Damian Schneider
+([@DedeHai](https://github.com/DedeHai)); the fixed-point kernel and this binding are ours.
 
 `sin`/`cos` return an **unsigned** wave, so a coordinate comes from scaling by the full span and not by half of it: `scale(cos(a), radius * 2 + 1)` sweeps a whole axis, where scaling by `radius` alone would only ever reach one side of centre.
 

@@ -182,3 +182,26 @@ TEST_CASE("Static mode pins the static IP during STA bring-up (WaitingSta)") {
     }
     mm::platform::setTestWifiStaAvailable(false);   // reset — cases stay independent
 }
+
+
+// The pin map must report what the HARDWARE holds, not what the control says. On an RMII/RGMII board
+// a type change is saved and applied on the NEXT BOOT (syncEthLive hot-reinits only W5500), so the
+// EMAC keeps driving its pads after the user selects None. Reading the pending control there frees
+// those pins in the map while the MAC still drives them, and an LED lane could then take one with
+// nothing flagging the collision, which is the failure this whole mechanism exists to prevent.
+//
+// Only the CAPACITY half is checkable here: `hasEthernet` is false on the desktop, so fixedPins
+// returns 0 on both sides of the applied-vs-pending distinction and a host test cannot tell them
+// apart. The distinction is exercised on hardware (an S31 keeps its twelve pads listed while the
+// interface runs) and by the esp32s31/esp32p4rev1-eth firmware builds.
+TEST_CASE("fixedPins never writes past the capacity it is given") {
+    mm::NetworkModule net;
+    net.setup();
+    mm::MoonModule::FixedPin pads[16];
+    // A sentinel past the capacity: the collector passes a real buffer size and a module that wrote
+    // beyond it would corrupt the stack frame above.
+    pads[2].gpio = 0xEE;
+    CHECK(net.fixedPins(pads, 2) <= 2);
+    CHECK(pads[2].gpio == 0xEE);
+    CHECK(net.fixedPins(nullptr, 16) == 0);   // a null sink is answered, not written through
+}

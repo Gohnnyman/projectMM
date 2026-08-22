@@ -22,6 +22,7 @@ void FilesystemModule::setScheduler(Scheduler* s) {
     instance_ = this;
     if (s) {
         s->setLoadAllHook(&loadAllHookTrampoline_);
+        s->setReapplyValuesHook(&reapplyValuesHookTrampoline_);
         // Scheduler::setControl calls this after a mutation so a control set from anywhere
         // (IR, WLED bridge, /api/control) schedules the same debounced save. noteDirty is a
         // static, so a plain function pointer suffices — no trampoline needed.
@@ -112,6 +113,10 @@ void FilesystemModule::loadAllHookTrampoline_(Scheduler* s) {
     if (instance_) instance_->loadAll(s);
 }
 
+void FilesystemModule::reapplyValuesHookTrampoline_(Scheduler* s) {
+    if (instance_) instance_->reapplyValues(s);
+}
+
 void FilesystemModule::loadAll(Scheduler* s) {
     if (!mounted_) {
         // setup() hasn't run yet (we're in phase 2, before phase 3 setup). Mount now
@@ -124,6 +129,51 @@ void FilesystemModule::loadAll(Scheduler* s) {
         MoonModule* m = s->module(i);
         if (!m || m == this) continue;
         loadSubtree(m);
+    }
+}
+
+// Re-apply saved VALUES after the tree has been prepared, for a module whose control set is not
+// final until then. `applyNode`'s two-pass overlay covers a schema that depends on a control VALUE
+// (ParallelLedDriver's `peripheral` swapping the backend-owned controls), because rebuildControls()
+// alone re-derives it. It cannot cover a schema that depends on WORK: a MoonLive script's declared
+// controls exist only once the script has COMPILED, which is prepare()'s job and runs after load.
+// So at load time `cols`/`rows` are not in the list, overlayControls skips them, and prepare() then
+// seeds them from the script's own defaults: the saved values are read and dropped.
+//
+// Values only, and no tree reconciliation: the shape was settled by the first pass, so this pass
+// must not add, remove or re-enable anything. Cold path, once per boot, and it re-reads rather than
+// holding every node's JSON until prepare() (memory on every module for a case that is three).
+void FilesystemModule::reapplyValues(Scheduler* s) {
+    if (!mounted_ || !s) return;
+    for (uint8_t i = 0; i < s->moduleCount(); i++) {
+        MoonModule* m = s->module(i);
+        if (!m || m == this) continue;
+        reapplySubtree(m);
+    }
+}
+
+void FilesystemModule::reapplySubtree(MoonModule* m) {
+    char path[MAX_PATH];
+    if (!pathFor(m, path, sizeof(path))) return;
+    const long size = platform::fsSize(path);
+    if (size <= 0) return;
+    char* buf = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
+    if (!buf) return;                    // out of memory on a cold path: the first pass already ran
+    const int n = platform::fsRead(path, buf, static_cast<size_t>(size) + 1);
+    if (n > 0) { buf[n] = '\0'; reapplyNode(m, buf, ""); }
+    platform::free(buf);
+}
+
+// Walk the same prefix scheme applyNode uses, overlaying values onto whatever controls exist NOW.
+void FilesystemModule::reapplyNode(MoonModule* m, const char* json, const char* prefix) {
+    if (!m) return;
+    overlayControls(m, json, prefix);
+    char childPrefix[MAX_PATH];
+    for (uint8_t i = 0; i < m->childCount(); i++) {
+        MoonModule* c = m->child(i);
+        if (!c) continue;
+        std::snprintf(childPrefix, sizeof(childPrefix), "%s%u.", prefix, static_cast<unsigned>(i));
+        reapplyNode(c, json, childPrefix);
     }
 }
 

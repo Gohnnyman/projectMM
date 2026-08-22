@@ -1,23 +1,23 @@
 {
-  "commit": "96da29d7",
+  "commit": "537fc928",
   "flash": {
-    "esp32": 1754896,
-    "esp32p4rev1-eth": 1643616,
-    "esp32p4rev1-eth-wifi": 1928640,
-    "esp32s3-n16r8": 1792912,
+    "esp32": 1756656,
+    "esp32p4rev1-eth": 1644960,
+    "esp32p4rev1-eth-wifi": 1933472,
+    "esp32s3-n16r8": 1801168,
     "esp32s3-n8r8": 1753232,
-    "esp32s31": 2074256,
+    "esp32s31": 2079904,
     "esp32-16mb": 1714608,
     "esp32-eth": 1324816,
     "esp32-wrover": 1765504,
     "qemu": 1318160,
     "esp32p4rev3-eth": 1643760,
-    "desktop": 1085952
+    "desktop": 1213096
   },
   "perf": {
     "desktop": {
-      "tick_us": 318,
-      "fps": 3144
+      "tick_us": 502,
+      "fps": 1992
     },
     "esp32": {
       "tick_us": 2151,
@@ -25,53 +25,53 @@
     }
   },
   "loc": {
-    "core": 19408,
-    "light": 25102,
-    "platform": 14342,
+    "core": 19590,
+    "light": 25679,
+    "platform": 13592,
     "ui": 6859,
-    "test": 44819,
-    "moondeck": 21295
+    "test": 45033,
+    "moondeck": 21218
   },
   "comments": {
     "core": {
-      "lines": 7613,
+      "lines": 7688,
       "ratio": 0.425
     },
     "light": {
-      "lines": 9849,
-      "ratio": 0.433
+      "lines": 10137,
+      "ratio": 0.436
     },
     "platform": {
-      "lines": 5094,
-      "ratio": 0.391
+      "lines": 4843,
+      "ratio": 0.393
     },
     "ui": {
       "lines": 1803,
       "ratio": 0.279
     },
     "test": {
-      "lines": 8163,
+      "lines": 8169,
       "ratio": 0.209
     },
     "moondeck": {
-      "lines": 3474,
-      "ratio": 0.187
+      "lines": 3432,
+      "ratio": 0.185
     }
   },
   "tests": {
-    "cases": 1455,
+    "cases": 1462,
     "scenarios": 23
   },
   "docs": {
-    "md_files": 184,
-    "md_lines": 26723,
-    "plans_files": 94,
-    "backlog_lines": 4242,
+    "md_files": 185,
+    "md_lines": 26829,
+    "plans_files": 93,
+    "backlog_lines": 4303,
     "lessons_lines": 549,
-    "claude_md_lines": 135
+    "claude_md_lines": 136
   },
   "complexity": {
-    "functions": 2600,
+    "functions": 2641,
     "over_threshold": 163,
     "worst_ccn": 108
   }

@@ -7,6 +7,7 @@
 #include "light/layers/BlendMap.h"   // BlendOp, for blendOp()
 #include "light/modifiers/ModifierBase.h"
 #include "light/draw.h"              // draw::fade — the once-per-frame collected fade (fadeToBlackBy)
+#include "light/particles.h"       // particles::FrameTime, the shared elapsed-to-scale conversion
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -82,6 +83,11 @@ public:
     void setChannelsPerLight(uint8_t cpl) { if (cpl > 0) channelsPerLight_ = cpl; }
 
     void prepare() override {
+        // Restart discards the elapsed gap. Without this the first tick after a re-prepare sees the
+        // whole idle interval as one step and jumps the trail forward: the guarantee
+        // LissajousEffect::prepare used to give for its own trail, now given once for every effect.
+        fadeTime_.reset();
+        fadeCarry_ = 0;
         // Treat "no layouts wired" the same as "every layout child disabled" —
         // either way the Layer should be empty (no LUT, no buffer, zero dims).
         // Returning early here used to leave stale state from a previous build,
@@ -166,7 +172,33 @@ public:
         // (VirtualLayer): effects call layer()->fadeToBlackBy(amt) which MINs into fadeBy_, so N
         // fading effects on one layer cost ONE buffer pass (the gentlest amount wins, preserving the
         // most light / longest trail) instead of each effect fading the whole shared buffer itself.
-        if (fadeBy_ > 0) { draw::fade(buffer_, fadeBy_); fadeBy_ = 0; bufferGen_++; }
+        // Scale the requested RATE by the fraction of a reference frame this frame covered, and
+        // CARRY the remainder rather than flooring it to 1: at high frame rates the per-frame
+        // amount is legitimately below one unit, and a floor of 1 would apply many times the decay
+        // the effect asked for, which is the bug that made trails visibly shorter on a fast device.
+        // ALWAYS advance the clock, even on a frame nobody asked to fade. Only a quarter of the
+        // effects fade at all, so leaving it frozen means the next request sees the whole idle gap
+        // as one step: five seconds away and a gentle trail is wiped black in a single frame. That
+        // is reachable by switching to a fading effect, re-enabling one, or resuming StarField,
+        // whose paused path returns before it asks.
+        const uint32_t frameScale = fadeTime_.advance(elapsed_);
+        if (fadeBy_ > 0) {
+            fadeCarry_ += static_cast<uint32_t>(fadeBy_) * frameScale;
+            uint32_t amt = fadeCarry_ / particles::FrameTime::kOne;
+            fadeBy_ = 0;
+            // A stall TOPS UP, it never bursts: spending a whole gap at once is the wipe described
+            // above. Dropping the remainder with it keeps the next frame from repeating the burst.
+            if (amt > 255) {
+                amt = 255;
+                fadeCarry_ = 0;              // the gap is spent, not banked for the next frame
+            } else {
+                fadeCarry_ -= amt * particles::FrameTime::kOne;
+            }
+            if (amt > 0) {
+                draw::fade(buffer_, static_cast<uint8_t>(amt));
+                bufferGen_++;
+            }
+        }
         // A degenerate grid has nothing to draw. This is orchestration — the Layer owns the
         // decision to run the effect pass at all, the same way it owns the enabled/role gates
         // below — so it is checked ONCE here rather than repeated as a guard clause in every
@@ -319,11 +351,24 @@ public:
     uint8_t channelsPerLight() const { return channelsPerLight_; }
     uint32_t elapsed() const { return elapsed_; }
 
-    // Request a per-frame fade-to-black of amt/255 (a trail/tail). Effects call this instead of fading
-    // the buffer themselves: the Layer collects the amount (MIN across all fading effects — the
-    // gentlest fade wins, so the longest requested trail is honoured) and applies ONE buffer pass at
-    // the start of the next frame, then resets. MoonLight's VirtualLayer::fadeToBlackBy model — N
-    // fading effects on one layer cost one pass, not N, and never fade each other's fresh pixels.
+    // Request a fade-to-black of amt/255 PER REFERENCE FRAME (1/60 s): a trail or tail. Effects call
+    // this instead of fading the buffer themselves: the Layer collects the amount (MIN across all
+    // fading effects, the gentlest fade wins so the longest requested trail is honoured) and applies
+    // ONE buffer pass at the start of the next frame, then resets. MoonLight's
+    // VirtualLayer::fadeToBlackBy model: N fading effects on one layer cost one pass, not N, and
+    // never fade each other's fresh pixels.
+    //
+    // The amount is a RATE, not a per-frame constant. The Layer scales it by the time this frame
+    // actually covered, so a trail is the same length on a 470 fps ESP32 and a 140,000 fps desktop.
+    // Three effects used to carry that conversion themselves and had already drifted into two
+    // different versions of it (one carried the fraction, two floored to 1 and so applied many
+    // times the intended decay at high fps). Owning it here is core enforcing the rule on the path
+    // it already owns rather than every effect re-deriving it. See architecture.md, the tick-rate
+    // rule, and particles::FrameTime for the shared conversion.
+    //
+    // Every amount is a rate, with no exception. An effect that wants the buffer blank NOW calls
+    // draw::fill instead: a clear is not a fast fade, and giving 255 a second meaning put a
+    // discontinuity in kind at the top of six user-facing fade sliders.
     void fadeToBlackBy(uint8_t amt) { fadeBy_ = fadeBy_ ? (amt < fadeBy_ ? amt : fadeBy_) : amt; }
 
     /// How many times anything has written this layer's shared buffer. The buffer PERSISTS between
@@ -597,7 +642,9 @@ private:
     lengthType height_ = 0;
     lengthType depth_ = 0;
     uint32_t elapsed_ = 0;
-    uint8_t  fadeBy_ = 0;   // per-frame fade collected from effects (MIN), consumed once at frame start
+    uint8_t  fadeBy_ = 0;   // fade RATE collected from effects (MIN), consumed once at frame start
+    uint32_t fadeCarry_ = 0;               // sub-unit fade remainder, so a high frame rate does not over-fade
+    particles::FrameTime fadeTime_{60};    // elapsed-to-scale, the shared conversion
     uint32_t bufferGen_ = 0;   // bumped by every write to buffer_; see bufferGen()
     char statusBuf_[20] = {};  // "999×999×999" fits; owned (setStatus borrows the pointer)
     bool     hasLive_ = false;          // any enabled modifier animates per frame (gates the live pass)

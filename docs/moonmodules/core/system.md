@@ -45,7 +45,7 @@ Detail: [technical](moxygen/NetworkModule.md)
 
 ### Improv provisioning
 
-Serial/BLE Improv Wi-Fi provisioning — the web installer hands credentials to a fresh device over this protocol during the flash-and-connect flow.
+Serial/BLE Improv Wi-Fi provisioning: the web installer hands credentials to a fresh device over this protocol during the flash-and-connect flow. [Improv Wi-Fi](https://github.com/improv-wifi) is an open standard, and its [sdk-cpp](https://github.com/improv-wifi/sdk-cpp) / [sdk-js](https://github.com/improv-wifi/sdk-js) are the specification this implements, so any Improv-capable installer can provision a projectMM device.
 
 <img src="../../assets/core/ImprovProvisioningModule.png" width="300" alt="Improv provisioning module controls">
 

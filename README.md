@@ -1,6 +1,6 @@
 # projectMM
 
-Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi, Windows, macOS or Linux desktop. One source tree, multiple targets.
+Drive large LED installations and DMX fixtures. One source tree drives ESP32, Teensy, Raspberry Pi, macOS, Windows and Linux.
 
 ![Web UI](docs/assets/ui/ui_theme.gif)
 
@@ -172,6 +172,7 @@ Specific people whose work directly shaped parts of projectMM. We study their th
 - **The [Improv Wi-Fi](https://github.com/improv-wifi) project**: the open Improv serial provisioning standard ([sdk-cpp](https://github.com/improv-wifi/sdk-cpp) / [sdk-js](https://github.com/improv-wifi/sdk-js)) that the projectMM web installer uses to provision a freshly-flashed device over USB.
 - **[FastLED](https://github.com/FastLED/FastLED)**: the canonical LED-effects library whose conventions the LED-effect world shares. projectMM links no part of FastLED, but it carries forward FastLED's recognisable *names and models* for the color/animation primitives (`scale8`, `sin8`, the gradient-palette model (`CRGBPalette16` / `colorFromPalette`), the `beatsin8` / `inoise8` / `qadd8` family), so a contributor recognises them on sight. The implementations are projectMM's own, integer-only and hot-path-tuned for our render loop; FastLED is the prior art behind the convention, credited here and in each primitive's notes.
 - **[FPP](https://github.com/FalconChristmas/fpp) (Falcon Player)**: the show player that drives LED panel receiver cards from a Raspberry Pi. Seeing an FPP rig feed a wall of HUB75 panels is what prompted [PanelCardDriver](docs/moonmodules/light/drivers.md#panelcard): if a Linux host can send those frames, so can a board that is already rendering them, which removes the host from the installation entirely. FPP is the inspiration, and the reference point for what good looks like here: it sustains 50 fps.
+- **Damian Schneider ([dedehai](https://github.com/DedeHai))**: author of the WLED Particle System, whose emitters, forces and walls over one shared pool are the shape our [particle kernel](docs/moonmodules/light/power-functions.md#particles) and the scripted `pool` / `emit` / `step` builtins follow, in our own fixed-point implementation.
 - **wladi ([myhome-control](https://shop.myhome-control.de))**: designer of the [MHC-WLED ESP32-P4 shield](https://shop.myhome-control.de/en/ABC-WLED-ESP32-P4-shield/HW10027), and the source of the hardware and the pinout details that got its **line-in audio** working in [AudioService](docs/moonmodules/core/moxygen/AudioService.md): the onboard PCM1808 I2S ADC (WS 26 / SD 33 / SCK 32 / MCLK 36), the PCM1808's stereo wiring, and its `FMT` format-select jumper (open = I2S/Philips, our default; tie to 3V3 for left-justified), which is what confirmed the standard-I2S path the ADC needs.
 
 ## Contributing

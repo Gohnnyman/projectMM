@@ -281,6 +281,10 @@ public:
     /// The orchestrator pads spare bus lanes with this GPIO. Unrouted lanes cost nothing here, so the value is
     /// only ever *used* in shift mode — where WR is a real pad and the padding is genuinely inert.
     uint16_t clockPinForBus() const override { return static_cast<uint16_t>(clockPin); }
+    /// This backend routes its own GPIOs, so a lane past the data-pin count is left unconnected and
+    /// costs nothing (see configureGpio: it routes only what it is handed). No ghost pad, and no
+    /// hidden claim on a GPIO the board may have given to something else.
+    bool spareLanesNeedPad() const override { return false; }
 
     /// WR is a '595 pin here, so the control follows the expander toggle: bound always (a saved value
     /// survives a round-trip through direct mode) but shown only when a shift register can read it.

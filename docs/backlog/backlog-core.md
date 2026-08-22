@@ -369,7 +369,7 @@ Device-model injection over Improv shipped as **"Improv = REST over serial"** (t
 
 Run user-authored scripts on a running device — a scripted effect, layout, modifier, driver, or core sensor rule, pushed as text and live on the next tick with no reflash/reboot — the leap WLED took with ARTI-FX and the heart of the PixelBlaze product. A scripted module **is** a MoonModule (controls, `loop()`, role, generic UI). The engine lives in core (domain-neutral: also "transform sensor data") and serves the light domain specifically. Targets in order: ESP32 classic + S3 first, then P4/other ESP32, then Teensy, then desktop. Must be blazingly fast (runs in the render hot path at 16K+ lights × 50 FPS), memory-smart (IRAM/PSRAM via `platform::alloc`, compile-once), and synced (Scheduler tick, tick-atomic hot-swap, live reconfig).
 
-The **bottom-up landscape survey** is done — [livescripts-analysis-bottom-up.md](livescripts-analysis-bottom-up.md): deep-reads the [ESPLiveScript fork](https://github.com/ewowi/ESPLiveScript/tree/fix-warnings) (a from-scratch C-like JIT that emits **native Xtensa** machine code — blazingly fast but **Xtensa-only**, so it covers classic+S3 and *not* P4/Teensy/desktop), surveys the field (PixelBlaze bytecode VM + web editor, WLED ARTI-FX AST-walking interpreter, embedded VMs / WASM / lightweight multi-ISA JITs), and extracts the load-bearing decisions (execution strategy, the IR seam ESPLiveScript lacks, the MoonModule binding, the per-pixel contract, memory placement, sync, sandboxing). Its thesis to validate: a **portable bytecode-VM baseline that runs on every target on day one + an optional native back-end for the hot ISAs behind a shared IR**. **Next: the top-down redesign** — the prompt that generates `livescripts-analysis-top-down.md` is at the bottom of the bottom-up doc; it produces the reference architecture + staged spike plan. Implementation is multi-commit, spike-ordered, after the top-down lands. Credits: [history/hpwit-ESPLiveScript.md](../history/hpwit-ESPLiveScript.md).
+The **bottom-up landscape survey** is done — [livescripts-analysis-bottom-up.md](livescripts-analysis-bottom-up.md): deep-reads the [ESPLiveScript fork](https://github.com/ewowi/ESPLiveScript/tree/fix-warnings) (a from-scratch C-like JIT that emits **native Xtensa** machine code — blazingly fast but **Xtensa-only**, so it covers classic+S3 and *not* P4/Teensy/desktop), surveys the field (PixelBlaze bytecode VM + web editor, WLED ARTI-FX AST-walking interpreter, embedded VMs / WASM / lightweight multi-ISA JITs), and extracts the load-bearing decisions (execution strategy, the IR seam ESPLiveScript lacks, the MoonModule binding, the per-pixel contract, memory placement, sync, sandboxing). Its thesis to validate: a **portable bytecode-VM baseline that runs on every target on day one + an optional native back-end for the hot ISAs behind a shared IR**. **Next: the top-down redesign** — the prompt that generates `livescripts-analysis-top-down.md` is at the bottom of the bottom-up doc; it produces the reference architecture + staged spike plan. Implementation is multi-commit, spike-ordered, after the top-down lands. Credits: [friend-repos/hpwit-ESPLiveScript.md](../friend-repos/hpwit-ESPLiveScript.md).
 
 ### Duplicate module names are reachable, and silent (backlog)
 
@@ -629,7 +629,18 @@ Rounds 1 (board + Ethernet-only) and 2 (Parlio LED driver) have landed. Remainin
 
   **Open issues before this is done:**
 
-  0. **The esp_hosted build is ~17x slower on HTTP, with a ~1 s stutter — BISECTED to the hosted link, not to us (2026-08-19).** Same board, same commit, same application code, measured over **Ethernet on both builds** so the radio is not in the path:
+  0. **The esp_hosted build is slower on HTTP — BISECTED to the hosted link, not to us (2026-08-19), and much improved but NOT gone (re-measured 2026-08-21).**
+
+     **Re-measurement on IDF v6.1-rc1**, same board, same commit, same Ethernet interface, same method:
+
+     | build | per-request (`/api/system`) | throughput (76 KB `app.js`) |
+     |---|---|---|
+     | `esp32p4rev1-eth` | 10 ms flat | 1,973 KB/s |
+     | `esp32p4rev1-eth-wifi` | 40 ms typical, one 280 ms outlier in 12 | ~980 KB/s |
+
+     So the penalty is now **4x per-request and 2x throughput**, against 33-60x and 17x when this was written, and **the alternating 0.4/0.8 s pattern is gone** (one outlier in twelve, not every other request). Render is healthy in both (359 fps on the WiFi build). Something between the two IDF versions fixed most of it; what remains is the same shape (per-request, not per-byte) and still worth closing. The original measurement follows.
+
+     **Original (2026-08-19):** Same board, same commit, same application code, measured over **Ethernet on both builds** so the radio is not in the path:
 
      | build | per-request (`/api/system`) | throughput (73 KB `app.js`) |
      |---|---|---|
@@ -820,43 +831,6 @@ The P4 build runs at **360 MHz** because IDF's `Kconfig.cpu` caps a `SELECTS_REV
 
 Neither ships until a rev-3 P4 can prove 400 runs clean — no untested clock config, per the same rule the S31/320 and this P4/400 bootloop both taught.
 
-## ESP32-S31 RGMII Ethernet: DHCP at 100 Mbps (link-speed Tx-clock mismatch)
-
-**Found:** bench, 2026-07-26. Design record: [Plan-20260726 - S31 RGMII eth DHCP at 100M](../history/plans/Plan-20260726%20-%20S31%20RGMII%20eth%20DHCP%20at%20100M.md).
-
-The S31's 1 Gb RGMII EMAC (YT8531 PHY) **never** completes DHCP on the bench GL-AR300M (10/100) — and, as of 2026-07-27, **not on the gigabit router either** (see the gigabit result below, which contradicts the earlier reading this item was opened on). Confirmed on hardware that this is **not a regression** — it fails identically at the original S31 bring-up commit `d5ee07c` built against its exact pinned IDF (`0d928780081` / v6.1-dev-5215). The firmware logs `Ethernet no IP (DHCP timeout), cascading` and falls back to WiFi.
-
-**The gigabit test ran (2026-07-27) and Ethernet still does NOT lease — the link-speed theory is in doubt.** This was the decisive experiment this item asked for, and the expected outcome (leases at 1000M, because TXC is already 125 MHz there) did **not** happen. Boot trace on the current branch build, gigabit router:
-
-| t | line | |
-|---|---|---|
-| 1.73 s | `YT8531 RGMII init: auto-nego re-enabled, Rx+Tx delays set` | ✅ |
-| 1.73 s | netif glue attached, eth MAC `32:ed:a0:f3:d4:69` | ✅ |
-| 4.03 s | `Ethernet started` → `Ethernet link up` → DHCP hostname set | ✅ |
-| 4–19 s | DHCP client runs its full 15 s window, no OFFER | ❌ |
-| 19.3 s | `Ethernet no IP (DHCP timeout), cascading` | ❌ |
-| 21.0 s | `WiFi STA got IP: 192.168.1.212`, status *"Ethernet detected: no address assigned"* | (fallback works) |
-
-**The frames never reach the router.** The device holds two MACs — WiFi `30:ed:a0:f3:d4:68` and Ethernet `32:ed:a0:f3:d4:69`. The host's ARP table lists the **WiFi** MAC and contains **zero** entries for the Ethernet MAC. A DISCOVER that reached the router would leave the eth MAC visible there even without a completed lease, so TX is not arriving — the same data-plane TX conclusion the static-IP test reached at 100M, now reproduced with a gigabit router in the path.
-
-**Physical-layer caveat, and the most likely explanation:** the jack's **yellow LED is off while green blinks fast**. On most RJ45 jacks yellow is the speed/link indicator, so yellow-off suggests the port did **not** negotiate 1000M and fell back to 100M — which would put this squarely back in the known TXC case rather than disproving it. This is unresolved because the firmware cannot currently report the negotiated speed: IDF logs `working in 100Mbps` / `1000Mbps` at `ESP_LOGD`, filtered out at our log level (exactly the diagnostic gap step (2) below names). **Before drawing any conclusion about the root cause, settle the actual link speed** — read the router's port page, and try a known 4-pair (gigabit-capable) cable, since a 2-pair cable forces 100M regardless of the router.
-
-**Root cause (IDF source-traced).** On RGMII the MAC's Tx clock (TXC) must be 125 MHz at 1000M but **25 MHz at 100M** (`emac_esp32_set_speed`). The MAC is reprogrammed only when the generic 802.3 PHY driver's poll sees a link_status *transition* (`updt_link_dup_spd` → `on_state_changed(ETH_STATE_SPEED)`). Because the YT8531 needs its auto-negotiation manually re-enabled before `esp_eth_start` (it disables it on reset), the first negotiation can latch link-UP before the poll's first read, so the poll sees no transition, so `set_speed(100M)` never runs and TXC stays at its 125 MHz install default. At 100M every Tx frame then clocks out garbled and the switch drops it (Rx still works — it rides the PHY-recovered RXC): link up, DISCOVER sent, no OFFER ever.
-
-**Approaches tried on the bench (neither shipped):**
-- **`esp_eth_stop()` + `esp_eth_start()` bounce after start** — DID produce the first-ever eth lease (`.125`), proving the mechanism, but `esp_eth_stop` tears the netif down (releases the lease, resets dhcpc to INIT, clears the IP), which races the NetworkModule 15 s cascade window and the double `applyHostname` → non-deterministic (sometimes eth, sometimes WiFi; when eth, the netif IP was half-applied).
-- **In-place `link_status = ETH_LINK_DOWN` + `phy->get_link()`** (netif-preserving, from the CONNECTED handler) — ran cleanly (no crash from the re-entrant poll) and forced a second link-up, but eth **still** DHCP-timed-out on the bench. Open question: whether `set_speed` actually fired (the `working in 100Mbps` proof line is `ESP_LOGD`, likely filtered by the esp_eth component log level — absence is not proof).
-
-**Already landed (the link-up half):** `ethYt8531BoardInit` (re-enables the YT8531's auto-negotiation — disabled on reset — plus the RGMII Tx/Rx clock delays) brings the RGMII **link** up (speed/duplex negotiated, activity LED lit); and the `ethPhyAddr` int16 fix (the `-1` auto-detect sentinel a `uint8` mangled to 31, with its regression test) makes the PHY addressable. What remains open is only the **100M Tx-clock (TXC) reconfiguration** so frames actually flow at 100M — the DHCP half below.
-
-**Next (needs hardware) — first, the gigabit test + a scope decision:** test the current firmware on a **1 Gb switch** (confirm `ETH-DIAG` reports "link up at 1000M full", then look for `Ethernet got IP`). At 1000M the MAC's Tx clock is already 125 MHz (the install default), so the 100M-specific TXC bug is absent — eth is expected to lease, matching the earlier field success on gigabit. **If it leases at 1000M, there is a product decision to make: whether to support 100M routers at all**, or to state that the S31 (a 1 Gb board) requires a gigabit switch and close this item as "won't-fix at 100M." Only if 100M support is deemed in-scope do the TXC steps below apply.
-
-**If 100M support is kept** (the TXC path): (1) if it links at 1000M but still no lease, sweep the RGMII delays (`MM_YT8531_{RX,TX}_DELAY`) for this board's trace lengths; (2) for 100M, add a decisive speed-readback diagnostic (`ETH_CMD_G_SPEED` before/after the resync + raise the esp_eth log level) to confirm whether `set_speed` runs; (3) if the in-place `link_status`-reset poke can't trigger `set_speed`, fall back to the stop/start bounce and make it deterministic by widening the S31 eth-DHCP cascade window (> 15 s) and suppressing the double `applyHostname`.
-
-**The failure is data-plane TX corruption, not a DHCP-handshake quirk (bench-confirmed 2026-07-26 via static IP).** Setting a static IP on the S31 at 100M bypasses DHCP entirely, yet the interface is still unreachable: ARP for the device resolves to the eth MAC (`30:ed:a0:f3:d4:68`) — so a broadcast round-trips — but unicast (ping / HTTP) is 100% dropped. That rules out "only the DHCP exchange is broken" and pins it to garbled unicast frames on the 100M Tx path (the TXC issue). So static addressing is NOT a workaround for 100M; the TXC fix (or a gigabit link) is genuinely required. **This is a bug to FIX, never a reason to weaken the AP → STA → ETH promotion cascade** — Ethernet always outranks WiFi when a cable is present, unconditionally. Interim behaviour on the S31 at 100M with a cable in Static mode: it promotes to Ethernet (as it must) but can't pass traffic; the user recovers by unplugging the cable (link-down cascades back to WiFi). Acceptable only as a temporary state for this one board's open bug, not a design.
-
-**Related symptom — the "Ethernet detected: no address assigned" degraded warning is intermittent on the S31.** In DHCP mode, that warning is meant to appear when the eth link is up but leaseless past the 15 s window (`NetworkModule::ConnectedSta`). On the S31 at 100M it shows only *sometimes*, because the marginal 100M link *flaps*: each `ETHERNET_EVENT_DISCONNECTED` makes `tick1s()` reset `ethLinkUpAt_` (the degraded clock), so the 15 s threshold is often never reached. This is the same root cause (a bad 100M physical link), so it resolves when the TXC/link issue is fixed. Two robustness follow-ups if it's ever decoupled: (a) don't reset the degraded clock on a *brief* link blip (debounce link-down), and (b) note that a lower `check_link_period_ms` makes the flapping more visible — the default 2000 ms is deliberately kept (a 500 ms poll surfaced the flaps and suppressed the warning entirely).
-
 ## Flaky unit tests: the AudioService sync suite contends on a fixed UDP port
 
 **Found:** 2026-07-27, caught by `premerge.py`; pinned to the exact cases by looping the suite and keeping the failing logs. Fails roughly **1 run in 10**.
@@ -965,3 +939,33 @@ Per-script `sys.stdout.reconfigure()` is the wrong shape at 62 files: every new 
 The tool shells out to `c++` and `objdump` to build the per-ISA emitter and disassemble its bytes, and a Windows machine carrying only MSVC has neither. That holds for every ISA, not just the new `x86_64` one — but x86-64 is where it bites, because the host it disassembles is now a Windows desktop and the tool is what turns "the script did nothing" into an answer. The x86-64 backend was brought up without it, using byte-pinning tests plus WinDbg on the emitted image; that worked, and was slower than reading the instructions would have been.
 
 Closing it is a compiler/disassembler pair behind the two `subprocess.run` calls: `cl.exe` for the build, and for the disassembly either LLVM's `llvm-objdump` (which understands `-b binary` the way the tool already expects, and ships with the VS "C++ Clang tools" component) or a `.obj` wrapper around `dumpbin /disasm`, which does not. Prefer the former — the flags are already right, so it is a lookup rather than a second code path.
+
+## A driven GPIO the Pins map never sees: bus padding, and a hidden clockPin
+
+**Found:** 2026-08-21, on MM-S31, after a bench session that started as "the LED panel stopped working" and cost hours chasing a firmware regression that did not exist.
+
+An ESP32-S31 driving a ColorLight receiver card over raw Ethernet showed the panel dark while every diagnostic said the transmit path was healthy: link negotiated at 1000 Mbit, ~4600 packets/s, zero drops, and a byte-for-byte dump of a 128x128 frame matched `ColorLight5A75Packet.h` exactly. The card's own activity LED never blinked. Four firmware versions across two ESP-IDF releases behaved identically.
+
+The cause is a **GPIO collision that no part of the system could report**. `ParallelLed` carried `clockPin = 10`, and GPIO 10 is `txd2` on the S31's RGMII bus (`platform_esp32.cpp`: the EMAC's fixed IO_MUX pads are 8-19 plus MDC/MDIO on 5/6). The LED driver drove one of the four Ethernet transmit data lines, so every frame left the MAC counted-as-sent and arrived corrupt. Disabling the LED drivers fixed it instantly; moving the clock to GPIO 21 fixed it with all four drivers running.
+
+Three separate defects made this invisible, and each is worth fixing on its own:
+
+**1. Pins the map cannot see, because nothing declares them.** The shipped conflict soft-flag grades what modules *declare*, so an undeclared pin is invisible to it however hard the silicon drives the pad. Three cases, two now closed:
+
+- ✅ **Bus-padded lanes** (fixed): a one-strand board had seven i80 lanes parked on `clockPin`, driven at bus-clock rate and listed nowhere. `spareLanesNeedPad()` stops the padding on a backend that routes its own GPIOs, so the pin is no longer driven and the map is truthful again.
+- ✅ **RGMII data pads** (fixed): all twelve are now published by NetworkModule as read-only pin controls from one `platform::ethRgmiiPads` list that `ethInitEmac` also reads. Verified on MM-S31: `gpio 10` reports as `ethTxd2`.
+- ✅ **P4 RMII data pins** (fixed): the six lines the EMAC drives are in `platform::ethFixedPads` and reported through `fixedPins()`, same as the S31's RGMII pads. Verified on MM-P4: Network owns all ten of its Ethernet GPIOs (28/29/30/34/35/49 plus MDC 31, MDIO 52, clock 50, reset 51), against four before.
+- ✅ **Classic ESP32 RMII data pins** (fixed): TX_EN 21, TXD0 19, TXD1 22, CRS_DV 27, RXD0 25, RXD1 26, entered as a third `ethFixedPads` branch. Sourced from IDF's own RMII Data Plane GPIO table (`docs/en/api-reference/network/esp_eth.rst`): one IO_MUX choice per signal, which is why `ethInitEmac` never sets them. Verified on MM-Olimex: all ten Ethernet pins claimed, `Eth: 192.168.1.210 (100 Mbit)`.
+- ✅ **MDC/MDIO on the classic ESP32** (fixed): the chip default was `mdc -1, mdio -1`, so `ethInitEmac` skipped the assignment, IDF applied its own 23/18, and the map claimed neither. `ethConfigDefault` now states 23/18, sourced from IDF's own classic default and our QuinLED Dig-Octa entry. Verified on MM-Olimex: `Eth: 192.168.1.210 (100 Mbit)` with `gpio 23 MDC` and `gpio 18 MDIO` in the map. NOTE: a board with -1 already persisted keeps it until those controls are set once or NVS is erased.
+
+**The fix is the RGMII one, extended.** Being fixed in silicon does not make `gpioCapability`'s reserved list the right home: reserved means "routing I/O here corrupts the device" (flash, PSRAM, USB), which is unconditional, while an EMAC pad is only held while that interface runs. With `ethType = None` the init returns false and every one of those GPIOs is free for LEDs, so a static reserved list would permanently forbid pins a WiFi-only board can use. What makes a control the right shape is not that the pin is configurable (it is not) but that the claim is CONDITIONAL: published when the interface is selected, released when it is not, which is exactly what the pin map reads.
+
+So the same `platform::ethRgmiiPads` treatment applies, with one wrinkle. On the **classic ESP32** the RMII data pins are silicon-fixed, so a second per-chip pad list serves them directly. On the **P4** 49/34/35/28/29/30 is the Waveshare NANO's *board* wiring that the IDF macro happens to default to, not a chip constant, so those belong in `deviceModels.json` beside the other per-board eth pins, letting a different P4 carrier declare its own. Both then reach the pin map through the control path already built, rather than a third mechanism.
+
+Lower risk than the RGMII case (six pins rather than twelve, and nothing of ours currently collides), but the failure mode is identical: a driver claims one, the MAC still reports a healthy link, and every frame goes out corrupt.
+
+**2. `busPinList()` pads spare lanes with `clockPin`, and MoonI80 routes them as data.** The i80 bus is always 8 or 16 bits wide (`ParallelLedDriver::busWidthPins`), so a board driving one strand gets seven lanes parked on the clock pin, and `configureGpio` (`platform_esp32_moon_i80.cpp`) routes every entry it is given. The padding exists because `esp_lcd` rejects an NC data pin, but the MoonI80 backend does not have that limit: its own comment says *"pins past `laneCount` go nowhere"*. It is simply never told the real lane count. Passing it would free six or seven GPIOs on every direct-mode board and remove the hidden claim at the source.
+
+**3. `clockPin` defaults to 10 and is hidden.** `MoonLedDriver::clockPin = 10` is a hardcoded default that lands inside the S31's reserved RGMII block, and `addBusControls` hides the control unless `pinExpanderMode()` is on. So on this board the value was invisible on the card, unchangeable through the UI, and still driving a pad. A pin with a real effect must be visible, whatever mode it is in.
+
+**This also closed the S31 Ethernet defect, open since 2026-07-26.** That entry (removed) blamed an RGMII Tx-clock mismatch at 100M for DHCP never completing, and had concluded "the frames never reach the router". The cause was the same collision: `ParallelLed`'s default `clockPin = 10` is `txd2`, so a DHCP DISCOVER was garbled exactly as the panel frames were. With the clock pin moved off the RGMII block the S31 leases normally, verified on the bench at `Eth: 192.168.1.125 (1000 Mbit)`. Two long-standing bugs, one GPIO.

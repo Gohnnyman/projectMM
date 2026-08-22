@@ -66,6 +66,55 @@ constexpr bool isEsp32S31 = true;
 constexpr bool isEsp32S31 = false;
 #endif
 
+// The RGMII data bus: the fixed IO_MUX pads the EMAC accepts for TXD0-3 / RXD0-3 / TX_CTL / RX_CTL
+// and the two clocks. They are silicon's choice, not board wiring and not user config, which is why
+// ethInitEmac() hands exactly these to the driver. Declared here so ONE list serves both that init and
+// NetworkModule's read-only pin controls: the controls are the pin registry the pin map reads, and a
+// pad nobody declares is a pad the map shows free while the MAC drives it (an LED lane parked on
+// GPIO 10 corrupted every frame the MAC sent, with the link still reporting 1000 Mbit and no drops).
+/// One pad the EMAC's data interface owns: the signal it carries and the GPIO the silicon fixed it
+/// to. RGMII on the S31, RMII on the P4, and neither is configurable, which is why they are reported
+/// through MoonModule::fixedPins() rather than published as controls. Pairing name with GPIO here is
+/// what keeps the MAC's wiring and the pin map's label from drifting apart: both read this list.
+struct EthFixedPad { const char* name; uint8_t gpio; };
+#ifdef CONFIG_IDF_TARGET_ESP32S31
+constexpr EthFixedPad ethFixedPads[] = {
+    {"ethTxd0",  8}, {"ethTxd1",  9}, {"ethTxd2", 10}, {"ethTxd3", 11},
+    {"ethTxCtl", 12}, {"ethTxClk", 13}, {"ethRxClk", 14}, {"ethRxCtl", 15},
+    {"ethRxd3", 16}, {"ethRxd2", 17}, {"ethRxd1", 18}, {"ethRxd0", 19},
+};
+constexpr uint8_t ethFixedPadCount = 12;
+#elif defined(CONFIG_IDF_TARGET_ESP32P4)
+// P4 RMII: the data lines the EMAC drives, from ETH_ESP32_EMAC_DEFAULT_CONFIG() (which ethInitEmac
+// leaves untouched) and matching the NANO wiring in docs/reference/gpio-usage.md. Not the management
+// pair, which NetworkModule owns as real controls a carrier can reroute.
+constexpr EthFixedPad ethFixedPads[] = {
+    {"ethTxEn", 49}, {"ethTxd0", 34}, {"ethTxd1", 35},
+    {"ethCrsDv", 28}, {"ethRxd0", 29}, {"ethRxd1", 30},
+};
+constexpr uint8_t ethFixedPadCount = 6;
+#elif defined(CONFIG_IDF_TARGET_ESP32)
+// Classic ESP32 RMII: one IO_MUX choice per signal, so these are the pins, not a default. From the
+// IDF's own RMII Data Plane GPIO table (docs/en/api-reference/network/esp_eth.rst), which is why
+// ethInitEmac does not set them: there is nothing to choose. The management pair (MDC/MDIO) IS
+// routable through the GPIO matrix and stays a NetworkModule control.
+constexpr EthFixedPad ethFixedPads[] = {
+    {"ethTxEn", 21}, {"ethTxd0", 19}, {"ethTxd1", 22},
+    {"ethCrsDv", 27}, {"ethRxd0", 25}, {"ethRxd1", 26},
+};
+constexpr uint8_t ethFixedPadCount = 6;
+#endif
+#if defined(CONFIG_IDF_TARGET_ESP32S31) || defined(CONFIG_IDF_TARGET_ESP32P4) || defined(CONFIG_IDF_TARGET_ESP32)
+static_assert(ethFixedPadCount == sizeof(ethFixedPads) / sizeof(ethFixedPads[0]),
+              "the count gates every loop over this list: a mismatch reads past the end");
+#else
+// RMII targets name their data pins through NetworkModule's own controls, so there is no fixed pad
+// to publish. A one-element dummy rather than a zero-size array: `T x[] = {}` is a GCC/Clang
+// extension that MSVC refuses, and the desktop build is compiled by MSVC on the Windows CI job.
+constexpr EthFixedPad ethFixedPads[] = {{"", 0}};
+constexpr uint8_t ethFixedPadCount = 0;
+#endif
+
 // RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3 / P4 / S31,
 // straight from the RMT HAL — `RMT_LL_TX_CANDIDATES_PER_INST`, included above).
 // Doubles as the RMT capability flag: the RMT LED driver and its main.cpp
@@ -330,7 +379,11 @@ constexpr EthPinConfig ethConfigDefault =
   : isEsp32S3   ? EthPinConfig{ /*phyType*/ ethW5500, /*addr*/ 1, /*mdc*/ -1, /*mdio*/ -1,
                                 /*rst*/ -1, /*rmiiClk*/ -1, /*extIn*/ false,
                                 /*miso*/ -1, /*mosi*/ -1, /*sck*/ -1, /*cs*/ -1, /*irq*/ -1 }
-              :   EthPinConfig{ /*phyType*/ ethLan8720, /*addr*/ 0, /*mdc*/ -1, /*mdio*/ -1,
+    // Classic ESP32: MDC 23 / MDIO 18 stated rather than left at -1. The MAC uses these either way
+    // (a -1 makes ethInitEmac skip smi_gpio, and IDF's own ETH_ESP32_EMAC_DEFAULT_CONFIG applies the
+    // same pair), but a -1 is invisible to the pin map, which reads the controls: two pins the MAC
+    // drives showed as free, and nothing would have flagged an LED lane taking one.
+              :   EthPinConfig{ /*phyType*/ ethLan8720, /*addr*/ 0, /*mdc*/ 23, /*mdio*/ 18,
                                 /*rst*/ 5, /*rmiiClk*/ 17, /*extIn*/ false,
                                 /*miso*/ -1, /*mosi*/ -1, /*sck*/ -1, /*cs*/ -1, /*irq*/ -1 };
 #endif  // CONFIG_ETH_USE_OPENETH

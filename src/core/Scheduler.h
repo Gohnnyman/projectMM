@@ -55,6 +55,13 @@ public:
     using LoadAllFn = void(*)(Scheduler*);
     void setLoadAllHook(LoadAllFn fn) { loadAllHook_ = fn; }
 
+    /// Hook invoked ONCE after the first prepareTree(), for a module whose control set is not final
+    /// until then: a MoonLive script's declared controls exist only after the script compiles, which
+    /// is prepare()'s work, so the load pass above ran before they existed and their saved values had
+    /// nowhere to land. Values only; the tree shape was settled by the load pass. Same decoupling as
+    /// setLoadAllHook. No-op if unset.
+    void setReapplyValuesHook(LoadAllFn fn) { reapplyValuesHook_ = fn; }
+
     /// Hook invoked after a control mutation so the persistence layer can schedule a
     /// debounced save (FilesystemModule::noteDirty). Same decoupling as setLoadAllHook —
     /// Scheduler stays independent of FilesystemModule's type. No-op if unset.
@@ -141,6 +148,8 @@ private:
     // plain bool is a data race — and a lost request means a script edit silently never applies.
     std::atomic<bool> prepareRequested_{false};   // asked for off-thread; tick() honours it
     LoadAllFn loadAllHook_ = nullptr;
+    LoadAllFn reapplyValuesHook_ = nullptr;
+    bool valuesReapplied_ = false;   // the hook fires once, after the first prepareTree()
     NoteDirtyFn noteDirtyHook_ = nullptr;
     uint32_t startTime_ = 0;
     uint32_t lastLoop20ms_ = 0;

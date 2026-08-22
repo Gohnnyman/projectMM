@@ -531,6 +531,45 @@ TEST_CASE("streaming ring: a sliced encode is byte-identical to the whole-frame 
 // unpadded list — while busPinCount() reported the rounded width. With fewer pins than the bus is
 // wide, the platform would then read past the end of laneList_. Direct mode never hit it only because
 // the validation rejected any count but 8 or 16; allowing any count is what exposes it.
+// A backend that routes its own GPIOs does not need a pad for a spare lane, and must not get one: the
+// pad is a REAL claim on a REAL pin. On an ESP32-S31 the default clock pin (10) is an RGMII transmit
+// line, so a one-strand board silently drove an Ethernet data pad and corrupted every frame the MAC
+// sent, while the driver reported a healthy link and zero drops. The peripheral says whether it needs
+// the pad; only the lanes a strand actually reads are handed over.
+TEST_CASE("a peripheral that routes its own pins is handed only the lanes it drives") {
+    mm::Buffer src;
+    mm::Correction corr;
+
+    struct SelfRoutingPeripheral : MockPeripheral {
+        bool spareLanesNeedPad() const override { return false; }
+    };
+
+    SUBCASE("direct mode: 3 pins stay 3 lanes, nothing parked on the clock pin") {
+        MockShiftDriver d;
+        SelfRoutingPeripheral peripheral;
+        wire(d, peripheral, src, corr, 64, "1,2,4", /*shiftOn=*/false, /*latch=*/-1);
+
+        REQUIRE(d.busPinCountForTest() == 3);
+        const uint16_t* list = d.busPinListForTest();
+        CHECK(list[0] == 1);
+        CHECK(list[1] == 2);
+        CHECK(list[2] == 4);
+        for (uint8_t i = 0; i < 3; i++) CHECK(list[i] != 99);   // the clock pin is never claimed
+    }
+
+    SUBCASE("shift mode: the latch is a real lane, so it is still handed over") {
+        MockShiftDriver d;
+        SelfRoutingPeripheral peripheral;
+        wire(d, peripheral, src, corr, 64, "1,2", /*shiftOn=*/true, /*latch=*/7);
+
+        REQUIRE(d.busPinCountForTest() == 3);       // 2 data + the latch
+        const uint16_t* list = d.busPinListForTest();
+        CHECK(list[0] == 1);
+        CHECK(list[1] == 2);
+        CHECK(list[2] == 7);                        // the latch lane
+    }
+}
+
 TEST_CASE("bus pin list is padded to the full bus width, in both modes") {
     mm::Buffer src;
     mm::Correction corr;

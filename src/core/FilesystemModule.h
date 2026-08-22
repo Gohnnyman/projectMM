@@ -181,8 +181,14 @@ private:
     void updateLastSavedStr();
     static void loadAllHookTrampoline_(Scheduler* s);
     void loadAll(Scheduler* s);
+    static void reapplyValuesHookTrampoline_(Scheduler* s);
+    void reapplyValues(Scheduler* s);
     void loadSubtree(MoonModule* m);
     void applyNode(MoonModule* m, const char* json, const char* prefix);
+    /// Second load pass, values only, run after the tree is prepared: see the definition for why a
+    /// schema that only settles in prepare() (a MoonLive script's declared controls) needs it.
+    void reapplySubtree(MoonModule* m);
+    void reapplyNode(MoonModule* m, const char* json, const char* prefix);
     void applyWiredChildFromJson(MoonModule* wired, const char* json, const char* prefix);
     static bool hasWiredChildOfType(const MoonModule* parent, const char* typeName);
     void overlayControls(MoonModule* m, const char* json, const char* prefix);

@@ -778,3 +778,66 @@ TEST_CASE("FilesystemModule skips an unknown type mid-list and keeps the user mo
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(".");
 }
+
+// A module whose CONTROL SET only exists after prepare() has done work: the MoonLive bindings, whose
+// scripted controls (`cols`, `rows`, an effect's `speed`) are declared by the script and therefore
+// appear only once it has COMPILED, which is prepare()'s job. Boot order is defineControls → load →
+// prepareTree, so at load time those controls are in no list at all and their saved values have
+// nowhere to land; prepare() then seeds them from the script's own defaults. Symptom on the bench:
+// a scripted grid layout came back 16x16 however it had been set, while .config/Layouts.json held
+// the right numbers all along.
+namespace {
+class LateSchemaModule : public mm::MoonModule {
+public:
+    uint8_t always = 1;
+    uint8_t late = 16;        // stands in for a script's declared control
+    bool prepared = false;
+
+    void defineControls() override {
+        mm::MoonModule::defineControls();
+        controls_.addUint8("always", always, 0, 255);
+        // Only published once prepare() has run, exactly as publishDeclaredControls is empty until
+        // the engine holds a compiled program.
+        if (prepared) controls_.addUint8("late", late, 0, 255);
+    }
+    void prepare() override {
+        prepared = true;
+        rebuildControls();
+    }
+    /// Derived from the late control, read on demand: the shape MoonLiveLayout has, where
+    /// lightCount() runs the script each call rather than caching anything at prepare time.
+    uint16_t derived() const { return static_cast<uint16_t>(late) * 2; }
+};
+}  // namespace
+
+TEST_CASE("FilesystemModule restores a control that only exists after prepare()") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_lateschema_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    {
+        std::ofstream f(std::string(tmpRoot) + "/.config/LateSchemaModule.json");
+        f << "{\"enabled\":true,\"always\":7,\"late\":42}";
+    }
+
+    mm::Scheduler scheduler;
+    auto* fs = new mm::FilesystemModule();
+    fs->setTypeName("FilesystemModule");
+    fs->setScheduler(&scheduler);
+
+    auto* late = new LateSchemaModule();
+    late->setTypeName("LateSchemaModule");
+    scheduler.addModule(late);
+    scheduler.addModule(fs);
+    scheduler.setup();
+
+    CHECK(late->always == 7);    // an ordinary control: the first load pass carried it
+    CHECK(late->late == 42);     // and one that did not exist until prepare() ran
+    // And the state DERIVED from it, not just the backing member: a value restored after phase 4
+    // is still the one the pipeline reads, because derived state here is computed on demand.
+    CHECK(late->derived() == 84);
+    mm::platform::fsSetRoot(".");
+    std::filesystem::remove_all(tmpRoot);
+}

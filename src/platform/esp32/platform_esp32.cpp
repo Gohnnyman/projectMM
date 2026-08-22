@@ -685,11 +685,30 @@ static bool ethInitEmac() {
     // a non-IO_MUX pin fails "invalid ... GPIO number"). They also match the CoreBoard
     // schematic wiring (docs/reference/esp32-s31-coreboard.md). Passing GPIO_NUM_MAX (-1)
     // here would make IDF pick these same defaults; we list them explicitly for clarity.
-    emac_config.clock_config.rgmii.clock_tx_gpio = 13;
-    emac_config.clock_config.rgmii.clock_rx_gpio = 14;
+    // A pad's GPIO by signal name. constexpr-evaluable, so a name that is not in the list fails the
+    // build rather than silently wiring pad 0.
+    constexpr auto rgmiiPad = [](const char* want) -> int {
+        for (uint8_t i = 0; i < ethFixedPadCount; i++) {
+            const char* n = ethFixedPads[i].name;
+            const char* w = want;
+            while (*n && *n == *w) { ++n; ++w; }
+            if (*n == 0 && *w == 0) return ethFixedPads[i].gpio;
+        }
+        return -1;   // not found: IDF rejects it loudly at eth init
+    };
+    // Looked up BY NAME out of platform::ethFixedPads, the ONE list of these pads: NetworkModule
+    // reports the same entries through fixedPins() so the pin map can show what the MAC holds. By
+    // name rather than by index so reordering that list cannot silently rewire the MAC, and a typo
+    // is a compile error rather than a scrambled bus.
+    emac_config.clock_config.rgmii.clock_tx_gpio = rgmiiPad("ethTxClk");
+    emac_config.clock_config.rgmii.clock_rx_gpio = rgmiiPad("ethRxClk");
     emac_config.emac_dataif_gpio.rgmii = eth_mac_rgmii_gpio_config_t{
-        /*tx_ctl*/ 12, /*txd0*/ 8, /*txd1*/ 9, /*txd2*/ 10, /*txd3*/ 11,
-        /*rx_ctl*/ 15, /*rxd0*/ 19, /*rxd1*/ 18, /*rxd2*/ 17, /*rxd3*/ 16,
+        /*tx_ctl*/ rgmiiPad("ethTxCtl"),
+        /*txd0*/   rgmiiPad("ethTxd0"), /*txd1*/ rgmiiPad("ethTxd1"),
+        /*txd2*/   rgmiiPad("ethTxd2"), /*txd3*/ rgmiiPad("ethTxd3"),
+        /*rx_ctl*/ rgmiiPad("ethRxCtl"),
+        /*rxd0*/   rgmiiPad("ethRxd0"), /*rxd1*/ rgmiiPad("ethRxd1"),
+        /*rxd2*/   rgmiiPad("ethRxd2"), /*rxd3*/ rgmiiPad("ethRxd3"),
     };
 #else
     emac_config.clock_config.rmii.clock_mode =

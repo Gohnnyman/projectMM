@@ -265,7 +265,7 @@ Shells rise, stall, and burst into sparks that arc over and fall. Every stage is
 
 Physics is driven by elapsed time, not frame count, so the same settings behave identically on a desktop at thousands of fps and an ESP32 at a few hundred ([architecture § tick rate](../../architecture.md#effects)).
 
-Origin: projectMM original, on the WLED Particle System's firework family (@Brandon502 / WildCats08)
+Origin: projectMM original, on the WLED Particle System's firework family by Damian Schneider / [@DedeHai](https://github.com/DedeHai)
 
 <a id="ballpit"></a>
 
@@ -282,7 +282,7 @@ Falling balls that pile up and shove each other aside. The heap is emergent: gra
 
 Exercises the half of the particle kernel [Fireworks](#fireworks) leaves untouched: sparks never notice each other, these do. Collisions are the one non-linear part of the kernel, so the pool is deliberately small.
 
-Origin: projectMM original, on the WLED Particle System's ballpit family (@Brandon502 / WildCats08)
+Origin: projectMM original, on the WLED Particle System's ballpit family by Damian Schneider / [@DedeHai](https://github.com/DedeHai)
 
 <a id="dissolve"></a>
 

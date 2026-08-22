@@ -129,6 +129,7 @@ public:
         // the Layer folds while the engine is empty, then prepare() recompiles, sees the same
         // source, and never asks for the rebuild that would apply it.
         script_.invalidate();
+        script_.releaseReporting(*this);
         ModifierBase::release();
     }
 

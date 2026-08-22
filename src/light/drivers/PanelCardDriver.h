@@ -93,6 +93,10 @@ namespace mm {
 /// Huidu is the one to approach with care: its controllers are largely asynchronous, playing from
 /// onboard storage rather than being fed live, which is a different product category from a
 /// real-time sender.
+// Prior art: FPP (Falcon Player), the show player that drives these receiving cards from a
+// Raspberry Pi. Seeing an FPP rig feed a wall of panels is what prompted this driver: a board
+// already rendering those frames can send them itself, which removes the host from the
+// installation. The wire format is the ColorLight 5A-75 documented byte layout, not FPP's code.
 class PanelCardDriver : public DriverBase {
 public:
     /// Panel cards are RGB, so this references the "RGB" preset rather than the strips' "GRB" —

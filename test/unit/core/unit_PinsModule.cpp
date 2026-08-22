@@ -522,3 +522,54 @@ TEST_CASE("PinsModule: dir is shown as info, NOT a warning — a driven role wit
     CHECK(rows.find("\"severity\"") == std::string::npos);     // ...but NOT flagged (no false positive)
     platform::clearTestGpioLiveState();
 }
+
+// A peripheral can hold GPIOs that no control names: an EMAC's data bus is fixed IO_MUX pads the
+// silicon chose, so there is nothing to set and nothing for the control scan to find. Those pads
+// reach the map through MoonModule::fixedPins(). Without it the map showed twelve S31 pins free
+// while the MAC drove them, and an LED driver that took one corrupted every frame the MAC sent
+// while the link still reported 1000 Mbit with zero drops.
+namespace {
+struct FixedPinModule : MoonModule {
+    bool holding = true;                 // stands in for "this interface is running"
+    uint8_t askedFor = 0;                // the `max` the collector passed, recorded for the cap test
+
+    FixedPinModule(const char* n) { setName(n); }
+
+    uint8_t fixedPins(FixedPin* out, uint8_t max) const override {
+        const_cast<FixedPinModule*>(this)->askedFor = max;
+        if (!out || !holding) return 0;   // not running: the pads are free for anything else
+        static constexpr FixedPin kPads[] = {{8, "ethTxd0"}, {9, "ethTxd1"}, {10, "ethTxd2"}};
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < 3 && n < max; i++) out[n++] = kPads[i];
+        return n;
+    }
+};
+}  // namespace
+
+TEST_CASE("PinsModule lists the pins a module holds without a control naming them") {
+    Scheduler scheduler;
+    FixedPinModule net("Network");
+    PinsModule pins;
+    scheduler.addModule(&net);
+    scheduler.addModule(&pins);
+    scheduler.setup();
+    pins.tick1s();
+
+    const std::string rows = allRows(*pinsSource(pins));
+    // Each pad carries its own GPIO and the signal name, so a collision names what it would break.
+    CHECK(rows.find("\"gpio\":8") != std::string::npos);
+    CHECK(rows.find("\"gpio\":10") != std::string::npos);
+    CHECK(rows.find("\"role\":\"ethTxd2\"") != std::string::npos);
+    CHECK(rows.find("\"owner\":\"Network\"") != std::string::npos);
+
+    // Released when the module stops holding them: an ethType of None frees the whole bus, which is
+    // why these are reported per-refresh rather than being a static reserved list.
+    net.holding = false;
+    pins.tick1s();
+    CHECK(allRows(*pinsSource(pins)).find("\"role\":\"ethTxd2\"") == std::string::npos);
+
+    // The collector states a capacity, and the module is trusted to respect it: a module reporting
+    // more than `max` would write past the collector's stack buffer.
+    CHECK(net.askedFor > 0);
+    CHECK(net.askedFor <= 16);
+}
