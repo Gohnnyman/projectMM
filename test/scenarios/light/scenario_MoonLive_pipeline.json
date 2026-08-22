@@ -158,7 +158,7 @@
         "desktop-windows": {
           "tick_us": [
             0,
-            5
+            9
           ],
           "free_heap": [
             0,

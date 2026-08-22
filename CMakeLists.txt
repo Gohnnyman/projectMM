@@ -123,8 +123,11 @@ add_library(mm_platform
     src/platform/desktop/moonlive_asm_x86_64.cpp
 )
 target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
-# Winsock for the desktop socket surface on Windows.
-target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32>)
+# Winsock for the desktop socket surface; IPHLPAPI for real Ethernet link state and negotiated
+# speed (PanelCardDriver warns below gigabit, and a ColorLight card tears rather than erroring).
+# Npcap is deliberately NOT linked: platform_desktop.cpp resolves wpcap.dll at run time so the
+# build needs no SDK and the binary runs without it.
+target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32> $<$<PLATFORM_ID:Windows>:iphlpapi>)
 
 # Generate build_info.h from library.json + git (carries version, build id, build date, board name).
 # ALWAYS out-of-date on purpose — see the same rule in esp32/main/CMakeLists.txt for why: MM_BUILD_ID

@@ -243,7 +243,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            9,
+            8,
             11
           ],
           "free_heap": [

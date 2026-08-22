@@ -128,6 +128,7 @@ nav:
   # this section and are being folded in gradually).
   - Tutorials:
       - How projectMM works: tutorials/how-projectmm-works.md
+      - Driving LED panels with a receiving card: tutorials/panel-cards.md
       - Build your own MoonModules: usecases/build-your-own-moonmodules.md
       - Home automation: usecases/home-automation.md
       - LED signal integrity: usecases/led-signal-integrity.md

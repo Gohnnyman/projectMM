@@ -99,7 +99,7 @@ The board renders and sends: effects, layers and MoonLive run on the device, so 
 
 - `format` — the card's wire format (ColorLight 5A-75).
 - **No geometry controls** — the wall comes from the [Layout](layouts.md). A `PanelsLayout` already states how many panels there are, their size, wiring order and snaking; this driver reads the finished picture and cuts it into card rows. A row wider than 497 pixels goes out as several packets.
-- `interface` — which NIC to send from on desktop/Raspberry Pi (`eth0`, `en0`). **Ignored on ESP32**, which has one MAC. Raw sending needs root; without it the driver records frames instead and says so.
+- `interface` — which NIC to send from on desktop/Raspberry Pi: the kernel name on Linux/macOS (`eth0`, `en0`), or any distinctive part of the adapter description on Windows (`Realtek`). **Ignored on ESP32**, which has one MAC. Raw sending is privileged — root or `CAP_NET_RAW` on Linux, BPF access on macOS, and [Npcap](https://npcap.com/) installed on Windows; without it the driver records frames instead and says so. Step-by-step per OS: [Driving LED panels with a receiving card](../../tutorials/panel-cards.md).
 - `fps` — frame-rate limit (default 40, 1–120).
 
 **These cards need a 1 Gbit link.** Not for bandwidth — a 256×256 panel at 40 fps is only ~65 Mbit/s — but for wire time: the cards have no buffering and latch on the sync frame, so a whole frame must arrive inside the inter-frame window. At 100 Mbit the same bytes take ten times as long, which breaks that timing and shows up as tearing or wrong rows rather than as an error. The driver reads the negotiated speed and warns, but still sends: a small panel may be fine, and a measurement beats a refusal.

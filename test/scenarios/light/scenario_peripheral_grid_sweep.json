@@ -365,7 +365,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            164,
+            161,
             220
           ],
           "free_heap": [
@@ -579,7 +579,7 @@
         "desktop-windows": {
           "tick_us": [
             9,
-            13
+            21
           ],
           "free_heap": [
             0,

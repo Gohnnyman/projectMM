@@ -57,11 +57,17 @@ namespace mm {
 ///
 /// ## Running this on a host
 ///
-/// The desktop build sends real frames too, via `platform::ethBindRawInterface` (Linux AF_PACKET,
-/// macOS BPF) — so a Raspberry Pi or a mini-PC running projectMM is a panel controller, which is
-/// the deployment this replaces. Raw L2 needs root or CAP_NET_RAW; without it, or with `interface`
-/// left blank, the host records frames instead of sending them, which is what lets the unit tests
-/// pin the wire format with no hardware and no privileges.
+/// The desktop build sends real frames too, via `platform::ethBindRawInterface` — so a Raspberry
+/// Pi, a Mac or a Windows PC running projectMM is a panel controller, which is the deployment this
+/// replaces. Linux uses AF_PACKET and macOS BPF, both needing root or CAP_NET_RAW; Windows has no
+/// kernel path for raw L2 at all and goes through Npcap, resolved at run time so the binary still
+/// builds and runs without it. Without the privilege or the driver, or with `interface` left blank,
+/// the host records frames instead of sending them, which is what lets the unit tests pin the wire
+/// format with no hardware and no privileges.
+///
+/// `interface` names the NIC: the kernel name on Linux and macOS (`eth0`, `en0`), and on Windows any
+/// distinctive part of the adapter description (`Realtek`), because a capture device there is spelled
+/// `\Device\NPF_{GUID}` and does not fit a control a human types into.
 ///
 /// On ESP32 `interface` is ignored: the chip has one MAC.
 ///
@@ -294,6 +300,11 @@ public:
                 else framesDroppedTotal_++;
             }
         }
+        // One wall frame is complete: hand the whole burst to the wire. Where a platform batches
+        // (a Windows host, via the pcap send queue) this is the single call that transmits it,
+        // and the cards need the burst inside one inter-frame window rather than trickled. A
+        // no-op where each frame already went out as it was handed over.
+        platform::ethFlushRaw();
     }
 
     /// Report what the wire is doing: no link, a link too slow for the cards, or the packet rate

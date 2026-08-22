@@ -1117,6 +1117,10 @@ bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
     return true;
 }
 
+// The MAC takes each frame as ethSendRaw hands it over, so no burst is held back and there is
+// nothing to flush. Present because the seam is platform-wide (see platform.h).
+void ethFlushRaw() MM_NONBLOCKING {}
+
 void ethSendFailCounts(uint32_t& linkDown, uint32_t& ringFull) MM_NONBLOCKING {
     linkDown = ethFailLinkDown_.load(std::memory_order_relaxed);
     ringFull = ethFailRingFull_.load(std::memory_order_relaxed);
@@ -1172,6 +1176,7 @@ bool ethLinkUp() MM_NONBLOCKING                        { return false; }
 bool ethConnected() MM_NONBLOCKING                     { return false; }
 void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING         { out[0] = out[1] = out[2] = out[3] = 0; }
 bool ethSendRaw(const uint8_t*, size_t) MM_NONBLOCKING { return false; }   // no MAC to hand a frame to
+void ethFlushRaw() MM_NONBLOCKING                      {}                  // nothing batched
 void ethClaimRawL2(bool)                               {}                  // no link to claim
 bool ethRawL2Claimed() MM_NONBLOCKING                  { return false; }
 bool ethRestartTx()                                    { return false; }   // no driver to restart

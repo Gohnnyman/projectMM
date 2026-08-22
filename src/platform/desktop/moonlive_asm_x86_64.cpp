@@ -746,12 +746,10 @@ void HostAssembler::patchBranches() {
     }
 }
 
-#else
 
-// No host assembler on this ISA. The matching `lowerToBytes` stub in moonlive_lower_host.cpp
-// returns 0, so MoonLive::compile fails cleanly and a scripted module runs dark — the desktop
-// binary still builds and runs everything else.
-
+// Bind the shared IR walk to this assembler. INSIDE the arch guard, with the assembler it names:
+// in the `#else` it would be compiled on every OTHER host, where `HostAssembler` is the arm64 one
+// (duplicate definition) or absent entirely. moonlive_asm_noarch.cpp owns the no-backend stub.
 size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squeeze) {
     return lowerWith<HostAssembler>(ir, out, cap, squeeze, kRegCount);
 }
