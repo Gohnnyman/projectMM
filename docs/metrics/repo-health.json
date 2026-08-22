@@ -1,5 +1,5 @@
 {
-  "commit": "caa93ebd",
+  "commit": "cadbb215",
   "flash": {
     "esp32": 1767584,
     "esp32p4rev1-eth": 1653696,
@@ -16,8 +16,8 @@
   },
   "perf": {
     "desktop": {
-      "tick_us": 169,
-      "fps": 5917
+      "tick_us": 160,
+      "fps": 6250
     },
     "esp32": {
       "tick_us": 2151,
@@ -64,9 +64,9 @@
   },
   "docs": {
     "md_files": 187,
-    "md_lines": 27196,
+    "md_lines": 27197,
     "plans_files": 95,
-    "backlog_lines": 4310,
+    "backlog_lines": 4311,
     "lessons_lines": 576,
     "claude_md_lines": 136
   },

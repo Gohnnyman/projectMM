@@ -268,9 +268,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      # Same uv prerequisite as build-macos — see the comment there.
+      # Same uv prerequisite as build-macos, see the comment there.
       - uses: astral-sh/setup-uv@v3
+      # ubuntu-24.04 defaults to GCC 13, whose -Wnull-dereference, -Wrestrict and
+      # -Wstringop-overflow fire inside libstdc++ and glibc headers on this codebase: four of
+      # the twelve are in <bits/stl_algobase.h>, <streambuf> and <stdio2.h>, which no source
+      # change here can reach. GCC 14 compiles the same code clean, as does the GCC 16 the
+      # local gate uses. Pinned rather than silenced so -Werror keeps every warning fatal,
+      # including the three tier-zero ones CMakeLists enables on purpose.
+      - name: Install GCC 14
+        run: sudo apt-get install -y g++-14
       - name: Build + package Linux x64
+        env:
+          CXX: g++-14
         run: uv run moondeck/ci/package_desktop.py
       - uses: actions/upload-artifact@v4
         with:
