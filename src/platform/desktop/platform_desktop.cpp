@@ -788,9 +788,11 @@ PcapSendQueue*    pcapQueue_ = nullptr;
 // and sync frames, at the Ethernet maximum. ~400 KB of one-time allocation on a machine that has
 // just chosen to drive an LED wall.
 constexpr unsigned kSendQueueBytes = 264u * (unsigned)(kEthTestFrameMax + sizeof(PcapPktHdr));
-// The adapter description the handle belongs to, so ethLinkUp/ethLinkSpeedMbps report THAT NIC.
-// The DESCRIPTION rather than the GUID: see winAdapterLink for why a virtualized NIC needs it.
-char              boundDesc_[128] = {};
+// The adapter GUID the handle belongs to, so ethLinkUp/ethLinkSpeedMbps report THAT NIC. The GUID
+// rather than the description, because the description is not always THERE: pcap reports none at
+// all for some adapters (a USB NIC on this bench reports none), while `\Device\NPF_{GUID}` is the
+// one identifier every Windows pcap device carries. See winAdapterLink.
+char              boundGuid_[40] = {};   // "{8BB7C86E-E3D1-4842-8333-DAD18FD0ADD5}" + NUL
 
 /// Resolve wpcap.dll once. False when Npcap is not installed, which is an ordinary state.
 bool wpcapLoad() {
@@ -826,6 +828,59 @@ bool containsNoCase(const char* haystack, const char* needle) {
     }
     return false;
 }
+
+/// Case-insensitive equality, for two strings already in the same canonical form.
+bool equalsNoCase(const char* a, const char* b) {
+    for (; *a && *b; a++, b++) {
+        if (std::tolower(static_cast<unsigned char>(*a)) !=
+            std::tolower(static_cast<unsigned char>(*b))) return false;
+    }
+    return !*a && !*b;
+}
+
+/// The `{GUID}` out of a pcap device name (`\Device\NPF_{8BB7C86E-...}`), braces included.
+bool guidFromPcapName(const char* name, char* out, size_t cap) {
+    if (!name || !out || cap == 0) return false;
+    const char* open = std::strchr(name, '{');
+    if (!open) return false;
+    const char* close = std::strchr(open, '}');
+    if (!close) return false;
+    const size_t n = static_cast<size_t>(close - open) + 1;
+    if (n >= cap) return false;
+    std::memcpy(out, open, n);
+    out[n] = '\0';
+    return true;
+}
+
+/// A MIB row's GUID in the spelling pcap uses, so the two can be compared as text.
+void guidToString(const GUID& g, char* out, size_t cap) {
+    std::snprintf(out, cap, "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+                  static_cast<unsigned long>(g.Data1), g.Data2, g.Data3,
+                  g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
+                  g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
+}
+
+/// The description WINDOWS shows for a pcap device, found through the interface table by GUID.
+/// This exists because pcap's own description can be absent: without it such an adapter is
+/// unnameable, since the only text left to match is a 49-character device path.
+bool winDescForPcapName(const MIB_IF_TABLE2* table, const char* pcapName, char* out, size_t cap) {
+    if (!table || !out || cap == 0) return false;
+    char want[40];
+    if (!guidFromPcapName(pcapName, want, sizeof(want))) return false;
+    for (ULONG i = 0; i < table->NumEntries; i++) {
+        char have[40];
+        guidToString(table->Table[i].InterfaceGuid, have, sizeof(have));
+        if (!equalsNoCase(have, want)) continue;
+        // Narrow the wide description as we copy: an adapter description is ASCII.
+        size_t n = 0;
+        for (; n + 1 < cap && table->Table[i].Description[n]; n++) {
+            out[n] = static_cast<char>(table->Table[i].Description[n]);
+        }
+        out[n] = '\0';
+        return n > 0;
+    }
+    return false;
+}
 #endif  // _WIN32
 }  // namespace
 
@@ -840,32 +895,40 @@ bool ethBindRawInterface(const char* ifName) {
     pcapHandle_ = nullptr;
     if (pcapQueue_ && pcapQDestroy_) { pcapQDestroy_(pcapQueue_); }
     pcapQueue_ = nullptr;
-    boundDesc_[0] = '\0';
+    boundGuid_[0] = '\0';
     if (!ifName || !ifName[0]) return true;   // explicit return to capture mode, as on POSIX
     if (!wpcapLoad()) return false;           // no Npcap installed: the driver reports it
 
-    // Match the user's string against pcap's device name OR its description, case-insensitively.
-    // A pcap device is `\Device\NPF_{GUID}` — 45+ characters against a 16-byte control — while the
-    // description is what Windows shows ("Intel(R) Ethernet ..."), so a short, memorable substring
-    // is the only spelling that fits. An exact device name still matches, which keeps the control
-    // meaning the same thing it means on Linux and macOS: name the interface.
+    // Match the user's string against pcap's device name, pcap's description, and the description
+    // WINDOWS shows for the same adapter — case-insensitively, first hit wins. A pcap device is
+    // `\Device\NPF_{GUID}`, 49 characters against a 16-byte control, so a substring of a
+    // description is the only spelling that fits. The Windows lookup is not a nicety: pcap reports
+    // NO description for some adapters, and for those nothing a user could type would match at all.
+    // An exact device name still matches, which keeps the control meaning the same thing it means
+    // on Linux and macOS: name the interface.
     PcapIf* devs = nullptr;
     char err[256] = {};
     if (pcapFindAllDevs_(&devs, err) != 0 || !devs) return false;
+    MIB_IF_TABLE2* table = nullptr;
+    if (::GetIfTable2(&table) != NO_ERROR) table = nullptr;   // fall back to pcap's own text
     const PcapIf* hit = nullptr;
     for (const PcapIf* d = devs; d; d = d->next) {
         if (containsNoCase(d->name, ifName) || containsNoCase(d->description, ifName)) { hit = d; break; }
+        char desc[256];
+        if (winDescForPcapName(table, d->name, desc, sizeof(desc)) &&
+            containsNoCase(desc, ifName)) { hit = d; break; }
     }
+    if (table) ::FreeMibTable(table);
     if (!hit) { pcapFreeAllDevs_(devs); return false; }
 
     // snaplen 65536, non-promiscuous, 1 ms read timeout. This handle only ever sends; promiscuous
     // capture would cost interrupts for frames nothing reads.
     PcapT* h = pcapOpenLive_(hit->name, 65536, 0, 1, err);
     if (h) {
-        // Keep the DESCRIPTION, which is what the link-state query matches on (winAdapterLink
-        // explains why the GUID does not survive a NIC owned by a Hyper-V vSwitch).
-        std::snprintf(boundDesc_, sizeof(boundDesc_), "%s",
-                      hit->description ? hit->description : hit->name);
+        // Keep the GUID, which is what the link-state query matches on. The description was the
+        // old key, and it fell back to the DEVICE NAME when pcap reported none — a string no MIB
+        // row can ever match, so a perfectly bound adapter reported "no ethernet link" forever.
+        guidFromPcapName(hit->name, boundGuid_, sizeof(boundGuid_));
     }
     pcapFreeAllDevs_(devs);
     pcapHandle_ = h;
@@ -1057,29 +1120,24 @@ bool ethRawL2Claimed() MM_NONBLOCKING { return ethRawClaims_ > 0; }
 namespace {
 /// (linkUp, mbps) for the adapter ethBindRawInterface opened.
 ///
-/// Matched on DESCRIPTION through GetIfTable2, not on the adapter GUID through
-/// GetAdaptersAddresses, because a NIC bound to a Hyper-V external vSwitch does not appear in the
-/// latter at all: Windows reports the virtual adapter and hides the physical one the switch owns.
-/// Measured here, where pcap opens `\Device\NPF_{7DD559D5-...}` (the Realtek) and that GUID is in
-/// no GetAdaptersAddresses row. GetIfTable2 lists the physical interface, so the description pcap
-/// already gave us is the key that survives virtualization.
+/// Matched on the adapter GUID through GetIfTable2 — NOT through GetAdaptersAddresses, because a
+/// NIC bound to a Hyper-V external vSwitch does not appear there at all: Windows reports the
+/// virtual adapter and hides the physical one the switch owns. Measured here, where pcap opens
+/// `\Device\NPF_{7DD559D5-...}` (the Realtek) and that GUID is in no GetAdaptersAddresses row.
+/// GetIfTable2 lists the physical interface AND carries the same GUID pcap put in the device name,
+/// so one exact key covers both a virtualized NIC and an adapter pcap describes as nothing at all.
+/// The description cannot do that: absent on some adapters, filter-suffixed on others.
 bool winAdapterLink(uint16_t& mbps) {
     mbps = 0;
-    if (!boundDesc_[0]) return false;
+    if (!boundGuid_[0]) return false;
     MIB_IF_TABLE2* table = nullptr;
     if (::GetIfTable2(&table) != NO_ERROR || !table) return false;
     bool up = false;
     for (ULONG i = 0; i < table->NumEntries; i++) {
         const MIB_IF_ROW2& row = table->Table[i];
-        // MIB descriptions carry a filter suffix ("...-WFP Native MAC Layer LightWeight Filter-0000"),
-        // so the pcap description is a PREFIX of the row rather than equal to it. Narrow the wide
-        // string as we compare: every character here is ASCII.
-        bool prefix = true;
-        for (size_t c = 0; boundDesc_[c]; c++) {
-            const wchar_t w = row.Description[c];
-            if (!w || static_cast<char>(w) != boundDesc_[c]) { prefix = false; break; }
-        }
-        if (!prefix) continue;
+        char have[40];
+        guidToString(row.InterfaceGuid, have, sizeof(have));
+        if (!equalsNoCase(have, boundGuid_)) continue;
         up = (row.OperStatus == IfOperStatusUp);
         const unsigned long long bps = row.TransmitLinkSpeed;
         mbps = (bps == 0 || bps == ~0ULL) ? 0

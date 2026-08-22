@@ -121,6 +121,23 @@ public:
 
     /// Wire format (index into kFormatOptions).
     uint8_t format = 0;
+
+    /// Card firmware generation. v13 and newer act on the SECOND copy of the brightness and sync
+    /// frames, so both go out twice; v12 and older act on the FIRST and take the second sync as
+    /// another latch, aborting a refresh already in progress. Measured on a 5A-75 v8.0 downgraded
+    /// to 11.09: the panel updated once every few seconds until the duplicate was dropped.
+    ///
+    /// A control rather than a probe because THIS DRIVER is send-only, not because the protocol is.
+    /// The cards do answer: a discovery reply carries the major version in `data[2]`, which is how
+    /// FPP auto-detects it and how ColorLight's own LEDUpgrade reports a card as "5A 13.17". Probing
+    /// needs a receive seam beside platform::ethSendRaw, which does not exist yet. FPP keeps the
+    /// manual setting regardless, as its FIRST source, falling back to discovery only when unset.
+    static constexpr const char* kFirmwareOptions[] = {"v13 and newer", "v12 and older"};
+    static constexpr uint8_t kFirmwareCount = 2;
+
+    /// Card firmware generation (index into kFirmwareOptions). Defaults to v13+, which is what a
+    /// card ships with today.
+    uint8_t firmware = 0;
     /// Host NIC to send from ("eth0", "en0"). Ignored on ESP32, which has one MAC. Blank on a host
     /// means capture-only: nothing reaches the wire and the status says so.
     char interface[16] = {};
@@ -131,6 +148,7 @@ public:
     /// driver card: format, panel geometry, the host interface, the shared window, then the cap.
     void defineDriverControls() override {
         controls_.addSelect("format", format, kFormatOptions, kFormatCount);
+        controls_.addSelect("firmware", firmware, kFirmwareOptions, kFirmwareCount);
         controls_.addText("interface", interface, sizeof(interface));
         // Desktop/Raspberry-Pi only: which host NIC to open a raw socket on. An ESP32 has one MAC
         // and ignores it, so an empty box there would invite input that does nothing.
@@ -246,18 +264,21 @@ public:
         // pair on the wire, so a misconfigured window is silent rather than emitting frames per tick.
         if (nLights < static_cast<nrOfLightsType>(wallW)) return;
 
+        // How many copies of the brightness and sync frames this card wants: see `firmware`. Sending
+        // two to a card that acts on the first is not harmless, which is why this is a choice and
+        // not a constant.
+        const int frameCopies = (firmware == 0) ? 2 : 1;
+
         // Brightness first, ahead of the rows — the order the cards expect. Advisory: older card
         // firmware ignores it, and the driver never depends on it having landed (our own Correction
         // has already applied brightness to the pixel data, so this only sets the card's own gain).
         {
             const size_t len = buildColorLightBrightnessPacket(packet_, kCardGain);
-            // Sent TWICE, like the sync below. Card firmware v13+ acts on the second copy only;
-            // older firmware ignores the duplicate, so sending both costs one frame and works on
-            // every version rather than making the behaviour depend on a firmware probe we do not do.
+            // Once or twice, per `firmware` (frameCopies above).
             //
             // Counted like the rows: `dropped` and the platform's per-cause totals must describe the
             // SAME set of frames, or comparing them tells you nothing.
-            for (int i = 0; i < 2; i++) {
+            for (int i = 0; i < frameCopies; i++) {
                 if (platform::ethSendRaw(packet_, len)) framesSent_++;
                 else framesDroppedTotal_++;
             }
@@ -294,8 +315,9 @@ public:
         // latching an empty frame would blank the panels on a misconfigured window.
         if (anyRowSent) {
             const size_t len = buildColorLightSyncPacket(packet_, kCardGain);
-            // Twice, for the same firmware reason as the brightness frame above.
-            for (int i = 0; i < 2; i++) {
+            // Same copy count as the brightness frame above, and this is the one that matters: a
+            // second sync is a second LATCH, not a harmless repeat.
+            for (int i = 0; i < frameCopies; i++) {
                 if (platform::ethSendRaw(packet_, len)) framesSent_++;
                 else framesDroppedTotal_++;
             }

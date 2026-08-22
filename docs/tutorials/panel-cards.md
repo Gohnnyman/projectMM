@@ -126,9 +126,9 @@ Pick your OS.
 
 Windows has **no** built-in way for an application to put a raw Ethernet frame on the wire. That is an OS restriction, not a projectMM limitation, and it is why Wireshark bundles a driver and why ColorLight's own LEDVision needs one.
 
-**Install [Npcap](https://npcap.com/)** (free; it is also installed if you already have Wireshark). Legacy WinPcap works too.
+**Install [Npcap](https://npcap.com/)** (free; it is also installed if you already have Wireshark). Legacy WinPcap 4.1.3 also works, and is what this driver was developed and measured against; Npcap offers the same API and is the maintained choice on a new machine.
 
-projectMM loads it *at run time*, so the application installs and runs fine without Npcap; you simply cannot bind an interface until it is present, and the driver says so.
+projectMM loads it *at run time*, so the application installs and runs fine without either; you simply cannot bind an interface until one is present, and the driver says so.
 
 For `interface`, type **any distinctive part of the adapter's name**, case-insensitive: `Realtek`, `Intel`, `Ethernet`. Windows names its capture devices `\Device\NPF_{…GUID…}`, which is neither memorable nor short enough for the field, so projectMM matches your text against the adapter description instead. The full device name also works if you have it.
 
@@ -162,13 +162,61 @@ Set up the **Panels** layout and the **Panel Card** driver exactly as in §3.4 a
 
 ---
 
-## 5. When it does not light up
+## 5. Card firmware, and the flicker
+
+A card's firmware has a version of its own, separate from the hardware revision printed on the board. It matters twice: once because one generation is defective, and once because projectMM has to know which generation it is talking to.
+
+### The v13 flicker
+
+Cards running **firmware v13** on **v8.x hardware** flicker in time with network activity. This is a defect in the card, not in the sender: it shows up identically under projectMM, [FPP](https://github.com/FalconChristmas/fpp) and ColorLight's own LEDVision, and nothing about how the frames are sent avoids it. The fix is to put older firmware on the card.
+
+To be clear about what is and is not wrong: projectMM drives a v13 card perfectly well. It binds, sends at the full frame rate, and the picture is correct. The flicker is the *only* reason to move off v13, and it is the card doing it. Since the trigger is network activity and driving a wall means constant network activity, there is no sending-side setting that avoids it. Batching, frame rate and packet count have all been tried; the defect is downstream of all of them.
+
+Two different faults look like "flicker", and only one of them is this. Tell them apart before spending an evening on the wrong one:
+
+| What you see | What it is |
+|---|---|
+| Flicker follows the Ethernet activity LED, and is there even on a still, dim image | The v13 defect. Downgrade the card. |
+| Flicker grows with brightness and with how much of the wall is lit | Power. The panels draw more than the supply holds. A downgrade changes nothing. |
+
+The second row is worth taking seriously, because projectMM sends a full frame every tick no matter what the effect is doing. The packet rate is identical for a black wall and a busy one, so flicker that tracks *content* is not coming from the network.
+
+### Reading and changing the version
+
+**[LEDUpgrade](https://en.colorlightinside.com/product/download/383)** reads and writes card firmware. Use **version 4.0**. Version 5.0 ships no pre-v12 firmware at all, so it cannot do this downgrade from its preset list however long you fight it.
+
+**Why 11.09 rather than something older.** Anything before v12 clears the flicker, but older is not automatically safer: cards on 11.08 were reported strobing white, which 11.09 fixes. 11.09 is the newest build on the safe side of the defect, so it carries the most fixes while carrying none of the flicker.
+
+1. Connect the card **directly** to the machine, no switch in between.
+2. **Close everything else that talks to the card**, projectMM included. A card being streamed at will not answer, and two ColorLight tools at once (LEDVision and LEDUpgrade) interfere.
+3. `Send Mode` set to the network-card mode, then choose your adapter. Restart LEDUpgrade afterwards: it binds the adapter at startup.
+4. **Detect Receiver Cards.** It reports something like `5A 13.17 (v8.0)`, meaning firmware 13.17 on v8.0 hardware.
+5. **Readback Firmware** to back up what is on the card before you replace it.
+6. `Upgrade Firmware`, preset, `4in1`, `normal`, then **`normal-11.09`**. Stay in the `normal` series: `PWM` and `shixin` are for different panel driver ICs.
+7. **Power-cycle the card.** It goes on running the old firmware until you do, which is the step most often missed.
+
+### Then tell projectMM what it is talking to
+
+Set the driver's `firmware` control to match the card:
+
+| Setting | For |
+|---|---|
+| `v13 and newer` | A stock card. The brightness and sync frames go out twice, which is the copy this firmware acts on. |
+| `v12 and older` | A downgraded card. Both go out once. |
+
+The mismatch is not subtle in one direction: leave a downgraded card on `v13 and newer` and it receives a second sync, treats it as another latch, aborts the refresh already running, and the wall updates once every few seconds.
+
+---
+
+## 6. When it does not light up
 
 | Symptom | Look at |
 |---|---|
-| `no ethernet link` | Cable seated, card powered, and plugged into the card's **input** port. On a 100 Mbit controller, try a gigabit switch in between. |
+| `no ethernet link` | On a desktop, check `interface` first: a string that matches no adapter fails the bind and reports exactly this, with nothing to distinguish it from an unplugged cable. Then cable seated, card powered, and plugged into the card's **input** port. On a 100 Mbit controller, try a gigabit switch in between. |
 | Status healthy, panels dark | The Layout, not the driver. If the wall is 0 lights, or the driver's window (`start`/`count`) selects none, there is nothing to send. |
 | Image tears or rolls | Link speed (§2). Check the status line says 1000 Mbit. |
+| A new frame only every few seconds | `firmware` (§5) is set to `v13 and newer` on a card running v12 or older. The duplicate sync latches twice and aborts the refresh. |
+| Flicker in time with network activity | The card's own v13 firmware defect (§5), not the sender. Downgrade the card. |
 | Every other row or column mirrored | `snake` for within-panel, `snakeP` for panel order. |
 | Panels in the wrong places | `wiringOrderP`, `X++P`, `Y++P`: the panel-grid ordering. |
 | Right image, wrong colours | `lightPreset` on the driver, which is where channel order and RGBW synthesis live for every driver. There is no separate colour-order control here. |
