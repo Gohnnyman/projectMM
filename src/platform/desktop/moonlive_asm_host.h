@@ -66,6 +66,13 @@ public:
     size_t size() const { return len_; }
     bool overflowed() const { return overflow_; }
 
+    // Byte-level append primitive — public so the x86-64 backend's file-scope encoding helpers
+    // (variable-length instructions marshalled into small local buffers) can call it directly.
+    // Sets overflowed() and drops the write if the buffer is full; arm64 uses it too for the
+    // 4-byte emit32 shortcut. Owns bounds checking and the overflow flag — no other code path
+    // writes into buf_.
+    void emitBytes(const uint8_t* p, size_t n);
+
     // --- labels ---
     Label newLabel();
     void  bind(Label l);                 // mark l's position = current offset
@@ -128,7 +135,6 @@ private:
     static constexpr uint8_t kMaxFixups = kAsmFixups;
 
     void emit32(uint32_t w);             // append one 32-bit instruction (arm64) — or byte run (x64)
-    void emitBytes(const uint8_t* p, size_t n);
     // A pending reference to a label. The kind is needed because a call's displacement is a
     // different field from a branch's: `bl` carries imm26 at bits 0..25, the conditional branches
     // imm19 at bits 5..23. Patching one as the other retargets it in silence, which is the failure

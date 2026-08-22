@@ -11,9 +11,10 @@
 // rewritten so the overflow lives in the call frame, instead of being refused.
 //
 // It lives in CORE, once. Correct spilling across a loop back edge is the hardest logic in this
-// compiler, and only the arm64 backend is ever executed by tests — three copies would leave two
-// permanently untested (CLAUDE.md Principle 3). Every backend supplies a RegBudget and consumes two
-// new IR ops; the algorithm appears nowhere in the platform layer.
+// compiler, and only the HOST backend is ever executed by tests (arm64 or x86-64, whichever the
+// machine is) — four copies would leave three permanently untested (CLAUDE.md Principle 3). Every
+// backend supplies a RegBudget and consumes two new IR ops; the algorithm appears nowhere in the
+// platform layer.
 
 namespace mm::moonlive {
 

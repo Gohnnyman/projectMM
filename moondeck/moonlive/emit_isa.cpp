@@ -25,8 +25,17 @@
 #define __aarch64__ 1
 #include "platform/desktop/moonlive_asm_host.h"
 #include "platform/desktop/moonlive_asm_host.cpp"
+#elif defined(MM_EMIT_X86_64)
+// No macro to define: the desktop backend's x86-64 branch is selected by the HOST's own
+// `__x86_64__` / `_M_X64`, so this ISA reads what the machine already compiles. That also means
+// it only works ON an x86-64 host — the arm64 branch above it wins on an Apple Silicon machine,
+// and a native architecture macro cannot be undefined. The device ISAs cross-emit because they
+// are gated on macros no host defines; this one does not, which is the honest trade for having
+// the same file serve as both the host backend and a tool target.
+#include "platform/desktop/moonlive_asm_host.h"
+#include "platform/desktop/moonlive_asm_host.cpp"
 #else
-#error "define MM_EMIT_XTENSA, MM_EMIT_RISCV or MM_EMIT_ARM64"
+#error "define MM_EMIT_XTENSA, MM_EMIT_RISCV, MM_EMIT_ARM64 or MM_EMIT_X86_64"
 #endif
 
 // The lowerer body, with the emit seam it expects.
@@ -46,6 +55,8 @@
 #elif defined(MM_EMIT_ARM64)
 #include "platform/desktop/moonlive_lower_host.cpp"
 #undef __aarch64__
+#elif defined(MM_EMIT_X86_64)
+#include "platform/desktop/moonlive_lower_host.cpp"
 #endif
 
 #include "core/moonlive/MoonLiveCompiler.h"

@@ -442,8 +442,12 @@ void XtensaAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
 
 void XtensaAssembler::patchBranches() {
     // Nothing was emitted if the buffer never allocated, so there is nothing to patch —
-    // stated rather than left to the reader to derive from fixupCount_ being 0.
-    if (!buf_) return;
+    // stated rather than left to the reader to derive from fixupCount_ being 0. And an
+    // OVERFLOWED compile is refused after finalize(), so patching it is pointless — and unsafe:
+    // a fixup recorded just before the emit dropped its instruction points at the buffer's end,
+    // and patching there writes past buf_ (found as heap corruption on the x86-64 backend; the
+    // pattern is identical here).
+    if (!buf_ || overflow_) return;
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
         if (labelPos_[f.label] < 0) continue;                                  // unbound label — leave as-is (overflow_ already failed the compile)

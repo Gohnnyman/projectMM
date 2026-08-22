@@ -14,9 +14,13 @@ this compiles a script through a REAL backend and pipes the bytes to that ISA's 
     uv run moondeck/moonlive/disasm.py --isa riscv moonlive/effects/plasma.mle effect
     uv run moondeck/moonlive/disasm.py --isa all moonlive/layouts/grid.mll layout
 
-Note there is no x86_64 backend to disassemble: the desktop assembler is arm64-only
-(`moonlive_asm_host.cpp`), and on an x86 host a compile fails cleanly and the module renders dark
-(backlogged). The three backends below are therefore every backend that exists.
+`--isa x86_64` reads the desktop backend's other half. It is selected by the HOST's architecture
+rather than by a define, so it only runs ON an x86-64 machine — see emit_isa.cpp for why the trick
+the device ISAs use does not apply to it.
+
+POSIX HOSTS ONLY, every ISA: this shells out to `c++` and `objdump`, and a Windows machine with
+only MSVC has neither. The x86-64 entry is therefore usable from Linux and Intel macOS but not
+from the Windows desktop whose backend it disassembles. Backlogged (backlog-light.md).
 """
 
 import argparse
@@ -48,6 +52,11 @@ ISAS = {
         "define": "MM_EMIT_ARM64",
         "toolchain": None,
         "machine": "aarch64",
+    },
+    "x86_64": {
+        "define": "MM_EMIT_X86_64",
+        "toolchain": None,
+        "machine": "i386:x86-64",
     },
 }
 

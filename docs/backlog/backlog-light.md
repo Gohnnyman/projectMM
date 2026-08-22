@@ -292,20 +292,6 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 
 - **A scripted modifier that reshapes the grid** (2026-08-10). `ModifierBase::modifyLogicalSize` lets a modifier change the logical `width`/`height`/`depth` — a Multiply kaleidoscope grows the grid, a crop shrinks it — and a compiled modifier uses it. A SCRIPTED one cannot: system variables are read-only, so `MoonLiveModifier` writes the box in and never reads it back. Needs a writable system variable — the binding reads the slots after the script returns and reports the result through `modifyLogicalSize` — which is a new `SysVarKind` (or a mutable flag on `SysVar`) plus the read-back, not a new builtin. Until then a scripted modifier can fold coordinates but not resize the grid they live in.
 
-- **MoonLive has no x86-64 backend — scripts do not run on Windows** (2026-08-14). The desktop
-  assembler (`moonlive_asm_host.cpp`) is arm64-only, so `MM_MOONLIVE_HAS_HOST_JIT` is 0 on x86-64
-  Windows, x86-64 Linux and Intel macOS. `compileSource` fails cleanly there and scripted modules
-  render dark — no crash, but no MoonLive either, on the desktop platform most users run. Apple
-  Silicon macOS is the only desktop where scripts work today, which is why this stayed invisible:
-  the bench is arm64 and CI's x86-64 runners gate their MoonLive tests on the macro.
-
-  Closing it is one more backend behind the unchanged IR (the seam's whole promise): an
-  `x86_64` branch alongside the three that exist. It is the widest ISA of the four — variable-length
-  encoding, and a different calling convention per OS (System V on Linux/macOS, Microsoft x64 on
-  Windows), so the `call()` save-set and argument registers differ from everything written so far.
-  `disasm.py --isa x86_64` should land with it, since no test executes emitted bytes for any backend
-  but the host's.
-
 - **The compile-failure latch is not provable on the host** (2026-08-18). `MoonLiveScript::sync`
   refuses to re-attempt a script that failed until its (name, content) changes. The latch exists for
   a device-only reason: each attempt is two LittleFS reads (~5 ms on an S3), a layout is asked from
@@ -351,6 +337,34 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 - **Drain MoonLive's `print()` through a queue** (2026-08-09). `print(v)` writes to serial directly, and an EFFECT script runs on the render tick — so a print inside one blocks the frame for as long as the UART takes. The burst cap bounds it (a handful of writes per compile, then a compare and a return), but bounded is not free, and `tick()` is annotated `MM_NONBLOCKING`.
 
   **What it costs when it comes:** a small preallocated record queue the built-in writes into, drained from a housekeeping path through the existing platform output seam. The budget and the burst-spent message stay as they are; only where the bytes are written moves. Worth doing when a script is left with a print in it on a real fixture, which is the case the cap exists for.
+
+- **MoonDeck scripts crash on Windows when run BY HAND** (2026-08-22). 62 of the ~64 scripts
+  print `→ ✓ ⚠ —` or box-drawing characters. Run from a Windows terminal their stdout takes
+  `locale.getpreferredencoding()` — cp1252 — and the first such character raises
+  UnicodeEncodeError, *after* the real work has succeeded: `collect_kpi.py` measures everything,
+  writes the metrics, then dies printing the summary arrow. Gate runs are already fixed
+  (`_gates.py` hands children `PYTHONIOENCODING=utf-8`), so this bites only the human path —
+  which is the path MoonDeck exists for.
+
+  Per-script `sys.stdout.reconfigure()` is the wrong shape at 62 files: every new script would
+  have to remember, and the one that forgets fails in the field. It wants ONE home — the
+  candidates are a `PYTHONUTF8=1` in whatever env MoonDeck's front ends already establish, or a
+  shared `moondeck/_stdio.py` imported by the handful of scripts that are entry points. Pick
+  when someone next runs a check by hand and it dies on a tick mark.
+
+- **`disasm.py` cannot run on Windows** (2026-08-21). The tool shells out to `c++` and `objdump`
+  to build the per-ISA emitter and disassemble its bytes, and a Windows machine carrying only MSVC
+  has neither. That holds for every ISA, not just the new `x86_64` one — but x86-64 is where it
+  bites, because the host it disassembles is now a Windows desktop and the tool is what turns "the
+  script did nothing" into an answer. The x86-64 backend was brought up without it, using
+  byte-pinning tests plus WinDbg on the emitted image; that worked, and was slower than reading
+  the instructions would have been.
+
+  Closing it is a compiler/disassembler pair behind the two `subprocess.run` calls: `cl.exe` for
+  the build, and for the disassembly either LLVM's `llvm-objdump` (which understands `-b binary`
+  the way the tool already expects, and ships with the VS "C++ Clang tools" component) or a
+  `.obj` wrapper around `dumpbin /disasm`, which does not. Prefer the former — the flags are
+  already right, so it is a lookup rather than a second code path.
 
 (The shared lane-driver scaffolding extraction — when a 3rd parallel backend lands — is tracked separately under [§ Extract shared lane-driver scaffolding](#extract-shared-lane-driver-scaffolding-when-the-3rd-parallel-backend-lands-deferred) above.)
 

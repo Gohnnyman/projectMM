@@ -110,20 +110,38 @@ def measure_comments():
 
 
 def measure_flash():
-    """Built firmware size per variant, in bytes.
+    """Built firmware size per variant, in bytes — STALE BINARIES EXCLUDED.
 
-    Only variants present in build/ are reported. A variant that was not built this run
-    carries its previous number forward (see merge_carry_forward) rather than vanishing:
-    a docs-only commit genuinely did not change any firmware size.
+    Only variants whose binary is newer than the sources are reported. A variant that was
+    not built this run carries its previous number forward (see merge_carry_forward) rather
+    than vanishing: a docs-only commit genuinely did not change any firmware size.
+
+    The freshness rule is what makes the carry-forward honest. Reporting whatever `.bin`
+    happens to sit in a build dir means a months-old artefact is re-measured as if it were
+    this commit's, and the delta printed against the baseline is then pure noise — on a bench
+    holding five old firmwares that produced "−230 KB ✓", "−193 KB ✓", "−279 KB ✓" in one run,
+    for firmwares nobody had rebuilt, because the baseline had been recorded on a different
+    machine. A metric that moves when nothing was built is worse than a missing one: it is
+    read as a result. Same predicate as check_esp32_built.py, imported rather than restated.
     """
+    sys.path.insert(0, str(ROOT / "moondeck" / "check"))
+    from check_esp32_built import newest_source, compiled_sources
+
     flash = {}
     build = ROOT / "build"
     if not build.exists():
         return flash
     for d in sorted(build.glob("esp32-*")):
         binary = d / "projectMM.bin"
-        if binary.exists():
-            flash[d.name.replace("esp32-", "", 1)] = binary.stat().st_size
+        if not binary.exists():
+            continue
+        firmware = d.name.replace("esp32-", "", 1)
+        _, newest = newest_source(compiled_sources(firmware))
+        if newest > binary.stat().st_mtime:
+            continue                       # stale — let the previous number carry forward
+        flash[firmware] = binary.stat().st_size
+    # The desktop binary is rebuilt by the same gate run that calls this, so it is fresh by
+    # construction; no staleness rule needed for it.
     desktop = ROOT / "build" / "projectMM"
     if desktop.exists():
         flash["desktop"] = desktop.stat().st_size
