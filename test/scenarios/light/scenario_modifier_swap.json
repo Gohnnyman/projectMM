@@ -364,7 +364,7 @@
         "desktop-windows": {
           "tick_us": [
             41,
-            65
+            73
           ],
           "free_heap": [
             0,

@@ -36,7 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 # (see merge_carry_forward). Same single source of truth check_firmwares.py reads.
 sys.path.insert(0, str(ROOT / "moondeck" / "build"))
 from build_esp32 import FIRMWARES  # noqa: E402
-from build_desktop import host_build_dir  # noqa: E402 (desktop build dir is per host)
+from build_desktop import desktop_binary  # noqa: E402 (one definition of where it lands)
 HEALTH_FILE = ROOT / "docs" / "metrics" / "repo-health.json"
 # The same snapshot as a table a human reads: units applied, ratios as percentages, areas
 # grouped. The JSON stays the source the delta is computed from; this is the view. Both
@@ -146,19 +146,20 @@ def measure_flash():
         if st.st_mtime <= newest:
             continue
         flash[firmware] = st.st_size
-    # The desktop binary, under the PER-HOST build dir and under the config subdir a multi-config
-    # generator adds (Visual Studio puts it in Release/; Ninja and Makefiles do not). A bare
-    # build/projectMM matched none of them off macOS, so this metric silently carried a foreign
-    # machine's number forward while reading as a measurement: the same defect the firmware
-    # freshness rule above exists to prevent, and worth stating because it survived writing that
-    # rule. Its own staleness is the build gate's business: that gate compiles the desktop target
-    # immediately before this runs, and fails the event if it cannot.
-    for candidate in (ROOT / host_build_dir() / "Release" / "projectMM.exe",
-                      ROOT / host_build_dir() / "projectMM.exe",
-                      ROOT / host_build_dir() / "projectMM"):
-        if candidate.exists():
-            flash["desktop"] = candidate.stat().st_size
-            break
+    # The desktop binary, located by build_desktop.desktop_binary() so this and collect_kpi.py
+    # cannot name different files in the same run. A bare build/projectMM matched nothing off
+    # macOS, so this metric silently carried a foreign machine's number forward while reading as
+    # a measurement: the same defect the firmware freshness rule above exists to prevent.
+    #
+    # Held to the SAME freshness rule as the firmwares rather than trusting the build gate to have
+    # just built it. That gate does, but `collect_kpi.py --commit` is also run standalone, where
+    # nothing builds first, and a rule that holds only inside one caller is not a rule.
+    desktop = desktop_binary()
+    if desktop:
+        st = desktop.stat()
+        _, newest = newest_source()
+        if st.st_mtime > newest:
+            flash["desktop"] = st.st_size
     return flash
 
 

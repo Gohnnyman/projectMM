@@ -42,6 +42,26 @@ def host_build_dir() -> str:
 GCC_CANDIDATES = ("g++-16", "g++-15", "g++-14", "g++-13")
 
 
+def desktop_binary(build_dir=None):
+    """The built desktop executable inside `build_dir` (default: this host's), or None.
+
+    Where it lands depends on the generator, not the platform: a single-config generator (Ninja,
+    Makefiles) writes it at the build root, a multi-config one (Visual Studio, Xcode) puts it under
+    a per-config subdirectory. So all four spellings are real, and NEWEST WINS rather than a fixed
+    priority: a machine that has built with both generators holds two of them, and any fixed order
+    reports whichever the order happened to name instead of what was last built.
+
+    ONE definition, because the copies had already drifted: collect_kpi.py looked for bare, .exe,
+    Release/.exe while repo_health.py looked for Release/.exe, .exe, bare, so a single
+    `collect_kpi --commit` could take `binary_kb` from one file and `flash.desktop` from another.
+    """
+    root = Path(build_dir) if build_dir else ROOT / host_build_dir()
+    found = [p for p in (root / "projectMM", root / "projectMM.exe",
+                         root / "Release" / "projectMM", root / "Release" / "projectMM.exe")
+             if p.exists()]
+    return max(found, key=lambda p: p.stat().st_mtime) if found else None
+
+
 def gcc_pair():
     """(cc, cxx) for a real GCC, or exit with how to get one.
 

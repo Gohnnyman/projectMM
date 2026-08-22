@@ -1,5 +1,5 @@
 {
-  "commit": "53701967",
+  "commit": "96da29d7",
   "flash": {
     "esp32": 1754896,
     "esp32p4rev1-eth": 1643616,
@@ -16,8 +16,8 @@
   },
   "perf": {
     "desktop": {
-      "tick_us": 341,
-      "fps": 2932
+      "tick_us": 318,
+      "fps": 3144
     },
     "esp32": {
       "tick_us": 2151,
@@ -30,7 +30,7 @@
     "platform": 14342,
     "ui": 6859,
     "test": 44819,
-    "moondeck": 21277
+    "moondeck": 21295
   },
   "comments": {
     "core": {
@@ -54,7 +54,7 @@
       "ratio": 0.209
     },
     "moondeck": {
-      "lines": 3472,
+      "lines": 3474,
       "ratio": 0.187
     }
   },
@@ -64,9 +64,9 @@
   },
   "docs": {
     "md_files": 184,
-    "md_lines": 26751,
+    "md_lines": 26723,
     "plans_files": 94,
-    "backlog_lines": 4270,
+    "backlog_lines": 4242,
     "lessons_lines": 549,
     "claude_md_lines": 135
   },

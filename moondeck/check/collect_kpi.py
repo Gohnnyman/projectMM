@@ -58,6 +58,8 @@ BUILD_DIR = ROOT / "build" / _HOST
 MIN_ESP32_FPS_LED_PRODUCT = 10 * 16384  # 163840
 
 sys.path.insert(0, str(ROOT / "moondeck" / "build"))
+from build_desktop import desktop_binary  # noqa: E402 (one definition of where the binary lands)
+
 
 def run(cmd, cwd=None, timeout=30):
     # encoding="utf-8" + errors="replace" — subprocess defaults to the locale
@@ -85,13 +87,10 @@ def collect_desktop():
 
     # Binary names + locations differ per host: macOS/Linux drop the
     # executable under <build>/, MSVC multi-config under <build>/Release/.
-    # Cover both forms so KPI on Windows doesn't silently report nothing.
-    # Same fallback shape test_desktop.py uses.
-    projectMM = _pick_first_existing(
-        BUILD_DIR / "projectMM",
-        BUILD_DIR / "projectMM.exe",
-        BUILD_DIR / "Release" / "projectMM.exe",
-    )
+    # Located by build_desktop.desktop_binary(), which repo_health.py also calls: the two had
+    # separate copies of the candidate list in OPPOSITE order, so one run of this script could
+    # take binary_kb from one file and flash.desktop from another.
+    projectMM = desktop_binary(BUILD_DIR)
     if projectMM:
         kpi["binary_kb"] = projectMM.stat().st_size // 1024
 

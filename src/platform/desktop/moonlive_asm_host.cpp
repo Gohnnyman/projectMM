@@ -993,8 +993,8 @@ void HostAssembler::callLabel(Label l) {
     // call must do the same: without this store, the callee's `mov rdi, [rbp+48]` reads whatever
     // happened to be in that stack slot (an old vreg-save byte, a return-address byte from a
     // previous call), rdi becomes garbage, and the first host(kArg4) dereferences it and faults.
-    // [rsp+32] is safe to write here because the call-save area (the [rsp+32..] region we own
-    // for saving vregs across host builtin calls) is scratch — nothing lives there between calls.
+    // [rsp+kShadowSpace] is the outgoing arg-5 slot prologue reserves for exactly this (see the
+    // frame layout above); call() saves vregs with pushes below rsp and reserves nothing here.
     // SysV passes arg 5 in r8, which IS R4 in the SysV map; the spillLoad above already put it
     // in the right register, so no stack store is needed.
     emitMovMemDispReg(this, x64::RSP, kShadowSpace, xr(R4));

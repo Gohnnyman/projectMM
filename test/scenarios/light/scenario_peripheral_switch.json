@@ -649,7 +649,7 @@
         "desktop-windows": {
           "tick_us": [
             9,
-            13
+            16
           ],
           "free_heap": [
             0,

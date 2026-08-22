@@ -142,7 +142,7 @@ private:
                                          // are variable-length and call emitBytes directly)
 #if (defined(__x86_64__) || defined(_M_X64)) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
     // The four indexed `[base + index]` memory ops share one encoder; see the definition for the
-    // two SDM rules it centralises (the rbp/r13 base case, and the byte store's mandatory REX).
+    // two SDM rules it centralizes (the rbp/r13 base case, and the byte store's mandatory REX).
     // Declared only where it is defined: on arm64 these ops are single fixed-width instructions
     // and this member would be dead weight in the class.
     void emitIndexed(const uint8_t* opcode, size_t opLen, bool prefix66, bool forceRex,

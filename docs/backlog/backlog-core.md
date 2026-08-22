@@ -947,3 +947,21 @@ byte count does not match what was declared. (a) plus (c) is the pair worth doin
 File Manager always sends a length, so this does not affect it — an API caller or a script does.
 
 Pin with a test that a length-less upload does not report success and does not truncate the target.
+
+## repo-health compares numbers from different machines (2026-08-22)
+
+`repo-health.json` records one value per metric with no note of which host produced it, so running the KPI gate on a second machine rewrites the baseline with figures that were never comparable. Measured on the same commit: desktop flash reads 1,060 KB on a Windows/MSVC bench against 1,165 KB recorded on macOS/clang, printed as "−105 KB ✓"; desktop tick reads 368 µs against 179 µs, printed as "+189 µs ⚠". Neither is a change in the code. The firmware rows are now guarded by a freshness rule, which stops a stale binary being re-measured, but freshness cannot detect a different compiler or a different CPU.
+
+The file's own docstring states the property this breaks: "two machines agree and a number never moves for a reason nobody can explain". Two ways out, and it is a design call rather than a bug fix: key the host-dependent metrics by platform (`flash.desktop.windows`, `perf.desktop.macos`) so each machine tracks its own trend, or declare one canonical machine (CI) the only writer and have every other run print the delta without saving it. The second is less data and less honest about a Windows contributor's numbers; the first grows the file, which its "never grows" design resists. Until then, read a cross-host delta as noise.
+
+## MoonDeck scripts crash on Windows when run BY HAND (2026-08-22)
+
+62 of the ~64 scripts print `→ ✓ ⚠ —` or box-drawing characters. Run from a Windows terminal their stdout takes `locale.getpreferredencoding()` — cp1252 — and the first such character raises UnicodeEncodeError, *after* the real work has succeeded: `collect_kpi.py` measures everything, writes the metrics, then dies printing the summary arrow. Gate runs are already fixed (`_gates.py` hands children `PYTHONIOENCODING=utf-8`), so this bites only the human path — which is the path MoonDeck exists for.
+
+Per-script `sys.stdout.reconfigure()` is the wrong shape at 62 files: every new script would have to remember, and the one that forgets fails in the field. It wants ONE home — the candidates are a `PYTHONUTF8=1` in whatever env MoonDeck's front ends already establish, or a shared `moondeck/_stdio.py` imported by the handful of scripts that are entry points. Pick when someone next runs a check by hand and it dies on a tick mark.
+
+## `disasm.py` cannot run on Windows (2026-08-21)
+
+The tool shells out to `c++` and `objdump` to build the per-ISA emitter and disassemble its bytes, and a Windows machine carrying only MSVC has neither. That holds for every ISA, not just the new `x86_64` one — but x86-64 is where it bites, because the host it disassembles is now a Windows desktop and the tool is what turns "the script did nothing" into an answer. The x86-64 backend was brought up without it, using byte-pinning tests plus WinDbg on the emitted image; that worked, and was slower than reading the instructions would have been.
+
+Closing it is a compiler/disassembler pair behind the two `subprocess.run` calls: `cl.exe` for the build, and for the disassembly either LLVM's `llvm-objdump` (which understands `-b binary` the way the tool already expects, and ships with the VS "C++ Clang tools" component) or a `.obj` wrapper around `dumpbin /disasm`, which does not. Prefer the former — the flags are already right, so it is a lookup rather than a second code path.
