@@ -309,7 +309,11 @@ would have held about five particles. Sizing is reachable ONLY from that one mom
 is installed around the `defineControls` run, so `pool()` from `tick()` is a no-op reporting the live
 count and no allocation ever reaches the render path.
 
-Seven builtins, all whole-pool passes: `pool`, `emit`, `gravity`, `drag`, `step`, `age`, `render`.
+Nine builtins, all whole-pool passes: `pool`, `emit`, `gravity`, `drag`, `step`, `age`, `render`,
+`bounce` and `collide`. The last two shipped after measurement: collide is an N-body check (3.2 us
+at 48 particles against 0.1 us without, 53.6 us at 200), so the quadratic is real but the absolute
+cost at ball-pit sizes is not, and the numbers ride the builtin so an author knows what a big pool
+would cost.
 The cost model is the point. `fountain.mle` measures **9 us** on a 128x96 desktop grid against
 `metal.mle`'s **1557 us** on the same grid: the first script vocabulary whose cost scales with the
 OBJECTS rather than with the grid.
@@ -319,8 +323,7 @@ whole-pool or takes plain scalars, so a script never names a particle field. #10
 `ball[i].x` INSTEAD of parallel arrays, which a pool removes the need for; #4b is `Coord3D`/`CRGB`
 for per-pixel shader signatures, whose real prerequisite is #2.
 
-Not exposed, each with a reason: `bounce` (5 args, 3 of them physics jargon; the first to add next),
-`collide` (the only non-linear pass, an O(n^2) foot-gun in a language with no cost model), `spray`
+Not exposed, each with a reason: `spray`
 (`emit` with a wide cone is one), `spawn` (per-particle in a whole-pool API), `force`/`forceSmall`
 (needs the `acc` buffer for wind nothing needs yet), `attract`, `wrap`, `liveCount`, `clear`.
 

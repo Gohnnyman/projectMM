@@ -29,9 +29,6 @@ constexpr uint8_t rmtTxChannels = 4;
 // element because a zero-size array is a GCC/Clang extension MSVC refuses, and this header is
 // compiled by MSVC on the Windows CI job. See the ESP32 config for what this is for.
 struct EthFixedPad { const char* name; uint8_t gpio; };
-// A host has no EMAC and no fixed pads. Count 0 so the publishing loop yields nothing; the array
-// still holds one dummy element because a zero-size array is a GCC/Clang extension MSVC refuses, and
-// this header is compiled by MSVC on the Windows CI job.
 constexpr EthFixedPad ethFixedPads[] = {{"", 0}};
 constexpr uint8_t ethFixedPadCount = 0;
 

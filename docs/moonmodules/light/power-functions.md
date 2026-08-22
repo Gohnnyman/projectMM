@@ -58,7 +58,7 @@ These act on the grid as a surface rather than on a shape. Between them they cov
 | Power function | What it does | Effects | Modifiers |
 |---|---|---|---|
 | `draw::fill` | Fills every light with one color, leaving channels beyond RGB untouched | AudioSpectrum, Blurz, RubiksCube, Solid, Spectrum, Text | — |
-| `draw::fade` | Fades every channel toward black — the trail primitive | **13, through `Layer::fadeToBlackBy`** — Blurz, BouncingBalls, FixedRectangle, FreqSaws, GEQ, GEQ3D, Lissajous, NoiseMeter, PaintBrush, Random, SphereMove, StarField, StarSky | — |
+| `draw::fade` | Fades every channel toward black — the trail primitive | **13, through `Layer::fadeToBlackBy`** — Blurz, BouncingBalls, Fireworks, FixedRectangle, FreqSaws, GEQ, GEQ3D, Lissajous, NoiseMeter, PaintBrush, Random, StarField, StarSky | — |
 | `draw::blur` | Separable box blur across every axis with extent > 1; one call covers 1D, 2D and 3D | Blurz | — |
 | `draw::get` | Reads one pixel back, black outside the grid | Echo, GameOfLife | — |
 | `draw::blendPixel` | Lerps a pixel toward a color by an amount, rather than replacing it | GameOfLife, Tetrix | — |

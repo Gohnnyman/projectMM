@@ -547,3 +547,30 @@ evidence which *looks* most authoritative here is the evidence that lies.
   hypotheses. hpwit's `new-parser` hits the identical wall and leaves it unhandled, which is
   confirmation the question is real rather than self-inflicted. **Assemble the case before
   theorising about it.**
+
+## Lessons from the particles branch
+
+- **A stateful effect is a jitter meter; a stateless one hides the same fault.** A shader recomputes
+  every pixel from `t`, so a late frame is simply skipped and the next one is correct. A particle's
+  position is the previous position plus velocity, and `FrameTime` deliberately spends a whole stall
+  at once to keep the trajectory true in real time, so one frame after an 80 ms gap moves every
+  particle **6.7x its usual distance** (measured). The first particle effect on the branch therefore
+  exposed a 1 Hz `esp_littlefs_info` scan running inline on the render thread that had been there all
+  along and that no shader had ever revealed. **When motion starts stuttering after a change that
+  should not have touched timing, suspect a pre-existing periodic cost, and measure the frame deltas
+  before theorising.** The reverse also holds: a smooth shader is not evidence that the render loop
+  is clean.
+
+- **Standardising a duplicated sentence requires deciding which version is TRUE first.** Three front
+  pages had drifted into four orderings of the same six platforms, so a check was written to hold
+  them to one wording. The wording picked was the most formal-looking existing one, which happened
+  to demote five of the six targets to secondary and was simply wrong. Enforcing it would have
+  spread a false claim to every file the check covered. **A consistency check is only as good as the
+  value it pins; establish the fact, then enforce it.**
+
+- **A test that passes with the bug reintroduced is worse than no test.** Three separate tests on
+  this branch (the fade idle-gap, the collide spread, the filesystem throttle) were each written,
+  seen green, and then found to pass with their own defect deliberately restored. Two were deleted
+  and one was rewritten. The habit that catches it is cheap: **sabotage the fix and confirm the test
+  goes red before believing it.** Two of those three had also been failing for a reason unrelated to
+  what they claimed to assert, which the control check surfaced immediately.
