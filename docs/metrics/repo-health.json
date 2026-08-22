@@ -1,5 +1,5 @@
 {
-  "commit": "caa93ebd",
+  "commit": "85a37c9e",
   "flash": {
     "esp32": 1764416,
     "esp32p4rev1-eth": 1653696,
@@ -16,8 +16,8 @@
   },
   "perf": {
     "desktop": {
-      "tick_us": 377,
-      "fps": 2652
+      "tick_us": 365,
+      "fps": 2739
     },
     "esp32": {
       "tick_us": 2151,
@@ -27,7 +27,7 @@
   "loc": {
     "core": 19591,
     "light": 25690,
-    "platform": 14718,
+    "platform": 14728,
     "ui": 6859,
     "test": 45601,
     "moondeck": 21359
@@ -42,7 +42,7 @@
       "ratio": 0.436
     },
     "platform": {
-      "lines": 5245,
+      "lines": 5253,
       "ratio": 0.392
     },
     "ui": {

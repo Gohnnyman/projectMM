@@ -244,7 +244,7 @@
         "desktop-windows": {
           "tick_us": [
             8,
-            11
+            13
           ],
           "free_heap": [
             0,

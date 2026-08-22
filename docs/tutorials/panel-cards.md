@@ -103,7 +103,7 @@ The driver's status line tells you what the wire is doing, and the three states 
 
 | Status | Meaning |
 |---|---|
-| `1000 Mbit - 5280 packets/s` | Working. The rate is rows × fps, so it scales with wall height. |
+| `1000 Mbit - 5280 packets/s` | Working. The rate is (rows + 4) × fps: one packet per row, plus two brightness and two sync packets per frame. A row wider than 497 pixels splits into several packets, so a wide wall sends more than one per row. |
 | `100 Mbit - …` (warning) | Sending, but see §2: fine for a small wall, tearing on a large one. |
 | `no ethernet link` | Cable, card power, or the wrong port on the card. |
 
@@ -171,13 +171,13 @@ Set up the **Panels** layout and the **Panel Card** driver exactly as in §3.4 a
 | Image tears or rolls | Link speed (§2). Check the status line says 1000 Mbit. |
 | Every other row or column mirrored | `snake` for within-panel, `snakeP` for panel order. |
 | Panels in the wrong places | `wiringOrderP`, `X++P`, `Y++P`: the panel-grid ordering. |
-| Right image, wrong colours | Panel colour order, set on the driver's colour-order control like any other driver. |
+| Right image, wrong colours | `lightPreset` on the driver, which is where channel order and RGBW synthesis live for every driver. There is no separate colour-order control here. |
 | Works on ESP32, not on desktop | Permission (§4). The driver will be showing a warning that says so. |
 
 ---
 
 ## Where to go next
 
-- **[Drivers](../moonmodules/light/drivers.md#panel-card--raw-ethernet)**: the Panel Card control reference.
+- **[Drivers](../moonmodules/light/drivers.md#panelcard)**: the Panel Card control reference.
 - **[Layouts](../moonmodules/light/layouts.md#panels)**: the Panels layout in full.
 - **[Effects](../moonmodules/light/effects.md)** and **[live scripting](../moonmodules/light/MoonLiveEffect.md)**: a wall is a big canvas, and scripted effects are the fastest way to fill it.

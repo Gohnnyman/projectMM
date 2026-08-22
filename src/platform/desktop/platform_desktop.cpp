@@ -930,11 +930,16 @@ bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
         PcapPktHdr hdr = {};
         hdr.caplen = static_cast<unsigned>(len);
         hdr.len    = static_cast<unsigned>(len);
-        if (pcapQQueue_(pcapQueue_, &hdr, frame) == 0) { ethSendFails_ = 0; return true; }
+        // NOTE the streak is not cleared here: queuing a packet into a buffer says nothing about
+        // whether it reached the wire. Only ethFlushRaw, where pcap_sendqueue_transmit reports how
+        // many bytes actually went out, is in a position to say the link is working. Clearing it on
+        // enqueue would keep ethSendFailStreak() at zero forever, and that streak is what the driver
+        // watches to detect a wedged link and call ethRestartTx.
+        if (pcapQQueue_(pcapQueue_, &hdr, frame) == 0) return true;
         // Queue full: flush what we have and retry once, so an unexpectedly large wall degrades to
         // two batches rather than dropping the rest of the frame.
         ethFlushRaw();
-        if (pcapQQueue_(pcapQueue_, &hdr, frame) == 0) { ethSendFails_ = 0; return true; }
+        if (pcapQQueue_(pcapQueue_, &hdr, frame) == 0) return true;
         ethSendFails_++; ethFailTotal_++;
         return false;
     }
@@ -1016,8 +1021,13 @@ void ethFlushRaw() MM_NONBLOCKING {
     if (!pcapHandle_ || !pcapQueue_ || !pcapQTransmit_ || pcapQueue_->len == 0) return;
     // sync=0: transmit at wire speed rather than replaying the queued timestamps. The card wants
     // the whole burst inside its inter-frame window, which is the opposite of paced playback.
+    const unsigned queued = pcapQueue_->len;
     const unsigned sent = pcapQTransmit_(pcapHandle_, pcapQueue_, 0);
-    if (sent < pcapQueue_->len) { ethSendFails_++; ethFailTotal_++; }
+    // The one place that knows the burst actually left, so it owns BOTH ends of the streak: a short
+    // write is the failure ethSendFailStreak counts, and a complete one is the only honest reason to
+    // clear it.
+    if (sent < queued) { ethSendFails_++; ethFailTotal_++; }
+    else               { ethSendFails_ = 0; }
     // Reset for the next frame: the queue is a buffer, and transmit does not rewind it.
     pcapQueue_->len = 0;
 #endif
