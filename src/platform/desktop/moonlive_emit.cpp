@@ -92,9 +92,8 @@ size_t emitAnimatedFill(uint8_t* out, size_t cap) {
 // R/G/B are the immediate byte of each `movb` at offsets 0x11/0x17/0x1d.
 // `mov esi, esi` FIRST: SysV, like Win64, leaves the upper 32 bits of a register holding a
 // uint32_t argument UNDEFINED, and the loop bound below is the 64-bit `cmp r8, rsi` — dirty
-// upper bits would run the loop past nLights and write past the end of the buffer (the exact
-// heap corruption the debug CRT caught on the Win64 twin of this blob). A 32-bit register
-// write zero-extends, so this one instruction pins the bound.
+// upper bits run the loop far past nLights and write past the end of the caller's buffer. A
+// 32-bit register write zero-extends, so this one instruction pins the bound.
 static const uint8_t kX64[] = {
     0x89, 0xf6,                         // mov   esi, esi         (zero-extend nLights)
     0x85, 0xf6,                         // test  esi, esi
@@ -160,10 +159,9 @@ size_t emitAnimatedFill(uint8_t* out, size_t cap) {
 //
 // `mov edx, edx` FIRST: Win64 leaves the upper 32 bits of a register holding a uint32_t arg
 // UNDEFINED, and the loop bound below is the 64-bit `cmp r10, rdx` — with dirty upper bits the
-// loop runs far past nLights and writes past the end of the heap buffer. That was found as
-// "HEAP CORRUPTION DETECTED ... wrote to memory after end of heap buffer" by the debug CRT,
-// appearing only in full-suite runs because whether rdx arrives dirty depends on what code ran
-// before the call. A 32-bit register write zero-extends, so this one instruction pins the bound.
+// loop runs far past nLights and writes past the end of the caller's buffer. Whether rdx arrives
+// dirty depends on what ran before the call, so the corruption is intermittent and lands in
+// whatever allocation follows. A 32-bit register write zero-extends, pinning the bound.
 static const uint8_t kWin64[] = {
     0x89, 0xd2,                         // mov   edx, edx        (zero-extend nLights — see above)
     0x85, 0xd2,                         // test  edx, edx        (nLights == 0?)

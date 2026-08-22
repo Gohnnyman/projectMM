@@ -36,6 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 # (see merge_carry_forward). Same single source of truth check_firmwares.py reads.
 sys.path.insert(0, str(ROOT / "moondeck" / "build"))
 from build_esp32 import FIRMWARES  # noqa: E402
+from build_desktop import host_build_dir  # noqa: E402 (desktop build dir is per host)
 HEALTH_FILE = ROOT / "docs" / "metrics" / "repo-health.json"
 # The same snapshot as a table a human reads: units applied, ratios as percentages, areas
 # grouped. The JSON stays the source the delta is computed from; this is the view. Both
@@ -117,8 +118,8 @@ def measure_flash():
     than vanishing: a docs-only commit genuinely did not change any firmware size.
 
     The freshness rule is what makes the carry-forward honest. Reporting whatever `.bin`
-    happens to sit in a build dir means a months-old artefact is re-measured as if it were
-    this commit's, and the delta printed against the baseline is then pure noise — on a bench
+    happens to sit in a build dir means a months-old artifact is re-measured as if it were
+    this commit's, and the delta printed against the baseline is then pure noise. On a bench
     holding five old firmwares that produced "−230 KB ✓", "−193 KB ✓", "−279 KB ✓" in one run,
     for firmwares nobody had rebuilt, because the baseline had been recorded on a different
     machine. A metric that moves when nothing was built is worse than a missing one: it is
@@ -140,11 +141,19 @@ def measure_flash():
         if newest > binary.stat().st_mtime:
             continue                       # stale — let the previous number carry forward
         flash[firmware] = binary.stat().st_size
-    # The desktop binary is rebuilt by the same gate run that calls this, so it is fresh by
-    # construction; no staleness rule needed for it.
-    desktop = ROOT / "build" / "projectMM"
-    if desktop.exists():
-        flash["desktop"] = desktop.stat().st_size
+    # The desktop binary, under the PER-HOST build dir and under the config subdir a multi-config
+    # generator adds (Visual Studio puts it in Release/; Ninja and Makefiles do not). A bare
+    # build/projectMM matched none of them off macOS, so this metric silently carried a foreign
+    # machine's number forward while reading as a measurement: the same defect the firmware
+    # freshness rule above exists to prevent, and worth stating because it survived writing that
+    # rule. Its own staleness is the build gate's business: that gate compiles the desktop target
+    # immediately before this runs, and fails the event if it cannot.
+    for candidate in (ROOT / host_build_dir() / "Release" / "projectMM.exe",
+                      ROOT / host_build_dir() / "projectMM.exe",
+                      ROOT / host_build_dir() / "projectMM"):
+        if candidate.exists():
+            flash["desktop"] = candidate.stat().st_size
+            break
     return flash
 
 

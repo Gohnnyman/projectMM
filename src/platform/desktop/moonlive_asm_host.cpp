@@ -348,11 +348,11 @@ enum : uint8_t {
 // is loaded into rdi (R4 = kArg4) once in prologue. Nonvolatiles rbx, rdi, rsi, r12-r15 are
 // saved by prologue. rsp and rbp are reserved (rbp = frame pointer).
 static constexpr uint8_t kX64Reg[kRegCount] = {
-    x64::RCX, x64::RDX, x64::R8,  x64::R9,  x64::RDI,             // R0..R4 = kArg0..kArg4
-    x64::R10, x64::R11,                            // R5..R6 = volatile scratch
-    x64::RBX, x64::R12, x64::R13, x64::R14, x64::R15,             // R7..x64::R11 = nonvolatile
-    x64::RSI,                                 // x64::R12 = nonvolatile
-    x64::RAX,                                 // x64::R13 = volatile — clobbered by every call's return
+    x64::RCX, x64::RDX, x64::R8,  x64::R9,  x64::RDI,   // R0..R4  = kArg0..kArg4
+    x64::R10, x64::R11,                                 // R5..R6  = volatile scratch
+    x64::RBX, x64::R12, x64::R13, x64::R14, x64::R15,   // R7..R11 = nonvolatile
+    x64::RSI,                                           // R12     = nonvolatile
+    x64::RAX,                                           // R13     = volatile, holds every return
 };
 static constexpr uint8_t  kNonvolSaveBytes = 56;   // rbx+rdi+rsi+r12..r15 (7×8)
 static constexpr int32_t  kArg5Offset      = 48;   // ret-addr 8 + saved-rbp 8 + shadow 32
@@ -361,10 +361,10 @@ static constexpr uint16_t kShadowSpace     = 32;   // Win64 shadow for OUR calle
 // System V (Linux, Intel macOS). Args in rdi/rsi/rdx/rcx/r8/r9 — all five kArg registers arrive
 // in registers. Nonvolatiles rbx, r12-r15 (5) are saved by prologue.
 static constexpr uint8_t kX64Reg[kRegCount] = {
-    x64::RDI, x64::RSI, x64::RDX, x64::RCX, x64::R8,              // R0..R4 = kArg0..kArg4 (all register-passed on SysV)
-    x64::R9,  x64::R10, x64::R11,                       // R5..R7 = volatile scratch
-    x64::RBX, x64::R12, x64::R13, x64::R14, x64::R15,             // x64::R8..x64::R12 = nonvolatile
-    x64::RAX,                                 // x64::R13 = volatile
+    x64::RDI, x64::RSI, x64::RDX, x64::RCX, x64::R8,    // R0..R4  = kArg0..kArg4 (all in registers)
+    x64::R9,  x64::R10, x64::R11,                       // R5..R7  = volatile scratch
+    x64::RBX, x64::R12, x64::R13, x64::R14, x64::R15,   // R8..R12 = nonvolatile
+    x64::RAX,                                           // R13     = volatile, holds every return
 };
 static constexpr uint8_t  kNonvolSaveBytes = 40;   // rbx+r12..r15 (5×8)
 static constexpr uint16_t kShadowSpace     = 0;    // SysV has no shadow-space obligation
@@ -400,10 +400,10 @@ void HostAssembler::addFixup(size_t at, Label label, FixKind kind) {
 // Emit N bytes little-endian into the code buffer via the existing emitBytes path (which owns
 // bounds checking + the overflow_ flag). x86 opcodes are 1-15 bytes long; a stack buffer of 16
 // is enough for any single instruction the backend emits here.
-void HostAssembler::emit32(uint32_t w) {
-    const uint8_t b[4] = {uint8_t(w), uint8_t(w >> 8), uint8_t(w >> 16), uint8_t(w >> 24)};
-    emitBytes(b, 4);
-}
+// No emit32 here: x86-64 instructions are 1-15 bytes, so every encoder below marshals into a
+// local buffer and calls emitBytes. The header still declares emit32 for the arm64 branch, where
+// a fixed 4-byte word is the natural unit; leaving it undefined on this ISA is what says it has
+// no meaning here, and nothing links against it.
 void HostAssembler::emitBytes(const uint8_t* p, size_t n) {
     if (!buf_ || len_ + n > kCap) { overflow_ = true; return; }
     std::memcpy(buf_ + len_, p, n); len_ += n;
@@ -511,23 +511,24 @@ static void emitSubRspImm32(HostAssembler* A, int32_t imm) {
 // --- the call frame -----------------------------------------------------------------------------
 //
 // Frame layout, address ORDER (low → high):
-//   [rsp+0]  ..  [rsp+kShadowSpace-1]        shadow space for OUR callees (Win64 only; SysV = 0)
-//   [rsp+kShadowSpace]                       start of vreg save area (used by call())
-//   [rsp+kShadowSpace + 8*kRegCount]         return-value stash (used by call())
-//   [rsp+kShadowSpace + 8*kRegCount + 8]     start of alignment padding + slot storage
-//   ... slots (grow toward higher offset from rsp, toward rbp) ...
-//   [rbp - kNonvolSaveBytes - 8*slots]       slot (slots-1)
-//   [rbp - kNonvolSaveBytes - 8]             slot 0
-//   [rbp - kNonvolSaveBytes]                 first saved nonvolatile (pushed)
-//   [rbp - 8]                                last saved nonvolatile (pushed)
-//   [rbp]                                    saved rbp (from `push rbp`)
-//   [rbp + 8]                                return address
-//   [rbp + 16..rbp+kArg5Offset-1]            (Win64) caller shadow space
-//   [rbp + kArg5Offset]                      (Win64) caller's arg 5 = kArg4 pointer
+//   [rsp+0] .. [rsp+kShadowSpace-1]              shadow space our callees are owed (Win64; SysV 0)
+//   [rsp+kShadowSpace]                           callLabel's outgoing arg 5 (Win64)
+//   ... alignment padding ...
+//   [rbp - kNonvolSaveBytes - 8*kTotalSlots]     slot 0            (deepest)
+//   [rbp - kNonvolSaveBytes - 8]                 slot kTotalSlots-1
+//   [rbp - kNonvolSaveBytes]                     first saved nonvolatile (pushed)
+//   [rbp - 8]                                    last saved nonvolatile (pushed)
+//   [rbp]                                        saved rbp (from `push rbp`)
+//   [rbp + 8]                                    return address
+//   [rbp + 16 .. rbp+kArg5Offset-1]              (Win64) caller's shadow space
+//   [rbp + kArg5Offset]                          (Win64) caller's arg 5 = the ctrls pointer
 //
-// Slot n is addressed as [rbp - kNonvolSaveBytes - 8 - 8*n]. Using rbp (not rsp) means every
-// slot address stays valid while call() moves rsp for shadow-space adjustments — the same
-// rbp-based-slots decision the arm64 backend makes with x29.
+// Slots ASCEND with the index (slotOffsetFromRbp), because IrOp::Call hands a builtin the address
+// of its first argument slot and the callee reads upward from there. Addressed from rbp rather
+// than rsp so they survive call() moving rsp, the same decision arm64 makes with x29.
+//
+// call() saves the vreg pool BELOW this frame with pushes; nothing in the frame is reserved for
+// it beyond the shadow space above.
 
 // call() saves the vreg pool with PUSHES (1-2 bytes each), not rsp-relative movs (8 bytes each)
 // — the pool is 14 registers and a script calls builtins per-pixel-loop, so the encoding size of
@@ -537,13 +538,14 @@ static void emitSubRspImm32(HostAssembler* A, int32_t imm) {
 // second frame formula). Spill slots are rbp-relative, so the rsp movement inside call() cannot
 // disturb them.
 // Slot n's offset from rbp (negative — the slots live BELOW the saved nonvols). ASCENDING with
-// the slot index, exactly like arm64's x29 + 16 + n*8: the IR's Call passes slotAddr(firstSlot)
-// and the host builtin reads its arguments as an ARRAY walking upward from that address
-// (moonlive_lower.h, IrOp::Call), so consecutive slot indices MUST be consecutive ascending
-// memory. The first cut of this backend grew slots downward, which handed every non-inlined
-// builtin (random16, addLight, addUint8, line, palette reads) its arguments in reverse. The
-// region is sized at kMaxSpillSlots regardless of how many slots the script uses — a fixed
-// 168 bytes of desktop stack against a formula that would need the count at every call site.
+// the slot index, exactly like arm64's x29 + 16 + n*8: IrOp::Call passes slotAddr(firstSlot) and
+// the host builtin reads its arguments as an ARRAY walking upward from that address
+// (moonlive_lower.h), so consecutive slot indices MUST be consecutive ascending memory. Reverse
+// this and every non-inlined builtin (random16, addLight, addUint8, line, palette reads)
+// receives its arguments backwards, while everything inlined keeps working.
+//
+// The region is sized at kTotalSlots whatever the script uses: a fixed 168 bytes of desktop stack
+// against a formula that would need the slot count at every call site.
 static inline int32_t slotOffsetFromRbp(uint8_t slot) {
     return -int32_t(kNonvolSaveBytes) - 8 * int32_t(kTotalSlots - slot);
 }
@@ -588,28 +590,32 @@ void HostAssembler::prologue(uint8_t slots) {
     emitSubRspImm32(this, int32_t(needed));
 
 #if defined(_WIN32)
-    // Load kArg4 (arg 5 = the ctrls arena pointer) from caller's stack into R4 (= rdi).
+    // Load kArg4 (arg 5 = the ctrls arena pointer) from the caller's stack into R4 (= rdi).
     // arg 5 lives at [rbp + kArg5Offset]. Under Win64 it's on the caller's stack because only
     // the first four args ride registers; SysV skips this because r8 IS the arg-5 register and
     // is already in place as R4.
     emitMovRegMemDisp(this, x64::RDI, x64::RBP, kArg5Offset);
-    // Zero-extend the narrow ABI args. CtrlFn's signature is
+#endif
+
+    // Zero-extend the narrow arguments. REQUIRED ON BOTH ABIs, which is why it is not inside
+    // the switch above. CtrlFn is
     //   void (uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t, const uint8_t* ctrls)
-    // and the Win64 ABI leaves the UPPER bits of a register holding a smaller argument UNDEFINED:
-    // caller sets only rcx's full 64 bits (it's a pointer), and edx / r8b / r9d for the narrower
-    // args — the top 32/56/32 bits are garbage. The IR then spills each host arg to a slot as a
-    // full 64-bit store, and the loop math (imul index * cpl) multiplies against a 64-bit view of
-    // that slot. Without this widening, cpl comes back as ~0x7fffffff_ffffff03 and the pixel write
-    // computes a kernel-space address (found in the debugger: r13 = 0x7fffffffffffff03 at the AV).
-    // Arm64's ABI zero/sign-extends narrow args automatically, so it never hit this. SysV has the
-    // same "upper bits undefined" rule as Win64 — the same widening will apply when the SysV path
-    // is exercised.
-    // rdx (nLights, uint32_t): `mov edx, edx` — 32-bit dest write implicitly zeroes upper 32 bits.
-    { uint8_t b[2] = {0x89, 0xD2}; emitBytes(b, 2); }
-    // r8 (cpl, uint8_t): `movzx r8, r8b` — REX.W + 0F B6 /r zero-extends byte to 64-bit.
-    { uint8_t b[4] = {0x4D, 0x0F, 0xB6, 0xC0}; emitBytes(b, 4); }
-    // r9 (t, uint32_t): `mov r9d, r9d` — same 32-to-64 zero-extension pattern.
-    { uint8_t b[3] = {0x45, 0x89, 0xC9}; emitBytes(b, 3); }
+    // and x86-64 leaves the UPPER bits of a register holding a narrower argument UNDEFINED: a
+    // caller sets edx / r8b / r9d (Win64) or esi / dl / ecx (SysV) and may leave anything above.
+    // The IR then spills each host argument to a frame slot as a full 64-bit store, and the loop
+    // math multiplies a 64-bit view of that slot, so a dirty `cpl` reaches the pixel write as
+    // ~0x7fffffff_ffffff03 and the address lands outside the buffer. arm64's ABI extends narrow
+    // arguments for us, which is why only this backend needs it.
+    //
+    // The pointers (buf, ctrls) are full-width by definition and need nothing.
+#if defined(_WIN32)
+    { uint8_t b[2] = {0x89, 0xD2};             emitBytes(b, 2); }  // mov   edx, edx   (nLights)
+    { uint8_t b[4] = {0x4D, 0x0F, 0xB6, 0xC0}; emitBytes(b, 4); }  // movzx r8,  r8b   (cpl)
+    { uint8_t b[3] = {0x45, 0x89, 0xC9};       emitBytes(b, 3); }  // mov   r9d, r9d   (t)
+#else
+    { uint8_t b[2] = {0x89, 0xF6};             emitBytes(b, 2); }  // mov   esi, esi   (nLights)
+    { uint8_t b[4] = {0x48, 0x0F, 0xB6, 0xD2}; emitBytes(b, 4); }  // movzx rdx, dl    (cpl)
+    { uint8_t b[2] = {0x89, 0xC9};             emitBytes(b, 2); }  // mov   ecx, ecx   (t)
 #endif
 }
 
@@ -755,25 +761,39 @@ void HostAssembler::mulReg(Reg d, Reg a, Reg b) {
 
 // --- memory ops ---------------------------------------------------------------------------------
 
-// mov byte ptr [base + off], val_l  (88 /r with SIB) — indexed 1-byte store.
-// The register-offset form: SIB has scale=0, index=off, base=base — an unscaled byte offset.
+// The shared body of the four INDEXED memory ops: `[base + index]`, unscaled, which is how this
+// backend addresses a pixel (the lowering multiplies an element index by the element width before
+// it gets here, so the index is always a byte offset).
+//
+// Two encoding rules live here once instead of four times:
+//
+// - A base whose low three bits are 101 (rbp, r13) cannot use mod=00: the SDM gives that slot to
+//   "disp32, no base", so the emitted instruction would address an absolute constant instead of
+//   the register. mod=01 with an explicit zero disp8 means the same thing and encodes correctly.
+//   Unreachable today (the lowering only ever bases these on kArg0/kArg4), but the cost is one
+//   comparison, and the previous version of this code carried a comment claiming it was guarded
+//   when it was not, which is the kind of note that stops the next reader from checking.
+// - REX is emitted UNCONDITIONALLY for the byte store. Without it, an 8-bit operand naming
+//   register 4-7 means ah/ch/dh/bh, not sil/dil/bpl/spl, and this backend's vreg maps do put
+//   values in rsi/rdi/rbx, so the wrong half-register would be stored with no diagnostic.
+void HostAssembler::emitIndexed(const uint8_t* opcode, size_t opLen, bool prefix66,
+                                bool forceRex, uint8_t reg, uint8_t base, uint8_t index) {
+    const bool baseNeedsDisp = ((base & 7) == 0b101);    // rbp / r13
+    uint8_t b[8]; size_t n = 0;
+    if (prefix66) b[n++] = 0x66;                         // operand-size override → 16-bit
+    if (forceRex || reg >= 8 || index >= 8 || base >= 8)
+        b[n++] = rex_(false, reg >= 8, index >= 8, base >= 8);
+    for (size_t i = 0; i < opLen; i++) b[n++] = opcode[i];
+    b[n++] = modrm_(baseNeedsDisp ? 0b01 : 0b00, reg & 7, 0b100);   // r/m=100 → SIB follows
+    b[n++] = sib_(0, index & 7, base & 7);                          // scale=0: unscaled index
+    if (baseNeedsDisp) b[n++] = 0x00;                               // the explicit zero disp8
+    emitBytes(b, n);
+}
+
+// mov byte ptr [base + off], val_l  (88 /r with SIB): indexed 1-byte store, the pixel write.
 void HostAssembler::store8(Reg base, Reg off, Reg val) {
-    const uint8_t b_reg = xr(base), o_reg = xr(off), v_reg = xr(val);
-    // Encoding: [REX.R for val, REX.X for off, REX.B for base] 88 /r SIB
-    // val_l requires REX to access r8-r15's low byte OR to access sil/dil/bpl/spl (regs 4-7) as
-    // byte. Since our vreg map may put val into rsi/rdi/rbx (regs 3/6/7), we emit REX always to
-    // force the "new" 8-bit registers.
-    uint8_t bytes[4];
-    bytes[0] = rex_(false, v_reg >= 8, o_reg >= 8, b_reg >= 8);
-    bytes[1] = 0x88;
-    bytes[2] = modrm_(0b00, v_reg & 7, 0b100);           // r/m=SIB (0b100)
-    bytes[3] = sib_(0, o_reg & 7, b_reg & 7);
-    emitBytes(bytes, 4);
-    // Special: if base's low 3 bits == 0b101 (rbp/r13), mod=00 means "disp32 no base" — we would
-    // need mod=01 disp8=0 instead. This backend maps R7=rbx (3) and never R13=rax to base of a
-    // pixel store, but rax=0 which is fine. r13 would be a problem — guarded here defensively.
-    // (The IR uses buf/base for pixel writes, which lands in kArg0 = rcx on Win64 / rdi on SysV;
-    // neither is rbp/r13, so this path is not hit in practice.)
+    const uint8_t op = 0x88;
+    emitIndexed(&op, 1, /*prefix66=*/false, /*forceRex=*/true, xr(val), xr(base), xr(off));
 }
 // mov r64_low16, [base + off]  — index-in-reg. Used for control byte reads.
 // x86 zero-extends 8-bit loads to 32 bits automatically (movzx). The 64-bit destination is
@@ -795,15 +815,8 @@ void HostAssembler::load8(Reg d, Reg base, int32_t imm) {
 // mov word ptr [base + off], val_l16  (66 89 /r SIB) — indexed 2-byte store.
 // The 66 prefix switches operand size to 16 bits for a 32-bit-mode instruction.
 void HostAssembler::store16(Reg base, Reg off, Reg val) {
-    const uint8_t b_reg = xr(base), o_reg = xr(off), v_reg = xr(val);
-    uint8_t bytes[5]; size_t n = 0;
-    bytes[n++] = 0x66;                                   // operand-size override → 16-bit
-    if (v_reg >= 8 || o_reg >= 8 || b_reg >= 8)
-        bytes[n++] = rex_(false, v_reg >= 8, o_reg >= 8, b_reg >= 8);
-    bytes[n++] = 0x89;
-    bytes[n++] = modrm_(0b00, v_reg & 7, 0b100);
-    bytes[n++] = sib_(0, o_reg & 7, b_reg & 7);
-    emitBytes(bytes, n);
+    const uint8_t op = 0x89;
+    emitIndexed(&op, 1, /*prefix66=*/true, /*forceRex=*/false, xr(val), xr(base), xr(off));
 }
 // movzx r32, word ptr [base + disp32]  (0F B7 /r) — 16-bit zero-extending load. Immediate offset.
 void HostAssembler::load16(Reg d, Reg base, int32_t imm) {
@@ -820,25 +833,13 @@ void HostAssembler::load16(Reg d, Reg base, int32_t imm) {
 }
 // movzx r32, byte ptr [base + off]  (0F B6 /r SIB) — indexed 8-bit zero-extending load.
 void HostAssembler::load8Idx(Reg d, Reg base, Reg off) {
-    const uint8_t dst = xr(d), b_reg = xr(base), o_reg = xr(off);
-    uint8_t bytes[5]; size_t n = 0;
-    if (dst >= 8 || o_reg >= 8 || b_reg >= 8)
-        bytes[n++] = rex_(false, dst >= 8, o_reg >= 8, b_reg >= 8);
-    bytes[n++] = 0x0F; bytes[n++] = 0xB6;
-    bytes[n++] = modrm_(0b00, dst & 7, 0b100);
-    bytes[n++] = sib_(0, o_reg & 7, b_reg & 7);
-    emitBytes(bytes, n);
+    const uint8_t op[2] = {0x0F, 0xB6};
+    emitIndexed(op, 2, /*prefix66=*/false, /*forceRex=*/false, xr(d), xr(base), xr(off));
 }
 // movzx r32, word ptr [base + off]  (0F B7 /r SIB) — indexed 16-bit zero-extending load.
 void HostAssembler::load16Idx(Reg d, Reg base, Reg off) {
-    const uint8_t dst = xr(d), b_reg = xr(base), o_reg = xr(off);
-    uint8_t bytes[5]; size_t n = 0;
-    if (dst >= 8 || o_reg >= 8 || b_reg >= 8)
-        bytes[n++] = rex_(false, dst >= 8, o_reg >= 8, b_reg >= 8);
-    bytes[n++] = 0x0F; bytes[n++] = 0xB7;
-    bytes[n++] = modrm_(0b00, dst & 7, 0b100);
-    bytes[n++] = sib_(0, o_reg & 7, b_reg & 7);
-    emitBytes(bytes, n);
+    const uint8_t op[2] = {0x0F, 0xB7};
+    emitIndexed(op, 2, /*prefix66=*/false, /*forceRex=*/false, xr(d), xr(base), xr(off));
 }
 
 // --- compare and branch -------------------------------------------------------------------------
@@ -904,10 +905,12 @@ void HostAssembler::ret() {
 // (the live-vreg-across-call contract), load the arguments from their pushed copies (memory
 // sources, so an argument register overlapping a source is harmless — the "one is x0" problem
 // arm64 solves with x15/x16/x17 scratch), call through rax, write the zero-extended return over
-// dst's pushed slot, pop everything back. Pushes are 1-2 bytes against 8 for an rsp-relative
-// mov, and call() dominates a call-dense script's emitted size — the first cut of this function
-// used mov-saves and a single random16() came to ~270 bytes, overflowing buffers the arm64
-// backend fits comfortably; this shape is ~100.
+// dst's pushed slot, pop everything back.
+//
+// Pushes rather than rsp-relative movs because call() dominates a call-dense script's emitted
+// size: 1-2 bytes against 8, which is ~100 bytes per call instead of ~270. That is the difference
+// between fitting the buffers arm64 fits and overflowing them. The density canary in
+// unit_moonlive_codegen_x86_64.cpp is what holds that.
 //
 // Alignment: prologue leaves rsp 16-aligned; kRegCount (14) pushes move it by 112 ≡ 0 (mod 16),
 // so it is still 16-aligned at the call — with the Win64 shadow sub folded in around it.
@@ -994,7 +997,7 @@ void HostAssembler::callLabel(Label l) {
     // for saving vregs across host builtin calls) is scratch — nothing lives there between calls.
     // SysV passes arg 5 in r8, which IS R4 in the SysV map; the spillLoad above already put it
     // in the right register, so no stack store is needed.
-    emitMovMemDispReg(this, x64::RSP, 32, xr(R4));
+    emitMovMemDispReg(this, x64::RSP, kShadowSpace, xr(R4));
 #endif
     addFixup(len_, l, FixKind::Call);
     uint8_t b[5] = { 0xE8, 0, 0, 0, 0 };
@@ -1005,9 +1008,8 @@ void HostAssembler::callLabel(Label l) {
 void HostAssembler::patchBranches() {
     // An OVERFLOWED compile is refused by lowerWith after finalize(), so patching it is pointless —
     // and unsafe: a fixup recorded just before emitBytes dropped its instruction points at the
-    // buffer's end, and the memcpy below would write up to 5 bytes past buf_. That was a real heap
-    // corruption, caught by the debug CRT freeing buf_ after the deliberately-unencodable 40-loop
-    // script ("an unencodable script is refused, not truncated") overflowed the buffer.
+    // buffer's end, and the memcpy below would write up to 5 bytes past buf_. "an unencodable
+    // script is refused, not truncated" is the test that reaches this path.
     if (!buf_ || overflow_) return;
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];

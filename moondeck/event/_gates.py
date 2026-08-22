@@ -194,12 +194,13 @@ def mechanical_gates(firmware, esp32="freshness", triggered=True):
         Gate("GCC build (CI's toolchain)",
              UV + ["moondeck/build/build_desktop.py", "--gcc", "--tests"],
              (lambda f: _have_gcc() and (not triggered or touches(f, *COMPILES_DESKTOP)))),
-        # The other half of "green here, red on CI": this bench is arm64 and has a MoonLive
-        # backend, while every x86-64 desktop (Windows, Linux, Intel macOS, and CI's runners)
-        # has none. A test that presumes a script compiles therefore passes locally and fails
-        # only after a push. Building with the backend gated out runs the suite the way those
-        # hosts see it. Triggered by MoonLive sources and by the tests that exercise them.
-        Gate("no-backend build (the x86-64 desktop's view)",
+        # Every desktop the project supports now HAS a MoonLive backend (arm64 and x86-64 both).
+        # This gate builds the one configuration that does not: MM_MOONLIVE_FORCE_NO_HOST_JIT, the
+        # view a future host with no backend gets, and the view --no-jit gives a developer testing
+        # the dark-render degradation. It stays because the guarded-out path has to keep compiling
+        # a helper defined outside its guard is unused there, which GCC makes fatal under -Werror
+        # while clang stays silent. Triggered by MoonLive sources and the tests that exercise them.
+        Gate("no-backend build (the backend-less view)",
              UV + ["moondeck/build/build_desktop.py", "--no-jit", "--tests"],
              lambda f: touches(f, "src/core/moonlive/", "src/light/moonlive/",
                                "src/platform/desktop/moonlive", "test/unit/core/unit_moonlive",

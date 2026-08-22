@@ -338,6 +338,23 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 
   **What it costs when it comes:** a small preallocated record queue the built-in writes into, drained from a housekeeping path through the existing platform output seam. The budget and the burst-spent message stay as they are; only where the bytes are written moves. Worth doing when a script is left with a print in it on a real fixture, which is the case the cap exists for.
 
+- **repo-health compares numbers from different machines** (2026-08-22). `repo-health.json`
+  records one value per metric with no note of which host produced it, so running the KPI gate on
+  a second machine rewrites the baseline with figures that were never comparable. Measured on the
+  same commit: desktop flash reads 1,060 KB on a Windows/MSVC bench against 1,165 KB recorded on
+  macOS/clang, printed as "−105 KB ✓"; desktop tick reads 368 µs against 179 µs, printed as
+  "+189 µs ⚠". Neither is a change in the code. The firmware rows are now guarded by a freshness
+  rule, which stops a stale binary being re-measured, but freshness cannot detect a different
+  compiler or a different CPU.
+
+  The file's own docstring states the property this breaks: "two machines agree and a number never
+  moves for a reason nobody can explain". Two ways out, and it is a design call rather than a bug
+  fix: key the host-dependent metrics by platform (`flash.desktop.windows`, `perf.desktop.macos`)
+  so each machine tracks its own trend, or declare one canonical machine (CI) the only writer and
+  have every other run print the delta without saving it. The second is less data and less honest
+  about a Windows contributor's numbers; the first grows the file, which its "never grows" design
+  resists. Until then, read a cross-host delta as noise.
+
 - **MoonDeck scripts crash on Windows when run BY HAND** (2026-08-22). 62 of the ~64 scripts
   print `→ ✓ ⚠ —` or box-drawing characters. Run from a Windows terminal their stdout takes
   `locale.getpreferredencoding()` — cp1252 — and the first such character raises

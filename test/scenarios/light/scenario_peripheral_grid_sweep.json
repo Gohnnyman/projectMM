@@ -365,7 +365,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            171,
+            164,
             220
           ],
           "free_heap": [
@@ -378,7 +378,7 @@
           ],
           "at": [
             "2026-08-21",
-            "2026-08-21"
+            "2026-08-22"
           ]
         }
       }
@@ -461,7 +461,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            669,
+            658,
             1143
           ],
           "free_heap": [
@@ -578,7 +578,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            10,
+            9,
             13
           ],
           "free_heap": [
@@ -674,7 +674,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            43,
+            37,
             71
           ],
           "free_heap": [
@@ -770,7 +770,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            162,
+            158,
             282
           ],
           "free_heap": [
@@ -866,7 +866,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            659,
+            644,
             1863
           ],
           "free_heap": [
@@ -983,7 +983,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            10,
+            9,
             14
           ],
           "free_heap": [
@@ -1079,7 +1079,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            38,
+            37,
             82
           ],
           "free_heap": [
@@ -1175,7 +1175,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            161,
+            155,
             402
           ],
           "free_heap": [
@@ -1388,7 +1388,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            10,
+            9,
             45
           ],
           "free_heap": [
@@ -1401,7 +1401,7 @@
           ],
           "at": [
             "2026-08-21",
-            "2026-08-21"
+            "2026-08-22"
           ]
         }
       }
@@ -1484,7 +1484,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            42,
+            39,
             105
           ],
           "free_heap": [
@@ -1580,7 +1580,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            173,
+            161,
             320
           ],
           "free_heap": [
@@ -1676,7 +1676,7 @@
         },
         "desktop-windows": {
           "tick_us": [
-            648,
+            641,
             1012
           ],
           "free_heap": [

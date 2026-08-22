@@ -1,5 +1,5 @@
 {
-  "commit": "d65bae25",
+  "commit": "3bc09821",
   "flash": {
     "esp32": 1754896,
     "esp32p4rev1-eth": 1643616,
@@ -12,12 +12,12 @@
     "esp32-wrover": 1765504,
     "qemu": 1318160,
     "esp32p4rev3-eth": 1643760,
-    "desktop": 1193320
+    "desktop": 1085952
   },
   "perf": {
     "desktop": {
-      "tick_us": 306,
-      "fps": 3267
+      "tick_us": 368,
+      "fps": 2717
     },
     "esp32": {
       "tick_us": 2151,
@@ -27,10 +27,10 @@
   "loc": {
     "core": 19408,
     "light": 25102,
-    "platform": 14329,
+    "platform": 14342,
     "ui": 6859,
-    "test": 44782,
-    "moondeck": 21243
+    "test": 44819,
+    "moondeck": 21253
   },
   "comments": {
     "core": {
@@ -42,19 +42,19 @@
       "ratio": 0.433
     },
     "platform": {
-      "lines": 5078,
-      "ratio": 0.39
+      "lines": 5094,
+      "ratio": 0.391
     },
     "ui": {
       "lines": 1803,
       "ratio": 0.279
     },
     "test": {
-      "lines": 8149,
+      "lines": 8163,
       "ratio": 0.209
     },
     "moondeck": {
-      "lines": 3452,
+      "lines": 3458,
       "ratio": 0.186
     }
   },

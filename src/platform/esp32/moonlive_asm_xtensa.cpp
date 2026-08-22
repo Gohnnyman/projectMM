@@ -445,8 +445,7 @@ void XtensaAssembler::patchBranches() {
     // stated rather than left to the reader to derive from fixupCount_ being 0. And an
     // OVERFLOWED compile is refused after finalize(), so patching it is pointless — and unsafe:
     // a fixup recorded just before the emit dropped its instruction points at the buffer's end,
-    // and patching there writes past buf_ (found as heap corruption on the x86-64 backend; the
-    // pattern is identical here).
+    // and patching there writes past buf_. Same shape on every backend.
     if (!buf_ || overflow_) return;
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
