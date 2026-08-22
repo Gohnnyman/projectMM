@@ -23,6 +23,8 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <io.h>     // _fileno, _commit (POSIX fileno/fsync equivalents)
+#include <iphlpapi.h>   // GetIfTable2 — real link state + negotiated speed (ethLinkUp)
+#include <netioapi.h>   // MIB_IF_ROW2: sees a NIC a Hyper-V vSwitch hides from GetAdaptersAddresses
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -702,8 +704,6 @@ size_t filesystemTotal() {
 void setEthConfig(const EthPinConfig&) {}   // no eth on desktop; ethInit stubs false
 void ethStop() {}                           // no eth on desktop
 bool ethInit() { return false; }
-bool ethLinkUp() MM_NONBLOCKING { return false; }
-bool ethConnected() MM_NONBLOCKING { return false; }
 
 // Raw-frame capture: the desktop half of the ethSendRaw seam. Sending a real L2 frame from a host
 // process needs a raw socket and root, which no test should ask for — so the host RECORDS what the
@@ -737,6 +737,151 @@ bool     ethRestartFails_ = false;   // simulated recovery failure
 // The bound raw socket, or -1 for capture mode (the default, and all any test sees).
 int      ethRawFd_ = -1;
 unsigned ethRawIfIndex_ = 0;         // Linux AF_PACKET needs the index; BPF binds by name
+
+#ifdef _WIN32
+// --- Npcap/WinPcap, loaded at RUN TIME ---------------------------------------------------------
+//
+// Windows has no kernel path for sending a raw L2 frame: it takes a third-party driver, which is
+// what Npcap is and what ColorLight's own LEDVision uses. wpcap.dll is resolved with LoadLibrary
+// rather than linked, and that is deliberate rather than stylistic. mm_platform is a PUBLIC
+// dependency of mm_core, projectMM, mm_tests and mm_scenarios, so linking wpcap would make the
+// Npcap SDK a build requirement for CI and for every contributor, to compile a path most of them
+// never run. Loading on demand means the binary builds and runs identically without Npcap, and
+// reports that raw send is unavailable instead of failing to link.
+//
+// The whole surface is five functions, declared here with pcap's own signatures rather than by
+// including pcap.h, which would reintroduce the SDK dependency this exists to avoid.
+struct PcapIf { PcapIf* next; char* name; char* description; /* remaining fields unused */ };
+using PcapT = struct pcap;
+// pcap's send queue: a preformatted block of (header, bytes) pairs the kernel transmits in one
+// call. Layout must match wpcap's exactly — it is written by pcap_sendqueue_queue and read by
+// pcap_sendqueue_transmit, so these are ABI, not convenience.
+struct PcapSendQueue { unsigned maxlen; unsigned len; char* buffer; };
+struct PcapTimeval { long tv_sec; long tv_usec; };            // Windows long is 32-bit
+struct PcapPktHdr  { PcapTimeval ts; unsigned caplen; unsigned len; };
+using PcapOpenLiveFn    = PcapT* (*)(const char*, int, int, int, char*);
+using PcapSendPacketFn  = int (*)(PcapT*, const unsigned char*, int);
+using PcapCloseFn       = void (*)(PcapT*);
+using PcapFindAllDevsFn = int (*)(PcapIf**, char*);
+using PcapFreeAllDevsFn = void (*)(PcapIf*);
+using PcapQAllocFn      = PcapSendQueue* (*)(unsigned);
+using PcapQQueueFn      = int (*)(PcapSendQueue*, const PcapPktHdr*, const unsigned char*);
+using PcapQTransmitFn   = unsigned (*)(PcapT*, PcapSendQueue*, int);
+using PcapQDestroyFn    = void (*)(PcapSendQueue*);
+
+HMODULE           wpcapLib_ = nullptr;
+PcapOpenLiveFn    pcapOpenLive_ = nullptr;
+PcapSendPacketFn  pcapSendPacket_ = nullptr;
+PcapCloseFn       pcapClose_ = nullptr;
+PcapFindAllDevsFn pcapFindAllDevs_ = nullptr;
+PcapFreeAllDevsFn pcapFreeAllDevs_ = nullptr;
+PcapQAllocFn      pcapQAlloc_ = nullptr;
+PcapQQueueFn      pcapQQueue_ = nullptr;
+PcapQTransmitFn   pcapQTransmit_ = nullptr;
+PcapQDestroyFn    pcapQDestroy_ = nullptr;
+PcapT*            pcapHandle_ = nullptr;   // the open adapter, or null for capture mode
+// The batch ethSendRaw fills and ethFlushRaw hands to the kernel. Allocated once at BIND time, not
+// per frame: ethSendRaw is MM_NONBLOCKING and must not allocate. Null when wpcap is too old to
+// offer the queue API, in which case sends fall back to one syscall per packet.
+PcapSendQueue*    pcapQueue_ = nullptr;
+// Sized for one wall frame with headroom: the widest supported wall is 256 rows, plus brightness
+// and sync frames, at the Ethernet maximum. ~400 KB of one-time allocation on a machine that has
+// just chosen to drive an LED wall.
+constexpr unsigned kSendQueueBytes = 264u * (unsigned)(kEthTestFrameMax + sizeof(PcapPktHdr));
+// The adapter GUID the handle belongs to, so ethLinkUp/ethLinkSpeedMbps report THAT NIC. The GUID
+// rather than the description, because the description is not always THERE: pcap reports none at
+// all for some adapters (a USB NIC on this bench reports none), while `\Device\NPF_{GUID}` is the
+// one identifier every Windows pcap device carries. See winAdapterLink.
+char              boundGuid_[40] = {};   // "{8BB7C86E-E3D1-4842-8333-DAD18FD0ADD5}" + NUL
+
+/// Resolve wpcap.dll once. False when Npcap is not installed, which is an ordinary state.
+bool wpcapLoad() {
+    if (pcapSendPacket_) return true;
+    if (!wpcapLib_) wpcapLib_ = ::LoadLibraryA("wpcap.dll");
+    if (!wpcapLib_) return false;
+    auto sym = [](HMODULE m, const char* n) {
+        return reinterpret_cast<void*>(::GetProcAddress(m, n));
+    };
+    pcapOpenLive_    = reinterpret_cast<PcapOpenLiveFn>(sym(wpcapLib_, "pcap_open_live"));
+    pcapSendPacket_  = reinterpret_cast<PcapSendPacketFn>(sym(wpcapLib_, "pcap_sendpacket"));
+    pcapClose_       = reinterpret_cast<PcapCloseFn>(sym(wpcapLib_, "pcap_close"));
+    pcapFindAllDevs_ = reinterpret_cast<PcapFindAllDevsFn>(sym(wpcapLib_, "pcap_findalldevs"));
+    pcapFreeAllDevs_ = reinterpret_cast<PcapFreeAllDevsFn>(sym(wpcapLib_, "pcap_freealldevs"));
+    // The batch API is OPTIONAL: it is a WinPcap/Npcap extension, absent from some builds. When it
+    // is missing the sends below stay one-syscall-per-packet, which works and merely jitters.
+    pcapQAlloc_    = reinterpret_cast<PcapQAllocFn>(sym(wpcapLib_, "pcap_sendqueue_alloc"));
+    pcapQQueue_    = reinterpret_cast<PcapQQueueFn>(sym(wpcapLib_, "pcap_sendqueue_queue"));
+    pcapQTransmit_ = reinterpret_cast<PcapQTransmitFn>(sym(wpcapLib_, "pcap_sendqueue_transmit"));
+    pcapQDestroy_  = reinterpret_cast<PcapQDestroyFn>(sym(wpcapLib_, "pcap_sendqueue_destroy"));
+    return pcapOpenLive_ && pcapSendPacket_ && pcapClose_ && pcapFindAllDevs_ && pcapFreeAllDevs_;
+}
+
+/// Case-insensitive substring test, so an adapter can be named the way Windows shows it.
+bool containsNoCase(const char* haystack, const char* needle) {
+    if (!haystack || !needle || !*needle) return false;
+    for (const char* h = haystack; *h; h++) {
+        const char* a = h;
+        const char* b = needle;
+        while (*a && *b && std::tolower(static_cast<unsigned char>(*a)) ==
+                           std::tolower(static_cast<unsigned char>(*b))) { a++; b++; }
+        if (!*b) return true;
+    }
+    return false;
+}
+
+/// Case-insensitive equality, for two strings already in the same canonical form.
+bool equalsNoCase(const char* a, const char* b) {
+    for (; *a && *b; a++, b++) {
+        if (std::tolower(static_cast<unsigned char>(*a)) !=
+            std::tolower(static_cast<unsigned char>(*b))) return false;
+    }
+    return !*a && !*b;
+}
+
+/// The `{GUID}` out of a pcap device name (`\Device\NPF_{8BB7C86E-...}`), braces included.
+bool guidFromPcapName(const char* name, char* out, size_t cap) {
+    if (!name || !out || cap == 0) return false;
+    const char* open = std::strchr(name, '{');
+    if (!open) return false;
+    const char* close = std::strchr(open, '}');
+    if (!close) return false;
+    const size_t n = static_cast<size_t>(close - open) + 1;
+    if (n >= cap) return false;
+    std::memcpy(out, open, n);
+    out[n] = '\0';
+    return true;
+}
+
+/// A MIB row's GUID in the spelling pcap uses, so the two can be compared as text.
+void guidToString(const GUID& g, char* out, size_t cap) {
+    std::snprintf(out, cap, "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+                  static_cast<unsigned long>(g.Data1), g.Data2, g.Data3,
+                  g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
+                  g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
+}
+
+/// The description WINDOWS shows for a pcap device, found through the interface table by GUID.
+/// This exists because pcap's own description can be absent: without it such an adapter is
+/// unnameable, since the only text left to match is a 49-character device path.
+bool winDescForPcapName(const MIB_IF_TABLE2* table, const char* pcapName, char* out, size_t cap) {
+    if (!table || !out || cap == 0) return false;
+    char want[40];
+    if (!guidFromPcapName(pcapName, want, sizeof(want))) return false;
+    for (ULONG i = 0; i < table->NumEntries; i++) {
+        char have[40];
+        guidToString(table->Table[i].InterfaceGuid, have, sizeof(have));
+        if (!equalsNoCase(have, want)) continue;
+        // Narrow the wide description as we copy: an adapter description is ASCII.
+        size_t n = 0;
+        for (; n + 1 < cap && table->Table[i].Description[n]; n++) {
+            out[n] = static_cast<char>(table->Table[i].Description[n]);
+        }
+        out[n] = '\0';
+        return n > 0;
+    }
+    return false;
+}
+#endif  // _WIN32
 }  // namespace
 
 // Open a raw L2 socket on `ifName` so a host build drives panels for real — the deployment a Pi or
@@ -744,9 +889,52 @@ unsigned ethRawIfIndex_ = 0;         // Linux AF_PACKET needs the index; BPF bin
 // need root (or CAP_NET_RAW), so an ordinary test run simply stays in capture mode.
 bool ethBindRawInterface(const char* ifName) {
 #ifdef _WIN32
-    // No raw-L2 send without a third-party driver (WinPcap/Npcap) on Windows; capture mode only.
-    (void)ifName;
-    return false;
+    // Close any previous handle first: `interface` is a live control, so a rebind must not leak
+    // the old adapter (CLAUDE.md, every setting applies live).
+    if (pcapHandle_ && pcapClose_) { pcapClose_(pcapHandle_); }
+    pcapHandle_ = nullptr;
+    if (pcapQueue_ && pcapQDestroy_) { pcapQDestroy_(pcapQueue_); }
+    pcapQueue_ = nullptr;
+    boundGuid_[0] = '\0';
+    if (!ifName || !ifName[0]) return true;   // explicit return to capture mode, as on POSIX
+    if (!wpcapLoad()) return false;           // no Npcap installed: the driver reports it
+
+    // Match the user's string against pcap's device name, pcap's description, and the description
+    // WINDOWS shows for the same adapter — case-insensitively, first hit wins. A pcap device is
+    // `\Device\NPF_{GUID}`, 49 characters against a 16-byte control, so a substring of a
+    // description is the only spelling that fits. The Windows lookup is not a nicety: pcap reports
+    // NO description for some adapters, and for those nothing a user could type would match at all.
+    // An exact device name still matches, which keeps the control meaning the same thing it means
+    // on Linux and macOS: name the interface.
+    PcapIf* devs = nullptr;
+    char err[256] = {};
+    if (pcapFindAllDevs_(&devs, err) != 0 || !devs) return false;
+    MIB_IF_TABLE2* table = nullptr;
+    if (::GetIfTable2(&table) != NO_ERROR) table = nullptr;   // fall back to pcap's own text
+    const PcapIf* hit = nullptr;
+    for (const PcapIf* d = devs; d; d = d->next) {
+        if (containsNoCase(d->name, ifName) || containsNoCase(d->description, ifName)) { hit = d; break; }
+        char desc[256];
+        if (winDescForPcapName(table, d->name, desc, sizeof(desc)) &&
+            containsNoCase(desc, ifName)) { hit = d; break; }
+    }
+    if (table) ::FreeMibTable(table);
+    if (!hit) { pcapFreeAllDevs_(devs); return false; }
+
+    // snaplen 65536, non-promiscuous, 1 ms read timeout. This handle only ever sends; promiscuous
+    // capture would cost interrupts for frames nothing reads.
+    PcapT* h = pcapOpenLive_(hit->name, 65536, 0, 1, err);
+    if (h) {
+        // Keep the GUID, which is what the link-state query matches on. The description was the
+        // old key, and it fell back to the DEVICE NAME when pcap reported none — a string no MIB
+        // row can ever match, so a perfectly bound adapter reported "no ethernet link" forever.
+        guidFromPcapName(hit->name, boundGuid_, sizeof(boundGuid_));
+    }
+    pcapFreeAllDevs_(devs);
+    pcapHandle_ = h;
+    // Allocate the batch here, off the hot path, so ethSendRaw only ever fills it.
+    if (h && pcapQAlloc_ && pcapQQueue_ && pcapQTransmit_) pcapQueue_ = pcapQAlloc_(kSendQueueBytes);
+    return h != nullptr;
 #else
     if (ethRawFd_ >= 0) { ::close(ethRawFd_); ethRawFd_ = -1; }
     ethRawIfIndex_ = 0;
@@ -791,6 +979,40 @@ bool ethBindRawInterface(const char* ifName) {
 bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
     if (!frame || len == 0) return false;
     if (ethTestSendFails_) { ethSendFails_++; ethFailTotal_++; return false; }   // simulated link-down / full ring
+
+#ifdef _WIN32
+    // Bound adapter: send for real. Unbound (the default, and every unit test) falls through to the
+    // capture ring below, so the Windows path gains sending without changing what tests observe.
+    //
+    // BATCHED when the queue API is available. A wall frame is ~131 packets that must all land
+    // inside the card's inter-frame window, and one pcap_sendpacket per packet is one kernel
+    // transition per packet: measured at 0.9-5.6 ms per frame on a 128x127 wall, a 5x spread that
+    // the cards show as stutter because they latch on the sync frame and have no buffering.
+    // Queuing costs a memcpy and hands the whole burst over in a single call from ethFlushRaw.
+    if (pcapHandle_ && pcapQueue_ && pcapQQueue_) {
+        PcapPktHdr hdr = {};
+        hdr.caplen = static_cast<unsigned>(len);
+        hdr.len    = static_cast<unsigned>(len);
+        // NOTE the streak is not cleared here: queuing a packet into a buffer says nothing about
+        // whether it reached the wire. Only ethFlushRaw, where pcap_sendqueue_transmit reports how
+        // many bytes actually went out, is in a position to say the link is working. Clearing it on
+        // enqueue would keep ethSendFailStreak() at zero forever, and that streak is what the driver
+        // watches to detect a wedged link and call ethRestartTx.
+        if (pcapQQueue_(pcapQueue_, &hdr, frame) == 0) return true;
+        // Queue full: flush what we have and retry once, so an unexpectedly large wall degrades to
+        // two batches rather than dropping the rest of the frame.
+        ethFlushRaw();
+        if (pcapQQueue_(pcapQueue_, &hdr, frame) == 0) return true;
+        ethSendFails_++; ethFailTotal_++;
+        return false;
+    }
+    if (pcapHandle_ && pcapSendPacket_) {
+        const int rc = pcapSendPacket_(pcapHandle_, frame, static_cast<int>(len));
+        if (rc != 0) { ethSendFails_++; ethFailTotal_++; return false; }
+        ethSendFails_ = 0;
+        return true;
+    }
+#endif
 
 #ifndef _WIN32
     if (ethRawFd_ >= 0) {
@@ -853,6 +1075,27 @@ void setTestEthRestartFails(bool fail) { ethRestartFails_ = fail; }
 uint32_t ethRestartCountForTest() { return ethRestarts_; }
 
 // See platform.h: a claim stated by the driver, reference-counted.
+// Hand the batched burst to the kernel. See the header for why this seam exists.
+//
+// A no-op everywhere except a Windows host with the pcap queue API: Linux and macOS already give
+// the frame to the kernel inside ethSendRaw, so there is nothing held back to flush.
+void ethFlushRaw() MM_NONBLOCKING {
+#ifdef _WIN32
+    if (!pcapHandle_ || !pcapQueue_ || !pcapQTransmit_ || pcapQueue_->len == 0) return;
+    // sync=0: transmit at wire speed rather than replaying the queued timestamps. The card wants
+    // the whole burst inside its inter-frame window, which is the opposite of paced playback.
+    const unsigned queued = pcapQueue_->len;
+    const unsigned sent = pcapQTransmit_(pcapHandle_, pcapQueue_, 0);
+    // The one place that knows the burst actually left, so it owns BOTH ends of the streak: a short
+    // write is the failure ethSendFailStreak counts, and a complete one is the only honest reason to
+    // clear it.
+    if (sent < queued) { ethSendFails_++; ethFailTotal_++; }
+    else               { ethSendFails_ = 0; }
+    // Reset for the next frame: the queue is a buffer, and transmit does not rewind it.
+    pcapQueue_->len = 0;
+#endif
+}
+
 void ethClaimRawL2(bool claim) {
     if (claim) ethRawClaims_++;
     else if (ethRawClaims_ > 0) ethRawClaims_--;
@@ -863,7 +1106,61 @@ bool ethRawL2Claimed() MM_NONBLOCKING { return ethRawClaims_ > 0; }
 // The host has no negotiated link. Report gigabit so the driver's speed check passes on desktop and
 // its tests exercise the send path rather than the too-slow branch (which has its own test via
 // setTestEthLinkSpeed).
+// Link state and negotiated speed.
+//
+// On Windows these describe the adapter ethBindRawInterface opened, queried through IPHLPAPI. It
+// matters here rather than being a nicety: PanelCardDriver warns below 1000 Mbit because a
+// ColorLight card has no buffering and no flow control, so a 100 Mbit link tears the panel while
+// every frame still "sends" successfully. A hardcoded 1000 would make that warning inert, which is
+// worse than absent — it would state a fact nobody measured.
+//
+// Elsewhere on the desktop there is no Ethernet peripheral to describe, so these keep the stub
+// values and ethTestLinkSpeed_ lets a test choose what the driver sees.
+#ifdef _WIN32
+namespace {
+/// (linkUp, mbps) for the adapter ethBindRawInterface opened.
+///
+/// Matched on the adapter GUID through GetIfTable2 — NOT through GetAdaptersAddresses, because a
+/// NIC bound to a Hyper-V external vSwitch does not appear there at all: Windows reports the
+/// virtual adapter and hides the physical one the switch owns. Measured here, where pcap opens
+/// `\Device\NPF_{7DD559D5-...}` (the Realtek) and that GUID is in no GetAdaptersAddresses row.
+/// GetIfTable2 lists the physical interface AND carries the same GUID pcap put in the device name,
+/// so one exact key covers both a virtualized NIC and an adapter pcap describes as nothing at all.
+/// The description cannot do that: absent on some adapters, filter-suffixed on others.
+bool winAdapterLink(uint16_t& mbps) {
+    mbps = 0;
+    if (!boundGuid_[0]) return false;
+    MIB_IF_TABLE2* table = nullptr;
+    if (::GetIfTable2(&table) != NO_ERROR || !table) return false;
+    bool up = false;
+    for (ULONG i = 0; i < table->NumEntries; i++) {
+        const MIB_IF_ROW2& row = table->Table[i];
+        char have[40];
+        guidToString(row.InterfaceGuid, have, sizeof(have));
+        if (!equalsNoCase(have, boundGuid_)) continue;
+        up = (row.OperStatus == IfOperStatusUp);
+        const unsigned long long bps = row.TransmitLinkSpeed;
+        mbps = (bps == 0 || bps == ~0ULL) ? 0
+             : static_cast<uint16_t>((bps / 1000000ULL) > 65535ULL ? 65535ULL : (bps / 1000000ULL));
+        break;
+    }
+    ::FreeMibTable(table);
+    return up;
+}
+}  // namespace
+
+bool ethLinkUp() MM_NONBLOCKING { uint16_t m = 0; return winAdapterLink(m); }
+bool ethConnected() MM_NONBLOCKING { return ethLinkUp(); }
+uint16_t ethLinkSpeedMbps() MM_NONBLOCKING {
+    uint16_t m = 0;
+    if (winAdapterLink(m) && m) return m;
+    return ethTestLinkSpeed_;   // unbound, or a speed Windows would not state
+}
+#else
+bool ethLinkUp() MM_NONBLOCKING { return false; }
+bool ethConnected() MM_NONBLOCKING { return false; }
 uint16_t ethLinkSpeedMbps() MM_NONBLOCKING { return ethTestLinkSpeed_; }
+#endif
 
 size_t ethTestFrameCount() { return ethTestCount_; }
 size_t ethTestFrameLength(size_t i) { return i < kEthTestMaxFrames ? ethTestLens_[i] : 0; }

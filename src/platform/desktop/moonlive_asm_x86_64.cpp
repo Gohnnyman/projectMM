@@ -746,8 +746,10 @@ void HostAssembler::patchBranches() {
     }
 }
 
-// The two-line binding of core's IR walk to THIS assembler. Inside the ISA guard, not after it:
-// a template instantiation needs its argument, and HostAssembler only exists here.
+
+// Bind the shared IR walk to this assembler. INSIDE the arch guard, with the assembler it names:
+// in the `#else` it would be compiled on every OTHER host, where `HostAssembler` is the arm64 one
+// (duplicate definition) or absent entirely. moonlive_asm_noarch.cpp owns the no-backend stub.
 size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squeeze) {
     return lowerWith<HostAssembler>(ir, out, cap, squeeze, kRegCount);
 }

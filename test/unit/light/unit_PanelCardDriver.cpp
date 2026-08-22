@@ -91,6 +91,25 @@ TEST_CASE("PanelCardDriver sends one frame per row then one sync") {
     CHECK(frameType(7) == mm::COLORLIGHT_TYPE_SYNC);
 }
 
+// A card on v12-or-older firmware acts on the FIRST copy and reads a second sync as another latch,
+// aborting the refresh already running: the wall then updates once every few seconds. That
+// generation gets exactly one brightness and one sync, which is also what FPP sends such a card.
+TEST_CASE("PanelCardDriver sends a pre-v13 card one brightness and one sync") {
+    mm::Buffer source;
+    mm::PanelCardDriver driver;
+    Wall wall(64, 4);
+    setUp(driver, source, wall, 256);
+    driver.firmware = 1;               // "v12 and older"
+
+    mm::platform::setTestNowMs(1000);
+    driver.tick();
+
+    REQUIRE(mm::platform::ethTestFrameCount() == 6);   // 1 brightness + 4 rows + 1 sync
+    CHECK(frameType(0) == mm::COLORLIGHT_TYPE_BRIGHTNESS);
+    for (size_t i = 1; i <= 4; i++) CHECK(frameType(i) == mm::COLORLIGHT_TYPE_ROW);
+    CHECK(frameType(5) == mm::COLORLIGHT_TYPE_SYNC);
+}
+
 // A buffer smaller than the wall sends only the rows it covers, then latches — rather than reading
 // past the buffer for the rows it does not have.
 TEST_CASE("PanelCardDriver stops at the last row its buffer covers") {

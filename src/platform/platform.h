@@ -379,6 +379,18 @@ void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING;
 // driver and its tests run on the host.
 bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING;
 
+// End of one wall frame: hand whatever ethSendRaw batched to the wire, and start a new batch.
+//
+// Exists because a panel wall is a BURST, not a stream: a 128-row wall is ~131 frames that must all
+// land inside the inter-frame window, since the cards have no buffering and latch on the sync frame.
+// Where the platform can hand the whole burst to the kernel at once it should, and only the caller
+// knows where a burst ends — hence a seam rather than a heuristic on frame contents, which would put
+// wire-format knowledge in the platform layer.
+//
+// Idempotent and safe to call with nothing pending. A platform that already sends each frame as it
+// arrives (ESP32's MAC, Linux, macOS) implements this as a no-op, so a driver calls it unconditionally.
+void ethFlushRaw() MM_NONBLOCKING;
+
 // Claim the Ethernet interface for direct L2 use, or release it. A driver that addresses the wire
 // below IP calls this in prepare/release to STATE its intent, rather than leaving
 // NetworkModule to infer it from traffic — the driver knows, and a claim made before the first frame
