@@ -50,8 +50,9 @@ namespace mm::particles {
 // Collisions run BEFORE the move for the reason WLED-PS documents: resolving an overlap after
 // integrating can shove a particle outside the grid, which the wall pass has already gone past.
 //
-// Prior art: the WLED Particle System (@Brandon502 / WildCats08) for the effect vocabulary this
-// serves, and Reeves 1983 for the name. Written fresh in fixed point against those descriptions.
+// Prior art: the WLED Particle System by Damian Schneider (@DedeHai), whose per-frame vocabulary
+// (emitters, forces, walls, a renderer over one pool) is the shape this follows, and Reeves 1983
+// for the name. Written fresh in fixed point against those descriptions.
 
 /// Converts real elapsed time into a per-frame scale factor, so physics runs at the same SPEED on
 /// every target while still using every frame the hardware can render.

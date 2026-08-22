@@ -378,6 +378,19 @@ TEST_CASE("two threads can run scripts at once without stealing each other's sin
 // reading. A scripted module owns two heap blocks — the emitted code and the control-values arena —
 // and dynamicBytes counted only the first, so every scripted card under-reported. It also read 0
 // whenever the script failed to compile, while the arena was still allocated.
+// ...and hands it all back when disabled. MoonLive::free() drops the exec block but does not touch
+// the owner's counter, so a binding that forgets to report the release leaves a disabled module's
+// card claiming memory nobody holds. All three scripted bindings share one helper for this.
+TEST_CASE("a disabled scripted layout stops reporting the memory it freed") {
+    MoonLiveLayout l;
+    l.defineControls();
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }")));
+    l.prepare();
+    REQUIRE(l.dynamicBytes() > 0);
+    l.release();
+    CHECK(l.dynamicBytes() == 0);
+}
+
 TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not") {
     MoonLiveLayout l;
     l.defineControls();

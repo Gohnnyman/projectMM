@@ -1,0 +1,28 @@
+// Rain: drops falling from anywhere along the top, with wind.
+// Wind is the launch angle, not a force, so gravity curves each drop as it falls.
+
+class RainEffect {
+  uint8_t fall = 24;
+  uint8_t wind = 128;
+  uint8_t drops = 3;
+
+  defineControls() {
+    pool(400);
+    addUint8("fall", fall, 4, 80);
+    addUint8("wind", wind, 0, 255);
+    addUint8("drops", drops, 1, 12);
+  }
+
+  tick() {
+    fade(90);
+
+    // 16384 is straight down. Wind leans the launch either side of it.
+    emit(random16(width), 0, 16384 + wind * 24 - 3072, fall * height / 8,
+         drops, 120, scale(beat(3, t), 256));
+
+    gravity(fall * height / 24);
+    step();
+    age(1);
+    render(120);
+  }
+}

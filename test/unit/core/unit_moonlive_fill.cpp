@@ -1369,6 +1369,25 @@ TEST_CASE("fading from a script with no layer does nothing") {
     CHECK(px[0] == 7);                            // the run completed, the fade was simply ignored
 }
 
+// A script's values are UNSIGNED 32-bit, and `65535 * 65535` is an expression it can write. Read
+// back as a signed int that is a large NEGATIVE number, so a coordinate far off the right of the
+// grid used to clamp to the LEFT edge, having overflowed a signed multiply on the way. A coordinate
+// past the edge must saturate at the edge it passed.
+TEST_CASE("a coordinate far outside the grid saturates at that edge, not the opposite one") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T { tick() {"
+                        "  setRGB(0, scale(uvX(65535 * 65535, 4, 4), 256),"
+                        "            scale(uvX(3, 4, 4), 256),"
+                        "            scale(uvY(65535 * 65535, 4, 4), 256)); } }",
+                        kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0, moonlive::kEntryTick);
+    eng.free();
+    CHECK(px[1] > 128);          // x = 3 on a 4-wide grid: right of center, as a control
+    CHECK(px[0] == 255);         // and a huge x saturates at the RIGHT edge, not the left
+    CHECK(px[2] == 255);         // same on the other axis
+}
+
 #endif  // MM_MOONLIVE_HAS_HOST_JIT — every case above needs compile() to SUCCEED, so
         // they all gate on the JIT: on a target with no backend (x86-64 desktop today)
         // the helpers they call are compiled out with it.

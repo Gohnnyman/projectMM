@@ -27,7 +27,7 @@ namespace mm {
 // Cost: one pass per force over a pool the effect sizes itself, plus a sub-pixel splat per live
 // spark. At the default 120 particles that is well inside the budget on any target.
 //
-// Prior art: the WLED Particle System's firework family (@Brandon502 / WildCats08) for the effect
+// Prior art: the WLED Particle System's firework family (Damian Schneider, @DedeHai) for the effect
 // vocabulary; the physics is the kernel's.
 // @card FireworksEffect.png
 /// Effect: shells that rise, stall, and burst into falling sparks.

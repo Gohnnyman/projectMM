@@ -51,6 +51,7 @@ private:
     bool showHidden_ = false;      // reveal dot-prefixed entries (forwarded to /api/dir by the UI)
     uint32_t usedBytes_ = 0;       // "filesystem" progress: bytes used, refreshed in tick1s
     uint32_t totalBytes_ = 0;      // "filesystem" progress: partition total, read once at build
+    uint8_t  secondsSinceScan_ = 0;   // the usage scan walks the partition; see tick1s
 };
 
 } // namespace mm

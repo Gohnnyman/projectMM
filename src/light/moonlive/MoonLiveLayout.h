@@ -84,6 +84,7 @@ public:
     void release() override {
         script_.engine().free();
         script_.invalidate();     // forget what was compiled, so re-enabling rebuilds it
+        script_.releaseReporting(*this);
         LayoutBase::release();
     }
 

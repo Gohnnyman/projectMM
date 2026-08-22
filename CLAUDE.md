@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A high-performance multi-platform system driving large LED installations and DMX fixtures. ESP32 is the primary target; also Teensy, macOS, Windows, Linux, RPi. System design: [docs/architecture.md](docs/architecture.md); coding conventions: [docs/coding-standards.md](docs/coding-standards.md). This file holds only the rules.
+A high-performance system driving large LED installations and DMX fixtures. One source tree drives ESP32, Teensy, Raspberry Pi, macOS, Windows and Linux. System design: [docs/architecture.md](docs/architecture.md); coding conventions: [docs/coding-standards.md](docs/coding-standards.md). This file holds only the rules.
 
 ## Principles
 

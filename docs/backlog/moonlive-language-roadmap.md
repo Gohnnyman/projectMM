@@ -48,7 +48,7 @@ Each row is a compromise the balls effect makes, and the language feature that w
 
 | forced to | because | wants |
 |---|---|---|
-| 4 objects, not 25 | 64-byte arena, 8 members | a bigger arena |
+| 4 objects, not 25 | 64-byte arena, 8 members | a bigger arena, or a pool handle (shipped for particles) |
 | whole-pixel motion | no fractional type | fixed-point or float |
 | a direction bit per axis | unsigned only | signed values |
 | one flat colour | no `hsv()` builtin | `hsv()` |
@@ -301,39 +301,28 @@ per-pixel. The parser resolves both through the builtin table (`div`, `mod`) rat
 either by name, so core stays domain-neutral and a domain that registers neither simply has no
 operator. `mod(a, b)` stays registered: it is the name the cyclic case reads best under.
 
-### 9b. A ScratchBuffer handle: `pool()` and friends, *the particle blocker*
+### 9b. A ScratchBuffer pool handle, ✅ *shipped for particles*
 
-**Particles cannot be a script feature without this, and it is the reason the shader step shipped
-first.** A `particles::Pool` is eight parallel arrays plus a count (`particles.h:132`). At the
-64-byte arena and 8 members a script could hold **five** particles across all its state, against
-the 100 to 1000 a particle look needs. Even a bigger arena is the wrong answer: `sizeof(MoonLive)`
-is held BY VALUE in every scripted module and probed on the main task's stack by `registerType`,
-which is what boot-looped the P4 at 1440 bytes (see #3). Particle state must live OUTSIDE the
-arena.
+A script sizes its own particle pool with `pool(n)` from `defineControls()`, and the buffers live in
+`MoonLiveParticles` (six `ScratchBuffer`s the binding owns) rather than in the 64-byte arena, which
+would have held about five particles. Sizing is reachable ONLY from that one moment: the sizing sink
+is installed around the `defineControls` run, so `pool()` from `tick()` is a no-op reporting the live
+count and no allocation ever reaches the render path.
 
-`ScratchBuffer<T>` (`src/core/ScratchBuffer.h`) is already exactly the primitive: one
-`platform::alloc`, PSRAM-backed where the target has it, tied to its owning module so it is freed
-on disable and counted into that module's `dynamicBytes`. `ParticlesEffect` composes six of them
-into a Pool in `prepare()` (`ParticlesEffect.h:46-49, :137`), which is the shape a script wants
-too.
+Seven builtins, all whole-pool passes: `pool`, `emit`, `gravity`, `drag`, `step`, `age`, `render`.
+The cost model is the point. `fountain.mle` measures **9 us** on a 128x96 desktop grid against
+`metal.mle`'s **1557 us** on the same grid: the first script vocabulary whose cost scales with the
+OBJECTS rather than with the grid.
 
-What is missing is the HANDLE: a script has no type but `uint8_t`/`uint16_t`, so it cannot name a
-buffer. The shape that fits the existing vocabulary is an arena-resident handle the binding owns,
-with the script addressing slots by index:
+**Structs were NOT needed, and that is a finding rather than a deferral.** Every pool operation is
+whole-pool or takes plain scalars, so a script never names a particle field. #10 below is about
+`ball[i].x` INSTEAD of parallel arrays, which a pool removes the need for; #4b is `Coord3D`/`CRGB`
+for per-pixel shader signatures, whose real prerequisite is #2.
 
-    pool(200)                 // in prepare/defineControls: size the pool, once
-    emit(x, y, vx, vy, ttl)   // returns a slot, or the count when full
-    step(); gravity(g); bounce()   // the frame order particles.h documents
-
-Every one of those is a Call the binding services against a `ScratchBuffer` it holds, so the arena
-carries a handle rather than the data, and the 64-byte ceiling stops being the limit on particle
-count. Note this is the same "handle route" #3 already argues for, stated concretely: **widen the
-arena for scripts that genuinely hold their own state, not as a substitute for this.**
-
-Two things to settle when it is built: who owns the frame order (the script calling
-step/bounce/age in sequence is honest but is five more calls per frame, and `particles.h` warns
-the order is the caller's to get right), and what a second script asking for a pool gets, since
-`setDrawCanvas` already had to become a per-thread table for exactly this reason.
+Not exposed, each with a reason: `bounce` (5 args, 3 of them physics jargon; the first to add next),
+`collide` (the only non-linear pass, an O(n^2) foot-gun in a language with no cost model), `spray`
+(`emit` with a wide cone is one), `spawn` (per-particle in a whole-pool API), `force`/`forceSmall`
+(needs the `acc` buffer for wind nothing needs yet), `attract`, `wrap`, `liveCount`, `clear`.
 
 ### 10. Structs — *readability, once the arena is bigger*
 

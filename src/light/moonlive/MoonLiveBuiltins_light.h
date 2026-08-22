@@ -14,6 +14,7 @@
 #include "light/shader.h"  // shader::smoothstep, the GLSL vocabulary, already in fixed point
 #include "core/noise.h"    // inoise8 — the shared value-noise field
 #include "light/draw.h"    // draw::line, the shared 3D Bresenham a script draws with
+#include "light/particles.h" // particles::Pool, the kernel a scripted particle effect drives
 
 // MoonLive — the LIGHT-DOMAIN built-in registration. This is the only place the LED vocabulary
 // lives: the function NAMES (`setRGB`, `fill`, `random16`), their arg counts, and the meaning
@@ -140,19 +141,24 @@ extern "C" inline uint32_t mm_light_smoothstep(const uintptr_t* args, uint32_t, 
 // ONE axis per call, rather than shader::uv's pair with the other half discarded: that computed two
 // divides per call and a script asking for both paid four per pixel, on the path the builtin exists
 // to make cheap. The 8192 factor is applied before the divide instead of as a shift after it, so
-// there is one rounding step rather than two. Everything stays int32_t: the arguments arrive as
-// full 32-bit script values, and narrowing them to lengthType (int16_t) first would wrap a large
-// width past the guard that is meant to catch it.
+// there is one rounding step rather than two.
+//
+// The arithmetic is 64-bit and the inputs are read UNSIGNED, because a script's values are unsigned
+// 32-bit and `65535 * 65535` is an expression it can write. Read as int32_t that is a large
+// NEGATIVE number, so a coordinate far off the right of the grid clamped to the LEFT edge, and
+// `px * 2` overflowed a signed 32-bit multiply on the way there. Widening costs one instruction on
+// a path already doing a divide, and it is what makes the saturation below honest.
 extern "C" inline uint32_t mm_light_uvAxis(const uintptr_t* args, bool wantY) {
-    const int32_t px = static_cast<int32_t>(uint32_t(args[0]));
-    const int32_t w  = static_cast<int32_t>(uint32_t(args[1]));
-    const int32_t h  = static_cast<int32_t>(uint32_t(args[2]));
-    const int32_t sw = w < 1 ? 1 : w, sh = h < 1 ? 1 : h;
-    const int32_t s  = sw < sh ? sw : sh;          // normalize on the SHORT side: that is what
+    const int64_t px = static_cast<int64_t>(uint32_t(args[0]));
+    const int64_t w  = static_cast<int64_t>(uint32_t(args[1]));
+    const int64_t h  = static_cast<int64_t>(uint32_t(args[2]));
+    const int64_t sw = w < 1 ? 1 : w, sh = h < 1 ? 1 : h;
+    const int64_t s  = sw < sh ? sw : sh;          // normalize on the SHORT side: that is what
                                                    // keeps a circle circular on a wide panel
-    const int32_t extent = wantY ? sh : sw;
-    const int32_t v = ((px * 2 - extent + 1) * 8192) / s;
-    return static_cast<uint32_t>(shader::clamp(v, -32768, 32767) + 32768);
+    const int64_t extent = wantY ? sh : sw;
+    const int64_t v = ((px * 2 - extent + 1) * 8192) / s;
+    const int64_t c = v < -32768 ? -32768 : (v > 32767 ? 32767 : v);
+    return static_cast<uint32_t>(c + 32768);
 }
 extern "C" inline uint32_t mm_light_uvX(const uintptr_t* args, uint32_t, const uint8_t*) {
     return mm_light_uvAxis(args, false);
@@ -350,6 +356,16 @@ struct AddControlSink { AddControlFn fn = nullptr; void* ctx = nullptr; };
 using FadeFn = void (*)(void* ctx, uint8_t amt);
 struct FadeSink { FadeFn fn = nullptr; void* ctx = nullptr; };
 
+/// Where pool(n) sends its sizing request, and where the per-frame particle builtins find the pool.
+/// TWO sinks for one feature, deliberately: sizing ALLOCATES, so it is installed only around the
+/// defineControls run (the cold path, once per script edit), while the per-frame calls get a
+/// read-only handle installed around each tick. A script calling pool(400) from tick() therefore
+/// reaches no sizing sink and gets a no-op returning the live count, which is what keeps allocation
+/// off the render path entirely.
+using PoolSizeFn = uint16_t (*)(void* ctx, uint16_t count);
+struct PoolSizeSink { PoolSizeFn fn = nullptr; void* ctx = nullptr; };
+struct PoolSink { particles::Pool* pool = nullptr; uint32_t scale = particles::FrameTime::kOne; };
+
 namespace detail {
 // `owner` is ATOMIC and claimed with compare_exchange: the claim used to be a load then a store,
 // so two threads could both see the same slot free and both take it — leaving them sharing one
@@ -359,7 +375,7 @@ namespace detail {
 // addLight sink (a layout run installs it) and the draw canvas (an effect run installs it). A
 // second table would repeat the claim/release machinery for the same lifetime.
 struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; draw::Canvas canvas;
-                  AddControlSink controls; FadeSink fade; };
+                  AddControlSink controls; FadeSink fade; PoolSizeSink poolSize; PoolSink pool; };
 /// Two slots: the render task and whichever task edits a control are the two that ever run a script
 /// at once. A third concurrent runner gets the overflow slot, which holds no sink — so its addLight
 /// calls no-op instead of writing through someone else's context.
@@ -391,11 +407,13 @@ inline SinkSlot* ownedSlot(bool claim) MM_NONBLOCKING {
     }
     return nullptr;
 }
-/// Release only a fully empty slot: the four halves (addLight sink, draw canvas, control sink,
-/// fade sink) detach independently, and a release while any of them is live would hand this
-/// thread's context to the next claimer, whose script would then reach a dead engine through it.
+/// Release only a fully empty slot: the six halves (addLight sink, draw canvas, control sink, fade
+/// sink, pool sizing sink, pool handle) detach independently, and a release while any of them is
+/// live would hand this thread's context to the next claimer, whose script would then reach a dead
+/// engine through it.
 inline void releaseIfEmpty(SinkSlot* s) MM_NONBLOCKING {
-    if (s && !s->sink.fn && !s->sink.ctx && !s->canvas.data && !s->controls.fn && !s->fade.fn)
+    if (s && !s->sink.fn && !s->sink.ctx && !s->canvas.data && !s->controls.fn && !s->fade.fn &&
+        !s->poolSize.fn && !s->pool.pool)
         s->owner.store(0, std::memory_order_release);
 }
 }  // namespace detail
@@ -435,6 +453,40 @@ inline void setFadeSink(FadeFn fn, void* ctx) MM_NONBLOCKING {
     if (!s) return;
     s->fade = {fn, ctx};
     if (!fn) detail::releaseIfEmpty(s);
+}
+
+/// This thread's pool sizing sink, or an empty one. Reading does not claim a slot.
+inline const PoolSizeSink& poolSizeSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit PoolSizeSink none{};
+    return s ? s->poolSize : none;
+}
+
+/// Point pool(n) at the binding that owns the buffers, for the duration of one defineControls()
+/// run; nullptr to detach. Installed in the same bracket as the control sink, because sizing a pool
+/// and declaring a control are the same moment: after the compile, on the cold path, once per edit.
+inline void setPoolSizeSink(PoolSizeFn fn, void* ctx) {
+    detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
+    if (!s) return;
+    s->poolSize = {fn, ctx};
+    if (!fn) detail::releaseIfEmpty(s);
+}
+
+/// This thread's live pool, or an empty handle. Reading does not claim a slot.
+inline const PoolSink& poolSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit PoolSink none{};
+    return s ? s->pool : none;
+}
+
+/// Point the per-frame particle builtins at the pool for the duration of one run; nullptr to
+/// detach. Installed by the binding in the same bracket as the draw canvas, so a script calling
+/// step() from a layout or a modifier reaches no pool and does nothing.
+inline void setPoolSink(particles::Pool* pool, uint32_t scale) MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(pool != nullptr);
+    if (!s) return;
+    s->pool = {pool, scale};
+    if (!pool) detail::releaseIfEmpty(s);
 }
 
 /// Point addUint8 at a consumer for the duration of one defineControls() run; nullptr to detach.
@@ -580,6 +632,177 @@ extern "C" inline uint32_t mm_light_fade(const uintptr_t* args, uint32_t, const 
     return 0;
 }
 
+/// pool(n) → size this script's particle pool to n particles, and report what it actually got.
+///
+/// Called from defineControls(), which is the one moment that is after the compile, on the cold
+/// path, and once per script edit. Anywhere else it is a NO-OP that reports the live count: the
+/// sizing sink is installed only around that run, so a script calling pool() every tick allocates
+/// nothing, every frame, forever. That is what keeps a malloc off the render path.
+///
+/// Returning the achieved count is the whole error channel: 0 means the allocation failed, which a
+/// script can see and a device with less PSRAM than the author assumed reports honestly.
+///
+/// A script that never calls pool() allocates nothing at all. There is deliberately no default
+/// pool: a default would give every scripted effect on the device particle buffers it never asked
+/// for, including the ones drawing shaders.
+extern "C" inline uint32_t mm_light_pool(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSizeSink& s = poolSizeSink();
+    if (!s.fn) {
+        const PoolSink& live = poolSink();   // outside defineControls: report, do not resize
+        return live.pool ? live.pool->count : 0u;
+    }
+    const uint32_t n = uint32_t(args[0]);
+    return s.fn(s.ctx, static_cast<uint16_t>(n > 65535u ? 65535u : n));
+}
+
+// --- The particle vocabulary -------------------------------------------------------------------
+//
+// Six calls, and every one is a pass over the WHOLE pool: this is the first script vocabulary whose
+// cost scales with the OBJECTS rather than with the grid. A shader touches every light every frame
+// (metal.mle: ~14 host calls per pixel, 59.6 ms on an 80x48); a particle script makes about nine
+// calls per FRAME and the per-particle work happens inside C++ loops.
+//
+// Coordinates and speeds are in PIXELS, converted to the kernel's sub-pixel units here: a script
+// author thinks in the grid they can see, not in 1/256ths of it.
+//
+// The frame scale rides on the pool handle, so every call is framerate-independent without the
+// script naming time. That is deliberate: it is a property of the system, not a thing an author
+// remembers to type.
+//
+// A call with no pool installed (a layout, a modifier, or a script that never called pool()) does
+// nothing, the same degrade `line` and `setPaletteColor` already have.
+
+/// A moving seed for the emitters. angleEmit hashes (index, seed) into an angle and a speed, so a
+/// seed that does not change makes every frame throw the identical set of sparks.
+///
+/// Atomic for the same reason random16 is: the render task and a control-edit task can both be
+/// inside a script at once, and a lost update would hand two emissions the same pattern.
+inline uint32_t nextEmitSeed() MM_NONBLOCKING {
+    static std::atomic<uint32_t> seed{0x9E3779B9u};
+    return seed.fetch_add(0x9E3779B9u, std::memory_order_relaxed);
+}
+
+/// emit(x, y, angle, speed, n, life, hue) → throw `n` particles from a point.
+///
+/// Wraps angleEmit, which spreads them across a cone and varies each one's speed, so a fountain, a
+/// burst and a spray are the same call with different numbers. The cone and the RNG seed are the
+/// binding's: a script that had to pass a seed would either hard-code one (making every device
+/// identical) or invent one per frame (making the emission jitter).
+extern "C" inline uint32_t mm_light_emit(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    p.pool->angleEmit(draw::toSub(static_cast<lengthType>(uint32_t(args[0]))),
+                      draw::toSub(static_cast<lengthType>(uint32_t(args[1]))),
+                      static_cast<angle16>(uint32_t(args[2])),
+                      static_cast<draw::pos_t>(uint32_t(args[3])),
+                      /*cone*/ 8192,                       // a 45 degree plume: wide enough to read
+                                                           // as a spray, narrow enough to aim
+                      static_cast<uint8_t>(uint32_t(args[4])),
+                      static_cast<uint16_t>(uint32_t(args[5])),
+                      static_cast<uint8_t>(uint32_t(args[6])),
+                      // The seed must MOVE, or every frame emits the same n trajectories and the
+                      // spray reads as a few fixed streams that stack up rather than a plume. A
+                      // per-call counter rather than the clock: two emit() calls in one frame must
+                      // not share a pattern either.
+                      /*seed*/ nextEmitSeed());
+    return 0;
+}
+
+/// gravity(g) → pull every live particle down by `g` sub-pixels per reference frame squared.
+/// The one force that makes matter read as matter.
+extern "C" inline uint32_t mm_light_gravity(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    p.pool->gravity(static_cast<draw::pos_t>(uint32_t(args[0])), p.scale);
+    return 0;
+}
+
+/// drag(k) → bleed speed off every live particle, 0 none and 255 nearly all.
+/// The counterweight to gravity: without it a pool under constant force accelerates until it
+/// teleports, which is the first thing an author hits.
+extern "C" inline uint32_t mm_light_drag(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    p.pool->drag(static_cast<uint8_t>(uint32_t(args[0])), p.scale);
+    return 0;
+}
+
+/// step() → move every live particle by its velocity. The integrator; nothing moves without it.
+///
+/// Also kills anything that has left the grid, which is NOT a separate call on purpose: a particle
+/// outside the fixture draws nothing and holds its slot forever, so leaking them is a bug in every
+/// effect rather than a choice an author should have to opt out of.
+extern "C" inline uint32_t mm_light_step(const uintptr_t*, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    const draw::Canvas& cv = drawCanvas();
+    p.pool->step(p.scale);
+    if (cv.data)
+        p.pool->killOutside(draw::toSub(cv.dims.x), draw::toSub(cv.dims.y), draw::toSub(2));
+    return 0;
+}
+
+/// bounce(e) → reflect every particle off the walls of the grid, keeping `e`/256 of its speed.
+/// 256 is a perfect bounce and lower loses energy on every contact, so a ball settles.
+///
+/// The grid is the canvas, not an argument: a script that had to pass width and height could pass
+/// the wrong ones, and a wall the fixture does not have is not a thing an author wants.
+extern "C" inline uint32_t mm_light_bounce(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    const draw::Canvas& cv = drawCanvas();
+    if (!cv.data) return 0;
+    // The wall is the LAST VALID PIXEL, not the pixel past the end: bounce() clamps a particle to
+    // the coordinate it is given, and toSub(dims.x) is one pixel outside the buffer, so a ball
+    // resting against that wall renders nowhere and the pit looks empty.
+    p.pool->bounce(draw::toSub(static_cast<lengthType>(cv.dims.x - 1)),
+                   draw::toSub(static_cast<lengthType>(cv.dims.y - 1)),
+                   static_cast<uint16_t>(uint32_t(args[0])));
+    return 0;
+}
+
+/// collide(radius) → make particles bounce off EACH OTHER, `radius` being the contact distance in
+/// whole pixels. This is what turns a pool of independent sparks into objects that pile up.
+///
+/// The one call in this vocabulary whose cost is NOT linear: it is an N-body check, so doubling the
+/// pool quadruples the work. Measured on the host at 3.2 us for 48 particles against 0.1 us without
+/// it, and 53.6 us at 200. An S3 is roughly 20-40x slower, so a few dozen balls is comfortable and
+/// a few hundred is not. A script that wants a big pool should not call this.
+///
+/// Call it BEFORE step(): resolving an overlap after integrating can shove a particle outside the
+/// grid the wall pass has already checked.
+extern "C" inline uint32_t mm_light_collide(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    p.pool->collide(draw::toSub(static_cast<lengthType>(uint32_t(args[0]))),
+                    /*restitution*/ 200, nextEmitSeed());
+    return 0;
+}
+
+/// age(rate) → count down every particle's life; a particle reaching zero frees its slot.
+/// Without it the pool fills and emit() silently stops, which is the bug that only shows up after
+/// a minute on the bench.
+extern "C" inline uint32_t mm_light_age(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    p.pool->age(static_cast<uint16_t>(uint32_t(args[0])), p.scale);
+    return 0;
+}
+
+/// render(maxLife) → draw every live particle, dimmed by how much life it has left.
+///
+/// Reads the ACTIVE palette, so a scripted particle effect follows the device's palette control
+/// with no color work in the script at all. Sub-pixel splatting is what makes slow motion smooth
+/// on a coarse grid rather than stepping.
+extern "C" inline uint32_t mm_light_render(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    const draw::Canvas& cv = drawCanvas();
+    if (!cv.data) return 0;                       // no canvas (a layout, a modifier): draw nothing
+    p.pool->render(cv, static_cast<uint16_t>(uint32_t(args[0])));
+    return 0;
+}
+
 /// line(x1, y1, x2, y2, r, g, b) → a straight segment on the effect's canvas, z = 0.
 ///
 /// The first seven-argument builtin, riding the args-array call ABI (every Call builtin receives
@@ -706,6 +929,24 @@ inline BuiltinTable lightBuiltins() {
     // fade(amt)              → dim every light toward black, FastLED's fadeToBlackBy. The trail
     // primitive, collected by the layer so N fading effects cost one pass. See mm_light_fade.
     t.add({"fade", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_fade, {}});
+    // pool(n)                → size this script's particle pool, from defineControls(). Returns the
+    // count actually available, 0 when the allocation failed. See mm_light_pool.
+    t.add({"pool", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_pool, {}});
+    // The particle vocabulary: whole-pool passes, one call per FRAME rather than per pixel.
+    // emit(x, y, angle, speed, n, life, hue) → throw n particles from a point.
+    t.add({"emit", 7, /*returns*/ false, BuiltinKind::Call, &mm_light_emit, {}});
+    // gravity(g) / drag(k) → the two forces a first particle effect needs.
+    t.add({"gravity", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_gravity, {}});
+    t.add({"drag", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_drag, {}});
+    // step() → integrate, and kill whatever left the grid. age(rate) → count down life.
+    t.add({"step", 0, /*returns*/ false, BuiltinKind::Call, &mm_light_step, {}});
+    t.add({"age", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_age, {}});
+    // bounce(e) → reflect off the grid walls, keeping e/256 of the speed.
+    t.add({"bounce", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_bounce, {}});
+    // collide(radius) → particles notice each other. NOT linear in pool size; see mm_light_collide.
+    t.add({"collide", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_collide, {}});
+    // render(maxLife) → draw the pool from the active palette.
+    t.add({"render", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_render, {}});
     // mod(value, limit)      → value % limit. The wrap every cyclic animation needs; see above.
     // Also what the '%' OPERATOR resolves to, which is why the name stays even though `%` reads
     // better: the parser looks it up here rather than core knowing any function by name.
@@ -785,7 +1026,11 @@ inline BuiltinTable lightBuiltins() {
 /// Re-runnable, like its compiled counterpart: the list is cleared first, so calling it twice
 /// rebuilds rather than appends. A script that defines no `defineControls()` declares no controls,
 /// which is the honest answer for a script that wants no UI.
-inline void runDefineControls(MoonLive& engine) {
+/// `sizePool` is the binding's pool sizer, or null for a binding with no particles (a layout, a
+/// modifier). Installed and detached in the same bracket as the control sink: sizing a pool and
+/// declaring a control are the same moment, and sharing the bracket means a script's pool cannot
+/// be resized from anywhere else.
+inline void runDefineControls(MoonLive& engine, PoolSizeFn sizePool = nullptr, void* poolCtx = nullptr) {
     // A script with no defineControls() declares no controls, which is the honest answer for one
     // that wants no UI: there is nothing to clear and nothing to run.
     if (!engine.hasEntry(kEntryDefineControls)) return;
@@ -797,11 +1042,13 @@ inline void runDefineControls(MoonLive& engine) {
                               uint16_t lo, uint16_t hi, CtrlType type) {
             static_cast<MoonLive*>(ctx)->addDeclaredControl(n, off, lo, hi, type);
         }, &engine)) return;
+    if (sizePool) setPoolSizeSink(sizePool, poolCtx);
     engine.clearDeclaredControls();      // re-runnable: rebuild rather than append
     // A one-light scratch buffer: this entry point writes no pixels, but `run` refuses a null or
     // undersized one, and honoring that contract costs less than carving out an exception.
     uint8_t scratch[3] = {};
     engine.run(scratch, 1, 3, 0, kEntryDefineControls);
+    if (sizePool) setPoolSizeSink(nullptr, nullptr);
     setAddControlSink(nullptr, nullptr);
 }
 
