@@ -40,8 +40,10 @@ public:
 
         const draw::Canvas cv = canvas();
 
-        // Full clear each frame (source: fadeToBlackBy(255)).
-        layer()->fadeToBlackBy(255);
+        // Full clear each frame (source: fadeToBlackBy(255)). A fill rather than a fade: this
+        // effect redraws every pixel, so it wants the buffer blank NOW, and fadeToBlackBy is a rate
+        // the Layer scales by elapsed time. The same idiom BlurzEffect uses for its own clear.
+        draw::fill(cv, RGB{0, 0, 0});
 
         const uint32_t ms = elapsed();
 

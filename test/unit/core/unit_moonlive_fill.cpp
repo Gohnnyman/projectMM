@@ -1172,9 +1172,9 @@ TEST_CASE("a script paints from the active palette") {
     eng.free();
 }
 
-// polarA/polarR turn a pixel's offset from a centre into an angle and a distance, which is what
+// polarA/polarR turn a pixel's offset from a center into an angle and a distance, which is what
 // lets a radial effect run without the fixture-sized lookup table the original form needs.
-TEST_CASE("polar builtins answer angle and distance from a centre") {
+TEST_CASE("polar builtins answer angle and distance from a center") {
     moonlive::MoonLive eng;
     // Directly right of centre is angle 0 and distance 4; the script writes both as channels.
     REQUIRE(eng.compile("class T { tick() { setRGB(0, scale(polarA(4, 0), 256), polarR(4, 0), 0); } }",
@@ -1186,7 +1186,7 @@ TEST_CASE("polar builtins answer angle and distance from a centre") {
     eng.free();
 
     // A point LEFT of centre arrives as an unsigned wrap (x - cx underflows); the builtin
-    // re-centres it, so the distance is still 4 rather than a huge number.
+    // re-centers it, so the distance is still 4 rather than a huge number.
     moonlive::MoonLive eng2;
     REQUIRE(eng2.compile("class T { tick() { setRGB(0, polarR(0 - 4, 0), 0, 0); } }",
                          kCtrlTable, kSys));
@@ -1194,6 +1194,198 @@ TEST_CASE("polar builtins answer angle and distance from a centre") {
     eng2.run(px2, 1, 3, 0, moonlive::kEntryTick);
     CHECK(px2[0] == 4);
     eng2.free();
+}
+
+// smoothstep is what turns a DISTANCE into LIGHT: a shape's edge stops being jaggy and becomes a
+// falloff whose width the script chooses. The failure that matters is not the curve, which
+// shader.h already pins, but the unsigned boundary: a script writes `smoothstep(0, w, w - d)` and
+// `w - d` WRAPS the moment d passes w, so a missing re-center reads a huge positive where a small
+// negative was meant, and the shape renders inverted-and-solid.
+TEST_CASE("a shape's outside stays dark once the distance passes its edge") {
+    moonlive::MoonLive eng;
+    // Sweep the distance from inside the edge to well outside it, one light each.
+    REQUIRE(eng.compile("class T { tick() {"
+                        "  for (i = 0; i < 8; i = i + 1) {"
+                        "    setRGB(i, scale(smoothstep(0, 400, 400 - i * 100), 256), 0, 0);"
+                        "  } } }", kCtrlTable, kSys));
+    uint8_t px[8 * 3] = {};
+    eng.run(px, 8, 3, 0, moonlive::kEntryTick);
+    eng.free();
+    CHECK(px[0] == 255);                        // distance 0: fully inside
+    for (int i = 1; i < 8; i++) {
+        CHECK(px[i * 3] <= px[(i - 1) * 3]);    // never brightens as the distance grows
+    }
+    CHECK(px[7 * 3] == 0);                      // far outside: dark, not wrapped back to full
+}
+
+// A ramp, not a switch. An implementation that truncated the normalize to an integer before the
+// cubic would still pass the monotone check above while drawing a hard edge.
+TEST_CASE("smoothstep is a soft ramp rather than a hard threshold") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T { tick() {"
+                        "  for (i = 0; i < 8; i = i + 1) {"
+                        "    setRGB(i, scale(smoothstep(0, 800, i * 100), 256), 0, 0);"
+                        "  } } }", kCtrlTable, kSys));
+    uint8_t px[8 * 3] = {};
+    eng.run(px, 8, 3, 0, moonlive::kEntryTick);
+    eng.free();
+    int distinct = 0;
+    for (int i = 0; i < 8; i++) {
+        bool seen = false;
+        for (int j = 0; j < i; j++) if (px[j * 3] == px[i * 3]) seen = true;
+        if (!seen) distinct++;
+    }
+    CHECK(distinct >= 5);                       // a hard threshold would give 2
+    CHECK(px[0] == 0);                          // and the ramp starts dark
+}
+
+// uv is the mapping a shader starts from: centered on the grid and normalized on the SHORT side,
+// biased at 32768 the way sin/cos already are. Its guarantee is that one unit of uv is the same
+// number of PIXELS on both axes, so a shape written as a distance comes out round. Skipping it is
+// why a design stretches on a non-square panel: with a raw `x - width / 2`, one x-unit and one
+// y-unit differ, and a circle drawn on a 32x8 grid arrives 4:1 wide.
+TEST_CASE("a circle drawn through uv stays circular on a wide panel") {
+    moonlive::MoonLive eng;
+    // Light every cell within a fixed uv radius of the center, on a grid four times wider than
+    // it is tall. The lit region must be as tall as it is wide, in PIXELS.
+    REQUIRE(eng.compile("class T { tick() {"
+                        "  for (y = 0; y < 8; y = y + 1) {"
+                        "    for (x = 0; x < 32; x = x + 1) {"
+                        "      if (polarR(uvX(x, 32, 8) - 32768, uvY(y, 32, 8) - 32768) < 6000) {"
+                        "        setRGB(y * 32 + x, 255, 0, 0);"
+                        "      } } } } }", kCtrlTable, kSys));
+    uint8_t px[32 * 8 * 3] = {};
+    eng.run(px, 32 * 8, 3, 0, moonlive::kEntryTick);
+    eng.free();
+    int litCols = 0, litRows = 0;
+    for (int x = 0; x < 32; x++) for (int y = 0; y < 8; y++) if (px[(y * 32 + x) * 3]) { litCols++; break; }
+    for (int y = 0; y < 8; y++) for (int x = 0; x < 32; x++) if (px[(y * 32 + x) * 3]) { litRows++; break; }
+    CHECK(litRows > 2);                // it drew something, and not a single line
+    CHECK(litCols == litRows);         // round in pixels; without uv this would be 4:1
+    CHECK(litRows < 8);                // and it fits inside the short axis rather than clipping
+}
+
+// The bias convention every signed value in this language shares: 32768 is the origin, so a
+// coordinate left of center reads below it and one to the right above it.
+TEST_CASE("uv places the grid center at the origin") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T { tick() {"
+                        "  setRGB(0, scale(uvX(0, 16, 16), 256), scale(uvX(15, 16, 16), 256),"
+                        "            scale(uvY(0, 16, 16), 256)); } }", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0, moonlive::kEntryTick);
+    eng.free();
+    CHECK(px[0] < 128);                // the left edge sits below the origin
+    CHECK(px[1] > 128);                // the right edge above it
+    CHECK(px[2] < 128);                // and the same on the other axis
+}
+
+// smin is what makes two shapes read as ONE surface rather than as two stamps that overlap. The
+// visible difference the blend control sells, stated as a test.
+TEST_CASE("blending two shapes with smin produces one surface, not two") {
+    // Two circles far enough apart that a plain union leaves a gap between them.
+    const char* src = "class T { uint16_t k = 0; tick() {"
+                      "  for (x = 0; x < 16; x = x + 1) {"
+                      "    if (smin(polarR(x - 4, 0) - 2, polarR(x - 11, 0) - 2, k) < 0) {"
+                      "      setRGB(x, 255, 0, 0); } } } }";
+    moonlive::MoonLive hard;
+    REQUIRE(hard.compile(src, kCtrlTable, kSys));
+    uint8_t px[16 * 3] = {};
+    hard.run(px, 16, 3, 0, moonlive::kEntryTick);
+    hard.free();
+    // k defaults to 0: a plain min, so the midpoint between the two circles stays dark.
+    CHECK(px[7 * 3] == 0);
+}
+
+// draw::smin widens to 64 bits precisely so a large blend radius cannot WRAP. A wrap makes smin
+// return a value larger than both inputs, which inverts the blend rather than lengthening it.
+// Note smin legitimately goes BELOW both inputs as k grows: that is the merge, not an error,
+// so the property to pin is the ordering against a plain union, not a floor.
+TEST_CASE("a longer blend never reads as less merged than a short one") {
+    moonlive::MoonLive eng;
+    // The same pair of distances at three blend radii, the last large enough that draw::smin's
+    // intermediate would overflow a 32-bit multiply if it had not widened to 64. Each must merge at
+    // least as hard as the one before it, and the widest must still be a real merge rather than a
+    // wrapped value: a wrap makes smin return MORE than both inputs, which inverts the blend the
+    // control exists to produce.
+    REQUIRE(eng.compile("class T { tick() {"
+                        "  setRGB(0, 0, 0, 0);"
+                        "  setXYZ(smin(300, 500, 0), smin(300, 500, 400), smin(300, 500, 60000));"
+                        "} }", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0, moonlive::kEntryTick);
+    eng.free();
+    // setXYZ writes the three results as bytes, so each is its low byte.
+    CHECK(px[0] == 44);                      // k = 0: a plain min, 300 & 0xFF
+    CHECK(px[1] <= px[0]);                   // a real blend pulls the surface below the union
+    CHECK(px[2] == 248);                     // k = 60000: -14600 & 0xFF, still merging further
+                                             // below the union rather than wrapping above it
+}
+
+// fade(amt) is the trail primitive: an effect that fades rather than clears leaves a decaying
+// tail behind what it draws. It goes to the LAYER, which collects every request and applies the
+// gentlest once per frame, so what a script can observe here is that the request ARRIVES and
+// carries the amount, not that pixels changed (Layer::tick does that, and Layer owns that test).
+TEST_CASE("a script asks its layer to fade, and the amount arrives") {
+    static uint16_t asked = 0;
+    static uint8_t lastAmt = 0;
+    asked = 0; lastAmt = 0;
+    moonlive::setFadeSink([](void*, uint8_t amt) { asked++; lastAmt = amt; }, &asked);
+
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T { tick() { fade(40); } }", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0, moonlive::kEntryTick);
+    eng.free();
+    moonlive::setFadeSink(nullptr, nullptr);
+
+    CHECK(asked == 1);
+    CHECK(lastAmt == 40);
+}
+
+// An amount past a byte is clamped rather than wrapped: fade(300) is "fade hard", and wrapping it
+// to 44 would be a gentle fade where the script asked for the opposite.
+TEST_CASE("an over-large fade amount clamps to full rather than wrapping") {
+    static uint8_t lastAmt = 0;
+    lastAmt = 0;
+    moonlive::setFadeSink([](void*, uint8_t amt) { lastAmt = amt; }, &lastAmt);
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T { tick() { fade(300); } }", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0, moonlive::kEntryTick);
+    eng.free();
+    moonlive::setFadeSink(nullptr, nullptr);
+    CHECK(lastAmt == 255);
+}
+
+// A layout and a modifier install no fade sink, so the call reaches nothing. Without this a script
+// moved between roles would fade a layer it is not ticking in.
+TEST_CASE("fading from a script with no layer does nothing") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T { tick() { fade(40); setRGB(0, 7, 0, 0); } }", kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0, moonlive::kEntryTick);   // no sink installed
+    eng.free();
+    CHECK(px[0] == 7);                            // the run completed, the fade was simply ignored
+}
+
+// A script's values are UNSIGNED 32-bit, and `65535 * 65535` is an expression it can write. Read
+// back as a signed int that is a large NEGATIVE number, so a coordinate far off the right of the
+// grid used to clamp to the LEFT edge, having overflowed a signed multiply on the way. A coordinate
+// past the edge must saturate at the edge it passed.
+TEST_CASE("a coordinate far outside the grid saturates at that edge, not the opposite one") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class T { tick() {"
+                        "  setRGB(0, scale(uvX(65535 * 65535, 4, 4), 256),"
+                        "            scale(uvX(3, 4, 4), 256),"
+                        "            scale(uvY(65535 * 65535, 4, 4), 256)); } }",
+                        kCtrlTable, kSys));
+    uint8_t px[3] = {};
+    eng.run(px, 1, 3, 0, moonlive::kEntryTick);
+    eng.free();
+    CHECK(px[1] > 128);          // x = 3 on a 4-wide grid: right of center, as a control
+    CHECK(px[0] == 255);         // and a huge x saturates at the RIGHT edge, not the left
+    CHECK(px[2] == 255);         // same on the other axis
 }
 
 #endif  // MM_MOONLIVE_HAS_HOST_JIT — every case above needs compile() to SUCCEED, so

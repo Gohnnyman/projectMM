@@ -423,7 +423,7 @@ This design stands on work others did first; per *Industry standards, our own co
 - **ARTI-FX / ARTI — ewowi.** The author of this analysis also wrote ARTI-FX (the interpreted-effects runtime in WLED MoonModules, on the PEG-grammar ARTI interpreter). It is the prior projectMM-family answer to the same problem and the source of hard-won lessons carried here: the `renderFrame`/`renderLed` per-frame/per-LED split, the host-binding shape (`arti_external_function` / `arti_*_variable`), and — by being the AST-walking, double-everything design — the concrete demonstration of *why* the hot path wants native or VM execution rather than tree-walking. ARTI-FX proved the live-scripting *idea* works end-to-end in this ecosystem (load a script, run it, edit live); this redesign trades its interpreter for native speed, but inherits its product shape and its lessons.
 - **MoonLight — MoonModules.** The [effects tutorial](https://moonmodules.org/MoonLight/moonlight/effects-tutorial/) is the staging spine of §9, and its `setRGB`/`setRGBXY`/`setRGBXYZ` + `addControl` surface is the model for the host binding (§3.4–3.5).
 
-Credits also live in the bottom-up's *Prior art & credits* and the digest [history/hpwit-ESPLiveScript.md](../history/hpwit-ESPLiveScript.md).
+Credits also live in the bottom-up's *Prior art & credits* and the digest [friend-repos/hpwit-ESPLiveScript.md](../friend-repos/hpwit-ESPLiveScript.md).
 
 ### Public credit — to lift into `docs/moonmodules/core/MoonLive.md` when the module spec is written
 

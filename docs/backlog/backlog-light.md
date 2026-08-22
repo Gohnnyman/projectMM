@@ -2,6 +2,22 @@
 
 Forward-looking to-build items for the **light domain** (`src/light/`: drivers, effects, layouts, modifiers, preview) and its sensors. The core/infrastructure counterpart is [backlog-core.md](backlog-core.md); cross-domain items are in [backlog-mixed.md](backlog-mixed.md). Index + overview: [README.md](README.md). Completed items are removed.
 
+- ❌ **Cap the particle frame scale** (open): `FrameTime` spends a whole stall in one frame, so an
+  80 ms hiccup moves every particle **6.7x** its usual distance in a single step (measured). That is
+  the rule working as designed, and it keeps the trajectory correct in real time, but a particle
+  INTEGRATES the gap where a shader just redraws from the clock and skips a frame invisibly. So
+  particles are the first effect class that makes system jitter visible, and they did: they exposed
+  a 1 Hz LittleFS scan on the render thread (since fixed) and they still show the previewer's
+  socket write and a UI reload.
+
+  The fix would clamp the scale a pool sees to ~2 reference frames, trading real-time accuracy for
+  smoothness. **Deliberately not done**: it makes motion lie about elapsed time, which
+  [architecture.md's tick-rate rule](../architecture.md) exists to prevent, and every stall it
+  hides is a real defect somewhere else that would stop being visible. WLED-PS takes the opposite
+  side (`ParticleSystem2D::update()` advances a fixed amount per call, with no `millis()` anywhere),
+  so its motion speed is a property of the frame rate. **Build trigger**: a stall we cannot remove
+  at its source, on hardware a user actually has.
+
 ## Drivers
 
 ### MoonI80 streaming ring — 48×256 shipped; open instruments and cleanups
@@ -353,4 +369,3 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
   **What it costs when it comes:** a small preallocated record queue the built-in writes into, drained from a housekeeping path through the existing platform output seam. The budget and the burst-spent message stay as they are; only where the bytes are written moves. Worth doing when a script is left with a print in it on a real fixture, which is the case the cap exists for.
 
 (The shared lane-driver scaffolding extraction — when a 3rd parallel backend lands — is tracked separately under [§ Extract shared lane-driver scaffolding](#extract-shared-lane-driver-scaffolding-when-the-3rd-parallel-backend-lands-deferred) above.)
-

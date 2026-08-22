@@ -27,7 +27,7 @@ namespace mm {
 // Cost: one pass per force over a pool the effect sizes itself, plus a sub-pixel splat per live
 // spark. At the default 120 particles that is well inside the budget on any target.
 //
-// Prior art: the WLED Particle System's firework family (@Brandon502 / WildCats08) for the effect
+// Prior art: the WLED Particle System's firework family (Damian Schneider, @DedeHai) for the effect
 // vocabulary; the physics is the kernel's.
 // @card FireworksEffect.png
 /// Effect: shells that rise, stall, and burst into falling sparks.
@@ -90,12 +90,9 @@ public:
         if (scale > 0) {
             frame_++;
             simulate(gy, wSub, hSub, scale);
-            // The trail decays per unit TIME too, scaled the same way, or its length would be a
-            // property of the framerate: erased before the eye sees it on a fast device, smeared on
-            // a slow one.
-            uint32_t f = (static_cast<uint32_t>(fade) * scale) / particles::FrameTime::kOne;
-            if (f == 0) f = 1;
-            layer()->fadeToBlackBy(static_cast<uint8_t>(f > 255 ? 255 : f));
+            // The trail decays per unit TIME, which the Layer now does for every fading effect:
+            // fadeToBlackBy takes a RATE and the Layer scales it by the elapsed frame.
+            layer()->fadeToBlackBy(fade);
         }
 
         pool_.render(cv, sparkLife);

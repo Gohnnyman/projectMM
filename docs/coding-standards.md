@@ -19,7 +19,7 @@ Decided once; not re-derived per file.
 - **All Python through `uv run`.** Never bare `python`/`python3`: not in shell commands, not in CMake, not in docs. uv manages the project venv and is the project standard ([moondeck/MoonDeck.md](../moondeck/MoonDeck.md)); bare `python3` isn't on PATH on Windows, and the macOS Python launcher pops a Store prompt. In CMake, resolve `find_program(UV_EXECUTABLE NAMES uv REQUIRED HINTS "$ENV{USERPROFILE}/.local/bin" "$ENV{HOME}/.local/bin")` once and use `${UV_EXECUTABLE} run python …` thereafter; the shared `src/ui/embed_ui.cmake` takes a `PYTHON_CMD` parameter (desktop passes uv; ESP32 passes IDF's Python). The one exception is `esp32/main/CMakeLists.txt`: ESP-IDF builds use IDF's own bundled Python venv via `find_package(Python3)`, since IDF manages that environment itself.
 - **Consider extending before creating.** When adding a feature, check whether an existing module extends cleanly; a new file is fine if genuinely cleaner, but justify it.
 - **Do not remove comments** unless they are outdated or factually wrong. Comments document intent and context; removing them silently loses knowledge.
-- **Reference, don't copy.** Prior art (friend repos, datasheets, our own prototype branches) holds proven approaches: study it, take the ideas, write our own code, never copy or trace the structure. Credits live in the history digests and per-module prior-art sections.
+- **Reference, don't copy.** Prior art (friend repos, datasheets, our own prototype branches) holds proven approaches: study it, take the ideas, write our own code, never copy or trace the structure. Credits live in the [friend-repo digests](friend-repos/README.md) and per-module prior-art sections.
 - **Minimal comments in MoonLive scripts.** A `.mle`/`.mll`/`.mlm` is a user-facing artifact shown in an editor on the device's own card, not a C++ source file: the reader is looking at the effect, and a comment block longer than the code buries it. One or two lines at the top saying what the effect IS, and a short note only where a line would otherwise read as a mistake. Everything else, the reasoning behind a formulation, the measured numbers, the language limits it works around, belongs in the commit message or the roadmap. This is the one place the "do not remove comments" rule above yields: on these files, trim.
 - **Present-tense litmus.** "There is no MCLK pin" states a property (keep); "no X anymore" narrates a removal (cut it; describe the path that exists).
 
@@ -47,6 +47,37 @@ Counter-example to avoid: storing `char rssiStr_[12]` and re-`snprintf`'ing `"-5
 **When a validation field's storage is narrower than what it claims to validate, the validation is wrong, not the field.** A `uint8_t` min/max slot can't bound an `Int16` control (it clamps to `[0..0]`); the fix is a wider bound (or per-type bound slots), and until then the constraint is documented at the field's declaration.
 
 **When one control type does two jobs with different UX, that's the smell for a new type, not a range hack.** An `int16` control the UI renders as a slider can't also mean "GPIO pin number"; a dedicated `Pin` type (smallest storage that fits the domain, `int8_t` for a GPIO) is the fix, not overloading the range.
+
+## Animate on elapsed time, never on the frame count
+
+**A faster device renders the same motion more smoothly, not more motion.** Anything on a tick path
+whose output changes between two calls with identical inputs is animating, and it takes its step
+from wallclock, not from having been called. This holds for effects, for modifiers that scroll or
+rotate, and for anything else the render loop reaches. A pure fold of coordinates from controls is
+not animating and owes nothing. Rationale and the two-rate check:
+[architecture.md](architecture.md#live-reconfiguration-every-change-applies-without-a-reboot).
+
+The shape, whichever quantity it is:
+
+```cpp
+carry_ += rate * time_.advance(elapsed());     // particles::FrameTime, 256 = one 1/60 s frame
+uint32_t due = carry_ / particles::FrameTime::kOne;
+carry_ -= due * particles::FrameTime::kOne;    // CARRY the remainder, never floor it to 1
+```
+
+**Carry the fraction.** At a high render rate the per-frame amount is legitimately below one unit,
+and flooring it to 1 applies many times the intended amount: that is what made trails visibly
+shorter on a fast device than on a slow one. Cap `due` so a long stall tops the effect up rather
+than bursting a frame's worth of work at once.
+
+**Ask whether something upstream already scales it.** Do not scale a quantity twice. A fade
+requested through `Layer::fadeToBlackBy` is already scaled by the Layer, so an effect passes a rate
+and does nothing else; a fade requested only on frames that pass a wallclock gate gets throttled by
+the gate AND by the scale. When in doubt, write the two-rate test first.
+
+**A compounding spatial operation is not a rate.** `draw::blur` applied twice at half strength is
+not one blur at full strength, so the carry pattern above does not transfer to it. Gate it in time
+and leave it at full strength.
 
 ## Per-type behaviour lives with the type
 

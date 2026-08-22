@@ -11,7 +11,7 @@ namespace {
 // --- Lexer ---------------------------------------------------------------------------
 // A `//` line comment is whitespace. `Assign` is `=` (a member declaration's initializer).
 enum class Tok { Ident, Number, String, Assign, LParen, RParen, LBrace, RBrace, Comma, Semicolon,
-                 Plus, Minus, Star, Less, LessEq, Greater, GreaterEq, EqEq, NotEq,
+                 Plus, Minus, Star, Slash, Percent, Less, LessEq, Greater, GreaterEq, EqEq, NotEq,
                  LBracket, RBracket, End, Error };
 
 struct Lexer {
@@ -80,10 +80,8 @@ struct Lexer {
         if (c == '<') { p++; kind = Tok::Less;    return; }
         if (c == '>') { p++; kind = Tok::Greater; return; }
         // '/' only reaches here when it is NOT the `//` a comment starts with (handled above).
-        // '/' and '%' are deliberately NOT tokens yet. No ISA here has a cheap integer divide, so
-        // both would lower to a host call — which the light domain already ships as `mod(a, b)` and
-        // `turn(n)`, so the capability exists under a name instead of an operator. A script using
-        // the character gets "unexpected character", which is the honest answer. Backlogged.
+        if (c == '/') { p++; kind = Tok::Slash;   return; }
+        if (c == '%') { p++; kind = Tok::Percent; return; }
         // A quoted string: a control's UI label. The span goes in identBeg/identLen, the same
         // fields an identifier uses, because both are a run of source bytes the parser reads
         // without copying. No escapes: a control name with a quote or a newline in it is not a
@@ -268,16 +266,54 @@ struct Parser {
         return lhs;
     }
 
+    // `a / b` and `a % b` lower to a HOST CALL, not to an instruction: the IR's whole arithmetic
+    // set is Const/Add/AddImm/Mul because no ISA here has a divide (Xtensa has none at all), so a
+    // divide is a software routine wherever it appears. The operator is therefore syntax over the
+    // machinery `mod(a, b)` already uses and costs nothing extra: but it is a call PER USE, which
+    // is cheap on a cold path and deliberate inside a per-pixel loop.
+    //
+    // Resolved by NAME through the builtin table rather than emitted directly, because core is
+    // domain-neutral: it knows no function, only what the host registered. A domain that registers
+    // no "div" simply has no '/' operator, and says so at compile time instead of miscompiling.
+    VReg emitBinaryCall(const char* name, size_t nameLen, VReg lhs, VReg rhs, const char* absent) {
+        const Builtin* fn = table.find(name, nameLen);
+        if (!fn || fn->argc != 2 || !fn->returns || fn->kind != BuiltinKind::Call) {
+            fail(absent); return 0;
+        }
+        // Both operands go through consecutive frame slots, exactly as a two-argument call stages
+        // them: the Call op carries where they start and how many, and nothing stays in a register
+        // across it.
+        if (slotHighWater + 1 >= kMaxLocals) { fail("expression too deeply nested"); return 0; }
+        const uint8_t argBase = slotHighWater;
+        emit({IrOp::Spill, 0, lhs, 0,0,0, slotHighWater++, nullptr, {}});
+        emit({IrOp::Spill, 0, rhs, 0,0,0, slotHighWater++, nullptr, {}});
+        if (slotHighWater > slotsUsed) slotsUsed = slotHighWater;
+        freeTemp(lhs); freeTemp(rhs);
+        VReg dst = alloc();
+        emit({IrOp::Call, dst, 0, 2, 0, 0, argBase, fn->fn, {}});
+        slotHighWater = argBase;               // the staging slots die with the call
+        return dst;
+    }
+
     VReg parseTerm() {
         VReg lhs = parsePrimary();
-        while (!failed && lex.kind == Tok::Star) {
+        while (!failed && (lex.kind == Tok::Star || lex.kind == Tok::Slash
+                           || lex.kind == Tok::Percent)) {
+            const Tok op = lex.kind;
             lex.advance();
             VReg rhs = parsePrimary();
             if (failed) return 0;
-            VReg dst = alloc();
-            emit({IrOp::Mul, dst, lhs, rhs, 0,0, 0, nullptr, {}});
-            freeTemp(lhs); freeTemp(rhs);
-            lhs = dst;
+            if (op == Tok::Star) {
+                VReg dst = alloc();
+                emit({IrOp::Mul, dst, lhs, rhs, 0,0, 0, nullptr, {}});
+                freeTemp(lhs); freeTemp(rhs);
+                lhs = dst;
+            } else if (op == Tok::Slash) {
+                lhs = emitBinaryCall("div", 3, lhs, rhs, "'/' needs a div(a, b) built-in");
+            } else {
+                lhs = emitBinaryCall("mod", 3, lhs, rhs, "'%' needs a mod(a, b) built-in");
+            }
+            if (failed) return 0;
         }
         return lhs;
     }

@@ -1600,7 +1600,7 @@ public:
     /// below — the bus-geometry accessors a backend needs are public, everything else in this block stays
     /// protected (this driver's own cold-path config machinery).
     const uint16_t* busPinList() {
-        const uint8_t width = busWidthPins();
+        const uint8_t width = busPinCount();
         const uint16_t clockPin = peripheral_ ? peripheral_->clockPinForBus() : laneList_[0];
         for (uint8_t i = 0; i < width && i < kMaxLanes; i++) {
             if (i < physPins_)                        busPinBuf_[i] = laneList_[i];   // data
@@ -1609,7 +1609,20 @@ public:
         }
         return busPinBuf_;
     }
-    uint8_t busPinCount() const { return busWidthPins(); }
+    /// How many lanes the PERIPHERAL is handed. The bus is 8 or 16 bits wide whatever the board wires,
+    /// but only a backend that cannot leave a lane unconnected needs a pad for the spares: `esp_lcd`
+    /// rejects an NC data pin and parks them on WR, while MoonI80 routes its own GPIOs and simply does
+    /// not connect them (spareLanesNeedPad). Handing MoonI80 only the real lanes is what keeps a
+    /// one-strand board from driving six or seven GPIOs it never asked for, one of which, on an S31,
+    /// is an Ethernet transmit line.
+    uint8_t busPinCount() const {
+        const uint8_t width = busWidthPins();
+        if (peripheral_ && !peripheral_->spareLanesNeedPad()) {
+            const uint8_t real = static_cast<uint8_t>(physPins_ + (pinExpanderMode() ? 1 : 0));
+            return real < width ? real : width;
+        }
+        return width;
+    }
     // Bus clock: a '595 must be fed kPinExpanderOutputs shift cycles per WS2812 slot, so the bus clocks
     // that much faster to hold the same 375 ns slot on the wire. The platform picks the exact rate
     // its clock tree can divide to (see platform_esp32_i80.cpp); this is the multiplier.

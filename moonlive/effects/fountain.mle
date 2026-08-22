@@ -1,0 +1,30 @@
+// Fountain: sparks thrown up from the floor, arcing over and falling back.
+// The arc is not drawn: sparks leave at an angle and gravity decides where they turn over.
+
+class FountainEffect {
+  uint8_t lift = 90;
+  uint8_t pull = 18;
+  uint8_t sparks = 4;
+
+  defineControls() {
+    pool(300);
+    addUint8("lift", lift, 20, 200);
+    addUint8("pull", pull, 4, 60);
+    addUint8("sparks", sparks, 1, 12);
+  }
+
+  tick() {
+    fade(40);
+
+    // Throw and pull both scale with the grid, so the plume fills any panel. 47152 is just under
+    // straight up; the nozzle leans either side of it.
+    emit(width / 2, height - 1, 47152 + beatsin(9, t, 4000), lift * height / 4,
+         sparks, 160, scale(beat(4, t), 256));
+
+    gravity(pull * height / 16);
+    drag(2);
+    step();
+    age(1);
+    render(160);
+  }
+}

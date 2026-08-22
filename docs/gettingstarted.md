@@ -236,6 +236,8 @@ Get it free for your phone:
 - **iPhone / iPad:** [WLED Native on the App Store](https://apps.apple.com/us/app/wled-native/id6446207239)
 - **Android:** [WLED Native on Google Play](https://play.google.com/store/apps/details?id=ca.cgagnier.wlednativeandroid)
 
+WLED Native is by **Christophe Gagnier ([@Moustachauve](https://github.com/Moustachauve))**, who wrote both the [Android](https://github.com/Moustachauve/WLED-Android) and [iOS](https://github.com/Moustachauve/WLED-iOS) apps. Their open source is what let us work out exactly what those apps read, so a projectMM device appears in them without either side needing to know about the other.
+
 For the full picture and controls, the device's web interface is always there at
 `http://<devicename>.local` — WLED Native is the fast everyday remote alongside it.
 

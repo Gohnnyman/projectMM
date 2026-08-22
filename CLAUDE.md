@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A high-performance multi-platform system driving large LED installations and DMX fixtures. ESP32 is the primary target; also Teensy, macOS, Windows, Linux, RPi. System design: [docs/architecture.md](docs/architecture.md); coding conventions: [docs/coding-standards.md](docs/coding-standards.md). This file holds only the rules.
+A high-performance system driving large LED installations and DMX fixtures. One source tree drives ESP32, Teensy, Raspberry Pi, macOS, Windows and Linux. System design: [docs/architecture.md](docs/architecture.md); coding conventions: [docs/coding-standards.md](docs/coding-standards.md). This file holds only the rules.
 
 ## Principles
 
@@ -127,7 +127,8 @@ Published at [moonmodules.org/projectMM](https://moonmodules.org/projectMM/); so
 - [MIGRATING.md](https://moonmodules.org/projectMM/MIGRATING.html) — breaking-change log
 - [backlog/](https://moonmodules.org/projectMM/backlog/index.html) — forward-looking to-build lists (core / light / mixed)
 - [adr/](https://moonmodules.org/projectMM/adr/index.html) — immutable architecture decision records (Nygard format); immutable except the status line: superseded/amended ADRs get a dated pointer to their successor
-- [history/](https://moonmodules.org/projectMM/history/index.html) — lessons, prior-project inventories, friend-repo digests
+- [friend-repos/](https://github.com/MoonModules/projectMM/tree/main/docs/friend-repos): monthly activity digests of related open-source LED projects
+- [history/](https://moonmodules.org/projectMM/history/index.html): lessons, prior-project inventories
 - [moonmodules/](https://github.com/MoonModules/projectMM/tree/main/docs/moonmodules) — module catalog pages + generated technical pages
 
 Docs describe the system as it is; git is the history; specs precede implementation. **Documentation model**: [coding-standards.md § Documentation model](docs/coding-standards.md#documentation-model).
