@@ -38,7 +38,7 @@ If you like projectMM, give it a ⭐️, fork it, or open an issue or pull reque
 
 🛡️ **Robust to any input**: add, delete, replace, or reconfigure any module in any order, at any grid size, and the device keeps running, degraded or idle, but never crashed. Every crash that's ever found becomes a regression test, so it stays fixed.
 
-🖥️ **One source tree, many targets**: the same code runs on ESP32, Teensy, Raspberry Pi, and macOS / Windows / Linux.
+🖥️ **One source tree, many targets**: the same code runs on ESP32 (Xtensa and RISC-V), Teensy, Raspberry Pi, and macOS / Windows / Linux. On the desktop that means **arm64 and x86-64 alike**: MoonLive's script JIT has a native backend for each, so a script compiles to real machine code on Apple Silicon, on an Intel Mac, and on a Windows or Linux PC.
 
 🎨 **Plug in, open a browser, see lights**: a live 3D preview of every effect, modifier, and layout, controllable from the same tab. The interface renders any module from its declared controls, so adding a module needs zero UI code.
 
@@ -98,12 +98,14 @@ The numbers above are observations. The **contracts** projectMM commits to, what
 
 **Desktop: download and run.** Grab the build for your OS from the [releases page](https://github.com/MoonModules/projectMM/releases):
 
-- **macOS arm64:** `projectMM-macos-arm64-vX.Y.Z.tar.gz`: unpack, run `./projectMM`. The binary is unsigned, so Gatekeeper prompts on first run; right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`.
+- **macOS arm64:** `projectMM-macos-arm64-vX.Y.Z.dmg`: open it and drag projectMM to Applications, then launch it like any app. A Terminal window opens showing what it is doing, your browser opens the UI, and closing that window stops it. (`projectMM-macos-arm64-vX.Y.Z.tar.gz` is the same binary without the wrapper, for scripting.) x86-64 macOS is supported and tested, but only the arm64 build is packaged: build from source for an Intel Mac. The binary is ad-hoc signed rather than notarized, so Gatekeeper says it cannot verify the developer; right-click → Open and confirm, or clear the flag with `xattr -dr com.apple.quarantine ./projectMM`.
 - **Windows x64:** `projectMM-windows-x64-vX.Y.Z.zip`: unzip, double-click `projectMM.exe`. SmartScreen may warn on first run because the binary is unsigned (More info → Run anyway).
+- **Linux x64:** `projectMM-linux-x64-vX.Y.Z.tar.gz`, or `projectmm_X.Y.Z_amd64.deb` on Debian, Ubuntu and Raspberry Pi OS (`sudo apt install ./projectmm_X.Y.Z_amd64.deb` puts it on your PATH).
 
-Then open `http://localhost:8080/`.
+Then open `http://localhost:8080/`. It opens by itself on start; pass `--no-browser` to suppress
+that (a headless server, or a service manager), and `--port <n>` to serve somewhere else.
 
-Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, send it to Art-Net, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source (see [building.md](docs/building.md)), though currently only the macOS, Windows, and ESP32 binaries ship as releases.
+Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, send it to Art-Net, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source (see [building.md](docs/building.md)), though currently only the macOS, Windows, Linux and ESP32 binaries ship as releases.
 
 ### From source
 

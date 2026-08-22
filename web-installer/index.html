@@ -35,11 +35,11 @@
     <p class="tag">Plug in your ESP32. Pick a release + device. Flash. Get the device on your network. Open it in a browser.</p>
 
     <div class="card browser-warning" id="browser-warning">
-      <strong>This browser can't flash directly.</strong>
-      Web Serial is required — open this page in
-      <strong>Chrome</strong> or <strong>Edge</strong> on a desktop. Firefox
-      and Safari don't support Web Serial. The release page on GitHub has the
-      same binaries for manual flashing.
+      <strong>This browser can't flash an ESP32.</strong>
+      Flashing needs Web Serial, which Firefox and Safari don't support. Open this page in
+      <strong>Chrome</strong> or <strong>Edge</strong> on a desktop to flash a board. The
+      release page on GitHub has the same binaries for manual flashing.
+      Downloading the desktop build works in any browser, and is selected above.
     </div>
 
     <div class="card">
@@ -67,7 +67,7 @@
            web-installer only; the shared picker module (embedded in firmware,
            no local serial) carries the narrowing logic but never the port UI. -->
       <div class="control-row" id="port-row">
-        <span class="control-label">USB Port</span>
+        <span class="control-label">Install to</span>
         <select id="port-select" class="rp-select"></select>
       </div>
       <div class="control-row" id="detect-status-row">

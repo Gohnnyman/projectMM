@@ -113,6 +113,8 @@ function makeState() {
 // (returns whichever initialized last). See comment at makeState — pickers
 // are otherwise isolated.
 let _lastState = null;
+// A setDesktopMode() that arrived before init() mounted the state. Applied by init().
+let _pendingDesktopMode = null;
 
 // ---------------------------------------------------------------------------
 // 2. GitHub Releases API + sessionStorage cache
@@ -189,6 +191,30 @@ function parseFirmwaresFromAssets(assets, tag) {
             firmwares.set(firmware, entry);
         }
     }
+    // A DESKTOP build ships an archive, not a .bin: projectMM-<os>-<arch>-v<ver>.{dmg,tar.gz,zip,deb}.
+    // The device cannot flash itself over the air, so these are offered as a DOWNLOAD instead, and
+    // the caller decides what that means. Keyed by the platform so the picker can show "macOS
+    // arm64" rather than a filename.
+    // The version carries dots, so the platform group has to be anchored on the -v rather than on
+    // "everything up to a dot". A .deb names its arch, not the platform, so it maps to linux-x64.
+    const desktopRe = /^projectMM-(macos-arm64|windows-x64|linux-x64)-v.+\.(dmg|tar\.gz|zip)$/;
+    const debRe = /^projectmm_.+_amd64\.deb$/;
+    for (const a of assets) {
+        const d = desktopRe.exec(a.name);
+        const plat = d ? d[1] : (debRe.test(a.name) ? "linux-x64" : null);
+        if (!plat) continue;
+        const key = `desktop-${plat}`;
+        const entry = firmwares.get(key) || { firmware: key, manifestUrl: null, binaryUrl: null,
+                                              isDesktop: true, assets: [] };
+        entry.isDesktop = true;
+        (entry.assets = entry.assets || []).push({ name: a.name, url: a.browser_download_url });
+        // Prefer the friendliest form when a platform ships more than one: a .dmg to drag, or a
+        // .deb apt can install, over the tarball that is there for scripting.
+        const friendly = /\.(dmg|deb)$/.test(a.name);
+        if (!entry.binaryUrl || friendly) entry.binaryUrl = a.browser_download_url;
+        firmwares.set(key, entry);
+    }
+
     for (const a of assets) {
         // Reject the part-suffixed .bins (bootloader / partition-table / ota-data)
         // — they're install fragments, not the main image. The OTA path needs the
@@ -202,9 +228,11 @@ function parseFirmwaresFromAssets(assets, tag) {
             firmwares.set(firmware, entry);
         }
     }
-    // Only return firmwares that have BOTH a manifest and a binary — partial uploads
-    // (mid-release-publish race) shouldn't appear in the dropdown.
-    return Array.from(firmwares.values()).filter(f => f.manifestUrl && f.binaryUrl);
+    // An OTA firmware needs BOTH a manifest and a binary: a partial upload (the
+    // mid-release-publish race) shouldn't appear in the dropdown. A desktop archive has no
+    // manifest by nature (there is nothing to flash), so it qualifies on its download alone.
+    return Array.from(firmwares.values())
+        .filter(f => f.binaryUrl && (f.manifestUrl || f.isDesktop));
 }
 
 // Merge a release's published firmwares with locally-staged extras (preview only).
@@ -233,8 +261,29 @@ function mergeFirmwares(published, extras) {
 // table). Web installer passes ownFirmwareKey=null → all candidates compatible.
 function isCompatible(ownFirmwareKey, candidateFirmwareKey) {
     if (!ownFirmwareKey) return true;
+    // A desktop reports "unknown": there is no ESP32 variant to name. Match it to the archive built
+    // for the OS the browser is running on, so a Mac is offered the .dmg and not the Windows .zip.
+    if (ownFirmwareKey === "unknown") return candidateFirmwareKey === desktopKeyForThisHost();
     const strip = f => f.replace(/-eth.*$/, "");
     return strip(ownFirmwareKey) === strip(candidateFirmwareKey);
+}
+
+// One name per desktop archive, used by both the Device row and the Firmware option so the two
+// cannot drift apart.
+const DESKTOP_LABEL = {
+    "desktop-macos-arm64": "macOS arm64",
+    "desktop-windows-x64": "Windows x64",
+    "desktop-linux-x64":   "Linux x64",
+};
+
+// Which desktop archive belongs to the machine viewing this page. Null on an OS we do not package,
+// which leaves the list empty rather than offering a download that will not run.
+function desktopKeyForThisHost() {
+    const p = (navigator.platform || "") + " " + (navigator.userAgent || "");
+    if (/Win/i.test(p)) return "desktop-windows-x64";
+    if (/Mac/i.test(p)) return "desktop-macos-arm64";
+    if (/Linux|X11/i.test(p)) return "desktop-linux-x64";
+    return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -324,7 +373,18 @@ function render(state) {
     // on-device OTA passes enableBoardPicker:false (the device already
     // knows its board); catalog-missing on the web installer (rare) falls
     // back to a two-row Release+Firmware layout with no board narrowing.
-    const boardRow = (state.enableBoardPicker && state.boards.length > 0) ? `
+    // In desktop mode the device is not a board being flashed, it is the computer viewing the
+    // page, so the row names it instead of offering a catalog to narrow.
+    // In desktop mode the target is the computer viewing the page, not a board: no catalog to
+    // narrow by. The web installer draws its own Device row (a picture grid it hides in this
+    // mode), so naming the computer here would be a second one; only the on-device card, which
+    // has no board row of its own, gets the static label.
+    const desktopMode = state.ownFirmwareKey === "unknown";
+    const boardRow = (desktopMode && !state.enableBoardPicker) ? `
+        <div class="control-row">
+            <span class="control-label">Device</span>
+            <span class="rp-status">${DESKTOP_LABEL[desktopKeyForThisHost()] || "this computer"}</span>
+        </div>` : (!desktopMode && state.enableBoardPicker && state.boards.length > 0) ? `
         <div class="control-row">
             <span class="control-label">Device</span>
             <select id="rp-board" class="rp-select"></select>
@@ -439,13 +499,20 @@ function render(state) {
             installBtn.disabled = true;
             return;
         }
-        let compatible = (r.firmwares || []).filter(f => isCompatible(state.ownFirmwareKey, f.firmware));
+        // A desktop archive and a flashable firmware are never alternatives in the same list:
+        // the web installer with no ownFirmwareKey accepts every candidate, which would otherwise
+        // offer "macOS arm64" as something to flash onto an ESP32. The target picked in the Port
+        // row decides which kind is on offer.
+        const wantDesktop = state.ownFirmwareKey === "unknown";
+        let compatible = (r.firmwares || [])
+            .filter(f => !!f.isDesktop === wantDesktop)
+            .filter(f => isCompatible(state.ownFirmwareKey, f.firmware));
         // Narrow by selected board (web installer only — selectedBoard stays
         // null on the on-device picker since the board <select> isn't rendered).
         // Defensive: a board the user picked that isn't in the catalog (e.g.
         // catalog edited mid-session) skips the narrow — better than rejecting
         // every firmware silently.
-        if (state.selectedBoard) {
+        if (state.selectedBoard && !wantDesktop) {
             const board = state.boards.find(b => b.name === state.selectedBoard);
             if (board) {
                 compatible = compatible.filter(f => board.firmwares.includes(f.firmware));
@@ -464,7 +531,11 @@ function render(state) {
             //   - otherwise → genuinely no build for this board/firmware.
             let reason;
             if (state.ownFirmwareKey === "unknown") {
-                reason = "device firmware is 'unknown' — rebuild with MM_FIRMWARE_NAME set";
+                // "unknown" on a DESKTOP is correct, not a build bug: there is no ESP32 variant.
+                // It only reaches here when the release ships no archive for this OS.
+                reason = desktopKeyForThisHost()
+                    ? "this release has no desktop build for your OS"
+                    : "no desktop build is packaged for your OS: build from source";
             } else if (state.selectedBoard) {
                 const board = state.boards.find(b => b.name === state.selectedBoard);
                 const wanted = board ? board.firmwares : [];
@@ -494,11 +565,20 @@ function render(state) {
             // is unverified must carry its own visible warning here — the firmwares.json
             // `description` isn't loaded by the picker (it parses names from release asset
             // filenames), so a user picking blind would see nothing.
-            opt.textContent = EXPERIMENTAL_FIRMWARES.has(f.firmware)
-                ? `⚠️ ${f.firmware} (untested — no board to verify on)`
-                : f.firmware;
+            // A desktop entry is a download, so name the file rather than the variant key: the
+            // user is about to receive that file and will look for it by name.
+            opt.textContent = f.isDesktop
+                ? DESKTOP_LABEL[f.firmware] || f.firmware
+                : EXPERIMENTAL_FIRMWARES.has(f.firmware)
+                    ? `⚠️ ${f.firmware} (untested — no board to verify on)`
+                    : f.firmware;
             firmwareEl.appendChild(opt);
         });
+        // The button says what it will do. A desktop entry is downloaded and opened by the user;
+        // a firmware is flashed by the device. Same control, two honest verbs.
+        const selEntry = compatible.find(f => f.firmware === state.firmware) || compatible[0];
+        installBtn.textContent = (selEntry && selEntry.isDesktop) ? "Download" : "Install";
+
         // Precedence: own firmware > last user pick > board default > first
         // compatible.
         //   1. The device's currently-flashed firmware (ownFirmwareKey) wins
@@ -553,7 +633,10 @@ function render(state) {
 
     firmwareEl.addEventListener("change", () => {
         state.firmware = firmwareEl.value;
-        safeLocalSet(PREF_FIRMWARE_KEY, state.firmware);
+        // Only a flashable variant is worth remembering. There is one desktop archive per
+        // host and the OS picks it, so storing it would just overwrite the ESP32 variant a
+        // returning user chose.
+        if (!state.firmware.startsWith("desktop-")) safeLocalSet(PREF_FIRMWARE_KEY, state.firmware);
     });
 
     if (boardEl) {
@@ -633,17 +716,21 @@ function render(state) {
                 return;
             }
         }
-        // Install click is the strongest "yes, this is my choice" signal —
-        // remember it explicitly in addition to the on-change writes above, in
-        // case the user reaches this point without having interacted with the
-        // dropdowns (defaults restored, click straight through).
+        // Install click is the strongest "yes, this is my choice" signal, so remember it
+        // explicitly in addition to the on-change writes above, in case the user reaches
+        // this point without having touched the dropdowns (defaults restored, click
+        // straight through). Desktop keys are excluded for the reason given at that write.
         safeLocalSet(PREF_RELEASE_KEY, r.tag_name);
-        safeLocalSet(PREF_FIRMWARE_KEY, state.firmware);
+        if (!entry.isDesktop) safeLocalSet(PREF_FIRMWARE_KEY, state.firmware);
         installBtn.disabled = true;
-        statusEl.textContent = `Installing ${r.tag_name} (${state.firmware})…`;
+        statusEl.textContent = entry.isDesktop
+            ? `Downloading ${r.tag_name}…`
+            : `Installing ${r.tag_name} (${state.firmware})…`;
         try {
-            await state.onInstall(state.firmware, entry.manifestUrl, entry.binaryUrl);
-            statusEl.textContent = `Install request sent — watch device status for progress.`;
+            await state.onInstall(state.firmware, entry.manifestUrl, entry.binaryUrl, entry);
+            statusEl.textContent = entry.isDesktop
+                ? `Download started. Open it to install.`
+                : `Install request sent — watch device status for progress.`;
         } catch (e) {
             statusEl.textContent = `Error: ${e && e.message ? e.message : e}`;
         } finally {
@@ -661,9 +748,31 @@ function render(state) {
 // Pure helpers exported for unit testing (test/js/installer-firmware-merge.test.mjs).
 // They take data and return data — no DOM, no fetch — so a node test can exercise
 // the real functions rather than a re-implemented copy.
-export { parseFirmwaresFromAssets, mergeFirmwares };
+export { parseFirmwaresFromAssets, mergeFirmwares, isCompatible };
 
 export const installPicker = {
+    /**
+     * Web installer only: switch between flashing a board over USB and downloading the
+     * desktop build for the machine viewing the page. The port dropdown offers "This
+     * computer" as an entry alongside the USB ports, and picking it lands here.
+     *
+     * Reuses the on-device desktop path rather than adding a parallel one: a desktop
+     * reports its firmware key as "unknown", which isCompatible() already maps to this
+     * host's archive, so the labels, the Download button and the download itself all
+     * follow with no second implementation. The board picker is hidden while it is on,
+     * because no board is being flashed.
+     */
+    setDesktopMode(on) {
+        const state = _lastState;
+        // Called before init() finished mounting: remember it, and init applies it once the
+        // state exists. Without this the host's opening default is silently dropped.
+        if (!state) { _pendingDesktopMode = on; return; }
+        const want = on ? "unknown" : null;
+        if (state.ownFirmwareKey === want) return;
+        state.ownFirmwareKey = want;
+        render(state);
+    },
+
     /**
      * Mount a picker into the given container.
      * @param {object} opts
@@ -733,6 +842,11 @@ export const installPicker = {
         ]);
         state.boards = boards;
         _lastState = state;
+        // Honour a mode the host chose while the release fetch was still in flight.
+        if (_pendingDesktopMode !== null) {
+            if (_pendingDesktopMode) state.ownFirmwareKey = "unknown";
+            _pendingDesktopMode = null;
+        }
         if (!data) {
             container.innerHTML =
                 `<div class="control-row"><span class="control-label">Releases</span>` +

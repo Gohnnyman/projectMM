@@ -746,12 +746,8 @@ void HostAssembler::patchBranches() {
     }
 }
 
-#else
-
-// No host assembler on this ISA. The matching `lowerToBytes` stub in moonlive_lower_host.cpp
-// returns 0, so MoonLive::compile fails cleanly and a scripted module runs dark — the desktop
-// binary still builds and runs everything else.
-
+// The two-line binding of core's IR walk to THIS assembler. Inside the ISA guard, not after it:
+// a template instantiation needs its argument, and HostAssembler only exists here.
 size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squeeze) {
     return lowerWith<HostAssembler>(ir, out, cap, squeeze, kRegCount);
 }

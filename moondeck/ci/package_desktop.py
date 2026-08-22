@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
 """Build + package a release-ready desktop binary for the host platform.
 
-Runs under CI on macOS and Windows runners. The output lands in `dist/`:
+Runs under CI on macOS, Windows and Linux runners. The output lands in `dist/`:
 
-  macOS arm64:  dist/projectMM-macos-arm64-vX.Y.Z.tar.gz
+  macOS arm64:  dist/projectMM-macos-arm64-vX.Y.Z.tar.gz + .dmg
   Windows x64:  dist/projectMM-windows-x64-vX.Y.Z.zip
+  Linux x64:    dist/projectMM-linux-x64-vX.Y.Z.tar.gz + dist/projectmm_X.Y.Z_amd64.deb
 
 Each archive carries the executable + a short README.txt with run instructions.
 
-Linux is intentionally not supported here — projectMM 1.0 ships ESP32 firmware
-+ macOS + Windows desktop only. Linux desktop is on the 2.0 roadmap.
-
-Both archives are unsigned; macOS users will see the Gatekeeper "downloaded
-from internet" prompt and Windows users will see a SmartScreen warning on
-first run. Documented in the README and the per-archive README.txt.
+The macOS build is ad-hoc signed, which turns Gatekeeper's outright refusal into
+the "unidentified developer" prompt a user can accept. Windows is unsigned, so
+SmartScreen warns on first run. Documented in the README and each README.txt.
 """
 
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -32,6 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 # macOS package job.
 BUILD_DIR_MACOS = ROOT / "build" / "macos"
 BUILD_DIR_WIN   = ROOT / "build" / "windows"
+BUILD_DIR_LINUX = ROOT / "build" / "linux"
 DIST_DIR = ROOT / "dist"
 
 
@@ -61,6 +61,102 @@ def configure_and_build_macos() -> Path:
         print(f"package_desktop: expected binary not found at {binary}")
         sys.exit(1)
     return binary
+
+
+def configure_and_build_linux() -> Path:
+    """Configure + build for Linux x86-64. Returns the built binary path."""
+    bdir = str(BUILD_DIR_LINUX.relative_to(ROOT))
+    run(["cmake", "-B", bdir, "-DCMAKE_BUILD_TYPE=Release"])
+    run(["cmake", "--build", bdir, "--config", "Release", "-j"])
+    binary = BUILD_DIR_LINUX / "projectMM"
+    if not binary.exists():
+        print(f"package_desktop: expected binary not found at {binary}")
+        sys.exit(1)
+    return binary
+
+
+def package_linux(binary: Path, version: str) -> Path:
+    """A .tar.gz and a .deb. No signing: Linux has no Gatekeeper equivalent to satisfy.
+
+    The tarball is the universal form (any distro, unpack and run). The .deb is for the machines
+    this actually runs on: Debian, Ubuntu, and Raspberry Pi OS, where `apt install ./file.deb` puts
+    it on PATH and a user never thinks about where it landed.
+
+    Deliberately no AppImage yet: it needs a runtime downloaded at package time, which makes the
+    release job depend on a third-party host. Worth adding once someone asks.
+    """
+    DIST_DIR.mkdir(exist_ok=True)
+    out = DIST_DIR / f"projectMM-linux-x64-v{version}.tar.gz"
+    readme = DIST_DIR / "_README.txt"
+    readme.write_text(readme_text(version, "Linux x64"), encoding="utf-8")
+    try:
+        with tarfile.open(out, "w:gz") as tar:
+            tar.add(binary, arcname="projectMM")
+            tar.add(readme, arcname="README.txt")
+    finally:
+        readme.unlink(missing_ok=True)
+    print(f"package_desktop: wrote {out}")
+    package_deb(binary, version)
+    return out
+
+
+def package_deb(binary: Path, version: str) -> Path | None:
+    """A .deb, built with dpkg-deb when the host has it (every Debian-family CI runner does).
+
+    Hand-rolled rather than via a helper library: a .deb is an ar archive of two tarballs and a
+    control file, and the packaging tools that wrap that would be a build dependency for something
+    this project needs exactly once.
+    """
+    if shutil.which("dpkg-deb") is None:
+        # Under CI this is fatal: the release uploads dist/projectmm_*.deb with
+        # fail_on_unmatched_files, so skipping here would fail the entire release (ESP32
+        # firmware and all) with an error naming the glob rather than the missing tool.
+        # On a dev machine it stays a skip, which is what the tarball beside it is for.
+        if os.environ.get("CI"):
+            sys.exit("package_desktop: no dpkg-deb on this CI runner, cannot build the .deb")
+        print("package_desktop: no dpkg-deb on this host, skipping the .deb")
+        return None
+    # A Debian version cannot carry a leading 'v' and must start with a digit.
+    stage = DIST_DIR / f"deb-{version}"
+    shutil.rmtree(stage, ignore_errors=True)
+    (stage / "DEBIAN").mkdir(parents=True)
+    (stage / "usr" / "bin").mkdir(parents=True)
+    shutil.copy2(binary, stage / "usr" / "bin" / "projectMM")
+    # A menu entry, so a Linux user launches it the way a macOS user opens the .app: Terminal=true
+    # gives the same visible, closeable window that shows the log and stops the server when closed.
+    apps = stage / "usr" / "share" / "applications"
+    apps.mkdir(parents=True)
+    (apps / "projectmm.desktop").write_text(
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=projectMM\n"
+        "Comment=Drive large LED installations and DMX fixtures\n"
+        "Exec=projectMM\n"
+        "Icon=projectmm\n"
+        "Terminal=true\n"
+        "Categories=Graphics;Utility;\n", encoding="utf-8")
+    icons = stage / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps"
+    icons.mkdir(parents=True)
+    fav = ROOT / "web-installer" / "favicon.png"
+    if fav.exists():
+        shutil.copy2(fav, icons / "projectmm.png")
+
+    (stage / "DEBIAN" / "control").write_text(
+        "Package: projectmm\n"
+        f"Version: {version}\n"
+        "Section: misc\n"
+        "Priority: optional\n"
+        "Architecture: amd64\n"
+        "Maintainer: MoonModules <https://github.com/MoonModules/projectMM>\n"
+        "Description: Drive large LED installations and DMX fixtures\n"
+        " projectMM renders effects to LED fixtures and DMX, controlled from a\n"
+        " browser. This is the desktop build; run projectMM and open\n"
+        " http://localhost:8080/.\n", encoding="utf-8")
+    out = DIST_DIR / f"projectmm_{version}_amd64.deb"
+    run(["dpkg-deb", "--build", "--root-owner-group", str(stage), str(out)])
+    shutil.rmtree(stage, ignore_errors=True)
+    print(f"package_desktop: wrote {out}")
+    return out
 
 
 def configure_and_build_windows() -> Path:
@@ -93,15 +189,141 @@ def readme_text(version: str, platform_label: str) -> str:
         f"Run: ./projectMM (macOS) or projectMM.exe (Windows)\n"
         f"Open: http://localhost:8080/\n"
         f"\n"
-        f"macOS first run: Gatekeeper will prompt because the binary is\n"
-        f"unsigned. Right-click → Open, or 'xattr -dr com.apple.quarantine\n"
-        f"./projectMM' to clear the quarantine flag.\n"
+        f"macOS first run: the binary is ad-hoc signed, not notarized, so\n"
+        f"Gatekeeper says it cannot verify the developer. Right-click → Open\n"
+        f"and confirm, or clear the flag with\n"
+        f"'xattr -dr com.apple.quarantine ./projectMM'.\n"
         f"\n"
         f"Source: https://github.com/MoonModules/projectMM\n"
     )
 
 
+def adhoc_sign(binary: Path) -> None:
+    """Sign the macOS binary with an ad-hoc signature. Free, and it changes what a user sees.
+
+    An UNSIGNED binary is refused outright by recent macOS with no obvious way through. Ad-hoc
+    signed, the same download gets the familiar "cannot verify the developer, open anyway?" dialog
+    and a working right-click -> Open. Neither is as good as notarization, which needs a paid
+    Developer ID; this is the free half of the distance.
+
+    Best effort: a failure prints and continues, because an unsigned build is still shippable and
+    a release that stops for this would be worse than one that warns.
+    """
+    r = subprocess.run(["codesign", "--force", "--sign", "-", str(binary)],
+                       capture_output=True, text=True)
+    if r.returncode == 0:
+        print("package_desktop: ad-hoc signed (Gatekeeper shows the standard unverified-developer prompt)")
+    else:
+        print(f"package_desktop: ad-hoc signing failed, shipping unsigned: {r.stderr.strip()}")
+
+
+def make_icns(dest: Path) -> Path | None:
+    """Build an .icns from the favicon the browser tab already shows, so the Dock icon and the tab
+    icon are the same mark. sips and iconutil ship with macOS: no dependency, no download.
+
+    The source is 320x320, which covers every size a Dock or Finder list shows. The 512pt slots an
+    .icns can carry are left out rather than upscaled, since a soft icon reads worse than a smaller
+    crisp one. Swap in a 1024 master and they can be added.
+    """
+    src = ROOT / "web-installer" / "favicon.png"
+    if not src.exists() or shutil.which("iconutil") is None:
+        print("package_desktop: no favicon or no iconutil, the app will use the default icon")
+        return None
+    iconset = dest / "projectMM.iconset"
+    shutil.rmtree(iconset, ignore_errors=True)
+    iconset.mkdir(parents=True)
+    # (size, filename) pairs iconutil expects; @2x is the Retina variant of the size below it.
+    for px, name in ((16, "icon_16x16.png"), (32, "icon_16x16@2x.png"), (32, "icon_32x32.png"),
+                     (64, "icon_32x32@2x.png"), (128, "icon_128x128.png"),
+                     (256, "icon_128x128@2x.png"), (256, "icon_256x256.png")):
+        run(["sips", "-z", str(px), str(px), str(src), "--out", str(iconset / name)])
+    out = dest / "projectMM.icns"
+    run(["iconutil", "-c", "icns", str(iconset), "-o", str(out)])
+    shutil.rmtree(iconset, ignore_errors=True)
+    return out
+
+
+def make_app_bundle(binary: Path, version: str, dest: Path) -> Path:
+    """A double-clickable .app around the console binary.
+
+    projectMM is a terminal program that serves a web UI, and that IS the shape a user wants: the
+    window shows it is alive, the log is right there, and closing it stops the server. What Finder
+    will not do is open a terminal for a bare binary, so the bundle's executable is a stub that asks
+    Terminal to run the real one.
+
+    The CLI lives INSIDE the bundle (Contents/MacOS/projectMM), so the disk image holds exactly one
+    draggable item while `--port` and `--no-browser` stay reachable at
+    /Applications/projectMM.app/Contents/MacOS/projectMM.
+    """
+    app = dest / "projectMM.app"
+    shutil.rmtree(app, ignore_errors=True)
+    macos = app / "Contents" / "MacOS"
+    res = app / "Contents" / "Resources"
+    macos.mkdir(parents=True)
+    res.mkdir(parents=True)
+
+    shutil.copy2(binary, macos / "projectMM")
+    icns = make_icns(dest)
+    if icns:
+        shutil.move(str(icns), res / "projectMM.icns")
+
+    # The stub Finder launches. `open -a Terminal` gives the user the window the app lives in.
+    launcher = macos / "projectMM-launcher"
+    launcher.write_text(
+        "#!/bin/sh\n"
+        "# Finder runs this; it opens a Terminal window on the real binary beside it. The window is\n"
+        "# the app's presence: it shows the log, and closing it stops the server.\n"
+        'exec open -a Terminal "$(dirname "$0")/projectMM"\n', encoding="utf-8")
+    launcher.chmod(0o755)
+
+    (app / "Contents" / "Info.plist").write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>projectMM</string>
+  <key>CFBundleDisplayName</key><string>projectMM</string>
+  <key>CFBundleIdentifier</key><string>org.moonmodules.projectmm</string>
+  <key>CFBundleVersion</key><string>{version}</string>
+  <key>CFBundleShortVersionString</key><string>{version}</string>
+  <key>CFBundleExecutable</key><string>projectMM-launcher</string>
+  <key>CFBundleIconFile</key><string>projectMM</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+</dict>
+</plist>
+""", encoding="utf-8")
+    adhoc_sign(app)          # sign the BUNDLE, which covers the binary inside it
+    return app
+
+
+def package_dmg(binary: Path, version: str) -> Path | None:
+    """A disk image holding one item: drag projectMM to Applications and it is installed.
+
+    hdiutil ships with macOS. A .tar.gz still ships beside this for anyone scripting a deploy.
+    """
+    if shutil.which("hdiutil") is None:
+        # Fatal under CI for the same reason as the .deb above.
+        if os.environ.get("CI"):
+            sys.exit("package_desktop: no hdiutil on this CI runner, cannot build the .dmg")
+        print("package_desktop: no hdiutil, skipping the .dmg")
+        return None
+    stage = DIST_DIR / "dmg"
+    shutil.rmtree(stage, ignore_errors=True)
+    stage.mkdir(parents=True)
+    make_app_bundle(binary, version, stage)
+    # The Applications symlink is what makes the window a drag-and-drop target.
+    (stage / "Applications").symlink_to("/Applications")
+    out = DIST_DIR / f"projectMM-macos-arm64-v{version}.dmg"
+    out.unlink(missing_ok=True)
+    run(["hdiutil", "create", "-volname", f"projectMM {version}",
+         "-srcfolder", str(stage), "-ov", "-format", "UDZO", str(out)])
+    shutil.rmtree(stage, ignore_errors=True)
+    print(f"package_desktop: wrote {out}")
+    return out
+
+
 def package_macos(binary: Path, version: str) -> Path:
+    adhoc_sign(binary)
     DIST_DIR.mkdir(exist_ok=True)
     out = DIST_DIR / f"projectMM-macos-arm64-v{version}.tar.gz"
     readme = DIST_DIR / "_README.txt"
@@ -116,6 +338,7 @@ def package_macos(binary: Path, version: str) -> Path:
     finally:
         readme.unlink(missing_ok=True)
     print(f"package_desktop: wrote {out}")
+    package_dmg(binary, version)
     return out
 
 
@@ -142,7 +365,7 @@ def main() -> int:
     # Clean only THIS host's build dir so a configure-flag change picked
     # up by this run gets a fresh CMakeCache. We don't touch the other
     # host's dir; on CI each runner only ever sees its own anyway.
-    host_build = BUILD_DIR_MACOS if system == "Darwin" else BUILD_DIR_WIN
+    host_build = {"Darwin": BUILD_DIR_MACOS, "Windows": BUILD_DIR_WIN}.get(system, BUILD_DIR_LINUX)
     if host_build.exists():
         shutil.rmtree(host_build, ignore_errors=True)
 
@@ -160,8 +383,17 @@ def main() -> int:
         package_windows(binary, version)
         return 0
 
+    if system == "Linux":
+        if machine not in ("x86_64", "amd64"):
+            print(f"package_desktop: unsupported Linux arch '{machine}'. "
+                  f"Only x86-64 is packaged; other arches build from source.")
+            return 2
+        binary = configure_and_build_linux()
+        package_linux(binary, version)
+        return 0
+
     print(f"package_desktop: host '{system}' not supported. "
-          f"projectMM 1.0 ships macOS arm64 + Windows x64 only.")
+          f"projectMM ships macOS arm64, Windows x64 and Linux x64.")
     return 2
 
 
