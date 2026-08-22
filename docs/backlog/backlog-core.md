@@ -97,7 +97,7 @@ Forward-looking to-build items for the **core / infrastructure** domain (`src/co
   RISC-V coprocessor-context save on INTERRUPT ENTRY. That is a symptom of something faulting inside
   an ISR context rather than a bug in the kernel itself, and the P4 is the only RISC-V target with a
   coprocessor, which is why no other board shows it. The prior art at
-  [Plan-20260718](../history/plans/Plan-20260718%20-%20MoonI80%20lapping-v2%20clock-oracle%20ring%20(shipped).md)
+  [Plan-20260718](../history/plans/archive/Plan-20260718%20-%20MoonI80%20lapping-v2%20clock-oracle%20ring%20(shipped).md)
   is a DIFFERENT cause with the same panic name (an ISR reading PSRAM while a flash write disabled
   the cache, fixed with a `spi_flash_cache_enabled()` defer guard) and is worth re-reading first:
   the same shape on another ISR would present exactly like this.
@@ -122,7 +122,7 @@ DevicesModule discovers via **passive UDP presence** (UDP 65506) feeding a [`Dev
 - **Live peer state** — a discovered peer's brightness / on-off shown in our list, refreshed by polling its REST `/json` after discovery gives the IP (discovery = UDP/mDNS, state = REST). The read-side complement to the command half.
 - **Non-IP transports (board-gated, far future)** — Tasmota-MQTT / zigbee2mqtt need an MQTT client; **direct Zigbee/Thread** (S31/C6/H2 802.15.4 radio) makes projectMM the *hub itself*, driving bulbs over the mesh with no gateway — the standout differentiator, the biggest lift. Same plugin philosophy, a transport addition + board gate.
 
-Full design + the reasoned transport split: [Plan-20260629 — UDP device discovery + mDNS advertise-only (shipped)](../history/plans/Plan-20260629%20-%20UDP%20device%20discovery%20%2B%20mDNS%20advertise-only%20%28shipped%29.md).
+Full design + the reasoned transport split: [Plan-20260629 — UDP device discovery + mDNS advertise-only (shipped)](../history/plans/archive/Plan-20260629%20-%20UDP%20device%20discovery%20%2B%20mDNS%20advertise-only%20%28shipped%29.md).
 
 ## ESP32 performance and memory
 
