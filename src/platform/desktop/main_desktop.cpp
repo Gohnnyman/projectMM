@@ -72,11 +72,38 @@ static void atExitHandler() {
     }
 }
 
+// Show the UI the moment the server is up. A desktop user launching from Finder or a file manager
+// has no terminal to read a URL out of, and typing localhost:8080 is exactly the step that loses
+// someone on their first run. Best effort: a failure is silent, because the banner above already
+// printed the address and a missing browser must not stop the server.
+//
+// --no-browser opts out, for a headless box or a service manager where opening a browser on the
+// server's own display is wrong.
+static void openLocalUi(uint16_t port) {
+    char url[64];
+    std::snprintf(url, sizeof(url), "http://localhost:%u/", static_cast<unsigned>(port));
+    char cmd[128];
+#if defined(_WIN32)
+    std::snprintf(cmd, sizeof(cmd), "start \"\" \"%s\"", url);
+#elif defined(__APPLE__)
+    std::snprintf(cmd, sizeof(cmd), "open \"%s\" >/dev/null 2>&1 &", url);
+#else
+    std::snprintf(cmd, sizeof(cmd), "xdg-open \"%s\" >/dev/null 2>&1 &", url);
+#endif
+    // Degrade visibly: a box with no xdg-open (the headless case --no-browser exists for) would
+    // otherwise do nothing at all, leaving the user waiting for a window that is never coming.
+    // The URL is already on stdout above, so this only has to say the auto-open failed.
+    if (std::system(cmd) != 0) {
+        std::printf("  (could not open a browser automatically, open %s yourself)\n", url);
+    }
+}
+
 int main(int argc, char** argv) {
     // --port N: the HTTP port. Defaults to 8080 because ports below 1024 need root on POSIX, but
     // Home Assistant's WLED integration hardcodes port 80 with no way to specify another, so testing
     // that path on desktop needs `sudo projectMM --port 80`.
     uint16_t httpPort = 8080;
+    bool openBrowser = true;
     for (int i = 1; i < argc; i++) {
         const bool isPort = std::strcmp(argv[i], "--port") == 0;
         if (isPort && i + 1 < argc) {
@@ -91,8 +118,12 @@ int main(int argc, char** argv) {
             httpPort = static_cast<uint16_t>(v);
         } else if (isPort) {
             std::printf("--port needs a value\n"); return 1;
+        } else if (std::strcmp(argv[i], "--no-browser") == 0) {
+            openBrowser = false;
         } else if (std::strcmp(argv[i], "--help") == 0) {
-            std::printf("usage: projectMM [--port N]   (default 8080; 80 needs root)\n");
+            std::printf("usage: projectMM [--port N] [--no-browser]\n"
+                        "  --port N       HTTP port (default 8080; 80 needs root)\n"
+                        "  --no-browser   do not open the UI on start\n");
             return 0;
         } else {
             // An unknown argument is a user error, not noise to ignore: "--prot 80" silently
@@ -143,8 +174,15 @@ int main(int argc, char** argv) {
 
     char tbuf[32];
     isoTimestamp(tbuf, sizeof(tbuf));
+    // The banner, then the URL, then how to stop. This window IS the app on a desktop: there is no
+    // tray icon and no GUI, so it has to say what it is and how to end it. The tick lines that
+    // follow print for the first 60 s and then go quiet unless the log level asks for them, so this
+    // stays readable once the machine settles.
     std::printf("projectMM started at %s\n", tbuf);
-    std::printf("Listening on port %u. Press Ctrl-C to stop.\n", static_cast<unsigned>(httpPort));
+    std::printf("\n  projectMM is running: http://localhost:%u/\n", static_cast<unsigned>(httpPort));
+    std::printf("  Close this window (or press Ctrl-C) to stop.\n\n");
+
+    if (openBrowser) openLocalUi(httpPort);
 
     mm_main(running, httpPort);
 

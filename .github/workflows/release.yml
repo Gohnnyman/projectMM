@@ -252,7 +252,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      # Same uv prerequisite as build-macos — see the comment there.
+      # Same uv prerequisite as build-macos, see the comment there.
       - uses: astral-sh/setup-uv@v3
       - name: Build + package Windows x64
         run: uv run moondeck/ci/package_desktop.py
@@ -261,12 +261,32 @@ jobs:
           name: desktop-windows
           path: dist/
 
+  build-linux:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Same uv prerequisite as build-macos, see the comment there.
+      - uses: astral-sh/setup-uv@v3
+      # Builds with the runner's default GCC (13 on ubuntu-24.04). Its four false-positive
+      # warnings are handled in CMakeLists.txt, which demotes them to non-fatal on GCC below
+      # 16 rather than pinning a compiler here: a from-source build on Debian or Raspberry Pi
+      # OS meets the same GCC and deserves the same fix.
+      - name: Build + package Linux x64
+        run: uv run moondeck/ci/package_desktop.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          path: dist/
+
   release:
     # Publish a release on: version tag push, main branch push, or workflow_dispatch.
     # Plain branch push without matching paths is filtered by the top-level `paths:`
     # so the build jobs already won't run; this condition is the belt to their braces.
     if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
-    needs: [build-esp32, build-macos, build-windows]
+    needs: [build-esp32, build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write     # softprops/action-gh-release needs this
@@ -426,6 +446,8 @@ jobs:
             dist/manifest-*.json
             dist/projectMM-*.tar.gz
             dist/projectMM-*.zip
+            dist/projectMM-*.dmg
+            dist/projectmm_*.deb
 
   # Deploy the web installer to GitHub Pages. Separate from `release` because
   # the `github-pages` environment's protection rule only allows `main` — so
@@ -506,6 +528,8 @@ jobs:
               --pattern 'manifest-*.json' \
               --pattern 'projectMM-*.tar.gz' \
               --pattern 'projectMM-*.zip' \
+              --pattern 'projectMM-*.dmg' \
+              --pattern 'projectmm_*.deb' \
               || echo "  (skip $T — no matching assets)"
             # Rewrite each manifest's part paths to relative basenames (strip the
             # absolute release-asset URL); jq edits in place via a temp file.

@@ -644,8 +644,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // mid-flash error. installer.start() falls back to its own requestPort()
     // prompt if the user clicks Install without pre-picking.
     let pickedPort = null;
+    // Desktop mode: the user is not flashing a board over USB, they are downloading the build
+    // for the computer viewing this page. Same picker, same release list; only the target
+    // differs. Kept beside pickedPort because the two are mutually exclusive states of the
+    // one "what am I installing onto" question the Port row asks.
+    let desktopMode = false;   // this page is for flashing an ESP32; the desktop download is the alternative
     const portSelect = document.getElementById("port-select");
     const PICK_NEW = "__pick_new__"; // sentinel value for the "pick another" option
+    const DESKTOP = "__desktop__";   // sentinel value for the "this computer" option
+    const IDLE = "__idle__";         // neutral placeholder: nothing chosen yet
+
+    // Name this computer the way the picker names its archive, or null on an OS we do not
+    // package, in which case the option is not offered at all rather than offering a
+    // download that cannot run.
+    function thisComputerLabel() {
+        const p = (navigator.platform || "") + " " + (navigator.userAgent || "");
+        if (/Win/i.test(p)) return "Windows x64";
+        if (/Mac/i.test(p)) return "macOS arm64";
+        if (/Linux|X11/i.test(p)) return "Linux x64";
+        return null;
+    }
 
     function rebuildPortSelect() {
       portSelect.replaceChildren();
@@ -656,12 +674,35 @@ document.addEventListener('DOMContentLoaded', () => {
       // `change` when the chosen <option> changes; clicking the lone option
       // when it's already selected doesn't fire — handled by the click
       // listener below.
+      // The "this computer" option, offered in every state: a visitor with no board
+      // attached is the exact person who wants the desktop build, and they should not
+      // have to grant a serial port to discover it exists.
+      const desktopLabel = thisComputerLabel();
+      const addDesktopOpt = () => {
+        if (!desktopLabel) return;
+        const opt = document.createElement("option");
+        opt.value = DESKTOP;
+        opt.textContent = `This computer (${desktopLabel})`;
+        portSelect.appendChild(opt);
+      };
       if (!pickedPort) {
-        const pickOpt = document.createElement("option");
-        pickOpt.value = PICK_NEW;
-        pickOpt.textContent = "Pick a port…";
-        portSelect.appendChild(pickOpt);
-        portSelect.value = PICK_NEW;
+        // A neutral placeholder sits first and stays selected until the user chooses. It is
+        // what makes every pick a real `change` event, including re-picking the same option
+        // after cancelling the OS prompt.
+        const idleOpt = document.createElement("option");
+        idleOpt.value = IDLE;
+        idleOpt.textContent = "Choose where to install…";
+        portSelect.appendChild(idleOpt);
+        // Offer the USB choice only where it can work. Without Web Serial the option would
+        // open nothing, so a browser that cannot flash shows only what it can do.
+        if ("serial" in navigator) {
+          const pickOpt = document.createElement("option");
+          pickOpt.value = PICK_NEW;
+          pickOpt.textContent = "An ESP32 on a USB port…";
+          portSelect.appendChild(pickOpt);
+        }
+        addDesktopOpt();
+        portSelect.value = desktopMode ? DESKTOP : IDLE;
         return;
       }
       // Picked state: name the selected port by the chip Detect read from it
@@ -675,9 +716,10 @@ document.addEventListener('DOMContentLoaded', () => {
       portSelect.appendChild(currentOpt);
       const pickOpt = document.createElement("option");
       pickOpt.value = PICK_NEW;
-      pickOpt.textContent = "Pick another port…";
+      pickOpt.textContent = "Pick another USB port…";
       portSelect.appendChild(pickOpt);
-      portSelect.value = "current";
+      addDesktopOpt();
+      portSelect.value = desktopMode ? DESKTOP : "current";
     }
 
     // Reflect the port state in the picker's Install gate after every rebuild
@@ -685,12 +727,28 @@ document.addEventListener('DOMContentLoaded', () => {
     // both rebuildPortSelect() exits and all call sites stay covered by one hook.
     function syncPortState() {
       rebuildPortSelect();
+      installPicker.setDesktopMode(desktopMode);
       installPicker.notifyPortChanged();
+      // The serial-only controls have no meaning when the target is this computer: there is
+      // no chip to erase and no port to monitor. Hidden rather than disabled, because a
+      // greyed "Erase chip first" next to a Mac download invites the wrong question.
+      // The board grid picks an ESP32 to flash; in desktop mode the target is this computer,
+      // and a stale board selection would also narrow the firmware list to ESP32 variants.
+      const boardCard = document.getElementById("board-grid-card");
+      if (boardCard) boardCard.hidden = desktopMode;
+      const eraseRow = document.getElementById("erase-row");
+      // The button's own control-row, so hiding it doesn't leave an empty row behind.
+      const monitorRow = document.getElementById("monitor-btn")?.closest(".control-row");
+      if (eraseRow) eraseRow.hidden = desktopMode;
+      if (monitorRow) monitorRow.hidden = desktopMode;
     }
 
     syncPortState();
 
+    let portPromptOpen = false;   // one OS prompt at a time (see the click handler below)
     async function openPortPicker() {
+      if (portPromptOpen) return;
+      portPromptOpen = true;
       let granted = false;
       try {
         pickedPort = await navigator.serial.requestPort({});
@@ -703,6 +761,8 @@ document.addEventListener('DOMContentLoaded', () => {
         installPicker.clearDetectedChip();
       } catch (_) {
         // User cancelled the picker — keep whatever was picked before.
+      } finally {
+        portPromptOpen = false;
       }
       syncPortState();
       // Auto-detect right after a fresh grant — the ESP Web Tools / ESPHome
@@ -720,22 +780,22 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    portSelect.addEventListener("change", () => {
-      if (portSelect.value === PICK_NEW) openPortPicker();
-    });
-    // Mousedown rather than click — `change` won't fire when the only
-    // option (the "Pick a port…" entry in the no-port state) is "re-chosen",
-    // and click on a <select> opens the native list before our handler
-    // runs. Mousedown fires before the list pops up; we preventDefault to
-    // suppress the list and open the Web Serial picker instead. Only
-    // applies in the no-port state — once a port is picked the regular
-    // change-event path handles it.
-    portSelect.addEventListener("mousedown", (e) => {
-      if (!pickedPort) {
-        e.preventDefault();
-        openPortPicker();
-      }
-    });
+    function applyPortChoice(value) {
+      if (value === IDLE) return;   // the placeholder is not a choice
+      if (value === DESKTOP) { desktopMode = true; syncPortState(); return; }
+      // Any other choice is about a board again. openPortPicker ends in its own
+      // syncPortState, so only sync here when nothing else will.
+      desktopMode = false;
+      if (value === PICK_NEW) openPortPicker();
+      else syncPortState();
+    }
+
+    portSelect.addEventListener("change", () => applyPortChoice(portSelect.value));
+    // `change` is the only listener here on purpose. A <select> fires `click` when the list
+    // OPENS, so using that to catch a re-pick would launch the OS prompt on top of the list
+    // the user just opened and hide every other option behind it. The IDLE placeholder is
+    // what makes a re-pick work instead: after a cancelled prompt the row returns to it, so
+    // choosing the same option again is a real value change.
 
     // --- Serial monitor -------------------------------------------------
     // Live read-only viewer of the picked port at 115200 baud. Web Serial
@@ -887,7 +947,9 @@ document.addEventListener('DOMContentLoaded', () => {
       // Gate Install on a picked USB port — the web installer requires the user
       // to choose the port in the dropdown before flashing. (notifyPortChanged()
       // below re-evaluates the button whenever pickedPort changes.)
-      hasPort: () => !!pickedPort,
+      // Desktop mode has nothing to open, so the port gate does not apply: the button is a
+      // download and is enabled as soon as an archive for this OS exists.
+      hasPort: () => desktopMode || !!pickedPort,
       onDetect: async () => {
         // The monitor (if open) holds the port — release it before esptool
         // claims it, same as the install path. detect() keeps the port open
@@ -895,7 +957,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (_monitor.port) await closeMonitor();
         return await installer.detect({ port: pickedPort, onLog: appendLog });
       },
-      onInstall: async (firmware, manifestUrl /*, binaryUrl */) => {
+      onInstall: async (firmware, manifestUrl, binaryUrl, entry) => {
+        // A desktop archive is handed to the browser to download; there is no chip to flash
+        // and no port to hold. Anchor-click rather than location.href so the Content-Disposition
+        // from GitHub is honoured and the page is not navigated away mid-session.
+        if (entry && entry.isDesktop) {
+          const a = document.createElement("a");
+          a.href = binaryUrl;
+          a.download = "";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          return;
+        }
         // Remember the firmware being flashed so handleError can fall back to it
         // for the unsupported-chip guidance when no board was picked (the on-device
         // OTA path, or a generic flash) — getSelectedBoardChip() is empty there.
@@ -997,6 +1071,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Show the unsupported-browser banner when Web Serial isn't available.
     if (!("serial" in navigator)) {
       document.getElementById("browser-warning").style.display = "block";
+      // Flashing needs Web Serial; downloading the desktop build does not. On a browser
+      // without it, open on the half that works instead of on a port row that cannot.
+      // After _pickerReady: setDesktopMode reaches the picker's state only once init()
+      // has mounted it, so calling it here synchronously would silently do nothing.
+      if (thisComputerLabel()) { desktopMode = true; syncPortState(); }
     }
 
     // --- picture board grid --------------------------------
@@ -1300,17 +1379,22 @@ document.addEventListener('DOMContentLoaded', () => {
       // #rp-board's <option>s, so observe its child list. The grid then filters
       // to the detected family (allowedNames), and updateSummary picks up any
       // auto-selected single match.
-      const rpBoard = document.getElementById("rp-board");
-      if (rpBoard) {
+      // Observe the picker's CONTAINER, not #rp-board itself: the picker re-renders by
+      // replacing its whole innerHTML (switching install target does this), so a #rp-board
+      // captured once is detached by the first switch and its observer never fires again,
+      // silently killing Detect narrowing. The container node is stable for the page's life,
+      // and `subtree` catches the option swaps inside whichever #rp-board currently exists.
+      const pickerMount = document.getElementById("picker-mount");
+      if (pickerMount) {
         new MutationObserver(() => {
-          showAll = false;   // a fresh detect is a new context — re-apply the filter
-          // Take the picker's value verbatim — an empty string means it cleared the
-          // selection (detected family with multiple matches → generic mode), and
+          showAll = false;   // a fresh detect is a new context, so re-apply the filter
+          // Take the picker's value verbatim: an empty string means it cleared the
+          // selection (detected family with multiple matches, so generic mode), and
           // `|| selected` would wrongly keep the stale board in the summary.
           selected = installPicker.getSelectedBoard();
           updateSummary();
           render();
-        }).observe(rpBoard, { childList: true });
+        }).observe(pickerMount, { childList: true, subtree: true });
       }
 
       updateSummary();   // reflect any restored pick in the collapsed summary

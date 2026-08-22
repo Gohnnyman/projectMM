@@ -51,6 +51,32 @@ else()
                         -Wshadow -Wnon-virtual-dtor -Wdouble-promotion
                         -Wimplicit-fallthrough -Wnull-dereference)
 
+    # GCC through 15 raises four of these on code that is provably correct, and -Werror turns
+    # each into a failed build. They stay ON (a real one still has to be read and dismissed);
+    # they just stop being fatal on the versions that cry wolf:
+    #   -Wnull-dereference   fires on a plain `return member_` inlined through a lambda
+    #                        trampoline, where GCC cannot prove `this` across the thunk, and on
+    #                        `buf.data()[15]` after an allocate(10, 3) it cannot see through.
+    #   -Wrestrict           fires on snprintf(dst, n, "%s", src) where both are members of the
+    #                        same object, which GCC reads as a possible overlap.
+    #   -Wstringop-overflow  fires inside <bits/stl_algobase.h> with a bound "between 2^63 and
+    #                        2^64-1", a range no call in this codebase can produce.
+    #   -Wformat-truncation  fires on snprintf(ssid_, 33, "%s", ssid) because a 99-char SSID
+    #                        would not fit. Truncating there is the documented intent (see
+    #                        NetworkModule.h): an over-long SSID is invalid, and snprintf
+    #                        terminates what it writes.
+    # Five of the twelve are inside libstdc++ and glibc headers (<bits/stl_algobase.h>,
+    # <streambuf>, <stdio2.h>), so no source change can reach them. GCC 16 is clean, which is
+    # why this went unnoticed locally: the maintainer's GCC is 16 and CI's is 13.
+    # A version test rather than a flag probe, deliberately: the flags all EXIST here, it is
+    # their judgement that is wrong, so CheckCXXCompilerFlag would happily confirm them.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+        add_compile_options(-Wno-error=null-dereference
+                            -Wno-error=restrict
+                            -Wno-error=stringop-overflow
+                            -Wno-error=format-truncation)
+    endif()
+
     # Hot-path discipline, enforced by the compiler. MM_NONBLOCKING marks tick/tick20ms/tick1s
     # (platform.h); -Wfunction-effects then checks TRANSITIVELY that nothing they reach
     # allocates or blocks, through the whole call graph. Clang 20+ only; the flag does not
@@ -128,6 +154,16 @@ target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 # Npcap is deliberately NOT linked: platform_desktop.cpp resolves wpcap.dll at run time so the
 # build needs no SDK and the binary runs without it.
 target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32> $<$<PLATFORM_ID:Windows>:iphlpapi>)
+
+# The two libraries genuinely need each other: mm_core calls into the platform surface, and the
+# platform's MoonLive backend calls back into core's target-independent IR passes (lowerWith ->
+# spillToBudget, MoonLiveSpill.cpp). Declaring the cycle makes CMake repeat both archives on the
+# link line until the symbols resolve. Apple's linker and MSVC search archives repeatedly and
+# never noticed; GNU ld makes ONE left-to-right pass, so the reference from mm_platform back into
+# mm_core is unresolved unless the cycle is declared.
+target_link_libraries(mm_platform PUBLIC mm_core)
+set_target_properties(mm_core     PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)
+set_target_properties(mm_platform PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)
 
 # Generate build_info.h from library.json + git (carries version, build id, build date, board name).
 # ALWAYS out-of-date on purpose — see the same rule in esp32/main/CMakeLists.txt for why: MM_BUILD_ID

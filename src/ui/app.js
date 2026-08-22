@@ -1188,7 +1188,20 @@ function createCard(mod, depth) {
             // releases + firmware compatibility only. Showing a board picker
             // here would invite the user to mis-narrow the firmware list.
             enableBoardPicker: false,
-            onInstall: async (_firmware, _manifestUrl, binaryUrl) => {
+            onInstall: async (_firmware, _manifestUrl, binaryUrl, entry) => {
+                // A desktop build has no OTA: it updates by downloading a new release and being
+                // replaced by hand. So hand the browser the file and let it do what it does with a
+                // download, rather than POSTing to a route that would 501 here.
+                if (entry && entry.isDesktop) {
+                    const a = document.createElement("a");
+                    a.href = binaryUrl;
+                    a.rel = "noopener";
+                    a.target = "_blank";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    return;
+                }
                 const res = await fetch("/api/firmware/url", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -4202,6 +4215,21 @@ async function cachedJson(url, key, force) {
     return p;
 }
 
+// Which release asset would UPDATE this machine? An ESP32 installs a firmware-<variant>-<ver>.bin
+// through the Firmware card; a desktop downloads an archive and replaces its own binary by hand.
+// Both still want to be TOLD there is a newer version, which is what the badge is for.
+//
+// A desktop reports firmware "unknown" (there is no variant to name), which is how we tell them
+// apart. Before this, that value was truthy and the check looked for a firmware-unknown-*.bin that
+// no release has ever contained, so a desktop user was never told anything.
+function desktopAssetPrefix() {
+    const p = (navigator.platform || "") + " " + (navigator.userAgent || "");
+    if (/Win/i.test(p)) return "projectMM-windows-x64-v";
+    if (/Mac/i.test(p)) return "projectMM-macos-arm64-v";
+    if (/Linux|X11/i.test(p)) return "projectMM-linux-x64-v";
+    return null;                                   // an OS we do not package: say nothing
+}
+
 // Read the device's running version + firmware-variant key off the FirmwareUpdateModule.
 function deviceFirmwareInfo() {
     if (!state || !state.modules) return null;
@@ -4210,15 +4238,23 @@ function deviceFirmwareInfo() {
     const ctrls = fw.controls || [];
     const version = (ctrls.find(c => c.name === "version") || {}).value;
     const firmware = (ctrls.find(c => c.name === "firmware") || {}).value;
-    return version ? { version, firmware } : null;
+    // "unknown" is what a desktop build reports: no ESP32 variant to name.
+    const isDesktop = !firmware || firmware === "unknown";
+    return version ? { version, firmware: isDesktop ? null : firmware, isDesktop } : null;
 }
 
 // Light the badge for an available update. `tag` is the release the picker should pre-select
 // (a vX.Y.Z stable tag, or "latest"); `label` is what the badge shows.
-function showUpdateBadge(badge, tag, label) {
+function showUpdateBadge(badge, tag, label, isDesktop) {
     badge.textContent = `⬆ ${label}`;
-    badge.title = `Firmware update available: ${label} — open Firmware to install`;
+    // A desktop cannot install from the Firmware card: it has no OTA, and updating means
+    // downloading an archive and replacing the binary. So the badge sends it to the release page
+    // instead of a card that would offer it nothing.
+    badge.title = isDesktop
+        ? `Update available: ${label}. Open the release page to download`
+        : `Firmware update available: ${label}. Open Firmware to install`;
     badge.dataset.tag = tag;
+    badge.dataset.desktop = isDesktop ? "1" : "";
     badge.hidden = false;
 }
 
@@ -4228,8 +4264,13 @@ async function stableUpdate(dev, force) {
     const rel = await cachedJson(`${RELEASES_API}/latest`, "projectMM.update.latest.v1", force);
     if (!rel || !rel.tag_name) return null;
     const assetNames = (rel.assets || []).map(a => a.name);
-    const hasBinary = !dev.firmware ||
-        assetNames.some(n => n === `firmware-${dev.firmware}-${rel.tag_name}.bin`);
+    const prefix = dev.isDesktop ? desktopAssetPrefix() : null;
+    const hasBinary = dev.isDesktop
+        // A desktop is told about a release that actually ships a build for ITS OS: an archive
+        // named for the platform, rather than a firmware .bin it could not install anyway.
+        ? !!prefix && assetNames.some(n => n.startsWith(prefix))
+        : !dev.firmware ||
+          assetNames.some(n => n === `firmware-${dev.firmware}-${rel.tag_name}.bin`);
     return (isNewer(rel.tag_name, dev.version) && hasBinary) ? rel.tag_name : null;
 }
 
@@ -4241,13 +4282,16 @@ async function stableUpdate(dev, force) {
 // We also require the matching firmware .bin asset so the badge never points at a build the
 // device can't install.
 async function devUpdate(dev, force) {
-    if (!dev.firmware) return null;                          // can't match an asset without the key
+    if (!dev.firmware && !dev.isDesktop) return null;        // can't match an asset without the key
     const rel = await cachedJson(`${RELEASES_API}/tags/latest`, "projectMM.update.dev.v1", force);
     const v = rel && rel.name;
     if (!v) return null;
     // Assets are versioned, not tagged: the `latest` release ships
     // firmware-<fw>-v<version>.bin (release.yml stages PREFIX="firmware-...-v$V").
-    const hasBinary = (rel.assets || []).some(a => a.name === `firmware-${dev.firmware}-v${v}.bin`);
+    const prefix = dev.isDesktop ? desktopAssetPrefix() : null;
+    const hasBinary = dev.isDesktop
+        ? !!prefix && (rel.assets || []).some(a => a.name.startsWith(prefix))
+        : (rel.assets || []).some(a => a.name === `firmware-${dev.firmware}-v${v}.bin`);
     return (hasBinary && isNewer(v, dev.version)) ? v : null;
 }
 
@@ -4260,14 +4304,14 @@ async function checkFirmwareUpdate(force) {
     if (!dev) { badge.hidden = true; return; }
 
     const stableTag = await stableUpdate(dev, force);
-    if (stableTag) { showUpdateBadge(badge, stableTag, stableTag); return; }
+    if (stableTag) { showUpdateBadge(badge, stableTag, stableTag, dev.isDesktop); return; }
 
     // Only a prerelease (-dev…) build follows the moving latest channel; a stable device is
     // not nudged toward an unreleased build.
     const onPrerelease = (parse(dev.version)?.prerelease.length || 0) > 0;
     if (onPrerelease) {
         const devVer = await devUpdate(dev, force);
-        if (devVer) { showUpdateBadge(badge, "latest", `latest (${devVer})`); return; }
+        if (devVer) { showUpdateBadge(badge, "latest", `latest (${devVer})`, dev.isDesktop); return; }
     }
     badge.hidden = true;
 }
@@ -4278,6 +4322,12 @@ function setupUpdateBadge() {
     const badge = document.getElementById("fw-update-badge");
     if (!badge) return;
     badge.addEventListener("click", () => {
+        if (badge.dataset.desktop) {
+            const tag = badge.dataset.tag || "latest";
+            window.open(`https://github.com/MoonModules/projectMM/releases/tag/${tag}`, "_blank",
+                        "noopener");
+            return;
+        }
         if (badge.dataset.tag) safeLocalSet(PICKER_RELEASE_KEY, badge.dataset.tag);
         selectModule("Firmware");
     });
