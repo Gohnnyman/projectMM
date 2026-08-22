@@ -38,12 +38,13 @@ static std::vector<uint8_t> render(const char* src, int nLights, uint32_t t = 0)
 }
 #endif
 
-// The compile-through-run tests need a working host JIT — the assembler (moonlive_asm_host.cpp)
-// is arm64-only today, so on x86_64 desktops compileSource returns !ok ("codegen failed") and
-// every "should compile" assertion fails. Guarded on the emit-header capability macro so they
-// compile out where the backend is unimplemented — the same "runs dark" degradation on-device.
-// The malformed-input tests further down don't gate: they assert failure, which succeeds for
-// the right reason (parse rejects) on arm64 and for a compatible reason (no codegen) on x86_64.
+// The compile-through-run tests need a working host JIT. The assembler (moonlive_asm_host.cpp)
+// covers arm64 and x86-64, so these run on every desktop the project supports; a host with
+// neither, or a --no-jit build, gets !ok ("codegen failed") and every "should compile" assertion
+// would fail. Guarded on the emit-header capability macro so they compile out there instead —
+// the same "runs dark" degradation as on-device. The malformed-input tests further down don't
+// gate: they assert failure, which succeeds for the right reason (parse rejects) with a backend
+// and for a compatible reason (no codegen) without one.
 #if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("compileSource: fill(r,g,b) fills every light") {
     auto buf = render(mmScript("fill(10, 20, 200);"), 8);
@@ -379,7 +380,12 @@ TEST_CASE("a script cannot declare a name the engine already defines") {
 // tested and the counter never advanced — a hang on the render task, from a script a user can type
 // into the editor. Robustness says any input degrades visibly rather than wedging the device.
 TEST_CASE("a nested loop cannot reuse the enclosing loop's variable") {
-    uint8_t out[512];
+    // 1 KB, not the 512 this test carried from the arm64-only era: the sequential-loops case at
+    // the bottom emits 584 bytes on x86-64 (two call sites; that backend saves/restores its full
+    // pool around each). The production path sizes from codeCapFor (≈2.3 KB for this script), so
+    // the constant here is scaffolding — the x86-64 density itself is pinned in
+    // unit_moonlive_codegen_x86_64.cpp's canary.
+    uint8_t out[1024];
     auto r = moonlive::compileSource(
         mmScript("for (i = 0; i < 2; i = i + 1) { for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); } }"),
         kTable, kSys, out, sizeof(out));

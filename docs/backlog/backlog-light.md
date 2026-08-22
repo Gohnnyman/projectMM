@@ -308,20 +308,6 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 
 - **A scripted modifier that reshapes the grid** (2026-08-10). `ModifierBase::modifyLogicalSize` lets a modifier change the logical `width`/`height`/`depth` — a Multiply kaleidoscope grows the grid, a crop shrinks it — and a compiled modifier uses it. A SCRIPTED one cannot: system variables are read-only, so `MoonLiveModifier` writes the box in and never reads it back. Needs a writable system variable — the binding reads the slots after the script returns and reports the result through `modifyLogicalSize` — which is a new `SysVarKind` (or a mutable flag on `SysVar`) plus the read-back, not a new builtin. Until then a scripted modifier can fold coordinates but not resize the grid they live in.
 
-- **MoonLive has no x86-64 backend — scripts do not run on Windows** (2026-08-14). The desktop
-  assembler (`moonlive_asm_host.cpp`) is arm64-only, so `MM_MOONLIVE_HAS_HOST_JIT` is 0 on x86-64
-  Windows, x86-64 Linux and Intel macOS. `compileSource` fails cleanly there and scripted modules
-  render dark — no crash, but no MoonLive either, on the desktop platform most users run. Apple
-  Silicon macOS is the only desktop where scripts work today, which is why this stayed invisible:
-  the bench is arm64 and CI's x86-64 runners gate their MoonLive tests on the macro.
-
-  Closing it is one more backend behind the unchanged IR (the seam's whole promise): an
-  `x86_64` branch alongside the three that exist. It is the widest ISA of the four — variable-length
-  encoding, and a different calling convention per OS (System V on Linux/macOS, Microsoft x64 on
-  Windows), so the `call()` save-set and argument registers differ from everything written so far.
-  `disasm.py --isa x86_64` should land with it, since no test executes emitted bytes for any backend
-  but the host's.
-
 - **The compile-failure latch is not provable on the host** (2026-08-18). `MoonLiveScript::sync`
   refuses to re-attempt a script that failed until its (name, content) changes. The latch exists for
   a device-only reason: each attempt is two LittleFS reads (~5 ms on an S3), a layout is asked from

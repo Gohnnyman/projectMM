@@ -36,6 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 # (see merge_carry_forward). Same single source of truth check_firmwares.py reads.
 sys.path.insert(0, str(ROOT / "moondeck" / "build"))
 from build_esp32 import FIRMWARES  # noqa: E402
+from build_desktop import desktop_binary  # noqa: E402 (one definition of where it lands)
 HEALTH_FILE = ROOT / "docs" / "metrics" / "repo-health.json"
 # The same snapshot as a table a human reads: units applied, ratios as percentages, areas
 # grouped. The JSON stays the source the delta is computed from; this is the view. Both
@@ -110,23 +111,55 @@ def measure_comments():
 
 
 def measure_flash():
-    """Built firmware size per variant, in bytes.
+    """Built firmware size per variant, in bytes — STALE BINARIES EXCLUDED.
 
-    Only variants present in build/ are reported. A variant that was not built this run
-    carries its previous number forward (see merge_carry_forward) rather than vanishing:
-    a docs-only commit genuinely did not change any firmware size.
+    Only variants whose binary is newer than the sources are reported. A variant that was
+    not built this run carries its previous number forward (see merge_carry_forward) rather
+    than vanishing: a docs-only commit genuinely did not change any firmware size.
+
+    The freshness rule is what makes the carry-forward honest. Reporting whatever `.bin`
+    happens to sit in a build dir means a months-old artifact is re-measured as if it were
+    this commit's, and the delta printed against the baseline is then pure noise. On a bench
+    holding five old firmwares that produced "−230 KB ✓", "−193 KB ✓", "−279 KB ✓" in one run,
+    for firmwares nobody had rebuilt, because the baseline had been recorded on a different
+    machine. A metric that moves when nothing was built is worse than a missing one: it is
+    read as a result. Same predicate as check_esp32_built.py, imported rather than restated.
     """
+    sys.path.insert(0, str(ROOT / "moondeck" / "check"))
+    from check_esp32_built import newest_source, compiled_sources
+
     flash = {}
     build = ROOT / "build"
     if not build.exists():
         return flash
     for d in sorted(build.glob("esp32-*")):
         binary = d / "projectMM.bin"
-        if binary.exists():
-            flash[d.name.replace("esp32-", "", 1)] = binary.stat().st_size
-    desktop = ROOT / "build" / "projectMM"
-    if desktop.exists():
-        flash["desktop"] = desktop.stat().st_size
+        if not binary.exists():
+            continue                       # never built here: carry the previous number forward
+        firmware = d.name.replace("esp32-", "", 1)
+        # One stat, so the size recorded and the timestamp judged describe the same file even if
+        # a build lands mid-loop. STRICTLY newer: equal mtimes mean a source was written in the
+        # same filesystem tick as the binary, and which came first is unknowable, so the honest
+        # reading is "might be stale" rather than "fresh".
+        st = binary.stat()
+        _, newest = newest_source(compiled_sources(firmware))
+        if st.st_mtime <= newest:
+            continue
+        flash[firmware] = st.st_size
+    # The desktop binary, located by build_desktop.desktop_binary() so this and collect_kpi.py
+    # cannot name different files in the same run. A bare build/projectMM matched nothing off
+    # macOS, so this metric silently carried a foreign machine's number forward while reading as
+    # a measurement: the same defect the firmware freshness rule above exists to prevent.
+    #
+    # Held to the SAME freshness rule as the firmwares rather than trusting the build gate to have
+    # just built it. That gate does, but `collect_kpi.py --commit` is also run standalone, where
+    # nothing builds first, and a rule that holds only inside one caller is not a rule.
+    desktop = desktop_binary()
+    if desktop:
+        st = desktop.stat()
+        _, newest = newest_source()
+        if st.st_mtime > newest:
+            flash["desktop"] = st.st_size
     return flash
 
 

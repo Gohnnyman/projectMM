@@ -142,18 +142,18 @@ constexpr bool hasImprov = false;
 } // namespace mm::platform
 
 // MM_MOONLIVE_HAS_HOST_JIT — 1 when this desktop host has BOTH the emit blob AND the general
-// assembler (moonlive_asm_host.cpp) available. Both are arm64-only today; x86_64 Windows/Linux/
-// Intel-macOS desktops ship without a backend and MoonLive::compile / compileSource fail
-// cleanly (scripted modules render dark). Tests and scenarios that presuppose a working JIT
-// gate on this macro. Kept in platform_config.h (not core) per the platform-boundary rule:
+// assembler (moonlive_asm_host.cpp) available. Both arm64 and x86-64 are supported; the x86-64
+// backend switches internally on _WIN32 between Microsoft x64 (Windows) and System V (Linux /
+// Intel-macOS). Any other host ISA falls through here and MoonLive::compile / compileSource
+// fail cleanly (scripted modules render dark). Tests and scenarios that presuppose a working
+// JIT gate on this macro. Kept in platform_config.h (not core) per the platform-boundary rule:
 // no `#if defined(__aarch64__)` outside src/platform/. A #define (not constexpr) so #include-
 // side test files can use it in `#if` — CLAUDE.md's `if constexpr` preference is for runtime
 // branches inside code, not preprocessor gating around whole TEST_CASEs.
-// MM_MOONLIVE_FORCE_NO_HOST_JIT makes an arm64 machine build as a backend-less one
-// (build_desktop.py --no-jit). Every x86-64 desktop already is one, so a test that wrongly
-// presumes a compile succeeds passes on an arm64 bench and fails only once CI runs it. The
-// override lets that be caught before a push instead of after.
-#if defined(__aarch64__) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
+// MM_MOONLIVE_FORCE_NO_HOST_JIT makes a JIT-capable machine build as a backend-less one
+// (build_desktop.py --no-jit) — useful for testing the dark-render path on the same box that
+// normally has a live backend.
+#if (defined(__aarch64__) || defined(__x86_64__) || defined(_M_X64)) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
     #define MM_MOONLIVE_HAS_HOST_JIT 1
 #else
     #define MM_MOONLIVE_HAS_HOST_JIT 0

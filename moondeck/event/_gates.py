@@ -17,12 +17,22 @@ The changed-file set comes from git and is the single input every trigger reads,
 trigger is a pure function of the diff rather than a guess.
 """
 
+import os
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+
+# The desktop build dir is PER HOST (build/windows, build/macos, build/linux) — build_desktop.py
+# owns that mapping, so import it rather than re-deriving it here. Two gates hardcoded a bare
+# "build" and both were wrong off macOS: the build gate failed with "not a CMake build directory",
+# and — far worse — `ctest --test-dir build` found no tests and exited 0, so the unit-test gate
+# reported PASS without running anything. A gate that passes vacuously is worse than no gate.
+sys.path.insert(0, str(ROOT / "moondeck" / "build"))
+from build_desktop import GCC_CANDIDATES, host_build_dir  # noqa: E402  (path set just above)
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -101,6 +111,33 @@ class Gate:
 
 UV = ["uv", "run"]
 
+
+def _child_env():
+    """The environment a gate's subprocess runs in: this one, plus UTF-8 stdio.
+
+    The check scripts print ✓, →, — and box-drawing characters. A child's stdout is a PIPE
+    here, so Python picks `locale.getpreferredencoding()` for it — cp1252 on a Windows bench —
+    and the FIRST such character raises UnicodeEncodeError *inside the child*. Two gates died
+    that way after their real work had already succeeded and printed "None new since the
+    baseline": a green check reported as FAIL because of a tick mark. PYTHONIOENCODING fixes
+    every gate at once rather than each script re-deriving it, and the matching encoding= on
+    the parent's side stops the mojibake (— arriving as a replacement char) in captured output.
+    """
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
+
+
+def _have_gcc():
+    """True when a REAL GCC is installed: the names build_desktop.py --gcc would use.
+
+    Reads that module's GCC_CANDIDATES rather than gcc_pair(), because gcc_pair EXITS when it
+    finds nothing, which is right for a build and wrong for a trigger deciding whether a gate
+    applies. Sharing the list is what keeps the trigger and the build from disagreeing about
+    what counts as an installed GCC.
+    """
+    return any(shutil.which(cxx) for cxx in GCC_CANDIDATES)
+
 # What "this change could affect the desktop binary" means, and what it means for an
 # ESP32 image. Named once here because every event script asks the same two questions;
 # re-typing the tuples per script is how the lists drift apart.
@@ -130,9 +167,18 @@ def mechanical_gates(firmware, esp32="freshness", triggered=True):
         # Cheap and triggered: only the three front pages can break it.
         Gate("front pages agree", UV + ["moondeck/check/check_taglines.py"],
              when("README.md", "docs/index.md", "CLAUDE.md")),
-        Gate("desktop build (zero warnings)", ["cmake", "--build", "build"],
+        Gate("desktop build (zero warnings)", ["cmake", "--build", host_build_dir()],
              when(*COMPILES_DESKTOP)),
-        Gate("unit tests", ["ctest", "--test-dir", "build", "--output-on-failure"],
+        # --no-tests=error, because "no tests found" is a BROKEN GATE, not a pass: ctest exits 0
+        # on an empty project, so a wrong --test-dir reported PASS in 0.1s while running nothing.
+        # The flag turns that into the failure it always was.
+        #
+        # -C Release names the CONFIGURATION, which a multi-config generator (Visual Studio, the
+        # Windows default) requires and a single-config one (Makefiles, Ninja) ignores — so one
+        # spelling serves every host.
+        Gate("unit tests",
+             ["ctest", "--test-dir", host_build_dir(), "--output-on-failure",
+              "--no-tests=error", "-C", "Release"],
              when(*COMPILES_DESKTOP)),
         # Scenarios also re-run when only a scenario JSON changed.
         Gate("scenario tests", UV + ["moondeck/scenario/run_scenario.py"],
@@ -144,15 +190,21 @@ def mechanical_gates(firmware, esp32="freshness", triggered=True):
         # transitively, so a missing #include is green locally and red on every CI job. With
         # -Werror those are hard failures discovered only after a push. Compiling with the real
         # thing answers it here — see build_desktop.py --gcc for the four cycles that cost once.
+        #
+        # Conditional on GCC EXISTING, which on a Windows/MSVC bench it does not: an absent
+        # toolchain is "this check does not apply here", the definition of SKIP, and reporting it
+        # as FAIL trains the reader to scroll past a red line — the one habit a gate list cannot
+        # afford. CI runs Linux, so the check still guards every push.
         Gate("GCC build (CI's toolchain)",
              UV + ["moondeck/build/build_desktop.py", "--gcc", "--tests"],
-             when(*COMPILES_DESKTOP)),
-        # The other half of "green here, red on CI": this bench is arm64 and has a MoonLive
-        # backend, while every x86-64 desktop (Windows, Linux, Intel macOS, and CI's runners)
-        # has none. A test that presumes a script compiles therefore passes locally and fails
-        # only after a push. Building with the backend gated out runs the suite the way those
-        # hosts see it. Triggered by MoonLive sources and by the tests that exercise them.
-        Gate("no-backend build (the x86-64 desktop's view)",
+             (lambda f: _have_gcc() and (not triggered or touches(f, *COMPILES_DESKTOP)))),
+        # Every desktop the project supports HAS a MoonLive backend (arm64 and x86-64 both). This
+        # gate builds the one configuration that does not: MM_MOONLIVE_FORCE_NO_HOST_JIT, which is
+        # the view a future host with no backend gets, and the view --no-jit gives a developer
+        # testing the dark-render degradation. It stays because the guarded-out path has to keep
+        # compiling: a helper defined outside its guard is unused there, which GCC makes fatal
+        # under -Werror while clang stays silent. Triggered by MoonLive sources and their tests.
+        Gate("no-backend build (the backend-less view)",
              UV + ["moondeck/build/build_desktop.py", "--no-jit", "--tests"],
              lambda f: touches(f, "src/core/moonlive/", "src/light/moonlive/",
                                "src/platform/desktop/moonlive", "test/unit/core/unit_moonlive",
@@ -222,7 +274,8 @@ def run_gates(gates, files, title, next_step=""):
         if _TTY:
             print(f"  ...    {gate.name}", end="\r", flush=True)
         started = time.time()
-        proc = subprocess.run(gate.command, cwd=ROOT, capture_output=True, text=True)
+        proc = subprocess.run(gate.command, cwd=ROOT, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=_child_env())
         elapsed = time.time() - started
         status = PASS if proc.returncode == 0 else FAIL
         detail = "" if status == PASS else (proc.stdout + proc.stderr)
