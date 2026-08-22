@@ -152,6 +152,16 @@ target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 # Winsock for the desktop socket surface on Windows.
 target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32>)
 
+# The two libraries genuinely need each other: mm_core calls into the platform surface, and the
+# platform's MoonLive backend calls back into core's target-independent IR passes (lowerWith ->
+# spillToBudget, MoonLiveSpill.cpp). Declaring the cycle makes CMake repeat both archives on the
+# link line until the symbols resolve. Apple's linker and MSVC search archives repeatedly and
+# never noticed; GNU ld makes ONE left-to-right pass, so the reference from mm_platform back into
+# mm_core is unresolved unless the cycle is declared.
+target_link_libraries(mm_platform PUBLIC mm_core)
+set_target_properties(mm_core     PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)
+set_target_properties(mm_platform PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)
+
 # Generate build_info.h from library.json + git (carries version, build id, build date, board name).
 # ALWAYS out-of-date on purpose — see the same rule in esp32/main/CMakeLists.txt for why: MM_BUILD_ID
 # must track the git hash on every build, and pinning this to library.json's mtime is what made the
