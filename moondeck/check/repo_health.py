@@ -135,12 +135,17 @@ def measure_flash():
     for d in sorted(build.glob("esp32-*")):
         binary = d / "projectMM.bin"
         if not binary.exists():
-            continue
+            continue                       # never built here: carry the previous number forward
         firmware = d.name.replace("esp32-", "", 1)
+        # One stat, so the size recorded and the timestamp judged describe the same file even if
+        # a build lands mid-loop. STRICTLY newer: equal mtimes mean a source was written in the
+        # same filesystem tick as the binary, and which came first is unknowable, so the honest
+        # reading is "might be stale" rather than "fresh".
+        st = binary.stat()
         _, newest = newest_source(compiled_sources(firmware))
-        if newest > binary.stat().st_mtime:
-            continue                       # stale — let the previous number carry forward
-        flash[firmware] = binary.stat().st_size
+        if st.st_mtime <= newest:
+            continue
+        flash[firmware] = st.st_size
     # The desktop binary, under the PER-HOST build dir and under the config subdir a multi-config
     # generator adds (Visual Studio puts it in Release/; Ninja and Makefiles do not). A bare
     # build/projectMM matched none of them off macOS, so this metric silently carried a foreign

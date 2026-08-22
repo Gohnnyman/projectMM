@@ -28,10 +28,18 @@
 #elif defined(MM_EMIT_X86_64)
 // No macro to define: the desktop backend's x86-64 branch is selected by the HOST's own
 // `__x86_64__` / `_M_X64`, so this ISA reads what the machine already compiles. That also means
-// it only works ON an x86-64 host — the arm64 branch above it wins on an Apple Silicon machine,
+// it only works ON an x86-64 host: the arm64 branch above it wins on an Apple Silicon machine,
 // and a native architecture macro cannot be undefined. The device ISAs cross-emit because they
 // are gated on macros no host defines; this one does not, which is the honest trade for having
 // the same file serve as both the host backend and a tool target.
+//
+// REFUSED rather than silently wrong on any other host. Without this, an arm64 machine compiles
+// the arm64 branch, disasm.py hands the bytes to objdump as i386:x86-64, and the output is a
+// plausible-looking x86-64 listing of arm64 instructions: the exact "the tool answered, and the
+// answer was fiction" failure this tool exists to end.
+#if !defined(__x86_64__) && !defined(_M_X64)
+#error "MM_EMIT_X86_64 requires an x86-64 host; run --isa x86_64 on an x86-64 machine"
+#endif
 #include "platform/desktop/moonlive_asm_host.h"
 #include "platform/desktop/moonlive_asm_host.cpp"
 #else

@@ -36,6 +36,12 @@ def host_build_dir() -> str:
     }.get(sys_name, f"build/{sys_name.lower()}")
 
 
+# The g++ names a real GCC install goes by, newest first. ONE list: _gates.py's GCC-build trigger
+# reads it too, to decide whether that gate applies at all, and a second copy there would silently
+# disagree the first time a version is added.
+GCC_CANDIDATES = ("g++-16", "g++-15", "g++-14", "g++-13")
+
+
 def gcc_pair():
     """(cc, cxx) for a real GCC, or exit with how to get one.
 
@@ -45,7 +51,7 @@ def gcc_pair():
     GCC does not. With -Werror a hard rule, every divergence is a CI failure you cannot see locally.
     That cost four push-and-discover cycles once; this flag is so it costs zero.
     """
-    for cxx in ("g++-16", "g++-15", "g++-14", "g++-13"):
+    for cxx in GCC_CANDIDATES:
         if shutil.which(cxx):
             return cxx.replace("g++", "gcc"), cxx
     sys.exit("no GCC found — `brew install gcc` (macOS) or `apt install g++` (Linux).\n"

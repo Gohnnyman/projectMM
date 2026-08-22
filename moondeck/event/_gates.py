@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 # and — far worse — `ctest --test-dir build` found no tests and exited 0, so the unit-test gate
 # reported PASS without running anything. A gate that passes vacuously is worse than no gate.
 sys.path.insert(0, str(ROOT / "moondeck" / "build"))
-from build_desktop import host_build_dir  # noqa: E402  (path set immediately above)
+from build_desktop import GCC_CANDIDATES, host_build_dir  # noqa: E402  (path set just above)
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -129,13 +129,14 @@ def _child_env():
 
 
 def _have_gcc():
-    """True when a REAL GCC is installed — the same names build_desktop.py --gcc looks for.
+    """True when a REAL GCC is installed: the names build_desktop.py --gcc would use.
 
-    Kept in step with gcc_pair() there; if that list grows a version, this one follows. Not
-    imported from it because that function EXITS when it finds nothing, which is right for a
-    build and wrong for a trigger.
+    Reads that module's GCC_CANDIDATES rather than gcc_pair(), because gcc_pair EXITS when it
+    finds nothing, which is right for a build and wrong for a trigger deciding whether a gate
+    applies. Sharing the list is what keeps the trigger and the build from disagreeing about
+    what counts as an installed GCC.
     """
-    return any(shutil.which(cxx) for cxx in ("g++-16", "g++-15", "g++-14", "g++-13"))
+    return any(shutil.which(cxx) for cxx in GCC_CANDIDATES)
 
 # What "this change could affect the desktop binary" means, and what it means for an
 # ESP32 image. Named once here because every event script asks the same two questions;

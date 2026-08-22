@@ -77,7 +77,9 @@ def objdump(isa: str) -> str:
         found = subprocess.run(["xcrun", "-f", "llvm-objdump"], capture_output=True, text=True)
         if found.returncode == 0 and found.stdout.strip():
             return found.stdout.strip()
-        sys.exit("llvm-objdump not found — needed to disassemble arm64")
+        # Names the ISA asked for: two targets now take this branch (arm64 and x86_64), so a
+        # hardcoded "arm64" sends the reader looking at the wrong one.
+        sys.exit(f"llvm-objdump not found, needed to disassemble {isa}")
     hits = glob.glob(os.path.expanduser(pattern))
     if not hits:
         sys.exit(f"objdump for {isa} not found — install the matching ESP-IDF toolchain")
