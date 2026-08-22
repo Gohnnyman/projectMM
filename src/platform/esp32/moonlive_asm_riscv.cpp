@@ -1,3 +1,4 @@
+#include "core/moonlive/moonlive_lower.h"   // the one IR walk, shared by every backend
 #include "moonlive_asm_riscv.h"
 
 #include <cstring>
@@ -308,6 +309,14 @@ void RiscvAssembler::patchBranches() {
         }
         std::memcpy(buf_ + f.at, &w, 4);
     }
+}
+
+
+// The two-line binding of core's IR walk to THIS assembler. It lives here rather than in its own
+// file because a template instantiation can only exist where its argument does: `lowerToBytes` for
+// riscv is not separable from RiscvAssembler.
+size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squeeze) {
+    return lowerWith<RiscvAssembler>(ir, out, cap, squeeze, kRegCount);
 }
 
 }  // namespace mm::moonlive

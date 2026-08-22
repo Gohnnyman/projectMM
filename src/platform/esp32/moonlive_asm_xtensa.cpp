@@ -1,3 +1,4 @@
+#include "core/moonlive/moonlive_lower.h"   // the one IR walk, shared by every backend
 #include "moonlive_asm_xtensa.h"
 
 #include <cstring>
@@ -482,6 +483,14 @@ void XtensaAssembler::patchBranches() {
         buf_[f.at + 1] = static_cast<uint8_t>(enc >> 8);
         buf_[f.at + 2] = static_cast<uint8_t>(enc >> 16);
     }
+}
+
+
+// The two-line binding of core's IR walk to THIS assembler. It lives here rather than in its own
+// file because a template instantiation can only exist where its argument does: `lowerToBytes` for
+// xtensa is not separable from XtensaAssembler.
+size_t lowerToBytes(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squeeze) {
+    return lowerWith<XtensaAssembler>(ir, out, cap, squeeze, kRegCount);
 }
 
 }  // namespace mm::moonlive

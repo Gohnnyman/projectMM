@@ -105,6 +105,13 @@ constexpr EthFixedPad ethFixedPads[] = {
 constexpr uint8_t ethFixedPadCount = 6;
 #endif
 #if defined(CONFIG_IDF_TARGET_ESP32S31) || defined(CONFIG_IDF_TARGET_ESP32P4) || defined(CONFIG_IDF_TARGET_ESP32)
+// MoonLive emits native code per ISA (moonlive_emit_xtensa.cpp / moonlive_emit_riscv.cpp, and the
+// assemblers beside them). Every ESP32 is one or the other, so a third is an unfinished port rather
+// than a configuration: fail the build here instead of shipping a device whose scripts run dark.
+#if !defined(__XTENSA__) && !defined(__riscv)
+#error "MoonLive ESP32 backend: unsupported ISA (expected Xtensa or RISC-V)"
+#endif
+
 static_assert(ethFixedPadCount == sizeof(ethFixedPads) / sizeof(ethFixedPads[0]),
               "the count gates every loop over this list: a mismatch reads past the end");
 #else

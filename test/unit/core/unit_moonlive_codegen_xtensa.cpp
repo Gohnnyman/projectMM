@@ -43,7 +43,6 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 #define __XTENSA__ 1
 #include "platform/esp32/moonlive_asm_xtensa.h"
 #include "platform/esp32/moonlive_asm_xtensa.cpp"
-#include "platform/esp32/moonlive_lower_xtensa.cpp"
 #undef __XTENSA__
 }  // namespace mm_xtensa_backend
 

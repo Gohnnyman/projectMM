@@ -38,7 +38,6 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 #define __riscv 1
 #include "platform/esp32/moonlive_asm_riscv.h"
 #include "platform/esp32/moonlive_asm_riscv.cpp"
-#include "platform/esp32/moonlive_lower_riscv.cpp"
 #undef __riscv
 }  // namespace mm_riscv_backend
 

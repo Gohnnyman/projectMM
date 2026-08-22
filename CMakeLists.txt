@@ -115,9 +115,12 @@ target_link_libraries(mm_core PUBLIC mm_platform)
 # codegen) — it lives here because emitted machine code is platform/ISA-specific.
 add_library(mm_platform
     src/platform/desktop/platform_desktop.cpp
-    src/platform/desktop/moonlive_emit.cpp
-    src/platform/desktop/moonlive_asm_host.cpp
-    src/platform/desktop/moonlive_lower_host.cpp
+    src/platform/desktop/moonlive_emit_noarch.cpp
+    src/platform/desktop/moonlive_asm_noarch.cpp
+    src/platform/desktop/moonlive_emit_arm64.cpp
+    src/platform/desktop/moonlive_emit_x86_64.cpp
+    src/platform/desktop/moonlive_asm_arm64.cpp
+    src/platform/desktop/moonlive_asm_x86_64.cpp
 )
 target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 # Winsock for the desktop socket surface on Windows.
