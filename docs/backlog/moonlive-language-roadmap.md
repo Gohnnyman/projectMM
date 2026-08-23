@@ -102,7 +102,81 @@ Item 5 is worth noting against the arena work below: a particle pool as a HANDLE
 does not spend its own 64 bytes on particle state at all. That is a better answer than widening
 the arena, and it is already designed.
 
+## The type system: the settled design (2026-08-23)
+
+Decided with the product owner after the signed-values work, whose four bugs were all
+storage-width plumbing at the scalar boundary (a wrapped uint16 member, a sentinel read through a
+16-bit window, a one-byte store into a two-byte member, a sign-blind array load). The design
+removes that boundary rather than patching it again. This section supersedes the per-width
+thinking in items 3, 5 and 10 below; those entries stay for their history and their measurements.
+
+**Five types, each usable as scalar or array; one storage rule each way:**
+
+> `int`, `byte`, `bool`, `fixed`, `string`. Every SCALAR occupies one uniform 4-byte slot,
+> whatever its type. ARRAYS pack by element type. Strings are literals.
+
+A type is a SEMANTIC, not a storage width, for scalars: a `byte` scalar is an int the compiler
+masks to 8 bits on assignment (one AND), a `bool` normalizes to 0/1 (one compare), `fixed` is an
+int with scaled literals and a shifted multiply, `int` is bare. That single move is what buys
+orthogonality without resurrecting the width machinery: one scalar load, one scalar store, no
+sign windows, no width-matched bindings, no alignment rules. The width question survives only in
+arrays, where it pays for itself in memory, and the array access path already carries an element
+width (`idxPack`), so packed arrays are existing machinery rather than new.
+
+| Type | Min | Max | Step | The range is enough because |
+|---|---|---|---|---|
+| `int` | -2,147,483,648 | 2,147,483,647 | 1 | The domain's biggest integers: the ms clock (2^31 ms = 24.8 days, the known wrap), 12,288 lights, squared on-grid uv distances (<= 2^30). Anything wider lives in 64-bit inside a builtin, as escape() already does. |
+| `byte` | 0 | 255 | 1 | Exactly a hardware channel, a palette index, a heat cell. The LED's range, not a chosen one. |
+| `bool` | 0 | 1 | - | Normalized on store. |
+| `fixed` (Q16.16) | -32,768.0 | +32,767.99998 | 1/65,536 | Coordinates top out near 256 px and uv at +-4.0, orders of magnitude inside the range. The step gives 16 fraction bits against the 8 a channel displays, so two chained factors still land at the display floor. One turn as 1.0 steps at exactly angle16's resolution, the precision sin16 already consumes. Q16.16 is libfixmath's fix16_t, the de-facto embedded standard. |
+| `string` | - | one of the script's literals | - | An index into the compile-time pool. |
+
+**Cost on the hot path: none where it matters.** Scalar loads/stores are plain 32-bit forms
+(on Xtensa `l32i.n`, 2 bytes against `l8ui`'s 3, so smaller than today). A `byte[]` element's
+zero-extend and truncation happen INSIDE the load and store instructions; the only added
+instructions are one mask on a `byte` scalar store and one normalize on a `bool` store. A `fixed`
+multiply costs the mul-high + shift pair, which is the inherent price of fixed-point math the
+builtins already pay inside their Q13/Q8.8 conventions; it just becomes visible and uniform.
+
+**`int` <-> `fixed` conversion is EXPLICIT, never implicit.** The conversion itself is one shift
+(`<<16` / `>>16`), so the cost is trivial; the rule exists so a script never silently mixes a
+pixel count into a Q16.16 expression and gets a number 65,536 times off. A mixed expression is a
+compile error naming the conversion to write.
+
+**The two edges of `fixed`, stated so they are conventions rather than traps:**
+- **Time never goes into `fixed` raw**: 32,768 seconds is 9.1 hours. `t` stays `int` milliseconds
+  and rhythm reaches a script through `beat()`/`beatsin()`, which is already the idiom.
+- **Deep fractal zoom bottoms out at ~16 bits of magnification**, where the step becomes a pixel.
+  The same class of limit Q13 has at 13 bits, and better than float32 past that point (its 23-bit
+  mantissa is shared with the integer part). Extreme zoom is a 64-bit-builtin problem, not a
+  scalar-type problem.
+
+**`float` stays out, with a clean conscience.** The whole compiled library, the particle kernel
+and escape() are integer/fixed already; math16.h supplies sin/atan/dist/sqrt; the hot path makes
+float promotion a fatal warning. The FPU story splits the boards (LX6/LX7/P4 have one, the RISC-V
+line does not), so JIT float either runs wildly differently per board or softfloats, against the
+one-language-four-ISAs-identical rule. Fixed-point is bit-identical everywhere, which is also what
+makes an effect reproducible. If the MoonLight corpus (written with floats) ever forces the issue,
+the answer is compile-time float-literal-to-fixed translation, not runtime float.
+
+**Per-type notes:**
+- `bool[]` ships byte-backed first (elements are 0/1 either way), and the 8-per-byte packing lands
+  later as a pure memory optimization when an automaton effect pays for its read-modify-write
+  codegen. Same rule as every constant here: against a script that needs it, not on speculation.
+- `string` is a literal reference: assignable from literals, comparable, passable to a builtin,
+  one int of storage. NO concatenation, ever: runtime string building means allocation inside the
+  render loop.
+- Where arrays LIVE: small arrays stay in the arena (internal RAM); grid-sized state goes through
+  ScratchBuffer handles (item 9b's model), which prefer PSRAM and fall back to internal heap on
+  the classic ESP32, whose fixtures are small by construction. `byte[]` is what keeps a classic
+  heat map at 1x rather than 4x.
+
+**Migration**: 26 shipped scripts spell C widths (`uint8_t`, `uint16_t`, `int16_t`). MoonLive is
+not launched, so this is a clean mechanical break now and a compatibility program forever after.
+That timing is a large part of why the decision was taken when it was.
+
 ## The order, and why
+
 
 Ordered by **what removing it buys**, not by implementation cost.
 
@@ -124,7 +198,7 @@ The spec asks for ≤ 6 arguments plus an optional return.
 
 Doing #1 and #2 together is what actually opens the library; either alone leaves it stranded.
 
-### 3. A bigger arena and more members — *and check the handle route first*
+### 3. A bigger arena and more members: *check the handle route first; storage rules now in the type-system design above*
 
 64 bytes across 8 members is why an effect holds four objects rather than twenty-five.
 
@@ -264,7 +338,7 @@ Worth noting the ordering: this only pays off with the multi-value call ABI from
 makes that ABI worth having beyond colour — a `Coord3D` in and a `CRGB` out is the shape most of
 the power-functions surface wants.
 
-### 5. Fractional arithmetic — *expensive, and the real unlock*
+### 5. Fractional arithmetic: *superseded by `fixed` in the type-system design above*
 
 Every remaining visual compromise traces back to this: smooth motion, real velocities, a bounce
 that conserves speed, and any falloff term that makes a shape look round rather than flat. Without
@@ -280,6 +354,9 @@ Two routes, and the choice matters more than the schedule:
 
 Fixed-point first is the pragmatic order: most of the quality at a fraction of the cost, and it
 does not foreclose float.
+
+**Settled** by the type-system design above: `fixed` is Q16.16 on a uniform int slot, float
+stays out, and the range analysis lives there.
 
 ### 6. Function arguments — *moderate, removes a real footgun*
 

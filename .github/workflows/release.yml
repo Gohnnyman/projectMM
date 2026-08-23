@@ -309,6 +309,11 @@ jobs:
           set -euo pipefail
           V=$(uv run python moondeck/build/compute_version.py --tag "$TAG")
           echo "version=$V" >> "$GITHUB_OUTPUT"
+      # The runner image does NOT ship NSIS (the first release run after the installer merged
+      # proved it: "no makensis on this CI runner"). choco installs it into
+      # Program Files (x86)\NSIS, one of the two locations find_makensis already searches.
+      - name: Install NSIS (the Windows installer compiler)
+        run: choco install nsis --no-progress -y
       - name: Build + package Windows x64
         run: uv run moondeck/ci/package_desktop.py --version "${{ steps.ver.outputs.version }}"
       - uses: actions/upload-artifact@v4
