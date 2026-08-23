@@ -462,7 +462,7 @@ def find_makensis() -> str | None:
     The Windows NSIS installer does NOT put itself on PATH, so `which` alone reports it missing on
     a developer machine that has it installed the ordinary way. The CI runner image does not ship
     NSIS at all (the first release run proved it), so the workflow installs it via choco, which
-    lands in Program Files (x86)\NSIS, one of the two locations searched below.
+    lands in Program Files (x86)\\NSIS, one of the two locations searched below.
     """
     exe = shutil.which("makensis")
     if exe:
