@@ -22,6 +22,19 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### Desktop settings move to a per-user directory (2026-08-23)
+
+The desktop build wrote its configuration to `build/.config`, resolved against whatever directory the process happened to start in. That is a source-checkout layout, and it shipped: a downloaded binary either could not write there at all, failing every save and logging one line per save, or it wrote settings that belonged to that *folder* rather than to the user, so moving the executable lost them.
+
+Settings now live with the user: `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, `~/.local/share/projectMM` on Linux. `MM_DATA_DIR` overrides it. **A source checkout is unchanged** and still uses `build/.config`, so a development tree and every gate script behave exactly as before.
+
+**Action: *nothing*, unless your settings actually persisted before.** The old behavior had two modes, and only one of them leaves anything to move:
+
+- **Saves were failing.** The log showed `write failed for /.config/...` on every change and nothing survived a restart. Nothing to carry across.
+- **Saves were succeeding, per folder.** They are in a `build/.config` folder beside wherever you launched from: the folder you unzipped into on Windows and Linux, and `~/build/.config` on macOS, because the `.app` launcher starts in your home directory. **Action: *update a file*.** Move that folder's contents into the new per-user directory, or leave it and reconfigure from scratch.
+
+ESP32 is unaffected: LittleFS mounts at a fixed partition and never used this path.
+
 ### The `Layers` container is renamed to `Effects` (2026-08-08)
 
 The three top-level light containers are now **Layouts, Effects, Drivers** — L.E.D. The old name sat one character from its own child (`Layers` holding `Layer`s) and read as a near-twin of `Layouts`, which is the pair a newcomer actually has to tell apart. The tree is unchanged in shape: `Effects` → `Layer`s → effects and modifiers.

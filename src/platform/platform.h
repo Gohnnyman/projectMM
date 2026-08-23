@@ -315,11 +315,13 @@ size_t filesystemTotal();     // filesystem total bytes
 // Paths are absolute-looking (start with '/'); desktop strips the leading '/' so
 // "/.config/System.json" maps to "<root>/.config/System.json".
 //
-// fsSetRoot redirects the desktop root from CWD to an absolute path. Used by unit tests
-// to give each TEST_CASE an isolated working directory without chdir. No-op on ESP32
-// (LittleFS is mounted at a fixed partition). Must be called BEFORE fsMount; defaults
-// to ".".
+// fsSetRoot redirects the desktop root to an absolute path. Used by unit tests to give each
+// TEST_CASE an isolated working directory without chdir. No-op on ESP32 (LittleFS is mounted at a
+// fixed partition). Must be called BEFORE fsMount. Passing null or "" restores the default, which
+// on desktop is MM_DATA_DIR, else "build" inside a repo checkout, else the OS per-user data
+// directory (see platform_desktop.cpp).
 void fsSetRoot(const char* path);
+const char* fsRootPath();                                    // the resolved root, for diagnostics
 bool fsMount();                                              // idempotent; safe to call multiple times
 void fsUnmount();
 bool fsMkdir(const char* path);                              // mkdir -p; no error if exists

@@ -18,6 +18,7 @@ Filters compose:
 import argparse
 import datetime
 import json
+import os
 import platform
 import re
 import subprocess
@@ -170,7 +171,12 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
         print(f"  SKIP  {path.name} (skip_on {target})")
         return 0
     # Capture + tee: stream to stdout while collecting MEASURE lines.
-    proc = subprocess.Popen([str(RUNNER), str(path)], cwd=ROOT,
+    # Pin the runner's filesystem root into the build tree. The runner performs real writes, and
+    # its default root is the OS per-user data directory unless the working directory happens to be
+    # a checkout. Relying on cwd for that would put a test one wrong directory away from
+    # overwriting a developer's own installed-projectMM settings.
+    env = {**os.environ, "MM_DATA_DIR": str(ROOT / "build" / "scenario-fs")}
+    proc = subprocess.Popen([str(RUNNER), str(path)], cwd=ROOT, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1)
     observations: dict[str, dict] = {}  # step-name → {tick_us, free_heap, max_alloc_block}

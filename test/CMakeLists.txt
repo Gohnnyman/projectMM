@@ -174,6 +174,12 @@ add_dependencies(mm_tests effect_sweep_gen)
 
 add_test(NAME unit_tests COMMAND mm_tests)
 
+# Pin the desktop filesystem root into the build tree. ctest runs from the build directory, which
+# is not a repo checkout, so the default would resolve to the OS per-user data directory and any
+# test touching the default root would write into the developer's real settings.
+set_tests_properties(unit_tests PROPERTIES
+    ENVIRONMENT "MM_DATA_DIR=${CMAKE_CURRENT_BINARY_DIR}/fs-root")
+
 # Scenario runner (replays scenario JSON files in-process)
 add_executable(mm_scenarios scenario_runner.cpp)
 target_link_libraries(mm_scenarios PRIVATE mm_core mm_platform)
