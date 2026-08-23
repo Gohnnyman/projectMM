@@ -137,6 +137,16 @@ target_include_directories(mm_core PUBLIC src/)
 target_link_libraries(mm_core PUBLIC mm_platform)
 # `add_dependencies(mm_core ui_embed)` is below, after the ui_embed target is defined.
 
+# The computed semver (compute_version.py): the core for a stable tag, <core>-dev.<N> for a
+# moving latest build. Only the release pipeline sets it (package_desktop.py --version); a local
+# build falls through to build_info.h's #ifndef default (library.json). The same override the
+# ESP32 build has (esp32/main/CMakeLists.txt), so a desktop binary reports the same precise
+# version its release assets are named with, which is what lets the UI's update badge compare
+# a running desktop against the `latest` channel at all.
+if(MM_VERSION)
+    add_compile_definitions(MM_VERSION=${MM_VERSION})
+endif()
+
 # Platform library (desktop). moonlive_emit.cpp is the desktop MoonLive backend (host-ISA
 # codegen) — it lives here because emitted machine code is platform/ISA-specific.
 add_library(mm_platform

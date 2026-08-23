@@ -156,6 +156,12 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
 }
 
 void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
+    // Before the switch: every branch below returns, and a declared default belongs to the
+    // control whatever its type is. Emitted only when one was set, so the wire format and every
+    // module that relies on the type-level defaults in /api/types are untouched.
+    if (c.def != ControlDescriptor::kNoDefault) {
+        sink.appendf(",\"default\":%d", static_cast<int>(c.def));
+    }
     switch (c.type) {
         case ControlType::Uint8:
         case ControlType::Uint16:

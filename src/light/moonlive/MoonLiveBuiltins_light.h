@@ -35,6 +35,25 @@ namespace mm::moonlive {
 // division or shift to do that with. Three calls is the shape that works today, and
 // `setRGB(idx, paletteR(i), paletteG(i), paletteB(i))` reads clearly.
 //
+// A value a builtin takes as a BYTE: clamped to 0..255, not truncated to its low eight bits.
+//
+// `static_cast<uint8_t>` was the obvious spelling and it is the wrong one. A script computing a
+// brightness as `n * 255` means "full", and truncation turns that into an arbitrary walk: n=50
+// gives 206, n=128 gives 128, so the brightness draws its own pattern across the picture while
+// every part of the expression looks right. Saturating is what the author meant in every case,
+// and it is what a hardware byte channel does.
+//
+// Signed on the way in, so a value that went below zero clamps to 0 rather than to whatever its
+// low byte holds.
+//
+// The boundary: this covers the CALL builtins (setPaletteColor, paletteR/G/B). setRGB and fill
+// are inline stores whose channel bytes truncate in the emitted code itself, where a clamp would
+// cost three compares per channel per light on the hottest path there is.
+inline uint8_t byteArg(uintptr_t a) {
+    const int32_t v = static_cast<int32_t>(uint32_t(a));
+    return v < 0 ? 0 : (v > 255 ? 255 : static_cast<uint8_t>(v));
+}
+
 // The ACTIVE palette, so a script follows the device's palette control exactly as a compiled
 // effect does — which is the whole point: before this, a script could only hard-code colour.
 //
@@ -43,16 +62,13 @@ namespace mm::moonlive {
 // palette; the exceptions are effects where colour carries meaning, like the axis-identifying
 // red/green/blue in LinesEffect). Giving scripts hsv() would reintroduce it as the easy default.
 extern "C" inline uint32_t mm_light_paletteR(const uintptr_t* args, uint32_t, const uint8_t*) {
-    return colorFromPalette(*Palettes::active(), static_cast<uint8_t>(args[0]),
-                            static_cast<uint8_t>(args[1])).r;
+    return colorFromPalette(*Palettes::active(), byteArg(args[0]), byteArg(args[1])).r;
 }
 extern "C" inline uint32_t mm_light_paletteG(const uintptr_t* args, uint32_t, const uint8_t*) {
-    return colorFromPalette(*Palettes::active(), static_cast<uint8_t>(args[0]),
-                            static_cast<uint8_t>(args[1])).g;
+    return colorFromPalette(*Palettes::active(), byteArg(args[0]), byteArg(args[1])).g;
 }
 extern "C" inline uint32_t mm_light_paletteB(const uintptr_t* args, uint32_t, const uint8_t*) {
-    return colorFromPalette(*Palettes::active(), static_cast<uint8_t>(args[0]),
-                            static_cast<uint8_t>(args[1])).b;
+    return colorFromPalette(*Palettes::active(), byteArg(args[0]), byteArg(args[1])).b;
 }
 
 extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -71,17 +87,16 @@ extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, co
     return n ? (next >> 16) % n : 0u;
 }
 
-// A script's arithmetic is UNSIGNED, so `x - cx` for x < cx arrives as a huge value rather than a
-// negative one. Anything above half the range is that wrap, and subtracting the range recovers the
-// signed offset the maths needs.
+// A value a builtin takes as SIGNED: the script's own 32-bit two's complement, read as itself.
 //
-// One home rather than a copy per builtin: this is a language-wide ABI fact, not a detail of any
-// one function, and a new signed-taking builtin that forgets it renders INVERTED rather than
-// failing (the outside of a shape reads as fully inside), which looks like a working effect until
-// the shape moves. Every builtin below that takes a signed argument calls this.
+// This used to fold through a 16-BIT window (`v > 32767 ? v - 65536 : v`), because a script had no
+// way to hold a negative and the convention was that the top half of the 16-bit range meant one.
+// That window was the inverse of uint16_t member truncation, it was written down in neither place,
+// and it is what made `d = 60000` read as -5536: the script author thought in the member's range
+// and the builtin thought in the window's. int16_t members hold a negative directly now, so the
+// window has nothing left to undo and the value passes through.
 inline int32_t signedArg(uintptr_t a) {
-    const int32_t v = static_cast<int32_t>(uint32_t(a));
-    return v > 32767 ? v - 65536 : v;
+    return static_cast<int32_t>(uint32_t(a));
 }
 
 // mod(a, b) → a % b, the wrap a cyclic animation needs. `t` grows without bound, so every effect
@@ -92,18 +107,38 @@ inline int32_t signedArg(uintptr_t a) {
 // all, and emitting a division routine inline would cost more code than the whole script. One host
 // function, called like any other builtin, keeps the emitted code small and the three backends
 // identical. b == 0 returns 0 rather than trapping: a script must degrade, never fault.
+// SIGNED, like `%` in every language a script author already knows. A coordinate is signed now, so
+// an unsigned remainder here would be a bespoke rule with nothing on the page to signpost it: the
+// exact shape of the bugs this whole change set exists to remove.
+//
+// `t` is unsigned time and passes 2^31 after about 25 days, at which point `mod(t, n)` reads it as
+// negative. That is a real edge, and it is not the reason to keep this unsigned: `t` breaks at 2^32
+// regardless, so signedness moves WHEN rather than WHETHER. A wrapping clock needs its own answer,
+// not a modulo that hides it. No shipped script uses mod(t, ...).
 extern "C" inline uint32_t mm_light_mod(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const uint32_t a = uint32_t(args[0]), b = uint32_t(args[1]);
-    return b ? a % b : 0u;
+    const int32_t a = static_cast<int32_t>(uint32_t(args[0]));
+    const int32_t b = static_cast<int32_t>(uint32_t(args[1]));
+    // INT32_MIN % -1 is UB and traps on x86-64 (the other three ISAs quietly wrap, which is why a
+    // bench never shows it). Same stance as b == 0: a script degrades, never faults.
+    if (b == 0 || (a == INT32_MIN && b == -1)) return 0;
+    return static_cast<uint32_t>(a % b);
 }
 
 // div(a, b) → a / b, and what the '/' OPERATOR lowers to. Registered under a name for the same
 // reason mod is: the parser resolves both operators through the builtin table, so core stays
 // domain-neutral and a divide is one host call rather than an instruction no ISA here has.
 // b == 0 returns 0, matching mod, a script degrades, never faults.
+// SIGNED, for the reason given at mod above: `/` means what it means everywhere else. Scaling a
+// coordinate is the common case and coordinates go negative, so an unsigned divide turned
+// `uvX(...) * zoom / 40` on the left half of a grid into 107361151 rather than -13030.
 extern "C" inline uint32_t mm_light_div(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const uint32_t a = uint32_t(args[0]), b = uint32_t(args[1]);
-    return b ? a / b : 0u;
+    const int32_t a = static_cast<int32_t>(uint32_t(args[0]));
+    const int32_t b = static_cast<int32_t>(uint32_t(args[1]));
+    // INT32_MIN / -1 overflows: UB, and a SIGFPE on x86-64. Returns the saturated value a script
+    // would expect from negating INT32_MIN, rather than 0, which would read as "division broke".
+    if (b == 0) return 0;
+    if (a == INT32_MIN && b == -1) return static_cast<uint32_t>(INT32_MAX);
+    return static_cast<uint32_t>(a / b);
 }
 
 // smoothstep(edge0, edge1, v) → a soft 0..65535 ramp between the edges, GLSL's own and the
@@ -158,13 +193,69 @@ extern "C" inline uint32_t mm_light_uvAxis(const uintptr_t* args, bool wantY) {
     const int64_t extent = wantY ? sh : sw;
     const int64_t v = ((px * 2 - extent + 1) * 8192) / s;
     const int64_t c = v < -32768 ? -32768 : (v > 32767 ? 32767 : v);
-    return static_cast<uint32_t>(c + 32768);
+    // SIGNED, with no +32768 bias. A coordinate has an origin: the center of the grid is 0, the
+    // left half is negative, and a script uses the number it is given. The bias this used to add
+    // made every consumer write `uvX(...) - 32768`, and that subtraction is exactly what unsigned
+    // arithmetic broke: on the left half it wrapped to about 4.29 billion and tore the plane into
+    // blocks. sin/cos KEEP their bias, deliberately, because a wave has no origin and
+    // `scale(sin(a), width)` sweeping a full axis is the idiom 14 shipped call sites rely on.
+    return static_cast<uint32_t>(static_cast<int32_t>(c));
 }
 extern "C" inline uint32_t mm_light_uvX(const uintptr_t* args, uint32_t, const uint8_t*) {
     return mm_light_uvAxis(args, false);
 }
 extern "C" inline uint32_t mm_light_uvY(const uintptr_t* args, uint32_t, const uint8_t*) {
     return mm_light_uvAxis(args, true);
+}
+
+// escape(cx, cy, jx, jy, iters) → how many steps z = z*z + c survives before it runs away,
+// scaled to 0..255. The Mandelbrot set when the seed is zero, a Julia set when it is not.
+//
+// A BUILTIN rather than script arithmetic, and this is the one case where that is not a
+// judgement call. The iteration squares a SIGNED fixed-point value, and a script's arithmetic is
+// unsigned 32-bit: `x * x` where x holds the wrapped form of -1 computes 65535 * 65535, not 1.
+// There is no spelling of this loop in the language, at any cost, until signed values land
+// (moonlive-language-roadmap #7). Everything else here stays expressible in script on purpose.
+//
+// Q13 fixed point: 1.0 is 8192, matching uvX/uvY's 8192-per-unit. That is what puts the whole
+// set inside the signed 16-bit window a script can pass: x spans -2.5..1.0 (-20480..8192) and
+// y spans -1.25..1.25, so a script hands over uv coordinates directly with no rescaling.
+//
+// The products are int64. z*z at the escape radius reaches 4.0 in Q13, and the intermediate
+// before the shift is that squared again: an int32 overflows there and the point reads as
+// escaped when it has not, which draws holes in the middle of the set.
+//
+// `iters` is the detail dial and the cost: the loop is bounded by it, so a script trades
+// definition against frame time directly. Capped at 64, which is where the returned byte stops
+// gaining visible bands on a panel, and it bounds the per-pixel cost no matter what a slider says.
+extern "C" inline uint32_t mm_light_escape(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const int32_t cx = signedArg(args[0]), cy = signedArg(args[1]);
+    const int32_t jx = signedArg(args[2]), jy = signedArg(args[3]);
+    uint32_t iters = uint32_t(args[4]);
+    if (iters > 64) iters = 64;
+    if (iters == 0) return 0;
+
+    // Julia iterates z from the pixel with a FIXED c; Mandelbrot iterates z from zero with c
+    // taken from the pixel. One loop serves both: a zero seed selects Mandelbrot, which is why
+    // the seed is not a separate builtin.
+    const bool julia = (jx != 0 || jy != 0);
+    int64_t zx = julia ? cx : 0, zy = julia ? cy : 0;
+    const int64_t ax = julia ? jx : cx, ay = julia ? jy : cy;
+
+    constexpr int kShift = 13;
+    constexpr int64_t kEscape = int64_t(4) << (kShift * 2);   // |z|^2 > 4.0, in Q26
+
+    uint32_t n = 0;
+    for (; n < iters; ++n) {
+        const int64_t xx = zx * zx, yy = zy * zy;
+        if (xx + yy > kEscape) break;
+        const int64_t nx = ((xx - yy) >> kShift) + ax;
+        zy = ((2 * zx * zy) >> kShift) + ay;
+        zx = nx;
+    }
+    // Inside the set returns 0, so a script can test for it. Outside, the count spreads over the
+    // full byte whatever `iters` is, which keeps the palette mapping independent of the dial.
+    return (n >= iters) ? 0u : (n * 255u) / iters;
 }
 
 // smin(a, b, k) → the smooth minimum of two distances: two shapes FLOW into one another instead of
@@ -608,9 +699,7 @@ extern "C" inline uint32_t mm_light_setPaletteColor(const uintptr_t* args, uint3
     const uint32_t x = uint32_t(args[0]), y = uint32_t(args[1]);
     if (x >= uint32_t(cv.dims.x) || y >= uint32_t(cv.dims.y)) return 0;
     draw::pixel(cv, Coord3D{lengthType(x), lengthType(y), 0},
-                colorFromPalette(*Palettes::active(),
-                                 static_cast<uint8_t>(args[2]),
-                                 static_cast<uint8_t>(args[3])));
+                colorFromPalette(*Palettes::active(), byteArg(args[2]), byteArg(args[3])));
     return 0;
 }
 
@@ -963,6 +1052,10 @@ inline BuiltinTable lightBuiltins() {
     // smin(a, b, k)          → the smooth minimum: two shapes melt into one surface. k = 0 is a
     // plain union. See mm_light_smin.
     t.add({"smin", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_smin, {}});
+    // escape(cx, cy, jx, jy, iters) → the escape-time count for z = z*z + c, 0..255, 0 inside.
+    // Mandelbrot with a zero seed, Julia otherwise. The one piece of maths a script cannot
+    // express: it squares SIGNED values and script arithmetic is unsigned.
+    t.add({"escape", 5, /*returns*/ true, BuiltinKind::Call, &mm_light_escape, {}});
     // beat(bpm, t)           → 0..65535 sawtooth at bpm. The clock an animation is written against.
     t.add({"beat", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_beat, {}});
     // beatsin(bpm, t, high)  → a sine 0..high at bpm. The same shape an effect reaches for.

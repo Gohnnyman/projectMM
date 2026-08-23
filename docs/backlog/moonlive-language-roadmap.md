@@ -35,7 +35,7 @@ Five hard limits, all found by hitting them:
 | script state | **64 bytes** shared by all members | `kCtrlBytes`, `MoonLiveBuiltins.h:132` |
 | distinct members | **8** | `kMaxCtrls`, same file |
 | branch labels | **16** (an `if` or `for` takes up to 2) | `kIrLabels`, `MoonLiveIr.h:201` |
-| numeric types | `uint8_t`, `uint16_t` | no float, no signed |
+| numeric types | `uint8_t`, `uint16_t`, `int16_t` | no float |
 | ~~builtin table~~ | ~~16, and 16 used~~ → **64** ✅ | `BuiltinTable::kMax` — raised, with an overflow assert |
 
 The branch budget was binary-searched with generated scripts: **6 `if`/`else` + 2 `for` compiles,
@@ -50,7 +50,7 @@ Each row is a compromise the balls effect makes, and the language feature that w
 |---|---|---|
 | 4 objects, not 25 | 64-byte arena, 8 members | a bigger arena, or a pool handle (shipped for particles) |
 | whole-pixel motion | no fractional type | fixed-point or float |
-| a direction bit per axis | unsigned only | signed values |
+| a direction bit per axis | ✅ signed values shipped | |
 | one flat colour | no `hsv()` builtin | `hsv()` |
 | one array per field | no structs | structs |
 | the helper reads a member for its index | functions take no arguments | arguments |
@@ -128,6 +128,15 @@ Doing #1 and #2 together is what actually opens the library; either alone leaves
 ### 3. A bigger arena and more members — *and check the handle route first*
 
 64 bytes across 8 members is why an effect holds four objects rather than twenty-five.
+
+**The two limits bind at very different points, and it is the COUNT that bites first.**
+`fractal.mle` wanted 4 controls plus 4 scratch members plus a loop counter: 9 members costing
+**12 of the 64 arena bytes**. It compiled once the counter was dropped (a `for` counter does not
+have to be a member), so the script lost nothing, but the ceiling it hit was `kMaxCtrls` with 81%
+of the arena still free. Any script with a handful of controls and a handful of intermediates
+meets the same wall. If only one of the two moves, the count is the one worth moving: the four
+tables it sizes are `DeclaredControl[8]` at 24 B each, so 8 -> 12 costs 96 B per engine and
+roughly 600 B per device across three engines, against `sizeof(MoonLive)` at 864 B today.
 
 **But check the handle route first.** The power-functions spec's item 5 — a particle pool as an
 arena-allocated HANDLE — means a simulation effect stops storing its own particle state entirely,
@@ -279,12 +288,35 @@ does not foreclose float.
 caller and callee agree by convention and nothing checks it, so a helper called from two places
 with different state silently does the wrong thing. It is also what makes helpers composable.
 
-### 7. Signed values — *moderate, and it removes a whole class of workaround*
+### 7. Signed values: ✅ *shipped*
 
-Unsigned-only forces a sign bit alongside every value that can go negative — a velocity, a delta,
-an offset from a centre. It also makes ordinary expressions dangerous: `a - b` wraps instead of
-going negative, so scripts guard every subtraction. Comes naturally with fixed-point (#3) if that
-type is signed, which argues for doing them together.
+`int16_t` members, signed comparison, signed `/` and `%`, and `uvX`/`uvY` returning a signed
+coordinate with no bias to subtract.
+
+**The framing this item had was wrong about the cause, which is worth recording.** It described the
+problem as `a - b` wrapping, and prescribed signed comparison. Writing a Mandelbrot effect produced
+four bugs in one session and **not one of them was a comparison bug**: no `<` or `>` ever produced a
+wrong picture. Three were the *biased-unsigned* convention, where a builtin returned a value centered
+on 32768 and the author had to subtract that bias, which is exactly the subtraction unsigned
+arithmetic breaks. The fourth was a byte argument truncating instead of saturating. Every one
+presented as "the effect renders nothing", never as an error.
+
+So what shipped is smaller than "make the language signed" and removes more than it adds:
+
+- `signedArg`'s undocumented **16-bit window** is gone. It was the inverse of `uint16_t` member
+  truncation, written down in neither place, and it is what made `d = 60000` read as -5536.
+- The **bias on `uvX`/`uvY`** is gone: a coordinate has an origin, so the center is 0.
+- `sin`/`cos` **keep** their bias, deliberately. A wave has no origin, and `scale(sin(a), n)`
+  sweeping a full axis is the idiom 14 shipped call sites use. A script wanting a signed wave
+  writes `sin(a) - 32768`, which works now.
+- **Comparison** is a separate `BranchGeS` op, not a change to `BranchGe`: the array-index clamp
+  and the loop guards need unsigned, and a negative index arriving as a huge value is what lets one
+  branch catch both ends of a range.
+- **`int8_t` is deliberately absent.** Xtensa has no signed byte load, so it would need a
+  sign-extend sequence the other three ISAs do not, for a width no script has asked for.
+
+`escape()` stays a builtin regardless: its Q13 squaring needs 64-bit intermediates, which a 32-bit
+script value cannot express however signed it is.
 
 ### 8. More branch labels — *probably a constant, worth measuring first*
 

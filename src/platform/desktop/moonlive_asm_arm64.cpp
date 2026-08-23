@@ -165,6 +165,11 @@ void HostAssembler::store16(Reg base, Reg off, Reg val) {  // strh wVal, [xBase,
 void HostAssembler::load16(Reg d, Reg base, int32_t imm) {
     emit32(0x79400000u | (((uint32_t(imm) >> 1) & 0xfff) << 10) | (mr(base) << 5) | mr(d));
 }
+// ldrsh wDst, [xBase, #imm]: the 32-bit-destination signed form (opc 11), so the sign fills the
+// top 16 bits of the w register and the x register's upper half stays clear.
+void HostAssembler::load16S(Reg d, Reg base, int32_t imm) {
+    emit32(0x79C00000u | (((uint32_t(imm) >> 1) & 0xfff) << 10) | (mr(base) << 5) | mr(d));
+}
 // ldrb wDst, [xBase, xOff] and ldrh wDst, [xBase, xOff]. The register-offset form takes the index
 // UNSCALED for a byte; for a halfword the LSL amount would scale it, and it is left at 0 so the
 // index the caller passes is a BYTE offset in both cases. That keeps one rule for the lowering:
@@ -183,8 +188,11 @@ void HostAssembler::branchIfZero(Reg a, Label l) {         // cbz wA, l  (offset
     emit32(0x34000000u | mr(a));
 }
 void HostAssembler::branchIf(Cond c, Label l) {            // b.cond l  (offset patched)
-    // arm64 condition codes: NE=1, HS/CS=2, LO/CC=3.
-    const uint8_t cond = (c == Cond::Lo) ? 0x3 : (c == Cond::Ne ? 0x1 : 0x2);
+    // arm64 condition codes: NE=1, HS/CS=2, LO/CC=3, GE=10.
+    // Every enumerator is listed rather than falling through to a default: an unhandled one would
+    // emit a plausible branch with the WRONG condition, which runs and does the opposite thing.
+    const uint8_t cond = (c == Cond::Lo) ? 0x3 : (c == Cond::Ne) ? 0x1
+                       : (c == Cond::Ge) ? 0xa : 0x2;
     addFixup(len_, l, FixKind::Branch);   // the condition is already in the instruction
     emit32(0x54000000u | cond);
 }
@@ -193,6 +201,7 @@ void HostAssembler::branchIf(Cond c, Label l) {            // b.cond l  (offset 
 // same name, which is what lets the IR walk be written once.
 void HostAssembler::movReg(Reg d, Reg a) { addImm(d, a, 0); }    // mov wD, wA (add wD, wA, #0)
 void HostAssembler::branchGeU(Reg a, Reg b, Label l) { cmp(a, b); branchIf(Cond::Hs, l); }
+void HostAssembler::branchGeS(Reg a, Reg b, Label l) { cmp(a, b); branchIf(Cond::Ge, l); }
 void HostAssembler::branchNe(Reg a, Reg b, Label l)  { cmp(a, b); branchIf(Cond::Ne, l); }
 
 // movPtr: a full 64-bit address into a register, movz + three movk.

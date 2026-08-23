@@ -132,11 +132,15 @@ public:
     /// FPP auto-detects it and how ColorLight's own LEDUpgrade reports a card as "5A 13.17". Probing
     /// needs a receive seam beside platform::ethSendRaw, which does not exist yet. FPP keeps the
     /// manual setting regardless, as its FIRST source, falling back to discovery only when unset.
-    static constexpr const char* kFirmwareOptions[] = {"v13 and newer", "v12 and older"};
+    /// v12-and-older FIRST, and the default. A stock card ships on v13, but v13 on v8.x hardware
+    /// has a flicker defect with no sending-side workaround, so the documented path is to downgrade
+    /// the card (tutorials/panel-cards.md). Defaulting to the generation the guide leaves you on
+    /// means the setting is already right when you finish, rather than being the last unexplained
+    /// step between a downgraded card and a wall that updates once every few seconds.
+    static constexpr const char* kFirmwareOptions[] = {"v12 and older", "v13 and newer"};
     static constexpr uint8_t kFirmwareCount = 2;
 
-    /// Card firmware generation (index into kFirmwareOptions). Defaults to v13+, which is what a
-    /// card ships with today.
+    /// Card firmware generation (index into kFirmwareOptions): 0 is v12-and-older, 1 is v13+.
     uint8_t firmware = 0;
     /// Host NIC to send from ("eth0", "en0"). Ignored on ESP32, which has one MAC. Blank on a host
     /// means capture-only: nothing reaches the wire and the status says so.
@@ -267,7 +271,8 @@ public:
         // How many copies of the brightness and sync frames this card wants: see `firmware`. Sending
         // two to a card that acts on the first is not harmless, which is why this is a choice and
         // not a constant.
-        const int frameCopies = (firmware == 0) ? 2 : 1;
+        // Index 1 is v13-and-newer, which acts on the SECOND copy, so it needs both sent.
+        const int frameCopies = (firmware == 1) ? 2 : 1;
 
         // Brightness first, ahead of the rows — the order the cards expect. Advisory: older card
         // firmware ignores it, and the driver never depends on it having landed (our own Correction

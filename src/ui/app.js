@@ -1491,7 +1491,12 @@ function isUserEditableChild(mod, depth) {
 
 // Look up the factory default for a given module type's control. Returns undefined when
 // the type isn't in /api/types yet or the control has no default (display/progress).
-function defaultFor(moduleType, ctrlName) {
+function defaultFor(moduleType, ctrlName, ctrl) {
+    // A default carried ON the control wins: it is the only one that exists for a module whose
+    // controls are declared by data rather than by its C++ type (a MoonLive script's
+    // `uint8_t bpm = 60;`). /api/types probes a fresh instance, which for those has no script and
+    // so declares no controls at all.
+    if (ctrl && ctrl.default !== undefined) return ctrl.default;
     if (!moduleType) return undefined;
     const t = availableTypes.find(t => t.name === moduleType);
     if (!t || !t.defaults) return undefined;
@@ -1544,7 +1549,7 @@ function createControl(moduleName, moduleType, ctrl) {
     row.appendChild(label);
 
     const key = moduleName + ":" + ctrl.name;
-    const def = defaultFor(moduleType, ctrl.name);
+    const def = defaultFor(moduleType, ctrl.name, ctrl);
 
     // numberField: a numeric control that opted out of the slider (server sets it for a value where each
     // integer is a discrete identity, not a magnitude — a PHY/I2C address, a channel). Render a plain
@@ -3631,9 +3636,9 @@ function updateModuleControls(mod) {
                 break;
             }
         }
-        // Reset-button state may change as the value drifts in/out of default.
-        // Defaults live in availableTypes (populated from /api/types) keyed by module type.
-        const def = defaultFor(mod.type, ctrl.name);
+        // Reset-button state may change as the value drifts in/out of default. A default on the
+        // control itself wins over the type-level ones from /api/types; see defaultFor.
+        const def = defaultFor(mod.type, ctrl.name, ctrl);
         if (def !== undefined && def !== null) {
             const btn = document.querySelector(`button.reset-btn[data-mid="${mid}"][data-key="${k}.reset"]`);
             if (btn) {

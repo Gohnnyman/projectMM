@@ -543,6 +543,21 @@ void HostAssembler::load16(Reg d, Reg base, int32_t imm) {
     b[n++] = uint8_t(imm >> 16); b[n++] = uint8_t(imm >> 24);
     emitBytes(b, n);
 }
+// movsx r32, word ptr [base + disp32]  (0F BF /r): the sign-extending twin of movzx (0F B7), and
+// the only byte that differs. Writing the 32-bit destination zeroes the register's upper half,
+// so a negative arrives as a 32-bit value and the comparison width in cmp() matches it.
+void HostAssembler::load16S(Reg d, Reg base, int32_t imm) {
+    const uint8_t dst = xr(d), b_reg = xr(base);
+    const bool needsSIB = ((b_reg & 7) == x64::RSP);
+    uint8_t b[9]; size_t n = 0;
+    b[n++] = rex_(false, dst >= 8, false, b_reg >= 8);
+    b[n++] = 0x0F; b[n++] = 0xBF;
+    b[n++] = modrm_(0b10, dst & 7, needsSIB ? 0b100 : (b_reg & 7));
+    if (needsSIB) b[n++] = sib_(0, 0b100, b_reg & 7);
+    b[n++] = uint8_t(imm); b[n++] = uint8_t(imm >> 8);
+    b[n++] = uint8_t(imm >> 16); b[n++] = uint8_t(imm >> 24);
+    emitBytes(b, n);
+}
 // movzx r32, byte ptr [base + off]  (0F B6 /r SIB) — indexed 8-bit zero-extending load.
 void HostAssembler::load8Idx(Reg d, Reg base, Reg off) {
     const uint8_t op[2] = {0x0F, 0xB6};
@@ -556,11 +571,21 @@ void HostAssembler::load16Idx(Reg d, Reg base, Reg off) {
 
 // --- compare and branch -------------------------------------------------------------------------
 
-// cmp r64, r64  (REX.W 39 /r) — sets flags = a - b.
+// cmp r32, r32  (39 /r): sets flags = a - b, THIRTY-TWO bit.
+//
+// 32-bit, not REX.W 64-bit, because a MoonLive value is 32 bits and arm64 already compares in `w`
+// registers. While every value was zero-extended the two agreed and the width did not matter. A
+// SIGNED compare makes them disagree on the same program: a 32-bit -1 sitting in a 64-bit register
+// is 0x00000000FFFFFFFF, which a 64-bit signed compare reads as +4294967295. Comparing at the
+// value's own width is what keeps the four backends running the same script the same way.
+//
+// REX is still emitted when either register is r8..r15, since that is what addresses them; only
+// the W bit (the 64-bit operand size) is dropped. rex_ returns 0x40 for the no-bits case, which is
+// a valid null REX prefix, so the three-byte form holds for every register pair.
 void HostAssembler::cmp(Reg a, Reg b) {
     const uint8_t left = xr(a), right = xr(b);
     uint8_t bytes[3] = {
-        rex_(true, right >= 8, false, left >= 8),
+        rex_(false, right >= 8, false, left >= 8),
         0x39,
         modrm_(0b11, right & 7, left & 7),
     };
@@ -568,13 +593,14 @@ void HostAssembler::cmp(Reg a, Reg b) {
 }
 
 // Conditional branch, near-32-bit-relative  (0F 8x rel32). Always the rel32 form — one width,
-// so the fixup table is uniform. Condition tt values:  NE=0x5, HS/AE=0x3, LO/B=0x2.
+// so the fixup table is uniform. Condition tt values:  NE=0x5, HS/AE=0x3, LO/B=0x2, GE=0xD.
 void HostAssembler::branchIf(Cond c, Label l) {
     uint8_t tt;
     switch (c) {
         case Cond::Ne: tt = 0x05; break;
         case Cond::Hs: tt = 0x03; break;                // aka AE: unsigned >=
         case Cond::Lo: tt = 0x02; break;                // aka B:  unsigned <
+        case Cond::Ge: tt = 0x0D; break;                // SIGNED >=
         default:       tt = 0x05; break;
     }
     // Fixup site is the START of the branch instruction; patchBranches computes rel32 relative
@@ -603,6 +629,7 @@ void HostAssembler::branchIfZero(Reg a, Label l) {
 
 // The fused compare-and-branch pair.
 void HostAssembler::branchGeU(Reg a, Reg b, Label l) { cmp(a, b); branchIf(Cond::Hs, l); }
+void HostAssembler::branchGeS(Reg a, Reg b, Label l) { cmp(a, b); branchIf(Cond::Ge, l); }
 void HostAssembler::branchNe(Reg a, Reg b, Label l)  { cmp(a, b); branchIf(Cond::Ne, l); }
 
 // --- ret ----------------------------------------------------------------------------------------

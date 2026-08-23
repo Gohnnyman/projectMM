@@ -14,6 +14,7 @@ the "unidentified developer" prompt a user can accept. Windows is unsigned, so
 SmartScreen warns on first run. Documented in the README and each README.txt.
 """
 
+import argparse
 import json
 import os
 import platform
@@ -47,14 +48,22 @@ def run(cmd: list[str]) -> None:
         sys.exit(r.returncode)
 
 
-def configure_and_build_macos() -> Path:
+def version_args(version: str) -> list[str]:
+    """The -DMM_VERSION override, or nothing: the exact contract build_esp32.py has. Empty means
+    a local/dev build and build_info.h's library.json default; the release pipeline passes the
+    computed semver so the binary, the asset names and the update badge all carry one version.
+    The inner quotes make the macro a string literal, same as the ESP32 build."""
+    return [f'-DMM_VERSION="{version}"'] if version else []
+
+
+def configure_and_build_macos(version: str = "") -> Path:
     """Configure + build for macOS arm64. Returns the built binary path."""
     bdir = str(BUILD_DIR_MACOS.relative_to(ROOT))
     run([
         "cmake", "-B", bdir,
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_OSX_ARCHITECTURES=arm64",
-    ])
+    ] + version_args(version))
     run(["cmake", "--build", bdir, "--config", "Release", "-j"])
     binary = BUILD_DIR_MACOS / "projectMM"
     if not binary.exists():
@@ -63,10 +72,10 @@ def configure_and_build_macos() -> Path:
     return binary
 
 
-def configure_and_build_linux() -> Path:
+def configure_and_build_linux(version: str = "") -> Path:
     """Configure + build for Linux x86-64. Returns the built binary path."""
     bdir = str(BUILD_DIR_LINUX.relative_to(ROOT))
-    run(["cmake", "-B", bdir, "-DCMAKE_BUILD_TYPE=Release"])
+    run(["cmake", "-B", bdir, "-DCMAKE_BUILD_TYPE=Release"] + version_args(version))
     run(["cmake", "--build", bdir, "--config", "Release", "-j"])
     binary = BUILD_DIR_LINUX / "projectMM"
     if not binary.exists():
@@ -116,7 +125,11 @@ def package_deb(binary: Path, version: str) -> Path | None:
             sys.exit("package_desktop: no dpkg-deb on this CI runner, cannot build the .deb")
         print("package_desktop: no dpkg-deb on this host, skipping the .deb")
         return None
-    # A Debian version cannot carry a leading 'v' and must start with a digit.
+    # A Debian version cannot carry a leading 'v' and must start with a digit. A hyphen is also
+    # out: dpkg reads it as the upstream/revision separator, so the computed 3.0.0-dev.N becomes
+    # 3.0.0~dev.N here. Deliberately a tilde: dpkg sorts ~ BEFORE the bare version, so a dev build
+    # upgrades to the 3.0.0 release exactly as semver intends the prerelease to.
+    version = version.replace("-", "~")
     stage = DIST_DIR / f"deb-{version}"
     shutil.rmtree(stage, ignore_errors=True)
     (stage / "DEBIAN").mkdir(parents=True)
@@ -159,7 +172,7 @@ def package_deb(binary: Path, version: str) -> Path | None:
     return out
 
 
-def configure_and_build_windows() -> Path:
+def configure_and_build_windows(version: str = "") -> Path:
     """Configure + build for Windows x64. Returns the built binary path."""
     bdir = str(BUILD_DIR_WIN.relative_to(ROOT))
     # No -G: let CMake auto-detect the installed Visual Studio. Pinning a
@@ -168,7 +181,7 @@ def configure_and_build_windows() -> Path:
     run([
         "cmake", "-B", bdir,
         "-DCMAKE_BUILD_TYPE=Release",
-    ])
+    ] + version_args(version))
     run(["cmake", "--build", bdir, "--config", "Release"])
     # MSVC multi-config places binaries under <build-dir>/Release/.
     binary = BUILD_DIR_WIN / "Release" / "projectMM.exe"
@@ -358,7 +371,13 @@ def package_windows(binary: Path, version: str) -> Path:
 
 
 def main() -> int:
-    version = read_version()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--version", default="",
+                    help="Override the library.json version with the pipeline-computed semver "
+                         "(compute_version.py), so the binary, the asset names and the update "
+                         "badge all carry the same 3.0.0-dev.N. Empty = a local/dev build.")
+    args = ap.parse_args()
+    version = args.version or read_version()
     system = platform.system()
     machine = platform.machine().lower()
 
@@ -374,12 +393,12 @@ def main() -> int:
             print(f"package_desktop: unsupported macOS arch '{machine}'. "
                   f"projectMM 1.0 ships macOS arm64 only.")
             return 2
-        binary = configure_and_build_macos()
+        binary = configure_and_build_macos(args.version)
         package_macos(binary, version)
         return 0
 
     if system == "Windows":
-        binary = configure_and_build_windows()
+        binary = configure_and_build_windows(args.version)
         package_windows(binary, version)
         return 0
 
@@ -388,7 +407,7 @@ def main() -> int:
             print(f"package_desktop: unsupported Linux arch '{machine}'. "
                   f"Only x86-64 is packaged; other arches build from source.")
             return 2
-        binary = configure_and_build_linux()
+        binary = configure_and_build_linux(args.version)
         package_linux(binary, version)
         return 0
 

@@ -1251,7 +1251,7 @@ TEST_CASE("a circle drawn through uv stays circular on a wide panel") {
     REQUIRE(eng.compile("class T { tick() {"
                         "  for (y = 0; y < 8; y = y + 1) {"
                         "    for (x = 0; x < 32; x = x + 1) {"
-                        "      if (polarR(uvX(x, 32, 8) - 32768, uvY(y, 32, 8) - 32768) < 6000) {"
+                        "      if (polarR(uvX(x, 32, 8), uvY(y, 32, 8)) < 6000) {"
                         "        setRGB(y * 32 + x, 255, 0, 0);"
                         "      } } } } }", kCtrlTable, kSys));
     uint8_t px[32 * 8 * 3] = {};
@@ -1265,19 +1265,22 @@ TEST_CASE("a circle drawn through uv stays circular on a wide panel") {
     CHECK(litRows < 8);                // and it fits inside the short axis rather than clipping
 }
 
-// The bias convention every signed value in this language shares: 32768 is the origin, so a
-// coordinate left of center reads below it and one to the right above it.
-TEST_CASE("uv places the grid center at the origin") {
+// A coordinate has an origin: the center of the grid is 0, the left half is NEGATIVE, and a script
+// uses the number it is given. No bias to subtract, which is what made `uvX(...) - 32768` wrap on
+// the left half and tear a shader's plane into blocks.
+TEST_CASE("uv places the grid center at the origin, with the left half negative") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T { tick() {"
-                        "  setRGB(0, scale(uvX(0, 16, 16), 256), scale(uvX(15, 16, 16), 256),"
-                        "            scale(uvY(0, 16, 16), 256)); } }", kCtrlTable, kSys));
-    uint8_t px[3] = {};
-    eng.run(px, 1, 3, 0, moonlive::kEntryTick);
+                        "  if (uvX(0, 16, 16) < 0) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"
+                        "  if (uvX(15, 16, 16) > 0) { setRGB(1, 7, 0, 0); } else { setRGB(1, 3, 0, 0); }"
+                        "  if (uvY(0, 16, 16) < 0) { setRGB(2, 7, 0, 0); } else { setRGB(2, 3, 0, 0); }"
+                        "} }", kCtrlTable, kSys));
+    uint8_t px[9] = {};
+    eng.run(px, 3, 3, 0, moonlive::kEntryTick);
     eng.free();
-    CHECK(px[0] < 128);                // the left edge sits below the origin
-    CHECK(px[1] > 128);                // the right edge above it
-    CHECK(px[2] < 128);                // and the same on the other axis
+    CHECK(px[0] == 7);                 // the left edge is below the origin
+    CHECK(px[3] == 7);                 // the right edge above it
+    CHECK(px[6] == 7);                 // and the same on the other axis
 }
 
 // smin is what makes two shapes read as ONE surface rather than as two stamps that overlap. The
@@ -1375,17 +1378,19 @@ TEST_CASE("fading from a script with no layer does nothing") {
 // past the edge must saturate at the edge it passed.
 TEST_CASE("a coordinate far outside the grid saturates at that edge, not the opposite one") {
     moonlive::MoonLive eng;
+    // Compared rather than scaled: uv is signed now, and scale() takes the unsigned 0..65535 that
+    // beat() produces, so reading a coordinate through it would test the wrong thing.
     REQUIRE(eng.compile("class T { tick() {"
-                        "  setRGB(0, scale(uvX(65535 * 65535, 4, 4), 256),"
-                        "            scale(uvX(3, 4, 4), 256),"
-                        "            scale(uvY(65535 * 65535, 4, 4), 256)); } }",
-                        kCtrlTable, kSys));
-    uint8_t px[3] = {};
-    eng.run(px, 1, 3, 0, moonlive::kEntryTick);
+                        "  if (uvX(3, 4, 4) > 0) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"
+                        "  if (uvX(65535 * 65535, 4, 4) > 0) { setRGB(1, 7, 0, 0); } else { setRGB(1, 3, 0, 0); }"
+                        "  if (uvY(65535 * 65535, 4, 4) > 0) { setRGB(2, 7, 0, 0); } else { setRGB(2, 3, 0, 0); }"
+                        "} }", kCtrlTable, kSys));
+    uint8_t px[9] = {};
+    eng.run(px, 3, 3, 0, moonlive::kEntryTick);
     eng.free();
-    CHECK(px[1] > 128);          // x = 3 on a 4-wide grid: right of center, as a control
-    CHECK(px[0] == 255);         // and a huge x saturates at the RIGHT edge, not the left
-    CHECK(px[2] == 255);         // same on the other axis
+    CHECK(px[0] == 7);           // x = 3 on a 4-wide grid: right of center, as a control
+    CHECK(px[3] == 7);           // a huge x saturates at the RIGHT edge, not the left
+    CHECK(px[6] == 7);           // same on the other axis
 }
 
 #endif  // MM_MOONLIVE_HAS_HOST_JIT — every case above needs compile() to SUCCEED, so

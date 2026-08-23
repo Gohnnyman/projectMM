@@ -110,6 +110,7 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `smin(a, b, k)` | the smooth minimum of two distances, so shapes melt into one surface rather than overlapping |
 | `fade(amt)` | dim every light toward black, FastLED's `fadeToBlackBy`. The trail primitive |
 | `polarA(dx, dy)`, `polarR(dx, dy)` | angle and distance from a center, for a radial effect |
+| `escape(cx, cy, jx, jy, iters)` | the Mandelbrot/Julia escape count, `0..255`, `0` inside the set. Zero seed = Mandelbrot; coordinates are uv's own fixed point (8192 = 1.0). The one loop a script cannot write: it squares signed values in 64 bits |
 | `setPaletteColor(x, y, index, bri)` | one light from the ACTIVE palette, in one call |
 | `paletteR(i, bri)`, `paletteG`, `paletteB` | one palette channel, when a script needs the value rather than a pixel |
 | `pool(n)` | size this script's particle pool, from `defineControls()`. Returns what it got |
@@ -130,7 +131,9 @@ dozen particles pile convincingly, a few hundred cost more than the rest of the 
 vocabulary follows the [WLED Particle System](https://github.com/wled/WLED) by Damian Schneider
 ([@DedeHai](https://github.com/DedeHai)); the fixed-point kernel and this binding are ours.
 
-`sin`/`cos` return an **unsigned** wave, so a coordinate comes from scaling by the full span and not by half of it: `scale(cos(a), radius * 2 + 1)` sweeps a whole axis, where scaling by `radius` alone would only ever reach one side of centre.
+`sin`/`cos` return an **unsigned** wave centered on 32768, so a coordinate comes from scaling by the full span and not by half of it: `scale(cos(a), radius * 2 + 1)` sweeps a whole axis, where scaling by `radius` alone would only ever reach one side of center. Subtract 32768 for a signed wave when you want one.
+
+`uvX`/`uvY` are the other way round, and the difference is deliberate: they return a **signed** coordinate with the center of the grid at 0 and the left half negative. A coordinate has an origin, so a script uses the number it is given rather than re-centering it; a wave does not, which is why the two conventions differ. Hold a uv value in an `int16_t` member, not a `uint16_t`.
 
 `noise(x, y, z)` takes **16.8 fixed-point** coordinates: the high byte selects the noise cell and the low byte interpolates within it. So `x * zoom` sets how much of the field the fixture spans, and the time axis must be **monotonic** — feeding it a `beat()` sawtooth walks one cell and then snaps back to its start, which reads as a hiccup once per beat. Scaling `t` keeps walking into new cells. 2D is the same call with `z` held constant.
 

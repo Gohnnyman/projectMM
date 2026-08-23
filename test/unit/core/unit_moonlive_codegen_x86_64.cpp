@@ -317,17 +317,37 @@ TEST_CASE("x86_64: mulImm(R0, R1, 42) is imul r64, r/m64, imm32") {
     CHECK(A.bytes()[6] == 0x00);
 }
 
-TEST_CASE("x86_64: branchGeU emits cmp + je-with-condition-Hs (0F 83 rel32)") {
+TEST_CASE("x86_64: an unsigned comparison branches on the unsigned condition") {
     HostAssembler A;
     Label l = A.newLabel();
     A.branchGeU(R0, R1, l);
     // cmp (3 bytes) + jae rel32 (6 bytes: 0F 83 xx xx xx xx). Total 9.
     A.bind(l); A.finalize();
     REQUIRE(A.size() == 9);
-    CHECK(A.bytes()[0] == 0x48);            // cmp REX.W
-    CHECK(A.bytes()[1] == 0x39);            // cmp r/m64, r64
+    CHECK(A.bytes()[0] == 0x40);            // null REX: the compare is 32-bit, not REX.W 64-bit
+    CHECK(A.bytes()[1] == 0x39);            // cmp r/m32, r32
     CHECK(A.bytes()[3] == 0x0F);            // jae opcode prefix
     CHECK(A.bytes()[4] == 0x83);            // jae rel32
+}
+
+TEST_CASE("x86_64: a signed comparison branches on the signed condition, so a negative compares below zero") {
+    HostAssembler A;
+    Label l = A.newLabel();
+    A.branchGeS(R0, R1, l);
+    A.bind(l); A.finalize();
+    REQUIRE(A.size() == 9);
+    CHECK(A.bytes()[4] == 0x8D);            // jge rel32, NOT jae (0x83)
+}
+
+TEST_CASE("x86_64: the compare is 32 bits wide, the width a MoonLive value actually has") {
+    // Not REX.W. arm64 compares in `w` registers, so a 64-bit compare here would read a 32-bit
+    // negative (sitting in a 64-bit register as 0x00000000FFFFFFFF) as a large POSITIVE, and the
+    // two backends would run the same script differently the moment a comparison went signed.
+    HostAssembler A;
+    Label l = A.newLabel();
+    A.branchGeS(R0, R1, l);
+    A.bind(l); A.finalize();
+    CHECK((A.bytes()[0] & 0x08) == 0);      // the W bit is clear
 }
 
 TEST_CASE("x86_64: branchNe emits cmp + jne (0F 85 rel32)") {
