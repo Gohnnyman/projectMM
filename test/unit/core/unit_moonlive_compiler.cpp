@@ -38,7 +38,7 @@ static std::vector<uint8_t> render(const char* src, int nLights, uint32_t t = 0)
 }
 #endif
 
-// The compile-through-run tests need a working host JIT. The assembler (moonlive_asm_host.cpp)
+// The compile-through-run tests need a working host JIT. The assembler (the host backend (moonlive_asm_arm64/x86_64.cpp))
 // covers arm64 and x86-64, so these run on every desktop the project supports; a host with
 // neither, or a --no-jit build, gets !ok ("codegen failed") and every "should compile" assertion
 // would fail. Guarded on the emit-header capability macro so they compile out there instead —
@@ -569,5 +569,135 @@ TEST_CASE("parentheses group an expression ahead of division") {
 TEST_CASE("dividing by zero yields zero rather than faulting") {
     CHECK(render(mmScript("setRGB(0, 100 / 0, 100 % 0, 0);"), 1)[0] == 0);
     CHECK(render(mmScript("setRGB(0, 100 / 0, 100 % 0, 0);"), 1)[1] == 0);
+}
+
+// A subtraction that goes below zero is the ordinary way to ask "which of these is bigger", and
+// before this it silently answered the opposite: the difference wrapped to a huge unsigned value
+// and every `< 0` test was false. Four separate rendering bugs in one session came from this.
+TEST_CASE("a comparison against a subtraction that went negative takes the negative branch") {
+    CHECK(render(mmScript("if (10 - 200 < 0) { setRGB(0, 7, 0, 0); } "
+                          "else { setRGB(0, 3, 0, 0); }"), 1)[0] == 7);
+    // ... and the positive direction still reads positive, so this is a fix and not an inversion.
+    CHECK(render(mmScript("if (200 - 10 < 0) { setRGB(0, 7, 0, 0); } "
+                          "else { setRGB(0, 3, 0, 0); }"), 1)[0] == 3);
+}
+
+// Every relational operator routes through the same two branch ops, so each spelling needs its own
+// check: `>` swaps the operands and `>=` / `<=` go through the two-branch strict form.
+TEST_CASE("every comparison operator orders a negative below a positive") {
+    CHECK(render(mmScript("if (0 - 5 > 1) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 3);
+    CHECK(render(mmScript("if (0 - 5 <= 1) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 7);
+    CHECK(render(mmScript("if (0 - 5 >= 1) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 3);
+}
+
+// The one remaining trap in signed division: INT32_MIN / -1 overflows, which is UB and a SIGFPE
+// on x86-64 where the other three ISAs quietly wrap. A script can write it (65536 * 32768 wraps
+// the multiply to INT32_MIN), so the host guards it the same way it guards divide-by-zero.
+TEST_CASE("dividing the most negative value by minus one saturates rather than faulting") {
+    // 32768 * 32768 * 2 wraps the multiply to exactly INT32_MIN (a literal cannot exceed 65535).
+    CHECK(render(mmScript("if (32768 * 32768 * 2 / (0 - 1) > 0) { setRGB(0, 7, 0, 0); } "
+                          "else { setRGB(0, 3, 0, 0); }"), 1)[0] == 7);
+    CHECK(render(mmScript("setRGB(0, 32768 * 32768 * 2 % (0 - 1), 5, 0);"), 1)[1] == 5);
+}
+
+// An int16_t ARRAY is refused at the declaration: element access lowers through the unsigned
+// indexed load on every backend, so a negative element would silently read as a large positive
+// where a scalar of the same type reads correctly. A refusal names the gap; a wrong number would
+// not.
+TEST_CASE("an int16_t array is refused with a diagnostic rather than mis-read") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { int16_t buf[4]; tick() { fill(0, 0, 0); } }",
+                            kTable, kSys));
+    eng.free();
+}
+
+// A coordinate far outside the plane must escape immediately, not overflow: the wrapped multiply
+// below hands escape() the most negative int32 there is, whose square alone is 2^62.
+TEST_CASE("escape treats an absurdly distant coordinate as escaped rather than overflowing") {
+    CHECK(render(mmScript("setRGB(0, escape(32768 * 32768 * 2, 32768 * 32768 * 2, 0, 0, 40), 7, 0);"),
+                 1)[0] > 0);
+}
+
+// The escape-time fractal, pinned at the points every textbook names. escape() is the one loop a
+// script cannot write itself (it squares signed fixed-point in 64 bits), so its contract is pinned
+// here rather than by the script that uses it.
+TEST_CASE("escape reports the inside of the Mandelbrot set as zero and the outside as a count") {
+    // The origin is inside the set forever; c = 2 + 2i runs away almost immediately.
+    CHECK(render(mmScript("setRGB(0, escape(0, 0, 0, 0, 40), 7, 0);"), 1)[0] == 0);
+    CHECK(render(mmScript("setRGB(0, escape(0, 0, 0, 0, 40), 7, 0);"), 1)[1] == 7);
+    CHECK(render(mmScript("setRGB(0, escape(16384, 16384, 0, 0, 40), 0, 0);"), 1)[0] > 0);
+}
+
+TEST_CASE("escape near the set boundary counts more steps than far outside") {
+    // c = -1.2 + 0.3i sits near the boundary and survives longer than c = 1 + 1i, which is the
+    // graded banding every rendering of the set is made of. -1.2 in Q13 is -9830.
+    auto near_px = render(mmScript("setRGB(0, escape(0 - 9830, 2458, 0, 0, 40), 0, 0);"), 1);
+    auto far_px  = render(mmScript("setRGB(0, escape(8192, 8192, 0, 0, 40), 0, 0);"), 1);
+    CHECK(near_px[0] > far_px[0]);
+}
+
+TEST_CASE("a nonzero seed selects the Julia set rather than the Mandelbrot set") {
+    // The SAME pixel answers differently under the two modes, which is the whole point of the
+    // seed: the origin is inside the Mandelbrot set (0 forever), but under Julia seed
+    // (-0.4, 0.6) it iterates z = z*z + c from z = 0+0i and escapes with a graded count.
+    CHECK(render(mmScript("setRGB(0, escape(0, 0, 0, 0, 40), 7, 0);"), 1)[0] == 0);
+    CHECK(render(mmScript("setRGB(0, escape(0, 0, 0 - 3277, 4915, 40), 7, 0);"), 1)[0] > 0);
+}
+
+// An int16_t member is how a script holds a value that goes below zero: a velocity, a delta, a
+// distance from a center. Stored in the arena as two bytes and read back SIGN-EXTENDED, where a
+// uint16_t member would return 65436 for -100.
+TEST_CASE("an int16_t member written negative reads back negative") {
+    CHECK(render(mmScript("int16_t neg = -100; "
+                          "if (neg < 0) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 7);
+}
+
+// ASSIGNED in tick(), not just seeded by the initializer: the store and the load are different
+// ops, and the bug this pins wrote only ONE byte of the two-byte member, so the sign-extending
+// load read a stale high byte and every stored coordinate collapsed to 0..255. A whole shader
+// rendered one flat color, and the initializer-only test above stayed green throughout.
+TEST_CASE("an int16_t member assigned a negative in tick reads back negative") {
+    CHECK(render(mmScript("int16_t v = 0; "
+                          "v = 100 - 11000; "
+                          "if (v < 0) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 7);
+    // And the magnitude survives, not just the sign: -10900 halved is -5450, still negative,
+    // where a half-written member would hold a small positive.
+    CHECK(render(mmScript("int16_t v = 0; "
+                          "v = 100 - 11000; "
+                          "if (v / 2 < 0 - 5000) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 7);
+}
+
+// The same value in a uint16_t member is a large positive, which is the distinction the type makes.
+TEST_CASE("a uint16_t member holds the same bits as a large positive") {
+    CHECK(render(mmScript("uint16_t pos = 65436; "
+                          "if (pos < 0) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 3);
+}
+
+// A brightness is a byte channel, and a script computing `n * 255` for "full" meant full. The
+// truncating cast turned that into an arbitrary pattern (n=50 gave 206, n=128 gave 128) while
+// every part of the expression still looked right.
+TEST_CASE("a brightness above full saturates to full instead of wrapping to a dark band") {
+    // setPaletteColor(x, y, index, brightness): 50 * 255 is 12750, which truncated to a byte is
+    // 206. Saturating, it is 255, and palette entry 0 at full brightness is not black.
+    auto bright = render(mmScript("setPaletteColor(0, 0, 0, 50 * 255);"), 1);
+    auto full   = render(mmScript("setPaletteColor(0, 0, 0, 255);"), 1);
+    CHECK(bright[0] == full[0]);
+    CHECK(bright[1] == full[1]);
+    CHECK(bright[2] == full[2]);
+}
+
+TEST_CASE("a brightness that went below zero renders black rather than full") {
+    auto px = render(mmScript("setPaletteColor(0, 0, 0, 0 - 10);"), 1);
+    CHECK(px[0] == 0);
+    CHECK(px[1] == 0);
+    CHECK(px[2] == 0);
+}
+
+// The loop guard deliberately stayed UNSIGNED when comparisons went signed: a loop counter is a
+// count, and `for (i = 0; i < width; ...)` must run whatever a signed reading would make of it.
+TEST_CASE("a loop over a count still runs every step after comparisons became signed") {
+    auto px = render(mmScript("for (i = 0; i < 4; i = i + 1) { setRGB(i, 9, 0, 0); }"), 4);
+    CHECK(px[0] == 9);
+    CHECK(px[3 * 3] == 9);
 }
 #endif

@@ -200,6 +200,10 @@ void RiscvAssembler::store16(Reg base, Reg off, Reg val) {
 void RiscvAssembler::load16(Reg d, Reg base, int32_t imm) {
     emit32(((uint32_t(imm) & 0xfff) << 20) | (xr(base) << 15) | (5 << 12) | (xr(d) << 7) | 0x03);
 }
+// lh rDst, imm(rBase): funct3 1 rather than lhu's 5, which is the whole difference.
+void RiscvAssembler::load16S(Reg d, Reg base, int32_t imm) {
+    emit32(((uint32_t(imm) & 0xfff) << 20) | (xr(base) << 15) | (1 << 12) | (xr(d) << 7) | 0x03);
+}
 // RISC-V has no register-offset addressing mode, so the address is computed first. Same shape as
 // store8/store16, which is why they share kScratchAddr.
 void RiscvAssembler::load8Idx(Reg d, Reg base, Reg off) {
@@ -217,6 +221,10 @@ void RiscvAssembler::branchIfZero(Reg a, Label l) {    // a == 0  ⇔  bgeu x0, 
 void RiscvAssembler::branchGeU(Reg a, Reg b, Label l) {
     addFixup(len_, l);
     emit32(encBranch(xr(a), xr(b), 7, 0));             // bgeu a, b, l
+}
+void RiscvAssembler::branchGeS(Reg a, Reg b, Label l) {
+    addFixup(len_, l);
+    emit32(encBranch(xr(a), xr(b), 5, 0));             // bge a, b, l  (funct3 5, vs 7 unsigned)
 }
 void RiscvAssembler::branchNe(Reg a, Reg b, Label l) {
     addFixup(len_, l);

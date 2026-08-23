@@ -165,6 +165,11 @@ public:
                                   static_cast<uint8_t>(decls[i].min),
                                   static_cast<uint8_t>(decls[i].max));
             }
+            // The member's initializer (`uint8_t bpm = 60;`) IS the control's default, and it is
+            // the only place one exists: /api/types probes a fresh module for defaults, and a
+            // scripted module's controls come from the script, so a probe with no script declares
+            // none. Carried on the control instead, which is what lights the UI's reset button.
+            controls.setDefault(controls.count() - 1, static_cast<int32_t>(decls[i].def));
         }
     }
 

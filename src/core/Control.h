@@ -284,6 +284,14 @@ struct ControlDescriptor {
     // here; Text/Password/ReadOnly reuse max as the buffer size (min unused).
     int32_t min = 0;
     int32_t max = 255;
+    // The value the control was BORN with, for the UI's reset-to-default affordance. Normally the
+    // UI reads defaults per module TYPE from /api/types, which probes a fresh instance: correct
+    // while a type's controls are fixed, and empty for a module whose controls come from data.
+    // A scripted module is exactly that (a MoonLive script declares its own), so the default has
+    // to travel with the control instance. INT32_MIN means "none declared", so a control that
+    // never sets one costs nothing on the wire and the type-level route is unchanged.
+    static constexpr int32_t kNoDefault = INT32_MIN;
+    int32_t def = kNoDefault;
     bool hidden = false;    // UI visibility flag. Set via ControlList::setHidden() after addX().
                             // Persistence ignores this — hidden controls are still saved/loaded
                             // so toggling visibility doesn't lose state.
@@ -536,6 +544,13 @@ public:
     // remain bound for persistence — toggling visibility doesn't lose state.
     void setHidden(uint8_t i, bool hidden) {
         if (i < count_) controls_[i].hidden = hidden;
+    }
+
+    // Record what a previously-added control was born with, so the UI can offer a reset for a
+    // control whose default cannot be probed from the module TYPE. Used by the scripted modules,
+    // whose controls are declared by the running script rather than by the C++ type.
+    void setDefault(uint8_t i, int32_t def) {
+        if (i < count_) controls_[i].def = def;
     }
 
     // Flip the readonly flag on a previously-added control. Typical use: call addText()

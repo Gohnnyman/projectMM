@@ -1,10 +1,10 @@
 {
-  "commit": "9eea71d6",
+  "commit": "ab508402",
   "flash": {
     "esp32": 1764416,
     "esp32p4rev1-eth": 1653696,
     "esp32p4rev1-eth-wifi": 1933472,
-    "esp32s3-n16r8": 1801632,
+    "esp32s3-n16r8": 1813456,
     "esp32s3-n8r8": 1753232,
     "esp32s31": 2079904,
     "esp32-16mb": 1714608,
@@ -12,12 +12,12 @@
     "esp32-wrover": 1765504,
     "qemu": 1318160,
     "esp32p4rev3-eth": 1643760,
-    "desktop": 1105920
+    "desktop": 1230168
   },
   "perf": {
     "desktop": {
-      "tick_us": 437,
-      "fps": 2288
+      "tick_us": 182,
+      "fps": 5494
     },
     "esp32": {
       "tick_us": 2151,
@@ -25,54 +25,54 @@
     }
   },
   "loc": {
-    "core": 19591,
-    "light": 25712,
-    "platform": 14786,
-    "ui": 6859,
-    "test": 45620,
-    "moondeck": 21359
+    "core": 19684,
+    "light": 25824,
+    "platform": 14891,
+    "ui": 7028,
+    "test": 45902,
+    "moondeck": 21626
   },
   "comments": {
     "core": {
-      "lines": 7689,
-      "ratio": 0.425
+      "lines": 7746,
+      "ratio": 0.426
     },
     "light": {
-      "lines": 10161,
-      "ratio": 0.436
+      "lines": 10237,
+      "ratio": 0.438
     },
     "platform": {
-      "lines": 5263,
+      "lines": 5303,
       "ratio": 0.391
     },
     "ui": {
-      "lines": 1803,
-      "ratio": 0.279
+      "lines": 1861,
+      "ratio": 0.281
     },
     "test": {
-      "lines": 8355,
-      "ratio": 0.21
+      "lines": 8438,
+      "ratio": 0.211
     },
     "moondeck": {
-      "lines": 3479,
-      "ratio": 0.186
+      "lines": 3504,
+      "ratio": 0.185
     }
   },
   "tests": {
-    "cases": 1489,
+    "cases": 1511,
     "scenarios": 23
   },
   "docs": {
     "md_files": 189,
-    "md_lines": 27471,
+    "md_lines": 27631,
     "plans_files": 96,
-    "backlog_lines": 4310,
+    "backlog_lines": 4341,
     "lessons_lines": 576,
     "claude_md_lines": 136
   },
   "complexity": {
-    "functions": 2690,
-    "over_threshold": 164,
+    "functions": 2716,
+    "over_threshold": 165,
     "worst_ccn": 108
   }
 }

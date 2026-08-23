@@ -249,11 +249,16 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
                 if (op.imm >= 0 && op.imm < kIrLabels)
                     a.branchGeU(reg(op.a), reg(op.b), labelFor(op.imm));
                 break;
+            case IrOp::BranchGeS:
+                if (op.imm >= 0 && op.imm < kIrLabels)
+                    a.branchGeS(reg(op.a), reg(op.b), labelFor(op.imm));
+                break;
             case IrOp::BranchNe:
                 if (op.imm >= 0 && op.imm < kIrLabels)
                     a.branchNe(reg(op.a), reg(op.b), labelFor(op.imm));
                 break;
             case IrOp::LoadCtrl: a.load8(reg(op.dst), host(kArg4), op.imm); break;   // dst = ctrls[imm]
+            case IrOp::LoadCtrl16S: a.load16S(reg(op.dst), host(kArg4), op.imm); break;  // signed wide member
             case IrOp::LoadCtrl16: a.load16(reg(op.dst), host(kArg4), op.imm); break;  // dst = *(u16*)(ctrls+imm)
             // An ARRAY element. `imm` is the array's base, op.c the element width and op.d the
             // element count, so both the scaling and the bound come from the IR rather than from a

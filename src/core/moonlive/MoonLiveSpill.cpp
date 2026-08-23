@@ -67,7 +67,8 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         // time and needs no live interval here.
         case IrOp::StoreCtrl:
         case IrOp::StoreCtrl16: out[0] = in.a; return 1;
-        case IrOp::LoadCtrl16:  out[0] = kArg4;                return 1;   // reads the arena pointer
+        case IrOp::LoadCtrl16:
+        case IrOp::LoadCtrl16S: out[0] = kArg4;               return 1;   // reads the arena pointer
         // An indexed access reads its INDEX (and, for a store, the value). The arena pointer is
         // deliberately NOT reported: the rewriter below writes sources back POSITIONALLY (src[0]
         // into in.a, src[1] into in.b), so listing kArg4 first would shift every real operand one
@@ -79,6 +80,7 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         case IrOp::Add:
         case IrOp::Mul:
         case IrOp::BranchGe:
+        case IrOp::BranchGeS:
         case IrOp::BranchNe:   out[0] = in.a; out[1] = in.b; return 2;
         // A Call reads NO registers. Its arguments were staged into consecutive frame slots by the
         // parser, so `imm` is their base and `b` is how MANY there are — a literal count, not a
@@ -104,7 +106,7 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
 // buffer pointer) a spurious live range that the allocator would then try to manage.
 bool writesDst(IrOp op) {
     switch (op) {
-        case IrOp::Label: case IrOp::BranchGe: case IrOp::BranchNe:
+        case IrOp::Label: case IrOp::BranchGe: case IrOp::BranchGeS: case IrOp::BranchNe:
         // A member store writes MEMORY, not a register: its `a` is the value and `imm` the arena
         // offset, so reading its dst as a definition would give vreg 0 a spurious live range.
         case IrOp::StoreCtrl:
