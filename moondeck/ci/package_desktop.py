@@ -363,6 +363,167 @@ def package_macos(binary: Path, version: str) -> Path:
     return out
 
 
+NSI_TEMPLATE = r'''Unicode true
+!define APPNAME "projectMM"
+!define PUBLISHER "MoonModules"
+!define HOMEPAGE "https://github.com/MoonModules/projectMM"
+!define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\projectMM"
+
+Name "${APPNAME} @VERSION@"
+OutFile "@OUT@"
+; Per-user, under Programs: no elevation prompt, and no chance of landing in a directory the user
+; cannot write to. The SETTINGS live in $LOCALAPPDATA\projectMM, deliberately NOT under here, so an
+; upgrade replaces the program and leaves the configuration untouched.
+InstallDir "$LOCALAPPDATA\Programs\projectMM"
+InstallDirRegKey HKCU "${UNINSTKEY}" "InstallLocation"
+RequestExecutionLevel user
+SetCompressor /SOLID lzma
+!include "MUI2.nsh"
+!define MUI_ICON "@ICON@"
+!define MUI_UNICON "@ICON@"
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+!insertmacro MUI_LANGUAGE "English"
+
+Section "install"
+  ; A running projectMM.exe holds a lock on the file and the install would fail with a
+  ; file-in-use error. taskkill is a Windows built-in, so this needs no NSIS plugin; it is
+  ; harmless when nothing is running. projectMM is a local server the user restarts from the
+  ; Start menu, so stopping it costs a reconnect, not work.
+  DetailPrint "Stopping any running ${APPNAME}..."
+  nsExec::Exec 'taskkill /F /IM projectMM.exe'
+  Pop $0
+
+  SetOutPath "$INSTDIR"
+  File "@BINARY@"
+  File /oname=projectMM.ico "@ICON@"
+  File /oname=README.txt "@README@"
+
+  CreateDirectory "$SMPROGRAMS\${APPNAME}"
+  CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\projectMM.exe" "" "$INSTDIR\projectMM.ico"
+  CreateShortcut "$SMPROGRAMS\${APPNAME}\Uninstall ${APPNAME}.lnk" "$INSTDIR\uninstall.exe"
+
+  WriteUninstaller "$INSTDIR\uninstall.exe"
+  ; Add/Remove Programs. HKCU to match the per-user install: an HKLM entry would need elevation
+  ; and would advertise the app to users who do not have it.
+  WriteRegStr   HKCU "${UNINSTKEY}" "DisplayName"     "${APPNAME}"
+  WriteRegStr   HKCU "${UNINSTKEY}" "DisplayVersion"  "@VERSION@"
+  WriteRegStr   HKCU "${UNINSTKEY}" "Publisher"       "${PUBLISHER}"
+  WriteRegStr   HKCU "${UNINSTKEY}" "URLInfoAbout"    "${HOMEPAGE}"
+  WriteRegStr   HKCU "${UNINSTKEY}" "DisplayIcon"     "$INSTDIR\projectMM.ico"
+  WriteRegStr   HKCU "${UNINSTKEY}" "InstallLocation" "$INSTDIR"
+  WriteRegStr   HKCU "${UNINSTKEY}" "UninstallString" "$INSTDIR\uninstall.exe"
+  WriteRegDWORD HKCU "${UNINSTKEY}" "NoModify" 1
+  WriteRegDWORD HKCU "${UNINSTKEY}" "NoRepair" 1
+SectionEnd
+
+Section "uninstall"
+  nsExec::Exec 'taskkill /F /IM projectMM.exe'
+  Pop $0
+  Delete "$INSTDIR\projectMM.exe"
+  Delete "$INSTDIR\projectMM.ico"
+  Delete "$INSTDIR\README.txt"
+  Delete "$INSTDIR\uninstall.exe"
+  RMDir "$INSTDIR"
+  Delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
+  Delete "$SMPROGRAMS\${APPNAME}\Uninstall ${APPNAME}.lnk"
+  RMDir "$SMPROGRAMS\${APPNAME}"
+  DeleteRegKey HKCU "${UNINSTKEY}"
+  ; $LOCALAPPDATA\projectMM is NOT removed. Settings outlive the program on purpose: an uninstall
+  ; is often a step in a reinstall, and silently discarding a user's configuration is the kind of
+  ; thing they only discover afterwards. Removing that folder by hand is the documented way out.
+SectionEnd
+'''
+
+
+def windows_icon(version: str) -> Path | None:
+    """The .ico for the installer, its shortcut and Add/Remove Programs.
+
+    Prefers the one CMake already generated beside the binary, so the installer and the exe carry
+    the identical icon; regenerates it only when packaging a build that did not produce one.
+    """
+    built = BUILD_DIR_WIN / "projectMM.ico"
+    if built.exists():
+        return built
+    out = DIST_DIR / "projectMM.ico"
+    src = ROOT / "web-installer" / "favicon.png"
+    if not src.exists():
+        print("package_desktop: no favicon to generate an icon from")
+        return None
+    run(["uv", "run", str(ROOT / "moondeck" / "ci" / "make_ico.py"), str(src), str(out)])
+    return out if out.exists() else None
+
+
+def find_makensis() -> str | None:
+    """NSIS's compiler, on PATH or in its default install location.
+
+    The Windows NSIS installer does NOT put itself on PATH, so `which` alone reports it missing on
+    a developer machine that has it installed the ordinary way. CI's runner image does have it on
+    PATH; this is what makes a local packaging run behave the same as the release one.
+    """
+    exe = shutil.which("makensis")
+    if exe:
+        return exe
+    for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles")):
+        if not base:
+            continue
+        candidate = Path(base) / "NSIS" / "makensis.exe"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def package_windows_installer(binary: Path, version: str) -> Path | None:
+    """A setup.exe, built with NSIS when the host has makensis (the windows-latest runner does).
+
+    The zip beside it stays the portable form: unpack anywhere, run, no install. This is for the
+    user who wants what macOS and Linux already get, an entry in the Start menu with an icon and a
+    working uninstall, rather than an executable loose in their Downloads folder.
+    """
+    makensis = find_makensis()
+    if makensis is None:
+        # Same reasoning as the .deb: on CI this is fatal, because the release uploads the
+        # installer with fail_on_unmatched_files and a skip would fail the whole release with an
+        # error naming a glob rather than the missing tool. On a dev machine it is a skip, and the
+        # zip beside it is what that developer uses.
+        if os.environ.get("CI"):
+            sys.exit("package_desktop: no makensis on this CI runner, cannot build the installer")
+        print("package_desktop: no makensis on this host, skipping the installer")
+        return None
+
+    icon = windows_icon(version)
+    if icon is None:
+        # CI-fatal for the same reason as the missing makensis above: the release uploads the
+        # installer with fail_on_unmatched_files, so skipping here would fail the whole release
+        # with an error naming a glob rather than the missing icon source.
+        if os.environ.get("CI"):
+            sys.exit("package_desktop: no icon for the installer, and no favicon to build one from")
+        print("package_desktop: no icon, skipping the installer")
+        return None
+
+    out = DIST_DIR / f"projectMM-windows-x64-v{version}-setup.exe"
+    readme = DIST_DIR / "_README.txt"
+    readme.write_text(readme_text(version, "Windows x64"), encoding="utf-8")
+    script = DIST_DIR / "projectMM.nsi"
+    script.write_text(
+        NSI_TEMPLATE
+        .replace("@VERSION@", version)
+        .replace("@OUT@", str(out))
+        .replace("@BINARY@", str(binary))
+        .replace("@ICON@", str(icon))
+        .replace("@README@", str(readme)),
+        encoding="utf-8")
+    try:
+        run([makensis, str(script)])
+    finally:
+        script.unlink(missing_ok=True)
+        readme.unlink(missing_ok=True)
+    print(f"package_desktop: wrote {out}")
+    return out
+
+
 def package_windows(binary: Path, version: str) -> Path:
     DIST_DIR.mkdir(exist_ok=True)
     out = DIST_DIR / f"projectMM-windows-x64-v{version}.zip"
@@ -375,6 +536,7 @@ def package_windows(binary: Path, version: str) -> Path:
     finally:
         readme.unlink(missing_ok=True)
     print(f"package_desktop: wrote {out}")
+    package_windows_installer(binary, version)
     return out
 
 

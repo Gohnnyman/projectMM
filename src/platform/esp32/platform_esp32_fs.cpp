@@ -44,6 +44,8 @@ void fsSetRoot(const char* /*path*/) {
     // prefix is hard-coded. Provided only so test code can call it portably.
 }
 
+const char* fsRootPath() { return FS_MOUNT_POINT; }
+
 bool fsMount() {
     if (fsMounted_) return true;
 

@@ -65,6 +65,28 @@ Or use MoonDeck's Desktop tab for the same operations with a status dot per card
 
 Each host writes into its own build dir: `build/macos/`, `build/linux/`, `build/windows/`. The per-host layout mirrors the ESP32 side's `build/esp32-<board>/` shape — one directory per target, no cross-target clobbering on a multi-host dev machine.
 
+### Where the desktop keeps its settings
+
+A **source checkout writes to `build/.config/`**, recognized by `CMakeLists.txt` and `moondeck/` both being in the working directory, so a development tree stays self-contained and gitignored. Anywhere else, an installed or unzipped binary writes to the OS per-user data directory:
+
+| Platform | Directory |
+|---|---|
+| Windows | `%LOCALAPPDATA%\projectMM` |
+| macOS | `~/Library/Application Support/projectMM` |
+| Linux | `$XDG_DATA_HOME/projectMM`, else `~/.local/share/projectMM` |
+
+`MM_DATA_DIR` overrides both, which is how the test suite pins its root into the build tree rather than touching a developer's real settings.
+
+The distinction matters because a shipped binary is launched from a download folder or a Start-menu shortcut, where a path relative to the working directory is either unwritable or belongs to that folder rather than to the user. The root is created when the filesystem mounts, and a location that cannot be written to fails the mount and is reported once, rather than surfacing as a failed save on every change.
+
+### Packaging
+
+`uv run moondeck/ci/package_desktop.py` builds and packages for the host it runs on: a `.dmg` with a `.app` on macOS, a `.tar.gz` plus a `.deb` on Linux, and a `.zip` plus an NSIS `-setup.exe` on Windows. The Windows installer puts the program in `%LOCALAPPDATA%\Programs\projectMM` with a Start-menu shortcut and an uninstaller; it needs no elevation, and it never touches the settings directory, so an upgrade keeps the user's configuration.
+
+Both the Windows icon and the macOS `.icns` derive from `web-installer/favicon.png`, so the mark has one source. The `.ico` is generated during the CMake build (`moondeck/ci/make_ico.py`, which pulls Pillow on demand through uv) and embedded in the executable, so the binary carries its icon whether it was installed or just unzipped.
+
+Each packager skips its platform-specific format when the tool is missing (`dpkg-deb`, `makensis`) on a dev machine, and fails outright under CI, where a missing artifact would otherwise fail the release with an error naming a glob rather than the absent tool.
+
 ### Prerequisites
 
 Every host needs [uv](https://docs.astral.sh/uv/), CMake 3.20+, and a C++20 compiler.

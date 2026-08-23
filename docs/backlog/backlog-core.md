@@ -940,6 +940,14 @@ The tool shells out to `c++` and `objdump` to build the per-ISA emitter and disa
 
 Closing it is a compiler/disassembler pair behind the two `subprocess.run` calls: `cl.exe` for the build, and for the disassembly either LLVM's `llvm-objdump` (which understands `-b binary` the way the tool already expects, and ships with the VS "C++ Clang tools" component) or a `.obj` wrapper around `dumpbin /disasm`, which does not. Prefer the former — the flags are already right, so it is a lookup rather than a second code path.
 
+## A non-ASCII Windows profile path defeats the desktop settings directory (2026-08-23)
+
+`std::getenv("LOCALAPPDATA")` returns the ANSI form of the path, so a Windows user whose profile name carries characters outside the system codepage (CJK and Cyrillic on a Western machine; most accented Latin survives cp1252) gets `?` where those characters were. `?` is not legal in a Windows filename, so `create_directories` fails, `fsMount` returns false, and the driver reports `cannot use ..., persistence disabled` naming the mangled path. It degrades visibly rather than corrupting anything, which is the standard Principle 5 asks for, but that user has no working persistence.
+
+Reading the variable wide is only half of it. `toFsPath` composes a `std::filesystem::path`, which stores wide on Windows, but every open in the layer goes back through `.string()` to reach `std::fopen` (fsRead, fsReadAt, fsWriteAtomic, fsWriteStream, and the mount probe), a narrowing the code comments on deliberately at `fsRead`. So a wide `LOCALAPPDATA` alone would produce a correct path that still cannot be opened: the fix is one `_wfopen`-on-Windows helper shared by all five sites, plus a test with a non-ASCII root.
+
+Not done with the per-user data directory because it reverses a documented decision across the whole desktop filesystem layer, four of whose five call sites predate that change. What the change did do is make the root capable of containing a username, where it was previously the literal `build`. Worth closing the next time this file is opened for other reasons.
+
 ## A driven GPIO the Pins map never sees: bus padding, and a hidden clockPin
 
 **Found:** 2026-08-21, on MM-S31, after a bench session that started as "the LED panel stopped working" and cost hours chasing a firmware regression that did not exist.

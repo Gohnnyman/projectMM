@@ -529,6 +529,7 @@ jobs:
             dist/projectMM-*.tar.gz
             dist/projectMM-*.zip
             dist/projectMM-*.dmg
+            dist/projectMM-*-setup.exe
             dist/projectmm_*.deb
 
   # Deploy the web installer to GitHub Pages. Separate from `release` because

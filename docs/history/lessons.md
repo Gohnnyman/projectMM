@@ -574,3 +574,19 @@ evidence which *looks* most authoritative here is the evidence that lies.
   and one was rewritten. The habit that catches it is cheap: **sabotage the fix and confirm the test
   goes red before believing it.** Two of those three had also been failing for a reason unrelated to
   what they claimed to assert, which the control check surfaced immediately.
+
+- **A build script that does not build what the next command tests produces a confident false
+  green.** `build_desktop.py` builds `projectMM` but not `mm_tests`/`mm_scenarios` unless given
+  `--tests`, so `ctest` straight after it runs whatever binary was there before. It reported "1377
+  passed" against a test binary two hours old, on a change whose new option string was not even
+  present in it. The tell is cheap and worth the habit: **after changing code, confirm the test
+  binary actually contains the change** (a `grep` for a new string, or a run of just the new case)
+  before believing a green suite. The staleness guards in `run_scenario.py` exist for exactly this
+  and are why the scenario half never went unnoticed; the unit half has no such guard.
+
+- **A freshness guard keyed on mtime must exclude files the build itself rewrites.** The same guard
+  then cried wolf: `build_info.h` embeds a `+` when `git status` reports a dirty tree, and a gate run
+  dirties the tree by writing its own scenario baselines and metrics. So every gate run left the
+  next one reporting a stale runner, a self-inflicted loop that reads exactly like a real staleness
+  failure. **Generated build metadata is not source**, and a guard that cannot tell them apart
+  teaches people to ignore it.

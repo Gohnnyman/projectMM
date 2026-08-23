@@ -21,6 +21,106 @@
 #include <string>
 #include <fstream>
 
+// The settings directory is created when the filesystem mounts, not left for the first save to
+// discover. A shipped binary starts in a directory that has never held one, and before this the
+// first WRITE was what failed, then every write after it, once per save, forever.
+TEST_CASE("A settings directory that does not exist yet is created when the filesystem mounts") {
+    char root[256];
+    std::snprintf(root, sizeof(root), "/tmp/mm_root_new_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(root);
+    REQUIRE_FALSE(std::filesystem::exists(root));
+
+    mm::platform::fsSetRoot(root);
+    CHECK(mm::platform::fsMount());
+    CHECK(std::filesystem::is_directory(root));
+    // Reported back, so a failure can name the directory it actually tried.
+    CHECK(std::string(mm::platform::fsRootPath()) == root);
+
+    mm::platform::fsSetRoot("");
+    std::filesystem::remove_all(root);
+}
+
+// A root that exists and is a directory can still reject writes, which is the case the probe
+// exists for and the one a read-only extraction produces. A DIRECTORY where the probe file belongs
+// blocks its creation while leaving the root itself perfectly valid, so this reaches the probe
+// instead of failing earlier at the is_directory check the case above covers.
+TEST_CASE("A settings directory that rejects a write fails the mount, not just a missing one") {
+    char root[256];
+    std::snprintf(root, sizeof(root), "/tmp/mm_root_probe_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(root);
+    std::error_code ec;
+    const auto blocker = std::filesystem::path(root) / ".mm-write-probe";
+    std::filesystem::create_directories(blocker, ec);
+    // Non-empty, so the pre-remove cannot clear it out of the way either.
+    { std::ofstream f(blocker / "occupied.txt"); f << "x"; }
+    REQUIRE(std::filesystem::is_directory(root));
+    REQUIRE(std::filesystem::is_directory(blocker));
+
+    mm::platform::fsSetRoot(root);
+    CHECK_FALSE(mm::platform::fsMount());
+
+    mm::platform::fsSetRoot("");
+    std::filesystem::remove_all(root);
+}
+
+// MM_DATA_DIR wins over every other rule. This is the contract the test suite itself relies on:
+// ctest sets it so a test can never write into the developer's real settings directory.
+TEST_CASE("MM_DATA_DIR chooses the settings directory over any other rule") {
+    const char* prior = std::getenv("MM_DATA_DIR");
+    const std::string saved = prior ? prior : "";
+
+    char want[256];
+    std::snprintf(want, sizeof(want), "/tmp/mm_root_env_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+#ifdef _WIN32
+    _putenv_s("MM_DATA_DIR", want);
+#else
+    setenv("MM_DATA_DIR", want, 1);
+#endif
+    // Empty restores the DEFAULT, which is where the resolution rule is applied.
+    mm::platform::fsSetRoot("");
+    CHECK(std::string(mm::platform::fsRootPath()) == want);
+
+    // Restore what ctest pinned. Leaving this set would hand every later case a root of its own
+    // choosing, quietly undoing the isolation this very case exists to prove.
+#ifdef _WIN32
+    _putenv_s("MM_DATA_DIR", saved.c_str());
+#else
+    if (saved.empty()) unsetenv("MM_DATA_DIR");
+    else                setenv("MM_DATA_DIR", saved.c_str(), 1);
+#endif
+    mm::platform::fsSetRoot("");
+    // Not an equality check against `saved`: with the variable unset the root correctly falls
+    // through to the next rule, so the thing worth asserting is that the override is gone.
+    CHECK(std::string(mm::platform::fsRootPath()) != want);
+    std::filesystem::remove_all(want);
+}
+
+// An unusable location is refused at mount, which is what lets the caller say "persistence
+// disabled" once instead of emitting a failed save per module per change. A plain file where the
+// directory belongs stands in for the real cases (a read-only extraction, a protected folder, a
+// directory owned by someone else): every one of them accepts the path and rejects the writes.
+TEST_CASE("A settings location that cannot be written to fails the mount, not every later save") {
+    char root[256];
+    std::snprintf(root, sizeof(root), "/tmp/mm_root_blocked_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(root);
+    // ofstream does not create parents, and on Windows "/tmp" is <drive>:\tmp, which need not
+    // exist. Without this the case depends on another test having created it first.
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(root).parent_path(), ec);
+    { std::ofstream f(root); f << "a file, not a directory"; }
+    REQUIRE(std::filesystem::is_regular_file(root));
+
+    mm::platform::fsSetRoot(root);
+    CHECK_FALSE(mm::platform::fsMount());
+
+    mm::platform::fsSetRoot("");
+    std::filesystem::remove_all(root);
+}
+
 // Persistence round-trip: set deviceName → save → recreate Scheduler+modules → load → assert.
 // Uses fsSetRoot to isolate the test from any real /.config/ on disk.
 // A control change (deviceName) saved with flush() reappears on the next boot once a fresh Scheduler loads the same path.

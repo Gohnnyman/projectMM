@@ -51,7 +51,8 @@ struct Rig {
         fm.defineControls();
         fm.setup();
     }
-    // Restore the DEFAULT root (fsSetRoot("") → "build"), not ".", so a later test in the same
+    // Restore the DEFAULT root (whatever platform.h's fsSetRoot contract resolves "" to; under
+    // ctest that is the pinned MM_DATA_DIR), not ".", so a later test in the same
     // binary starts from the same baseline this Rig assumed, never a leaked "." repo-root.
     // Teardown must never propagate: this Rig is destroyed while the stack unwinds from a failed
     // CHECK, and a throw there terminates the process, losing the very failure being reported.

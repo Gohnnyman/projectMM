@@ -18,6 +18,7 @@ Filters compose:
 import argparse
 import datetime
 import json
+import os
 import platform
 import re
 import subprocess
@@ -68,7 +69,12 @@ _RUNNER_SKIP_PARTS = {"build", "__pycache__", ".git"}
 # rebuilding clears it only until the next firmware build. They are excluded because their mtime
 # carries no information about whether the runner is out of date; a real edit reaches them through
 # their INPUT (src/ui/app.js), which is watched.
-_RUNNER_GENERATED = {"src/ui/ui_embedded.h"}
+# build_info.h belongs here for the same reason and a sharper one: it embeds `git status
+# --porcelain` as a `+` dirty-suffix, so its CONTENT changes the moment the tree goes dirty. A gate
+# run writes scenario baselines and repo-health metrics, which dirties the tree, which flips the
+# suffix, which makes every binary look stale on the NEXT run. A build id is not code, so it cannot
+# make the runner "report on code that is no longer there", which is what this guard is for.
+_RUNNER_GENERATED = {"src/ui/ui_embedded.h", "src/core/build_info.h"}
 
 
 def _stale_runner_reason() -> str:
@@ -170,7 +176,12 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
         print(f"  SKIP  {path.name} (skip_on {target})")
         return 0
     # Capture + tee: stream to stdout while collecting MEASURE lines.
-    proc = subprocess.Popen([str(RUNNER), str(path)], cwd=ROOT,
+    # Pin the runner's filesystem root into the build tree. The runner performs real writes, and
+    # its default root is the OS per-user data directory unless the working directory happens to be
+    # a checkout. Relying on cwd for that would put a test one wrong directory away from
+    # overwriting a developer's own installed-projectMM settings.
+    env = {**os.environ, "MM_DATA_DIR": str(ROOT / "build" / "scenario-fs")}
+    proc = subprocess.Popen([str(RUNNER), str(path)], cwd=ROOT, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1)
     observations: dict[str, dict] = {}  # step-name → {tick_us, free_heap, max_alloc_block}

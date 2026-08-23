@@ -96,14 +96,16 @@ The numbers above are observations. The **contracts** projectMM commits to, what
 
 ![Installer](docs/assets/ui/installer.png)
 
-**Desktop: download and run.** Grab the build for your OS from the [releases page](https://github.com/MoonModules/projectMM/releases):
+**Desktop: download and run.** Grab the build for your OS from the [releases page](https://github.com/MoonModules/projectMM/releases). Step-by-step with screenshots for Windows: [Installing projectMM on a desktop](docs/tutorials/installing-to-desktop.md).
 
-- **macOS arm64:** `projectMM-macos-arm64-vX.Y.Z.dmg`: open it and drag projectMM to Applications, then launch it like any app. A Terminal window opens showing what it is doing, your browser opens the UI, and closing that window stops it. (`projectMM-macos-arm64-vX.Y.Z.tar.gz` is the same binary without the wrapper, for scripting.) x86-64 macOS is supported and tested, but only the arm64 build is packaged: build from source for an Intel Mac. The app is ad-hoc signed rather than notarized, so the first launch is refused with "Apple could not verify projectMM is free of malware". On macOS 15 and later that dialog offers no way through, so clear the download flag once in Terminal and open it again: `xattr -dr com.apple.quarantine /Applications/projectMM.app` (or `./projectMM` for the tarball).
-- **Windows x64:** `projectMM-windows-x64-vX.Y.Z.zip`: unzip, double-click `projectMM.exe`. SmartScreen may warn on first run because the binary is unsigned (More info → Run anyway).
+- **macOS arm64:** `projectMM-macos-arm64-vX.Y.Z.dmg`: open it and drag projectMM to Applications, then launch it like any app. A Terminal window opens showing what it is doing, your browser opens the UI, and closing that window stops it. (`projectMM-macos-arm64-vX.Y.Z.tar.gz` is the same binary without the wrapper, for scripting.) x86-64 macOS is supported and tested, but only the arm64 build is packaged: build from source for an Intel Mac. The binary is ad-hoc signed rather than notarized, so Gatekeeper says it cannot verify the developer; right-click → Open and confirm, or clear the flag with `xattr -dr com.apple.quarantine ./projectMM`.
+- **Windows x64:** `projectMM-windows-x64-vX.Y.Z-setup.exe`: run it and projectMM installs for your user (no admin prompt) with a Start-menu entry and an uninstaller. `projectMM-windows-x64-vX.Y.Z.zip` is the same binary without the installer, to unzip and run from anywhere. SmartScreen may warn on first run because neither is signed (More info → Run anyway).
 - **Linux x64:** `projectMM-linux-x64-vX.Y.Z.tar.gz`, or `projectmm_X.Y.Z_amd64.deb` on Debian, Ubuntu and Raspberry Pi OS (`sudo apt install ./projectmm_X.Y.Z_amd64.deb` puts it on your PATH).
 
 Then open `http://localhost:8080/`. It opens by itself on start; pass `--no-browser` to suppress
 that (a headless server, or a service manager), and `--port <n>` to serve somewhere else.
+
+**Your settings live with your user, not beside the executable**, so they survive moving the app, reinstalling, and upgrading: `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, and `$XDG_DATA_HOME/projectMM` on Linux, falling back to `~/.local/share/projectMM` when that is unset. An uninstall leaves them in place; delete that folder to start clean. Set `MM_DATA_DIR` to put them somewhere else. Running from a source checkout keeps using `build/` instead, so a development tree stays self-contained.
 
 Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, send it to Art-Net, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source (see [building.md](docs/building.md)), though currently only the macOS, Windows, Linux and ESP32 binaries ship as releases.
 

@@ -486,13 +486,62 @@ size_t firmwareSize() { return 0; }
 size_t firmwarePartition() { return 0; }
 size_t flashChipSize() { return 0; }
 
-// Filesystem — std::filesystem rooted at fsRoot_ (default "build", overridable via fsSetRoot).
-// A leading '/' in the API path maps to root-relative. Default lives under build/ so the
-// desktop-created .config/ is gitignored (along with the rest of build/) and doesn't clutter
-// the repo root. Tests override this to a tmpdir via fsSetRoot for isolation.
+// Filesystem: std::filesystem rooted at fsRoot_. A leading '/' in the API path maps to
+// root-relative.
+//
+// The root is a PER-USER data directory, not a path relative to wherever the process happened to
+// start. A shipped binary is launched from a download folder, a Start-menu shortcut, or an
+// installer's program directory, and a relative root fails both ways: it lands somewhere
+// unwritable, so every save fails, or it makes the settings belong to that FOLDER rather than to
+// the user, so moving the exe loses them. Both were seen on a Windows bench.
+//
+// Three sources, in order:
+//   1. MM_DATA_DIR, for tests and for anyone who wants the data somewhere specific.
+//   2. "build", when the working directory is a repo checkout. Keeps the dev loop, the gate
+//      scripts, and a developer's existing .config exactly where they already are.
+//   3. The OS's per-user application-data directory.
 
 namespace {
-std::filesystem::path fsRoot_{"build"};
+
+// The OS convention for per-user application data. Empty when the environment names no home, which
+// is a real case in a bare service account; the caller falls back rather than writing to "/".
+std::filesystem::path userDataDir() {
+#ifdef _WIN32
+    // LOCALAPPDATA, not APPDATA: this is machine-local state and has no business roaming.
+    if (const char* base = std::getenv("LOCALAPPDATA"); base && *base)
+        return std::filesystem::path(base) / "projectMM";
+#elif defined(__APPLE__)
+    if (const char* home = std::getenv("HOME"); home && *home)
+        return std::filesystem::path(home) / "Library" / "Application Support" / "projectMM";
+#else
+    if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg && *xdg)
+        return std::filesystem::path(xdg) / "projectMM";
+    if (const char* home = std::getenv("HOME"); home && *home)
+        return std::filesystem::path(home) / ".local" / "share" / "projectMM";
+#endif
+    return {};
+}
+
+// A checkout is recognized by CMakeLists.txt AND moondeck/ in the working directory. Both, because
+// CMakeLists.txt alone is true in the root of every CMake project there is, and a developer whose
+// shell happens to sit in an unrelated one would get projectMM's settings written into THAT
+// project's build/, which is the per-folder loss this whole change removes.
+//
+// Deliberately the working directory and not the executable's location:
+// `./build/windows/Release/projectMM` run from the repo root is the dev loop this preserves, and an
+// installed copy is never launched that way.
+std::filesystem::path defaultRoot() {
+    if (const char* env = std::getenv("MM_DATA_DIR"); env && *env)
+        return std::filesystem::path(env);
+    std::error_code ec;
+    if (std::filesystem::exists("CMakeLists.txt", ec) && !ec
+        && std::filesystem::is_directory("moondeck", ec) && !ec)
+        return std::filesystem::path("build");
+    std::filesystem::path user = userDataDir();
+    return user.empty() ? std::filesystem::path("build") : user;
+}
+
+std::filesystem::path fsRoot_{defaultRoot()};
 
 // Map "/.config/foo.json" → "<root>/.config/foo.json". Strips leading '/'s, normalizes
 // the result, and rejects paths that escape fsRoot_ (e.g. "../../etc/passwd"). Returns
@@ -513,11 +562,34 @@ std::filesystem::path toFsPath(const char* path) {
 }
 
 void fsSetRoot(const char* path) {
-    fsRoot_ = (path && *path) ? std::filesystem::path(path) : std::filesystem::path("build");
+    fsRoot_ = (path && *path) ? std::filesystem::path(path) : defaultRoot();
+}
+
+const char* fsRootPath() {
+    // Refreshed per call rather than cached at set time, so it cannot go stale after fsSetRoot.
+    // Diagnostics only, and the desktop build reports it from one thread.
+    static std::string cached;
+    cached = fsRoot_.string();
+    return cached.c_str();
 }
 
 bool fsMount() {
-    // No mount needed on desktop; OS handles it.
+    // Desktop has no volume to mount, but it DOES have a root that may not exist yet and may not
+    // be writable. Establishing that here is what turns an unusable location into ONE line at
+    // startup instead of one write failure per save, forever.
+    std::error_code ec;
+    std::filesystem::create_directories(fsRoot_, ec);
+    if (!std::filesystem::is_directory(fsRoot_, ec)) return false;
+    // Existence does not imply writability: a read-only extraction, a protected folder, or a
+    // directory owned by another user all exist happily and reject the first write. create_
+    // directories is silent about all three, so probe with the operation that actually matters.
+    const auto probe = fsRoot_ / ".mm-write-probe";
+    std::error_code rm;
+    std::filesystem::remove(probe, rm);
+    FILE* f = std::fopen(probe.string().c_str(), "wb");
+    if (!f) return false;
+    std::fclose(f);
+    std::filesystem::remove(probe, rm);
     return true;
 }
 

@@ -31,12 +31,21 @@ void FilesystemModule::setScheduler(Scheduler* s) {
 }
 
 void FilesystemModule::setup() {
+    // Both failures below name the directory, because the useful question when settings do not
+    // persist is always "which location did it try". Reported ONCE here rather than as a write
+    // error per save: an unusable root produces one failed save per module per change, and that
+    // stream buries the one fact that explains it.
     if (!platform::fsMount()) {
-        std::printf("FilesystemModule: mount failed — persistence disabled\n");
+        std::printf("FilesystemModule: cannot use %s, persistence disabled\n",
+                    platform::fsRootPath());
+        return;
+    }
+    if (!platform::fsMkdir(CONFIG_DIR)) {
+        std::printf("FilesystemModule: cannot create %s%s, persistence disabled\n",
+                    platform::fsRootPath(), CONFIG_DIR);
         return;
     }
     mounted_ = true;
-    platform::fsMkdir(CONFIG_DIR);
     std::printf("FilesystemModule: mounted, %zu / %zu bytes used\n",
                 platform::filesystemUsed(), platform::filesystemTotal());
 }
@@ -122,8 +131,8 @@ void FilesystemModule::loadAll(Scheduler* s) {
         // setup() hasn't run yet (we're in phase 2, before phase 3 setup). Mount now
         // so we can read; setup() later calls fsMount again (idempotent).
         if (!platform::fsMount()) return;
+        if (!platform::fsMkdir(CONFIG_DIR)) return;   // setup() reports it; stay unmounted
         mounted_ = true;
-        platform::fsMkdir(CONFIG_DIR);
     }
     for (uint8_t i = 0; i < s->moduleCount(); i++) {
         MoonModule* m = s->module(i);
