@@ -27,7 +27,7 @@ Currently supported: **ColorLight 5A-75** (5A-75B and 5A-75E use the same wire f
 | 5 V power supply | Sized from the panels' own rating: see the note on power in [§5.3](#53-wire-it) |
 | Cat5e or Cat6 cable | Controller → the card's **input** port |
 | A controller | An ESP32 board ([§5](#5-on-an-esp32)) or a desktop/Pi ([§6](#6-from-a-desktop)) |
-| A gigabit switch | Only if your controller is a **P4 or an S3**, whose Ethernet is 100 Mbit: the switch is what lets the card negotiate a gigabit link on its own side. An **S31 is gigabit already** and connects straight to the card. |
+| A gigabit switch | Only if your controller is a **P4 or an S3**, whose Ethernet is 100 Mbit: the switch lets the card negotiate a gigabit link on its own side and re-times the frames toward it. It does **not** make the controller faster: the 100 Mbit leg and its wire time ([§2](#the-one-hardware-fact-that-decides-everything)) remain, so a large wall still wants an S31. An **S31 is gigabit already** and connects straight to the card. |
 | A USB gigabit Ethernet dongle | Recommended on Windows. Not for projectMM, which drives these cards fine from a built-in port, but for **LEDUpgrade**: if it cannot find the card through your built-in adapter, a dongle is the known way through. See [§7](#7-card-firmware-and-the-flicker). |
 
 ### The one hardware fact that decides everything
@@ -204,11 +204,11 @@ Add a **Panel Card** driver under Drivers, and set:
 
 ### 5.6 What you should see
 
-The driver's status line tells you what the wire is doing, and the three states are worth recognising:
+The driver's status line tells you what the wire is doing, and the three states are worth recognizing:
 
 | Status | Meaning |
 |---|---|
-| `1000 Mbit - 5280 packets/s` | Working. The rate is (rows + 4) × fps: one packet per row, plus two brightness and two sync packets per frame. A row wider than 497 pixels splits into several packets, so a wide wall sends more than one per row. |
+| `1000 Mbit - 5200 packets/s` | Working. At the default `v12 and older` the rate is (rows + 2) × fps: one packet per row plus one brightness and one sync per frame, so 128 rows at 40 fps is 5,200. On `v13 and newer` both extras go out twice, (rows + 4) × fps = 5,280. A row wider than 497 pixels splits into several packets, so a wide wall sends more than one per row. |
 | `100 Mbit - …` (warning) | Sending, but see [§2](#the-one-hardware-fact-that-decides-everything): fine for a small wall, tearing on a large one. |
 | `no ethernet link` | Cable, card power, or the wrong port on the card. |
 

@@ -50,7 +50,6 @@ Each row is a compromise the balls effect makes, and the language feature that w
 |---|---|---|
 | 4 objects, not 25 | 64-byte arena, 8 members | a bigger arena, or a pool handle (shipped for particles) |
 | whole-pixel motion | no fractional type | fixed-point or float |
-| a direction bit per axis | ✅ signed values shipped | |
 | one flat colour | no `hsv()` builtin | `hsv()` |
 | one array per field | no structs | structs |
 | the helper reads a member for its index | functions take no arguments | arguments |

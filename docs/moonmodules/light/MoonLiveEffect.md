@@ -64,7 +64,9 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 
   `defineControls()` runs once after a successful compile, the way the Scheduler runs a compiled module's. Editing a control's slider does **not** recompile: the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops.
 
-  **The call has to match the member's width**: `addUint8` binds a `uint8_t` and `addUint16` a `uint16_t`. A mismatch is a compile error naming the call to use instead, because the alternative is silent: `addUint8` on a wide member would drive only its low byte, leaving the high half holding whatever it had, so the number the script reads is one nobody chose. A control binds a single member, never an array.
+  **The call has to match the member's width**: `addUint8` binds a `uint8_t` and `addUint16` a `uint16_t`. A mismatch is a compile error naming what the call takes, because the alternative is silent: `addUint8` on a wide member would drive only its low byte, leaving the high half holding whatever it had, so the number the script reads is one nobody chose. A control binds a single member, never an array.
+
+  **`int16_t` is the third member type**, for a value that goes below zero: a velocity, a delta, a coordinate from `uvX`/`uvY`. It is two arena bytes read back sign-extended, its initializer may be negative and is range-checked (`int16_t d = 60000;` is a compile error naming `-32768..32767`), and it is script-internal state only: no `addInt16` exists, so an `int16_t` member cannot be a control. `int16_t` arrays are refused with a diagnostic. There is deliberately no `int8_t`: the Xtensa has no signed byte load, and a small signed value declares `int16_t`.
 
 ### System variables — what the engine hands a script
 
@@ -101,7 +103,7 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `beatsin(bpm, t, high)` | a sine `0..high` at `bpm` |
 | `noise(x, y, z)` | `0..255` value noise at that point — the field behind fire, clouds and plasma |
 | `scale(value, n)` | a `0..65535` value onto `0..n-1` — lands a wave on an axis |
-| `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centred at 32768 |
+| `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centered at 32768 |
 | `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
 | `print(v)` | log a value and return it ([what it costs](writing-scripts.md#debugging-print)) |
 | `a / b`, `a % b` | divide and remainder. Both are host calls: cheap on a cold path, deliberate per light |

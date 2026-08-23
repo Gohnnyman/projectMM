@@ -229,3 +229,36 @@ TEST_CASE("Xtensa addImm never encodes an add of zero as the narrow form") {
         CHECK(a.bytes()[2] == 40);
     }
 }
+
+// The signed 16-bit load differs from the unsigned one ONLY in the r field (the second byte's
+// high nibble: l16ui r=1, l16si r=9). Asserted on the encoder because this exact encoding
+// shipped WRONG once: the 0x9 was first placed in the first byte's low nibble, the disassembler
+// read garbage, and every int16_t member load was an illegal instruction.
+TEST_CASE("Xtensa load16S emits l16si, one r-nibble away from l16ui") {
+    using Asm = mm_xtensa_backend::mm::moonlive::XtensaAssembler;
+    using mm_xtensa_backend::mm::moonlive::R0;
+    using mm_xtensa_backend::mm::moonlive::R1;
+    Asm u(64); u.load16(R0, R1, 4);
+    Asm s(64); s.load16S(R0, R1, 4);
+    REQUIRE(u.size() == 3);
+    REQUIRE(s.size() == 3);
+    CHECK((s.bytes()[0] & 0x0f) == 0x02);          // LSAI opcode, same as l16ui
+    CHECK((u.bytes()[1] >> 4) == 0x1);             // l16ui: r = 1
+    CHECK((s.bytes()[1] >> 4) == 0x9);             // l16si: r = 9
+    CHECK(s.bytes()[2] == 2);                      // the RRI8 immediate is scaled by 2
+}
+
+// The relaxed branch emits the INVERTED condition over a jump, so signed bge appears as blt
+// (0x2) where unsigned bgeu appears as bltu (0x3). This is the nibble the old inversion table's
+// fallthrough would have gotten wrong, emitting the OPPOSITE condition.
+TEST_CASE("Xtensa branchGeS inverts to blt where branchGeU inverts to bltu") {
+    using Asm = mm_xtensa_backend::mm::moonlive::XtensaAssembler;
+    using mm_xtensa_backend::mm::moonlive::R0;
+    using mm_xtensa_backend::mm::moonlive::R1;
+    Asm u(64); { auto l = u.newLabel(); u.branchGeU(R0, R1, l); u.bind(l); u.finalize(); }
+    Asm s(64); { auto l = s.newLabel(); s.branchGeS(R0, R1, l); s.bind(l); s.finalize(); }
+    REQUIRE(u.size() == 6);                        // inverted branch (3) + j (3)
+    REQUIRE(s.size() == 6);
+    CHECK((u.bytes()[1] >> 4) == 0x3);             // bltu
+    CHECK((s.bytes()[1] >> 4) == 0x2);             // blt: the SIGNED inversion
+}

@@ -35,6 +35,18 @@ namespace mm::moonlive {
 // division or shift to do that with. Three calls is the shape that works today, and
 // `setRGB(idx, paletteR(i), paletteG(i), paletteB(i))` reads clearly.
 //
+// A value a builtin takes as SIGNED: the script's own 32-bit two's complement, read as itself.
+//
+// This used to fold through a 16-BIT window (`v > 32767 ? v - 65536 : v`), because a script had no
+// way to hold a negative and the convention was that the top half of the 16-bit range meant one.
+// That window was the inverse of uint16_t member truncation, it was written down in neither place,
+// and it is what made `d = 60000` read as -5536: the script author thought in the member's range
+// and the builtin thought in the window's. int16_t members hold a negative directly now, so the
+// window has nothing left to undo and the value passes through.
+inline int32_t signedArg(uintptr_t a) {
+    return static_cast<int32_t>(uint32_t(a));
+}
+
 // A value a builtin takes as a BYTE: clamped to 0..255, not truncated to its low eight bits.
 //
 // `static_cast<uint8_t>` was the obvious spelling and it is the wrong one. A script computing a
@@ -50,7 +62,7 @@ namespace mm::moonlive {
 // are inline stores whose channel bytes truncate in the emitted code itself, where a clamp would
 // cost three compares per channel per light on the hottest path there is.
 inline uint8_t byteArg(uintptr_t a) {
-    const int32_t v = static_cast<int32_t>(uint32_t(a));
+    const int32_t v = signedArg(a);   // one home for the signed reinterpretation of the ABI word
     return v < 0 ? 0 : (v > 255 ? 255 : static_cast<uint8_t>(v));
 }
 
@@ -87,17 +99,6 @@ extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, co
     return n ? (next >> 16) % n : 0u;
 }
 
-// A value a builtin takes as SIGNED: the script's own 32-bit two's complement, read as itself.
-//
-// This used to fold through a 16-BIT window (`v > 32767 ? v - 65536 : v`), because a script had no
-// way to hold a negative and the convention was that the top half of the 16-bit range meant one.
-// That window was the inverse of uint16_t member truncation, it was written down in neither place,
-// and it is what made `d = 60000` read as -5536: the script author thought in the member's range
-// and the builtin thought in the window's. int16_t members hold a negative directly now, so the
-// window has nothing left to undo and the value passes through.
-inline int32_t signedArg(uintptr_t a) {
-    return static_cast<int32_t>(uint32_t(a));
-}
 
 // mod(a, b) → a % b, the wrap a cyclic animation needs. `t` grows without bound, so every effect
 // that repeats has to fold it back into a range: `mod(t * speed, width)` is a sweep that returns to
@@ -229,8 +230,16 @@ extern "C" inline uint32_t mm_light_uvY(const uintptr_t* args, uint32_t, const u
 // definition against frame time directly. Capped at 64, which is where the returned byte stops
 // gaining visible bands on a panel, and it bounds the per-pixel cost no matter what a slider says.
 extern "C" inline uint32_t mm_light_escape(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const int32_t cx = signedArg(args[0]), cy = signedArg(args[1]);
-    const int32_t jx = signedArg(args[2]), jy = signedArg(args[3]);
+    // Inputs clamped to |8.0| in Q13. A coordinate that far out is already deep outside the
+    // escape radius (2.0) and iterates identically after clamping; without the clamp, a script
+    // passing an extreme value (a full int32) makes zx * zx reach 2^62 and the escape test's
+    // SUM overflow int64, which is UB. The clamp is what makes every product below safely wide.
+    const auto q13 = [](uintptr_t a) {
+        const int32_t v = signedArg(a);
+        return v < -65536 ? -65536 : (v > 65536 ? 65536 : v);
+    };
+    const int32_t cx = q13(args[0]), cy = q13(args[1]);
+    const int32_t jx = q13(args[2]), jy = q13(args[3]);
     uint32_t iters = uint32_t(args[4]);
     if (iters > 64) iters = 64;
     if (iters == 0) return 0;

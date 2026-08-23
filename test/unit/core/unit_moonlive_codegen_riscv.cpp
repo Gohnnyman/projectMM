@@ -56,3 +56,29 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 #include "moonlive_device_codegen.inc"
 
 
+
+// The signed 16-bit load is lh (funct3 1) where the unsigned is lhu (funct3 5); the signed
+// branch is bge (funct3 5) where the unsigned is bgeu (funct3 7). One field each, asserted on
+// the encoder: a script-level test cannot tell these apart until a negative value flows, and by
+// then the symptom is a picture, not a diff.
+TEST_CASE("RISC-V load16S emits lh and branchGeS emits bge, one funct3 apart from unsigned") {
+    using Asm = mm_riscv_backend::mm::moonlive::RiscvAssembler;
+    using mm_riscv_backend::mm::moonlive::R0;
+    using mm_riscv_backend::mm::moonlive::R1;
+    auto word = [](const Asm& a, size_t i) {
+        return uint32_t(a.bytes()[i]) | (uint32_t(a.bytes()[i+1]) << 8)
+             | (uint32_t(a.bytes()[i+2]) << 16) | (uint32_t(a.bytes()[i+3]) << 24);
+    };
+    Asm lu(64); lu.load16(R0, R1, 4);
+    Asm ls(64); ls.load16S(R0, R1, 4);
+    REQUIRE(lu.size() == 4);
+    REQUIRE(ls.size() == 4);
+    CHECK((word(lu, 0) & 0x7f) == 0x03);           // load opcode
+    CHECK(((word(lu, 0) >> 12) & 7) == 5);         // lhu
+    CHECK(((word(ls, 0) >> 12) & 7) == 1);         // lh, sign-extending
+    Asm bu(64); { auto l = bu.newLabel(); bu.branchGeU(R0, R1, l); bu.bind(l); bu.finalize(); }
+    Asm bs(64); { auto l = bs.newLabel(); bs.branchGeS(R0, R1, l); bs.bind(l); bs.finalize(); }
+    CHECK((word(bu, 0) & 0x7f) == 0x63);           // branch opcode
+    CHECK(((word(bu, 0) >> 12) & 7) == 7);         // bgeu
+    CHECK(((word(bs, 0) >> 12) & 7) == 5);         // bge, SIGNED
+}

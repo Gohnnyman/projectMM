@@ -9,9 +9,9 @@ Runs under CI on macOS, Windows and Linux runners. The output lands in `dist/`:
 
 Each archive carries the executable + a short README.txt with run instructions.
 
-The macOS build is ad-hoc signed, which turns Gatekeeper's outright refusal into
-the "unidentified developer" prompt a user can accept. Windows is unsigned, so
-SmartScreen warns on first run. Documented in the README and each README.txt.
+The macOS build is ad-hoc signed, which gets it as far as Gatekeeper's "could not
+verify" dialog; clearing the quarantine flag is still required to open it. Windows
+is unsigned, so SmartScreen warns. Documented in the README and each README.txt.
 """
 
 import argparse
@@ -197,15 +197,19 @@ def configure_and_build_windows(version: str = "") -> Path:
 
 def readme_text(version: str, platform_label: str) -> str:
     return (
-        f"projectMM v{version} — {platform_label}\n"
+        f"projectMM v{version} ({platform_label})\n"
         f"\n"
         f"Run: ./projectMM (macOS) or projectMM.exe (Windows)\n"
         f"Open: http://localhost:8080/\n"
         f"\n"
-        f"macOS first run: the binary is ad-hoc signed, not notarized, so\n"
-        f"Gatekeeper says it cannot verify the developer. Right-click → Open\n"
-        f"and confirm, or clear the flag with\n"
-        f"'xattr -dr com.apple.quarantine ./projectMM'.\n"
+        f"macOS first run: the app is ad-hoc signed, not notarized, so macOS\n"
+        f"refuses it with 'Apple could not verify projectMM is free of malware'.\n"
+        f"That dialog has no way through on macOS 15 and later, so clear the\n"
+        f"download flag in Terminal and open it again:\n"
+        f"\n"
+        f"  xattr -dr com.apple.quarantine /Applications/projectMM.app\n"
+        f"\n"
+        f"(for the tarball, point it at ./projectMM instead). One time only.\n"
         f"\n"
         f"Source: https://github.com/MoonModules/projectMM\n"
     )
@@ -214,10 +218,14 @@ def readme_text(version: str, platform_label: str) -> str:
 def adhoc_sign(binary: Path) -> None:
     """Sign the macOS binary with an ad-hoc signature. Free, and it changes what a user sees.
 
-    An UNSIGNED binary is refused outright by recent macOS with no obvious way through. Ad-hoc
-    signed, the same download gets the familiar "cannot verify the developer, open anyway?" dialog
-    and a working right-click -> Open. Neither is as good as notarization, which needs a paid
-    Developer ID; this is the free half of the distance.
+    An UNSIGNED binary is refused by recent macOS before it even reaches Gatekeeper's usual
+    prompt. Ad-hoc signing gets it as far as the standard "could not verify" dialog, which is the
+    free half of the distance to notarization (that needs a paid Developer ID).
+
+    It is NOT enough to make the app openable: macOS 15 dropped the right-click -> Open bypass for
+    ad-hoc signed apps, so that dialog now has only "Move to Trash" and "Done". The user clears the
+    quarantine flag instead, which every README this script writes explains. Verified on macOS
+    26.6: the app launches normally once the flag is gone.
 
     Best effort: a failure prints and continues, because an unsigned build is still shippable and
     a release that stops for this would be worse than one that warns.
@@ -340,9 +348,9 @@ def package_macos(binary: Path, version: str) -> Path:
     DIST_DIR.mkdir(exist_ok=True)
     out = DIST_DIR / f"projectMM-macos-arm64-v{version}.tar.gz"
     readme = DIST_DIR / "_README.txt"
-    # encoding="utf-8" — the README contains "→" and "—"; Windows' default
-    # write_text encoding is cp1252 and rejects them. Explicit utf-8 matches
-    # what tar/zip readers expect today.
+    # encoding="utf-8" explicitly: Windows' default write_text encoding is cp1252, so a
+    # non-ASCII character added to readme_text later would raise there and nowhere else.
+    # The text is plain ASCII today; naming the encoding keeps that from being load-bearing.
     readme.write_text(readme_text(version, "macOS arm64"), encoding="utf-8")
     try:
         with tarfile.open(out, "w:gz") as tar:

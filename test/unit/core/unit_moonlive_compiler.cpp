@@ -38,7 +38,7 @@ static std::vector<uint8_t> render(const char* src, int nLights, uint32_t t = 0)
 }
 #endif
 
-// The compile-through-run tests need a working host JIT. The assembler (moonlive_asm_host.cpp)
+// The compile-through-run tests need a working host JIT. The assembler (the host backend (moonlive_asm_arm64/x86_64.cpp))
 // covers arm64 and x86-64, so these run on every desktop the project supports; a host with
 // neither, or a --no-jit build, gets !ok ("codegen failed") and every "should compile" assertion
 // would fail. Guarded on the emit-header capability macro so they compile out there instead —
@@ -609,6 +609,13 @@ TEST_CASE("an int16_t array is refused with a diagnostic rather than mis-read") 
     CHECK_FALSE(eng.compile("class T { int16_t buf[4]; tick() { fill(0, 0, 0); } }",
                             kTable, kSys));
     eng.free();
+}
+
+// A coordinate far outside the plane must escape immediately, not overflow: the wrapped multiply
+// below hands escape() the most negative int32 there is, whose square alone is 2^62.
+TEST_CASE("escape treats an absurdly distant coordinate as escaped rather than overflowing") {
+    CHECK(render(mmScript("setRGB(0, escape(32768 * 32768 * 2, 32768 * 32768 * 2, 0, 0, 40), 7, 0);"),
+                 1)[0] > 0);
 }
 
 // The escape-time fractal, pinned at the points every textbook names. escape() is the one loop a
