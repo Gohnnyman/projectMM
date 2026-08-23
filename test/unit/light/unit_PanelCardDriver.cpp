@@ -79,6 +79,7 @@ TEST_CASE("PanelCardDriver sends one frame per row then one sync") {
     mm::PanelCardDriver driver;
     Wall wall(64, 4);
     setUp(driver, source, wall, 256);
+    driver.firmware = 1;               // "v13 and newer": acts on the SECOND copy, so both go out
 
     mm::platform::setTestNowMs(1000);
     driver.tick();
@@ -99,7 +100,8 @@ TEST_CASE("PanelCardDriver sends a pre-v13 card one brightness and one sync") {
     mm::PanelCardDriver driver;
     Wall wall(64, 4);
     setUp(driver, source, wall, 256);
-    driver.firmware = 1;               // "v12 and older"
+    // No assignment: "v12 and older" is index 0 and the DEFAULT, because the documented path
+    // downgrades the card to clear the v13 flicker. This test also pins that default.
 
     mm::platform::setTestNowMs(1000);
     driver.tick();
@@ -121,8 +123,8 @@ TEST_CASE("PanelCardDriver stops at the last row its buffer covers") {
     mm::platform::setTestNowMs(1000);
     driver.tick();
 
-    REQUIRE(mm::platform::ethTestFrameCount() == 6);   // 2 brightness + 2 rows + 2 sync, not 8 rows
-    CHECK(frameType(5) == mm::COLORLIGHT_TYPE_SYNC);
+    REQUIRE(mm::platform::ethTestFrameCount() == 4);   // brightness + 2 rows + sync, not 8 rows
+    CHECK(frameType(3) == mm::COLORLIGHT_TYPE_SYNC);
 }
 
 // A row wider than one packet splits into several, each carrying its own pixel offset — the wide-
@@ -136,13 +138,13 @@ TEST_CASE("PanelCardDriver splits a row wider than one packet") {
     mm::platform::setTestNowMs(1000);
     driver.tick();
 
-    REQUIRE(mm::platform::ethTestFrameCount() == 6);   // 2 brightness + 2 row packets + 2 sync
-    // First chunk: offset 0, a full 497 pixels.
-    const uint8_t* a = mm::platform::ethTestFrameData(2);
+    REQUIRE(mm::platform::ethTestFrameCount() == 4);   // brightness + 2 row packets + sync
+    // First chunk: offset 0, a full 497 pixels. Frame 1: one brightness precedes the rows.
+    const uint8_t* a = mm::platform::ethTestFrameData(1);
     CHECK(((a[15] << 8) | a[16]) == 0);
     CHECK(((a[17] << 8) | a[18]) == mm::COLORLIGHT_MAX_PIXELS_PER_PACKET);
     // Second chunk: continues at 497, carrying the remaining 103.
-    const uint8_t* b = mm::platform::ethTestFrameData(3);
+    const uint8_t* b = mm::platform::ethTestFrameData(2);
     CHECK(((b[15] << 8) | b[16]) == mm::COLORLIGHT_MAX_PIXELS_PER_PACKET);
     CHECK(((b[17] << 8) | b[18]) == 600 - mm::COLORLIGHT_MAX_PIXELS_PER_PACKET);
 }
@@ -160,8 +162,8 @@ TEST_CASE("PanelCardDriver puts rendered pixels on the wire") {
     mm::platform::setTestNowMs(1000);
     driver.tick();
 
-    REQUIRE(mm::platform::ethTestFrameCount() == 5);   // 2 brightness + row + 2 sync
-    const uint8_t* row = mm::platform::ethTestFrameData(2);
+    REQUIRE(mm::platform::ethTestFrameCount() == 3);   // brightness + row + sync
+    const uint8_t* row = mm::platform::ethTestFrameData(1);
     CHECK(row[mm::COLORLIGHT_ROW_PREFIX + 0] == 10);
     CHECK(row[mm::COLORLIGHT_ROW_PREFIX + 1] == 20);
     CHECK(row[mm::COLORLIGHT_ROW_PREFIX + 2] == 30);
@@ -180,7 +182,7 @@ TEST_CASE("PanelCardDriver rate-limits to its fps setting") {
     mm::platform::setTestNowMs(1000);
     driver.tick();
     const size_t after1 = mm::platform::ethTestFrameCount();
-    CHECK(after1 == 5);   // 2 brightness + row + 2 sync
+    CHECK(after1 == 3);   // brightness + row + sync
 
     mm::platform::setTestNowMs(1010);   // too soon
     driver.tick();
@@ -222,7 +224,7 @@ TEST_CASE("PanelCardDriver survives a failing link") {
     mm::platform::setTestEthSendFails(false);
     mm::platform::setTestNowMs(1100);
     driver.tick();
-    CHECK(mm::platform::ethTestFrameCount() == 5);   // recovers on the next tick
+    CHECK(mm::platform::ethTestFrameCount() == 3);   // recovers on the next tick
 }
 
 // The correction-applied buffer is sized off the hot path, so tick() never allocates — the same
@@ -313,13 +315,13 @@ TEST_CASE("PanelCardDriver sends the wall a PanelsLayout describes") {
     mm::platform::setTestNowMs(1000);
     driver.tick();
 
-    // 2 brightness + 128 rows (one packet each, 128 <= 497) + 2 sync
-    REQUIRE(mm::platform::ethTestFrameCount() == 132);
+    // brightness + 128 rows (one packet each, 128 <= 497) + sync
+    REQUIRE(mm::platform::ethTestFrameCount() == 130);
     // Rows are numbered across the whole card, not restarted per panel.
-    const uint8_t* firstRow = mm::platform::ethTestFrameData(2);
+    const uint8_t* firstRow = mm::platform::ethTestFrameData(1);
     REQUIRE(firstRow != nullptr);
     CHECK(((firstRow[13] << 8) | firstRow[14]) == 0);
-    const uint8_t* lastRow = mm::platform::ethTestFrameData(129);
+    const uint8_t* lastRow = mm::platform::ethTestFrameData(128);
     REQUIRE(lastRow != nullptr);
     CHECK(((lastRow[13] << 8) | lastRow[14]) == 127);
 }
@@ -357,8 +359,8 @@ TEST_CASE("PanelCardDriver widens the row when a PanelsLayout chains panels acro
     mm::platform::setTestNowMs(1000);
     driver.tick();
 
-    // 2 brightness + 64 rows + 2 sync — still one packet per row, since 256 <= 497.
-    REQUIRE(mm::platform::ethTestFrameCount() == 68);
+    // brightness + 64 rows + sync: still one packet per row, since 256 <= 497.
+    REQUIRE(mm::platform::ethTestFrameCount() == 66);
     const uint8_t* row = mm::platform::ethTestFrameData(2);
     REQUIRE(row != nullptr);
     CHECK(((row[17] << 8) | row[18]) == 256);   // pixels in this packet
@@ -428,7 +430,11 @@ TEST_CASE("PanelCardDriver sends nothing when the buffer covers no row") {
 // re-entered and the guard under test never runs.
 static void wedge(mm::PanelCardDriver& driver, uint32_t fromMs) {
     mm::platform::setTestEthSendFails(true);
-    for (int i = 0; i < 200; i++) {
+    // Enough TICKS to clear the driver's 500-consecutive-failure wedge threshold. Each tick sends
+    // one brightness + rows + one sync, so the frame count per tick depends on the wall: 250 ticks
+    // is comfortably past 500 for the small walls these tests build, with headroom rather than an
+    // exact figure, because the point is that a long run of failures accumulates.
+    for (int i = 0; i < 250; i++) {
         mm::platform::setTestNowMs(fromMs + i * 30);
         driver.tick();
     }

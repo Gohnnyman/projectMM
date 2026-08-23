@@ -1,0 +1,38 @@
+// Fractal: the Mandelbrot and Julia sets, escape-time rendered.
+// seed 0 is the still Mandelbrot set; any other value walks a Julia seed along the cardioid.
+
+class FractalEffect {
+  uint8_t bpm = 6;
+  uint8_t iters = 40;
+  uint8_t zoom = 34;
+  uint8_t seed = 128;
+
+  int16_t cx = 0;
+  uint16_t n = 0;
+
+  defineControls() {
+    addUint8("bpm", bpm, 0, 30);
+    addUint8("iters", iters, 8, 64);
+    addUint8("zoom", zoom, 12, 40);
+    addUint8("seed", seed, 0, 128);
+  }
+
+  tick() {
+    for (y = 0; y < height; y = y + 1) {
+      for (x = 0; x < width; x = x + 1) {
+        cx = div(uvX(x, width, height) * zoom, 40);
+        if (seed == 0) { cx = cx - 4500; }
+
+        n = escape(cx, div(uvY(y, width, height) * zoom, 40),
+                   div((cos(beat(bpm, t)) - 32768) * seed, 1024)
+                       - div((cos(beat(bpm, t) * 2) - 32768) * seed, 2048),
+                   div((sin(beat(bpm, t)) - 32768) * seed, 1024)
+                       - div((sin(beat(bpm, t) * 2) - 32768) * seed, 2048),
+                   iters);
+
+        // 0 = inside the set: stays black, the silhouette is the shape.
+        setPaletteColor(x, y, n, n * 255);
+      }
+    }
+  }
+}

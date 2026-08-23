@@ -25,9 +25,15 @@ namespace mm::moonlive {
 
 // The width of a script member, and how many arena bytes one element of it occupies. Here rather
 // than with the IR because a builtin descriptor names the width its by-reference argument takes.
-enum class CtrlType : uint8_t { Uint8, Uint16 };
+// Int16 is the SIGNED sibling of Uint16, and there is no Int8 on purpose: Xtensa has no signed
+// byte load, so an int8_t member would need a sign-extend sequence the other three ISAs do not,
+// for a width no script has asked for. A script wanting a small signed value declares int16_t.
+enum class CtrlType : uint8_t { Uint8, Uint16, Int16 };
 
-constexpr uint8_t ctrlWidth(CtrlType t) { return t == CtrlType::Uint16 ? 2 : 1; }
+constexpr uint8_t ctrlWidth(CtrlType t) {
+    return (t == CtrlType::Uint16 || t == CtrlType::Int16) ? 2 : 1;
+}
+constexpr bool ctrlIsSigned(CtrlType t) { return t == CtrlType::Int16; }
 
 
 // Neutral inline opcodes — "store shapes a backend can emit", not "LED operations". A host maps

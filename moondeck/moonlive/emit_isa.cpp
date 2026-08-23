@@ -24,7 +24,7 @@
 #elif defined(MM_EMIT_ARM64)
 #define __aarch64__ 1
 #include "platform/desktop/moonlive_asm_host.h"
-#include "platform/desktop/moonlive_asm_host.cpp"
+#include "platform/desktop/moonlive_asm_arm64.cpp"
 #elif defined(MM_EMIT_X86_64)
 // No macro to define: the desktop backend's x86-64 branch is selected by the HOST's own
 // `__x86_64__` / `_M_X64`, so this ISA reads what the machine already compiles. That also means
@@ -41,7 +41,7 @@
 #error "MM_EMIT_X86_64 requires an x86-64 host; run --isa x86_64 on an x86-64 machine"
 #endif
 #include "platform/desktop/moonlive_asm_host.h"
-#include "platform/desktop/moonlive_asm_host.cpp"
+#include "platform/desktop/moonlive_asm_x86_64.cpp"
 #else
 #error "define MM_EMIT_XTENSA, MM_EMIT_RISCV, MM_EMIT_ARM64 or MM_EMIT_X86_64"
 #endif
@@ -54,17 +54,15 @@
 // backend could drift from the backend's own.
 #include "core/moonlive/moonlive_emit.h"
 
+// Each backend now carries its own lowerToBytes, INSIDE its arch guard and beside the assembler
+// it names, so including the asm file above already brought it in. There is nothing more to
+// include here; only the arch macros this file forced still have to come back off.
 #if defined(MM_EMIT_XTENSA)
-#include "platform/esp32/moonlive_lower_xtensa.cpp"
 #undef __XTENSA__
 #elif defined(MM_EMIT_RISCV)
-#include "platform/esp32/moonlive_lower_riscv.cpp"
 #undef __riscv
 #elif defined(MM_EMIT_ARM64)
-#include "platform/desktop/moonlive_lower_host.cpp"
 #undef __aarch64__
-#elif defined(MM_EMIT_X86_64)
-#include "platform/desktop/moonlive_lower_host.cpp"
 #endif
 
 #include "core/moonlive/MoonLiveCompiler.h"

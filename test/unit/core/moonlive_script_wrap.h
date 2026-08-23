@@ -43,7 +43,12 @@ inline const char* mmScriptAs(const char* entry, const char* body) {
     const char* declEnd = body;
     while (true) {
         while (*p == ' ' || *p == '\t' || *p == '\n') p++;
-        if (std::strncmp(p, "uint8_t", 7) != 0) break;
+        // Every member type the language has, not just uint8_t: a test declaring `int16_t d = -1;`
+        // means a member exactly as `uint8_t speed = 7;` does, and recognising only one of them
+        // silently drops the declaration into the function body, where it is not a member at all.
+        if (std::strncmp(p, "uint8_t", 7) != 0 &&
+            std::strncmp(p, "uint16_t", 8) != 0 &&
+            std::strncmp(p, "int16_t", 7) != 0) break;
         const char* semi = std::strchr(p, ';');
         if (!semi) break;
         const char* eol = std::strchr(semi, '\n');

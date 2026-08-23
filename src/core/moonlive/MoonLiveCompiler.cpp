@@ -396,8 +396,12 @@ struct Parser {
                 }
                 if (members[mi].count > 1) { fail("an array needs an index: write name[i]"); return 0; }
                 VReg v = alloc();
-                emit({members[mi].type == CtrlType::Uint16 ? IrOp::LoadCtrl16 : IrOp::LoadCtrl,
-                      v, 0,0,0,0, members[mi].offset, nullptr, {}});
+                // Three member types, three loads: the signed one sign-extends, which is the
+                // whole point of declaring int16_t rather than uint16_t.
+                const IrOp loadOp = members[mi].type == CtrlType::Int16  ? IrOp::LoadCtrl16S
+                                  : members[mi].type == CtrlType::Uint16 ? IrOp::LoadCtrl16
+                                                                         : IrOp::LoadCtrl;
+                emit({loadOp, v, 0,0,0,0, members[mi].offset, nullptr, {}});
                 return v;
             }
             VReg out = 0;
@@ -513,8 +517,12 @@ struct Parser {
                     // would move element 0 and leave the rest, with nothing on screen saying so.
                     if (members[mi].type != fn->refType)
                         { fail(fn->refType == CtrlType::Uint16
-                                   ? "addUint16 binds a uint16_t member (use addUint8)"
-                                   : "addUint8 binds a uint8_t member (use addUint16)"); return; }
+                                   ? "addUint16 binds a uint16_t member"
+                                   : "addUint8 binds a uint8_t member"); return; }
+                    // No addInt16 exists: an int16_t member is script-internal scratch, not a
+                    // control. The two messages above therefore name only what each call takes,
+                    // rather than recommending the sibling call, which for an int16_t member
+                    // would fail just the same.
                     if (members[mi].count > 1)
                         { fail("a control binds a single member, not an array"); return; }
                     v = alloc();
@@ -605,6 +613,11 @@ struct Parser {
         // size depend on a value the UI changes while the program runs.
         uint8_t count = 1;
         if (lex.kind == Tok::LBracket) {
+            // int16_t arrays are refused, not mis-read: element access lowers through the UNSIGNED
+            // indexed load on every backend, so a negative element would silently read as a large
+            // positive where a scalar member of the same type reads correctly. Add the signed
+            // indexed load to all four backends before lifting this.
+            if (type == CtrlType::Int16) { fail("int16_t arrays are not supported"); return; }
             lex.advance();
             if (lex.kind != Tok::Number) { fail("expected an array length (a number)"); return; }
             if (lex.number < 1 || lex.number > kCtrlBytes) { fail("array length out of range"); return; }
@@ -629,14 +642,26 @@ struct Parser {
             return;
         }
         if (!expect(Tok::Assign, "expected '=' in a member declaration")) return;
+        // A leading minus, here and nowhere else in the grammar: an int16_t member's whole purpose
+        // is to hold a negative, and `int16_t v = -100;` is how every language spells that. In an
+        // EXPRESSION the same minus is the subtraction operator, which is why this is read at the
+        // one point where a number is the only thing that can follow.
+        bool negated = false;
+        if (lex.kind == Tok::Minus) { negated = true; lex.advance(); }
         if (lex.kind != Tok::Number) { fail("expected a default value (a number)"); return; }
-        // The initializer is range-checked against the DECLARED type, so a uint8_t member cannot be
-        // given a value it silently truncates. A uint16_t's own default is bounded below, once its
-        // arena slot is known: the DeclaredControl record carries a byte, so a wide default is the
-        // seeding path's concern rather than the parser's.
-        const long defMax = type == CtrlType::Uint16 ? 65535 : 255;
-        if (lex.number < 0 || lex.number > defMax) {
-            fail(type == CtrlType::Uint16 ? "uint16_t default out of range (0..65535)"
+        if (negated) lex.number = -lex.number;
+        // The initializer is range-checked against the DECLARED type, so a member cannot be given
+        // a value it silently truncates.
+        // Checked against the DECLARED type, so `int16_t d = 60000;` is refused here rather than
+        // silently becoming -5536 at run time. That value was a real bug: a script used a large
+        // number as a "start big" sentinel, a builtin read it through a signed window, and every
+        // light rendered black with nothing reporting an error.
+        const long defMin = type == CtrlType::Int16 ? -32768 : 0;
+        const long defMax = type == CtrlType::Int16  ? 32767
+                          : type == CtrlType::Uint16 ? 65535 : 255;
+        if (lex.number < defMin || lex.number > defMax) {
+            fail(type == CtrlType::Int16  ? "int16_t default out of range (-32768..32767)"
+               : type == CtrlType::Uint16 ? "uint16_t default out of range (0..65535)"
                                           : "uint8_t default out of range (0..255)");
             return;
         }
@@ -680,9 +705,15 @@ struct Parser {
         return lex.kind == Tok::Ident && lex.identLen == len && std::strncmp(lex.identBeg, kw, len) == 0;
     }
     // Is the current Ident the `uint8_t` type keyword (the only declared type in Stage 1)?
-    bool atTypeKeyword() const { return atKeyword("uint8_t", 7) || atKeyword("uint16_t", 8); }
+    bool atTypeKeyword() const {
+        return atKeyword("uint8_t", 7) || atKeyword("uint16_t", 8) || atKeyword("int16_t", 7);
+    }
     /// The type the current keyword names. Only called when atTypeKeyword() is true.
-    CtrlType currentType() const { return atKeyword("uint16_t", 8) ? CtrlType::Uint16 : CtrlType::Uint8; }
+    CtrlType currentType() const {
+        if (atKeyword("uint16_t", 8)) return CtrlType::Uint16;
+        if (atKeyword("int16_t", 7))  return CtrlType::Int16;
+        return CtrlType::Uint8;
+    }
 
     // program := { decl } { stmt }.  Declarations (control vars) come first, then one-or-more
     // call statements. (Multi-statement now: a script has decl lines AND a statement line.)
@@ -903,7 +934,11 @@ struct Parser {
         VReg v = parseExpr();
         if (failed) return false;
         if (li >= 0) emit({IrOp::Spill,     0, v, 0,0,0, locals[li].slot,   nullptr, {}});
-        else         emit({members[mi].type == CtrlType::Uint16 ? IrOp::StoreCtrl16 : IrOp::StoreCtrl,
+        // Selected by WIDTH, not by naming one type: a store truncates, so signedness does not
+        // matter on the way in, but a 1-byte store into a 2-byte member writes half of it and the
+        // sign-extending load then reads a stale high byte. That bug shipped: int16_t members
+        // assigned in tick() collapsed to 0..255 and a whole shader went one flat color.
+        else         emit({ctrlWidth(members[mi].type) == 2 ? IrOp::StoreCtrl16 : IrOp::StoreCtrl,
                             0, v, 0,0,0, members[mi].offset, nullptr, {}});
         freeTemp(v);
         return expect(Tok::Semicolon, "expected ';' after an assignment");
@@ -912,8 +947,12 @@ struct Parser {
     /// `if (a OP b) { … }` with an optional `else { … }`.
     ///
     /// The six comparisons lower onto the TWO branch ops the loops already use. The emitted branch
-    /// skips the then-block, so each one emits the NEGATION of what the script wrote. `BranchGe` is
-    /// unsigned `a >= b` and `BranchNe` is `a != b`, which is all a byte language needs:
+    /// skips the then-block, so each one emits the NEGATION of what the script wrote. `BranchGeS`
+    /// is SIGNED `a >= b` and `BranchNe` is `a != b`, which is all this needs:
+    ///
+    /// SIGNED because this is the script's own comparison. The unsigned `BranchGe` still carries
+    /// the constructs that COUNT rather than compare: a for loop's entry guard and back edge, the
+    /// array-index clamp, and the `z >= z` unconditional-jump idiom below. See IrOp::BranchGe.
     ///
     ///     written    skip when    emitted
     ///     a <  b     a >= b       BranchGe a, b
@@ -951,13 +990,15 @@ struct Parser {
 
         // Emit the branch that SKIPS the then-block, which is the NEGATION of the written test.
         switch (cmp) {
-            // !(a < b) is a >= b.
-            case Tok::Less:      emit({IrOp::BranchGe, 0, a, b, 0,0, lElse, nullptr, {}}); break;
+            // !(a < b) is a >= b. SIGNED, here and below: this is the script's own comparison,
+            // and `a - b` produces a two's-complement negative the moment b exceeds a. Compared
+            // unsigned that negative is a huge value and `if (a - b < 0)` never fires.
+            case Tok::Less:      emit({IrOp::BranchGeS, 0, a, b, 0,0, lElse, nullptr, {}}); break;
             // !(a >= b) is a < b, which is b > a: BranchGe with the operands swapped tests b >= a,
             // so the strict form needs the pair below. a >= b skips when a < b == b > a.
             case Tok::GreaterEq: emitStrictLess(a, b, lElse); break;
             // !(a > b) is a <= b, i.e. b >= a.
-            case Tok::Greater:   emit({IrOp::BranchGe, 0, b, a, 0,0, lElse, nullptr, {}}); break;
+            case Tok::Greater:   emit({IrOp::BranchGeS, 0, b, a, 0,0, lElse, nullptr, {}}); break;
             // !(a <= b) is a > b, i.e. b < a.
             case Tok::LessEq:    emitStrictLess(b, a, lElse); break;
             case Tok::EqEq:      emit({IrOp::BranchNe, 0, a, b, 0,0, lElse, nullptr, {}}); break;
@@ -1006,15 +1047,18 @@ struct Parser {
         return true;
     }
 
-    /// Branch to `label` when `a < b`, STRICTLY. BranchGe gives `>=` only, so the strict form is
+    /// Branch to `label` when `a < b`, STRICTLY. BranchGeS gives `>=` only, so the strict form is
     /// "not (a >= b)": branch over an unconditional jump. Two branches for the two comparisons a
-    /// single unsigned `>=` cannot express, rather than a third branch op every backend must grow.
+    /// single `>=` cannot express, rather than a fourth branch op every backend must grow.
     void emitStrictLess(VReg a, VReg b, uint8_t label) {
         if (nextLabel >= kIrLabels) { fail("too many branches in one script"); return; }
         const uint8_t lSkip = nextLabel++;
-        emit({IrOp::BranchGe, 0, a, b, 0,0, lSkip, nullptr, {}});   // a >= b: do NOT take the skip
+        emit({IrOp::BranchGeS, 0, a, b, 0,0, lSkip, nullptr, {}});  // a >= b: do NOT take the skip
         VReg z = alloc();
         emit({IrOp::Const,    z, 0,0,0,0, 0,     nullptr, {}});
+        // Unsigned on purpose: `z >= z` is the unconditional-jump IDIOM, not a comparison, and it
+        // is true either way. Keeping it on BranchGe leaves the signed op meaning exactly one
+        // thing, which is what a reader checking "is this comparison signed?" needs.
         emit({IrOp::BranchGe, 0, z, z, 0,0, label, nullptr, {}});   // always taken
         freeTemp(z);
         emit({IrOp::Label,    0, 0,0,0,0, lSkip, nullptr, {}});

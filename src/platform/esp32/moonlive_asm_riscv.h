@@ -90,10 +90,12 @@ public:
     void load8(Reg d, Reg base, int32_t imm); // lbu rDst, imm(rBase) — a control read
     void store16(Reg base, Reg off, Reg val); // add tmp,base,off ; sh val,0(tmp)
     void load16(Reg d, Reg base, int32_t imm);// lhu rDst, imm(rBase), a wide control read
+    void load16S(Reg d, Reg base, int32_t imm);// lh  rDst, imm(rBase), SIGN-extended
     void load8Idx(Reg d, Reg base, Reg off);  // add tmp,base,off ; lbu d,0(tmp)
     void load16Idx(Reg d, Reg base, Reg off); // add tmp,base,off ; lhu d,0(tmp)
     void branchIfZero(Reg a, Label l);   // beqz a, l  (bge x0, a... use bgeu against x0)
     void branchGeU(Reg a, Reg b, Label l);    // bgeu a, b, l
+    void branchGeS(Reg a, Reg b, Label l);    // bge  a, b, l
     void branchNe(Reg a, Reg b, Label l);     // bne a, b, l
     void call(Reg d, Reg a, Reg b, Reg c, const void* fn);  // standard call to a host built-in
     /// Call a function in THIS block, by label: the script-to-script call. `jal ra, off` links the

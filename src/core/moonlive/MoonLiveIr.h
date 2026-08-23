@@ -93,6 +93,10 @@ enum class IrOp : uint8_t {
                // op hands the emitted code a pointer that outlives it.
     Inline,    // a host-registered inline op (inlineOp tag); operands a/b/c/d (op-specific)
     LoadCtrl,  // dst = ((const uint8_t*)kArg4)[imm] — read a control value byte at offset imm
+    LoadCtrl16S, // dst = *(int16_t*)((const uint8_t*)kArg4 + imm): read a wide member SIGN-EXTENDED,
+                 // which is what an int16_t member means. Separate from LoadCtrl16 for the reason
+                 // the note below gives: a width or sign FIELD a backend ignored would silently
+                 // zero-extend a negative member, and the script would read 65436 for -100.
     LoadCtrl16,  // dst = *(uint16_t*)((const uint8_t*)kArg4 + imm): read a WIDE member.
                  // Separate ops rather than a width field on LoadCtrl/StoreCtrl: every backend
                  // switch is exhaustive over IrOp, so a new op makes a backend that forgot the
@@ -124,6 +128,17 @@ enum class IrOp : uint8_t {
     Label,     // a branch target; `imm` is the label id. Emits no instruction.
     BranchGe,  // if (a >= b) goto label `imm` — UNSIGNED. The loop's ENTRY guard: skip a loop
                // whose range is empty, which is also what makes `for (i = 0; i < 0; …)` correct.
+               //
+               // STAYS unsigned, and BranchGeS is a separate op rather than a replacement, because
+               // three of its users need unsigned and would break: the array-index clamp
+               // (moonlive_lower.h) reads a negative index as a huge value so ONE branch catches
+               // both ends of the range, the element-store bounds check does the same, and the
+               // recursion-depth guard counts a byte. A loop counter is a count, so parseFor uses
+               // this one too. Only a script's own comparison is signed.
+    BranchGeS, // if (a >= b) goto label `imm`, SIGNED: the comparison a script writes. Separate
+               // from BranchGe per the note above; every backend switch is exhaustive over IrOp,
+               // so a backend that forgets it fails to COMPILE rather than silently comparing the
+               // wrong way, which is the same guarantee LoadCtrl16 documents below.
     BranchNe,  // if (a != b) goto label `imm` — the BACKWARD edge that closes the loop.
     Spill,     // frame slot `imm` = a   — a value the register file could not hold, parked
     Reload,    // dst = frame slot `imm` — the same value brought back for one use

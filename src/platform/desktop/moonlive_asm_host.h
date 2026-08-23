@@ -31,7 +31,8 @@ enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9,
 using Label = uint8_t;
 
 // Branch condition (only the ones the IR needs so far).
-enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */, Ne /* != */ };
+enum class Cond : uint8_t { Lo /* unsigned < */, Hs /* unsigned >= */, Ne /* != */,
+                            Ge /* SIGNED >= */ };
 
 class HostAssembler {
 public:
@@ -104,6 +105,7 @@ public:
     void load8(Reg d, Reg base, int32_t imm); // d = base[imm] (zero-extended byte) — control read
     void store16(Reg base, Reg off, Reg val); // halfword store: base[off..off+1] = val (low 16 bits)
     void load16(Reg d, Reg base, int32_t imm);// d = base[imm..imm+1] (zero-extended halfword)
+    void load16S(Reg d, Reg base, int32_t imm);// the same halfword, SIGN-extended
     void load8Idx(Reg d, Reg base, Reg off);  // d = base[off] (zero-extended byte), index in a REG
     void load16Idx(Reg d, Reg base, Reg off); // d = base[off..off+1], index in a REG
     void movReg(Reg d, Reg a);           // d = a
@@ -113,6 +115,7 @@ public:
     // instruction. Naming the operation rather than the flags is what lets one lowering serve all
     // three: a backend that needs two instructions hides that here, where the encoding already is.
     void branchGeU(Reg a, Reg b, Label l);    // if (unsigned)a >= b goto l
+    void branchGeS(Reg a, Reg b, Label l);    // if (signed)a >= b goto l
     void branchNe(Reg a, Reg b, Label l);     // if a != b goto l
     // Call a host built-in: d = fn(a, b, c). Preserves the host-arg registers (R0/R1/R2 = buf,
     // nLights, cpl) across the call by saving them on the stack, so they stay live for the

@@ -197,6 +197,11 @@ FIRMWARES: dict[str, dict] = {
         "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi + "
                        "W5500 SPI Ethernet (external module, pins per board in deviceModels.json)",
         "ships": True,
+        # W5500 over SPI is 100 Mbit, well under the gigabit these cards want, so a wall of
+        # any size needs a gigabit switch between the S3 and the card to negotiate the link.
+        # Enabled anyway: the S3 is the board most people already own, and a small panel is a
+        # real way to try this before buying an S31.
+        "panel_cards": True,
     },
     "esp32s3-n8r8": {
         "chip": "esp32s3",
@@ -207,6 +212,11 @@ FIRMWARES: dict[str, dict] = {
                        "Ethernet. Half the flash of N16R8; the N16R8 binary overruns an "
                        "8 MB board, so N8R8 boards (LightCrafter etc.) need this variant.",
         "ships": True,
+        # W5500 over SPI is 100 Mbit, well under the gigabit these cards want, so a wall of
+        # any size needs a gigabit switch between the S3 and the card to negotiate the link.
+        # Enabled anyway: the S3 is the board most people already own, and a small panel is a
+        # real way to try this before buying an S31.
+        "panel_cards": True,
     },
     "esp32p4rev1-eth": {
         "chip": "esp32p4",

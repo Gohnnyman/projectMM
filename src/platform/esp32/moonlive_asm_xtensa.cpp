@@ -320,6 +320,15 @@ void XtensaAssembler::load16(Reg d, Reg base, int32_t imm) {
                           uint8_t((imm >> 1) & 0xff)};
     emit(b, 3);
 }
+// l16si aDst, aBase, #imm: the same RRI8 shape as l16ui, differing only in the `r` field, which
+// is the HIGH nibble of the second byte (l8ui r=0, l16ui r=1, l16si r=9). The first byte carries
+// the destination and the LSAI opcode and does not change.
+// Xtensa has l16si but NO l8si, which is why int16_t is a member type here and int8_t is not.
+void XtensaAssembler::load16S(Reg d, Reg base, int32_t imm) {
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t(0x90 | ar(base)),
+                          uint8_t((imm >> 1) & 0xff)};
+    emit(b, 3);
+}
 
 // Xtensa has no register-offset load either. The computed address goes through kAddrScratch, the
 // same temp store8/store16 use, and the RRI8 offset is 0 so the halfword scaling never applies.
@@ -363,9 +372,14 @@ void XtensaAssembler::branchIfZero(Reg a, Label l) {
 void XtensaAssembler::branchRelaxed(uint8_t condNibble, Reg a, Reg b, Label l) {
     // The inverted condition, skipping the 3-byte `j` that follows. Xtensa branch displacements are
     // relative to PC+4 (the same rule patchBranches uses), so clearing a 3-byte instruction is +2.
-    // bne(0x9) <-> beq(0x1); bgeu(0xb) <-> bltu(0x3).
+    // bne(0x9) <-> beq(0x1); bgeu(0xb) <-> bltu(0x3); bge(0xa) <-> blt(0x2).
+    // Every nibble this is called with is listed: an unlisted one would take the final branch and
+    // emit a WRONG condition rather than failing, and a mis-inverted branch is a program that runs
+    // and does the opposite thing.
     const uint8_t inv = condNibble == 0x9 ? 0x1 : condNibble == 0x1 ? 0x9
-                      : condNibble == 0xb ? 0x3 : 0xb;
+                      : condNibble == 0xb ? 0x3 : condNibble == 0x3 ? 0xb
+                      : condNibble == 0xa ? 0x2 : condNibble == 0x2 ? 0xa
+                      : 0xb;
     const uint8_t br[3] = {uint8_t((ar(b) << 4) | 0x7), uint8_t((inv << 4) | ar(a)), 0x02};
     emit(br, 3);
     addFixup(len_, l);
@@ -374,6 +388,8 @@ void XtensaAssembler::branchRelaxed(uint8_t condNibble, Reg a, Reg b, Label l) {
 }
 // bgeu aA, aB, l  (skip if a >= b, unsigned)
 void XtensaAssembler::branchGeU(Reg a, Reg b, Label l) { branchRelaxed(0xb, a, b, l); }
+// bge aA, aB, l  (skip if a >= b, SIGNED). Same relaxation, one nibble apart from bgeu.
+void XtensaAssembler::branchGeS(Reg a, Reg b, Label l) { branchRelaxed(0xa, a, b, l); }
 // bne aA, aB, l
 void XtensaAssembler::branchNe(Reg a, Reg b, Label l) { branchRelaxed(0x9, a, b, l); }
 

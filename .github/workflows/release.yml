@@ -234,12 +234,40 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # Full history: compute_version.py counts commits since the last v* tag.
+          fetch-depth: 0
       # CMakeLists.txt calls find_program(UV_EXECUTABLE … REQUIRED) so the
       # build-host Python (gzip / build_info.h) is reached through uv. The
       # runners don't ship uv by default — install it before package_desktop.
       - uses: astral-sh/setup-uv@v3
+      # Same tag + version resolution as build-esp32 (see the comments there): the computed
+      # semver must reach the DESKTOP binary too, or a desktop build reports library.json's bare
+      # core and the update badge can never see a `latest` (-dev.N) build as newer. shell: bash
+      # keeps the three jobs' copies of this block identical; without it the Windows copy would
+      # run under PowerShell and fail on the bash syntax.
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "$IS_MAIN" = "true" ]; then echo "tag=latest" >> "$GITHUB_OUTPUT"
+          else echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"; fi
+      - name: Compute version
+        id: ver
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          V=$(uv run python moondeck/build/compute_version.py --tag "$TAG")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
       - name: Build + package macOS arm64
-        run: uv run moondeck/ci/package_desktop.py
+        run: uv run moondeck/ci/package_desktop.py --version "${{ steps.ver.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-macos
@@ -252,10 +280,37 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       # Same uv prerequisite as build-macos, see the comment there.
       - uses: astral-sh/setup-uv@v3
+      # Same tag + version resolution as build-esp32 (see the comments there): the computed
+      # semver must reach the DESKTOP binary too, or a desktop build reports library.json's bare
+      # core and the update badge can never see a `latest` (-dev.N) build as newer. shell: bash
+      # keeps the three jobs' copies of this block identical; without it the Windows copy would
+      # run under PowerShell and fail on the bash syntax.
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "$IS_MAIN" = "true" ]; then echo "tag=latest" >> "$GITHUB_OUTPUT"
+          else echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"; fi
+      - name: Compute version
+        id: ver
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          V=$(uv run python moondeck/build/compute_version.py --tag "$TAG")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
       - name: Build + package Windows x64
-        run: uv run moondeck/ci/package_desktop.py
+        run: uv run moondeck/ci/package_desktop.py --version "${{ steps.ver.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-windows
@@ -268,14 +323,41 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       # Same uv prerequisite as build-macos, see the comment there.
       - uses: astral-sh/setup-uv@v3
       # Builds with the runner's default GCC (13 on ubuntu-24.04). Its four false-positive
       # warnings are handled in CMakeLists.txt, which demotes them to non-fatal on GCC below
       # 16 rather than pinning a compiler here: a from-source build on Debian or Raspberry Pi
       # OS meets the same GCC and deserves the same fix.
+      # Same tag + version resolution as build-esp32 (see the comments there): the computed
+      # semver must reach the DESKTOP binary too, or a desktop build reports library.json's bare
+      # core and the update badge can never see a `latest` (-dev.N) build as newer. shell: bash
+      # keeps the three jobs' copies of this block identical; without it the Windows copy would
+      # run under PowerShell and fail on the bash syntax.
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "$IS_MAIN" = "true" ]; then echo "tag=latest" >> "$GITHUB_OUTPUT"
+          else echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"; fi
+      - name: Compute version
+        id: ver
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          V=$(uv run python moondeck/build/compute_version.py --tag "$TAG")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
       - name: Build + package Linux x64
-        run: uv run moondeck/ci/package_desktop.py
+        run: uv run moondeck/ci/package_desktop.py --version "${{ steps.ver.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-linux

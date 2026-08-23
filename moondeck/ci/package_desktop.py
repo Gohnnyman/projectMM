@@ -9,11 +9,12 @@ Runs under CI on macOS, Windows and Linux runners. The output lands in `dist/`:
 
 Each archive carries the executable + a short README.txt with run instructions.
 
-The macOS build is ad-hoc signed, which turns Gatekeeper's outright refusal into
-the "unidentified developer" prompt a user can accept. Windows is unsigned, so
-SmartScreen warns on first run. Documented in the README and each README.txt.
+The macOS build is ad-hoc signed, which gets it as far as Gatekeeper's "could not
+verify" dialog; clearing the quarantine flag is still required to open it. Windows
+is unsigned, so SmartScreen warns. Documented in the README and each README.txt.
 """
 
+import argparse
 import json
 import os
 import platform
@@ -47,14 +48,22 @@ def run(cmd: list[str]) -> None:
         sys.exit(r.returncode)
 
 
-def configure_and_build_macos() -> Path:
+def version_args(version: str) -> list[str]:
+    """The -DMM_VERSION override, or nothing: the exact contract build_esp32.py has. Empty means
+    a local/dev build and build_info.h's library.json default; the release pipeline passes the
+    computed semver so the binary, the asset names and the update badge all carry one version.
+    The inner quotes make the macro a string literal, same as the ESP32 build."""
+    return [f'-DMM_VERSION="{version}"'] if version else []
+
+
+def configure_and_build_macos(version: str = "") -> Path:
     """Configure + build for macOS arm64. Returns the built binary path."""
     bdir = str(BUILD_DIR_MACOS.relative_to(ROOT))
     run([
         "cmake", "-B", bdir,
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_OSX_ARCHITECTURES=arm64",
-    ])
+    ] + version_args(version))
     run(["cmake", "--build", bdir, "--config", "Release", "-j"])
     binary = BUILD_DIR_MACOS / "projectMM"
     if not binary.exists():
@@ -63,10 +72,10 @@ def configure_and_build_macos() -> Path:
     return binary
 
 
-def configure_and_build_linux() -> Path:
+def configure_and_build_linux(version: str = "") -> Path:
     """Configure + build for Linux x86-64. Returns the built binary path."""
     bdir = str(BUILD_DIR_LINUX.relative_to(ROOT))
-    run(["cmake", "-B", bdir, "-DCMAKE_BUILD_TYPE=Release"])
+    run(["cmake", "-B", bdir, "-DCMAKE_BUILD_TYPE=Release"] + version_args(version))
     run(["cmake", "--build", bdir, "--config", "Release", "-j"])
     binary = BUILD_DIR_LINUX / "projectMM"
     if not binary.exists():
@@ -116,7 +125,11 @@ def package_deb(binary: Path, version: str) -> Path | None:
             sys.exit("package_desktop: no dpkg-deb on this CI runner, cannot build the .deb")
         print("package_desktop: no dpkg-deb on this host, skipping the .deb")
         return None
-    # A Debian version cannot carry a leading 'v' and must start with a digit.
+    # A Debian version cannot carry a leading 'v' and must start with a digit. A hyphen is also
+    # out: dpkg reads it as the upstream/revision separator, so the computed 3.0.0-dev.N becomes
+    # 3.0.0~dev.N here. Deliberately a tilde: dpkg sorts ~ BEFORE the bare version, so a dev build
+    # upgrades to the 3.0.0 release exactly as semver intends the prerelease to.
+    version = version.replace("-", "~")
     stage = DIST_DIR / f"deb-{version}"
     shutil.rmtree(stage, ignore_errors=True)
     (stage / "DEBIAN").mkdir(parents=True)
@@ -159,7 +172,7 @@ def package_deb(binary: Path, version: str) -> Path | None:
     return out
 
 
-def configure_and_build_windows() -> Path:
+def configure_and_build_windows(version: str = "") -> Path:
     """Configure + build for Windows x64. Returns the built binary path."""
     bdir = str(BUILD_DIR_WIN.relative_to(ROOT))
     # No -G: let CMake auto-detect the installed Visual Studio. Pinning a
@@ -168,7 +181,7 @@ def configure_and_build_windows() -> Path:
     run([
         "cmake", "-B", bdir,
         "-DCMAKE_BUILD_TYPE=Release",
-    ])
+    ] + version_args(version))
     run(["cmake", "--build", bdir, "--config", "Release"])
     # MSVC multi-config places binaries under <build-dir>/Release/.
     binary = BUILD_DIR_WIN / "Release" / "projectMM.exe"
@@ -184,15 +197,19 @@ def configure_and_build_windows() -> Path:
 
 def readme_text(version: str, platform_label: str) -> str:
     return (
-        f"projectMM v{version} — {platform_label}\n"
+        f"projectMM v{version} ({platform_label})\n"
         f"\n"
         f"Run: ./projectMM (macOS) or projectMM.exe (Windows)\n"
         f"Open: http://localhost:8080/\n"
         f"\n"
-        f"macOS first run: the binary is ad-hoc signed, not notarized, so\n"
-        f"Gatekeeper says it cannot verify the developer. Right-click → Open\n"
-        f"and confirm, or clear the flag with\n"
-        f"'xattr -dr com.apple.quarantine ./projectMM'.\n"
+        f"macOS first run: the app is ad-hoc signed, not notarized, so macOS\n"
+        f"refuses it with 'Apple could not verify projectMM is free of malware'.\n"
+        f"That dialog has no way through on macOS 15 and later, so clear the\n"
+        f"download flag in Terminal and open it again:\n"
+        f"\n"
+        f"  xattr -dr com.apple.quarantine /Applications/projectMM.app\n"
+        f"\n"
+        f"(for the tarball, point it at ./projectMM instead). One time only.\n"
         f"\n"
         f"Source: https://github.com/MoonModules/projectMM\n"
     )
@@ -201,10 +218,14 @@ def readme_text(version: str, platform_label: str) -> str:
 def adhoc_sign(binary: Path) -> None:
     """Sign the macOS binary with an ad-hoc signature. Free, and it changes what a user sees.
 
-    An UNSIGNED binary is refused outright by recent macOS with no obvious way through. Ad-hoc
-    signed, the same download gets the familiar "cannot verify the developer, open anyway?" dialog
-    and a working right-click -> Open. Neither is as good as notarization, which needs a paid
-    Developer ID; this is the free half of the distance.
+    An UNSIGNED binary is refused by recent macOS before it even reaches Gatekeeper's usual
+    prompt. Ad-hoc signing gets it as far as the standard "could not verify" dialog, which is the
+    free half of the distance to notarization (that needs a paid Developer ID).
+
+    It is NOT enough to make the app openable: macOS 15 dropped the right-click -> Open bypass for
+    ad-hoc signed apps, so that dialog now has only "Move to Trash" and "Done". The user clears the
+    quarantine flag instead, which every README this script writes explains. Verified on macOS
+    26.6: the app launches normally once the flag is gone.
 
     Best effort: a failure prints and continues, because an unsigned build is still shippable and
     a release that stops for this would be worse than one that warns.
@@ -327,9 +348,9 @@ def package_macos(binary: Path, version: str) -> Path:
     DIST_DIR.mkdir(exist_ok=True)
     out = DIST_DIR / f"projectMM-macos-arm64-v{version}.tar.gz"
     readme = DIST_DIR / "_README.txt"
-    # encoding="utf-8" — the README contains "→" and "—"; Windows' default
-    # write_text encoding is cp1252 and rejects them. Explicit utf-8 matches
-    # what tar/zip readers expect today.
+    # encoding="utf-8" explicitly: Windows' default write_text encoding is cp1252, so a
+    # non-ASCII character added to readme_text later would raise there and nowhere else.
+    # The text is plain ASCII today; naming the encoding keeps that from being load-bearing.
     readme.write_text(readme_text(version, "macOS arm64"), encoding="utf-8")
     try:
         with tarfile.open(out, "w:gz") as tar:
@@ -520,7 +541,13 @@ def package_windows(binary: Path, version: str) -> Path:
 
 
 def main() -> int:
-    version = read_version()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--version", default="",
+                    help="Override the library.json version with the pipeline-computed semver "
+                         "(compute_version.py), so the binary, the asset names and the update "
+                         "badge all carry the same 3.0.0-dev.N. Empty = a local/dev build.")
+    args = ap.parse_args()
+    version = args.version or read_version()
     system = platform.system()
     machine = platform.machine().lower()
 
@@ -536,12 +563,12 @@ def main() -> int:
             print(f"package_desktop: unsupported macOS arch '{machine}'. "
                   f"projectMM 1.0 ships macOS arm64 only.")
             return 2
-        binary = configure_and_build_macos()
+        binary = configure_and_build_macos(args.version)
         package_macos(binary, version)
         return 0
 
     if system == "Windows":
-        binary = configure_and_build_windows()
+        binary = configure_and_build_windows(args.version)
         package_windows(binary, version)
         return 0
 
@@ -550,7 +577,7 @@ def main() -> int:
             print(f"package_desktop: unsupported Linux arch '{machine}'. "
                   f"Only x86-64 is packaged; other arches build from source.")
             return 2
-        binary = configure_and_build_linux()
+        binary = configure_and_build_linux(args.version)
         package_linux(binary, version)
         return 0
 
