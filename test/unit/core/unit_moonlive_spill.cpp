@@ -122,7 +122,7 @@ TEST_CASE("a spilled value survives a host call and is still correct afterwards"
     // `keep` is defined before the call and used after it, so it must be live ACROSS random16 —
     // and at a squeezed budget it is one of the values that has nowhere to live but a slot.
     const char* src =
-        mmScript("uint8_t idx = 5;\n"
+        mmScript("byte idx = 5;\n"
         "for (i = 0; i < 3; i = i + 1) {\n"
         "  setRGB(idx + i, random16(1) + 111, i + 1, 222);\n"
         "}\n");
@@ -148,7 +148,7 @@ TEST_CASE("a spilled value survives a host call and is still correct afterwards"
 // If it did, a control read after a spill would load from a register holding something else.
 TEST_CASE("a declared control still reads live at a squeezed budget") {
     const char* src =
-        mmScript("uint8_t pos = 0;\n"
+        mmScript("byte pos = 0;\n"
         "for (i = 0; i < 2; i = i + 1) {\n"
         "  setRGB(pos + i, 10, 20, 30);\n"
         "}\n");

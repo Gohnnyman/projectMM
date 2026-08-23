@@ -23,17 +23,36 @@
 
 namespace mm::moonlive {
 
-// The width of a script member, and how many arena bytes one element of it occupies. Here rather
-// than with the IR because a builtin descriptor names the width its by-reference argument takes.
-// Int16 is the SIGNED sibling of Uint16, and there is no Int8 on purpose: Xtensa has no signed
-// byte load, so an int8_t member would need a sign-extend sequence the other three ISAs do not,
-// for a width no script has asked for. A script wanting a small signed value declares int16_t.
-enum class CtrlType : uint8_t { Uint8, Uint16, Int16 };
+// A script member's TYPE. A semantic, not a storage width: every SCALAR occupies one uniform
+// 4-byte slot whatever its type, and only ARRAYS pack by element. That is what removes the width
+// machinery a script used to spell for itself (uint8_t/uint16_t/int16_t), which is where four
+// bugs came from — a wrapped member, a sentinel read through a 16-bit window, a one-byte store
+// into a two-byte member, a sign-blind array load. Here rather than with the IR because a builtin
+// descriptor names the type its by-reference argument takes.
+//
+// Byte and Bool are masked and normalized on STORE, so a slot always already holds what its type
+// promises and every read is one plain 32-bit load. Fixed is Q16.16 on that same slot. Str holds
+// an offset into the compiled program's string pool.
+enum class CtrlType : uint8_t { Int, Byte, Bool, Fixed, Str };
 
+/// Bytes ONE ELEMENT occupies. A scalar always takes a whole 4-byte slot (see ctrlSlotBytes);
+/// this is the array element width, which is where packing still pays for itself: a byte[] heat
+/// map costs a quarter of what an int[] would, and on the classic ESP32 there is no PSRAM to
+/// absorb the difference.
 constexpr uint8_t ctrlWidth(CtrlType t) {
-    return (t == CtrlType::Uint16 || t == CtrlType::Int16) ? 2 : 1;
+    return (t == CtrlType::Byte || t == CtrlType::Bool) ? 1 : 4;
 }
-constexpr bool ctrlIsSigned(CtrlType t) { return t == CtrlType::Int16; }
+
+/// Bytes a SCALAR of this type occupies: always 4, whatever the type. Spelled as a function
+/// rather than a bare constant so the uniformity is stated at every call site that used to ask
+/// for a width.
+constexpr uint8_t ctrlSlotBytes(CtrlType) { return 4; }
+
+/// Does a value of this type need masking on the way into its slot? Byte keeps its slot's upper
+/// bytes zero, which is what lets a byte control's descriptor point at the slot's low byte.
+constexpr bool ctrlMasksOnStore(CtrlType t) {
+    return t == CtrlType::Byte || t == CtrlType::Bool;
+}
 
 
 // Neutral inline opcodes — "store shapes a backend can emit", not "LED operations". A host maps
@@ -92,11 +111,16 @@ struct Builtin {
     // host a pointer built from a color byte. Stated per builtin for the same reason byRef is,
     // rather than special-cased by name in the parser.
     uint8_t      byStr = 0;
-    // The member WIDTH a by-reference argument must have, for the control-declaring builtins:
-    // addUint8 takes a uint8_t member, addUint16 a uint16_t one. Stated here for the same reason
-    // byRef and byStr are, rather than the parser matching on the builtin's name — a name test
-    // would silently mis-classify the next by-reference builtin somebody adds.
-    CtrlType     refType = CtrlType::Uint8;
+    // Which arguments are FIXED (Q16.16) rather than whole numbers, a bit per position, and
+    // whether the RESULT is. Stated per builtin for the same reason byRef and byStr are: the
+    // parser type-checks against this rather than matching on a name, so the next builtin that
+    // speaks fixed declares it here and the checker follows.
+    //
+    // Almost every builtin is whole numbers: a channel, a light index, an angle16, a count. The
+    // exceptions are the ones a shader hands coordinates to — uvX/uvY return a fixed coordinate,
+    // and escape() takes four of them.
+    uint8_t      fixedArgs = 0;
+    bool         fixedReturn = false;
 };
 
 /// Assert a host's builtin table did not silently drop a registration.

@@ -3,15 +3,15 @@
 // it a simulation rather than a formula.
 
 class EmberEffect {
-  uint8_t  cool = 30;
-  uint8_t  spark = 60;
-  uint8_t  cycle = 20;
-  uint8_t  heat[16];
+  byte  cool = 30;
+  byte  spark = 60;
+  byte  cycle = 20;
+  byte  heat[16];
 
   defineControls() {
-    addUint8("cool", cool, 1, 120);
-    addUint8("spark", spark, 0, 200);
-    addUint8("cycle", cycle, 1, 120);
+    addControl("cool", cool, 1, 120);
+    addControl("spark", spark, 0, 200);
+    addControl("cycle", cycle, 1, 120);
   }
 
   tick() {

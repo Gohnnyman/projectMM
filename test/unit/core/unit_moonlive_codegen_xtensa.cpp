@@ -48,7 +48,7 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 
 #define MM_ISA_NAME "Xtensa"
 // Golden values, recorded from this backend. See the .inc for what they are and are not.
-#define MM_GOLD_GRID_LEN  227u
+#define MM_GOLD_GRID_LEN  225u
 #define MM_GOLD_FX_LEN    105u
 #define MM_GOLD_FILLLOOP_LEN 254u  // fits now: the host arguments left the register file
 #define MM_GOLD_FXLOOP_LEN  190u
@@ -230,23 +230,6 @@ TEST_CASE("Xtensa addImm never encodes an add of zero as the narrow form") {
     }
 }
 
-// The signed 16-bit load differs from the unsigned one ONLY in the r field (the second byte's
-// high nibble: l16ui r=1, l16si r=9). Asserted on the encoder because this exact encoding
-// shipped WRONG once: the 0x9 was first placed in the first byte's low nibble, the disassembler
-// read garbage, and every int16_t member load was an illegal instruction.
-TEST_CASE("Xtensa load16S emits l16si, one r-nibble away from l16ui") {
-    using Asm = mm_xtensa_backend::mm::moonlive::XtensaAssembler;
-    using mm_xtensa_backend::mm::moonlive::R0;
-    using mm_xtensa_backend::mm::moonlive::R1;
-    Asm u(64); u.load16(R0, R1, 4);
-    Asm s(64); s.load16S(R0, R1, 4);
-    REQUIRE(u.size() == 3);
-    REQUIRE(s.size() == 3);
-    CHECK((s.bytes()[0] & 0x0f) == 0x02);          // LSAI opcode, same as l16ui
-    CHECK((u.bytes()[1] >> 4) == 0x1);             // l16ui: r = 1
-    CHECK((s.bytes()[1] >> 4) == 0x9);             // l16si: r = 9
-    CHECK(s.bytes()[2] == 2);                      // the RRI8 immediate is scaled by 2
-}
 
 // The relaxed branch emits the INVERTED condition over a jump, so signed bge appears as blt
 // (0x2) where unsigned bgeu appears as bltu (0x3). This is the nibble the old inversion table's
@@ -261,4 +244,99 @@ TEST_CASE("Xtensa branchGeS inverts to blt where branchGeU inverts to bltu") {
     REQUIRE(s.size() == 6);
     CHECK((u.bytes()[1] >> 4) == 0x3);             // bltu
     CHECK((s.bytes()[1] >> 4) == 0x2);             // blt: the SIGNED inversion
+}
+
+// The Q16.16 primitives, pinned against the ESP-IDF assembler's own output (xtensa-esp32-elf-as
+// emitted every byte below). The shift immediates are the reason these are pinned: slli encodes
+// 32-n and srai encodes n, in fields that are easy to place plausibly and wrongly, and a wrong
+// placement is an illegal instruction on the board while every host test stays green.
+TEST_CASE("Xtensa mulhi emits mulsh, the signed high half") {
+    using Asm = mm_xtensa_backend::mm::moonlive::XtensaAssembler;
+    using mm_xtensa_backend::mm::moonlive::R0;
+    using mm_xtensa_backend::mm::moonlive::R1;
+    using mm_xtensa_backend::mm::moonlive::R2;
+    Asm a(64); a.mulhi(R0, R1, R2);
+    REQUIRE(a.size() == 3);
+    // The WORD is 0xb22340 (mulsh a2, a3, a4); in memory, little-endian, the opcode byte is LAST.
+    CHECK(a.bytes()[2] == 0xb2);                   // mulsh, against mull's 0x82
+    CHECK(a.bytes()[0] == 0x40);
+    CHECK(a.bytes()[1] == 0x23);
+}
+
+TEST_CASE("Xtensa shlImm encodes 32-n where sarImm encodes n") {
+    using Asm = mm_xtensa_backend::mm::moonlive::XtensaAssembler;
+    using mm_xtensa_backend::mm::moonlive::R0;
+    using mm_xtensa_backend::mm::moonlive::R1;
+    Asm l(64); l.shlImm(R0, R1, 16);
+    Asm r(64); r.sarImm(R0, R1, 16);
+    REQUIRE(l.size() == 3);
+    REQUIRE(r.size() == 3);
+    // WORDS: slli a2, a3, 16 = 0x112300; srai a2, a3, 16 = 0x312030. Little-endian memory puts
+    // the low byte first — a first version wrote these bytes REVERSED (an objdump listing read in
+    // the wrong convention), and the reversed slli decoded as `l32r a1`: a stack-pointer clobber
+    // that hung the board. These constants are the word order the S3's own objdump confirms.
+    CHECK(l.bytes()[0] == 0x00);
+    CHECK(l.bytes()[1] == 0x23);
+    CHECK(l.bytes()[2] == 0x11);
+    CHECK(r.bytes()[0] == 0x30);
+    CHECK(r.bytes()[1] == 0x20);
+    CHECK(r.bytes()[2] == 0x31);
+}
+
+// The 4-byte slot access, in the NARROW forms: l32i.n/s32i.n are 2 bytes where the halfword
+// forms are 3, so every scalar access got SMALLER as well as wider. The offset field holds
+// offset/4, which is the encoding that would silently address four times too far if read as a
+// byte offset — pinned against the ESP-IDF assembler's own bytes.
+TEST_CASE("Xtensa load32 emits the two-byte l32i.n with a scaled offset") {
+    using Asm = mm_xtensa_backend::mm::moonlive::XtensaAssembler;
+    using mm_xtensa_backend::mm::moonlive::R0;
+    using mm_xtensa_backend::mm::moonlive::R1;
+    Asm l(64); l.load32(R0, R1, 4);
+    Asm s(64); s.store32(R1, 16, R0);
+    REQUIRE(l.size() == 2);                        // narrower than l16ui's 3 bytes
+    REQUIRE(s.size() == 2);
+    // WORDS: l32i.n a2, a3, 4 = 0x1328 ; s32i.n a2, a3, 16 = 0x4329 — low byte first in memory.
+    CHECK(l.bytes()[0] == 0x28);
+    CHECK(l.bytes()[1] == 0x13);
+    CHECK(s.bytes()[0] == 0x29);
+    CHECK(s.bytes()[1] == 0x43);
+}
+
+// The indexed forms compute into a12, the scratch outside the vreg map, so an array element
+// access can never clobber a live virtual register.
+TEST_CASE("Xtensa the indexed 32-bit forms go through the a12 address scratch") {
+    using Asm = mm_xtensa_backend::mm::moonlive::XtensaAssembler;
+    using mm_xtensa_backend::mm::moonlive::R0;
+    using mm_xtensa_backend::mm::moonlive::R1;
+    using mm_xtensa_backend::mm::moonlive::R2;
+    Asm l(64); l.load32Idx(R0, R1, R2);
+    REQUIRE(l.size() == 4);                        // add.n (2) + l32i.n (2)
+    // add.n a12, a3, a4 = word 0xc34a; l32i.n a2, a12, 0 = word 0x0c28 — low byte first.
+    CHECK(l.bytes()[0] == 0x4a);
+    CHECK(l.bytes()[1] == 0xc3);                   // add.n writes a12
+    CHECK(l.bytes()[2] == 0x28);
+    CHECK(l.bytes()[3] == 0x0c);                   // then reads through it at offset 0
+}
+
+// A fixed multiply must reach the DEVICE backend, not just the host one. The three-instruction
+// sequence (mulsh for the high half, mull for the low, then the shifts that join them) is what
+// makes Q16.16 arithmetic work on an ESP32, and a host-only test would never notice its absence:
+// every render test on this machine executes the arm64 backend.
+TEST_CASE("Xtensa: a fixed multiply emits mulsh beside mull") {
+    bool ok = false;
+    auto bytes = emitBytes("class T {\n"
+                           "  fixed a = 0.5;\n"
+                           "  fixed b = 2.0;\n"
+                           "  fixed c = 0.0;\n"
+                           "  tick() { c = a * b; setRGB(0, toInt(c), 0, 0); }\n"
+                           "}\n",
+                           mm::moonlive::modifierSysVars(), ok);
+    REQUIRE(ok);
+    REQUIRE(!bytes.empty());
+    // mulsh's opcode byte in its RRR position. A coarse probe, but mulsh is the only b2-leading
+    // 24-bit op the engine can emit, so its absence is the failure this test exists to catch.
+    bool sawMulsh = false;
+    for (size_t i = 0; i + 2 < bytes.size(); i++)
+        if (bytes[i] == 0xb2) { sawMulsh = true; break; }
+    CHECK(sawMulsh);
 }

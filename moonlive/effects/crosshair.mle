@@ -9,10 +9,10 @@
 // rather than computing a value. Parameters and members that a caller can set are the next steps;
 // when they arrive, the shape of this script does not change, the helpers just get shorter.
 class CrosshairEffect {
-  uint8_t bpm = 30;
+  byte bpm = 30;
 
   defineControls() {
-    addUint8("bpm", bpm, 1, 240);
+    addControl("bpm", bpm, 1, 240);
   }
 
   column() {

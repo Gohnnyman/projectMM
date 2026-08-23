@@ -6,10 +6,10 @@
 // script used to spell out.
 
 class LinesEffect {
-  uint8_t bpm = 30;
+  byte bpm = 30;
 
   defineControls() {
-    addUint8("bpm", bpm, 1, 240);
+    addControl("bpm", bpm, 1, 240);
   }
 
   tick() {

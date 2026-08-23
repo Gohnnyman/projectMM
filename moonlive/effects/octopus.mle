@@ -7,14 +7,14 @@
 // budget — and a lookup table is a cache, not state, so recomputing costs correctness nothing.
 
 class OctopusEffect {
-  uint8_t speed = 20;
-  uint8_t branches = 4;
-  uint8_t cx = 0;
-  uint8_t cy = 0;
+  byte speed = 20;
+  byte branches = 4;
+  byte cx = 0;
+  byte cy = 0;
 
   defineControls() {
-    addUint8("speed", speed, 1, 120);
-    addUint8("branches", branches, 1, 8);
+    addControl("speed", speed, 1, 120);
+    addControl("branches", branches, 1, 8);
   }
 
   tick() {

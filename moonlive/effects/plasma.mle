@@ -7,12 +7,12 @@
 // through the same path an effect always does.
 
 class PlasmaEffect {
-  uint8_t bpm = 12;
-  uint8_t zoom = 24;
+  byte bpm = 12;
+  byte zoom = 24;
 
   defineControls() {
-    addUint8("bpm", bpm, 1, 120);
-    addUint8("zoom", zoom, 1, 64);
+    addControl("bpm", bpm, 1, 120);
+    addControl("zoom", zoom, 1, 64);
   }
 
   tick() {

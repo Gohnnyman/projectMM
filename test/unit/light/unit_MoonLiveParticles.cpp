@@ -56,7 +56,7 @@ TEST_CASE("a script sizes its own particle pool and is told what it got") {
     // The SAME script with and without the pool call, so the difference is the buffers alone and
     // not the compiled program, which varies with the source text.
     Scene without, with_;
-    without.run("class T { defineControls() { addUint8(\"n\", n, 0, 9); } uint8_t n = 0; tick() { } }");
+    without.run("class T { defineControls() { addControl(\"n\", n, 0, 9); } byte n = 0; tick() { } }");
     with_.run("class T { defineControls() { pool(64); } tick() { } }");
     CHECK(with_.effect.dynamicBytes() > without.effect.dynamicBytes() + 1000);   // ~1216 of buffers
 }
@@ -121,7 +121,7 @@ TEST_CASE("a spark thrown upward comes back down") {
     // Straight up (angle16 49152 = three quarter turn = -y), fast, long-lived, no drag.
     // A member counter, so the spark is thrown once and then only physics runs.
     s.run("class T {"
-          "  uint8_t fired = 0;"
+          "  byte fired = 0;"
           "  defineControls() { pool(8); }"
           "  tick() { fill(0, 0, 0);"
           "           if (fired == 0) { emit(8, 15, 49152, 260, 4, 600, 40); fired = 1; }"

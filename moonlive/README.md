@@ -13,9 +13,9 @@ A class may also define functions of its own and **call them**, including callin
 
 ```
 class CrosshairEffect {
-  uint8_t bpm = 30;
+  byte bpm = 30;
 
-  defineControls() { addUint8("bpm", bpm, 1, 240); }
+  defineControls() { addControl("bpm", bpm, 1, 240); }
 
   column() { for (y = 0; y < height; y = y + 1) { setRGB(y * width + scale(beat(bpm, t), width), 255, 40, 0); } }
   tick()   { fill(0, 0, 0); column(); }
@@ -27,10 +27,10 @@ lets one helper call another and lets a function recurse. A function takes no ar
 nothing yet, so a helper does a whole job rather than computing a value. `effects/crosshair.mle` is
 the worked example.
 
-**A declaration is a MEMBER; `defineControls()` decides what the UI shows.** `uint8_t bpm = 30;` is
+**A declaration is a MEMBER; `defineControls()` decides what the UI shows.** `byte bpm = 30;` is
 state the script owns: visible in every function, surviving every tick. Naming it in
-`defineControls()` with `addUint8("bpm", bpm, 1, 240)` also puts it on the UI as a slider, which is
-the same call a compiled module makes. A member no `addUint8` names stays private to the script,
+`defineControls()` with `addControl("bpm", bpm, 1, 240)` also puts it on the UI as a slider, which is
+the same call a compiled module makes. A member no `addControl` names stays private to the script,
 which is how a stateful effect holds a value the user should not see.
 
 The default comes from the declaration, the range from the call, and the quoted name is the UI
@@ -52,13 +52,13 @@ if (heat[i] > 40) { setRGB(i, 255, 90, 0); }
 else { setRGB(i, 0, 0, 0); }
 ```
 
-**Members can be wider than a byte, and can be arrays.** `uint8_t` spans 0..255; `uint16_t` spans
+**Members can be wider than a byte, and can be arrays.** `byte` spans 0..255; `int` spans
 0..65535, which is what a position on a wall wider than 255 needs. An array is declared with a
 literal length and starts at zero:
 
 ```c
-uint16_t phase = 900;      // a value a byte cannot hold
-uint8_t  heat[16];         // sixteen elements, all zero to begin with
+int phase = 900;      // a value a byte cannot hold
+byte  heat[16];         // sixteen elements, all zero to begin with
 ```
 
 An index is an arbitrary expression (`heat[i * 2 + 1]`), and an index outside the array is

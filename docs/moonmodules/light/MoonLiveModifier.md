@@ -60,7 +60,7 @@ Past half full, the status also names the tightest limit the script is approachi
 |---|---|
 | `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-maps live |
 
-Plus one control per `addUint8` / `addUint16` in the script's `defineControls()`: `addUint8("amount", amount, 0, 64)`
+Plus one control per `addControl` in the script's `defineControls()`: `addControl("amount", amount, 0, 64)`
 becomes a slider, and moving it rebuilds the mapping just as editing the script does.
 
 Editing the script asks the Layer to rebuild its mapping, so a change is visible immediately. A script that fails to compile shows the parse error on the module and the mapping falls back to passing coordinates straight through — the transform disappears until the script parses again, and the device keeps rendering throughout.

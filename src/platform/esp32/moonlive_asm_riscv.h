@@ -86,13 +86,17 @@ public:
     void addImm(Reg d, Reg a, int32_t imm);   // addi rd, ra, imm
     void addReg(Reg d, Reg a, Reg b);    // add rd, ra, rb
     void mulReg(Reg d, Reg a, Reg b);    // mul rd, ra, rb
+    void mulhi(Reg d, Reg a, Reg b);     // mulh rd, ra, rb — the SIGNED high 32 bits
+    void shlImm(Reg d, Reg a, uint8_t n);// slli rd, ra, #n
+    void sarImm(Reg d, Reg a, uint8_t n);// srai rd, ra, #n — arithmetic, sign-filling
+    void shrImm(Reg d, Reg a, uint8_t n);// srli rd, ra, #n — logical, zero-filling
     void store8(Reg base, Reg off, Reg val);  // add tmp,base,off ; sb val,0(tmp)
     void load8(Reg d, Reg base, int32_t imm); // lbu rDst, imm(rBase) — a control read
-    void store16(Reg base, Reg off, Reg val); // add tmp,base,off ; sh val,0(tmp)
-    void load16(Reg d, Reg base, int32_t imm);// lhu rDst, imm(rBase), a wide control read
-    void load16S(Reg d, Reg base, int32_t imm);// lh  rDst, imm(rBase), SIGN-extended
+    void load32(Reg d, Reg base, int32_t imm); // lw rDst, imm(rBase) — a whole 4-byte slot
+    void store32(Reg base, int32_t imm, Reg val);// sw rVal, imm(rBase) (offset IMMEDIATE)
+    void load32Idx(Reg d, Reg base, Reg off);  // add tmp,base,off ; lw d,0(tmp)
+    void store32Idx(Reg base, Reg off, Reg val);// add tmp,base,off ; sw val,0(tmp)
     void load8Idx(Reg d, Reg base, Reg off);  // add tmp,base,off ; lbu d,0(tmp)
-    void load16Idx(Reg d, Reg base, Reg off); // add tmp,base,off ; lhu d,0(tmp)
     void branchIfZero(Reg a, Label l);   // beqz a, l  (bge x0, a... use bgeu against x0)
     void branchGeU(Reg a, Reg b, Label l);    // bgeu a, b, l
     void branchGeS(Reg a, Reg b, Label l);    // bge  a, b, l

@@ -128,9 +128,9 @@ TEST_CASE("every script reads the same system-variable vocabulary") {
         {mmScript("setRGB(xPos, 0, 0, 0);"),
          true,  "reading a coordinate outside a modifier is legal and reads 0: no binding writes "
                 "it, so there is nothing to disagree with"},
-        {mmScript("uint8_t width = 16;\nsetRGB(0, 0, 0, 0);"),
+        {mmScript("byte width = 16;\nsetRGB(0, 0, 0, 0);"),
          false, "declaring one is still refused, in every role: that is what keeps a read meaningful"},
-        {mmScript("uint8_t xPos = 3;\nsetRGB(0, 0, 0, 0);"),
+        {mmScript("byte xPos = 3;\nsetRGB(0, 0, 0, 0);"),
          false, "the coordinate names are reserved too, so a modifier cannot shadow what it is handed"},
     };
     uint8_t out[2048];
@@ -173,7 +173,7 @@ TEST_CASE("a comment is whitespace, wherever it appears") {
          "a comment inside a loop body"},
         {mmScript("// @control 1..64 is just text now\naddLight(1, 2, 3);"), true,
          "the old annotation is an ordinary comment"},
-        {mmScript("uint8_t n = 4; // anything at all !!\nfor (i = 0; i < n; i = i + 1) { addLight(i, 0, 0); }"),
+        {mmScript("byte n = 4; // anything at all !!\nfor (i = 0; i < n; i = i + 1) { addLight(i, 0, 0); }"),
          true, "a comment after a member declaration"},
     };
     for (const Case& c : cases) {
@@ -289,7 +289,7 @@ TEST_CASE("noise is smooth across neighbouring points, and varies across the fie
 TEST_CASE("mod wraps a sweep, so an animation repeats instead of running off the end") {
     uint8_t code[4096];
     auto r = moonlive::compileSource(
-        mmScript("uint8_t w = 16;\n"
+        mmScript("byte w = 16;\n"
         "for (yy = 0; yy < w; yy = yy + 1) { setRGB(yy * w + mod(t, w), 255, 0, 0); }"),
         moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
     REQUIRE(r.ok);
@@ -323,7 +323,7 @@ TEST_CASE("sequential loops reuse the same register, so a script is not billed p
     uint8_t code[8192];
     // Four loops, each with a call in the body — comfortably over budget if counters accumulate.
     auto r = moonlive::compileSource(
-        mmScript("uint8_t w = 16;\n"
+        mmScript("byte w = 16;\n"
         "for (a = 0; a < w; a = a + 1) { setRGB(a, 255, 0, 0); }\n"
         "for (b = 0; b < w; b = b + 1) { setRGB(b, 0, 255, 0); }\n"
         "for (c = 0; c < w; c = c + 1) { setRGB(c, 0, 0, 255); }\n"

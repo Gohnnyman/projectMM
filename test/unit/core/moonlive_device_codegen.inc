@@ -44,8 +44,8 @@ namespace {
 // every S3, so the one worth pinning hardest.
 const char* kGridLayout =
     "class GridLayout {\n"
-    "  uint8_t cols = 16;\n"
-    "  uint8_t rows = 16;\n"
+    "  byte cols = 16;\n"
+    "  byte rows = 16;\n"
     "  tick() {\n"
     "    for (y = 0; y < rows; y = y + 1) {\n"
     "      for (x = 0; x < cols; x = x + 1) {\n"

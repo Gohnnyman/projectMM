@@ -102,20 +102,38 @@ public:
         else if (anim_) anim_(buf, nLights, cpl, t);          // hand-encoded animated fill
     }
 
+    /// A member's 4-byte slot, little-endian, which is the layout every backend's 32-bit load and
+    /// store already uses. One home for it: the engine, the seeding pass and the control binding
+    /// all reach a slot through these two rather than each spelling the byte order themselves.
+    int32_t readSlot(uint8_t offset) const {
+        if (!ctrlArena_ || offset + 4 > kArenaBytes) return 0;
+        return int32_t(uint32_t(ctrlArena_[offset]) | (uint32_t(ctrlArena_[offset + 1]) << 8) |
+                       (uint32_t(ctrlArena_[offset + 2]) << 16) |
+                       (uint32_t(ctrlArena_[offset + 3]) << 24));
+    }
+    void writeSlot(uint8_t offset, int32_t v) {
+        if (!ctrlArena_ || offset + 4 > kArenaBytes) return;
+        const uint32_t u = uint32_t(v);
+        ctrlArena_[offset]     = uint8_t(u & 0xff);
+        ctrlArena_[offset + 1] = uint8_t((u >> 8) & 0xff);
+        ctrlArena_[offset + 2] = uint8_t((u >> 16) & 0xff);
+        ctrlArena_[offset + 3] = uint8_t((u >> 24) & 0xff);
+    }
+
     /// Append a control the running `defineControls()` declared. The binding installs a sink that
-    /// lands here, so the control list is built by the script CALLING addUint8, exactly as a
+    /// lands here, so the control list is built by the script CALLING addControl, exactly as a
     /// compiled module's list is built by its defineControls() running.
     ///
     /// `name` must outlive the engine: it points into the string pool this engine owns, which is
     /// what the compiler interned it into.
-    void addDeclaredControl(const char* name, uint8_t offset, uint16_t lo, uint16_t hi,
-                            CtrlType type = CtrlType::Uint8) {
+    void addDeclaredControl(const char* name, uint8_t offset, int32_t lo, int32_t hi,
+                            CtrlType type = CtrlType::Int) {
         if (controlCount_ >= kMaxCtrls || !name || offset >= kArenaBytes) return;
         if (lo > hi) return;
-        // A wide control owns TWO arena bytes, so the second one has to exist. The compiler already
+        // A scalar owns a whole 4-byte SLOT, so all four bytes have to exist. The compiler already
         // aligned and bounded the member; this is the engine refusing to publish a control whose
-        // high byte would sit outside the arena.
-        if (ctrlWidth(type) == 2 && offset + 1 >= kArenaBytes) return;
+        // slot would run past the arena.
+        if (offset + ctrlSlotBytes(type) > kArenaBytes) return;
         // Two controls on one member would give the UI two cards writing the same byte, each
         // overwriting the other, and two labels the same persistence key.
         for (uint8_t i = 0; i < controlCount_; i++)
@@ -129,19 +147,14 @@ public:
         // record. Clamping only the record would leave the out-of-range value driving the effect
         // while the UI showed a slider that could not reach it. This is the one place that knows
         // both the range and the live byte at the same moment.
-        // Read at the DECLARED width, little-endian to match every backend's halfword load, so a
-        // wide control's default is the member's whole value rather than its low byte.
-        uint16_t def = lo;
-        if (ctrlArena_) {
-            def = ctrlArena_[offset];
-            if (ctrlWidth(type) == 2) def |= static_cast<uint16_t>(ctrlArena_[offset + 1]) << 8;
-        }
+        // Read the whole SLOT, little-endian to match every backend's 32-bit load, so the default
+        // is the member's entire value rather than its low byte. Signed: a fixed or int member
+        // legitimately holds a negative one.
+        int32_t def = lo;
+        if (ctrlArena_) def = readSlot(offset);
         if (def < lo) def = lo;
         else if (def > hi) def = hi;
-        if (ctrlArena_) {
-            ctrlArena_[offset] = static_cast<uint8_t>(def & 0xff);
-            if (ctrlWidth(type) == 2) ctrlArena_[offset + 1] = static_cast<uint8_t>(def >> 8);
-        }
+        if (ctrlArena_) writeSlot(offset, def);
         controls_[controlCount_] = {name, lo, hi, def, 0, type, offset};
         // nameLen is what the binding reports; measured here rather than passed, so a caller
         // cannot disagree with the string it handed over.
@@ -270,7 +283,7 @@ private:
     // declared default. 2 bytes per row, 16 across the table.
     struct SeededMember {
         uint8_t  offset = 0;
-        CtrlType type   = CtrlType::Uint8;
+        CtrlType type   = CtrlType::Int;
         uint8_t  count  = 1;
         char     name[kSeedNameLen] = {};
     };

@@ -128,18 +128,43 @@ extern "C" inline uint32_t mm_light_mod(const uintptr_t* args, uint32_t, const u
 // div(a, b) → a / b, and what the '/' OPERATOR lowers to. Registered under a name for the same
 // reason mod is: the parser resolves both operators through the builtin table, so core stays
 // domain-neutral and a divide is one host call rather than an instruction no ISA here has.
-// b == 0 returns 0, matching mod, a script degrades, never faults.
+// b == 0 SATURATES with the numerator's sign — IEEE 754's ±infinity mapped onto an int, and what
+// libfixmath does on divide overflow. The value is also the visually right one: `k / dist` at
+// dist == 0 is the CENTER of a ripple, where max reads as the peak the eye expects and 0 punched
+// a dark hole exactly there. 0/0 stays 0 (no direction to saturate toward). mod keeps returning
+// 0: there is no "infinite remainder". Either way a script degrades, never faults, and needs no
+// zero-check of its own.
 // SIGNED, for the reason given at mod above: `/` means what it means everywhere else. Scaling a
 // coordinate is the common case and coordinates go negative, so an unsigned divide turned
 // `uvX(...) * zoom / 40` on the left half of a grid into 107361151 rather than -13030.
 extern "C" inline uint32_t mm_light_div(const uintptr_t* args, uint32_t, const uint8_t*) {
     const int32_t a = static_cast<int32_t>(uint32_t(args[0]));
     const int32_t b = static_cast<int32_t>(uint32_t(args[1]));
+    if (b == 0)
+        return static_cast<uint32_t>(a > 0 ? INT32_MAX : a < 0 ? INT32_MIN : 0);
     // INT32_MIN / -1 overflows: UB, and a SIGFPE on x86-64. Returns the saturated value a script
     // would expect from negating INT32_MIN, rather than 0, which would read as "division broke".
-    if (b == 0) return 0;
     if (a == INT32_MIN && b == -1) return static_cast<uint32_t>(INT32_MAX);
     return static_cast<uint32_t>(a / b);
+}
+
+// fdiv(a, b) → the Q16.16 quotient, what the '/' OPERATOR lowers to when both sides are fixed.
+// A separate host call from div because the numerator must widen: the quotient of two Q16.16
+// values needs (a << 16) / b, and shifting a 32-bit fixed value left by 16 in registers wraps for
+// anything past |128.0| — which is exactly what froze two shipped shaders. int64 in the host is
+// exact over the whole range, and a divide is a host call on every ISA here anyway (libfixmath's
+// fix16_div does the same widening for the same reason).
+// b == 0 saturates with the numerator's sign, matching div; a quotient outside int32 saturates
+// too, rather than wrapping into a number nobody wrote.
+extern "C" inline uint32_t mm_light_fdiv(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const int32_t a = static_cast<int32_t>(uint32_t(args[0]));
+    const int32_t b = static_cast<int32_t>(uint32_t(args[1]));
+    if (b == 0)
+        return static_cast<uint32_t>(a > 0 ? INT32_MAX : a < 0 ? INT32_MIN : 0);
+    const int64_t q = (static_cast<int64_t>(a) << 16) / b;
+    if (q > INT32_MAX) return static_cast<uint32_t>(INT32_MAX);
+    if (q < INT32_MIN) return static_cast<uint32_t>(INT32_MIN);
+    return static_cast<uint32_t>(static_cast<int32_t>(q));
 }
 
 // smoothstep(edge0, edge1, v) → a soft 0..65535 ramp between the edges, GLSL's own and the
@@ -192,14 +217,21 @@ extern "C" inline uint32_t mm_light_uvAxis(const uintptr_t* args, bool wantY) {
     const int64_t s  = sw < sh ? sw : sh;          // normalize on the SHORT side: that is what
                                                    // keeps a circle circular on a wide panel
     const int64_t extent = wantY ? sh : sw;
-    const int64_t v = ((px * 2 - extent + 1) * 8192) / s;
-    const int64_t c = v < -32768 ? -32768 : (v > 32767 ? 32767 : v);
-    // SIGNED, with no +32768 bias. A coordinate has an origin: the center of the grid is 0, the
-    // left half is negative, and a script uses the number it is given. The bias this used to add
-    // made every consumer write `uvX(...) - 32768`, and that subtraction is exactly what unsigned
-    // arithmetic broke: on the left half it wrapped to about 4.29 billion and tore the plane into
-    // blocks. sin/cos KEEP their bias, deliberately, because a wave has no origin and
-    // `scale(sin(a), width)` sweeping a full axis is the idiom 14 shipped call sites rely on.
+    // Q16.16: 65536 is 1.0, the scale every `fixed` value in the language uses. Applied before the
+    // divide rather than as a shift after it, so there is one rounding step rather than two.
+    const int64_t v = ((px * 2 - extent + 1) * 65536) / s;
+    // ±4.0, which is well past the ±1 the short side normalizes to: a wide panel's long axis runs
+    // past 1.0 by its aspect ratio, and 4x covers any panel anyone builds.
+    const int64_t c = v < -262144 ? -262144 : (v > 262144 ? 262144 : v);
+    // SIGNED and FIXED, with no bias. A coordinate has an origin: the center of the grid is 0.0,
+    // the left half is negative, and a script holds the result in a `fixed` member and does
+    // ordinary arithmetic on it. The bias this used to add made every consumer write
+    // `uvX(...) - 32768`, and that subtraction is exactly what unsigned arithmetic broke: on the
+    // left half it wrapped to about 4.29 billion and tore the plane into blocks.
+    //
+    // sin/cos/beat KEEP their unsigned 0..65535 convention, deliberately: a wave has no origin,
+    // and `scale(sin(a), width)` sweeping a full axis is the idiom 14 shipped call sites rely on.
+    // A coordinate has an origin, a wave does not.
     return static_cast<uint32_t>(static_cast<int32_t>(c));
 }
 extern "C" inline uint32_t mm_light_uvX(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -218,28 +250,28 @@ extern "C" inline uint32_t mm_light_uvY(const uintptr_t* args, uint32_t, const u
 // There is no spelling of this loop in the language, at any cost, until signed values land
 // (moonlive-language-roadmap #7). Everything else here stays expressible in script on purpose.
 //
-// Q13 fixed point: 1.0 is 8192, matching uvX/uvY's 8192-per-unit. That is what puts the whole
-// set inside the signed 16-bit window a script can pass: x spans -2.5..1.0 (-20480..8192) and
-// y spans -1.25..1.25, so a script hands over uv coordinates directly with no rescaling.
+// Q16.16, the language's `fixed`: 1.0 is 65536, matching uvX/uvY. A script hands over uv
+// coordinates directly, holds them in `fixed` members, and does ordinary arithmetic on them with
+// no rescaling anywhere.
 //
-// The products are int64. z*z at the escape radius reaches 4.0 in Q13, and the intermediate
-// before the shift is that squared again: an int32 overflows there and the point reads as
-// escaped when it has not, which draws holes in the middle of the set.
+// The products are int64 and have to be. z*z at the escape radius is 4.0, whose Q32 square is
+// about 7.4e10 — an int32 overflows there and the point reads as escaped when it has not, which
+// draws holes in the middle of the set.
 //
 // `iters` is the detail dial and the cost: the loop is bounded by it, so a script trades
 // definition against frame time directly. Capped at 64, which is where the returned byte stops
 // gaining visible bands on a panel, and it bounds the per-pixel cost no matter what a slider says.
 extern "C" inline uint32_t mm_light_escape(const uintptr_t* args, uint32_t, const uint8_t*) {
-    // Inputs clamped to |8.0| in Q13. A coordinate that far out is already deep outside the
+    // Inputs clamped to |8.0| in Q16.16. A coordinate that far out is already deep outside the
     // escape radius (2.0) and iterates identically after clamping; without the clamp, a script
-    // passing an extreme value (a full int32) makes zx * zx reach 2^62 and the escape test's
-    // SUM overflow int64, which is UB. The clamp is what makes every product below safely wide.
-    const auto q13 = [](uintptr_t a) {
+    // passing a full int32 makes zx * zx reach 2^62 and the escape test's SUM overflow int64,
+    // which is UB. The clamp is what makes every product below safely wide.
+    const auto qfx = [](uintptr_t a) {
         const int32_t v = signedArg(a);
-        return v < -65536 ? -65536 : (v > 65536 ? 65536 : v);
+        return v < -524288 ? -524288 : (v > 524288 ? 524288 : v);
     };
-    const int32_t cx = q13(args[0]), cy = q13(args[1]);
-    const int32_t jx = q13(args[2]), jy = q13(args[3]);
+    const int32_t cx = qfx(args[0]), cy = qfx(args[1]);
+    const int32_t jx = qfx(args[2]), jy = qfx(args[3]);
     uint32_t iters = uint32_t(args[4]);
     if (iters > 64) iters = 64;
     if (iters == 0) return 0;
@@ -251,8 +283,8 @@ extern "C" inline uint32_t mm_light_escape(const uintptr_t* args, uint32_t, cons
     int64_t zx = julia ? cx : 0, zy = julia ? cy : 0;
     const int64_t ax = julia ? jx : cx, ay = julia ? jy : cy;
 
-    constexpr int kShift = 13;
-    constexpr int64_t kEscape = int64_t(4) << (kShift * 2);   // |z|^2 > 4.0, in Q26
+    constexpr int kShift = 16;
+    constexpr int64_t kEscape = int64_t(4) << (kShift * 2);   // |z|^2 > 4.0, in Q32
 
     uint32_t n = 0;
     for (; n < iters; ++n) {
@@ -445,7 +477,7 @@ struct AddLightSink { AddLightFn fn = nullptr; void* ctx = nullptr; };
 /// arena bytes a write touches. It is checked against the member's own type by the compiler, so
 /// by the time a call arrives here the two already agree.
 using AddControlFn = void (*)(void* ctx, const char* name, uint8_t offset,
-                              uint16_t lo, uint16_t hi, CtrlType type);
+                              int32_t lo, int32_t hi, CtrlType type);
 struct AddControlSink { AddControlFn fn = nullptr; void* ctx = nullptr; };
 
 /// Where fade(amt) sends its request. The binding forwards it to the LAYER rather than to the
@@ -627,8 +659,10 @@ inline void setAddLightSink(AddLightFn fn, void* ctx) {
 // this runs. What is left is the call itself, which exists so that a script declares a control the
 // way a compiled module does: `defineControls()` is an ordinary function the binding calls after a
 // successful compile, and this is an ordinary builtin it calls.
-// Shared by addUint8 and addUint16: identical but for the width they declare, so the bound check
-// and the sink call live once rather than in two copies that could drift.
+// The one control declaration. What kind of control it becomes is read from the MEMBER'S declared
+// type rather than chosen by the call, which is what removed the width-matched pair this replaces:
+// addUint8 on a wide member drove only its low byte and addUint16 on a narrow one wrote past it,
+// both silently, and the script author had to keep call and declaration in agreement by hand.
 inline uint32_t addControlDecl(const uintptr_t* args, CtrlType type) {
     // args: (name, memberOffset, min, max). The name is a pointer into the compiled program's
     // string pool, which outlives the run; the offset is the member's arena byte, which the
@@ -636,26 +670,28 @@ inline uint32_t addControlDecl(const uintptr_t* args, CtrlType type) {
     const char* name = reinterpret_cast<const char*>(args[0]);
     const AddControlSink s = addControlSink();
     if (!name || !s.fn || !s.ctx) return 0;      // no binding listening: the call is a no-op
-    // The range is an ARBITRARY EXPRESSION, so `addUint8("n", n, 0, x * 64)` can compute past what
-    // the declared width holds. Truncating would publish a slider whose top silently wraps to a
-    // small number; refusing the declaration leaves the control absent, which the user can see.
-    const uintptr_t limit = (type == CtrlType::Uint16) ? 65535u : 255u;
-    if (args[2] > limit || args[3] > limit) return 0;
+    // The range is an ARBITRARY EXPRESSION, so `addControl("n", n, 0, x * 64)` can compute past
+    // what the member's type holds. Truncating would publish a slider whose top silently wraps to
+    // a small number; refusing the declaration leaves the control absent, which the user can see.
+    const int32_t lo = int32_t(args[2]), hi = int32_t(args[3]);
+    const int32_t limit = (type == CtrlType::Byte) ? 255 : (type == CtrlType::Bool) ? 1 : INT32_MAX;
+    if (lo > limit || hi > limit) return 0;
+    // A byte and a bool are UNSIGNED, and the binding casts the range to uint8_t: a negative low
+    // bound became min 251 with max 100, a slider that could reach nothing. The old uintptr_t
+    // compare caught this for free (a negative wrapped huge); with a signed range it needs saying.
+    if ((type == CtrlType::Byte || type == CtrlType::Bool) && lo < 0) return 0;
     // Same stance for an INVERTED range: with min > max the write path's `v < min || v > max` is
     // true for every value, so the slider would appear and then refuse everything the user does to
     // it. Refusing the declaration leaves it absent, which is visible.
-    if (args[2] > args[3]) return 0;
-    s.fn(s.ctx, name, static_cast<uint8_t>(args[1]),
-         static_cast<uint16_t>(args[2]), static_cast<uint16_t>(args[3]), type);
+    if (lo > hi) return 0;
+    s.fn(s.ctx, name, static_cast<uint8_t>(args[1] & 0xff), lo, hi, type);
     return 0;
 }
 
-extern "C" inline uint32_t mm_light_addUint8(const uintptr_t* args, uint32_t, const uint8_t*) {
-    return addControlDecl(args, CtrlType::Uint8);
-}
-
-extern "C" inline uint32_t mm_light_addUint16(const uintptr_t* args, uint32_t, const uint8_t*) {
-    return addControlDecl(args, CtrlType::Uint16);
+// The member's own type decides the control; this call only says "surface it, within this range".
+// The compiler packs both into args[1]: the low byte is the arena offset, the next the CtrlType.
+extern "C" inline uint32_t mm_light_addControl(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return addControlDecl(args, static_cast<CtrlType>((args[1] >> 8) & 0xff));
 }
 
 extern "C" inline uint32_t mm_light_addLight(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -1055,16 +1091,17 @@ inline BuiltinTable lightBuiltins() {
     // glow; signed arguments, re-centered like polarA. See mm_light_smoothstep.
     t.add({"smoothstep", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_smoothstep, {}});
     // uvX(x, w, h) / uvY(y, w, h) → shader space, centered and short-side normalized so a circle
-    // stays a circle on a wide panel. Biased at 32768. See mm_light_uvAxis.
-    t.add({"uvX", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_uvX, {}});
-    t.add({"uvY", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_uvY, {}});
+    // stays a circle on a wide panel. SIGNED fixed (Q16.16), centered on 0.0, no bias.
+    // See mm_light_uvAxis.
+    t.add({"uvX", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_uvX, {}, /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0, /*fixedReturn*/ true});
+    t.add({"uvY", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_uvY, {}, /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0, /*fixedReturn*/ true});
     // smin(a, b, k)          → the smooth minimum: two shapes melt into one surface. k = 0 is a
     // plain union. See mm_light_smin.
     t.add({"smin", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_smin, {}});
     // escape(cx, cy, jx, jy, iters) → the escape-time count for z = z*z + c, 0..255, 0 inside.
     // Mandelbrot with a zero seed, Julia otherwise. The one piece of maths a script cannot
     // express: it squares SIGNED values and script arithmetic is unsigned.
-    t.add({"escape", 5, /*returns*/ true, BuiltinKind::Call, &mm_light_escape, {}});
+    t.add({"escape", 5, /*returns*/ true, BuiltinKind::Call, &mm_light_escape, {}, /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0x0f});
     // beat(bpm, t)           → 0..65535 sawtooth at bpm. The clock an animation is written against.
     t.add({"beat", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_beat, {}});
     // beatsin(bpm, t, high)  → a sine 0..high at bpm. The same shape an effect reaches for.
@@ -1093,20 +1130,20 @@ inline BuiltinTable lightBuiltins() {
     t.add({"addLight", 3, /*returns*/ false, BuiltinKind::Call, &mm_light_addLight, {}});
     // line(x1, y1, x2, y2, r, g, b) → a segment on the canvas, via the shared draw::line.
     t.add({"line", 7, /*returns*/ false, BuiltinKind::Call, &mm_light_line, {}});
-    // addUint8(name, member, min, max) → declare a control on a member, the same call a compiled
-    // module makes (`controls_.addUint8("speed", speed, 1, 255)`). Bit 1 of byRef marks the second
-    // argument as the MEMBER, so the compiler passes its arena offset rather than its value, which
-    // is what makes the script read as the reference a compiled module passes.
-    t.add({"addUint8", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addUint8, {},
-           /*byRef*/ 0x2, /*byStr*/ 0x1, /*refType*/ CtrlType::Uint8});
-    // addUint16(name, member, min, max) → the same call against a uint16_t member, so a script can
-    // expose a value a byte cannot hold (a dwell time, a 0..1000 scale) instead of packing it into
-    // two byte controls. Same by-ref/by-str marking: only the declared width differs.
-    t.add({"addUint16", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addUint16, {},
-           /*byRef*/ 0x2, /*byStr*/ 0x1, /*refType*/ CtrlType::Uint16});
+    // addControl(name, member, min, max) → surface a member in the UI, the same shape a compiled
+    // module uses. Bit 1 of byRef marks the second argument as the MEMBER, so the compiler passes
+    // its arena offset (and its type) rather than its value, which is what makes the script read
+    // as the reference a compiled module passes. ONE call for every type: which widget appears
+    // follows from how the member was declared, so the two can no longer disagree.
+    t.add({"addControl", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addControl, {},
+           /*byRef*/ 0x2, /*byStr*/ 0x1});
     // setPaletteColor(x, y, i, bri) → one palette-coloured pixel. The form a script should reach
     // for: one call, one brightness evaluation, and no buffer-layout arithmetic at the call site.
     t.add({"setPaletteColor", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_setPaletteColor, {}});
+    // fdiv(a, b)             → the fixed '/' — see mm_light_fdiv. Both operands and the result
+    // are fixed; resolved by name exactly as div is, so core stays domain-neutral.
+    t.add({"fdiv", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_fdiv, {},
+           /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0x3, /*fixedReturn*/ true});
     // paletteR/G/B(i, bri)    → one channel each, for a script that needs the components. Kept
     // because setPaletteColor writes a pixel and cannot serve a script that wants the value.
     t.add({"paletteR", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_paletteR, {}});
@@ -1141,7 +1178,7 @@ inline void runDefineControls(MoonLive& engine, PoolSizeFn sizePool = nullptr, v
     // declare nothing. Keeping the previous set is the honest degrade, and the run is skipped
     // rather than executed into a dead sink.
     if (!setAddControlSink([](void* ctx, const char* n, uint8_t off,
-                              uint16_t lo, uint16_t hi, CtrlType type) {
+                              int32_t lo, int32_t hi, CtrlType type) {
             static_cast<MoonLive*>(ctx)->addDeclaredControl(n, off, lo, hi, type);
         }, &engine)) return;
     if (sizePool) setPoolSizeSink(sizePool, poolCtx);

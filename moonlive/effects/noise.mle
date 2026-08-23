@@ -2,12 +2,12 @@
 // Ported from MoonLight's E_noise.sc.
 
 class NoiseEffect {
-  uint8_t speed = 20;
-  uint8_t zoom = 8;
+  byte speed = 20;
+  byte zoom = 8;
 
   defineControls() {
-    addUint8("speed", speed, 1, 120);
-    addUint8("zoom", zoom, 1, 32);
+    addControl("speed", speed, 1, 120);
+    addControl("zoom", zoom, 1, 32);
   }
 
   tick() {

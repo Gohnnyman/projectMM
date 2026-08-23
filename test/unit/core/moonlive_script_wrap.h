@@ -43,12 +43,26 @@ inline const char* mmScriptAs(const char* entry, const char* body) {
     const char* declEnd = body;
     while (true) {
         while (*p == ' ' || *p == '\t' || *p == '\n') p++;
-        // Every member type the language has, not just uint8_t: a test declaring `int16_t d = -1;`
-        // means a member exactly as `uint8_t speed = 7;` does, and recognising only one of them
+        // Every member type the language has, not just one: a test declaring `fixed d = -1.0;`
+        // means a member exactly as `byte speed = 7;` does, and recognising only some of them
         // silently drops the declaration into the function body, where it is not a member at all.
-        if (std::strncmp(p, "uint8_t", 7) != 0 &&
-            std::strncmp(p, "uint16_t", 8) != 0 &&
-            std::strncmp(p, "int16_t", 7) != 0) break;
+        //
+        // The keyword must be followed by a NON-IDENTIFIER character, or a body opening with a
+        // variable called `intensity` would be read as an `int` declaration and swallowed.
+        auto atType = [](const char* q) {
+            static const struct { const char* kw; size_t len; } kTypes[] = {
+                {"int", 3}, {"byte", 4}, {"bool", 4}, {"fixed", 5}, {"string", 6}};
+            for (const auto& t : kTypes) {
+                if (std::strncmp(q, t.kw, t.len) == 0) {
+                    const char c = q[t.len];
+                    const bool identChar = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                                           (c >= '0' && c <= '9') || c == '_';
+                    if (!identChar) return true;
+                }
+            }
+            return false;
+        };
+        if (!atType(p)) break;
         const char* semi = std::strchr(p, ';');
         if (!semi) break;
         const char* eol = std::strchr(semi, '\n');

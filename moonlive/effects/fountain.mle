@@ -2,15 +2,15 @@
 // The arc is not drawn: sparks leave at an angle and gravity decides where they turn over.
 
 class FountainEffect {
-  uint8_t lift = 90;
-  uint8_t pull = 18;
-  uint8_t sparks = 4;
+  byte lift = 90;
+  byte pull = 18;
+  byte sparks = 4;
 
   defineControls() {
     pool(300);
-    addUint8("lift", lift, 20, 200);
-    addUint8("pull", pull, 4, 60);
-    addUint8("sparks", sparks, 1, 12);
+    addControl("lift", lift, 20, 200);
+    addControl("pull", pull, 4, 60);
+    addControl("sparks", sparks, 1, 12);
   }
 
   tick() {

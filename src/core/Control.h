@@ -106,6 +106,10 @@ enum class ControlType : uint8_t {
     Int16,      ///< signed 16-bit, min/max — for coordinate-style controls where negatives
                 ///< are legal (the light grid coordinate type is int16). A bounded slider
                 ///< (unbounded → a ±percentage slider). DMX-mappable.
+    Int32,      ///< signed 32-bit, min/max — where a value genuinely exceeds 16 bits and a
+                ///< narrower type would wrap. A MoonLive `int` member is the case that
+                ///< introduced it: every script scalar occupies a 4-byte slot. A bounded
+                ///< slider, same contract as Int16. DMX-mappable via the range.
     Pin,        ///< a GPIO number (int8_t storage, -1 = unused/default). Distinct from Int16
                 ///< so the UI renders a plain number input, not a slider (a GPIO has no
                 ///< meaningful drag range; pins span 0..~52). min/max clamp writes server-side.
@@ -393,6 +397,15 @@ public:
                   int16_t min = INT16_MIN, int16_t max = INT16_MAX) {
         grow();
         controls_[count_++] = {&var, name, 0, ControlType::Int16, min, max};
+    }
+
+    /// Bind an `int32_t` where the value does not fit 16 bits. min/max default to the
+    /// full type range (no UI constraint); pass explicit bounds for a bounded slider +
+    /// server-side write clamp — same contract as addInt16.
+    void addInt32(const char* name, int32_t& var,
+                  int32_t min = INT32_MIN, int32_t max = INT32_MAX) {
+        grow();
+        controls_[count_++] = {&var, name, 0, ControlType::Int32, min, max};
     }
 
     // A GPIO pin number (int8_t storage — one byte; -1 = unused/default). A GPIO

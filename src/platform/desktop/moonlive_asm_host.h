@@ -101,13 +101,17 @@ public:
     void addReg(Reg d, Reg a, Reg b);    // d = a + b
     void mulImm(Reg d, Reg a, int32_t imm);   // d = a * imm  (index scaling by a constant)
     void mulReg(Reg d, Reg a, Reg b);    // d = a * b   (index scaling by a runtime cpl)
+    void mulhi(Reg d, Reg a, Reg b);     // d = the SIGNED high 32 bits of a * b (Q16.16 multiply)
+    void shlImm(Reg d, Reg a, uint8_t n);// d = a << n
+    void sarImm(Reg d, Reg a, uint8_t n);// d = a >> n, ARITHMETIC (sign-filling)
+    void shrImm(Reg d, Reg a, uint8_t n);// d = a >> n, LOGICAL (zero-filling)
     void store8(Reg base, Reg off, Reg val);  // byte store: base[off] = val (low 8 bits)
     void load8(Reg d, Reg base, int32_t imm); // d = base[imm] (zero-extended byte) — control read
-    void store16(Reg base, Reg off, Reg val); // halfword store: base[off..off+1] = val (low 16 bits)
-    void load16(Reg d, Reg base, int32_t imm);// d = base[imm..imm+1] (zero-extended halfword)
-    void load16S(Reg d, Reg base, int32_t imm);// the same halfword, SIGN-extended
+    void load32(Reg d, Reg base, int32_t imm); // d = base[imm..imm+3] — a whole 4-byte slot
+    void store32(Reg base, int32_t imm, Reg val);// base[imm..imm+3] = val (offset IMMEDIATE)
+    void load32Idx(Reg d, Reg base, Reg off);  // d = base[off..off+3], index in a REG
+    void store32Idx(Reg base, Reg off, Reg val);// base[off..off+3] = val, index in a REG
     void load8Idx(Reg d, Reg base, Reg off);  // d = base[off] (zero-extended byte), index in a REG
-    void load16Idx(Reg d, Reg base, Reg off); // d = base[off..off+1], index in a REG
     void movReg(Reg d, Reg a);           // d = a
     void branchIfZero(Reg a, Label l);   // if a == 0 goto l
     // The FUSED compare-and-branch forms, which is how the shared lowering spells a conditional.
