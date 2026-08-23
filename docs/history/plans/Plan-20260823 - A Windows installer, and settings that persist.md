@@ -50,7 +50,7 @@ Reuse what exists rather than adding seams: `fsMkdir` ([platform_desktop.cpp:526
 
 **Settings survive an update by construction**, because the program and the data live in separate directories:
 
-```
+```text
 %LOCALAPPDATA%\Programs\projectMM\    program   - replaced on update, removed on uninstall
 %LOCALAPPDATA%\projectMM\.config\     settings  - never touched by the installer
 ```

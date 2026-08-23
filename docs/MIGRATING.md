@@ -26,7 +26,7 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 The desktop build wrote its configuration to `build/.config`, resolved against whatever directory the process happened to start in. That is a source-checkout layout, and it shipped: a downloaded binary either could not write there at all, failing every save and logging one line per save, or it wrote settings that belonged to that *folder* rather than to the user, so moving the executable lost them.
 
-Settings now live with the user: `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, `~/.local/share/projectMM` on Linux. `MM_DATA_DIR` overrides it. **A source checkout is unchanged** and still uses `build/.config`, so a development tree and every gate script behave exactly as before.
+Settings now live with the user: `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, and `$XDG_DATA_HOME/projectMM` on Linux, falling back to `~/.local/share/projectMM` when that is unset. `MM_DATA_DIR` overrides it. **A source checkout is unchanged** and still uses `build/.config`, so a development tree and every gate script behave exactly as before.
 
 **Action: *nothing*, unless your settings actually persisted before.** The old behavior had two modes, and only one of them leaves anything to move:
 

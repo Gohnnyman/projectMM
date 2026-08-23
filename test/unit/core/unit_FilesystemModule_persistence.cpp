@@ -41,6 +41,30 @@ TEST_CASE("A settings directory that does not exist yet is created when the file
     std::filesystem::remove_all(root);
 }
 
+// A root that exists and is a directory can still reject writes, which is the case the probe
+// exists for and the one a read-only extraction produces. A DIRECTORY where the probe file belongs
+// blocks its creation while leaving the root itself perfectly valid, so this reaches the probe
+// instead of failing earlier at the is_directory check the case above covers.
+TEST_CASE("A settings directory that rejects a write fails the mount, not just a missing one") {
+    char root[256];
+    std::snprintf(root, sizeof(root), "/tmp/mm_root_probe_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(root);
+    std::error_code ec;
+    const auto blocker = std::filesystem::path(root) / ".mm-write-probe";
+    std::filesystem::create_directories(blocker, ec);
+    // Non-empty, so the pre-remove cannot clear it out of the way either.
+    { std::ofstream f(blocker / "occupied.txt"); f << "x"; }
+    REQUIRE(std::filesystem::is_directory(root));
+    REQUIRE(std::filesystem::is_directory(blocker));
+
+    mm::platform::fsSetRoot(root);
+    CHECK_FALSE(mm::platform::fsMount());
+
+    mm::platform::fsSetRoot("");
+    std::filesystem::remove_all(root);
+}
+
 // MM_DATA_DIR wins over every other rule. This is the contract the test suite itself relies on:
 // ctest sets it so a test can never write into the developer's real settings directory.
 TEST_CASE("MM_DATA_DIR chooses the settings directory over any other rule") {
