@@ -429,7 +429,7 @@ def windows_icon(version: str) -> Path | None:
     out = DIST_DIR / "projectMM.ico"
     src = ROOT / "web-installer" / "favicon.png"
     if not src.exists():
-        print("package_desktop: no favicon, the installer will use the default icon")
+        print("package_desktop: no favicon to generate an icon from")
         return None
     run(["uv", "run", str(ROOT / "moondeck" / "ci" / "make_ico.py"), str(src), str(out)])
     return out if out.exists() else None
@@ -474,6 +474,11 @@ def package_windows_installer(binary: Path, version: str) -> Path | None:
 
     icon = windows_icon(version)
     if icon is None:
+        # CI-fatal for the same reason as the missing makensis above: the release uploads the
+        # installer with fail_on_unmatched_files, so skipping here would fail the whole release
+        # with an error naming a glob rather than the missing icon source.
+        if os.environ.get("CI"):
+            sys.exit("package_desktop: no icon for the installer, and no favicon to build one from")
         print("package_desktop: no icon, skipping the installer")
         return None
 

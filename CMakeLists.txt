@@ -207,6 +207,8 @@ if(WIN32)
     set(MM_RC   "${CMAKE_BINARY_DIR}/projectMM.rc")
     add_custom_command(
         OUTPUT "${MM_ICON}"
+        # `uv run <script>` rather than the usual `uv run python <script>`: make_ico.py declares
+        # Pillow inline (PEP 723), and only the script form makes uv honour that declaration.
         COMMAND ${UV_EXECUTABLE} run "${CMAKE_SOURCE_DIR}/moondeck/ci/make_ico.py"
                 "${CMAKE_SOURCE_DIR}/web-installer/favicon.png" "${MM_ICON}"
         DEPENDS "${CMAKE_SOURCE_DIR}/web-installer/favicon.png"

@@ -2,7 +2,7 @@
 
 projectMM does not need an ESP32. The same code runs as an ordinary application on your computer, rendering effects, serving the web UI, and driving Art-Net, DMX and LED panel cards over the network. It is the quickest way to see projectMM working, and on a real PC the effects have far more compute behind them than any microcontroller can offer.
 
-This page covers **Windows**. macOS and Linux follow the same shape and get their own sections later; until then, the [README](https://github.com/MoonModules/projectMM#readme) has the short version for both.
+This page covers **Windows**. For macOS and Linux, the [README](https://github.com/MoonModules/projectMM#readme) has the download and first-run steps.
 
 > Looking to flash a device instead? That is [Install & first light](../gettingstarted.md). This page is about running projectMM *on the computer itself*.
 
@@ -50,11 +50,13 @@ Two options worth knowing: `--no-browser` stops it opening a browser (for a head
 
 Everything you change is saved automatically, in a folder that belongs to **your Windows user** rather than to the application:
 
-```
+```text
 %LOCALAPPDATA%\projectMM
 ```
 
-That location is deliberate, and it has a consequence worth knowing: **your settings are not in the folder you extracted to**. Move the application, replace it with a newer version, or delete the extracted folder entirely, and your configuration is still there. To start completely fresh, delete that folder.
+This applies from the release that introduced it. On an older build, settings sat in a `build\.config` folder beside the executable instead, and the log said `write failed` for each save when that folder could not be created.
+
+The location is deliberate, and it has a consequence worth knowing: **your settings are not in the folder you extracted to**. Move the application, replace it with a newer version, or delete the extracted folder entirely, and your configuration is still there. To start completely fresh, delete that folder.
 
 Paste `%LOCALAPPDATA%\projectMM` into the Explorer address bar to open it.
 

@@ -31,7 +31,7 @@ Settings now live with the user: `%LOCALAPPDATA%\projectMM` on Windows, `~/Libra
 **Action: *nothing*, unless your settings actually persisted before.** The old behavior had two modes, and only one of them leaves anything to move:
 
 - **Saves were failing.** The log showed `write failed for /.config/...` on every change and nothing survived a restart. Nothing to carry across.
-- **Saves were succeeding, per folder.** They are in a `build/.config` folder beside wherever you launched from: the folder you unzipped into on Windows and Linux, and `~/build/.config` on macOS, because the `.app` launcher starts in your home directory. **Action: *update a file*.** Move that folder's contents into the new per-user directory, or leave it and reconfigure from scratch.
+- **Saves were succeeding, per folder.** They are in a `build/.config` folder beside wherever you launched from: the folder you unzipped into on Windows and Linux, and `~/build/.config` on macOS, because the `.app` launcher starts in your home directory. **Action: *move a folder*.** Move the `.config` directory itself into the new per-user directory, so it lands as `<data directory>/.config` rather than spilling its files into the root. Or leave it and reconfigure from scratch.
 
 ESP32 is unaffected: LittleFS mounts at a fixed partition and never used this path.
 

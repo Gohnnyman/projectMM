@@ -32,7 +32,7 @@ Default the desktop filesystem root to a per-user data directory, created at mou
 | macOS | `~/Library/Application Support/projectMM` |
 | Linux | `$XDG_DATA_HOME/projectMM`, else `~/.local/share/projectMM` |
 
-**A repo checkout keeps using `build/`**, detected by `CMakeLists.txt` being present in the working directory. This is the non-destructive half of the change: the dev workflow, every gate script, and the existing tests are untouched, and nobody's local config silently relocates. `MM_DATA_DIR` overrides both cases, for tests and for anyone who wants the data somewhere specific.
+**A repo checkout keeps using `build/`**, detected by `CMakeLists.txt` AND `moondeck/` both being present in the working directory (`CMakeLists.txt` alone is true in the root of every CMake project). This is the non-destructive half of the change: the dev workflow, every gate script, and the existing tests are untouched, and nobody's local config silently relocates. `MM_DATA_DIR` overrides both cases, for tests and for anyone who wants the data somewhere specific.
 
 **Make the failure loud and singular.** Desktop `fsMount()` creates the root and returns `false` when it cannot, so `FilesystemModule::setup()`'s existing "persistence disabled" branch does its job. Check the `fsMkdir(CONFIG_DIR)` result there too. One error at startup naming the directory, instead of one per save forever.
 

@@ -69,7 +69,12 @@ _RUNNER_SKIP_PARTS = {"build", "__pycache__", ".git"}
 # rebuilding clears it only until the next firmware build. They are excluded because their mtime
 # carries no information about whether the runner is out of date; a real edit reaches them through
 # their INPUT (src/ui/app.js), which is watched.
-_RUNNER_GENERATED = {"src/ui/ui_embedded.h"}
+# build_info.h belongs here for the same reason and a sharper one: it embeds `git status
+# --porcelain` as a `+` dirty-suffix, so its CONTENT changes the moment the tree goes dirty. A gate
+# run writes scenario baselines and repo-health metrics, which dirties the tree, which flips the
+# suffix, which makes every binary look stale on the NEXT run. A build id is not code, so it cannot
+# make the runner "report on code that is no longer there", which is what this guard is for.
+_RUNNER_GENERATED = {"src/ui/ui_embedded.h", "src/core/build_info.h"}
 
 
 def _stale_runner_reason() -> str:
