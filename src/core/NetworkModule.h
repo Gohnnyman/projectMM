@@ -311,12 +311,12 @@ public:
             // deviceModels.json catalog injects 8 dBm for brown-out-prone boards.
             // Hidden with the same radioOn gate as the txPower readout above — a WiFi
             // TX-power cap is meaningless on Ethernet / Idle where the radio is off.
-            controls_.addInt16("txPowerSetting", txPowerSetting_, 0, 21);
+            controls_.addControl("txPowerSetting", txPowerSetting_, 0, 21);
             controls_.setHidden(controls_.count() - 1, !radioOn);
             controls_.setAdvanced(controls_.count() - 1);
         }
         // Expert-only: discovery works without it, and the projectMM UI finds devices over UDP.
-        controls_.addBool("mDNS", mdnsEnabled_);
+        controls_.addControl("mDNS", mdnsEnabled_);
         controls_.setAdvanced(controls_.count() - 1);
 
         // addressing goes immediately before the static-IP fields it conditions, so
@@ -360,12 +360,12 @@ public:
             // GPIO controls use addPin → a plain number input (ControlType::Pin),
             // not a slider: a GPIO has no meaningful range to drag. -1 = unused.
             // phyAddr is a PHY MDIO address (-1 = auto-detect, else 0..31), NOT a GPIO —
-            // so it uses a signed int control (addInt16), not addPin. (A Pin here would
+            // so it uses a signed int16 control, not addPin. (A Pin here would
             // make the pin ownership map report it as a false GPIO claim, since that map
             // reads every ControlType::Pin as a claimed GPIO.) It must be signed: -1 is
             // IDF's ESP_ETH_PHY_ADDR_AUTO sentinel (scan the MDIO bus), the S31's RGMII
             // default — a uint8 mangled -1 to 31 and the PHY never answered.
-            controls_.addInt16("ethPhyAddr", ethPhyAddr_, -1, 31);
+            controls_.addControl("ethPhyAddr", ethPhyAddr_, -1, 31);
             controls_.setNumberField(controls_.count() - 1);   // an MDIO address is an identity, not a magnitude — a number field, not a slider
             controls_.setHidden(controls_.count() - 1, !isEth);
             controls_.addPin("ethRstGpio", ethRstGpio_);
@@ -383,7 +383,7 @@ public:
             controls_.setHidden(controls_.count() - 1, !isRmii);
             // Clock direction is a boolean (true = clock IN / board feeds it,
             // false = chip drives it OUT) — a toggle, not a 0..1 slider.
-            controls_.addBool("ethClockExtIn", ethClockExtIn_);
+            controls_.addControl("ethClockExtIn", ethClockExtIn_);
             controls_.setHidden(controls_.count() - 1, !isRmii);
             controls_.addPin("ethSpiMiso", ethSpiMiso_);
             controls_.setHidden(controls_.count() - 1, !isSpi);
@@ -778,7 +778,7 @@ private:
     // ~54 on any ESP32-family chip, so int8 is ample — bound via addPin (Pin control
     // → number input). ethConfigDefault's fields are plain int; the values are all
     // small (≤52 / -1) so the copy into int8_t is lossless.
-    int16_t ethPhyAddr_    = static_cast<int16_t>(platform::ethConfigDefault.phyAddr);  // PHY MDIO addr 0..31, or -1 = auto-detect (scan the bus). Signed (int16, via addInt16) so -1 round-trips — a uint8 cast the platform's -1 to 255 and the 0..31 control showed 31, a fixed address no PHY answered, so the S31's RGMII never linked. NOT a GPIO (deliberately not addPin, or the pin-map would false-claim it).
+    int16_t ethPhyAddr_    = static_cast<int16_t>(platform::ethConfigDefault.phyAddr);  // PHY MDIO addr 0..31, or -1 = auto-detect (scan the bus). Signed (int16) so -1 round-trips — a uint8 cast the platform's -1 to 255 and the 0..31 control showed 31, a fixed address no PHY answered, so the S31's RGMII never linked. NOT a GPIO (deliberately not addPin, or the pin-map would false-claim it).
     int8_t  ethMdcGpio_    = static_cast<int8_t>(platform::ethConfigDefault.mdcGpio);
     int8_t  ethMdioGpio_   = static_cast<int8_t>(platform::ethConfigDefault.mdioGpio);
     int8_t  ethRstGpio_    = static_cast<int8_t>(platform::ethConfigDefault.rstGpio);

@@ -40,12 +40,12 @@ public:
     uint8_t drag     = 6;    // damping, so the heap settles instead of sloshing forever
 
     void defineControls() override {
-        controls_.addUint8("balls", balls, 1, kPool);
-        controls_.addUint8("gravity", gravity, 0, 64);
-        controls_.addUint8("size", size, 1, 8);
-        controls_.addUint8("bounce", bounce, 0, 255);
-        controls_.addUint8("tilt", tilt, 0, 255);
-        controls_.addUint8("drag", drag, 0, 64);
+        controls_.addControl("balls", balls, 1, kPool);
+        controls_.addControl("gravity", gravity, 0, 64);
+        controls_.addControl("size", size, 1, 8);
+        controls_.addControl("bounce", bounce, 0, 255);
+        controls_.addControl("tilt", tilt, 0, 255);
+        controls_.addControl("drag", drag, 0, 64);
     }
 
     void prepare() override {

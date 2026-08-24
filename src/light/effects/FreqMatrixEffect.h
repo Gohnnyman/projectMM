@@ -52,12 +52,12 @@ public:
     bool    audioSpeed  = false; // when set, the audio level modulates the scroll rate
 
     void defineControls() override {
-        controls_.addUint8("speed", speed, 1, 255);
-        controls_.addUint8("fx", fx, 0, 255);
-        controls_.addUint8("lowBin", lowBin, 0, 255);
-        controls_.addUint8("highBin", highBin, 0, 255);
-        controls_.addUint8("sensitivity", sensitivity, 10, 100);
-        controls_.addBool("audioSpeed", audioSpeed);
+        controls_.addControl("speed", speed, 1, 255);
+        controls_.addControl("fx", fx, 0, 255);
+        controls_.addControl("lowBin", lowBin, 0, 255);
+        controls_.addControl("highBin", highBin, 0, 255);
+        controls_.addControl("sensitivity", sensitivity, 10, 100);
+        controls_.addControl("audioSpeed", audioSpeed);
     }
 
     void tick() MM_NONBLOCKING override {

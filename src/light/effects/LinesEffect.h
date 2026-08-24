@@ -32,13 +32,13 @@ public:
         // on every control change (MoonModule), so toggling `mode` re-hides these automatically — the
         // conditional-control shape the driver uses for latchPin/loopback pins.
         const bool dots = (mode == 1);
-        controls_.addUint8("speed", speed, 1, 240);
+        controls_.addControl("speed", speed, 1, 240);
         controls_.setHidden(controls_.count() - 1, dots);          // lines only
         controls_.addSelect("axis", axis, kAxisOptions, 4);
         controls_.setHidden(controls_.count() - 1, dots);          // lines only
-        controls_.addUint8("panelW", panelW, 1, 64);
+        controls_.addControl("panelW", panelW, 1, 64);
         controls_.setHidden(controls_.count() - 1, !dots);         // panel dots only
-        controls_.addUint8("panelH", panelH, 1, 64);
+        controls_.addControl("panelH", panelH, 1, 64);
         controls_.setHidden(controls_.count() - 1, !dots);         // panel dots only
     }
 

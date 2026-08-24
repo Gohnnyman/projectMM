@@ -94,7 +94,7 @@ struct Builtin {
     HostCallFn   fn = nullptr;        // Call: the host C function pointer
     InlineOp     inlineOp{};          // Inline: the neutral opcode tag
     // Which arguments are passed BY REFERENCE, as a bit per position (bit 0 = first argument).
-    // A script names a member and the compiler passes its arena offset, so `addUint8("bpm", bpm,
+    // A script names a member and the compiler passes its arena offset, so `addControl("bpm", bpm,
     // 1, 120)` reads as the reference a compiled module passes rather than as bpm's value. Zero
     // for every builtin that takes plain values, which is all of them but this one.
     //
@@ -102,7 +102,7 @@ struct Builtin {
     // by-reference, and `draw::line` already proves a builtin may take seven arguments.
     uint8_t      byRef = 0;
     // Which arguments must be a STRING LITERAL, a bit per position. Without it a bare identifier
-    // in a name slot compiles: `addUint8(s, s, 0, 9)` read `s`'s VALUE as the label and handed the
+    // in a name slot compiles: `addControl(s, s, 0, 9)` read `s`'s VALUE as the label and handed the
     // host a pointer built from a color byte. Stated per builtin for the same reason byRef is,
     // rather than special-cased by name in the parser.
     uint8_t      byStr = 0;

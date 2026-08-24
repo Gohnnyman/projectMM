@@ -32,8 +32,8 @@ public:
     uint8_t scale = 64;   // noise zoom (2..255); higher = finer/more-detailed field
 
     void defineControls() override {
-        controls_.addUint8("speed", speed, 0, 15);
-        controls_.addUint8("scale", scale, 2, 255);
+        controls_.addControl("speed", speed, 0, 15);
+        controls_.addControl("scale", scale, 2, 255);
     }
 
     void tick() MM_NONBLOCKING override {

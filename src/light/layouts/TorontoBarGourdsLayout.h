@@ -42,7 +42,7 @@ public:
     void defineControls() override {
         controls_.addSelect("granularity", granularity, kGranularityOptions, kGranularityCount);
         // Mode 0 only; MoonLight range 1..128.
-        controls_.addUint8("nrOfLightsPerGourd", nrOfLightsPerGourd, 1, 128);
+        controls_.addControl("nrOfLightsPerGourd", nrOfLightsPerGourd, 1, 128);
     }
 
     const char* tags() const override { return "💫"; }

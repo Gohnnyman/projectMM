@@ -18,7 +18,7 @@ public:
     uint8_t brightness = 255;   // overall ceiling
 
     void defineControls() override {
-        controls_.addUint8("brightness", brightness, 1, 255);
+        controls_.addControl("brightness", brightness, 1, 255);
     }
 
     void tick() MM_NONBLOCKING override {

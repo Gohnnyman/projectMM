@@ -41,10 +41,10 @@ public:
     bool    smoothBars = false; // blend each band with its neighbours for a smoother profile
 
     void defineControls() override {
-        controls_.addUint8("fadeOut", fadeOut, 0, 255);
-        controls_.addUint8("ripple", ripple, 0, 255);
-        controls_.addBool("colorBars", colorBars);
-        controls_.addBool("smoothBars", smoothBars);
+        controls_.addControl("fadeOut", fadeOut, 0, 255);
+        controls_.addControl("ripple", ripple, 0, 255);
+        controls_.addControl("colorBars", colorBars);
+        controls_.addControl("smoothBars", smoothBars);
     }
 
     // One peak tracker per column: previousBarHeight[width]. WLED stores this in the segment's data

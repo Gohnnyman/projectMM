@@ -30,8 +30,8 @@ public:
     uint8_t interval = 128; // wavefront spacing: low = tight rings, high = wide
 
     void defineControls() override {
-        controls_.addUint8("speed", speed, 0, 99);
-        controls_.addUint8("interval", interval, 1, 254);
+        controls_.addControl("speed", speed, 0, 99);
+        controls_.addControl("interval", interval, 1, 254);
     }
 
     void tick() MM_NONBLOCKING override {

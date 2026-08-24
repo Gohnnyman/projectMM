@@ -253,7 +253,7 @@ static void emitSubRspImm32(HostAssembler* A, int32_t imm) {
 // the slot index, exactly like arm64's x29 + 16 + n*8: IrOp::Call passes slotAddr(firstSlot) and
 // the host builtin reads its arguments as an ARRAY walking upward from that address
 // (moonlive_lower.h), so consecutive slot indices MUST be consecutive ascending memory. Reverse
-// this and every non-inlined builtin (random16, addLight, addUint8, line, palette reads)
+// this and every non-inlined builtin (random16, addLight, addControl, line, palette reads)
 // receives its arguments backwards, while everything inlined keeps working.
 //
 // The region is sized at kTotalSlots whatever the script uses: a fixed 168 bytes of desktop stack

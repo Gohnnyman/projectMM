@@ -65,19 +65,19 @@ public:
     void defineControls() override {
         // MoonLight's bgC is a Coord3D 0..255 read as RGB. projectMM has no color control, so the
         // three components are three uint8s — the native, recognisable shape for an RGB triple here.
-        controls_.addUint8("backgroundColorR", backgroundColorR, 0, 255);
-        controls_.addUint8("backgroundColorG", backgroundColorG, 0, 255);
-        controls_.addUint8("backgroundColorB", backgroundColorB, 0, 255);
+        controls_.addControl("backgroundColorR", backgroundColorR, 0, 255);
+        controls_.addControl("backgroundColorG", backgroundColorG, 0, 255);
+        controls_.addControl("backgroundColorB", backgroundColorB, 0, 255);
         controls_.addSelect("ruleset", ruleset, kRulesetOptions, kRulesetCount);
         controls_.addText("customRuleString", customRuleString, sizeof(customRuleString));
-        controls_.addUint8("GameSpeed (FPS)", speed, 0, 100);
-        controls_.addUint8("startingLifeDensity", lifeChance, 10, 90);
-        controls_.addUint8("mutationChance", mutation, 0, 100);
-        controls_.addBool("wrap", wrap);
-        controls_.addBool("disablePause", disablePause);
-        controls_.addBool("colorByAge", colorByAge);
-        controls_.addBool("infinite", infinite);
-        controls_.addUint8("blur", blur, 0, 255);
+        controls_.addControl("GameSpeed (FPS)", speed, 0, 100);
+        controls_.addControl("startingLifeDensity", lifeChance, 10, 90);
+        controls_.addControl("mutationChance", mutation, 0, 100);
+        controls_.addControl("wrap", wrap);
+        controls_.addControl("disablePause", disablePause);
+        controls_.addControl("colorByAge", colorByAge);
+        controls_.addControl("infinite", infinite);
+        controls_.addControl("blur", blur, 0, 255);
     }
 
     // Grid state lives on the heap (cells + next-gen + per-cell color), sized to the light count.

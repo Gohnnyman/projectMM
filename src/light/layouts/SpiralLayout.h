@@ -29,9 +29,9 @@ public:
     lengthType height = 25;         // vertical rise from base to tip
 
     void defineControls() override {
-        controls_.addInt16("ledCount",     ledCount,     1, 2048);
-        controls_.addInt16("bottomRadius", bottomRadius, 1, 100);
-        controls_.addInt16("height",       height,       1, 200);
+        controls_.addControl("ledCount",     ledCount,     1, 2048);
+        controls_.addControl("bottomRadius", bottomRadius, 1, 100);
+        controls_.addControl("height",       height,       1, 200);
     }
 
     nrOfLightsType lightCount() const override {

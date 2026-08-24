@@ -39,10 +39,10 @@ public:
     bool    showName      = true;   // overlay the playing effect's name (the reel as a showcase tool)
 
     void defineControls() override {
-        controls_.addUint8("interval", interval, 1, 120);
-        controls_.addBool("shuffle", shuffle);
-        controls_.addBool("randomPalette", randomPalette);
-        controls_.addBool("showName", showName);
+        controls_.addControl("interval", interval, 1, 120);
+        controls_.addControl("shuffle", shuffle);
+        controls_.addControl("randomPalette", randomPalette);
+        controls_.addControl("showName", showName);
     }
 
     // Build the eligible-effect list (all Effect-role types except this one) and start the first.

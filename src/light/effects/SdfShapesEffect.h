@@ -42,12 +42,12 @@ public:
     bool    glow = true;      // tint the surrounding field by distance
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 1, 120);
-        controls_.addUint8("radius", radius, 0, 255);
-        controls_.addUint8("boxSize", boxSize, 0, 255);
-        controls_.addUint8("blend", blend, 0, 255);
-        controls_.addUint8("outline", outline, 0, 64);
-        controls_.addBool("glow", glow);
+        controls_.addControl("bpm", bpm, 1, 120);
+        controls_.addControl("radius", radius, 0, 255);
+        controls_.addControl("boxSize", boxSize, 0, 255);
+        controls_.addControl("blend", blend, 0, 255);
+        controls_.addControl("outline", outline, 0, 64);
+        controls_.addControl("glow", glow);
     }
 
     void tick() MM_NONBLOCKING override {

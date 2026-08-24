@@ -355,7 +355,7 @@ public:
         // ensurePeripheralMatchesSelection so a peripheral CHANGE evaluates the visibility against the NEW
         // backend. The saved value stays bound, so it survives a round-trip through a single-buffer-only
         // peripheral and re-engages when a peripheral that supports it is selected again.
-        controls_.addBool("doubleBuffer", doubleBuffer);
+        controls_.addControl("doubleBuffer", doubleBuffer);
         controls_.setHidden(controls_.count() - 1, !(peripheral_ && peripheral_->supportsDoubleBuffer()));
         // The bus pins sit UNDER the peripheral selector because they ARE peripheral-specific: for a driver
         // that owns its own GPIO routing they are '595 pins: MoonI80 routes WR only when a shift register
@@ -370,7 +370,7 @@ public:
         // a hardware limit, see supportsPinExpander). The '595's width (8) is the chip's, not a setting,
         // so the toggle is a plain checkbox; latchPin is bound always (a saved value survives a
         // round-trip through direct mode) but shown only when the expander is on.
-        controls_.addBool("pinExpander", pinExpander);
+        controls_.addControl("pinExpander", pinExpander);
         controls_.setHidden(controls_.count() - 1, !(peripheral_ && peripheral_->supportsPinExpander()));
         controls_.addPin("latchPin", latchPin);
         controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
@@ -379,7 +379,7 @@ public:
         if (peripheral_) peripheral_->addRingControls(controls_);
         // The on-device loopback self-test + its wiring — a dev/bring-up instrument (jumper a lane to the
         // rx pin), not a casual-user setting, so the whole cluster is expert-only.
-        controls_.addBool("loopbackTest", loopbackTest);
+        controls_.addControl("loopbackTest", loopbackTest);
         controls_.setAdvanced(controls_.count() - 1);
         // Always bound, shown only in test mode — the conditional-control shape.
         controls_.addPin("loopbackTxPin", loopbackTxPin);
@@ -393,11 +393,11 @@ public:
         controls_.setAdvanced(controls_.count() - 1);
         // Which strand carries the pattern — shift mode only (in direct mode it is always lane 0).
         // Lets the jumper come off ANY '595 output, including a spare one that drives no panel.
-        controls_.addUint8("loopbackStrand", loopbackStrand, 0, kMaxStrands - 1);
+        controls_.addControl("loopbackStrand", loopbackStrand, 0, kMaxStrands - 1);
         controls_.setHidden(controls_.count() - 1, !loopbackTest || !pinExpanderMode());
         controls_.setAdvanced(controls_.count() - 1);
         // Intrusive: ride the live pipeline instead of a private replica (see the member doc).
-        controls_.addBool("loopbackIntrusive", loopbackIntrusive);
+        controls_.addControl("loopbackIntrusive", loopbackIntrusive);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
         controls_.setAdvanced(controls_.count() - 1);
     }
@@ -1136,7 +1136,7 @@ public:
     /// read `outChannels` through this instead of inheriting `correction_` directly.
     const Correction& correction() const { return correction_; }
     /// Mutable reference to the ring-snapshot A/B knob, for a backend's addRingControls to bind
-    /// (`controls.addBool("ringSnapshot", owner_->ringSnapshotRef())`) — addBool binds by reference,
+    /// (`controls.addControl("ringSnapshot", owner_->ringSnapshotRef())`) — a bool addControl binds by reference,
     /// so the control needs the member's address, not a copy.
     bool& ringSnapshotRef() { return ringSnapshot; }
     /// The ring snapshot buffer (null when unallocated / off the ring path) — a backend's KPI refresh

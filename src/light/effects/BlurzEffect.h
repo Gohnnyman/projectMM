@@ -38,10 +38,10 @@ public:
     bool    geqScanner = false;  // steady sweep across the strip (vs. random jump) when freqMap is off
 
     void defineControls() override {
-        controls_.addUint8("fadeRate", fadeRate, 1, 255);
-        controls_.addUint8("blur", blur, 1, 255);
-        controls_.addBool("freqMap", freqMap);
-        controls_.addBool("geqScanner", geqScanner);
+        controls_.addControl("fadeRate", fadeRate, 1, 255);
+        controls_.addControl("blur", blur, 1, 255);
+        controls_.addControl("freqMap", freqMap);
+        controls_.addControl("geqScanner", geqScanner);
     }
 
     // WLED clears the segment once on the first call (SEGENV.call == 0 → fadeToBlackBy(255), a full

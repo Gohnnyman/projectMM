@@ -47,12 +47,12 @@ public:
     uint8_t method    = 2;     // 0 Chaos, 1 Chaos fix, 2 BandPhases
 
     void defineControls() override {
-        controls_.addUint8("fade", fade, 0, 255);
-        controls_.addUint8("increaser", increaser, 0, 255);
-        controls_.addUint8("decreaser", decreaser, 0, 255);
-        controls_.addUint8("bpmMax", bpmMax, 0, 255);
-        controls_.addBool("invert", invert);
-        controls_.addBool("keepOn", keepOn);
+        controls_.addControl("fade", fade, 0, 255);
+        controls_.addControl("increaser", increaser, 0, 255);
+        controls_.addControl("decreaser", decreaser, 0, 255);
+        controls_.addControl("bpmMax", bpmMax, 0, 255);
+        controls_.addControl("invert", invert);
+        controls_.addControl("keepOn", keepOn);
         static constexpr const char* kMethodOptions[] = {"Chaos", "Chaos fix", "BandPhases"};
         controls_.addSelect("method", method, kMethodOptions, 3);
     }

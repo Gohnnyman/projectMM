@@ -72,7 +72,7 @@ std::vector<uint8_t> emitBytes(const char* src, const mm::moonlive::SysVarTable&
     // Sized the way production sizes it, from the script's own token count — a test that always
     // allocated the sanity bound would pass while a right-sized caller overflowed.
     std::vector<uint8_t> out(mm::moonlive::codeCapFor(mm::moonlive::countTokens(src)));
-    // A string pool, as the engine supplies one: a script with a literal (every `addUint8` name)
+    // A string pool, as the engine supplies one: a script with a literal (every `addControl` name)
     // interns into it, and the emitted code carries pointers there. Static so those pointers stay
     // valid for as long as a test might look at the bytes.
     static char strings[mm::moonlive::CompileResult::kStringPool];

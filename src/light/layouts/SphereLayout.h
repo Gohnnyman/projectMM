@@ -26,7 +26,7 @@ public:
     lengthType radius = 4;
 
     void defineControls() override {
-        controls_.addInt16("radius", radius, 1, 64);
+        controls_.addControl("radius", radius, 1, 64);
     }
 
     nrOfLightsType lightCount() const override {

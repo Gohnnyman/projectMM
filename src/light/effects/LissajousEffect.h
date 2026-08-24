@@ -33,9 +33,9 @@ public:
     uint8_t speed      = 128;  // phase advance rate
 
     void defineControls() override {
-        controls_.addUint8("xFrequency", xFrequency, 0, 255);
-        controls_.addUint8("fadeRate", fadeRate, 0, 255);
-        controls_.addUint8("speed", speed, 0, 255);
+        controls_.addControl("xFrequency", xFrequency, 0, 255);
+        controls_.addControl("fadeRate", fadeRate, 0, 255);
+        controls_.addControl("speed", speed, 0, 255);
     }
 
     void tick() MM_NONBLOCKING override {

@@ -40,12 +40,12 @@ public:
     void defineControls() override {
         // 1–64 tiles per axis. More tiles than the grid has pixels just yields
         // 1-pixel tiles (the effective multiplier clamps to the axis extent).
-        controls_.addUint8("multiplyX", multiplyX, 1, 64);
-        controls_.addUint8("multiplyY", multiplyY, 1, 64);
-        controls_.addUint8("multiplyZ", multiplyZ, 1, 64);
-        controls_.addBool("mirrorX", mirrorX);
-        controls_.addBool("mirrorY", mirrorY);
-        controls_.addBool("mirrorZ", mirrorZ);
+        controls_.addControl("multiplyX", multiplyX, 1, 64);
+        controls_.addControl("multiplyY", multiplyY, 1, 64);
+        controls_.addControl("multiplyZ", multiplyZ, 1, 64);
+        controls_.addControl("mirrorX", mirrorX);
+        controls_.addControl("mirrorY", mirrorY);
+        controls_.addControl("mirrorZ", mirrorZ);
     }
 
     void modifyLogicalSize(Coord3D& size) override {

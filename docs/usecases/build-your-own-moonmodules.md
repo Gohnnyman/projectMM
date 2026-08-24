@@ -77,7 +77,7 @@ public:
 
     // Declare the control so it shows up in the UI. Runs at startup.
     void defineControls() override {
-        controls_.addUint8("speed", speed, 1, 255);   // name, variable, min, max
+        controls_.addControl("speed", speed, 1, 255);   // name, variable, min, max
     }
 
     // Called every render tick. Draw the picture for "now".
@@ -130,8 +130,8 @@ We build the moving `phase` from `elapsed()` (milliseconds since the show starte
 `speed` is an ordinary `uint8_t`. In `defineControls()` you tell the UI about it with one line, and from then on the framework keeps `speed` in sync with the on-screen slider. You read it in `tick()` like any variable. There are helpers for every common control:
 
 ```cpp
-controls_.addUint8("brightness", brightness, 0, 255);   // a 0–255 slider
-controls_.addBool("mirror", mirror);                    // a checkbox
+controls_.addControl("brightness", brightness, 0, 255);   // a 0–255 slider
+controls_.addControl("mirror", mirror);                  // a checkbox
 controls_.addSelect("mode", mode, kModeOptions, kModeCount);   // a dropdown
 ```
 
@@ -274,8 +274,8 @@ public:
     lengthType height = 16;
 
     void defineControls() override {
-        controls_.addInt16("width",  width,  1, 512);
-        controls_.addInt16("height", height, 1, 512);
+        controls_.addControl("width",  width,  1, 512);
+        controls_.addControl("height", height, 1, 512);
     }
 
     nrOfLightsType lightCount() const override { return width * height; }
@@ -309,7 +309,7 @@ You get all of that "release the pin on disable" behaviour by implementing the s
 ## A suggested classroom path
 
 1. **Copy the rainbow.** Change the maths in `tick()` — make it pulse, or swap the palette lookup for a fixed color. Rebuild and add it in the UI. See it move.
-2. **Add a control.** Give it a `brightness` slider (`addUint8`) and multiply your colors by it. Watch the UI wire itself up.
+2. **Add a control.** Give it a `brightness` slider (`addControl`) and multiply your colors by it. Watch the UI wire itself up.
 3. **Add memory.** Write an effect that keeps a per-pixel value between frames (a fading trail, a bouncing dot). Now you need `prepare()` + `release()` — practice matching them.
 4. **Make it robust.** Resize the grid live to 1×1, then 0×0. Your effect must not crash. (Reading `width()`/`height()` each frame is what saves you.)
 5. **Write a test.** Add `test/unit/light/unit_MyEffect.cpp` with one case: build a small grid, run a frame, `CHECK` the buffer got painted (and doesn't crash on 0×0). Run `ctest`. That's the habit — a module and its test travel together.

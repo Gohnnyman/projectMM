@@ -39,12 +39,12 @@ public:
     bool    vignette = true; // darken toward the vanishing point so it reads as receding
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 0, 120);
-        controls_.addUint8("depth", depth, 1, 255);
-        controls_.addUint8("twist", twist, 0, 255);
-        controls_.addUint8("segments", segments, 1, 16);
-        controls_.addUint8("octaves", octaves, 1, 4);
-        controls_.addBool("vignette", vignette);
+        controls_.addControl("bpm", bpm, 0, 120);
+        controls_.addControl("depth", depth, 1, 255);
+        controls_.addControl("twist", twist, 0, 255);
+        controls_.addControl("segments", segments, 1, 16);
+        controls_.addControl("octaves", octaves, 1, 4);
+        controls_.addControl("vignette", vignette);
     }
 
     void tick() MM_NONBLOCKING override {

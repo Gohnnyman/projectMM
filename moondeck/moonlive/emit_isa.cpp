@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
     const auto sysvars = std::strcmp(binding, "modifier") == 0 ? moonlive::modifierSysVars()
                        : std::strcmp(binding, "effect")   == 0 ? moonlive::effectSysVars()
                                                                : moonlive::layoutSysVars();
-    // A string pool, as the engine supplies one: `addUint8("name", ...)` interns its label there
+    // A string pool, as the engine supplies one: `addControl("name", ...)` interns its label there
     // and the emitted code carries a pointer to it. Static so the pointers stay valid while the
     // bytes below are dumped.
     static char strings[moonlive::CompileResult::kStringPool];

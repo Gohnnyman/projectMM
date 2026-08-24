@@ -44,12 +44,12 @@ public:
 
     void defineControls() override {
         // Int16 so negative / >100 percentages round-trip; the carve math clamps.
-        controls_.addInt16("startX", startX);
-        controls_.addInt16("startY", startY);
-        controls_.addInt16("startZ", startZ);
-        controls_.addInt16("endX",   endX);
-        controls_.addInt16("endY",   endY);
-        controls_.addInt16("endZ",   endZ);
+        controls_.addControl("startX", startX);
+        controls_.addControl("startY", startY);
+        controls_.addControl("startZ", startZ);
+        controls_.addControl("endX",   endX);
+        controls_.addControl("endY",   endY);
+        controls_.addControl("endZ",   endZ);
     }
 
     void modifyLogicalSize(Coord3D& size) override {

@@ -264,7 +264,7 @@ protected:
     /// via the DriverBase::defineControls template method. The Select is rebuilt from the library on
     /// every defineControls (which re-runs on a control change), so adding/renaming a preset shows up.
     void defineCorrectionControls() {
-        controls_.addUint8("localBrightness", localBrightness_, 0, 255);
+        controls_.addControl("localBrightness", localBrightness_, 0, 255);
         buildPresetOptions();                        // fill presetOptions_ from the library, sync id/sel/ref
         controls_.addSelect("lightPreset", presetSel_, presetOptions_, presetOptionCount_);
         controls_.addSelect("whiteMode", whiteMode_, kWhiteModeOptions, kWhiteModeCount);
@@ -355,8 +355,8 @@ protected:
     /// helper (not auto-added) so a driver opts in by calling it where its other
     /// controls go, keeping control *order* in the driver's hands.
     void addWindowControls() {
-        controls_.addUint16("start", start_);
-        controls_.addUint16("count", count_);
+        controls_.addControl("start", start_);
+        controls_.addControl("count", count_);
     }
 
     /// True if `name` is one of the window controls — a driver folds this into its

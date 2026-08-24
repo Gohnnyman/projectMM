@@ -31,12 +31,12 @@ public:
     bool    phase_chaos = false;               // random per-frame phase jitter
 
     void defineControls() override {
-        controls_.addUint8("oscillatorOffset", oscillatorOffset, 0, 16);
-        controls_.addUint8("numLines", numLines, 2, 255);
-        controls_.addUint8("fadeRate", fadeRate, 0, 128);
-        controls_.addUint8("minLength", minLength);   // slider over the full 0..255 range
-        controls_.addBool("color_chaos", color_chaos);
-        controls_.addBool("phase_chaos", phase_chaos);
+        controls_.addControl("oscillatorOffset", oscillatorOffset, 0, 16);
+        controls_.addControl("numLines", numLines, 2, 255);
+        controls_.addControl("fadeRate", fadeRate, 0, 128);
+        controls_.addControl("minLength", minLength);   // slider over the full 0..255 range
+        controls_.addControl("color_chaos", color_chaos);
+        controls_.addControl("phase_chaos", phase_chaos);
     }
 
     void tick() MM_NONBLOCKING override {

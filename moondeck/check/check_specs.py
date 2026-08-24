@@ -164,10 +164,11 @@ def _module_block(source_path, spec):
     return "\n".join(lines[start:end])
 
 
-# Range-bearing control forms: addUint8/addInt16/addUint16("name", var, MIN, MAX).
-# (addBool/addPin/addSelect/addText/addButton carry no numeric range — skipped.)
+# Range-bearing control forms: addControl("name", var, MIN, MAX).
+# (addPin/addSelect/addText/addButton and a bool addControl carry no numeric range — a call with
+# no MIN/MAX simply does not match, which is what skips them.)
 _RANGE_CTRL_RE = re.compile(
-    r'controls_\.add(?:Uint8|Int16|Uint16)\("(?P<name>\w+)"\s*,\s*\w+\s*,\s*'
+    r'controls_\.addControl\("(?P<name>\w+)"\s*,\s*\w+\s*,\s*'
     r'(?P<lo>-?\d+)\s*,\s*(?P<hi>-?\d+)'
 )
 # A numeric range as spelled in .md prose: 1–8 / 1-8 / 1 to 8 (en-dash, hyphen, or "to").

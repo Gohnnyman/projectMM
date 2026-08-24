@@ -19,9 +19,9 @@ public:
     uint8_t hue_shift = 0;
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 1, 255);
-        controls_.addUint8("twist", twist, 1, 255);
-        controls_.addUint8("hue_shift", hue_shift, 0, 255);
+        controls_.addControl("bpm", bpm, 1, 255);
+        controls_.addControl("twist", twist, 1, 255);
+        controls_.addControl("hue_shift", hue_shift, 0, 255);
     }
 
     void tick() MM_NONBLOCKING override {

@@ -34,8 +34,8 @@ public:
     uint8_t numBalls = 8;    // balls per column (1..maxNumBalls)
 
     void defineControls() override {
-        controls_.addUint8("grav", grav, 0, 255);
-        controls_.addUint8("numBalls", numBalls, 1, maxNumBalls);
+        controls_.addControl("grav", grav, 0, 255);
+        controls_.addControl("numBalls", numBalls, 1, maxNumBalls);
     }
 
     void prepare() override {

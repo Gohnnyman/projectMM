@@ -36,10 +36,10 @@ inline constexpr const char* kModifierExt = ".mlm";
 /// shape of a script is visible before a line is typed.
 inline constexpr const char* kEffectTemplate =
     "class NewEffect {\n"
-    "  uint8_t bpm = 60;\n"
+    "  byte bpm = 60;\n"
     "\n"
     "  defineControls() {\n"
-    "    addUint8(\"bpm\", bpm, 1, 255);\n"
+    "    addControl(\"bpm\", bpm, 1, 255);\n"
     "  }\n"
     "\n"
     "  tick() {\n"
@@ -49,12 +49,12 @@ inline constexpr const char* kEffectTemplate =
 
 inline constexpr const char* kLayoutTemplate =
     "class NewLayout {\n"
-    "  uint8_t cols = 16;\n"
-    "  uint8_t rows = 16;\n"
+    "  byte cols = 16;\n"
+    "  byte rows = 16;\n"
     "\n"
     "  defineControls() {\n"
-    "    addUint8(\"cols\", cols, 1, 64);\n"
-    "    addUint8(\"rows\", rows, 1, 64);\n"
+    "    addControl(\"cols\", cols, 1, 64);\n"
+    "    addControl(\"rows\", rows, 1, 64);\n"
     "  }\n"
     "\n"
     "  placeLights() {\n"

@@ -300,37 +300,37 @@ public:
         // The shift-clock speed switch, below the clockPin/latchPin wiring pair (the orchestrator places
         // this hook right after latchPin): OFF = 20 MHz (safe default), ON = 26.67 MHz (overclock). The
         // fix for per-strand '595 corruption is OFF; see the member doc. Shift-mode only.
-        controls.addBool("shiftOverclock", shiftOverclock);
+        controls.addControl("shiftOverclock", shiftOverclock);
         controls.setHidden(controls.count() - 1, !owner_->pinExpanderMode());
         controls.setAdvanced(controls.count() - 1);   // a '595 clock tuning knob — expert only
         // Path selector (pin-expander mode only): the ring, or the whole frame. A distinct axis from
         // ringSnapshot — this picks the PATH, ringSnapshot tunes how the RING reads its source; they
         // compose. Whole-frame is the A/B reference: it is how the whole-frame-PSRAM-at-the-expander-clock
         // question stays testable on the same board and content.
-        controls.addBool("useRing", useRing);
+        controls.addControl("useRing", useRing);
         controls.setHidden(controls.count() - 1, !owner_->pinExpanderMode());
         // The source-snapshot A/B knob, directly under useRing (the path it belongs to): the ring reads
         // its source through an immutable snapshot (ON, the safe default) or the live buffer (OFF, a bench
         // lever). Meaningful only when the ring is the chosen path, so hidden on wantsRing() like the
         // geometry below. `ringSnapshot` lives on the orchestrator (ParallelLedDriver); the control binds
         // it here through the mutable reference accessor.
-        controls.addBool("ringSnapshot", owner_->ringSnapshotRef());
+        controls.addControl("ringSnapshot", owner_->ringSnapshotRef());
         controls.setHidden(controls.count() - 1, !wantsRing());
         // The geometry + the instrument, shown only when the RING is the chosen path — all meaningless on
         // the whole-frame one. (Gating on wantsRing() is safe: it reads plain members, pinExpanderMode +
         // useRing, not frameBytes_, so it resolves even before the source buffer is wired at boot.)
-        controls.addBool("ringAuto", ringAuto);
+        controls.addControl("ringAuto", ringAuto);
         controls.setHidden(controls.count() - 1, !wantsRing());
         // ringRows/ringBufs/ringPadUs are DEV TUNING — ringAuto derives them for the end user (kept
         // visible above); the manual knobs are expert-only. (Once ringAuto is verified to always pick the
         // right geometry, ringAuto itself could go advanced too — for now it stays visible as the recourse.)
-        controls.addUint8("ringRows", ringRows, 1, 64);
+        controls.addControl("ringRows", ringRows, 1, 64);
         controls.setHidden(controls.count() - 1, !wantsRing());
         controls.setAdvanced(controls.count() - 1);
-        controls.addUint8("ringBufs", ringBufs, platform::kRingBufsMin, platform::kRingBufsMax);
+        controls.addControl("ringBufs", ringBufs, platform::kRingBufsMin, platform::kRingBufsMax);
         controls.setHidden(controls.count() - 1, !wantsRing());
         controls.setAdvanced(controls.count() - 1);
-        controls.addUint8("ringPadUs", ringPadUs, 0, platform::kRingPadMaxUs);
+        controls.addControl("ringPadUs", ringPadUs, 0, platform::kRingPadMaxUs);
         controls.setHidden(controls.count() - 1, !wantsRing());
         controls.setAdvanced(controls.count() - 1);
         // Ring internals, so the streaming can be diagnosed by polling /api/state (reliable) rather than

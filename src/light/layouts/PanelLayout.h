@@ -45,12 +45,12 @@ public:
     void defineControls() override {
         // Geometry only — MoonLight's pin controls (ledPin selects, nextPin) are dropped.
         // Ranges from MoonLight (1..65536), clamped to lengthType's int16_t max (512-safe).
-        controls_.addInt16("panelWidth",  panelWidth,  1, 512);
-        controls_.addInt16("panelHeight", panelHeight, 1, 512);
+        controls_.addControl("panelWidth",  panelWidth,  1, 512);
+        controls_.addControl("panelHeight", panelHeight, 1, 512);
         controls_.addSelect("wiringOrder", wiringOrder, kWiringOptions, kWiringCount);
-        controls_.addBool("X++", incX);
-        controls_.addBool("Y++", incY);
-        controls_.addBool("snake", snake);
+        controls_.addControl("X++", incX);
+        controls_.addControl("Y++", incY);
+        controls_.addControl("snake", snake);
     }
 
     const char* tags() const override { return "💫"; }

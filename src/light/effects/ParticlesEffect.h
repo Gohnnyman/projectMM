@@ -23,10 +23,10 @@ public:
     uint8_t hue_shift = 0;
 
     void defineControls() override {
-        controls_.addUint8("count", count, 1, 255);
-        controls_.addUint8("speed", speed, 1, 255);
-        controls_.addUint8("fade", fade, 1, 255);
-        controls_.addUint8("hue_shift", hue_shift, 0, 255);
+        controls_.addControl("count", count, 1, 255);
+        controls_.addControl("speed", speed, 1, 255);
+        controls_.addControl("fade", fade, 1, 255);
+        controls_.addControl("hue_shift", hue_shift, 0, 255);
     }
 
     void prepare() override {

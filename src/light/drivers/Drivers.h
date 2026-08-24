@@ -196,10 +196,10 @@ public:
     uint8_t effectiveBrightness() const { return on ? brightness : 0; }
 
     void defineControls() override {
-        controls_.addBool("on", on);   // master power — first so it renders at the top of the card
-        controls_.addUint8("brightness", brightness, 0, 255);
+        controls_.addControl("on", on);   // master power — first so it renders at the top of the card
+        controls_.addControl("brightness", brightness, 0, 255);
         controls_.addPalette("palette", palette, mm::paletteOptions, mm::palettes::kCount);
-        controls_.addBool("multicore", multicore);   // render↔encode split on/off (see the member's doc)
+        controls_.addControl("multicore", multicore);   // render↔encode split on/off (see the member's doc)
         controls_.setAdvanced(controls_.count() - 1);   // a tuning knob, not a user setting
         // Read-only KPI, the multicore sibling of the driver's frameTime: how long core 0 waited at the
         // frame boundary for core 1's encode. ~0 = render and encode overlap perfectly (the split pays

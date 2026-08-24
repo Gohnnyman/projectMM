@@ -41,13 +41,13 @@ public:
     uint8_t microMutatorMax  = 255;  // micro mutator high end (0..255)
 
     void defineControls() override {
-        controls_.addUint8("speed", speed, 1, 64);
-        controls_.addUint8("macroMutatorFreq", macroMutatorFreq, 0, 15);
-        controls_.addUint8("macroMutatorMin", macroMutatorMin, 0, 255);
-        controls_.addUint8("macroMutatorMax", macroMutatorMax, 0, 255);
-        controls_.addUint8("microMutatorFreq", microMutatorFreq, 0, 15);
-        controls_.addUint8("microMutatorMin", microMutatorMin, 0, 255);
-        controls_.addUint8("microMutatorMax", microMutatorMax, 0, 255);
+        controls_.addControl("speed", speed, 1, 64);
+        controls_.addControl("macroMutatorFreq", macroMutatorFreq, 0, 15);
+        controls_.addControl("macroMutatorMin", macroMutatorMin, 0, 255);
+        controls_.addControl("macroMutatorMax", macroMutatorMax, 0, 255);
+        controls_.addControl("microMutatorFreq", microMutatorFreq, 0, 15);
+        controls_.addControl("microMutatorMin", microMutatorMin, 0, 255);
+        controls_.addControl("microMutatorMax", microMutatorMax, 0, 255);
     }
 
     void tick() MM_NONBLOCKING override {

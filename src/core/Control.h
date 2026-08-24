@@ -377,41 +377,67 @@ public:
     ControlList(ControlList&&) = delete;
     ControlList& operator=(ControlList&&) = delete;
 
+    /// Bind a member as a control. ONE NAME for every numeric and boolean type: the widget
+    /// follows the variable's own type, which the compiler already knows, so a call cannot
+    /// disagree with the declaration and a contributor has one spelling to learn.
+    ///
+    /// This is deliberately the same vocabulary a MoonLive script uses — `addControl("speed",
+    /// speed, 0, 99)` reads identically in a script and in a compiled module, which is the point:
+    /// someone who has written one can read the other.
+    ///
+    /// A non-const lvalue reference binds only to its EXACT type, so overload selection is decided
+    /// by the variable alone. No conversion is considered, and no two overloads share a type.
+    ///
+    /// The WIDGET-specific adders keep their own names — addPin, addSelect, addPalette, addText,
+    /// addButton and the rest. They name a widget rather than a width, and that intent is not
+    /// recoverable from the C++ type: `uint8_t` backs a slider, a dropdown AND a palette picker,
+    /// and an `int8_t` that silently became a Pin would register as a claimed GPIO in PinsModule.
+    ///
     /// Bind a `uint8_t` as a 0–255 slider (the preferred default control). `min`/`max`
     /// bound the UI drag range and clamp writes server-side.
-    void addUint8(const char* name, uint8_t& var, uint8_t min = 0, uint8_t max = 255) {
+    void addControl(const char* name, uint8_t& var, uint8_t min = 0, uint8_t max = 255) {
         grow();
         controls_[count_++] = {&var, name, 0, ControlType::Uint8, min, max};
     }
 
     /// Bind a `uint16_t` as a number input. min/max default to the full type range
-    /// (no UI constraint); pass explicit bounds (e.g. `addUint16("sampleRate", r,
-    /// 8000, 48000)`) for a bounded slider + server-side write clamp — same contract
-    /// as addUint8/addInt16.
-    void addUint16(const char* name, uint16_t& var,
-                   uint16_t min = 0, uint16_t max = UINT16_MAX) {
+    /// (no UI constraint); pass explicit bounds (e.g. `addControl("sampleRate", r,
+    /// 8000, 48000)`) for a bounded slider + server-side write clamp.
+    ///
+    /// The defaults DIFFER per overload, deliberately: each is its own type's full range, so a
+    /// call that omits them means "no UI constraint" whatever the type. Unifying them would
+    /// silently move a control's bounds.
+    void addControl(const char* name, uint16_t& var,
+                    uint16_t min = 0, uint16_t max = UINT16_MAX) {
         grow();
         controls_[count_++] = {&var, name, 0, ControlType::Uint16, min, max};
     }
 
     // lengthType (int16_t) — signed wire format so negative values round-trip
     // correctly. min/max default to INT16_MIN/INT16_MAX (no UI constraint) when
-    // omitted; pass explicit bounds (e.g. addInt16("width", w, 1, 512)) to get a
+    // omitted; pass explicit bounds (e.g. addControl("width", w, 1, 512)) to get a
     // bounded slider in the UI and server-side clamping on write.
-    void addInt16(const char* name, int16_t& var,
-                  int16_t min = INT16_MIN, int16_t max = INT16_MAX) {
+    void addControl(const char* name, int16_t& var,
+                    int16_t min = INT16_MIN, int16_t max = INT16_MAX) {
         grow();
         controls_[count_++] = {&var, name, 0, ControlType::Int16, min, max};
     }
 
     /// Bind an `int32_t` where the value does not fit 16 bits. min/max default to the
     /// full type range (no UI constraint); pass explicit bounds for a bounded slider +
-    /// server-side write clamp — same contract as addInt16.
-    void addInt32(const char* name, int32_t& var,
-                  int32_t min = INT32_MIN, int32_t max = INT32_MAX) {
+    /// server-side write clamp.
+    void addControl(const char* name, int32_t& var,
+                    int32_t min = INT32_MIN, int32_t max = INT32_MAX) {
         grow();
         controls_[count_++] = {&var, name, 0, ControlType::Int32, min, max};
     }
+
+    /// An `int8_t` is NOT a control type here: it is either a GPIO (addPin, which PinsModule
+    /// scans for to collect claimed pins) or telemetry (addReadOnlyInt, which needs a unit).
+    /// Deducing one from the type would make any future small signed control register as a
+    /// claimed GPIO, so the caller says which. Deleted rather than absent, so the diagnostic
+    /// names the two real options instead of listing every unrelated overload.
+    void addControl(const char* name, int8_t& var, int16_t min = 0, int16_t max = 0) = delete;
 
     // A GPIO pin number (int8_t storage — one byte; -1 = unused/default). A GPIO
     // never exceeds ~54 on any ESP32-family chip, so int8 (−128..127) is ample and
@@ -429,7 +455,9 @@ public:
         controls_[count_++] = {&var, name, 0, ControlType::Pin, min, max};
     }
 
-    void addBool(const char* name, bool& var) {
+    /// A toggle. No min/max: a bool's range is itself, which is why this overload takes three
+    /// arguments where the numeric ones take four.
+    void addControl(const char* name, bool& var) {
         grow();
         controls_[count_++] = {&var, name, 0, ControlType::Bool, 0, 1};
     }
@@ -547,7 +575,7 @@ public:
 
     // A momentary action button (ControlType::Button). No backing storage — a click
     // POSTs through to the module's onControlChanged(name), which performs the action. Use
-    // for "do this now" (rescan, reset, self-test); use addBool for on/off state.
+    // for "do this now" (rescan, reset, self-test); use addControl on a bool for on/off state.
     void addButton(const char* name) {
         grow();
         controls_[count_++] = {nullptr, name, 0, ControlType::Button, 0, 0};
@@ -588,7 +616,7 @@ public:
 
     // Ask the UI to render a numeric control as a plain number input, never a slider — for a value where
     // each integer is a discrete identity (a PHY/I2C address, a channel), not a magnitude to sweep.
-    // Typical use: addInt16()/addUint8() then setNumberField(count() - 1). See the descriptor's field.
+    // Typical use: addControl() then setNumberField(count() - 1). See the descriptor's field.
     void setNumberField(uint8_t i, bool numberField = true) {
         if (i < count_) controls_[i].numberField = numberField;
     }

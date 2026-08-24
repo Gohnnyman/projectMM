@@ -125,9 +125,9 @@ public:
         controls_.addSelect("protocol", protocol, kProtocolOptions, kProtocolCount);
         controls_.addText("ips", ips, sizeof(ips));
         controls_.addText("lightsPerIp", lightsPerIp, sizeof(lightsPerIp));
-        controls_.addUint16("universe_start", universeStart);
+        controls_.addControl("universe_start", universeStart);
         addWindowControls();   // start / count — the slice of the shared buffer this sink sends
-        controls_.addUint8("fps", fps, 1, 120);
+        controls_.addControl("fps", fps, 1, 120);
     }
 
     /// A start/count change resizes the window this sink sends, and a Custom channel-count

@@ -40,10 +40,10 @@ public:
     bool    usePalette = false;  // color stars from the palette instead of greyscale
 
     void defineControls() override {
-        controls_.addUint8("speed", speed, 0, 30);
-        controls_.addUint8("numStars", numStars, 1, 255);
-        controls_.addUint8("blur", blur, 0, 255);
-        controls_.addBool("usePalette", usePalette);
+        controls_.addControl("speed", speed, 0, 30);
+        controls_.addControl("numStars", numStars, 1, 255);
+        controls_.addControl("blur", blur, 0, 255);
+        controls_.addControl("usePalette", usePalette);
     }
 
     // Star table is sized to the control maximum (255) so a live numStars change never reallocates,

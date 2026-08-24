@@ -49,9 +49,9 @@ TEST_CASE("applyControlValue leaves a control untouched when its key is absent")
     bool      flag   = true;
     static const char* const opts[] = {"None", "LAN8720", "IP101", "W5500"};
     controls.addSelect("ethType", ethType, opts, 4);
-    controls.addInt16("ethMdcGpio", mdcGpio, -1, 48);
-    controls.addUint8("small", small, 0, 100);
-    controls.addBool("flag", flag);
+    controls.addControl("ethMdcGpio", mdcGpio, -1, 48);
+    controls.addControl("small", small, 0, 100);
+    controls.addControl("flag", flag);
 
     // A persisted file that contains an UNRELATED key only — none of our controls.
     const char* partialJson = "{\"ssid\":\"home\"}";
@@ -76,7 +76,7 @@ TEST_CASE("applyControlValue still applies a present key") {
     int16_t mdcGpio = 31;
     static const char* const opts[] = {"None", "LAN8720", "IP101", "W5500"};
     controls.addSelect("ethType", ethType, opts, 4);
-    controls.addInt16("ethMdcGpio", mdcGpio, -1, 48);
+    controls.addControl("ethMdcGpio", mdcGpio, -1, 48);
 
     // Saved file carries new values for both.
     const char* json = "{\"ethType\":3,\"ethMdcGpio\":23}";

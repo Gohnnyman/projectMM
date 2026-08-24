@@ -594,7 +594,7 @@ struct ModeDependentMock : public mm::MoonModule {
         controls_.addSelect("mode", mode, kModes, 2);
         // `param` binds to a DIFFERENT variable depending on mode — exactly like clockPin binding to
         // whichever peripheral backend is live. A rebuild after `mode` changes re-binds it.
-        controls_.addUint8("param", mode == 0 ? paramA : paramB, 0, 255);
+        controls_.addControl("param", mode == 0 ? paramA : paramB, 0, 255);
     }
 };
 }  // namespace
@@ -895,10 +895,10 @@ public:
 
     void defineControls() override {
         mm::MoonModule::defineControls();
-        controls_.addUint8("always", always, 0, 255);
+        controls_.addControl("always", always, 0, 255);
         // Only published once prepare() has run, exactly as publishDeclaredControls is empty until
         // the engine holds a compiled program.
-        if (prepared) controls_.addUint8("late", late, 0, 255);
+        if (prepared) controls_.addControl("late", late, 0, 255);
     }
     void prepare() override {
         prepared = true;

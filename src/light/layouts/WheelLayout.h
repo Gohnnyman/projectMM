@@ -26,8 +26,8 @@ public:
     uint16_t ledsPerSpoke = 10;  // LEDs along each spoke, 1..256
 
     void defineControls() override {
-        controls_.addUint16("spokes", spokes, 2, 64);
-        controls_.addUint16("ledsPerSpoke", ledsPerSpoke, 1, 256);
+        controls_.addControl("spokes", spokes, 2, 64);
+        controls_.addControl("ledsPerSpoke", ledsPerSpoke, 1, 256);
     }
 
     nrOfLightsType lightCount() const override {

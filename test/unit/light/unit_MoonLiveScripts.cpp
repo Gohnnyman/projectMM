@@ -81,10 +81,11 @@ TEST_CASE("every script in moonlive/ compiles") {
             moonlive::MoonLive engine;
             const bool ok = engine.compile(src.c_str(), moonlive::lightBuiltins(), sys);
             if (!ok) std::printf("FAIL %-28s %s\n", label.c_str(), engine.error());
-            // compile() both PARSES and emits native code, and only the second half needs a backend
-            // for this host's ISA (MM_MOONLIVE_HAS_HOST_JIT — 0 on x86_64, which is what CI runs).
-            // Requiring success there would fail every script for a reason that has nothing to do
-            // with the script, so without a backend the only failure allowed is the codegen one.
+            // compile() both PARSES and emits native code, and only the second half needs a
+            // backend for this host's ISA. arm64 and x86-64 both have one; a --no-jit build and any
+            // other host do not, and there requiring success would fail every script for a reason
+            // that has nothing to do with the script. Without a backend the only failure allowed is
+            // the codegen one.
 #if MM_MOONLIVE_HAS_HOST_JIT
             CHECK(ok);
 #else
@@ -139,8 +140,8 @@ TEST_CASE("every script reads the same system-variable vocabulary") {
         auto r = moonlive::compileSource(c.src, moonlive::lightBuiltins(), moonlive::lightSysVars(),
                                          out, sizeof(out));
         // Where a backend exists, a valid script must actually EMIT — accepting kCodegenFailed
-        // everywhere would let a codegen regression pass as a pass. Only a host with no assembler
-        // for its ISA (x86_64, which is what CI runs) is allowed that answer.
+        // everywhere would let a codegen regression pass as a pass. Only a build with no assembler
+        // for its ISA (--no-jit, or an unsupported host) is allowed that answer.
 #if MM_MOONLIVE_HAS_HOST_JIT
         if (c.ok) CHECK(r.ok);
 #else
@@ -331,9 +332,9 @@ TEST_CASE("sequential loops reuse the same register, so a script is not billed p
         moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
     if (!r.ok) INFO(r.error);
     // What this pins is REGISTER REUSE, which the front-end does on every host — but proving it
-    // needs code to come out, and only a host with an assembler for its ISA emits any
-    // (MM_MOONLIVE_HAS_HOST_JIT is 0 on x86_64, which is what CI runs). Requiring success there
-    // fails for the one reason that has nothing to do with register reuse.
+    // needs code to come out, and only a host with an assembler for its ISA emits any. On a build
+    // without one (--no-jit, or an unsupported host) requiring success fails for the one reason
+    // that has nothing to do with register reuse.
 #if MM_MOONLIVE_HAS_HOST_JIT
     CHECK(r.ok);
 #else

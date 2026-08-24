@@ -170,7 +170,7 @@ struct IrInst {
     InlineOp inlineOp{};                   // Inline: the neutral opcode tag
 };
 
-// A control a script declared (`addUint8("speed", speed, 0, 99)`). Neutral: the core
+// A control a script declared (`addControl("speed", speed, 0, 99)`). Neutral: the core
 // knows {name, a neutral type, range, default, and the byte offset into the run-time controls
 // arena it lives at}. The light-domain binding turns this into a real MoonModule control bound to
 // the arena slot. `type` is a neutral kind — Uint8 only in Stage 1 — NOT a projectMM ControlType.
@@ -181,7 +181,7 @@ struct IrInst {
 
 struct DeclaredControl {
     const char* name = nullptr;        // script-declared name (points into the source buffer)
-    // The UI range, as wide as the widest member a control can bind: addUint8 declares 0..255 and
+    // The UI range, as wide as the widest member a control can bind: a byte declares 0..255 and
     // an int member the full 32-bit span, so the field has to hold the wider one.
     int32_t     min = 0, max = 255;
     // The initializer, wide enough for the widest member type. Separate from the range because a

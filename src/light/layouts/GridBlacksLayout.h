@@ -27,12 +27,12 @@ public:
     lengthType blackCount = 0; // number of dark columns; 0 = no gap (renders like a plain Grid)
 
     void defineControls() override {
-        controls_.addInt16("width",  width,  1, 512);
-        controls_.addInt16("height", height, 1, 512);
-        controls_.addInt16("depth",  depth,  1, 512);
-        controls_.addBool("serpentine", serpentine);
-        controls_.addInt16("blackCount", blackCount, 0, 512);
-        controls_.addInt16("blackStart", blackStart, 0, 512);
+        controls_.addControl("width",  width,  1, 512);
+        controls_.addControl("height", height, 1, 512);
+        controls_.addControl("depth",  depth,  1, 512);
+        controls_.addControl("serpentine", serpentine);
+        controls_.addControl("blackCount", blackCount, 0, 512);
+        controls_.addControl("blackStart", blackStart, 0, 512);
         controls_.setHidden(controls_.count() - 1, blackCount == 0);   // blackStart matters only with a run
     }
 

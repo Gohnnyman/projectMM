@@ -621,9 +621,9 @@ inline void setPoolSink(particles::Pool* pool, uint32_t scale) MM_NONBLOCKING {
     if (!pool) detail::releaseIfEmpty(s);
 }
 
-/// Point addUint8 at a consumer for the duration of one defineControls() run; nullptr to detach.
+/// Point addControl at a consumer for the duration of one defineControls() run; nullptr to detach.
 /// False when the two-slot table is full, which the caller must not treat as an installed sink:
-/// every addUint8 would then be a silent no-op and the script would publish no controls at all.
+/// every addControl would then be a silent no-op and the script would publish no controls at all.
 inline bool setAddControlSink(AddControlFn fn, void* ctx) {
     detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
     if (!s) return false;
@@ -652,7 +652,7 @@ inline void setAddLightSink(AddLightFn fn, void* ctx) {
     if (s) s->sink = {fn, ctx};
 }
 
-// addUint8(name, memberOffset, min, max): the run-time half of declaring a control.
+// addControl(name, memberOffset, min, max): the run-time half of declaring a control.
 //
 // The CONTROL RECORD is built by the compiler, which knows the name span and the member's offset,
 // so nothing has to travel through a frame slot into a source buffer that is freed by the time
@@ -660,9 +660,7 @@ inline void setAddLightSink(AddLightFn fn, void* ctx) {
 // way a compiled module does: `defineControls()` is an ordinary function the binding calls after a
 // successful compile, and this is an ordinary builtin it calls.
 // The one control declaration. What kind of control it becomes is read from the MEMBER'S declared
-// type rather than chosen by the call, which is what removed the width-matched pair this replaces:
-// addUint8 on a wide member drove only its low byte and addUint16 on a narrow one wrote past it,
-// both silently, and the script author had to keep call and declaration in agreement by hand.
+// type rather than chosen by the call, so a call and a declaration cannot disagree.
 inline uint32_t addControlDecl(const uintptr_t* args, CtrlType type) {
     // args: (name, memberOffset, min, max). The name is a pointer into the compiled program's
     // string pool, which outlives the run; the offset is the member's arena byte, which the
@@ -1159,7 +1157,7 @@ inline BuiltinTable lightBuiltins() {
 ///
 /// A compiled module's controls exist because `defineControls()` RAN: the Scheduler calls it on
 /// every module at setup, and again whenever a Select reshapes the visible set. A scripted one
-/// works the same way. This calls the entry point, each `addUint8` inside it reaches the engine
+/// works the same way. This calls the entry point, each `addControl` inside it reaches the engine
 /// through the control sink, and the binding's `rebuildControls()` then finds a populated list.
 ///
 /// Re-runnable, like its compiled counterpart: the list is cleared first, so calling it twice

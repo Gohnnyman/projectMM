@@ -59,7 +59,7 @@ public:
     void defineControls() override {
         static constexpr const char* kBlendModeOptions[] = {"alpha", "additive"};
         controls_.addSelect("blendMode", blendMode, kBlendModeOptions, 2);
-        controls_.addUint8("opacity", opacity, 0, 255);
+        controls_.addControl("opacity", opacity, 0, 255);
         // Cascade to children (effects and modifiers) — preserves the default
         // base behaviour we just overrode.
         MoonModule::defineControls();

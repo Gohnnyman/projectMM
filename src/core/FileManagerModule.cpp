@@ -11,7 +11,7 @@ void FileManagerModule::defineControls() {
     // mkdir/delete OPS are their own HTTP endpoints (POST/DELETE /api/dir?path=) — not persisted
     // controls — so a create/delete carries its path in the request, not in device storage. The
     // `show hidden` flag keeps it bound for the API while the generic control list skips it.
-    controls_.addBool("show hidden", showHidden_);      // reveal dot-prefixed entries (e.g. .config)
+    controls_.addControl("show hidden", showHidden_);      // reveal dot-prefixed entries (e.g. .config)
     controls_.setHidden(controls_.count() - 1, true);
     // Filesystem-usage gauge (used / total bytes), read from the platform. Shown below the tree in
     // the panel — the File Manager is where filesystem space is relevant, so it owns the control.

@@ -45,13 +45,13 @@ public:
     uint8_t fade = 25;          // trail length (the Layer's decay, not the pool's)
 
     void defineControls() override {
-        controls_.addUint8("launchRate", launchRate, 1, 255);
-        controls_.addUint8("launchSpeed", launchSpeed, 10, 255);
-        controls_.addUint8("gravity", gravity, 1, 128);
-        controls_.addUint8("sparks", sparks, 1, 64);
-        controls_.addUint8("sparkLife", sparkLife, 10, 255);
-        controls_.addUint8("drag", drag, 0, 64);
-        controls_.addUint8("fade", fade, 1, 255);
+        controls_.addControl("launchRate", launchRate, 1, 255);
+        controls_.addControl("launchSpeed", launchSpeed, 10, 255);
+        controls_.addControl("gravity", gravity, 1, 128);
+        controls_.addControl("sparks", sparks, 1, 64);
+        controls_.addControl("sparkLife", sparkLife, 10, 255);
+        controls_.addControl("drag", drag, 0, 64);
+        controls_.addControl("fade", fade, 1, 255);
     }
 
     void prepare() override {
