@@ -85,6 +85,7 @@
 #include "light/drivers/LightPresetsModule.h"  // the reusable light-preset library (Drivers submodule)
 #include "light/drivers/HueDriver.h"
 #include "light/drivers/NetworkSendDriver.h"
+#include "light/drivers/NdiDriver.h"
 #include "light/drivers/PreviewDriver.h"
 // LED drivers are compiled in per chip, gated on the SOC peripheral the driver
 // needs — so a board's binary carries only the drivers its silicon can actually
@@ -126,7 +127,6 @@
 // S31, which is RGMII gigabit, and the P4, where the 100 Mbit wire-time limit is worth measuring).
 // Everything else would carry ~2.8 KB of flash for a driver it cannot use, so it does not link it.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
-#include "light/drivers/NdiDriver.h"
 #include "light/drivers/PanelCardDriver.h"
 #endif
 #include "core/HttpServerModule.h"
@@ -262,7 +262,9 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::HueDriver>("HueDriver", "light/drivers.md#hue");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers.md#networksend");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers.md#preview");
-    // NDI needs a desktop runtime to load, so the picker offers it only where one can exist.
+    // NDI is gated by CAPABILITY, not by firmware: the header compiles everywhere (its platform
+    // calls are declared on every target), and `hasNdi` decides whether the picker offers it. An
+    // `if constexpr` discarded branch must still PARSE, so the include above cannot be gated.
     if constexpr (mm::platform::hasNdi)
         mm::ModuleFactory::registerType<mm::NdiDriver>("NdiDriver", "light/drivers.md#ndi");
     // Same firmware gate as the include above.

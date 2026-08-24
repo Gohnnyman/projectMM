@@ -17,6 +17,19 @@
 
 namespace {
 
+// The NDI seams and virtual time are process-global, so a REQUIRE that aborts mid-case would
+// strand a forced mode (or a frozen clock) for whichever test runs next — the classic
+// passes-alone / fails-in-sequence flake. A scope guard restores both however the case leaves.
+struct NdiSeamGuard {
+    explicit NdiSeamGuard(mm::platform::NdiTestMode mode) {
+        mm::platform::setTestNdiMode(mode);
+    }
+    ~NdiSeamGuard() {
+        mm::platform::setTestNdiMode(mm::platform::NdiTestMode::Off);
+        mm::platform::setTestNowMs(0);
+    }
+};
+
 // A wall of `width` x `height`, wired as production wires it: the Layout gives the Layer its
 // physical size and the driver reads that. The driver has no geometry of its own.
 struct Wall {
@@ -58,7 +71,7 @@ void paint(mm::Buffer& b, mm::nrOfLightsType i, uint8_t r, uint8_t g, uint8_t bl
 // Without the runtime the driver is inert but SAFE, and says why. This is the state every machine
 // without NDI installed is in, including CI, so it is the default path rather than an edge case.
 TEST_CASE("NdiDriver reports a missing NDI runtime instead of failing") {
-    mm::platform::setTestNdiMode(mm::platform::NdiTestMode::ForceMissing);
+    NdiSeamGuard seam{mm::platform::NdiTestMode::ForceMissing};
     mm::Buffer source;
     mm::NdiDriver driver;
     Wall wall(4, 2);
@@ -70,12 +83,11 @@ TEST_CASE("NdiDriver reports a missing NDI runtime instead of failing") {
     mm::platform::setTestNowMs(1000);
     driver.tick();                                   // must not crash, must send nothing
     CHECK(mm::platform::ndiTestFrameCount() == 0);
-    mm::platform::setTestNdiAvailable(false);
 }
 
 // The frame a receiver gets is the grid: one pixel per light, at the layer's physical size.
 TEST_CASE("NdiDriver sends one pixel per light at the layer's size") {
-    mm::platform::setTestNdiAvailable(true);
+    NdiSeamGuard seam{mm::platform::NdiTestMode::ForceAvailable};
     mm::Buffer source;
     mm::NdiDriver driver;
     Wall wall(4, 2);
@@ -96,13 +108,12 @@ TEST_CASE("NdiDriver sends one pixel per light at the layer's size") {
     REQUIRE(f != nullptr);
     CHECK(f[0] == 10); CHECK(f[1] == 20); CHECK(f[2] == 30);      // first light
     CHECK(f[21] == 40); CHECK(f[22] == 50); CHECK(f[23] == 60);   // eighth light, at 7*3
-    mm::platform::setTestNdiAvailable(false);
 }
 
 // The per-driver output correction is what makes a receiver see what the WALL sees: halving
 // brightness must reach the NDI frame, not just the LEDs.
 TEST_CASE("NdiDriver applies the driver's own brightness correction") {
-    mm::platform::setTestNdiAvailable(true);
+    NdiSeamGuard seam{mm::platform::NdiTestMode::ForceAvailable};
     mm::Buffer source;
     mm::NdiDriver driver;
     Wall wall(2, 1);
@@ -122,13 +133,12 @@ TEST_CASE("NdiDriver applies the driver's own brightness correction") {
     REQUIRE(f != nullptr);
     CHECK(f[0] < 200);            // dimmed, not passed through raw
     CHECK(f[0] > 0);
-    mm::platform::setTestNdiAvailable(false);
 }
 
 // fps is a CEILING: a second tick inside the interval must not produce a second frame, or a fast
 // render loop would flood the receiver with frames it never asked for.
 TEST_CASE("NdiDriver holds its frame rate to the fps ceiling") {
-    mm::platform::setTestNdiAvailable(true);
+    NdiSeamGuard seam{mm::platform::NdiTestMode::ForceAvailable};
     mm::Buffer source;
     mm::NdiDriver driver;
     Wall wall(2, 1);
@@ -147,13 +157,12 @@ TEST_CASE("NdiDriver holds its frame rate to the fps ceiling") {
     mm::platform::setTestNowMs(1150);      // past it
     driver.tick();
     CHECK(mm::platform::ndiTestFrameCount() == 2);
-    mm::platform::setTestNdiAvailable(false);
 }
 
 // A blank sourceName means the device's own name — what a user scanning a receiver's source list
 // expects to find, rather than an empty entry.
 TEST_CASE("NdiDriver names the source after the device when left blank") {
-    mm::platform::setTestNdiAvailable(true);
+    NdiSeamGuard seam{mm::platform::NdiTestMode::ForceAvailable};
     mm::Buffer source;
     mm::NdiDriver driver;
     Wall wall(2, 1);
@@ -165,13 +174,12 @@ TEST_CASE("NdiDriver names the source after the device when left blank") {
     driver.sourceName[3] = 'l'; driver.sourceName[4] = '\0';
     driver.prepare();
     CHECK(std::string(mm::platform::ndiTestSenderName()) == "Wall");
-    mm::platform::setTestNdiAvailable(false);
 }
 
 // A layer smaller than the frame must not leak the previous frame's pixels into the tail — a
 // shrunk layout should go dark there, not show stale image.
 TEST_CASE("NdiDriver blanks the tail when the layer is smaller than the frame") {
-    mm::platform::setTestNdiAvailable(true);
+    NdiSeamGuard seam{mm::platform::NdiTestMode::ForceAvailable};
     mm::Buffer source;
     mm::NdiDriver driver;
     Wall wall(4, 2);                       // an 8-pixel frame
@@ -189,5 +197,4 @@ TEST_CASE("NdiDriver blanks the tail when the layer is smaller than the frame") 
     CHECK(f[0] == 99);                     // a real light
     CHECK(f[12] == 0);                     // light 4 onward: blanked, not stale
     CHECK(f[23] == 0);
-    mm::platform::setTestNdiAvailable(false);
 }

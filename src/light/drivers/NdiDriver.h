@@ -6,8 +6,9 @@
 // leave the box, and one NDI implementation covers Windows, macOS, Linux and ARM where Spout and
 // Syphon are two platform-specific ones covering two of them.
 //
-// **Desktop only** (`platform::hasNdi`): the NDI runtime is a desktop shared library with no build
-// for a microcontroller, and the per-frame conversion does not belong on one.
+// **Desktop only** (`platform::hasNdi`): the NDI runtime is a closed binary built only for Intel
+// and ARM (SSSE3 / NEON floor), so no ESP32 can load one and there is no source to port. An ESP32
+// reaches the same receivers over Art-Net / sACN / DDP, which projectMM implements itself.
 //
 // **The runtime is the user's.** projectMM is GPL-3.0 and the NDI runtime is proprietary, so it is
 // never bundled or linked — the platform layer resolves it on demand, exactly as it does Npcap for
@@ -70,16 +71,21 @@ public:
             setStatus("could not create the NDI source", Severity::Error);
             return;
         }
+        // Set BEFORE the staging below, so release() owns the sender from the moment it exists: a
+        // later failure here would otherwise leave the source advertised on the network forever
+        // with nothing ever sent, since release() closes only what open_ claims.
+        open_ = true;
+
         // Size the staging off the hot path: one tight-RGB frame, plus a per-light correction
         // scratch when the wiring emits more channels than the three NDI carries.
         const size_t pixels = static_cast<size_t>(width_) * height_;
         if (!rgb_.resize(pixels * 3)) {
+            release();                       // closes the sender we just opened
             setStatus("out of memory for the NDI frame", Severity::Error);
             return;
         }
         if (correction_.outChannels > 3) corrScratch_.resize(correction_.outChannels);
 
-        open_ = true;
         std::snprintf(statusBuf_, sizeof(statusBuf_), "sending %ux%u at %u fps",
                       static_cast<unsigned>(width_), static_cast<unsigned>(height_),
                       static_cast<unsigned>(fps));

@@ -306,8 +306,11 @@ constexpr bool hasHeavyCompute = SOC_CPU_HAS_FPU;
 // choose between and a NIC-name control would do nothing. See the desktop config for the true case.
 constexpr bool hasNamedNetInterfaces = false;
 
-// hasNdi — false on every ESP32: the NDI runtime is a desktop shared library with no build for
-// these chips. See the desktop config for the true case.
+// hasNdi — false on every ESP32, and not by choice: the NDI runtime is a closed binary that
+// Vizrt builds only for Intel and ARM, with a documented floor of SSSE3 / NEON SIMD. Neither
+// Xtensa nor ESP32 RISC-V has either, and there is no source to port. NDI's own embedded answer
+// is an FPGA reference design, not an MCU. An ESP32 reaches the same tools over Art-Net, sACN and
+// DDP instead — open protocols, our own implementations, send and receive. Desktop config: true.
 constexpr bool hasNdi = false;
 
 #if defined(CONFIG_ETH_USE_SPI_ETHERNET) && !defined(CONFIG_ETH_USE_ESP32_EMAC)

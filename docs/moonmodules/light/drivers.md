@@ -171,7 +171,7 @@ The grid's `physicalWidth` × `physicalHeight` becomes the frame; each light is 
 To watch the output you need a receiver: **NDI Video Monitor** (part of NDI Tools) is the simplest, and OBS gains an "NDI Source" via the [DistroAV](https://github.com/DistroAV/DistroAV) plugin.
 
 - `sourceName` — the name a receiver lists. Blank uses the device's own name.
-- `fps` — frame-rate ceiling (default 30, 1–120). NDI paces the receiver from this.
+- `fps` — frame-rate ceiling (default 30, 1–120). The driver sends no faster than this and declares the rate in every frame.
 
 Status tells you where you are: `NDI runtime not installed` (install it), `could not create the NDI source` (the runtime is there but refused), or `sending <w>x<h> at <n> fps` when it is live.
 

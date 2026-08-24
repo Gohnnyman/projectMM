@@ -199,7 +199,17 @@ public:
         // failure is a Warning rather than an Error: the driver still runs and still records frames,
         // which is what a test or a dry run wants — it just is not driving panels.
         if (!platform::ethBindRawInterface(interface[0] ? interface : nullptr)) {
-            setStatus("cannot open interface (needs root?)", Severity::Warning);
+            // Two very different causes reach here and the fixes are opposite: a name that matches
+            // no adapter (a typo, or an OS naming the NIC differently) versus the privilege raw L2
+            // needs. Blaming root for a typo sends the reader to sudo, which cannot help. Name the
+            // string we failed to match so the likelier cause is the one they read first.
+            if (interface[0]) {
+                std::snprintf(statusBuf_, sizeof(statusBuf_),
+                              "cannot open '%s' - no adapter matches, or needs root", interface);
+                setStatus(statusBuf_, Severity::Warning);
+            } else {
+                setStatus("cannot open interface (needs root?)", Severity::Warning);
+            }
             return;
         }
 

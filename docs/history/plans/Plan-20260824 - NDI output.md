@@ -52,7 +52,7 @@ encode cost does not belong on a microcontroller).
 
 The seam is deliberately tiny — four functions, mirroring the pcap surface:
 
-```
+```cpp
 bool ndiAvailable();                                  // runtime present and loaded
 bool ndiSenderOpen(const char* name);                 // create a named source
 void ndiSenderClose();
