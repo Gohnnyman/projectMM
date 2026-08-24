@@ -211,6 +211,12 @@ TEST_CASE("a number too large for an int is refused rather than wrapped") {
     CHECK_FALSE(eng.compile(mmScript("int huge = 3000000000;\nsetRGB(0, huge, 0, 0);"),
                             kTable, kSys));
     eng.free();
+    // One PAST the most negative int: the lexer admits the magnitude 2147483648 so that
+    // -2147483648 can be written, so the sign-aware site is what has to catch this.
+    moonlive::MoonLive engLow;
+    CHECK_FALSE(engLow.compile(mmScript("int low = -2147483649;\nsetRGB(0, low, 0, 0);"),
+                               kTable, kSys));
+    engLow.free();
     moonlive::MoonLive eng2;
     CHECK_FALSE(eng2.compile(mmScript("int huge = 99999999999;\nsetRGB(0, huge, 0, 0);"),
                              kTable, kSys));
@@ -932,6 +938,41 @@ TEST_CASE("a member survives a spill across the 32-bit slot access") {
                           "g = a + b + c + d + e + f;\n"
                           "setRGB(0, g / 100, 0, 0);"), 1)[0] == 210);
 }
+
+// The two BOUNDARY literals, in an expression rather than an initializer. Both have a magnitude
+// one past their type's positive limit, so a lexer that judged the number before the sign made
+// them unwritable: -2147483648 is the most negative int and -32768.0 the most negative fixed.
+TEST_CASE("the most negative int and fixed values can be written in an expression") {
+    CHECK(render(mmScript("int n = 0;\n"
+                          "n = -2147483648;\n"
+                          "if (n < 0) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 9);
+    CHECK(render(mmScript("fixed f = 0.0;\n"
+                          "f = -32768.0;\n"
+                          "if (f < 0) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 9);
+}
+
+// A fixed multiply where the destination is also a source, and where a long chain forces the
+// allocator to reuse registers. On x86-64 the emitted sequence borrows a scratch register and
+// writes its destination last; an ordering mistake there returns a*a, or a stale value, rather
+// than the product. Run rather than decoded, because the byte shape is what hid the bug twice.
+TEST_CASE("a fixed multiply is correct when its destination aliases a source") {
+    // f = f * two: destination and first source are the same member.
+    CHECK(render(mmScript("fixed f = 1.5;\n"
+                          "fixed two = 2.0;\n"
+                          "f = f * two;\n"
+                          "setRGB(0, toInt(f * toFixed(50)), 0, 0);"), 1)[0] == 150);
+    // A chain long enough that the allocator recycles registers between the multiplies.
+    CHECK(render(mmScript("fixed a = 1.5;\n"
+                          "fixed b = 2.0;\n"
+                          "fixed c = 0.5;\n"
+                          "fixed d = 4.0;\n"
+                          "fixed r = 0.0;\n"
+                          "r = a * b * c * d;\n"      // 1.5*2*0.5*4 = 6.0
+                          "setRGB(0, toInt(r * toFixed(20)), 0, 0);"), 1)[0] == 120);
+}
+
 #endif   // MM_MOONLIVE_HAS_HOST_JIT
 
 // Compile-only from here down: these assert DIAGNOSTICS, which the front end produces
@@ -1206,4 +1247,13 @@ TEST_CASE("every shipped script compiles") {
         }
     }
     CHECK(checked > 0);          // an empty folder would pass the loop vacuously
+}
+
+// A sign has no meaning on a boolean. `-true` consumed the minus and then ignored it, seeding the
+// member to 1 as though nothing had been written.
+TEST_CASE("a bool initializer takes no sign") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { bool b = -true; tick() { setRGB(0, 1, 0, 0); } }",
+                            kTable, kSys));
+    eng.free();
 }

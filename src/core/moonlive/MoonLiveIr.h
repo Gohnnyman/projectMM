@@ -191,10 +191,9 @@ struct DeclaredControl {
     uint8_t     nameLen = 0;           // length (the source is not NUL-terminated per token)
     CtrlType    type = CtrlType::Int;
     // Byte offset into the controls arena, assigned as a running CURSOR in declaration order. Not
-    // the declaration index: a scalar costs a whole 4-byte slot and an array costs count *
-// element width, so the
-    // n-th member is no longer at byte n. Everything downstream (the bindings' cached slot
-    // pointers, persistence, addUint8's by-reference argument) already keys on this offset, which
+    // the declaration index: a scalar costs a whole 4-byte slot and an array costs count * element
+    // width, so the n-th member is no longer at byte n. Everything downstream (the bindings'
+    // cached slot pointers, persistence, addControl's by-reference argument) keys on this offset,
     // is why widening a member does not reach any of them.
     uint8_t     offset = 0;
     // Elements: 1 for a scalar, the length for an array. Total bytes is count * ctrlWidth(type).

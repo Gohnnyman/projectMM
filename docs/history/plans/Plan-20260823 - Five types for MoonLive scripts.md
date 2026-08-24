@@ -30,7 +30,7 @@ Approved scope: all five types in one branch, including `fixed` and `string`.
 | Type | Scalar | Array element | Control |
 |---|---|---|---|
 | `int` | 4 bytes | 4 bytes | `Int32` (new) |
-| `byte` | 4-byte slot, narrowed by the store | 1 byte | `Uint8` |
+| `byte` | 4-byte slot, narrowed by the store | 1 byte | `Uint8` (a 0..255 slider) |
 | `bool` | 4-byte slot, narrowed by the store | 1 byte | `Bool` |
 | `fixed` | 4 bytes, Q16.16 | (refused, see below) | none |
 | `string` | 4 bytes (pool offset) | not allowed | none |
@@ -69,7 +69,8 @@ three bytes are always zero.
 
 ## Verification
 
-- 1456 unit tests, 20 scenario tests, all 11 pre-commit gates.
+- The unit suite and 20 scenario tests, all 11 pre-commit gates, on arm64 AND on x86-64
+  under Rosetta — the x86-only tests no arm64 run compiles are where two defects hid.
 - Every shipped script compiles, on the host backend and on both device ISAs.
 - `disasm.py` on all four backends, reading the emitted sequences by eye.
 - On hardware: desktop and an ESP32-S3 (shiffy), with the product owner's eyes on metal, fractal,
@@ -88,8 +89,10 @@ Recorded because the plan was wrong about them, and the next reader should not r
 - **`fixed[]` is refused, not shipped.** Element type-tracking needs the array's type to reach both
   the read and the write; scalars get that from their declaration, elements would need it per array.
   Parity with `string[]`, deferred until a script needs it.
-- **`bool` truncates rather than normalizing** (`flag = 256` reads false): normalizing needs a
-  compare-and-select the IR has no op for.
+- **`bool` truncates on store rather than normalizing** (`flag = 256` reads false): normalizing in
+  the emitted code needs a compare-and-select the IR has no op for, and a branch would spend two of
+  the script's sixteen labels. The byte IS normalized where it matters — at publish time, before
+  the UI binding reads it through a `bool*`, which would otherwise be undefined behaviour.
 - **`string` is declared but inert** — a string member cannot be initialized yet, and says so.
 
 ## The lesson that cost the most

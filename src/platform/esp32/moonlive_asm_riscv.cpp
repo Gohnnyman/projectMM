@@ -202,9 +202,18 @@ void RiscvAssembler::addReg(Reg d, Reg a, Reg b) { emit32(encAdd(xr(d), xr(a), x
 void RiscvAssembler::mulReg(Reg d, Reg a, Reg b) { emit32(encMul(xr(d), xr(a), xr(b))); }
 
 void RiscvAssembler::mulhi(Reg d, Reg a, Reg b) { emit32(encMulh(xr(d), xr(a), xr(b))); }
-void RiscvAssembler::shlImm(Reg d, Reg a, uint8_t n) { emit32(encSlli(xr(d), xr(a), n)); }
-void RiscvAssembler::sarImm(Reg d, Reg a, uint8_t n) { emit32(encSrai(xr(d), xr(a), n)); }
-void RiscvAssembler::shrImm(Reg d, Reg a, uint8_t n) { emit32(encSrli(xr(d), xr(a), n)); }
+void RiscvAssembler::shlImm(Reg d, Reg a, uint8_t n) {
+    if (n >= 32) { overflow_ = true; return; }   // shamt is five bits
+    emit32(encSlli(xr(d), xr(a), n));
+}
+void RiscvAssembler::sarImm(Reg d, Reg a, uint8_t n) {
+    if (n >= 32) { overflow_ = true; return; }   // shamt is five bits
+    emit32(encSrai(xr(d), xr(a), n));
+}
+void RiscvAssembler::shrImm(Reg d, Reg a, uint8_t n) {
+    if (n >= 32) { overflow_ = true; return; }   // shamt is five bits
+    emit32(encSrli(xr(d), xr(a), n));
+}
 // The 4-byte slot access. encLw/encSw already existed for spills; these give them an arbitrary
 // base and offset, which is what a member slot needs.
 void RiscvAssembler::load32(Reg d, Reg base, int32_t imm) { emit32(encLw(xr(d), xr(base), imm)); }
@@ -227,7 +236,7 @@ void RiscvAssembler::load8(Reg d, Reg base, int32_t imm) {   // lbu rDst, imm(rB
     emit32(((uint32_t(imm) & 0xfff) << 20) | (xr(base) << 15) | (4 << 12) | (xr(d) << 7) | 0x03);
 }
 // RISC-V has no register-offset addressing mode, so the address is computed first. Same shape as
-// store8/store16, which is why they share kScratchAddr.
+// store8 and store32, which is why they share kScratchAddr.
 void RiscvAssembler::load8Idx(Reg d, Reg base, Reg off) {
     emit32(encAdd(kScratchAddr, xr(base), xr(off)));                              // t6 = base + off
     emit32((uint32_t(kScratchAddr) << 15) | (4 << 12) | (xr(d) << 7) | 0x03);     // lbu d, 0(t6)

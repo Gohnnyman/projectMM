@@ -502,47 +502,67 @@ void HostAssembler::emitIndexed(const uint8_t* opcode, size_t opLen, bool prefix
     emitBytes(b, n);
 }
 
-// The signed high 32 bits of a * b. A vreg holds a 32-bit value, so both operands are
-// sign-extended to 64 bits before a 64-bit imul; the arithmetic shift then takes the high word.
+// The signed high 32 bits of a * b, for the Q16.16 multiply.
 //
-// rax is the scratch, exactly as call() uses it: it is the last vreg (R13) and the assembler
-// already relies on saving it before borrowing it. Every OTHER volatile register (r9/r10/r11)
-// is inside the vreg pool, so using one would clobber a live virtual register.
+// ALIAS-SAFE BY CONSTRUCTION: both sources are read before the destination is written, and the
+// only register touched is rax, saved and restored around the sequence. The intermediate lives on
+// the STACK rather than in a borrowed register, because there is no register here that is safe to
+// borrow: rax is vreg R13, and r10/r11 are R5/R6 — the FIRST temps the allocator hands out, so
+// borrowing them is worse than borrowing rax, not better. Two earlier attempts each picked a
+// register that turned out to be allocatable, and each produced the same failure: `pop` restoring
+// a stale value over the result when the destination aliased the scratch, or a source destroyed
+// before it was read. A silently wrong number, not a crash.
+//
+//   movsxd rax, aD    ; push rax        — a widened, parked
+//   movsxd rax, bD    ; imul rax, [rsp] — b widened, then the 64-bit product
+//   sar rax, 32       ; mov dD, rax     — the high word, into d only now
+//   add rsp, 8                          — discard, without writing any register
 void HostAssembler::mulhi(Reg d, Reg a, Reg b) {
-    // BOTH sources are read into scratch BEFORE anything is written, so d may alias a, b, or the
-    // scratch itself. An earlier version borrowed rax around a push/pop and wrote d in the middle:
-    // with d == rax (which IS a vreg here — rax is R13, see the static_assert above) the pop then
-    // restored the old value over the result, and with b == rax the movsxd destroyed b before it
-    // was read. Neither shows on any current program, because the lowering reserves the scratch
-    // range; relying on that is exactly the kind of unstated precondition that breaks later.
-    //
-    // r10/r11 are pushed and popped around the sequence, so no vreg is disturbed whichever
-    // registers d, a and b turn out to be.
     const uint8_t dst = xr(d), ra = xr(a), rb = xr(b);
-    const uint8_t s1 = x64::R10, s2 = x64::R11;
+    const uint8_t RAX = x64::RAX;
 
-    uint8_t push1[2] = {rex_(false, false, false, true), uint8_t(0x50 | (s1 & 7))};
-    emitBytes(push1, 2);                                             // push r10
-    uint8_t push2[2] = {rex_(false, false, false, true), uint8_t(0x50 | (s2 & 7))};
-    emitBytes(push2, 2);                                             // push r11
+    uint8_t save[1] = {uint8_t(0x50 | (RAX & 7))};
+    emitBytes(save, 1);                                              // push rax  (save the vreg)
 
-    uint8_t ext_a[3] = {rex_(true, s1 >= 8, false, ra >= 8), 0x63, modrm_(0b11, s1 & 7, ra & 7)};
-    emitBytes(ext_a, 3);                                             // movsxd r10, aD
-    uint8_t ext_b[3] = {rex_(true, s2 >= 8, false, rb >= 8), 0x63, modrm_(0b11, s2 & 7, rb & 7)};
-    emitBytes(ext_b, 3);                                             // movsxd r11, bD
-    uint8_t mul[4] = {rex_(true, s1 >= 8, false, s2 >= 8), 0x0F, 0xAF,
-                      modrm_(0b11, s1 & 7, s2 & 7)};
-    emitBytes(mul, 4);                                               // imul r10, r11
-    uint8_t sar[4] = {rex_(true, false, false, s1 >= 8), 0xC1, modrm_(0b11, 7, s1 & 7), 32};
-    emitBytes(sar, 4);                                               // sar r10, 32
-    // The result lands in d only now, after every source has been consumed.
-    uint8_t mov[3] = {rex_(true, s1 >= 8, false, dst >= 8), 0x89, modrm_(0b11, s1 & 7, dst & 7)};
-    emitBytes(mov, 3);                                               // mov dD, r10
+    // The operand that might BE rax is widened FIRST, because the other widening overwrites rax.
+    // Reading a first when b == rax destroyed b before it was ever read — the third shape of the
+    // same mistake, and the reason both operands are now ordered rather than assumed independent.
+    const uint8_t first = (rb == RAX) ? rb : ra;
+    const uint8_t second = (rb == RAX) ? ra : rb;
 
-    uint8_t pop2[2] = {rex_(false, false, false, true), uint8_t(0x58 | (s2 & 7))};
-    emitBytes(pop2, 2);                                              // pop r11
-    uint8_t pop1[2] = {rex_(false, false, false, true), uint8_t(0x58 | (s1 & 7))};
-    emitBytes(pop1, 2);                                              // pop r10
+    uint8_t ext1[3] = {rex_(true, RAX >= 8, false, first >= 8), 0x63,
+                       modrm_(0b11, RAX & 7, first & 7)};
+    emitBytes(ext1, 3);                                              // movsxd rax, <first>
+    uint8_t park[1] = {uint8_t(0x50 | (RAX & 7))};
+    emitBytes(park, 1);                                              // push rax  (park it)
+
+    uint8_t ext2[3] = {rex_(true, RAX >= 8, false, second >= 8), 0x63,
+                       modrm_(0b11, RAX & 7, second & 7)};
+    emitBytes(ext2, 3);                                              // movsxd rax, <second>
+    // imul rax, [rsp] — the parked a. modrm mod=00 rm=100 selects a SIB byte; the SIB names rsp
+    // as base with no index, which is how [rsp] is addressed.
+    uint8_t mul[5] = {rex_(true, RAX >= 8, false, false), 0x0F, 0xAF,
+                      modrm_(0b00, RAX & 7, 0b100), sib_(0, 0b100, x64::RSP & 7)};
+    emitBytes(mul, 5);
+    uint8_t sar[4] = {rex_(true, false, false, RAX >= 8), 0xC1, modrm_(0b11, 7, RAX & 7), 32};
+    emitBytes(sar, 4);                                               // sar rax, 32
+
+    // Both sources are spent; only now does d take the result.
+    uint8_t mov[3] = {rex_(true, RAX >= 8, false, dst >= 8), 0x89, modrm_(0b11, RAX & 7, dst & 7)};
+    emitBytes(mov, 3);                                               // mov dD, rax
+
+    uint8_t drop[4] = {rex_(true, false, false, false), 0x83, modrm_(0b11, 0, x64::RSP & 7), 8};
+    emitBytes(drop, 4);                                              // add rsp, 8 (discard a)
+    // The saved rax is restored LAST, and into rax only — if d IS rax the mov above already put
+    // the result there, so this would overwrite it. Pop into rax is therefore skipped in that
+    // case and the stack adjusted instead.
+    if (dst == RAX) {
+        uint8_t skip[4] = {rex_(true, false, false, false), 0x83, modrm_(0b11, 0, x64::RSP & 7), 8};
+        emitBytes(skip, 4);                                          // add rsp, 8
+    } else {
+        uint8_t rest[1] = {uint8_t(0x58 | (RAX & 7))};
+        emitBytes(rest, 1);                                          // pop rax
+    }
 }
 // 32-bit shifts: C1 /4 ib is shl, C1 /7 ib is sar. No REX.W — a vreg is 32 bits, and the
 // arithmetic shift must fill from bit 31, not bit 63.

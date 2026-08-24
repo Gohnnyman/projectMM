@@ -240,16 +240,28 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
             // The shift amount is an immediate 1..31. A zero shift is a no-op the front end never
             // emits (Xtensa cannot even encode it: slli's field holds 32-n).
             case IrOp::Shl:
+                // A shift of 0 is a move; anything outside 1..31 has no encoding and must REFUSE
+                // rather than silently become one, which is the stance Xtensa's shrImm takes for
+                // the same reason: a wrong constant that still runs is the worst outcome.
                 if (op.imm > 0 && op.imm < 32) a.shlImm(reg(op.dst), reg(op.a), uint8_t(op.imm));
-                else if (op.dst != op.a) a.movReg(reg(op.dst), reg(op.a));
+                else if (op.imm == 0) { if (op.dst != op.a) a.movReg(reg(op.dst), reg(op.a)); }
+                else a.shlImm(reg(op.dst), reg(op.a), 32);   // no encoding: the assembler refuses
                 break;
             case IrOp::Shr:
+                // A shift of 0 is a move; anything outside 1..31 has no encoding and must REFUSE
+                // rather than silently become one, which is the stance Xtensa's shrImm takes for
+                // the same reason: a wrong constant that still runs is the worst outcome.
                 if (op.imm > 0 && op.imm < 32) a.shrImm(reg(op.dst), reg(op.a), uint8_t(op.imm));
-                else if (op.dst != op.a) a.movReg(reg(op.dst), reg(op.a));
+                else if (op.imm == 0) { if (op.dst != op.a) a.movReg(reg(op.dst), reg(op.a)); }
+                else a.shrImm(reg(op.dst), reg(op.a), 32);   // no encoding: the assembler refuses
                 break;
             case IrOp::Sar:
+                // A shift of 0 is a move; anything outside 1..31 has no encoding and must REFUSE
+                // rather than silently become one, which is the stance Xtensa's shrImm takes for
+                // the same reason: a wrong constant that still runs is the worst outcome.
                 if (op.imm > 0 && op.imm < 32) a.sarImm(reg(op.dst), reg(op.a), uint8_t(op.imm));
-                else if (op.dst != op.a) a.movReg(reg(op.dst), reg(op.a));
+                else if (op.imm == 0) { if (op.dst != op.a) a.movReg(reg(op.dst), reg(op.a)); }
+                else a.sarImm(reg(op.dst), reg(op.a), 32);   // no encoding: the assembler refuses
                 break;
             // A real register move, NOT add-immediate-zero: Xtensa's addi.n cannot encode 0, since
             // the ISA reuses that slot for -1, so `dst = a + 0` silently computed a - 1. A loop

@@ -312,6 +312,9 @@ void XtensaAssembler::mulhi(Reg d, Reg a, Reg b) {
 // slli aD, aA, #n : the field holds 32-n, split across bits 20-23 (high bit) and 4-7 (low
 // nibble). n==0 is unencodable and the lowering never asks.
 void XtensaAssembler::shlImm(Reg d, Reg a, uint8_t n) {
+    // 1..31 only: the field holds 32-n, so n==0 and n>=32 have no encoding and would emit a
+    // shift by some other amount. Refuse, the way shrImm below does.
+    if (n == 0 || n >= 32) { overflow_ = true; return; }
     const uint32_t k = 32u - n;
     emit3(((k >> 4) << 20) | 0x010000u | (uint32_t(ar(d)) << 12) | (uint32_t(ar(a)) << 8) |
           ((k & 0x0fu) << 4));
@@ -319,6 +322,7 @@ void XtensaAssembler::shlImm(Reg d, Reg a, uint8_t n) {
 // srai aD, aA, #n : arithmetic, sign-filling. The amount rides bits 8-11 (low nibble) and bit 20
 // (high bit, folded into the 0x2/0x3 opcode nibble).
 void XtensaAssembler::sarImm(Reg d, Reg a, uint8_t n) {
+    if (n >= 32) { overflow_ = true; return; }   // the amount field is five bits
     emit3(((0x2u | (uint32_t(n) >> 4)) << 20) | 0x010000u | (uint32_t(ar(d)) << 12) |
           ((uint32_t(n) & 0x0fu) << 8) | (uint32_t(ar(a)) << 4));
 }
@@ -380,7 +384,7 @@ void XtensaAssembler::load8(Reg d, Reg base, int32_t imm) {
 
 
 // Xtensa has no register-offset load either. The computed address goes through kAddrScratch, the
-// same temp store8/store16 use, and the RRI8 offset is 0 so the halfword scaling never applies.
+// same temp store8 uses, and the RRI8 offset is 0 so the offset scaling never applies.
 void XtensaAssembler::load8Idx(Reg d, Reg base, Reg off) {
     emit2(uint16_t((kAddrScratch << 12) | (ar(base) << 8) | (ar(off) << 4) | 0xa));   // add.n a12, base, off
     const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), kAddrScratch, 0x00};           // l8ui d, a12, 0

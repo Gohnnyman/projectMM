@@ -71,7 +71,10 @@ struct Lexer {
                 if (den <= 100000000LL) { num = num * 10 + (*p - '0'); den *= 10; }
                 p++;
             }
-            if (v > 32767) { overflowed = true; return true; }
+            // The MAGNITUDE: 32768.0 is legal with a leading minus (the most negative Q16.16
+            // value) and refused without one, which is a judgement only the sign-aware caller can
+            // make. Same rule the integer path follows for 2147483648.
+            if (v > 32768) { overflowed = true; return true; }
             // The integer part scales by 65536; the fraction is num/den of that, rounded.
             v = (v << 16) + (num * 65536 + den / 2) / den;
         }
@@ -483,6 +486,23 @@ struct Parser {
         }
         if (lex.kind == Tok::Minus) {                    // unary minus: 0 - v, as (v * -1)
             lex.advance();
+            // A NEGATED LITERAL folds here, before the positive form is range-checked: the
+            // magnitude 2147483648 is legal only with the sign attached, so parsing the number
+            // first made INT32_MIN unwritable in an expression (`v = -2147483648;` was refused
+            // while the identical initializer compiled). Folding also spares a Const and a Mul.
+            if (lex.kind == Tok::Number) {
+                const int64_t neg = -lex.number;
+                if (neg < INT32_MIN || neg > INT32_MAX) { fail("number out of range"); return 0; }
+                VReg v = alloc();
+                emit({IrOp::Const, v, 0,0,0,0, static_cast<int32_t>(neg), nullptr, {}});
+                // A FIXED literal folds here too: `-32768.0` is the most negative Q16.16 value and
+                // its magnitude is one past the positive limit, so parsing the number first and
+                // negating after made it unwritable — the same shape as INT32_MIN.
+                exprIsFixed = lex.numberIsFixed;
+                exprLitConst = lex.numberIsFixed ? -1 : int(ir.count) - 1;
+                lex.advance();
+                return v;
+            }
             VReg v = parsePrimary();
             if (failed) return 0;
             VReg m = alloc();
@@ -507,6 +527,10 @@ struct Parser {
             // and the member it was assigned to disagree about what a number could be.
             if (lex.number < INT32_MIN || lex.number > INT32_MAX)
                 { fail("number out of range"); return 0; }
+            // A positive fixed literal stops at 32767.99998; the magnitude 32768.0 the lexer now
+            // admits is legal only with the minus the branch above folds.
+            if (lex.numberIsFixed && lex.number > INT32_MAX)      // 32767.99998 in Q16.16
+                { fail("number out of range for a fixed value"); return 0; }
             VReg v = alloc();
             emit({IrOp::Const, v, 0,0,0,0, static_cast<int32_t>(lex.number), nullptr, {}});
             // A decimal point made it a fixed value at the lexer; the word is already scaled.
@@ -843,7 +867,10 @@ struct Parser {
             // Zero, not a written initializer: an element-wise initializer list would be a second
             // syntax for what a `for` in the script already expresses, and every element seeding to
             // the same value is what a decay or particle buffer starts from anyway.
-            members[memberCount] = {name, 0, 255, 0, static_cast<uint8_t>(nameLen), type,
+            // The RANGE is not the compiler's to state: it arrives with the addControl call at
+            // run time, through addDeclaredControl. Zeroed here rather than carrying a 0..255
+            // that an int or fixed member would flatly contradict.
+            members[memberCount] = {name, 0, 0, 0, static_cast<uint8_t>(nameLen), type,
                                     static_cast<uint8_t>(at), count};
             memberBytes = static_cast<uint8_t>(at + need);
             memberCount++;
@@ -859,6 +886,10 @@ struct Parser {
         // `true`/`false` seed a bool the way a script writes one.
         if (lex.kind == Tok::Ident && (atKeyword("true", 4) || atKeyword("false", 5))) {
             if (type != CtrlType::Bool) { fail("true and false initialize a bool member"); return; }
+            // `-true` parsed: the minus was consumed above and then never consulted, so the member
+            // seeded to 1 as though the sign had not been written. A sign has no meaning on a
+            // boolean, so say so rather than silently discarding it.
+            if (negated) { fail("true and false take no sign"); return; }
             const long b = atKeyword("true", 4) ? 1 : 0;
             lex.advance();
             if (!expect(Tok::Semicolon, "expected ';' after the member declaration")) return;
@@ -940,7 +971,9 @@ struct Parser {
         // def is int32_t on the record so a member's whole initializer survives; casting it
         // narrower here truncated `uint16_t phase = 1000;` to 232. Invisible to a test that
         // observes through setRGB, because the error is always a multiple of 256.
-        members[memberCount] = {name, 0, 255, static_cast<int32_t>(def),
+        // Range zeroed for the reason the array path gives: the control's range comes from
+        // addControl at run time, not from the declaration.
+        members[memberCount] = {name, 0, 0, static_cast<int32_t>(def),
                                 static_cast<uint8_t>(nameLen), type,
                                 static_cast<uint8_t>(at), 1};
         memberBytes = static_cast<uint8_t>(at + need);

@@ -165,6 +165,13 @@ public:
             // the low byte would be at offset+3 — no supported target is one.
             switch (decls[i].type) {
                 case moonlive::CtrlType::Bool:
+                    // NORMALIZED before the byte is ever read as a `bool`. A script's store
+                    // truncates rather than normalizing, so a bool member can legally hold 7
+                    // (`flag = 7;` is ordinary arithmetic to the language), and a C++ bool object
+                    // holding anything but 0 or 1 is undefined behaviour the moment it is read.
+                    // One write at publish time settles it; every later write comes through
+                    // applyControlValue's parseBool, which yields 0 or 1 by construction.
+                    *slot = (*slot != 0) ? 1 : 0;
                     controls.addBool(decls[i].name, *reinterpret_cast<bool*>(slot));
                     break;
                 case moonlive::CtrlType::Byte:

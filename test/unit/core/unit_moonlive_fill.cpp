@@ -776,7 +776,7 @@ TEST_CASE("a class declaring more member data than the arena holds is refused") 
 // A uint16_t member holds a value a byte cannot. This is the correctness wall on a 256-wide wall:
 // every arena slot was 8-bit, so a coordinate clamped at 255 and a modifier could not walk a light
 // off a large grid. The round trip is what matters: seeded wide, read wide, written wide.
-TEST_CASE("a int member holds a value above 255") {
+TEST_CASE("an int member holds a value above 255") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
                         "  int big = 1000;\n"
@@ -796,7 +796,7 @@ TEST_CASE("a int member holds a value above 255") {
 // The high byte must survive being stored and reloaded. A store that wrote only the low half would
 // pass the test above on the first tick and lose the value on the second, so the boundary at 256 is
 // checked directly: 255 -> 256 is exactly where a byte member wraps to 0 and a halfword does not.
-TEST_CASE("a int member crosses the 255 boundary without wrapping") {
+TEST_CASE("an int member crosses the 255 boundary without wrapping") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
                         "  int n = 255;\n"
@@ -966,7 +966,7 @@ TEST_CASE("a byte member cannot be initialized above 255") {
 }
 
 // The same value is legal once the member is declared wide enough to hold it.
-TEST_CASE("a int member accepts an initializer a byte could not hold") {
+TEST_CASE("an int member accepts an initializer a byte could not hold") {
     moonlive::MoonLive eng;
     CHECK(eng.compile("class T { int x = 300; tick() { setRGB(0, x - 300, 0, 0); } }", kCtrlTable, kSys));
     eng.free();
@@ -1160,7 +1160,7 @@ TEST_CASE("setRGB still names the light it writes") {
 // `uint16_t phase = 1000;` started at 232 (1000 & 0xff). Every existing test observed through
 // setRGB, which truncates to a byte, and the error is always a multiple of 256: invisible.
 // Observed here through a COMPARISON instead, which the byte channel cannot hide.
-TEST_CASE("a int member starts at the value it was initialized to") {
+TEST_CASE("an int member starts at the value it was initialized to") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
                         "  int phase = 1000;\n"

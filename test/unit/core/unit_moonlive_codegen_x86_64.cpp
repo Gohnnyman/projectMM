@@ -560,7 +560,7 @@ TEST_CASE("x86_64: two sequential call-bearing loops stay under the density boun
 TEST_CASE("x86_64: a class with a script-to-script call compiles") {
     const char* src =
         "class T {\n"
-        "  uint8_t level = 200;\n"
+        "  byte level = 200;\n"
         "  paint() { setRGB(1, level, 0, 0); }\n"
         "  tick()  { setRGB(0, 7, 8, 9); paint(); }\n"
         "}\n";
@@ -575,42 +575,57 @@ TEST_CASE("x86_64: a class with a script-to-script call compiles") {
     CHECK(r.entryCount == 2);
 }
 
-// The Q16.16 multiply, whose sequence must survive d aliasing a or b.
+// The Q16.16 multiply. The sequence must survive d aliasing a or b, AND must not borrow any
+// register the allocator can hand out.
 //
-// This backend had NO encoding tests for the new primitives while arm64, Xtensa and RISC-V all
-// gained them — and its mulhi borrowed rax, which IS a vreg here (R13). With d == rax the old
-// pop restored the stale value over the result; with b == rax the movsxd destroyed b before it
-// was read. Both are silently wrong answers, not crashes. Bytes checked against clang's own
-// assembly of the same sequence.
-TEST_CASE("x86_64: mulhi reads both sources before it writes its destination") {
+// Two earlier versions failed that second rule: the first borrowed rax (vreg R13), the second
+// r10/r11 — which are R5/R6, the FIRST temps the allocator assigns, so it was strictly worse.
+// Both produced a silently wrong number: `pop` restoring a stale value over the result when d
+// aliased the scratch, or a source destroyed before it was read. The intermediate now lives on
+// the STACK and only rax is touched, saved and restored around the whole sequence.
+//
+// Bytes verified against clang's assembly of the same instruction sequence.
+TEST_CASE("x86_64: mulhi borrows no allocatable register") {
     HostAssembler a; a.mulhi(R0, R1, R2); a.finalize();
     const uint8_t* b = a.bytes();
-    REQUIRE(a.size() >= 12);
-    // push r10 / push r11 open the sequence: the scratch pair is saved, so no vreg is disturbed
-    // whichever registers the three operands turn out to be.
-    CHECK(b[0] == 0x41); CHECK(b[1] == 0x52);        // push r10
-    CHECK(b[2] == 0x41); CHECK(b[3] == 0x53);        // push r11
-    // ...and pop restores them at the end, AFTER the result has been moved into d.
-    CHECK(b[a.size() - 4] == 0x41); CHECK(b[a.size() - 3] == 0x5b);   // pop r11
-    CHECK(b[a.size() - 2] == 0x41); CHECK(b[a.size() - 1] == 0x5a);   // pop r10
+    REQUIRE(a.size() >= 24);
+    // No push/pop of r10 or r11 anywhere: those encode as 41 52 / 41 53 / 41 5a / 41 5b, and a
+    // 0x41 REX.B prefix on a push is the tell. Their absence is the property under test.
+    for (size_t i = 0; i + 1 < a.size(); i++) {
+        const bool pushPopR8plus = (b[i] == 0x41) &&
+                                   ((b[i + 1] & 0xf8) == 0x50 || (b[i + 1] & 0xf8) == 0x58);
+        CHECK_FALSE(pushPopR8plus);
+    }
+    CHECK(b[0] == 0x50);                             // opens by saving rax
+    // The parked operand is discarded with `add rsp, 8` — a stack adjust, never a pop into some
+    // register. The sequence then ends either with `pop rax` (d is not rax) or a second adjust.
+    bool sawAdjust = false;
+    for (size_t i = 0; i + 3 < a.size(); i++)
+        if (b[i] == 0x48 && b[i + 1] == 0x83 && b[i + 2] == 0xc4 && b[i + 3] == 0x08)
+            sawAdjust = true;
+    CHECK(sawAdjust);
 }
 
-// The same sequence with the destination aliasing each source in turn, and with R13 (rax) in
-// every position. None may produce a different shape: the result is computed in scratch and only
-// then written, so aliasing cannot destroy an operand that has still to be read.
-TEST_CASE("x86_64: mulhi emits the same shape however its operands alias") {
-    const size_t base = [] { HostAssembler a; a.mulhi(R0, R1, R2); a.finalize(); return a.size(); }();
+// The destination aliasing each source, and rax itself. None may lose an operand or its result:
+// with d == rax the saved value must NOT be popped back over the answer.
+TEST_CASE("x86_64: mulhi handles every aliasing of its operands") {
     for (const auto& regs : {std::array<Reg, 3>{R0, R0, R1},    // d aliases a
                              std::array<Reg, 3>{R0, R1, R0},    // d aliases b
                              std::array<Reg, 3>{R0, R0, R0},    // all three
-                             std::array<Reg, 3>{R13, R1, R2},   // d is rax
+                             std::array<Reg, 3>{R5, R1, R2},    // d is a low temp (r10/r9)
+                             std::array<Reg, 3>{R0, R5, R6},    // both sources are low temps
+                             std::array<Reg, 3>{R13, R1, R2},   // d IS rax
                              std::array<Reg, 3>{R0, R13, R2},   // a is rax
                              std::array<Reg, 3>{R0, R1, R13}})  // b is rax
     {
         HostAssembler a; a.mulhi(regs[0], regs[1], regs[2]); a.finalize();
-        CHECK(a.size() == base);
-        CHECK(a.bytes()[0] == 0x41);                 // still opens by saving the scratch
-        CHECK(a.bytes()[a.size() - 1] == 0x5a);      // still closes by restoring it
+        CHECK(a.size() >= 24);
+        CHECK(a.bytes()[0] == 0x50);                 // always saves rax first
+        // The stack is always balanced: one save-push, one park-push, and two 8-byte adjustments
+        // (or one adjustment and one pop when the destination is not rax).
+        int pushes = 0;
+        for (size_t i = 0; i < a.size(); i++) if (a.bytes()[i] == 0x50) pushes++;
+        CHECK(pushes >= 2);
     }
 }
 

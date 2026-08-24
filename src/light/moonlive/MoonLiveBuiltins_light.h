@@ -469,7 +469,7 @@ using AddLightFn = void (*)(void* ctx, uint16_t x, uint16_t y, uint16_t z);
 /// and a third would mean a genuinely new concurrency story rather than a bigger table.
 struct AddLightSink { AddLightFn fn = nullptr; void* ctx = nullptr; };
 
-/// Where a running `defineControls()` sends each `addUint8` / `addUint16`. Same shape and same
+/// Where a running `defineControls()` sends each `addControl`. Same shape and same
 /// reason as the addLight sink: a builtin has no receiver, so the binding installs one for the
 /// duration of the run and the call reaches the engine through it.
 ///

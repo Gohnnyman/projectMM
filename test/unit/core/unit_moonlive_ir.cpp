@@ -169,7 +169,10 @@ TEST_CASE("MoonLive control survives a host call (kArg4 live across random16)") 
     platform::writeExec(blk, code, r.len);
     auto fn = reinterpret_cast<CtrlFn>(blk);
 
-    uint8_t arena[1] = {7};
+    // A member occupies a whole 4-byte SLOT and is read with a 32-bit load, so the arena has to
+    // hold all four bytes: a one-byte array would have the load reading past its end, and the
+    // index would come back as whatever followed it on the stack.
+    uint8_t arena[4] = {7, 0, 0, 0};
     std::vector<uint8_t> buf(16 * 3, 0);
     fn(buf.data(), 16, 3, 0, arena);
     // pixel 7 is lit (its blue channel is 255), and ONLY pixel 7 (the control index held across the call)
