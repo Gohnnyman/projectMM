@@ -113,7 +113,7 @@ To set it up:
 3. **Pick what it drives.** The driver lists the bridge's color-capable, reachable bulbs and its rooms; use the `room` / `light` controls to aim the effect at all bulbs, one room, or a single light. Each selected bulb becomes one pixel of the driver's window.
 4. **Run an effect.** Any effect on the layer now drives the bulbs — the global brightness slider and color-order correction apply to them just like a physical strip (brightness 0 turns a bulb off).
 
-*Note:* a bulb is only driven if it's an "Extended color light" and currently reachable — a white-only bulb, a plug, or a powered-off light is skipped. For true real-time (fast) Hue, the [Hue Entertainment API](https://developers.meethue.com/develop/hue-entertainment/) (DTLS streaming) is a separate future path; today's driver targets the standard API's ambient-color sweet spot.
+*Note:* a bulb is only driven if it's an "Extended color light" and currently reachable — a white-only bulb, a plug, or a powered-off light is skipped. For true real-time (fast) Hue, the [Hue Entertainment API](https://developers.meethue.com/develop/hue-entertainment/) (DTLS streaming) is out of scope for this driver, which targets the standard API's ambient-color sweet spot.
 
 ## Other platforms
 

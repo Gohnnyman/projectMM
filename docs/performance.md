@@ -170,7 +170,7 @@ LUT is half desktop size (uint16_t vs uint32_t per entry). The 1:1 (no-modifier)
 | Total tick | ~164 ms / 6 FPS | Dominated by ArtNet at the 8 dBm cap |
 | ArtNetSend | ~93 ms (97 UDP packets) | ~960 µs/packet — slower than full-power WiFi (cf. Olimex `esp32-eth-wifi` at 38 ms) because the cap cuts radio TX margin, association-rate adaptation lands at a lower MCS rate, and packets retry more |
 | Free internal RAM | ~240 KB | The comparable, scarce resource. Stays flat (~238–240 KB) across all grid sizes — the Layer buffer + LUT live in PSRAM, so growing the grid doesn't touch internal RAM. This is the number the README perf table shows for the S3, so devices compare on the same axis. |
-| Free heap (incl. PSRAM) | ~8,163 KB | The PSRAM-merged total (`totalHeap` reports 8 MB combined). Looks huge but isn't the constraint — assume PSRAM is ample for now. |
+| Free heap (incl. PSRAM) | ~8,163 KB | The PSRAM-merged total (`totalHeap` reports 8 MB combined). Looks huge but isn't the constraint: PSRAM is ample; internal RAM is the limit. |
 | maxBlock (internal) | ~164 KB | Internal-RAM largest contiguous block — the scarce-resource KPI. `maxAllocBlock` (any-memory) reports ~8 MB on PSRAM boards and is meaningless as a pressure signal; SystemModule + scenario_runner use `maxInternalAllocBlock` instead. |
 | Layer buffer | 92 KB | In PSRAM (auto by heap_caps preference) |
 | Image | 1,307 KB | ~30% larger than `esp32-eth-wifi` due to USB-Serial-JTAG driver + Improv-dual-transport listener |
@@ -386,7 +386,7 @@ The `multicore` control on the Drivers container runs **every driver's per-frame
 
 **Calling the network stack from core 1 costs ~100 µs/frame, and it does not matter.** lwIP is pinned to core 0 (`CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0`), so a driver that writes a socket still hands its bytes to the network task there — only the *CPU half* (packet / frame building) offloads. The cross-core lock and cache bouncing show up as Preview 49 → 91 µs and HttpServer 348 → 409 µs. That ~100 µs is set against the ~13,000 µs of output work removed from core 0 — a 130:1 trade, which is why no driver is special-cased: when the split is on, **all** of them move.
 
-**It also fixes the contention that motivated the work.** A ~19 ms inline encode on core 0 previously starved the network stack sharing that core — the LightCrafter 16's W5500 Ethernet dropped its link and HTTP timed out while the render loop kept ticking. With the encode on core 1, an HTTP hammer during a heavy 8192-light encode holds: 77 requests, median 163 ms, one timeout.
+**It also removes a contention.** A ~19 ms inline encode on core 0 starves the network stack sharing that core: the LightCrafter 16's W5500 Ethernet drops its link and HTTP times out while the render loop keeps ticking. With the encode on core 1, an HTTP hammer during a heavy 8192-light encode holds: 77 requests, median 163 ms, one timeout.
 
 **Per-chip `renderWait`** — the read-only KPI reporting the worst core-0 wait at the frame boundary in the last second. It says how much idle time a *second* handoff buffer (the deferred ping-pong step) would recover, so the decision is measured rather than assumed:
 
@@ -517,10 +517,3 @@ These numbers shift with IDF version + sdkconfig — treat as rough proportions.
 
 The default `esp32` carries both the WiFi and Ethernet stacks (1.27 MB); `esp32-eth` is the Ethernet-only build that drops the WiFi stack for ~670 KB less image.
 
-### Size budget for upcoming features
-
-| Feature | Est. | Rationale |
-|---|---|---|
-| Mozilla cert bundle trimmed | −40 KB | `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN` keeps common roots only. `_NONE` saves ~50 KB but breaks TLS. |
-| Static IPv6 | +20 KB | lwIP IPv6 component (off by default). Only if a deployment needs it. |
-| WebSocket TLS (`wss://`) | ~0 KB | Reuses linked mbedTLS; certificate handling adds <5 KB. |

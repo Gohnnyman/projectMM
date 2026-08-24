@@ -223,7 +223,7 @@ The render loop (`Scheduler::tick` and everything it calls: every effect, modifi
 
 ## Platform abstraction
 
-Only abstract what you actually need. Currently:
+Only abstract what you actually need:
 
 - **Time**: `millis()`, `micros()`. Monotonic, microsecond resolution. (`esp_timer` / `std::chrono`)
 - **Memory**: `alloc(size)`, `free(ptr)`. Prefers PSRAM on ESP32, falls back to regular heap. `freeHeap()`, `maxAllocBlock()` for diagnostics. (`heap_caps_malloc` / `std::malloc`)
@@ -293,7 +293,7 @@ Services are **user-add/deletable children of the `Services` container** — the
 Two domain-neutral services let several controllers act as one installation. They're core because nothing about them is light-specific; any domain spanning multiple devices uses the same two.
 
 - **Discovery**: devices find each other via mDNS. `NetworkModule` advertises each device today; this is live.
-- **Clock sync**: one leader broadcasts its elapsed time (millis); followers compute their offset, targeting sub-millisecond accuracy. A shared monotonic clock is the foundation any cross-device coordination builds on. The committed design; not yet wired.
+- **Clock sync**: a shared monotonic clock is the foundation any cross-device coordination builds on. The design is filed in [backlog-core](backlog/backlog-core.md).
 
 What the synced clock is *for* is a domain question; the light domain's use of it (synced animation across a wall) is in [§ Multi-device sync](#multi-device-sync).
 
@@ -458,9 +458,9 @@ The check is mechanical: **run the effect at two very different framerates over 
 
 **It applies to modifiers too, and to anything else on the tick path.** A modifier that scrolls, rotates or animates its fold is state advanced per call, so the same rule holds: a scroll driven by a per-tick increment moves at the render rate. Anything whose output changes between two ticks with identical inputs is animating and owes elapsed time; a modifier that only folds coordinates from its controls is a pure function and owes nothing.
 
-**Where the machinery lives, and why it is not in the effects.** A trail fade is the case with the most callers, so it is the worked example: `Layer::fadeToBlackBy` takes a RATE per reference frame and the Layer scales it once, for every effect at once. Three effects used to carry that conversion themselves and had already drifted into two versions of it (one carried the fraction, two floored to 1 and so applied many times the intended decay at high rates), which is the duplication the one-home rule exists to prevent. Every amount is a rate, with no exception: an effect that wants the buffer blank NOW calls `draw::fill`, since a clear is not a fast fade. Giving 255 a second meaning put a discontinuity in kind at the top of six user-facing fade sliders.
+**Where the machinery lives, and why it is not in the effects.** A trail fade is the case with the most callers, so it is the worked example: `Layer::fadeToBlackBy` takes a RATE per reference frame and the Layer scales it once, for every effect at once. An effect carrying that conversion itself drifts: a version that carries the fraction and a version that floors to 1 apply different decay at the same rate, which is the duplication the one-home rule exists to prevent. Every amount is a rate, with no exception: an effect that wants the buffer blank NOW calls `draw::fill`, since a clear is not a fast fade. Giving 255 a second meaning put a discontinuity in kind at the top of six user-facing fade sliders.
 
-Two traps worth naming, both found by hitting them. A quantity that is already gated by wallclock must not ALSO be scaled: StarField requested its fade only on stepping frames, and the Layer then scaled each request again, throttling it twice. And a COMPOUNDING spatial operation is not a rate: `draw::blur` applied twice at half strength is not one blur at full strength, so the carry pattern that fixes a fade does not transfer to it (BlurzEffect is the open case).
+Two traps worth naming. A quantity already gated by wallclock must not ALSO be scaled: an effect that requests its fade only on stepping frames has the Layer scale each request again, throttling it twice. And a COMPOUNDING spatial operation is not a rate: `draw::blur` applied twice at half strength is not one blur at full strength, so the carry pattern that fits a fade does not transfer to it.
 
 **An effect renders a pattern; it does not transform geometry.** When migrating or adding an effect, strip out anything that is really a *modifier* — mirroring, tiling, rotation, scrolling/offset, a kaleidoscope fold, masking, any remap of *where* pixels land — and add it as a separate [modifier](#modifiers) instead. WLED (and other sources we port from) routinely fold these into the effect's own loop (a "mirror" checkbox, a "2D" rotation, a built-in pinwheel), because WLED has no modifier concept; we do. Keeping them out of the effect is what lets any effect compose with any modifier (the same RotateModifier rotates Fire, Noise, or a network-received frame) instead of every effect re-implementing its own half-baked mirror. The test: an effect's `tick()` should only *write colors into the logical buffer for its own coordinates*; if it's reading or rewriting positions to move/fold/duplicate the image, that behaviour belongs in a modifier. (This is the light-domain face of *Complexity lives in core; domain modules stay simple* — geometry transforms are the modifier's job, shared once, not duplicated into every effect.)
 
@@ -593,8 +593,8 @@ The architecture does not assume PSRAM is present. Buffer counts and sizes are d
 
 How lighting uses the core [multi-device runtime](#multi-device-runtime) (discovery + clock sync) to drive an installation spanning multiple controllers:
 
-- **Synced visuals from the shared clock.** Effects animate off elapsed time ([§ Effects](#effects)), so feeding them the leader's synced clock instead of each device's local one makes a wall of controllers animate in lockstep, regardless of each one's frame rate. This is the light-domain payoff of the core clock sync.
-- **Light distribution**: one device sending rendered light data to another uses the existing ArtNet / E1.31 / DDP standards (the ArtNet *driver* already sends to fixtures today; device-to-device distribution as a sync topology is the part not yet wired). No bespoke protocol.
+- **Synced visuals from the shared clock.** Effects animate off elapsed time ([§ Effects](#effects)), so a synced clock is what makes a wall of controllers animate in lockstep regardless of each one's frame rate. This is the light-domain payoff of the core clock sync.
+- **Light distribution**: one device sending rendered light data to another uses the existing ArtNet / E1.31 / DDP standards. The ArtNet *driver* sends to fixtures; device-to-device distribution as a sync topology is filed in [backlog-core](backlog/backlog-core.md). No bespoke protocol.
 
 # Web UI
 

@@ -85,11 +85,11 @@ public:
     static_assert(kCapturable[kEffectsRole][0] == 'E' && kCapturable[kEffectsRole][1] == 'f' &&
                   kCapturable[kEffectsRole][6] == 's', "kEffectsRole must index Effects");
 
-    /// How many faders the bank shows. Fixed for now; the surfaces we will map onto this have 8
+    /// How many faders the bank shows. Fixed; the surfaces this maps onto have 8
     /// (X-Touch) or 9 (nanoKONTROL), so the count becomes a control once a second surface needs it.
     static constexpr uint8_t kFaderCount = 8;
     /// A row of rotary encoders above the pads, mirroring where both the X-Touch and the QCon put
-    /// theirs. Unassigned for now: the binding UI is what gives them targets.
+    /// theirs. Unassigned: the binding UI is what gives them targets.
     static constexpr uint8_t kEncoderCount = 8;
 
     void defineControls() override {

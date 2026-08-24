@@ -228,8 +228,8 @@ void MqttModule::subscribeHaSet() {
 // HA update entity — the second HA-discovery component alongside the light. Same
 // announce/retract shape (both gated on haDiscovery_), same MAC-stable uniq_id,
 // same broker connection. The state block is written once at CONNACK and on
-// haDiscovery-on-mid-session; there is nothing per-tick to refresh yet because
-// installed_version and (for now) latest_version are compile-time constants.
+// haDiscovery-on-mid-session; there is nothing per-tick to refresh because
+// installed_version and latest_version are compile-time constants.
 // ----------------------------------------------------------------------------
 
 // Mirror of buildDiscoveryTopic but for the `update` component type. Same object id

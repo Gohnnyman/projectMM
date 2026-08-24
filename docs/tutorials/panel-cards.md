@@ -14,7 +14,7 @@ An LED wall is normally driven by two boxes. A **sending card** (a PCI-E board i
 
 That has one consequence worth understanding before you wire anything: these frames are **raw Ethernet**, below IP. No address, no port, no DHCP. The cable between your controller and the card is not a network in the usual sense; it is a private link carrying pixel data, and nothing else should be on it.
 
-Currently supported: **ColorLight 5A-75** (5A-75B and 5A-75E use the same wire format).
+Supported: **ColorLight 5A-75** (5A-75B and 5A-75E use the same wire format).
 
 ---
 
@@ -343,7 +343,7 @@ The mismatch is not subtle in one direction: leave a downgraded card on `v13 and
 | Every other row or column mirrored | With a receiving card, this is the card's own panel configuration: revisit it in LEDVision ([§4](#4-set-the-panels-up-in-led-vision)). The layout's `snake` / `snakeP` apply only to walls wired as a pixel strip. |
 | Panels in the wrong places | Same: the chain order is set on the card. |
 | Right image, wrong colors | `lightPreset` on the driver, which is where channel order and RGBW synthesis live for every driver. There is no separate color-order control here. |
-| Works on ESP32, not on desktop | Permission ([§6](#6-from-a-desktop)). The driver will be showing a warning that says so. |
+| Works on ESP32, not on desktop | Permission ([§6](#6-from-a-desktop)). The driver shows a warning that says so. |
 
 ---
 
