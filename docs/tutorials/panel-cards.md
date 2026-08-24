@@ -6,6 +6,23 @@ You bought a panel receiving card, most likely a **ColorLight** one, which is th
 
 ---
 
+## The short version
+
+If you have the card wired and projectMM running, this is the whole sequence. Every step has its own section below.
+
+1. **Layouts** → describe your wall ([§5.4](#54-describe-the-wall))
+2. **Effects** → pick an effect, so there is something to send
+3. **Drivers** → press **+** → choose **PanelCard** ([§5.5](#55-add-the-driver))
+4. **`interface`** → desktop only: `en0` (macOS), `eth0` (Linux), or any part of the adapter name on Windows. Leave blank on an ESP32 ([§6](#6-from-a-desktop))
+5. **`format`** and **`firmware`** → match your card ([§7](#7-card-firmware-and-the-flicker))
+6. **brightness** → turn it up, in the Drivers card itself
+
+The status line on the PanelCard card tells you where you are: it should read a link speed and a packet rate. Anything else is in [§8](#8-when-it-does-not-light-up).
+
+**PanelCard missing from the driver list?** It is compiled only into firmwares for gigabit-capable boards (S3, P4, S31). Check the Firmware page for the variant you are running.
+
+---
+
 ## 1. What you actually bought
 
 An LED wall is normally driven by two boxes. A **sending card** (a PCI-E board in a PC, or a standalone unit) takes video in and puts a specialised signal on Ethernet. A **receiving card** sits in each cabinet, decodes that signal, and drives the panels over HUB75 ribbon cables. The card you bought is a receiving card.
@@ -344,6 +361,8 @@ The mismatch is not subtle in one direction: leave a downgraded card on `v13 and
 | Panels in the wrong places | Same: the chain order is set on the card. |
 | Right image, wrong colors | `lightPreset` on the driver, which is where channel order and RGBW synthesis live for every driver. There is no separate color-order control here. |
 | Works on ESP32, not on desktop | Permission ([§6](#6-from-a-desktop)). The driver shows a warning that says so. |
+| **PanelCard is not in the Drivers list** | The driver is compiled only into firmwares for gigabit-capable boards (S3, P4, S31), so a classic-ESP32 build does not offer it. Check the **Firmware** page for the variant and version you are actually running: an OTA upgrade keeps the installed variant, so a device first flashed with a different one keeps that one. Re-flash from the [web installer](https://moonmodules.org/projectMM/install/) to change variant. |
+| **Link is up and packets are on the wire, but the wall stays dark** | The frames are leaving correctly, so the fault is downstream of the send. Check, in order: global **brightness** *and* the driver's own `localBrightness`, both of which must be up; a **layout** actually configured and an **effect** selected, since an empty layer sends valid black frames; and `format` / `firmware` matching the card ([§7](#7-card-firmware-and-the-flicker)). If all of that is right, remove the PanelCard driver and add it again: a re-add re-runs the bind and the geometry from scratch. |
 
 ---
 

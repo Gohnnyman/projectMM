@@ -229,6 +229,16 @@ Two improvements when this matters:
 
 Not blocking — MoonDeck is a developer tool, not a production server. Pick this up when MoonDeck is in scope for hardening.
 
+### A tagged release does not reach the web installer until the next main deploy (bug)
+
+`deploy-pages` in `.github/workflows/release.yml` is gated `if: github.ref == 'refs/heads/main'`, because the `github-pages` environment's protection rule only allows main. The installer's release list is **staged into the Pages site at deploy time** (`install.js` self-hosts the last 5 stable + 5 prerelease releases; the release-asset URLs redirect to a host that sends no CORS header, so the browser cannot read them from the Pages origin). Together those mean **pushing a `vX.Y.Z` tag publishes the release but never updates the installer** — the new version reaches the picker only when something later pushes to main.
+
+Hit on v4.0.0 (2026-08-24): the release published at 16:15:59, a main deploy ran at 16:16 and enumerated releases *before* it existed, and the installer offered v3.0.0 as newest for hours. Re-running the workflow with the tag fixed it, and that manual re-run is the current workaround.
+
+Note the device's own OTA picker is unaffected — it reads `api.github.com` live ([app.js](../../src/ui/app.js) `RELEASES_API`), which is why a device could offer v4.0.0 while the installer could not. Two independent paths to the same release list.
+
+The fix is to let a tag deploy Pages: either relax the environment's branch protection to include tags, or have the tag release trigger a Pages deploy as a follow-on (`workflow_run`, or a repository_dispatch from the release job). Until then, every stable release needs a manual `gh workflow run release.yml -f tag=vX.Y.Z` afterwards, which is exactly the kind of remember-to-do-it step a release ritual should not carry.
+
 ### CI: pin GitHub Actions to commit SHAs (supply-chain hardening)
 
 `.github/workflows/release.yml` references all 9 action types by mutable `@vN` tag (`actions/checkout@v4`, `astral-sh/setup-uv@v3`, `softprops/action-gh-release@v2`, `espressif/esp-idf-ci-action@v1`, …). A mutable tag can be force-moved to malicious code by a compromised publisher; pinning each `uses:` to a full commit SHA (with a `# vN` trailing comment) removes that vector. **Done already (cheaper half):** `persist-credentials: false` on every checkout that doesn't push, so the `GITHUB_TOKEN` isn't left in `.git/config` for later steps to read (the `release` job keeps it — it force-pushes the `latest` tag). **Not done (this item):** SHA-pinning, because it carries an ongoing cost — pinned SHAs go stale and miss security patches, so it only pays for itself **alongside Dependabot** (or a Renovate config) to auto-bump them. Pick this up as a deliberate "CI hardening + Dependabot" pass, not piecemeal. Low risk today: every action pinned is a first-party `actions/*` or a well-known publisher (astral, espressif, softprops), not an obscure third-party action.

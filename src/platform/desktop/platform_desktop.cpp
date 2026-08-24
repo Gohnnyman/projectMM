@@ -9,6 +9,9 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#ifndef _WIN32
+#include <dlfcn.h>   // dlopen/dlsym — the NDI runtime is resolved on demand, never linked
+#endif
 #include <vector>   // HostBus frame buffers — the memory-backed parallel bus
 #include <thread>
 #include <mutex>
@@ -2048,5 +2051,210 @@ size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*ma
 bool irRead(uint16_t /*pin*/, uint32_t& /*codeOut*/) { return false; }
 void irStop() {}   // no IR hardware on desktop
 bool irChannelReady(uint16_t /*pin*/) { return true; }   // no channel to fail on desktop
+
+
+// --- NDI video output ---------------------------------------------------------------------------
+//
+// projectMM as an NDI source (contract + the licensing reason for this shape: platform.h § NDI).
+// The runtime is resolved on demand and NEVER linked, bundled, or its headers included — the same
+// arrangement as the Npcap block above, for the same GPL-3 reason. The user installs the NDI
+// runtime; a machine without it builds and runs identically and reports the feature unavailable.
+//
+// The three declarations below are transcribed from the SDK's own public headers
+// (Processing.NDI.structs.h and Processing.NDI.Send.h). Getting a field's type or ORDER wrong here
+// is a silent crash or a skewed image rather than a compile error, because these are passed by
+// pointer into a binary that was built against the real definitions. They are quoted verbatim in
+// the plan (docs/history/plans) with their source, and must not be "tidied".
+namespace {
+
+using NdiSendInstance = void*;
+
+// Processing.NDI.structs.h — NDIlib_video_frame_v2_t, verbatim field order.
+struct NdiVideoFrameV2 {
+    int         xres, yres;
+    int         FourCC;                 // NDIlib_FourCC_video_type_e — an int-sized enum
+    int         frame_rate_N, frame_rate_D;
+    float       picture_aspect_ratio;
+    int         frame_format_type;      // NDIlib_frame_format_type_e
+    int64_t     timecode;
+    uint8_t*    p_data;
+    union { int line_stride_in_bytes; int data_size_in_bytes; };
+    const char* p_metadata;
+    int64_t     timestamp;
+};
+
+// Processing.NDI.Send.h — NDIlib_send_create_t, verbatim field order.
+struct NdiSendCreate {
+    const char* p_ndi_name;
+    const char* p_groups;
+    bool        clock_video, clock_audio;
+};
+
+// NDI_LIB_FOURCC('B','G','R','X') — X, not A: projectMM has no alpha to send, and an ignored
+// alpha channel is exactly what the X variants mean. Little-endian packing, as the macro builds it.
+constexpr int kFourCCBgrx = 'B' | ('G' << 8) | ('R' << 16) | (static_cast<int>('X') << 24);
+constexpr int kFrameFormatProgressive = 1;   // NDIlib_frame_format_type_progressive
+
+using NdiInitFn       = bool (*)();
+using NdiDestroyFn    = void (*)();
+using NdiSendCreateFn = NdiSendInstance (*)(const NdiSendCreate*);
+using NdiSendVideoFn  = void (*)(NdiSendInstance, const NdiVideoFrameV2*);
+using NdiSendDestroyFn= void (*)(NdiSendInstance);
+
+NdiInitFn        ndiInit_        = nullptr;
+NdiDestroyFn     ndiDestroy_     = nullptr;
+NdiSendCreateFn  ndiSendCreate_  = nullptr;
+NdiSendVideoFn   ndiSendVideo_   = nullptr;
+NdiSendDestroyFn ndiSendDestroy_ = nullptr;
+
+// Test capture (platform.h § NDI test seam). Recording is OFF unless a test turns it on, so a
+// desktop build with a real runtime behaves exactly as it would in production.
+struct NdiCapturedFrame { uint16_t w, h; uint8_t fps; std::vector<uint8_t> rgb; };
+NdiTestMode                  ndiTestMode_ = NdiTestMode::Off;
+std::vector<NdiCapturedFrame> ndiCaptured_;
+std::string                  ndiCapturedName_;
+
+void*           ndiLib_    = nullptr;
+NdiSendInstance ndiSender_ = nullptr;
+std::string     ndiName_;                 // owned: NDIlib_send_create_t holds the pointer, not a copy
+std::vector<uint8_t> ndiFrame_;           // BGRX staging, resized only on a geometry change
+
+/// The runtime's file name per platform, tried in order. The SONAME first, then the plain name a
+/// manual install leaves; Windows resolves through PATH, which the NDI installer sets.
+const char* const kNdiLibNames[] = {
+#if defined(_WIN32)
+    "Processing.NDI.Lib.x64.dll", "Processing.NDI.Lib.x86.dll",
+#elif defined(__APPLE__)
+    // NDI Tools for macOS ships the runtime INSIDE its app bundles rather than installing a
+    // system-wide dylib, so a plain name resolves nothing however complete the install is. The
+    // bundle paths are tried by name (verified to export the send API on a real NDI Tools install);
+    // `libndi_advanced` is the file NDI Tools ships, `libndi` the one bundled with Resolume.
+    "libndi.dylib", "/usr/local/lib/libndi.dylib", "/opt/homebrew/lib/libndi.dylib",
+    "/Applications/NDI Video Monitor.app/Contents/Frameworks/libndi_advanced.dylib",
+    "/Applications/NDI Studio Monitor.app/Contents/Frameworks/libndi_advanced.dylib",
+    "/Applications/NDI Discovery.app/Contents/Frameworks/libndi_advanced.dylib",
+    "/Applications/Resolume Arena/libndi.dylib",
+    "/Applications/Resolume Avenue/libndi.dylib",
+#else
+    "libndi.so.5", "libndi.so.6", "libndi.so",
+#endif
+};
+
+bool ndiLoad() {
+    if (ndiSendVideo_) return true;      // already resolved
+    if (!ndiLib_) {
+        for (const char* name : kNdiLibNames) {
+#if defined(_WIN32)
+            ndiLib_ = reinterpret_cast<void*>(::LoadLibraryA(name));
+#else
+            ndiLib_ = ::dlopen(name, RTLD_LAZY | RTLD_LOCAL);
+#endif
+            if (ndiLib_) break;
+        }
+    }
+    if (!ndiLib_) return false;
+    auto sym = [](void* m, const char* n) -> void* {
+#if defined(_WIN32)
+        return reinterpret_cast<void*>(::GetProcAddress(static_cast<HMODULE>(m), n));
+#else
+        return ::dlsym(m, n);
+#endif
+    };
+    ndiInit_         = reinterpret_cast<NdiInitFn>(sym(ndiLib_, "NDIlib_initialize"));
+    ndiDestroy_      = reinterpret_cast<NdiDestroyFn>(sym(ndiLib_, "NDIlib_destroy"));
+    ndiSendCreate_   = reinterpret_cast<NdiSendCreateFn>(sym(ndiLib_, "NDIlib_send_create"));
+    ndiSendVideo_    = reinterpret_cast<NdiSendVideoFn>(sym(ndiLib_, "NDIlib_send_send_video_v2"));
+    ndiSendDestroy_  = reinterpret_cast<NdiSendDestroyFn>(sym(ndiLib_, "NDIlib_send_destroy"));
+    if (!ndiInit_ || !ndiSendCreate_ || !ndiSendVideo_ || !ndiSendDestroy_) {
+        ndiSendVideo_ = nullptr;         // treat a partial resolve as absent
+        return false;
+    }
+    // NDIlib_initialize returns false when the CPU is unsupported — a real "cannot use it" that
+    // must not read as "installed and working".
+    if (!ndiInit_()) { ndiSendVideo_ = nullptr; return false; }
+    return true;
+}
+
+}  // namespace
+
+bool ndiAvailable() {
+    if (ndiTestMode_ == NdiTestMode::ForceAvailable) return true;
+    if (ndiTestMode_ == NdiTestMode::ForceMissing) return false;
+    return ndiLoad();
+}
+
+bool ndiSenderOpen(const char* name) {
+    if (ndiTestMode_ == NdiTestMode::ForceMissing) return false;
+    if (ndiTestMode_ == NdiTestMode::ForceAvailable) { ndiCapturedName_ = (name && name[0]) ? name : "projectMM"; return true; }
+    if (!ndiLoad()) return false;
+    ndiSenderClose();
+    ndiName_ = (name && name[0]) ? name : "projectMM";
+    NdiSendCreate create{};
+    create.p_ndi_name = ndiName_.c_str();   // the string must outlive the sender, hence ndiName_
+    create.p_groups   = nullptr;
+    // FALSE deliberately: clock_video makes send_send_video_v2 BLOCK to pace the caller, and this
+    // is called from the render thread which must never block. The driver already rate-limits to
+    // its fps control, so the pacing is ours to do.
+    create.clock_video = false;
+    create.clock_audio = false;             // no audio is sent
+    ndiSender_ = ndiSendCreate_(&create);
+    return ndiSender_ != nullptr;
+}
+
+void ndiSenderClose() {
+    if (ndiTestMode_ != NdiTestMode::Off) { ndiCapturedName_.clear(); return; }
+    if (ndiSender_) { ndiSendDestroy_(ndiSender_); ndiSender_ = nullptr; }
+    ndiFrame_.clear();
+    ndiFrame_.shrink_to_fit();
+}
+
+bool ndiSendFrame(const uint8_t* rgb, uint16_t w, uint16_t h, uint8_t fps) {
+    if (!rgb || w == 0 || h == 0) return false;
+    if (ndiTestMode_ == NdiTestMode::ForceAvailable) {
+        // Record what the driver produced, tight RGB, exactly as handed over.
+        NdiCapturedFrame f{w, h, fps, {}};
+        f.rgb.assign(rgb, rgb + static_cast<size_t>(w) * h * 3);
+        ndiCaptured_.push_back(std::move(f));
+        return true;
+    }
+    if (!ndiSender_) return false;
+    const size_t pixels = static_cast<size_t>(w) * h;
+    ndiFrame_.resize(pixels * 4);           // no-op once warm; the only allocation, never per frame
+    // RGB -> BGRX. The 4th byte is the ignored X, written once as 0xFF so a receiver that reads it
+    // as alpha sees opaque rather than transparent.
+    for (size_t i = 0; i < pixels; ++i) {
+        ndiFrame_[i * 4 + 0] = rgb[i * 3 + 2];
+        ndiFrame_[i * 4 + 1] = rgb[i * 3 + 1];
+        ndiFrame_[i * 4 + 2] = rgb[i * 3 + 0];
+        ndiFrame_[i * 4 + 3] = 0xFF;
+    }
+    NdiVideoFrameV2 f{};
+    f.xres = w;
+    f.yres = h;
+    f.FourCC = kFourCCBgrx;
+    f.frame_rate_N = fps ? fps : 30;
+    f.frame_rate_D = 1;
+    f.picture_aspect_ratio = 0.0f;          // 0 = square pixels, which a light grid has
+    f.frame_format_type = kFrameFormatProgressive;
+    f.timecode = INT64_MAX;                 // NDIlib_send_timecode_synthesize: let NDI stamp it
+    f.p_data = ndiFrame_.data();
+    f.line_stride_in_bytes = static_cast<int>(w) * 4;
+    ndiSendVideo_(ndiSender_, &f);          // synchronous, and clocked by clock_video above
+    return true;
+}
+
+void setTestNdiMode(NdiTestMode mode) {
+    ndiTestMode_ = mode;
+    if (mode != NdiTestMode::ForceAvailable) { ndiCaptured_.clear(); ndiCapturedName_.clear(); }
+}
+size_t ndiTestFrameCount() { return ndiCaptured_.size(); }
+uint16_t ndiTestFrameWidth(size_t i)  { return i < ndiCaptured_.size() ? ndiCaptured_[i].w : 0; }
+uint16_t ndiTestFrameHeight(size_t i) { return i < ndiCaptured_.size() ? ndiCaptured_[i].h : 0; }
+uint8_t  ndiTestFrameFps(size_t i)    { return i < ndiCaptured_.size() ? ndiCaptured_[i].fps : 0; }
+const uint8_t* ndiTestFrameData(size_t i) {
+    return i < ndiCaptured_.size() ? ndiCaptured_[i].rgb.data() : nullptr;
+}
+const char* ndiTestSenderName() { return ndiCapturedName_.c_str(); }
+void ndiTestClearFrames() { ndiCaptured_.clear(); }
 
 } // namespace mm::platform

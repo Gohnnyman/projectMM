@@ -122,6 +122,36 @@ projectMM already speaks DMX **over the network** (Art-Net / sACN via `NetworkRe
 
 Sequencing: it's a **driver** (`src/light/drivers/`) + a platform UART-RS485 seam + a fixture model shared with the Art-Net path — the buffer→channel encode is already done. Plan when a DMX fixture is actually on the bench and a catalog board's `supported`/`planned` list points at wired DMX. The [PinsModule pin-assignment work](backlog-core.md#pinsmodule-strict-reject-on-add-mode-the-one-remaining-increment) covers the RS485/DMX TX/RX/DE slot; this is the driver that consumes it.
 
+## Integration with other LED and visuals tools
+
+Distilled from a Discord thread with panel-card users (2026-08-24), where two people drove ColorLight walls from projectMM and described the pipelines they already run.
+
+### projectMM as a video source — NDI first, Spout/Syphon only if proven (open)
+
+Users asked for projectMM's rendered output to feed *their* tools, not the other way round. One runs OBS → Spout → his own VLAN-tagged card driver; he asked whether projectMM could be a Spout source. Input is not the gap: `NetworkReceiveEffect` already binds Art-Net, E1.31/sACN and DDP at once and answers ArtPoll, so any controller can already drive projectMM.
+
+**NDI is the recommended first implementation.** It is the AV industry's standard for video over IP, one implementation covers Windows, macOS, Linux and ARM, it discovers by name, and it crosses machines. Spout (Windows, DirectX/OpenGL) and Syphon (macOS, Metal/OpenGL) share a GPU texture zero-copy, so they are lower latency and bit-exact, but they are **same-machine only**, are **two** platform implementations, and leave **Linux and the Pi with nothing**. At LED-wall pixel counts (a 256x256 wall is 65K pixels) the latency difference is far below one frame of the render loop, so it does not decide the choice; coverage does. A Spout user is also reachable through NDI in one hop, since OBS, Resolume and TouchDesigner all speak both.
+
+**The licence shapes the design, and the shape is already established here.** projectMM is GPL-3.0 and the NDI runtime is proprietary, so projectMM must not *redistribute* it: bundling would require projectMM's own licence to carry NDI's restrictions downstream, which GPL-3 forbids. The user installs the NDI runtime themselves, exactly as they already install **Npcap** for the panel-card driver, and projectMM calls whatever is present.
+
+That is the arrangement `platform_desktop.cpp` uses for Npcap today: resolve the library with `LoadLibrary`/`dlopen` rather than linking it, declare the handful of functions with the library's own signatures rather than including its headers (so the SDK never becomes a build requirement for CI or contributors), and report the feature unavailable when it is absent instead of failing to link. Two independent installs that talk to each other, like Resolume on the same desktop.
+
+Also note projectMM renders into a CPU buffer, so a Spout/Syphon path would upload to the GPU purely to hand off, spending the zero-copy advantage it was chosen for.
+
+### Multi-card walls — does a daisy chain work today? (open, ask before building)
+
+The ColorLight format has **no card addressing**: the destination MAC is a fixed constant and every card filters on it, so every card on a segment shows the same image. A user with six cards on a switch observed exactly that.
+
+The industry-standard answer is **daisy-chaining** — a sending card's ports each drive a chain, and each card takes its region by position in the chain. That user works around it with per-card VLANs and a managed switch instead, which he built for throughput and for per-card colour-temperature grouping across mixed panel batches; he described it as his own solution, not a standard.
+
+**Establish first whether a daisy chain already works with projectMM** (one contact has a 96K daisy-chained rig). If the cards self-assign by chain position, the standard multi-card case is already solved and nothing is needed. Only if it does not work is there a feature here, and it should follow the daisy-chain standard rather than the VLAN workaround. 802.1Q tagging is technically a clean fit for a raw-L2 sender (the tag is part of the Ethernet header, the switch strips it before the card, so card firmware is unaffected), but it serves one bespoke architecture.
+
+### Smaller asks from the same thread
+
+- **Read the wall layout from the ColorLight cards.** The cards can report their configuration and at least one user's own tool already does it; it would remove the manual layout step.
+- **Per-card colour temperature and brightness**, via the ColorLight sync-packet bytes, grouped by sync group — used to colour-match mixed panel batches live.
+- **Docker image**, asked for by a user tracking updates in an IoT system. The Linux binary and `.deb` already ship, so this is packaging rather than new capability.
+
 ## Sensors and audio-reactive input
 
 ### Audio-reactive follow-ups

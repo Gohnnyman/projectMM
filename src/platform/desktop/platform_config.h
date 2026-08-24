@@ -96,6 +96,13 @@ constexpr bool hasEthernet = false;
 // True on desktop, false on a microcontroller with a single MAC, where the name would be a control
 // that does nothing. Drivers use it to hide the field rather than to choose behaviour.
 constexpr bool hasNamedNetInterfaces = true;
+
+// hasNdi — the host can be an NDI video source. True on desktop, false on every ESP32: the NDI
+// runtime is a desktop shared library with no microcontroller build, and the per-frame encode does
+// not belong on one. Gates NdiDriver's registration, so the type picker only offers it where it can
+// actually run. The runtime itself is loaded on demand and is NOT redistributed (see
+// platform_desktop.cpp), so this flag says "the platform supports it", not "it is installed".
+constexpr bool hasNdi = true;
 // Some-IP-stack flag (WiFi OR Ethernet) — mirrors the esp32 config so shared code
 // (WLED audio sync, UDP interop) gates on "has network" uniformly. True on desktop
 // via the WiFi stubs (UdpSocket has a desktop implementation).
