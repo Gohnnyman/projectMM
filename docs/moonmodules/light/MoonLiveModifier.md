@@ -41,7 +41,7 @@ It is for debugging and comes back out again — [what print costs](writing-scri
 
 ## Limits
 
-**A coordinate is a byte, so an axis spans 0..255.** A position handed TO a script outside that range is passed through untransformed rather than wrapped. A position a script COMPUTES past 255 keeps its low byte, so `(width - 1 - x) * 2` on a grid wider than 128 lands somewhere unintended, so keep a computed result inside the box. A script's own MEMBERS may be `uint16_t`, so intermediate arithmetic can exceed 255 even where the coordinate handed back cannot.
+**A coordinate is a byte, so an axis spans 0..255.** A position handed TO a script outside that range is passed through untransformed rather than wrapped. A position a script COMPUTES past 255 keeps its low byte, so `(width - 1 - x) * 2` on a grid wider than 128 lands somewhere unintended, so keep a computed result inside the box. A script's own MEMBERS may be `int`, so intermediate arithmetic can exceed 255 even where the coordinate handed back cannot.
 
 **A script cannot resize the logical box.** A modifier has two hooks: one reshapes the box once per rebuild, one folds each coordinate. A script drives only the second, so transforms that keep the box the same size work, and ones that halve it (the way the built-in [Mirror](modifiers.md#mirror) does) need the compiled modifier.
 
@@ -60,7 +60,7 @@ Past half full, the status also names the tightest limit the script is approachi
 |---|---|
 | `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-maps live |
 
-Plus one control per `addUint8` / `addUint16` in the script's `defineControls()`: `addUint8("amount", amount, 0, 64)`
+Plus one control per `addControl` in the script's `defineControls()`: `addControl("amount", amount, 0, 64)`
 becomes a slider, and moving it rebuilds the mapping just as editing the script does.
 
 Editing the script asks the Layer to rebuild its mapping, so a change is visible immediately. A script that fails to compile shows the parse error on the module and the mapping falls back to passing coordinates straight through — the transform disappears until the script parses again, and the device keeps rendering throughout.

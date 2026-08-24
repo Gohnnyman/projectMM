@@ -197,7 +197,12 @@ function parseFirmwaresFromAssets(assets, tag) {
     // arm64" rather than a filename.
     // The version carries dots, so the platform group has to be anchored on the -v rather than on
     // "everything up to a dot". A .deb names its arch, not the platform, so it maps to linux-x64.
-    const desktopRe = /^projectMM-(macos-arm64|windows-x64|linux-x64)-v.+\.(dmg|tar\.gz|zip)$/;
+    //
+    // The Windows INSTALLER carries a suffix AFTER the version — projectMM-windows-x64-v1.2.3
+    // -setup.exe — so the extension alternation alone could not match it and the installer never
+    // reached the dropdown: a Windows user was offered the bare .zip while setup.exe sat in the
+    // release. `.+` before the extension covers both shapes.
+    const desktopRe = /^projectMM-(macos-arm64|windows-x64|linux-x64)-v.+\.(dmg|tar\.gz|zip|exe)$/;
     const debRe = /^projectmm_.+_amd64\.deb$/;
     for (const a of assets) {
         const d = desktopRe.exec(a.name);
@@ -208,9 +213,11 @@ function parseFirmwaresFromAssets(assets, tag) {
                                               isDesktop: true, assets: [] };
         entry.isDesktop = true;
         (entry.assets = entry.assets || []).push({ name: a.name, url: a.browser_download_url });
-        // Prefer the friendliest form when a platform ships more than one: a .dmg to drag, or a
-        // .deb apt can install, over the tarball that is there for scripting.
-        const friendly = /\.(dmg|deb)$/.test(a.name);
+        // Prefer the friendliest form when a platform ships more than one: a .dmg to drag, a
+        // setup.exe that installs, or a .deb apt can install, over the archive that is there for
+        // scripting. An installer is what a person double-clicks, which is the whole point of
+        // offering a download rather than a flash.
+        const friendly = /(\.dmg|\.deb|-setup\.exe)$/.test(a.name);
         if (!entry.binaryUrl || friendly) entry.binaryUrl = a.browser_download_url;
         firmwares.set(key, entry);
     }

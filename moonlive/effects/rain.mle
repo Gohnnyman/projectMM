@@ -2,15 +2,15 @@
 // Wind is the launch angle, not a force, so gravity curves each drop as it falls.
 
 class RainEffect {
-  uint8_t fall = 24;
-  uint8_t wind = 128;
-  uint8_t drops = 3;
+  byte fall = 24;
+  byte wind = 128;
+  byte drops = 3;
 
   defineControls() {
     pool(400);
-    addUint8("fall", fall, 4, 80);
-    addUint8("wind", wind, 0, 255);
-    addUint8("drops", drops, 1, 12);
+    addControl("fall", fall, 4, 80);
+    addControl("wind", wind, 0, 255);
+    addControl("drops", drops, 1, 12);
   }
 
   tick() {

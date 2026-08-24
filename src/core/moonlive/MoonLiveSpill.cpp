@@ -66,9 +66,8 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         // the allocator rewrites anything. The pointer is reached through host(kArg4) at lowering
         // time and needs no live interval here.
         case IrOp::StoreCtrl:
-        case IrOp::StoreCtrl16: out[0] = in.a; return 1;
-        case IrOp::LoadCtrl16:
-        case IrOp::LoadCtrl16S: out[0] = kArg4;               return 1;   // reads the arena pointer
+        case IrOp::StoreCtrl32: out[0] = in.a; return 1;
+        case IrOp::LoadCtrl32:  out[0] = kArg4;               return 1;   // reads the arena pointer
         // An indexed access reads its INDEX (and, for a store, the value). The arena pointer is
         // deliberately NOT reported: the rewriter below writes sources back POSITIONALLY (src[0]
         // into in.a, src[1] into in.b), so listing kArg4 first would shift every real operand one
@@ -77,6 +76,12 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         // do the same, so kArg4 needs no live interval here either.
         case IrOp::LoadIdx:     out[0] = in.a;               return 1;
         case IrOp::StoreIdx:    out[0] = in.a; out[1] = in.b; return 2;
+        // Shl/Sar carry their shift amount in `imm`, so the vreg source is the value alone; Mulhi
+        // reads both operands exactly as Mul does.
+        case IrOp::Shl:
+        case IrOp::Shr:
+        case IrOp::Sar:        out[0] = in.a;               return 1;
+        case IrOp::Mulhi:      out[0] = in.a; out[1] = in.b; return 2;
         case IrOp::Add:
         case IrOp::Mul:
         case IrOp::BranchGe:
@@ -110,7 +115,7 @@ bool writesDst(IrOp op) {
         // A member store writes MEMORY, not a register: its `a` is the value and `imm` the arena
         // offset, so reading its dst as a definition would give vreg 0 a spurious live range.
         case IrOp::StoreCtrl:
-        case IrOp::StoreCtrl16:
+        case IrOp::StoreCtrl32:
         // CallScript writes no dst either: a script function returns nothing today, so the call is
         // a statement rather than an expression. When it gains a return value this moves.
         case IrOp::CallScript:

@@ -84,6 +84,24 @@ static uint32_t encAdd(uint8_t rd, uint8_t rs1, uint8_t rs2) {
 static uint32_t encMul(uint8_t rd, uint8_t rs1, uint8_t rs2) {
     return (1u << 25) | (rs2 << 20) | (rs1 << 15) | (0 << 12) | (rd << 7) | 0x33;
 }
+// mulh rd, rs1, rs2 — the same M-extension encoding as mul with funct3 = 1: the SIGNED high 32
+// bits of the product. Paired with mul it forms the Q16.16 multiply's middle word.
+static uint32_t encMulh(uint8_t rd, uint8_t rs1, uint8_t rs2) {
+    return (1u << 25) | (rs2 << 20) | (rs1 << 15) | (1u << 12) | (rd << 7) | 0x33;
+}
+// slli / srai rd, rs1, shamt — I-type with the shift amount in the immediate. srai sets bit 30
+// of the immediate field, which is what makes the shift arithmetic (sign-filling) rather than
+// logical.
+static uint32_t encSlli(uint8_t rd, uint8_t rs1, uint8_t n) {
+    return (uint32_t(n & 0x1f) << 20) | (rs1 << 15) | (1u << 12) | (rd << 7) | 0x13;
+}
+static uint32_t encSrai(uint8_t rd, uint8_t rs1, uint8_t n) {
+    return (1u << 30) | (uint32_t(n & 0x1f) << 20) | (rs1 << 15) | (5u << 12) | (rd << 7) | 0x13;
+}
+// srli: srai without bit 30. The one bit between zero-filling and sign-filling.
+static uint32_t encSrli(uint8_t rd, uint8_t rs1, uint8_t n) {
+    return (uint32_t(n & 0x1f) << 20) | (rs1 << 15) | (5u << 12) | (rd << 7) | 0x13;
+}
 static uint32_t encSb(uint8_t rs2, uint8_t rs1, int32_t imm) {   // sb rs2, imm(rs1)
     return (((uint32_t(imm) >> 5) & 0x7f) << 25) | (rs2 << 20) | (rs1 << 15) | (0 << 12) |
            ((uint32_t(imm) & 0x1f) << 7) | 0x23;
@@ -183,6 +201,33 @@ void RiscvAssembler::addImm(Reg d, Reg a, int32_t imm) { emit32(encAddi(xr(d), x
 void RiscvAssembler::addReg(Reg d, Reg a, Reg b) { emit32(encAdd(xr(d), xr(a), xr(b))); }
 void RiscvAssembler::mulReg(Reg d, Reg a, Reg b) { emit32(encMul(xr(d), xr(a), xr(b))); }
 
+void RiscvAssembler::mulhi(Reg d, Reg a, Reg b) { emit32(encMulh(xr(d), xr(a), xr(b))); }
+void RiscvAssembler::shlImm(Reg d, Reg a, uint8_t n) {
+    if (n >= 32) { overflow_ = true; return; }   // shamt is five bits
+    emit32(encSlli(xr(d), xr(a), n));
+}
+void RiscvAssembler::sarImm(Reg d, Reg a, uint8_t n) {
+    if (n >= 32) { overflow_ = true; return; }   // shamt is five bits
+    emit32(encSrai(xr(d), xr(a), n));
+}
+void RiscvAssembler::shrImm(Reg d, Reg a, uint8_t n) {
+    if (n >= 32) { overflow_ = true; return; }   // shamt is five bits
+    emit32(encSrli(xr(d), xr(a), n));
+}
+// The 4-byte slot access. encLw/encSw already existed for spills; these give them an arbitrary
+// base and offset, which is what a member slot needs.
+void RiscvAssembler::load32(Reg d, Reg base, int32_t imm) { emit32(encLw(xr(d), xr(base), imm)); }
+void RiscvAssembler::store32(Reg base, int32_t imm, Reg val) {
+    emit32(encSw(xr(val), xr(base), imm));
+}
+void RiscvAssembler::load32Idx(Reg d, Reg base, Reg off) {
+    emit32(encAdd(kScratchAddr, xr(base), xr(off)));   // t6 = base + off
+    emit32(encLw(xr(d), kScratchAddr, 0));
+}
+void RiscvAssembler::store32Idx(Reg base, Reg off, Reg val) {
+    emit32(encAdd(kScratchAddr, xr(base), xr(off)));
+    emit32(encSw(xr(val), kScratchAddr, 0));
+}
 void RiscvAssembler::store8(Reg base, Reg off, Reg val) {
     emit32(encAdd(kScratchAddr, xr(base), xr(off)));   // t6 = base + off
     emit32(encSb(xr(val), kScratchAddr, 0));           // sb val, 0(t6)
@@ -190,29 +235,11 @@ void RiscvAssembler::store8(Reg base, Reg off, Reg val) {
 void RiscvAssembler::load8(Reg d, Reg base, int32_t imm) {   // lbu rDst, imm(rBase) — control read
     emit32(((uint32_t(imm) & 0xfff) << 20) | (xr(base) << 15) | (4 << 12) | (xr(d) << 7) | 0x03);
 }
-void RiscvAssembler::store16(Reg base, Reg off, Reg val) {
-    emit32(encAdd(kScratchAddr, xr(base), xr(off)));   // t6 = base + off
-    // sh val, 0(t6): the S-type store, funct3 = 1 for a halfword where sb uses 0.
-    emit32((uint32_t(xr(val)) << 20) | (uint32_t(kScratchAddr) << 15) | (1u << 12) | 0x23u);
-}
-// lhu rDst, imm(rBase): funct3 = 5 where lbu uses 4. The immediate is in BYTES and unscaled, so
-// unlike arm64 no even-offset rule is forced by the encoding here.
-void RiscvAssembler::load16(Reg d, Reg base, int32_t imm) {
-    emit32(((uint32_t(imm) & 0xfff) << 20) | (xr(base) << 15) | (5 << 12) | (xr(d) << 7) | 0x03);
-}
-// lh rDst, imm(rBase): funct3 1 rather than lhu's 5, which is the whole difference.
-void RiscvAssembler::load16S(Reg d, Reg base, int32_t imm) {
-    emit32(((uint32_t(imm) & 0xfff) << 20) | (xr(base) << 15) | (1 << 12) | (xr(d) << 7) | 0x03);
-}
 // RISC-V has no register-offset addressing mode, so the address is computed first. Same shape as
-// store8/store16, which is why they share kScratchAddr.
+// store8 and store32, which is why they share kScratchAddr.
 void RiscvAssembler::load8Idx(Reg d, Reg base, Reg off) {
     emit32(encAdd(kScratchAddr, xr(base), xr(off)));                              // t6 = base + off
     emit32((uint32_t(kScratchAddr) << 15) | (4 << 12) | (xr(d) << 7) | 0x03);     // lbu d, 0(t6)
-}
-void RiscvAssembler::load16Idx(Reg d, Reg base, Reg off) {
-    emit32(encAdd(kScratchAddr, xr(base), xr(off)));                              // t6 = base + off
-    emit32((uint32_t(kScratchAddr) << 15) | (5 << 12) | (xr(d) << 7) | 0x03);     // lhu d, 0(t6)
 }
 void RiscvAssembler::branchIfZero(Reg a, Label l) {    // a == 0  ⇔  bgeu x0, a (unsigned 0 >= a)
     addFixup(len_, l);

@@ -144,28 +144,47 @@ public:
     /// Publish every control the compiled script declared into `controls`, bound by reference to
     /// the engine's live arena slot so a slider write lands where the running native code reads it.
     /// The ONE home for this: all three bindings (effect, layout, modifier) publish identically,
-    /// and the width dispatch below is the kind of reasoning that should be stated once.
+    /// and the type dispatch below is the kind of reasoning that should be stated once.
     void publishDeclaredControls(ControlList& controls) {
         uint8_t n = 0;
         const moonlive::DeclaredControl* decls = engine_.declaredControls(n);
         for (uint8_t i = 0; i < n; i++) {
             uint8_t* slot = engine_.controlSlot(decls[i].offset);
             if (!slot) continue;   // engine not compiled yet — controls appear after prepare
-            // Published at the width the script declared. A uint16_t member reaches the UI as a
-            // 16-bit control writing both its arena bytes; publishing it as a uint8 would drive
-            // only the low one and leave the high half holding whatever it had.
-            if (decls[i].type == moonlive::CtrlType::Uint16) {
-                // Safe to view as a uint16_t: the compiler aligns every wide member to an even
-                // arena offset (two backends cannot encode an odd halfword offset at all), and the
-                // arena base comes from platform::alloc, which is aligned for any fundamental type.
-                controls.addUint16(decls[i].name, *reinterpret_cast<uint16_t*>(slot),
-                                   decls[i].min, decls[i].max);
-            } else {
-                controls.addUint8(decls[i].name, *slot,
-                                  static_cast<uint8_t>(decls[i].min),
-                                  static_cast<uint8_t>(decls[i].max));
+            // Published as the widget the member's TYPE calls for. Every scalar occupies the same
+            // 4-byte slot, so this is no longer a width dispatch: it is the semantic one, and the
+            // storage underneath is identical in all three cases.
+            //
+            // Safe to view the slot as its type: the compiler aligns every member to a 4-byte
+            // arena offset, and the arena base comes from platform::alloc, which is aligned for
+            // any fundamental type.
+            //
+            // byte and bool point at the slot's LOW BYTE, which is only correct because the two
+            // are masked on store: the upper three bytes are always zero, so a 1-byte control
+            // reading and writing that byte sees the member's whole value. On a big-endian target
+            // the low byte would be at offset+3 — no supported target is one.
+            switch (decls[i].type) {
+                case moonlive::CtrlType::Bool:
+                    // NORMALIZED before the byte is ever read as a `bool`. A script's store
+                    // truncates rather than normalizing, so a bool member can legally hold 7
+                    // (`flag = 7;` is ordinary arithmetic to the language), and a C++ bool object
+                    // holding anything but 0 or 1 is undefined behaviour the moment it is read.
+                    // One write at publish time settles it; every later write comes through
+                    // applyControlValue's parseBool, which yields 0 or 1 by construction.
+                    *slot = (*slot != 0) ? 1 : 0;
+                    controls.addBool(decls[i].name, *reinterpret_cast<bool*>(slot));
+                    break;
+                case moonlive::CtrlType::Byte:
+                    controls.addUint8(decls[i].name, *slot,
+                                      static_cast<uint8_t>(decls[i].min),
+                                      static_cast<uint8_t>(decls[i].max));
+                    break;
+                default:   // Int; Fixed and Str never reach here (the compiler refuses to bind one)
+                    controls.addInt32(decls[i].name, *reinterpret_cast<int32_t*>(slot),
+                                      decls[i].min, decls[i].max);
+                    break;
             }
-            // The member's initializer (`uint8_t bpm = 60;`) IS the control's default, and it is
+            // The member's initializer (`byte bpm = 60;`) IS the control's default, and it is
             // the only place one exists: /api/types probes a fresh module for defaults, and a
             // scripted module's controls come from the script, so a probe with no script declares
             // none. Carried on the control instead, which is what lights the UI's reset button.

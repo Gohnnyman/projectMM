@@ -126,13 +126,22 @@ void HostAssembler::movImm(Reg d, int32_t imm) {
     // light, and in a host-call argument it is nonsense. movn is the negative form: it writes
     // ~imm16, so movn #(~imm) materialises the true negative value.
     if (imm < 0) {
-        // movn writes ~imm16, so it reaches -65536..-1 exactly. Below that the complement no longer
-        // fits the 16-bit field and the constant would come out wrong in silence.
-        if (imm < -65536) { overflow_ = true; return; }
-        emit32(0x12800000u | ((uint32_t(~imm) & 0xffff) << 5) | mr(d));   // movn wD, #~imm16
+        // movn writes ~imm16, reaching -65536..-1 in one instruction. Below that, movk patches
+        // the high half over it: movn seeds every bit set, so only the two 16-bit fields need
+        // stating. This used to overflow_ instead — the compiler's Const never went that low
+        // until a fixed literal could ride one.
+        const uint32_t u = uint32_t(imm);
+        emit32(0x12800000u | ((uint32_t(~imm) & 0xffff) << 5) | mr(d));   // movn wD, #~imm16 (low)
+        if (imm < -65536)
+            emit32(0x72a00000u | (((u >> 16) & 0xffff) << 5) | mr(d));    // movk wD, #hi16, lsl 16
         return;
     }
     emit32(0x52800000u | ((uint32_t(imm) & 0xffff) << 5) | mr(d));        // movz wD, #imm16
+    if (uint32_t(imm) > 0xffffu)
+        // The high half, patched over the movz. Without this every constant above 65535 silently
+        // materialized as its low 16 bits — invisible while the language capped literals there,
+        // and the first thing a Q16.16 literal (2.0 is 131072) stepped on.
+        emit32(0x72a00000u | ((uint32_t(imm) >> 16) << 5) | mr(d));       // movk wD, #hi16, lsl 16
 }
 void HostAssembler::addImm(Reg d, Reg a, int32_t imm) {    // add xD, xA, #imm12 (64-bit)
     emit32(0x91000000u | ((uint32_t(imm) & 0xfff) << 10) | (mr(a) << 5) | mr(d));
@@ -149,26 +158,45 @@ void HostAssembler::mulImm(Reg d, Reg a, int32_t imm) {    // d = a * imm via mo
 void HostAssembler::mulReg(Reg d, Reg a, Reg b) {         // mul wD, wA, wB
     emit32(0x1b007c00u | (mr(b) << 16) | (mr(a) << 5) | mr(d));
 }
+// smull xD, wA, wB then lsr xD, xD, #32 — the signed 64-bit product's high word. arm64 also has
+// smulh, but that is a 64x64 form: with 32-bit vregs, widening the multiply is both correct and
+// one instruction shorter than sign-extending first.
+void HostAssembler::mulhi(Reg d, Reg a, Reg b) {
+    emit32(0x9b207c00u | (mr(b) << 16) | (mr(a) << 5) | mr(d));   // smull xD, wA, wB
+    emit32(0xd360fc00u | (mr(d) << 5) | mr(d));                   // lsr  xD, xD, #32
+}
+// lsl wD, wA, #n is an alias of ubfm; asr wD, wA, #n of sbfm. Both take the 32-bit immr/imms
+// form, which is why the width bit (31) stays clear here.
+void HostAssembler::shlImm(Reg d, Reg a, uint8_t n) {
+    const uint32_t immr = (32u - n) & 31u, imms = 31u - n;
+    emit32(0x53000000u | (immr << 16) | (imms << 10) | (mr(a) << 5) | mr(d));
+}
+void HostAssembler::sarImm(Reg d, Reg a, uint8_t n) {
+    emit32(0x13000000u | (uint32_t(n) << 16) | (31u << 10) | (mr(a) << 5) | mr(d));
+}
+// lsr is ubfm with imms fixed at 31: the same shape as asr but zero-filling.
+void HostAssembler::shrImm(Reg d, Reg a, uint8_t n) {
+    emit32(0x53000000u | (uint32_t(n) << 16) | (31u << 10) | (mr(a) << 5) | mr(d));
+}
 void HostAssembler::store8(Reg base, Reg off, Reg val) {   // strb wVal, [xBase, xOff]
     emit32(0x38206800u | (mr(off) << 16) | (mr(base) << 5) | mr(val));
 }
 void HostAssembler::load8(Reg d, Reg base, int32_t imm) {  // ldrb wDst, [xBase, #imm12]
     emit32(0x39400000u | ((uint32_t(imm) & 0xfff) << 10) | (mr(base) << 5) | mr(d));
 }
-void HostAssembler::store16(Reg base, Reg off, Reg val) {  // strh wVal, [xBase, xOff]
-    emit32(0x78206800u | (mr(off) << 16) | (mr(base) << 5) | mr(val));
+// The 4-byte slot access. ldr/str with a 32-bit w destination: the immediate is scaled by 4
+// (every arena offset is a multiple of it), and the register-offset forms use the LSL-0 option.
+void HostAssembler::load32(Reg d, Reg base, int32_t imm) {
+    emit32(0xb9400000u | (((uint32_t(imm) >> 2) & 0xfff) << 10) | (mr(base) << 5) | mr(d));
 }
-// ldrh wDst, [xBase, #imm12]. The immediate is SCALED by the access size, so the field holds
-// imm/2 and an odd offset cannot be encoded at all: a halfword member is placed on an even byte
-// (see the arena cursor), which is what makes the scaled form usable rather than a constraint
-// invented here.
-void HostAssembler::load16(Reg d, Reg base, int32_t imm) {
-    emit32(0x79400000u | (((uint32_t(imm) >> 1) & 0xfff) << 10) | (mr(base) << 5) | mr(d));
+void HostAssembler::store32(Reg base, int32_t imm, Reg val) {
+    emit32(0xb9000000u | (((uint32_t(imm) >> 2) & 0xfff) << 10) | (mr(base) << 5) | mr(val));
 }
-// ldrsh wDst, [xBase, #imm]: the 32-bit-destination signed form (opc 11), so the sign fills the
-// top 16 bits of the w register and the x register's upper half stays clear.
-void HostAssembler::load16S(Reg d, Reg base, int32_t imm) {
-    emit32(0x79C00000u | (((uint32_t(imm) >> 1) & 0xfff) << 10) | (mr(base) << 5) | mr(d));
+void HostAssembler::load32Idx(Reg d, Reg base, Reg off) {
+    emit32(0xb8606800u | (mr(off) << 16) | (mr(base) << 5) | mr(d));
+}
+void HostAssembler::store32Idx(Reg base, Reg off, Reg val) {
+    emit32(0xb8206800u | (mr(off) << 16) | (mr(base) << 5) | mr(val));
 }
 // ldrb wDst, [xBase, xOff] and ldrh wDst, [xBase, xOff]. The register-offset form takes the index
 // UNSCALED for a byte; for a halfword the LSL amount would scale it, and it is left at 0 so the
@@ -176,9 +204,6 @@ void HostAssembler::load16S(Reg d, Reg base, int32_t imm) {
 // an element index is multiplied by the element width before it gets here, never after.
 void HostAssembler::load8Idx(Reg d, Reg base, Reg off) {   // ldrb wDst, [xBase, xOff]
     emit32(0x38606800u | (mr(off) << 16) | (mr(base) << 5) | mr(d));
-}
-void HostAssembler::load16Idx(Reg d, Reg base, Reg off) {  // ldrh wDst, [xBase, xOff]
-    emit32(0x78606800u | (mr(off) << 16) | (mr(base) << 5) | mr(d));
 }
 void HostAssembler::cmp(Reg a, Reg b) {                    // cmp wA, wB  (subs wzr, wA, wB)
     emit32(0x6b00001fu | (mr(b) << 16) | (mr(a) << 5));

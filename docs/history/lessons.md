@@ -590,3 +590,17 @@ evidence which *looks* most authoritative here is the evidence that lies.
   next one reporting a stale runner, a self-inflicted loop that reads exactly like a real staleness
   failure. **Generated build metadata is not source**, and a guard that cannot tell them apart
   teaches people to ignore it.
+
+- **An ISA-guarded test is not run by the machine that wrote it, and a JIT's bytes are only true
+  where they execute.** The MoonLive backends are `#if`-guarded per architecture, so an arm64 bench
+  compiles neither the x86-64 encoder tests nor the x86-64 emitted code — a whole backend can be
+  wrong while the local suite is green and confident. A Q16.16 multiply that borrowed a register the
+  allocator hands out returned garbage on every x86-64 desktop; 1458 local tests passed, and CI is
+  where it surfaced. Two smaller defects hid in the same blind spot: a one-byte arena where the code
+  now does a 32-bit load, and an unmigrated type keyword in a test file arm64 never compiles.
+
+  **On an Apple Silicon machine that blind spot is one command wide:** `cmake -B build/x86
+  -DCMAKE_OSX_ARCHITECTURES=x86_64` then `arch -x86_64 ./build/x86/test/mm_tests`. Rosetta runs the
+  emitted x86-64 instructions for real, so the tests that only exist on that host actually execute.
+  Worth doing on any change to a backend, an encoder, or the register allocator — it is minutes,
+  and it is the difference between finding these locally and finding them in CI.

@@ -2,18 +2,20 @@
 // smin() is the trick: a plain minimum draws two circles with a seam, smin() one flowing surface.
 
 class MetalEffect {
-  uint8_t bpm = 14;
-  uint8_t blend = 40;
-  uint8_t glow = 30;
+  byte bpm = 14;
+  byte blend = 40;
+  byte glow = 30;
 
-  int16_t ux = 0;
-  int16_t uy = 0;
-  int16_t d = 0;
+  fixed ux = 0.0;
+  fixed uy = 0.0;
+  fixed cx = 0.0;
+  fixed cy = 0.0;
+  int d = 0;
 
   defineControls() {
-    addUint8("bpm", bpm, 1, 60);
-    addUint8("blend", blend, 0, 120);
-    addUint8("glow", glow, 4, 120);
+    addControl("bpm", bpm, 1, 60);
+    addControl("blend", blend, 0, 120);
+    addControl("glow", glow, 4, 120);
   }
 
   tick() {
@@ -22,16 +24,24 @@ class MetalEffect {
         ux = uvX(x, width, height);
         uy = uvY(y, width, height);
 
-        // Each blob is a distance to a center that drifts on the clock.
-        d = polarR(ux - beatsin(bpm, t, 30000) + 15000,
-                   uy - beatsin(bpm + 5, t, 30000) + 15000) - 4200;
-        d = smin(d, polarR(ux - beatsin(bpm + 3, t, 30000) + 15000, uy) - 3600, blend * 32);
-        d = smin(d, polarR(ux, uy - beatsin(bpm + 7, t, 30000) + 15000) - 3600, blend * 32);
+        // Each blob is a distance to a center that drifts on the clock. beatsin sweeps 0..30000,
+        // recentred and scaled into uv's own range. polarR takes whole numbers, so the coordinate
+        // is scaled up before the conversion: toInt alone would discard the fraction that IS the
+        // shape. 1024 units per uv unit, so a blob radius of 0.35 is 358.
+        cx = ux - toFixed(beatsin(bpm, t, 30000) - 15000) / 25000;
+        cy = uy - toFixed(beatsin(bpm + 5, t, 30000) - 15000) / 25000;
+        d = polarR(toInt(cx * 1024), toInt(cy * 1024)) - 358;
+
+        cx = ux - toFixed(beatsin(bpm + 3, t, 30000) - 15000) / 25000;
+        d = smin(d, polarR(toInt(cx * 1024), toInt(uy * 1024)) - 307, blend);
+
+        cy = uy - toFixed(beatsin(bpm + 7, t, 30000) - 15000) / 25000;
+        d = smin(d, polarR(toInt(ux * 1024), toInt(cy * 1024)) - 307, blend);
 
         // d < 0 = inside the surface: the start of the palette, full bright.
         if (d < 0) { setPaletteColor(x, y, 0, 255); }
-        else { setPaletteColor(x, y, scale(d * 8, 256),
-                               scale(smoothstep(0, glow * 100, glow * 100 - d), 256)); }
+        else { setPaletteColor(x, y, scale(d * 128, 256),
+                               scale(smoothstep(0, glow * 8, glow * 8 - d), 256)); }
       }
     }
   }

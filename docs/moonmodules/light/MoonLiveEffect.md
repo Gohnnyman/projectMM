@@ -34,19 +34,19 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
     Type in the box and the script compiles when you click away, press Ctrl/Cmd+S, or press Save; a dot on the Save button marks unsaved work. A valid script swaps in on the next tick. A failed compile frees the old code, shows the diagnostic in the module status, and renders dark until it is fixed, so a typo costs a message rather than a reboot. Fixing it in place is enough: nothing has to be renamed.
 
     The card also creates and deletes scripts (delete asks twice), and the same editor is what the File Manager opens from a file row. The control is [`filepath`](../core/ui.md#control-types), which is generic: the module says only where its files are and which extension they carry.
-- **Scripted controls**: a script declares members, then says which of them the UI shows by calling `addUint8` (or `addUint16`) inside a `defineControls()`, the same call a compiled module makes. Each becomes a real MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
+- **Scripted controls**: a script declares members, then says which of them the UI shows by calling `addControl` inside a `defineControls()`, the same call a compiled module makes. Each becomes a real MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
 
   ```c
   class SpeedyEffect {
-    uint8_t  speed = 50;
-    uint8_t  hue   = 128;
-    uint16_t dwell = 900;       // a value a byte cannot hold
-    uint8_t  phase = 0;         // a member, not a control: the UI never shows it
+    byte speed = 50;
+    byte hue   = 128;
+    int  dwell = 900;           // a value a byte cannot hold
+    byte phase = 0;             // a member, not a control: the UI never shows it
 
     defineControls() {
-      addUint8("speed", speed, 0, 99);
-      addUint8("hue", hue, 0, 255);
-      addUint16("dwell", dwell, 0, 1000);
+      addControl("speed", speed, 0, 99);
+      addControl("hue", hue, 0, 255);
+      addControl("dwell", dwell, 0, 1000);
     }
 
     tick() { setRGB(speed, hue, phase, 255); }
@@ -58,15 +58,40 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
   UI shows one is the separate question `defineControls()` answers. A member no control names is
   simply the script's own state.
 
-  The compiled form is the same call with a receiver: `controls_.addUint8("speed", speed, 1, 255)`
-  (and `controls_.addUint16("dwell", dwell, 0, 1000)` for a wide member, which reaches the UI as a
-  16-bit control carrying its full range and value, not a byte). The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addUint8("speed", speed, base, base * 4 + 5)` is valid.
+  The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addControl("speed", speed, base, base * 4 + 5)` is valid.
 
   `defineControls()` runs once after a successful compile, the way the Scheduler runs a compiled module's. Editing a control's slider does **not** recompile: the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops.
 
-  **The call has to match the member's width**: `addUint8` binds a `uint8_t` and `addUint16` a `uint16_t`. A mismatch is a compile error naming what the call takes, because the alternative is silent: `addUint8` on a wide member would drive only its low byte, leaving the high half holding whatever it had, so the number the script reads is one nobody chose. A control binds a single member, never an array.
+  **One call for every type**: which widget appears follows from how the member was declared, so a call and a declaration can no longer disagree. A `byte` becomes a 0..255 slider, a `bool` a toggle, an `int` a full-range number. A range the member's type cannot hold is refused rather than truncated (`addControl("n", n, 0, 900)` on a `byte`), because a slider whose top silently wraps is worse than one that never appears. A control binds a single member, never an array, and a `fixed` or `string` member is refused: neither has a widget yet.
 
-  **`int16_t` is the third member type**, for a value that goes below zero: a velocity, a delta, a coordinate from `uvX`/`uvY`. It is two arena bytes read back sign-extended, its initializer may be negative and is range-checked (`int16_t d = 60000;` is a compile error naming `-32768..32767`), and it is script-internal state only: no `addInt16` exists, so an `int16_t` member cannot be a control. `int16_t` arrays are refused with a diagnostic. There is deliberately no `int8_t`: the Xtensa has no signed byte load, and a small signed value declares `int16_t`.
+### The five types
+
+A type says what a value **means**; the storage is the compiler's business. Every **scalar** occupies the same 4-byte slot whatever its type, and only **arrays** pack by element — which is where the width still earns its keep, since a `byte[]` heat map costs a quarter of an `int[]` one and the classic ESP32 has no PSRAM to absorb the difference.
+
+| Type | Range | For |
+|---|---|---|
+| `int` | −2,147,483,648 … 2,147,483,647 | counts, indices, milliseconds, anything whole |
+| `byte` | 0 … 255 | a channel, a palette index, a heat cell — the LED's own range |
+| `bool` | `true` / `false` | a flag |
+| `fixed` | −32,768.0 … 32,767.99998, in steps of 1/65,536 | coordinates and anything fractional |
+| `string` | one of the script's own literals | a name passed to a builtin |
+
+An initializer is range-checked against its type, so `byte n = 300;` is a compile error naming the member rather than a silent 44. Arrays are declared `byte heat[16];` and start at zero; a `string` array is refused, since there is no runtime string to fill one with.
+
+### `fixed`: fractional arithmetic without a float
+
+`fixed` is Q16.16 — the number is stored scaled by 65,536, which is how every coordinate in the engine has always worked, now spelled the way a script reads it. There is no float anywhere: fixed-point is bit-identical on all four backends, which is also what makes an effect reproducible.
+
+```c
+fixed ux = 0.0;
+ux = uvX(x, width, height);     // uvX and uvY hand back a fixed coordinate
+ux = ux * 2 + 0.5;              // ordinary arithmetic, decimals written as decimals
+setRGB(0, toInt(ux * 100), 0, 255);
+```
+
+**Mixing a whole number and a fixed value is a compile error** naming the conversion to write, because at run time the two are the same 32 bits and a silent mix is a number 65,536 times off with nothing reporting it. `toFixed(v)` and `toInt(v)` convert explicitly, each one instruction.
+
+The exception is an integer **literal**, which adopts the fixed side at a meet point and converts at compile time: `ux * 2`, `if (ux < 0)`, and `ux = 5;` all read naturally and cost nothing at run time. A *variable* never adopts — its scaling is not visible where it is used, so it keeps the explicit rule.
 
 ### System variables — what the engine hands a script
 
@@ -106,13 +131,14 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centered at 32768 |
 | `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
 | `print(v)` | log a value and return it ([what it costs](writing-scripts.md#debugging-print)) |
-| `a / b`, `a % b` | divide and remainder. Both are host calls: cheap on a cold path, deliberate per light |
+| `a / b`, `a % b` | divide and remainder. Both are host calls: cheap on a cold path, deliberate per light. Dividing by zero **saturates** toward the numerator's sign rather than faulting, so no script needs a zero-check of its own; the remainder is 0 |
+| `toFixed(v)`, `toInt(v)` | convert between a whole number and a `fixed` one, each a single instruction |
 | `smoothstep(e0, e1, v)` | a soft `0..65535` ramp between two edges, the anti-aliasing primitive |
-| `uvX(x, w, h)`, `uvY(y, w, h)` | shader space: centered, normalized on the short side so a circle stays round on a wide panel |
+| `uvX(x, w, h)`, `uvY(y, w, h)` | shader space, as a `fixed` value: centered on 0.0, normalized on the short side so a circle stays round on a wide panel |
 | `smin(a, b, k)` | the smooth minimum of two distances, so shapes melt into one surface rather than overlapping |
 | `fade(amt)` | dim every light toward black, FastLED's `fadeToBlackBy`. The trail primitive |
 | `polarA(dx, dy)`, `polarR(dx, dy)` | angle and distance from a center, for a radial effect |
-| `escape(cx, cy, jx, jy, iters)` | the Mandelbrot/Julia escape count, `0..255`, `0` inside the set. Zero seed = Mandelbrot; coordinates are uv's own fixed point (8192 = 1.0). The one loop a script cannot write: it squares signed values in 64 bits |
+| `escape(cx, cy, jx, jy, iters)` | the Mandelbrot/Julia escape count, `0..255`, `0` inside the set. Zero seed = Mandelbrot; the four coordinates are `fixed`, so uv output flows straight in. The one loop a script cannot write: it squares signed values in 64 bits |
 | `setPaletteColor(x, y, index, bri)` | one light from the ACTIVE palette, in one call |
 | `paletteR(i, bri)`, `paletteG`, `paletteB` | one palette channel, when a script needs the value rather than a pixel |
 | `pool(n)` | size this script's particle pool, from `defineControls()`. Returns what it got |
@@ -135,7 +161,7 @@ vocabulary follows the [WLED Particle System](https://github.com/wled/WLED) by D
 
 `sin`/`cos` return an **unsigned** wave centered on 32768, so a coordinate comes from scaling by the full span and not by half of it: `scale(cos(a), radius * 2 + 1)` sweeps a whole axis, where scaling by `radius` alone would only ever reach one side of center. Subtract 32768 for a signed wave when you want one.
 
-`uvX`/`uvY` are the other way round, and the difference is deliberate: they return a **signed** coordinate with the center of the grid at 0 and the left half negative. A coordinate has an origin, so a script uses the number it is given rather than re-centering it; a wave does not, which is why the two conventions differ. Hold a uv value in an `int16_t` member, not a `uint16_t`.
+`uvX`/`uvY` are the other way round, and the difference is deliberate: they return a **signed** coordinate with the center of the grid at 0 and the left half negative. A coordinate has an origin, so a script uses the number it is given rather than re-centering it; a wave does not, which is why the two conventions differ. They return a **`fixed`** value (Q16.16), so a script holds one in a `fixed` member and does ordinary arithmetic on it; `escape()` takes four of them, which is what lets uv output flow straight into a fractal.
 
 `noise(x, y, z)` takes **16.8 fixed-point** coordinates: the high byte selects the noise cell and the low byte interpolates within it. So `x * zoom` sets how much of the field the fixture spans, and the time axis must be **monotonic** — feeding it a `beat()` sawtooth walks one cell and then snaps back to its start, which reads as a hiccup once per beat. Scaling `t` keeps walking into new cells. 2D is the same call with `z` held constant.
 
@@ -154,7 +180,7 @@ Two rules a script author meets:
 
 ### Wire contract — control declaration
 
-The controls are **declared by the script** (one per `addUint8` call in its `defineControls()`), then **surfaced in `/api/state`**, the device JSON view the integrator consumes, as regular `uint8` controls alongside `script`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line script round-trips through `/api/file`.
+The controls are **declared by the script** (one per `addControl` call in its `defineControls()`), then **surfaced in `/api/state`**, the device JSON view the integrator consumes, as regular controls alongside `script` (a `byte` member as uint8, a `bool` as bool, an `int` as int32). So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line script round-trips through `/api/file`.
 
 ## What the card tells you: size, memory, and how close to a wall
 
@@ -186,7 +212,7 @@ A script can exhaust ten limits, but only five are ones an author can act on:
 | limit | ceiling | what to do |
 |---|---|---|
 | code size | 16 KB | split or simplify the script |
-| controls | 8 | remove an `addUint8` |
+| controls | 8 | remove an `addControl` |
 | members | 8 | shares the budget with controls |
 | functions | 8 | merge two helpers |
 | string bytes | 128 | shorter control labels |

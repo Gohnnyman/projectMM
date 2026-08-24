@@ -35,7 +35,7 @@ Five hard limits, all found by hitting them:
 | script state | **64 bytes** shared by all members | `kCtrlBytes`, `MoonLiveBuiltins.h:132` |
 | distinct members | **8** | `kMaxCtrls`, same file |
 | branch labels | **16** (an `if` or `for` takes up to 2) | `kIrLabels`, `MoonLiveIr.h:201` |
-| numeric types | `uint8_t`, `uint16_t`, `int16_t` | no float |
+| ~~numeric types~~ | ~~`uint8_t`, `uint16_t`, `int16_t`~~ → **`int`, `byte`, `bool`, `fixed`, `string`** ✅ | still no float: `fixed` is Q16.16 |
 | ~~builtin table~~ | ~~16, and 16 used~~ → **64** ✅ | `BuiltinTable::kMax` — raised, with an overflow assert |
 
 The branch budget was binary-searched with generated scripts: **6 `if`/`else` + 2 `for` compiles,
@@ -101,6 +101,31 @@ than "add a language feature":
 Item 5 is worth noting against the arena work below: a particle pool as a HANDLE means the script
 does not spend its own 64 bytes on particle state at all. That is a better answer than widening
 the arena, and it is already designed.
+
+## The type system: ✅ *shipped*
+
+Shipped as designed, with three things worth carrying forward that the design did not anticipate:
+
+- **`fixed` needed three new assembler primitives**, not the one the design implied. A Q16.16
+  multiply is `mulhi` + `mul` + two shifts, and the JIT had no shift instruction and no
+  multiply-high at all — `mulReg` is a plain 32-bit multiply. `shlImm`, `sarImm`, `shrImm` and
+  `mulhi` went into all four backends, every encoding checked byte-for-byte against the real
+  assembler. Worth it: the alternative made every fixed multiply a host call inside a per-pixel
+  loop, and made `int`↔`fixed` conversion — one shift — a function call.
+- **An integer literal ADOPTS fixed at a meet point.** The design said any mix is an error; that
+  made `v * 2` and `if (v < 0)` unwritable. A bare literal now converts at compile time by
+  patching its own `Const` (free at run time), while a *variable* still names its conversion,
+  because a literal's meaning is visible at the site and a variable's scaling is not.
+- **`movImm` truncated above 16 bits on arm64 and Xtensa.** A latent bug the whole time, masked
+  `& 0xffff` under a comment warning about exactly that failure mode: invisible while literals
+  capped at 65535, and fatal the moment a Q16.16 literal (2.0 is 131072) rode a `Const`. Both
+  backends now materialize the full 32 bits.
+
+`bool` truncates rather than normalizing (`flag = 256` reads false), because normalizing needs a
+compare-and-select the IR has no op for — there is no `Sub` and no bitwise op. Waiting for a script
+that writes a non-boolean expression into a bool.
+
+The design as agreed follows, unchanged.
 
 ## The type system: the settled design (2026-08-23)
 

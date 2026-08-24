@@ -2,36 +2,49 @@
 // seed 0 is the still Mandelbrot set; any other value walks a Julia seed along the cardioid.
 
 class FractalEffect {
-  uint8_t bpm = 6;
-  uint8_t iters = 40;
-  uint8_t zoom = 34;
-  uint8_t seed = 128;
+  byte bpm = 6;
+  byte iters = 40;
+  byte zoom = 34;
+  byte seed = 128;
 
-  int16_t cx = 0;
-  uint16_t n = 0;
+  fixed cx = 0.0;
+  fixed jx = 0.0;
+  fixed jy = 0.0;
+  int n = 0;
 
   defineControls() {
-    addUint8("bpm", bpm, 0, 30);
-    addUint8("iters", iters, 8, 64);
-    addUint8("zoom", zoom, 12, 40);
-    addUint8("seed", seed, 0, 128);
+    addControl("bpm", bpm, 0, 30);
+    addControl("iters", iters, 8, 64);
+    addControl("zoom", zoom, 12, 40);
+    addControl("seed", seed, 0, 128);
   }
 
   tick() {
+    // The Julia seed walks a cardioid once per beat, the same for every pixel.
+    // The wave spans -32768..32767 and the seed 0..128; together they scale to a Julia seed
+    // under 1.0, which is the band where the set has structure. seed 0 gives 0 and selects
+    // Mandelbrot. DIVIDED BEFORE MULTIPLIED: the other order pushes the intermediate past what
+    // fixed can hold (32767.0 * 128 wraps), where wave/2560 is at most 12.8 and stays in range.
+    // The walk traces the Mandelbrot cardioid's own boundary — every point there pinches alike,
+    // so a bare orbit looks cyclic. Perlin noise breathes the RADIUS across the boundary
+    // (0.87..1.12): slightly inside gives fat connected blobs, slightly outside shattered dust,
+    // and the noise never repeats, so the cuts vary from shallow to deep.
+    jx = (toFixed(cos(beat(bpm, t)) - 32768) / 2560 * toFixed(seed) / 3277
+        - toFixed(cos(beat(bpm, t) * 2) - 32768) / 5120 * toFixed(seed) / 3277)
+       * toFixed(870 + noise(t / 4, 0, 0)) / 1000;
+    jy = (toFixed(sin(beat(bpm, t)) - 32768) / 2560 * toFixed(seed) / 3277
+        - toFixed(sin(beat(bpm, t) * 2) - 32768) / 5120 * toFixed(seed) / 3277)
+       * toFixed(870 + noise(t / 4, 0, 0)) / 1000;
+
     for (y = 0; y < height; y = y + 1) {
       for (x = 0; x < width; x = x + 1) {
-        cx = div(uvX(x, width, height) * zoom, 40);
-        if (seed == 0) { cx = cx - 4500; }
+        cx = uvX(x, width, height) * toFixed(zoom) / 40;
+        if (seed == 0) { cx = cx - 0.55; }
 
-        n = escape(cx, div(uvY(y, width, height) * zoom, 40),
-                   div((cos(beat(bpm, t)) - 32768) * seed, 1024)
-                       - div((cos(beat(bpm, t) * 2) - 32768) * seed, 2048),
-                   div((sin(beat(bpm, t)) - 32768) * seed, 1024)
-                       - div((sin(beat(bpm, t) * 2) - 32768) * seed, 2048),
-                   iters);
+        n = escape(cx, uvY(y, width, height) * toFixed(zoom) / 40, jx, jy, iters);
 
         // 0 = inside the set: stays black, the silhouette is the shape.
-        setPaletteColor(x, y, n, n * 255);
+        setPaletteColor(x, y, mod(n * 4, 256), n * 255);
       }
     }
   }

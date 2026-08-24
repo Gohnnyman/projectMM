@@ -25,6 +25,7 @@ const char* controlTypeName(ControlType t) {
         case ControlType::Uint8:       return "uint8";
         case ControlType::Uint16:      return "uint16";
         case ControlType::Int16:       return "int16";
+        case ControlType::Int32:       return "int32";
         case ControlType::Pin:         return "pin";
         case ControlType::Bool:        return "bool";
         case ControlType::Text:        return "text";
@@ -91,6 +92,10 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
             return;
         case ControlType::Int16:
             sink.appendf("%d", *static_cast<int16_t*>(c.ptr));
+            return;
+        case ControlType::Int32:
+            // int is 32-bit on every target; int32_t is `long` on Xtensa, so %d alone mismatches.
+            sink.appendf("%d", static_cast<int>(*static_cast<int32_t*>(c.ptr)));
             return;
         case ControlType::Pin:   // int8_t storage; serialized as a plain integer
             sink.appendf("%d", *static_cast<int8_t*>(c.ptr));
@@ -166,6 +171,7 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
         case ControlType::Uint8:
         case ControlType::Uint16:
         case ControlType::Int16:
+        case ControlType::Int32:
         case ControlType::Pin:
             // Numeric controls carry a real [min,max]; the slider types render it
             // as a range, Pin uses it only as a documented valid-GPIO span (the UI
@@ -302,6 +308,13 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
                 return ApplyResult::OutOfRange;
             }
             return clampInto(static_cast<int16_t*>(c.ptr), v, c.min, c.max);
+        }
+        case ControlType::Int32: {
+            int v = mm::json::parseInt(json, key);
+            if (policy == ApplyPolicy::Strict && (v < c.min || v > c.max)) {
+                return ApplyResult::OutOfRange;
+            }
+            return clampInto(static_cast<int32_t*>(c.ptr), v, c.min, c.max);
         }
         case ControlType::Pin: {   // int8_t storage; [min,max] = valid-GPIO span
             int v = mm::json::parseInt(json, key);

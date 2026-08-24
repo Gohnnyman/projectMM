@@ -2,17 +2,17 @@
 // collide() is the trick: without it they fall straight through one another.
 
 class BallpitEffect {
-  uint8_t balls = 24;
-  uint8_t size = 2;
-  uint8_t bouncy = 180;
+  byte balls = 24;
+  byte size = 2;
+  byte bouncy = 180;
 
-  uint16_t last = 0;
+  bool last = false;
 
   defineControls() {
     pool(64);
-    addUint8("balls", balls, 4, 60);
-    addUint8("size", size, 1, 5);
-    addUint8("bouncy", bouncy, 60, 255);
+    addControl("balls", balls, 4, 60);
+    addControl("size", size, 1, 5);
+    addControl("bouncy", bouncy, 60, 255);
   }
 
   tick() {

@@ -1,6 +1,9 @@
 // @module MoonLive
 
 #include "doctest.h"
+#include <sstream>
+#include <fstream>
+#include <filesystem>
 #include "moonlive_script_wrap.h"
 #include "core/moonlive/MoonLiveCompiler.h"
 #include "core/moonlive/MoonLive.h"
@@ -72,7 +75,7 @@ TEST_CASE("compileSource: setRGB(index, r,g,b) writes one pixel") {
 TEST_CASE("a function the script calls can light pixels and read the script's controls") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
-                        "  uint8_t level = 200;\n"
+                        "  byte level = 200;\n"
                         "  paint() { setRGB(1, level, 0, 0); }\n"
                         "  tick()  { setRGB(0, 7, 8, 9); paint(); }\n"
                         "}\n", kTable, kSys));
@@ -183,14 +186,41 @@ TEST_CASE("compileSource: random16 works in any argument slot") {
     }
 }
 
-// REMARK #2: a literal / random16 bound may be a uint16 (0..65535), not capped at 255.
-TEST_CASE("compileSource: random16 accepts a uint16 bound (>255)") {
+// A literal spans the whole signed 32-bit range, because a member does: the old 0..65535 cap was
+// the widest member of the day, which left a literal and the member it was assigned to disagreeing
+// about what a number could be.
+TEST_CASE("compileSource: a literal may be any value an int member can hold") {
     moonlive::MoonLive eng;
-    CHECK(eng.compile(mmScript("setRGB(random16(65535), 0, 0, 255);"), kTable, kSys));   // 65535 accepted
-    CHECK(eng.compile(mmScript("setRGB(1000, 0, 0, 255);"), kTable, kSys));              // literal index > 255 ok
-    uint8_t out[256];
-    auto r = moonlive::compileSource(mmScript("setRGB(70000, 0, 0, 0);"), kTable, kSys, out, sizeof(out));
-    CHECK_FALSE(r.ok);   // 70000 > 65535 → rejected
+    CHECK(eng.compile(mmScript("setRGB(random16(65535), 0, 0, 255);"), kTable, kSys));
+    CHECK(eng.compile(mmScript("setRGB(1000, 0, 0, 255);"), kTable, kSys));
+    CHECK(eng.compile(mmScript("int big = 70000;\nsetRGB(big / 1000, 0, 0, 255);"), kTable, kSys));
+    // The signed 32-bit boundaries themselves, which is where the lexer's overflow guard lives.
+    CHECK(eng.compile(mmScript("int hi = 2147483647;\nsetRGB(hi / 100000000, 0, 0, 255);"),
+                      kTable, kSys));
+    CHECK(eng.compile(mmScript("int lo = -2147483648;\nsetRGB(0 - lo / 100000000, 0, 0, 255);"),
+                      kTable, kSys));
+    eng.free();
+}
+
+// The lexer accumulates in int64 and checks BEFORE each multiply. `long` is 32 bits on both ESP32
+// targets and a script COMPILES ON THE DEVICE, so the old guard could never fire there: the
+// multiply wrapped first (signed overflow, UB) and the script got a number nobody wrote, while
+// every host test stayed green. These are the two shapes that broke.
+TEST_CASE("a number too large for an int is refused rather than wrapped") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(mmScript("int huge = 3000000000;\nsetRGB(0, huge, 0, 0);"),
+                            kTable, kSys));
+    eng.free();
+    // One PAST the most negative int: the lexer admits the magnitude 2147483648 so that
+    // -2147483648 can be written, so the sign-aware site is what has to catch this.
+    moonlive::MoonLive engLow;
+    CHECK_FALSE(engLow.compile(mmScript("int low = -2147483649;\nsetRGB(0, low, 0, 0);"),
+                               kTable, kSys));
+    engLow.free();
+    moonlive::MoonLive eng2;
+    CHECK_FALSE(eng2.compile(mmScript("int huge = 99999999999;\nsetRGB(0, huge, 0, 0);"),
+                             kTable, kSys));
+    eng2.free();
 }
 
 TEST_CASE("compileSource: out-of-range index is bounds-rejected at runtime") {
@@ -288,12 +318,12 @@ TEST_CASE("MoonLive recompiling swaps the program live (fill <-> setRGB)") {
 //
 // Engine-level rather than compileSource-level, because a control now exists because a function
 // RAN: compileSource emits the code, and runDefineControls executes it.
-TEST_CASE("a control is declared by calling addUint8, and a plain member is not") {
+TEST_CASE("a control is declared by calling addControl, and a plain member is not") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
-                        "  uint8_t speed = 50;\n"
-                        "  uint8_t hidden = 7;\n"
-                        "  defineControls() { addUint8(\"speed\", speed, 0, 99); }\n"
+                        "  byte speed = 50;\n"
+                        "  byte hidden = 7;\n"
+                        "  defineControls() { addControl(\"speed\", speed, 0, 99); }\n"
                         "  tick() { setRGB(0, speed, hidden, 255); }\n"
                         "}\n", kTable, kSys));
     moonlive::runDefineControls(eng);
@@ -304,7 +334,7 @@ TEST_CASE("a control is declared by calling addUint8, and a plain member is not"
     CHECK(std::strcmp(c[0].name, "speed") == 0);
     CHECK(c[0].min == 0); CHECK(c[0].max == 99);
     CHECK(c[0].def == 50);                            // from the member's initializer
-    CHECK(c[0].type == moonlive::CtrlType::Uint8);
+    CHECK(c[0].type == moonlive::CtrlType::Byte);
 
     // Both members hold their declared values, whether or not a control surfaces them: the
     // initializer seeds the arena, which is what makes a member state rather than a constant.
@@ -320,9 +350,9 @@ TEST_CASE("a control is declared by calling addUint8, and a plain member is not"
 TEST_CASE("a control's range can be computed, not just written as a literal") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
-                        "  uint8_t base = 10;\n"
-                        "  uint8_t speed = 20;\n"
-                        "  defineControls() { addUint8(\"speed\", speed, base, base * 4 + 5); }\n"
+                        "  byte base = 10;\n"
+                        "  byte speed = 20;\n"
+                        "  defineControls() { addControl(\"speed\", speed, base, base * 4 + 5); }\n"
                         "  tick() { setRGB(0, speed, 0, 0); }\n"
                         "}\n", kTable, kSys));
     moonlive::runDefineControls(eng);
@@ -344,8 +374,8 @@ TEST_CASE("a script cannot declare a name the engine already defines") {
     uint8_t out[512];
     struct Case { const char* src; const char* what; };
     const Case refused[] = {
-        {mmScript("uint8_t width = 16;\nsetRGB(0, 0, 0, 0);"), "a control named width"},
-        {mmScript("uint8_t t = 5;\nsetRGB(0, 0, 0, 0);"),                        "a control named t"},
+        {mmScript("byte width = 16;\nsetRGB(0, 0, 0, 0);"), "a control named width"},
+        {mmScript("byte t = 5;\nsetRGB(0, 0, 0, 0);"),                        "a control named t"},
         {mmScript("for (xPos = 0; xPos < 4; xPos = xPos + 1) { setRGB(xPos, 0, 0, 0); }"),
                                                                         "a loop variable named xPos"},
         {mmScript("for (height = 0; height < 4; height = height + 1) { setRGB(0, 0, 0, 0); }"),
@@ -366,7 +396,7 @@ TEST_CASE("a script cannot declare a name the engine already defines") {
     CHECK((ok.ok || std::string(ok.error) == moonlive::kCodegenFailed));   // parses; no backend here
 #endif
     // A name the host did NOT register is an ordinary control, not a reserved word.
-    auto own = moonlive::compileSource(mmScript("uint8_t cols = 16;\nsetRGB(cols, 0, 0, 0);"), kTable, kSys,
+    auto own = moonlive::compileSource(mmScript("byte cols = 16;\nsetRGB(cols, 0, 0, 0);"), kTable, kSys,
                                        out, sizeof(out));
 #if MM_MOONLIVE_HAS_HOST_JIT
     CHECK(own.ok);
@@ -478,18 +508,18 @@ TEST_CASE("a long script compiles or refuses, but never spins") {
 TEST_CASE("compileSource: malformed control declarations fail with a diagnostic, never crash") {
     uint8_t out[768];
     const char* bad[] = {
-        mmScript("uint8_t speed 50; setRGB(0,0,0,0);"),                        // missing '='
-        mmScript("uint8_t speed = 300; setRGB(0,0,0,0);"),                     // default > 255
+        mmScript("byte speed 50; setRGB(0,0,0,0);"),                        // missing '='
+        mmScript("byte speed = 300; setRGB(0,0,0,0);"),                     // default > 255
         // The range cases moved to defineControls, where a range now lives. A comment cannot be
         // malformed any more, because a comment no longer declares anything.
-        "class T {\n  uint8_t s = 5;\n  defineControls() { addUint8(\"s\", nope, 0, 9); }\n"
+        "class T {\n  byte s = 5;\n  defineControls() { addControl(\"s\", nope, 0, 9); }\n"
         "  tick() { setRGB(0,0,0,0); }\n}\n",                                 // binds an undeclared member
-        "class T {\n  uint8_t s = 5;\n  defineControls() { addUint8(s, s, 0, 9); }\n"
+        "class T {\n  byte s = 5;\n  defineControls() { addControl(s, s, 0, 9); }\n"
         "  tick() { setRGB(0,0,0,0); }\n}\n",                                 // name is not a string
-        mmScript("uint8_t random16 = 5; setRGB(0,0,0,0);"),                    // name shadows a builtin
-        "uint8_t speed = 50;",                                       // not even a class
-        mmScript("uint8_t = 50; setRGB(0,0,0,0);"),                            // no name
-        mmScript("uint8_t s = 1; uint8_t s = 2; setRGB(0,0,0,0);"),            // duplicate member name
+        mmScript("byte random16 = 5; setRGB(0,0,0,0);"),                    // name shadows a builtin
+        "byte speed = 50;",                                       // not even a class
+        mmScript("byte = 50; setRGB(0,0,0,0);"),                            // no name
+        mmScript("byte s = 1; byte s = 2; setRGB(0,0,0,0);"),            // duplicate member name
     };
     for (auto s : bad) {
         auto r = moonlive::compileSource(s, kTable, kSys, out, sizeof(out));
@@ -565,10 +595,21 @@ TEST_CASE("parentheses group an expression ahead of division") {
 }
 
 // A script must degrade, never fault. Dividing by zero is the one input the hardware would trap
-// on, and it reaches the host helper as an ordinary value.
-TEST_CASE("dividing by zero yields zero rather than faulting") {
-    CHECK(render(mmScript("setRGB(0, 100 / 0, 100 % 0, 0);"), 1)[0] == 0);
+// on, and it reaches the host helper as an ordinary value. The masked result SATURATES with the
+// numerator's sign — IEEE's ±infinity mapped onto an int, and the visually right value: k / dist
+// at dist == 0 is the center of a ripple, where max is the peak the eye expects and 0 punched a
+// dark hole exactly there. So no zero-check is ever needed before a divide. The remainder stays
+// 0: there is no "infinite remainder".
+TEST_CASE("dividing by zero saturates toward the numerator's sign rather than faulting") {
+    // INT32_MAX through a truncating channel store reads 255: full bright, not a hole.
+    CHECK(render(mmScript("setRGB(0, 100 / 0, 100 % 0, 0);"), 1)[0] == 255);
     CHECK(render(mmScript("setRGB(0, 100 / 0, 100 % 0, 0);"), 1)[1] == 0);
+    // The sign carries: a negative numerator saturates DOWN, so the comparison sees a negative.
+    CHECK(render(mmScript("int n = -5;\n"
+                          "if (n / 0 < 0) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 9);
+    // 0/0 has no direction to saturate toward.
+    CHECK(render(mmScript("setRGB(0, 0 / 0, 0, 0);"), 1)[0] == 0);
 }
 
 // A subtraction that goes below zero is the ordinary way to ask "which of these is bigger", and
@@ -600,22 +641,30 @@ TEST_CASE("dividing the most negative value by minus one saturates rather than f
     CHECK(render(mmScript("setRGB(0, 32768 * 32768 * 2 % (0 - 1), 5, 0);"), 1)[1] == 5);
 }
 
-// An int16_t ARRAY is refused at the declaration: element access lowers through the unsigned
-// indexed load on every backend, so a negative element would silently read as a large positive
-// where a scalar of the same type reads correctly. A refusal names the gap; a wrong number would
-// not.
-TEST_CASE("an int16_t array is refused with a diagnostic rather than mis-read") {
+// An int ARRAY holds full 32-bit elements, negatives included: element access lowers through the
+// 4-byte indexed load, which has no sign to lose. This is what the old int16_t-array refusal
+// existed to stand in for — the language now has the load it was missing.
+TEST_CASE("an int array element round-trips a value no byte could hold") {
+    CHECK(render(mmScript("int buf[2];\n"
+                          "buf[0] = 1000;\n"
+                          "setRGB(0, buf[0] - 900, 0, 0);"), 1)[0] == 100);
+}
+
+// A STRING array is refused: a string is a reference into the compiled program's pool, so an
+// array of them would be an array of references with no way to fill it — there is no runtime
+// string. A refusal names the gap; a wrong number would not.
+TEST_CASE("a string array is refused with a diagnostic rather than mis-read") {
     moonlive::MoonLive eng;
-    CHECK_FALSE(eng.compile("class T { int16_t buf[4]; tick() { fill(0, 0, 0); } }",
+    CHECK_FALSE(eng.compile("class T { string names[4]; tick() { fill(0, 0, 0); } }",
                             kTable, kSys));
     eng.free();
 }
 
-// A coordinate far outside the plane must escape immediately, not overflow: the wrapped multiply
-// below hands escape() the most negative int32 there is, whose square alone is 2^62.
+// A coordinate far outside the plane must escape immediately, not overflow: the value below is
+// past the |8.0| input clamp, and without that clamp its square alone reaches 2^62.
 TEST_CASE("escape treats an absurdly distant coordinate as escaped rather than overflowing") {
-    CHECK(render(mmScript("setRGB(0, escape(32768 * 32768 * 2, 32768 * 32768 * 2, 0, 0, 40), 7, 0);"),
-                 1)[0] > 0);
+    CHECK(render(mmScript("fixed far = 30000.0;\n"
+                          "setRGB(0, escape(far, far, 0.0, 0.0, 40), 7, 0);"), 1)[0] > 0);
 }
 
 // The escape-time fractal, pinned at the points every textbook names. escape() is the one loop a
@@ -623,16 +672,17 @@ TEST_CASE("escape treats an absurdly distant coordinate as escaped rather than o
 // here rather than by the script that uses it.
 TEST_CASE("escape reports the inside of the Mandelbrot set as zero and the outside as a count") {
     // The origin is inside the set forever; c = 2 + 2i runs away almost immediately.
-    CHECK(render(mmScript("setRGB(0, escape(0, 0, 0, 0, 40), 7, 0);"), 1)[0] == 0);
-    CHECK(render(mmScript("setRGB(0, escape(0, 0, 0, 0, 40), 7, 0);"), 1)[1] == 7);
-    CHECK(render(mmScript("setRGB(0, escape(16384, 16384, 0, 0, 40), 0, 0);"), 1)[0] > 0);
+    CHECK(render(mmScript("setRGB(0, escape(0.0, 0.0, 0.0, 0.0, 40), 7, 0);"), 1)[0] == 0);
+    CHECK(render(mmScript("setRGB(0, escape(0.0, 0.0, 0.0, 0.0, 40), 7, 0);"), 1)[1] == 7);
+    CHECK(render(mmScript("setRGB(0, escape(2.0, 2.0, 0.0, 0.0, 40), 0, 0);"), 1)[0] > 0);
 }
 
 TEST_CASE("escape near the set boundary counts more steps than far outside") {
     // c = -1.2 + 0.3i sits near the boundary and survives longer than c = 1 + 1i, which is the
-    // graded banding every rendering of the set is made of. -1.2 in Q13 is -9830.
-    auto near_px = render(mmScript("setRGB(0, escape(0 - 9830, 2458, 0, 0, 40), 0, 0);"), 1);
-    auto far_px  = render(mmScript("setRGB(0, escape(8192, 8192, 0, 0, 40), 0, 0);"), 1);
+    // graded banding every rendering of the set is made of. Written as the numbers themselves,
+    // which is what `fixed` bought: the Q13 spelling was -9830 and 8192.
+    auto near_px = render(mmScript("setRGB(0, escape(-1.2, 0.3, 0.0, 0.0, 40), 0, 0);"), 1);
+    auto far_px  = render(mmScript("setRGB(0, escape(1.0, 1.0, 0.0, 0.0, 40), 0, 0);"), 1);
     CHECK(near_px[0] > far_px[0]);
 }
 
@@ -640,36 +690,30 @@ TEST_CASE("a nonzero seed selects the Julia set rather than the Mandelbrot set")
     // The SAME pixel answers differently under the two modes, which is the whole point of the
     // seed: the origin is inside the Mandelbrot set (0 forever), but under Julia seed
     // (-0.4, 0.6) it iterates z = z*z + c from z = 0+0i and escapes with a graded count.
-    CHECK(render(mmScript("setRGB(0, escape(0, 0, 0, 0, 40), 7, 0);"), 1)[0] == 0);
-    CHECK(render(mmScript("setRGB(0, escape(0, 0, 0 - 3277, 4915, 40), 7, 0);"), 1)[0] > 0);
-}
-
-// An int16_t member is how a script holds a value that goes below zero: a velocity, a delta, a
-// distance from a center. Stored in the arena as two bytes and read back SIGN-EXTENDED, where a
-// uint16_t member would return 65436 for -100.
-TEST_CASE("an int16_t member written negative reads back negative") {
-    CHECK(render(mmScript("int16_t neg = -100; "
-                          "if (neg < 0) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 7);
+    CHECK(render(mmScript("setRGB(0, escape(0.0, 0.0, 0.0, 0.0, 40), 7, 0);"), 1)[0] == 0);
+    CHECK(render(mmScript("setRGB(0, escape(0.0, 0.0, -0.4, 0.6, 40), 7, 0);"), 1)[0] > 0);
 }
 
 // ASSIGNED in tick(), not just seeded by the initializer: the store and the load are different
-// ops, and the bug this pins wrote only ONE byte of the two-byte member, so the sign-extending
-// load read a stale high byte and every stored coordinate collapsed to 0..255. A whole shader
-// rendered one flat color, and the initializer-only test above stayed green throughout.
-TEST_CASE("an int16_t member assigned a negative in tick reads back negative") {
-    CHECK(render(mmScript("int16_t v = 0; "
+// ops, and the bug this pins wrote only part of the member, so the load read a stale byte and
+// every stored coordinate collapsed to 0..255. A whole shader rendered one flat color, and the
+// initializer-only test above stayed green throughout. The 4-byte slot removes the class.
+TEST_CASE("an int member assigned a negative in tick reads back negative") {
+    CHECK(render(mmScript("int v = 0; "
                           "v = 100 - 11000; "
                           "if (v < 0) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 7);
     // And the magnitude survives, not just the sign: -10900 halved is -5450, still negative,
     // where a half-written member would hold a small positive.
-    CHECK(render(mmScript("int16_t v = 0; "
+    CHECK(render(mmScript("int v = 0; "
                           "v = 100 - 11000; "
                           "if (v / 2 < 0 - 5000) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 7);
 }
 
-// The same value in a uint16_t member is a large positive, which is the distinction the type makes.
-TEST_CASE("a uint16_t member holds the same bits as a large positive") {
-    CHECK(render(mmScript("uint16_t pos = 65436; "
+// 65436 is simply a positive number to an int. It is here because it USED to be the bit pattern a
+// uint16_t member held for -100, so the two were indistinguishable in storage; with a 4-byte
+// signed slot they are different values and the comparison says so.
+TEST_CASE("an int member holds a large positive") {
+    CHECK(render(mmScript("int pos = 65436; "
                           "if (pos < 0) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 3);
 }
 
@@ -700,4 +744,516 @@ TEST_CASE("a loop over a count still runs every step after comparisons became si
     CHECK(px[0] == 9);
     CHECK(px[3 * 3] == 9);
 }
-#endif
+
+// --- the five types -----------------------------------------------------------------------------
+
+// A type is a SEMANTIC, not a storage width. These pin what each one promises, which is the whole
+// reason the language stopped making a script spell uint8_t/uint16_t/int16_t for itself.
+
+// An int holds what its name says: the full signed 32-bit range, negatives included. The old
+// language had no such member — uint16_t wrapped at 65536 and int16_t at 32768 — so a script
+// needing a big number had to know which width to reach for and got a silently wrong value when
+// it guessed wrong.
+TEST_CASE("an int member holds a value far outside any 16-bit range") {
+    CHECK(render(mmScript("int big = 1000000;\n"
+                          "setRGB(0, big / 10000, 0, 0);"), 1)[0] == 100);
+}
+
+TEST_CASE("an int member written negative reads back negative") {
+    CHECK(render(mmScript("int neg = -100;\n"
+                          "if (neg < 0) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"),
+                 1)[0] == 7);
+}
+
+// Assigning past a byte's range TRUNCATES rather than wrapping the slot: the store writes one
+// byte, so the member keeps 0..255 and the three bytes above it stay zero. That zero is what lets
+// a byte control's descriptor point at the slot's low byte and still read the member's value.
+TEST_CASE("a byte member assigned past its range keeps only its own byte") {
+    CHECK(render(mmScript("byte n = 0;\nn = 300;\nsetRGB(0, n, 0, 0);"), 1)[0] == 44);
+}
+
+// A bool is a flag, and its initializer is 0 or 1 — anything else is a declaration error, so a
+// script cannot quietly seed a flag with a number it will later compare against.
+TEST_CASE("a bool member takes 0 or 1 and refuses anything else") {
+    CHECK(render(mmScript("bool on = 1;\n"
+                          "if (on != 0) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 9);
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { bool on = 7; tick() { setRGB(0, on, 0, 0); } }",
+                            kTable, kSys));
+    eng.free();
+}
+
+// A bool is written the way it reads. `bool on = 0;` was a C-ism the old language forced, and the
+// literals cost nothing: they are 1 and 0, so every comparison and arithmetic path takes them
+// unchanged.
+TEST_CASE("a bool member is initialized and compared with true and false") {
+    CHECK(render(mmScript("bool on = true;\n"
+                          "if (on != false) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 9);
+    CHECK(render(mmScript("bool off = false;\n"
+                          "if (off != false) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 1);
+}
+
+// --- fixed (Q16.16) -----------------------------------------------------------------------------
+
+// A script writes the number it means. `fixed half = 0.5;` is the Q16.16 word 32768, and toInt
+// brings it back to a whole number — the pair is what makes fractional arithmetic expressible
+// without a float anywhere in the engine.
+TEST_CASE("a fixed member holds a fractional value written as a decimal") {
+    // 2.5 * 100 = 250, and toInt of that is 250. Anything that lost the fraction would give 200.
+    CHECK(render(mmScript("fixed v = 2.5;\n"
+                          "setRGB(0, toInt(v * toFixed(100)), 0, 0);"), 1)[0] == 250);
+}
+
+// The multiply RESCALES: two Q16.16 values have 32 fraction bits between them, so the product has
+// to come back down by 16. Without that, 0.5 * 0.5 would be 0.25 scaled wrong by 65536 — either 0
+// or an enormous number, depending which way the shift went missing.
+TEST_CASE("multiplying two fixed values rescales the product") {
+    // 0.5 * 0.5 = 0.25; * 400 = 100.
+    CHECK(render(mmScript("fixed a = 0.5;\n"
+                          "fixed b = 0.5;\n"
+                          "setRGB(0, toInt(a * b * toFixed(400)), 0, 0);"), 1)[0] == 100);
+}
+
+// A NEGATIVE fixed value survives the multiply. The low word of the 64-bit product is unsigned
+// while the high word is signed, so joining them with the wrong shift turns -0.5 into a large
+// positive: the logical/arithmetic distinction is the whole reason both shifts exist.
+TEST_CASE("a fixed multiply keeps the sign of a negative operand") {
+    CHECK(render(mmScript("fixed neg = -0.5;\n"
+                          "fixed two = 2.0;\n"
+                          "if (neg * two < 0) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 9);
+    // -0.5 * 2.0 = -1.0, so adding 1.5 gives 0.5, and 0.5 * 200 = 100.
+    CHECK(render(mmScript("fixed neg = -0.5;\n"
+                          "fixed two = 2.0;\n"
+                          "fixed off = 1.5;\n"
+                          "setRGB(0, toInt((neg * two + off) * toFixed(200)), 0, 0);"), 1)[0] == 100);
+}
+
+// Division rescales the other way: the numerator is pre-shifted so the quotient lands back in
+// Q16.16 rather than collapsing to a whole number.
+TEST_CASE("dividing two fixed values keeps the fraction") {
+    // 1.0 / 4.0 = 0.25, * 400 = 100.
+    CHECK(render(mmScript("fixed one = 1.0;\n"
+                          "fixed four = 4.0;\n"
+                          "setRGB(0, toInt(one / four * toFixed(400)), 0, 0);"), 1)[0] == 100);
+}
+
+// A whole number seeding a fixed member is converted at COMPILE time: `fixed z = 2;` means 2.0,
+// and no runtime shift is spent on a constant.
+TEST_CASE("a whole number initializing a fixed member means its whole value") {
+    CHECK(render(mmScript("fixed two = 2;\n"
+                          "setRGB(0, toInt(two * toFixed(50)), 0, 0);"), 1)[0] == 100);
+}
+
+// An integer LITERAL meeting a fixed value converts at compile time — its Const is patched to the
+// same number in Q16.16, free at run time — so `v * 2` and `if (v < 0)` read naturally. A
+// VARIABLE never adopts: its scaling is not visible at the site, so it keeps the explicit rule.
+TEST_CASE("an integer literal adopts fixed at a meet point, a variable does not") {
+    // 1.5 * 2 = 3.0; * 50 = 150.
+    CHECK(render(mmScript("fixed v = 1.5;\n"
+                          "setRGB(0, toInt(v * 2 * toFixed(50)), 0, 0);"), 1)[0] == 150);
+    // The comparison idiom: a fixed value against a bare 0.
+    CHECK(render(mmScript("fixed neg = -0.5;\n"
+                          "if (neg < 0) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 9);
+    // Assignment: `c = 5;` on a fixed member means 5.0.
+    CHECK(render(mmScript("fixed c = 0.0;\n"
+                          "c = 5;\n"
+                          "setRGB(0, toInt(c * toFixed(20)), 0, 0);"), 1)[0] == 100);
+    // An int VARIABLE stays refused: nothing at the site says which scaling it carries.
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(mmScript("fixed v = 1.5;\nint n = 2;\nsetRGB(0, toInt(v * n), 0, 0);"),
+                            kTable, kSys));
+    eng.free();
+}
+
+// The fixed divide is exact over the WHOLE range, because the widening happens in int64 in the
+// host (fdiv), not by shifting a 32-bit register. A first implementation split the shift around
+// an integer divide and silently wrapped for any |value| past 128.0 — which froze two shipped
+// shaders whose animation flowed through exactly such a divide, while every small-value test
+// stayed green.
+TEST_CASE("a fixed divide is exact for values far past 128") {
+    // 32000.0 / 100.0 = 320.0; * 0.5 = 160.0. The wrapped version returned garbage near zero.
+    CHECK(render(mmScript("fixed big = 32000.0;\n"
+                          "fixed d = 100.0;\n"
+                          "fixed half = 0.5;\n"
+                          "setRGB(0, toInt(big / d * half), 0, 0);"), 1)[0] == 160);
+    // And the sign survives.
+    CHECK(render(mmScript("fixed big = -32000.0;\n"
+                          "fixed d = 100.0;\n"
+                          "if (big / d < 0) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 9);
+}
+
+// Dividing a fixed value by fixed zero saturates exactly as the integer divide does: the same
+// policy, stated once per representation because they are different host calls.
+TEST_CASE("a fixed divide by zero saturates toward the numerator's sign") {
+    // Saturated positive: the quotient is INT32_MAX, so a comparison against any ordinary value
+    // sees it as larger. Asserted by comparison rather than by scaling it down — the previous
+    // version divided by toFixed(20000000), a literal that WRAPPED, so it passed through a number
+    // nobody wrote.
+    CHECK(render(mmScript("fixed a = 5.0;\n"
+                          "fixed z = 0.0;\n"
+                          "fixed big = 30000.0;\n"
+                          "if (a / z > big) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 9);
+    CHECK(render(mmScript("fixed a = -5.0;\n"
+                          "fixed z = 0.0;\n"
+                          "if (a / z < 0) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 9);
+}
+// The new ops under REGISTER PRESSURE. sourcesOf/writesDst tell the allocator which vregs an op
+// reads and whether it defines one; get either wrong for a new op and the allocator spills the
+// wrong value or keeps a dead one, which shows up as an arithmetic answer that is wrong only in
+// the programs big enough to spill. A long chain of live fixed values forces that state.
+TEST_CASE("the fixed ops survive being spilled") {
+    // Eight members live at once, each read after the chain has moved on, so the allocator has to
+    // park and reload values across Mulhi/Shl/Shr/Sar and the 32-bit slot access.
+    CHECK(render(mmScript("fixed a = 1.5;\n"
+                          "fixed b = 2.0;\n"
+                          "fixed c = 0.5;\n"
+                          "fixed d = 4.0;\n"
+                          "fixed e = 0.25;\n"
+                          "fixed f = 8.0;\n"
+                          "fixed g = 0.125;\n"
+                          "fixed h = 0.0;\n"
+                          "h = a * b + c * d + e * f + g;\n"
+                          // 1.5*2 + 0.5*4 + 0.25*8 + 0.125 = 3 + 2 + 2 + 0.125 = 7.125
+                          "setRGB(0, toInt(h * toFixed(16)), 0, 0);"), 1)[0] == 114);
+}
+
+// The same for the whole-number ops the slot access shares: a value stored to a member, read back
+// after other work has claimed every register, and compared.
+TEST_CASE("a member survives a spill across the 32-bit slot access") {
+    CHECK(render(mmScript("int a = 1000;\n"
+                          "int b = 2000;\n"
+                          "int c = 3000;\n"
+                          "int d = 4000;\n"
+                          "int e = 5000;\n"
+                          "int f = 6000;\n"
+                          "int g = 0;\n"
+                          "g = a + b + c + d + e + f;\n"
+                          "setRGB(0, g / 100, 0, 0);"), 1)[0] == 210);
+}
+
+// The two BOUNDARY literals, in an expression rather than an initializer. Both have a magnitude
+// one past their type's positive limit, so a lexer that judged the number before the sign made
+// them unwritable: -2147483648 is the most negative int and -32768.0 the most negative fixed.
+TEST_CASE("the most negative int and fixed values can be written in an expression") {
+    CHECK(render(mmScript("int n = 0;\n"
+                          "n = -2147483648;\n"
+                          "if (n < 0) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 9);
+    CHECK(render(mmScript("fixed f = 0.0;\n"
+                          "f = -32768.0;\n"
+                          "if (f < 0) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
+                 1)[0] == 9);
+}
+
+// A fixed multiply where the destination is also a source, and where a long chain forces the
+// allocator to reuse registers. On x86-64 the emitted sequence borrows a scratch register and
+// writes its destination last; an ordering mistake there returns a*a, or a stale value, rather
+// than the product. Run rather than decoded, because the byte shape is what hid the bug twice.
+TEST_CASE("a fixed multiply is correct when its destination aliases a source") {
+    // f = f * two: destination and first source are the same member.
+    CHECK(render(mmScript("fixed f = 1.5;\n"
+                          "fixed two = 2.0;\n"
+                          "f = f * two;\n"
+                          "setRGB(0, toInt(f * toFixed(50)), 0, 0);"), 1)[0] == 150);
+    // A chain long enough that the allocator recycles registers between the multiplies.
+    CHECK(render(mmScript("fixed a = 1.5;\n"
+                          "fixed b = 2.0;\n"
+                          "fixed c = 0.5;\n"
+                          "fixed d = 4.0;\n"
+                          "fixed r = 0.0;\n"
+                          "r = a * b * c * d;\n"      // 1.5*2*0.5*4 = 6.0
+                          "setRGB(0, toInt(r * toFixed(20)), 0, 0);"), 1)[0] == 120);
+}
+
+#endif   // MM_MOONLIVE_HAS_HOST_JIT
+
+// Compile-only from here down: these assert DIAGNOSTICS, which the front end produces
+// with or without a backend, so they are exactly what a --no-jit build should still
+// check. Everything above needs render(), which needs emitted code to execute.
+
+
+// A byte is exactly a hardware channel: 0..255, and an initializer outside that is a COMPILE
+// ERROR naming the member rather than an arbitrary in-range number. `byte n = 300;` used to
+// become 44 with nothing reporting it.
+TEST_CASE("a byte member outside 0..255 is refused at the declaration") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { byte n = 300; tick() { setRGB(0, n, 0, 0); } }",
+                            kTable, kSys));
+    eng.free();
+}
+
+// Every scalar occupies the SAME 4-byte slot, so a byte and an int cost the same arena and the
+// member after either one sits at the same offset. The old rule — a byte packed beside its
+// neighbour, a wide member skipped to an even byte — is what this replaces.
+TEST_CASE("a byte member and an int member occupy the same sized slot") {
+    moonlive::MoonLive a;
+    REQUIRE(a.compile("class T {\n  byte first = 1;\n  byte second = 2;\n"
+                      "  defineControls() { addControl(\"second\", second, 0, 9); }\n"
+                      "  tick() { setRGB(0, first, second, 0); }\n}\n", kTable, kSys));
+    moonlive::runDefineControls(a);
+    uint8_t na = 0;
+    const auto* da = a.declaredControls(na);
+    REQUIRE(na == 1);
+    const uint8_t afterByte = da[0].offset;
+
+    moonlive::MoonLive b;
+    REQUIRE(b.compile("class T {\n  int first = 1;\n  byte second = 2;\n"
+                      "  defineControls() { addControl(\"second\", second, 0, 9); }\n"
+                      "  tick() { setRGB(0, first, second, 0); }\n}\n", kTable, kSys));
+    moonlive::runDefineControls(b);
+    uint8_t nb = 0;
+    const auto* db = b.declaredControls(nb);
+    REQUIRE(nb == 1);
+    CHECK(db[0].offset == afterByte);      // the type of `first` did not move `second`
+    a.free(); b.free();
+}
+
+// An array still PACKS at its element width — that is where the width question survives, because
+// a byte[] heat map costs a quarter of an int[] one and the classic ESP32 has no PSRAM to absorb
+// the difference. Two arrays of the same length, different element types, different extents.
+TEST_CASE("a byte array packs one byte per element where an int array takes four") {
+    moonlive::MoonLive small;
+    REQUIRE(small.compile("class T {\n  byte heat[8];\n  byte after = 3;\n"
+                          "  defineControls() { addControl(\"after\", after, 0, 9); }\n"
+                          "  tick() { setRGB(0, heat[0], after, 0); }\n}\n", kTable, kSys));
+    moonlive::runDefineControls(small);
+    uint8_t ns = 0;
+    const auto* ds = small.declaredControls(ns);
+    REQUIRE(ns == 1);
+
+    moonlive::MoonLive wide;
+    REQUIRE(wide.compile("class T {\n  int heat[8];\n  byte after = 3;\n"
+                         "  defineControls() { addControl(\"after\", after, 0, 9); }\n"
+                         "  tick() { setRGB(0, heat[0], after, 0); }\n}\n", kTable, kSys));
+    moonlive::runDefineControls(wide);
+    uint8_t nw = 0;
+    const auto* dw = wide.declaredControls(nw);
+    REQUIRE(nw == 1);
+
+    // Eight elements: 8 bytes against 32. The member after the array is 24 bytes further along.
+    CHECK(dw[0].offset - ds[0].offset == 24);
+    small.free(); wide.free();
+}
+
+// A control binds a member whose type the UI has a widget for. A fixed member has no widget yet,
+// and a slider writing a Q16.16 word is worse than a diagnostic saying so.
+TEST_CASE("a control refuses a member the UI has no widget for") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T {\n  fixed scale = 1;\n"
+                            "  defineControls() { addControl(\"scale\", scale, 0, 9); }\n"
+                            "  tick() { setRGB(0, 1, 0, 0); }\n}\n", kTable, kSys));
+    eng.free();
+}
+
+// true and false say bool, so seeding another type with one is a diagnostic rather than a silent 1.
+TEST_CASE("true and false initialize a bool and nothing else") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { byte n = true; tick() { setRGB(0, n, 0, 0); } }",
+                            kTable, kSys));
+    eng.free();
+}
+
+// THE WALL: mixing the two representations is a COMPILE ERROR naming the conversion, because at
+// run time they are the same 32 bits and a silent mix is a number 65,536 times off with nothing
+// reporting it. This is the diagnostic the whole type-tracking exists to produce.
+TEST_CASE("mixing a whole number and a fixed value is refused with the conversion named") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(mmScript("fixed v = 1.5;\nsetRGB(0, v + 2, 0, 0);"), kTable, kSys));
+    eng.free();
+    moonlive::MoonLive eng2;
+    CHECK_FALSE(eng2.compile(mmScript("fixed v = 1.5;\nint n = 2;\nsetRGB(0, v * n, 0, 0);"),
+                             kTable, kSys));
+    eng2.free();
+}
+
+// The conversions are explicit in BOTH directions, and each refuses a value already of its target
+// type: toFixed on a fixed value is a mistake worth naming, not a no-op to absorb.
+TEST_CASE("a conversion refuses a value already of its target type") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(mmScript("fixed v = 1.5;\nsetRGB(0, toInt(toFixed(v)), 0, 0);"),
+                            kTable, kSys));
+    eng.free();
+}
+
+// A fixed member outside the representable range is refused at the declaration rather than
+// wrapping: 40000.0 does not fit Q16.16's ±32767.99998.
+TEST_CASE("a fixed member outside its range is refused at the declaration") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { fixed v = 40000.0; tick() { setRGB(0, 1, 0, 0); } }",
+                            kTable, kSys));
+    eng.free();
+}
+
+// A literal too big for Q16.16 cannot adopt: patching 40000 to 40000.0 would wrap the word, so
+// the meet refuses it rather than producing a number nobody wrote.
+TEST_CASE("a literal outside the fixed range does not adopt") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(mmScript("fixed v = 1.5;\nsetRGB(0, toInt(v * 40000), 0, 0);"),
+                            kTable, kSys));
+    eng.free();
+}
+
+// The boundary to a built-in stays whole-numbered: a fixed value crossing unconverted would be
+// read 65,536 times off, so the conversion is written where the call is.
+TEST_CASE("a fixed value passed to a built-in names the conversion") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(mmScript("fixed v = 1.5;\nsetRGB(0, v, 0, 0);"), kTable, kSys));
+    eng.free();
+}
+
+// --- the type wall, at every boundary -----------------------------------------------------------
+
+// An ARRAY INDEX counts elements, so it is a whole number wherever it appears. A fixed index
+// would address by the raw Q16.16 word — 1.5 reading element 98304, clamped to the last one.
+TEST_CASE("an array index is refused as a fixed value") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { byte h[4]; fixed f = 1.5;\n"
+                            "  tick() { setRGB(0, h[f], 0, 0); } }", kTable, kSys));
+    eng.free();
+    moonlive::MoonLive eng2;
+    CHECK_FALSE(eng2.compile("class T { byte h[4]; fixed f = 1.5;\n"
+                             "  tick() { h[f] = 1; setRGB(0, 1, 0, 0); } }", kTable, kSys));
+    eng2.free();
+}
+
+// An array ELEMENT reports the ARRAY's type, not whatever the index expression left behind. A
+// literal index in a fixed context used to adopt the INDEX — patching `heat[3]`'s 3 into 196608,
+// clamping to the last element, and reading a byte as though it were Q16.16.
+TEST_CASE("an array element carries its array's type, not its index's") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { byte h[4]; fixed f = 0.0;\n"
+                            "  tick() { f = h[3] * 0.5; setRGB(0, toInt(f), 0, 0); } }",
+                            kTable, kSys));
+    eng.free();
+}
+
+// An element STORE takes what the element type holds, the same wall a scalar store enforces.
+TEST_CASE("an array element refuses a value of the wrong type") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { byte h[4]; tick() { h[0] = 1.5; setRGB(0, h[0], 0, 0); } }",
+                            kTable, kSys));
+    eng.free();
+}
+
+// A LOOP counts. A fixed limit would run the body ~65,536 times — a multi-second stall on the
+// render thread rather than a diagnostic, which is the robustness rule's whole point.
+TEST_CASE("a loop header refuses a fixed value in any of its three clauses") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { fixed f = 3.0;\n"
+                            "  tick() { for (i = 0; i < f; i = i + 1) { setRGB(0, 1, 0, 0); } } }",
+                            kTable, kSys));
+    eng.free();
+}
+
+// A fixed remainder keeps the fixed scale — (a*2^16) mod (b*2^16) is (a mod b)*2^16 — which is
+// what makes the fractional-part idiom work. Typed int, `toInt` on it would be refused.
+TEST_CASE("the remainder of two fixed values is itself fixed") {
+    moonlive::MoonLive eng;
+    CHECK(eng.compile("class T { fixed a = 1.5; fixed b = 1.0;\n"
+                      "  tick() { setRGB(0, toInt(a % b * toFixed(100)), 0, 0); } }",
+                      kTable, kSys));
+    eng.free();
+}
+
+// A member may not take a name the expression parser resolves first, or it could be declared and
+// then never read. Same stance the language already takes for a builtin's name.
+TEST_CASE("a member may not be named after a conversion or a boolean literal") {
+    for (const char* src : {"class T { byte toFixed = 5; tick() { setRGB(0, 1, 0, 0); } }",
+                            "class T { byte toInt = 5; tick() { setRGB(0, 1, 0, 0); } }",
+                            "class T { byte true = 5; tick() { setRGB(0, 1, 0, 0); } }"}) {
+        moonlive::MoonLive eng;
+        CHECK_FALSE(eng.compile(src, kTable, kSys));
+        eng.free();
+    }
+}
+
+// A fixed literal cannot seed a whole-number member: `byte b = 0.0;` says two different things
+// about what b is.
+TEST_CASE("a whole-number member refuses a fixed initializer") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { byte b = 0.0; tick() { setRGB(0, b, 0, 0); } }",
+                            kTable, kSys));
+    eng.free();
+}
+
+// A fixed ARRAY is refused rather than half-working: an element's type has to reach both the
+// expression that reads it and the value that writes it, which scalars get from their declaration.
+TEST_CASE("a fixed array is refused with a diagnostic") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { fixed w[4]; tick() { setRGB(0, 1, 0, 0); } }",
+                            kTable, kSys));
+    eng.free();
+}
+
+// toFixed of a literal past the representable range is a compile error, matching what adoption
+// already refuses at a meet point. It used to shift and wrap into a number nobody wrote.
+TEST_CASE("toFixed refuses a literal outside the fixed range") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(mmScript("setRGB(0, toInt(toFixed(40000)), 0, 0);"), kTable, kSys));
+    eng.free();
+}
+
+// Every script this project SHIPS compiles on the host.
+//
+// The device codegen tests already sweep the same folder for Xtensa and RISC-V, but nothing did it
+// for the host backend — the one every desktop runs and every other test in this file uses. A
+// language change that a shipped script no longer parses would otherwise reach a board before it
+// reached a test. Read from disk deliberately, so the check cannot drift from what ships.
+TEST_CASE("every shipped script compiles") {
+    // A layout places lights, a modifier transforms coordinates, an effect draws: three different
+    // sets of system variables, so each folder compiles against its own.
+    const moonlive::SysVarTable& layout = moonlive::layoutSysVars();
+    const moonlive::SysVarTable& effect = moonlive::effectSysVars();
+    const moonlive::SysVarTable& modifier = moonlive::modifierSysVars();
+    const struct { const char* dir; const moonlive::SysVarTable* sys; } kRoles[] = {
+        {"layouts",   &layout},
+        {"effects",   &effect},
+        {"modifiers", &modifier},
+    };
+    // Located from __FILE__, not the working directory: the gate runs this binary from build/,
+    // where a relative path finds nothing and the test would pass while checking zero scripts.
+    const std::filesystem::path repo =
+        std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path();
+    int checked = 0;
+    for (const auto& role : kRoles) {
+        const std::filesystem::path dir = repo / "moonlive" / role.dir;
+        // REPORTED, not skipped: a folder that moved would otherwise make this test pass while
+        // checking nothing, which is the failure mode it exists to prevent.
+        INFO("script folder: ", dir.string());
+        REQUIRE(std::filesystem::is_directory(dir));
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+            if (!entry.is_regular_file()) continue;
+            // The exact extensions, not a substring: `.ml` also matches an editor backup or a
+            // note file that has no business being compiled.
+            const std::string ext = entry.path().extension().string();
+            if (ext != ".mle" && ext != ".mll" && ext != ".mlm") continue;
+            const std::string path = entry.path().string();
+            std::ifstream in(path);
+            std::stringstream ss; ss << in.rdbuf();
+            const std::string src = ss.str();
+            moonlive::MoonLive eng;
+            INFO("script: ", path);
+            CHECK(eng.compile(src.c_str(), kTable, *role.sys));
+            eng.free();
+            checked++;
+        }
+    }
+    CHECK(checked > 0);          // an empty folder would pass the loop vacuously
+}
+
+// A sign has no meaning on a boolean. `-true` consumed the minus and then ignored it, seeding the
+// member to 1 as though nothing had been written.
+TEST_CASE("a bool initializer takes no sign") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile("class T { bool b = -true; tick() { setRGB(0, 1, 0, 0); } }",
+                            kTable, kSys));
+    eng.free();
+}

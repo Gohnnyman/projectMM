@@ -2,18 +2,18 @@
 // Turn spread to 0 for a tight ribbon, up for a wide cloud.
 
 class CometTrailEffect {
-  uint8_t speed = 30;
-  uint8_t spread = 40;
-  uint8_t sparks = 3;
+  byte speed = 30;
+  byte spread = 40;
+  byte sparks = 3;
 
-  uint16_t hx = 0;
-  uint16_t hy = 0;
+  int hx = 0;
+  int hy = 0;
 
   defineControls() {
     pool(400);
-    addUint8("speed", speed, 4, 120);
-    addUint8("spread", spread, 0, 200);
-    addUint8("sparks", sparks, 1, 10);
+    addControl("speed", speed, 4, 120);
+    addControl("spread", spread, 0, 200);
+    addControl("sparks", sparks, 1, 10);
   }
 
   tick() {

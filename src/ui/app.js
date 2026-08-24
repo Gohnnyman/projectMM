@@ -52,7 +52,7 @@ const dragTs = {};               // per-control last-touched timestamp (ms) — 
 // (display/display-int/time/progress) and the composite `list` are absent on
 // purpose: they always reflect the latest push.
 const EDITABLE_CONTROL_TYPES = new Set(
-    ["uint8", "uint16", "int16", "pin", "bool", "text", "textarea", "filepath", "password", "select",
+    ["uint8", "uint16", "int16", "int32", "pin", "bool", "text", "textarea", "filepath", "password", "select",
      "palette", "ipv4"]);
 const TIMING_MODES = ["fps", "ms"];
 
@@ -1555,7 +1555,8 @@ function createControl(moduleName, moduleType, ctrl) {
     // integer is a discrete identity, not a magnitude — a PHY/I2C address, a channel). Render a plain
     // number input, same shape as the `pin` case, whatever the underlying numeric type. The WS-patch path
     // (updateModuleControls) reads the input by [data-mid][data-key] the same way, so no extra patch case.
-    const isNumericType = ctrl.type === "uint8" || ctrl.type === "uint16" || ctrl.type === "int16";
+    const isNumericType = ctrl.type === "uint8" || ctrl.type === "uint16" || ctrl.type === "int16" ||
+                          ctrl.type === "int32";
     if (ctrl.numberField && isNumericType) {
         const nMin = Number(ctrl.min ?? 0);
         const nMax = Number(ctrl.max ?? 65535);
@@ -1726,14 +1727,24 @@ function createControl(moduleName, moduleType, ctrl) {
             appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
             break;
         }
+        case "int32":
         case "int16": {
-            // ctrl.min/ctrl.max are always present (server sends them). Sentinel
-            // values INT16_MIN (-32768) / INT16_MAX (32767) mean "unbounded" —
-            // fall back to a ±percentage range.
-            const rawMin = Number(ctrl.min ?? -32768);
-            const rawMax = Number(ctrl.max ?? 32767);
-            const min = rawMin <= -32768 ? -100 : rawMin;
-            const max = rawMax >= 32767  ?  200 : rawMax;
+            // ctrl.min/ctrl.max are always present (server sends them). An int16 at the type's
+            // own limit means "unbounded" and falls back to a +-percentage range, since a slider
+            // spanning the full type is useless to drag.
+            //
+            // An int32 does NOT: its range is what the script declared, and narrowing an
+            // unbounded one to -100..200 hid every value outside that window — a control
+            // declared 0..1000 sitting at 900 rendered as a slider pinned to its top with the
+            // real value unreachable. A bounded int32 keeps its bounds; an unbounded one spans
+            // the type, which the number input beside the slider makes usable.
+            const isI32 = ctrl.type === "int32";
+            const lo = isI32 ? -2147483648 : -32768;
+            const hi = isI32 ?  2147483647 :  32767;
+            const rawMin = Number(ctrl.min ?? lo);
+            const rawMax = Number(ctrl.max ?? hi);
+            const min = (!isI32 && rawMin <= lo) ? -100 : rawMin;
+            const max = (!isI32 && rawMax >= hi) ?  200 : rawMax;
             const raw = Number(ctrl.value ?? 0);
             const clamped = Math.max(min, Math.min(max, raw));
             const input = document.createElement("input");
@@ -3470,6 +3481,7 @@ function updateModuleControls(mod) {
             case "uint8":
             case "uint16":
             case "int16":
+            case "int32":
             case "pin": {   // pin is a plain number input (no slider sibling); patches the same way
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
                 // While the demo sweep animates a control, leave it alone: the sweep restores the

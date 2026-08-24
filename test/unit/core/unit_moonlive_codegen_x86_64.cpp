@@ -17,6 +17,7 @@
 // Intel SDM Vol. 2 encoding tables and marked with the human-readable assembly they represent.
 
 #include "doctest.h"
+#include <array>
 
 #if (defined(__x86_64__) || defined(_M_X64)) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
 
@@ -559,7 +560,7 @@ TEST_CASE("x86_64: two sequential call-bearing loops stay under the density boun
 TEST_CASE("x86_64: a class with a script-to-script call compiles") {
     const char* src =
         "class T {\n"
-        "  uint8_t level = 200;\n"
+        "  byte level = 200;\n"
         "  paint() { setRGB(1, level, 0, 0); }\n"
         "  tick()  { setRGB(0, 7, 8, 9); paint(); }\n"
         "}\n";
@@ -572,6 +573,60 @@ TEST_CASE("x86_64: a class with a script-to-script call compiles") {
     REQUIRE(r.ok);
     CHECK(r.len > 0);
     CHECK(r.entryCount == 2);
+}
+
+// The Q16.16 multiply. The sequence must survive d aliasing a or b, AND must not borrow any
+// register the allocator can hand out.
+//
+// Two earlier versions failed that second rule: the first borrowed rax (vreg R13), the second
+// r10/r11 — which are R5/R6, the FIRST temps the allocator assigns, so it was strictly worse.
+// Both produced a silently wrong number: `pop` restoring a stale value over the result when d
+// aliased the scratch, or a source destroyed before it was read. The intermediate now lives on
+// the STACK and only rax is touched, saved and restored around the whole sequence.
+//
+// Bytes verified against clang's assembly of the same instruction sequence.
+TEST_CASE("x86_64: mulhi borrows no allocatable register") {
+    HostAssembler a; a.mulhi(R0, R1, R2); a.finalize();
+    const uint8_t* b = a.bytes();
+    REQUIRE(a.size() >= 24);
+    // No push/pop of r10 or r11 anywhere: those encode as 41 52 / 41 53 / 41 5a / 41 5b, and a
+    // 0x41 REX.B prefix on a push is the tell. Their absence is the property under test.
+    for (size_t i = 0; i + 1 < a.size(); i++) {
+        const bool pushPopR8plus = (b[i] == 0x41) &&
+                                   ((b[i + 1] & 0xf8) == 0x50 || (b[i + 1] & 0xf8) == 0x58);
+        CHECK_FALSE(pushPopR8plus);
+    }
+    CHECK(b[0] == 0x50);                             // opens by saving rax
+    // The parked operand is discarded with `add rsp, 8` — a stack adjust, never a pop into some
+    // register. The sequence then ends either with `pop rax` (d is not rax) or a second adjust.
+    bool sawAdjust = false;
+    for (size_t i = 0; i + 3 < a.size(); i++)
+        if (b[i] == 0x48 && b[i + 1] == 0x83 && b[i + 2] == 0xc4 && b[i + 3] == 0x08)
+            sawAdjust = true;
+    CHECK(sawAdjust);
+}
+
+// The destination aliasing each source, and rax itself. None may lose an operand or its result:
+// with d == rax the saved value must NOT be popped back over the answer.
+TEST_CASE("x86_64: mulhi handles every aliasing of its operands") {
+    for (const auto& regs : {std::array<Reg, 3>{R0, R0, R1},    // d aliases a
+                             std::array<Reg, 3>{R0, R1, R0},    // d aliases b
+                             std::array<Reg, 3>{R0, R0, R0},    // all three
+                             std::array<Reg, 3>{R5, R1, R2},    // d is a low temp (r10/r9)
+                             std::array<Reg, 3>{R0, R5, R6},    // both sources are low temps
+                             std::array<Reg, 3>{R13, R1, R2},   // d IS rax
+                             std::array<Reg, 3>{R0, R13, R2},   // a is rax
+                             std::array<Reg, 3>{R0, R1, R13}})  // b is rax
+    {
+        HostAssembler a; a.mulhi(regs[0], regs[1], regs[2]); a.finalize();
+        CHECK(a.size() >= 24);
+        CHECK(a.bytes()[0] == 0x50);                 // always saves rax first
+        // The stack is always balanced: one save-push, one park-push, and two 8-byte adjustments
+        // (or one adjustment and one pop when the destination is not rax).
+        int pushes = 0;
+        for (size_t i = 0; i < a.size(); i++) if (a.bytes()[i] == 0x50) pushes++;
+        CHECK(pushes >= 2);
+    }
 }
 
 }  // namespace

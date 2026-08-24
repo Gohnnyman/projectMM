@@ -502,6 +502,127 @@ void HostAssembler::emitIndexed(const uint8_t* opcode, size_t opLen, bool prefix
     emitBytes(b, n);
 }
 
+// The signed high 32 bits of a * b, for the Q16.16 multiply.
+//
+// ALIAS-SAFE BY CONSTRUCTION: both sources are read before the destination is written, and the
+// only register touched is rax, saved and restored around the sequence. The intermediate lives on
+// the STACK rather than in a borrowed register, because there is no register here that is safe to
+// borrow: rax is vreg R13, and r10/r11 are R5/R6 — the FIRST temps the allocator hands out, so
+// borrowing them is worse than borrowing rax, not better. Two earlier attempts each picked a
+// register that turned out to be allocatable, and each produced the same failure: `pop` restoring
+// a stale value over the result when the destination aliased the scratch, or a source destroyed
+// before it was read. A silently wrong number, not a crash.
+//
+//   movsxd rax, aD    ; push rax        — a widened, parked
+//   movsxd rax, bD    ; imul rax, [rsp] — b widened, then the 64-bit product
+//   sar rax, 32       ; mov dD, rax     — the high word, into d only now
+//   add rsp, 8                          — discard, without writing any register
+void HostAssembler::mulhi(Reg d, Reg a, Reg b) {
+    const uint8_t dst = xr(d), ra = xr(a), rb = xr(b);
+    const uint8_t RAX = x64::RAX;
+
+    uint8_t save[1] = {uint8_t(0x50 | (RAX & 7))};
+    emitBytes(save, 1);                                              // push rax  (save the vreg)
+
+    // The operand that might BE rax is widened FIRST, because the other widening overwrites rax.
+    // Reading a first when b == rax destroyed b before it was ever read — the third shape of the
+    // same mistake, and the reason both operands are now ordered rather than assumed independent.
+    const uint8_t first = (rb == RAX) ? rb : ra;
+    const uint8_t second = (rb == RAX) ? ra : rb;
+
+    uint8_t ext1[3] = {rex_(true, RAX >= 8, false, first >= 8), 0x63,
+                       modrm_(0b11, RAX & 7, first & 7)};
+    emitBytes(ext1, 3);                                              // movsxd rax, <first>
+    uint8_t park[1] = {uint8_t(0x50 | (RAX & 7))};
+    emitBytes(park, 1);                                              // push rax  (park it)
+
+    uint8_t ext2[3] = {rex_(true, RAX >= 8, false, second >= 8), 0x63,
+                       modrm_(0b11, RAX & 7, second & 7)};
+    emitBytes(ext2, 3);                                              // movsxd rax, <second>
+    // imul rax, [rsp] — the parked a. modrm mod=00 rm=100 selects a SIB byte; the SIB names rsp
+    // as base with no index, which is how [rsp] is addressed.
+    uint8_t mul[5] = {rex_(true, RAX >= 8, false, false), 0x0F, 0xAF,
+                      modrm_(0b00, RAX & 7, 0b100), sib_(0, 0b100, x64::RSP & 7)};
+    emitBytes(mul, 5);
+    uint8_t sar[4] = {rex_(true, false, false, RAX >= 8), 0xC1, modrm_(0b11, 7, RAX & 7), 32};
+    emitBytes(sar, 4);                                               // sar rax, 32
+
+    // Both sources are spent; only now does d take the result.
+    uint8_t mov[3] = {rex_(true, RAX >= 8, false, dst >= 8), 0x89, modrm_(0b11, RAX & 7, dst & 7)};
+    emitBytes(mov, 3);                                               // mov dD, rax
+
+    uint8_t drop[4] = {rex_(true, false, false, false), 0x83, modrm_(0b11, 0, x64::RSP & 7), 8};
+    emitBytes(drop, 4);                                              // add rsp, 8 (discard a)
+    // The saved rax is restored LAST, and into rax only — if d IS rax the mov above already put
+    // the result there, so this would overwrite it. Pop into rax is therefore skipped in that
+    // case and the stack adjusted instead.
+    if (dst == RAX) {
+        uint8_t skip[4] = {rex_(true, false, false, false), 0x83, modrm_(0b11, 0, x64::RSP & 7), 8};
+        emitBytes(skip, 4);                                          // add rsp, 8
+    } else {
+        uint8_t rest[1] = {uint8_t(0x58 | (RAX & 7))};
+        emitBytes(rest, 1);                                          // pop rax
+    }
+}
+// 32-bit shifts: C1 /4 ib is shl, C1 /7 ib is sar. No REX.W — a vreg is 32 bits, and the
+// arithmetic shift must fill from bit 31, not bit 63.
+void HostAssembler::shlImm(Reg d, Reg a, uint8_t n) {
+    if (d != a) emitMovRegReg(this, xr(d), xr(a));
+    const uint8_t dst = xr(d);
+    if (dst >= 8) { uint8_t r[1] = {rex_(false, false, false, true)}; emitBytes(r, 1); }
+    uint8_t b[3] = {0xC1, modrm_(0b11, 4, dst & 7), n};
+    emitBytes(b, 3);
+}
+void HostAssembler::shrImm(Reg d, Reg a, uint8_t n) {
+    if (d != a) emitMovRegReg(this, xr(d), xr(a));
+    const uint8_t dst = xr(d);
+    if (dst >= 8) { uint8_t r[1] = {rex_(false, false, false, true)}; emitBytes(r, 1); }
+    uint8_t b[3] = {0xC1, modrm_(0b11, 5, dst & 7), n};      // C1 /5 ib = shr
+    emitBytes(b, 3);
+}
+void HostAssembler::sarImm(Reg d, Reg a, uint8_t n) {
+    if (d != a) emitMovRegReg(this, xr(d), xr(a));
+    const uint8_t dst = xr(d);
+    if (dst >= 8) { uint8_t r[1] = {rex_(false, false, false, true)}; emitBytes(r, 1); }
+    uint8_t b[3] = {0xC1, modrm_(0b11, 7, dst & 7), n};
+    emitBytes(b, 3);
+}
+// The 4-byte slot access. mov r32 <- [base+disp32] (8B /r) and its store twin (89 /r); the
+// indexed forms reuse emitIndexed, which already handles the SIB byte and the rbp/r13 base that
+// needs an explicit zero displacement.
+void HostAssembler::load32(Reg d, Reg base, int32_t imm) {
+    const uint8_t dst = xr(d), b_reg = xr(base);
+    const bool needsSIB = ((b_reg & 7) == x64::RSP);
+    uint8_t b[9]; size_t n = 0;
+    if (dst >= 8 || b_reg >= 8) b[n++] = rex_(false, dst >= 8, false, b_reg >= 8);
+    b[n++] = 0x8B;
+    b[n++] = modrm_(0b10, dst & 7, needsSIB ? 0b100 : (b_reg & 7));
+    if (needsSIB) b[n++] = sib_(0, 0b100, b_reg & 7);
+    b[n++] = uint8_t(imm); b[n++] = uint8_t(imm >> 8);
+    b[n++] = uint8_t(imm >> 16); b[n++] = uint8_t(imm >> 24);
+    emitBytes(b, n);
+}
+void HostAssembler::store32(Reg base, int32_t imm, Reg val) {
+    const uint8_t src = xr(val), b_reg = xr(base);
+    const bool needsSIB = ((b_reg & 7) == x64::RSP);
+    uint8_t b[9]; size_t n = 0;
+    if (src >= 8 || b_reg >= 8) b[n++] = rex_(false, src >= 8, false, b_reg >= 8);
+    b[n++] = 0x89;
+    b[n++] = modrm_(0b10, src & 7, needsSIB ? 0b100 : (b_reg & 7));
+    if (needsSIB) b[n++] = sib_(0, 0b100, b_reg & 7);
+    b[n++] = uint8_t(imm); b[n++] = uint8_t(imm >> 8);
+    b[n++] = uint8_t(imm >> 16); b[n++] = uint8_t(imm >> 24);
+    emitBytes(b, n);
+}
+void HostAssembler::load32Idx(Reg d, Reg base, Reg off) {
+    const uint8_t op = 0x8B;
+    emitIndexed(&op, 1, /*prefix66=*/false, /*forceRex=*/false, xr(d), xr(base), xr(off));
+}
+void HostAssembler::store32Idx(Reg base, Reg off, Reg val) {
+    const uint8_t op = 0x89;
+    emitIndexed(&op, 1, /*prefix66=*/false, /*forceRex=*/false, xr(val), xr(base), xr(off));
+}
+
 // mov byte ptr [base + off], val_l  (88 /r with SIB): indexed 1-byte store, the pixel write.
 void HostAssembler::store8(Reg base, Reg off, Reg val) {
     const uint8_t op = 0x88;
@@ -524,48 +645,9 @@ void HostAssembler::load8(Reg d, Reg base, int32_t imm) {
     b[n++] = uint8_t(imm >> 16); b[n++] = uint8_t(imm >> 24);
     emitBytes(b, n);
 }
-// mov word ptr [base + off], val_l16  (66 89 /r SIB) — indexed 2-byte store.
-// The 66 prefix switches operand size to 16 bits for a 32-bit-mode instruction.
-void HostAssembler::store16(Reg base, Reg off, Reg val) {
-    const uint8_t op = 0x89;
-    emitIndexed(&op, 1, /*prefix66=*/true, /*forceRex=*/false, xr(val), xr(base), xr(off));
-}
-// movzx r32, word ptr [base + disp32]  (0F B7 /r) — 16-bit zero-extending load. Immediate offset.
-void HostAssembler::load16(Reg d, Reg base, int32_t imm) {
-    const uint8_t dst = xr(d), b_reg = xr(base);
-    const bool needsSIB = ((b_reg & 7) == x64::RSP);
-    uint8_t b[9]; size_t n = 0;
-    b[n++] = rex_(false, dst >= 8, false, b_reg >= 8);
-    b[n++] = 0x0F; b[n++] = 0xB7;
-    b[n++] = modrm_(0b10, dst & 7, needsSIB ? 0b100 : (b_reg & 7));
-    if (needsSIB) b[n++] = sib_(0, 0b100, b_reg & 7);
-    b[n++] = uint8_t(imm); b[n++] = uint8_t(imm >> 8);
-    b[n++] = uint8_t(imm >> 16); b[n++] = uint8_t(imm >> 24);
-    emitBytes(b, n);
-}
-// movsx r32, word ptr [base + disp32]  (0F BF /r): the sign-extending twin of movzx (0F B7), and
-// the only byte that differs. Writing the 32-bit destination zeroes the register's upper half,
-// so a negative arrives as a 32-bit value and the comparison width in cmp() matches it.
-void HostAssembler::load16S(Reg d, Reg base, int32_t imm) {
-    const uint8_t dst = xr(d), b_reg = xr(base);
-    const bool needsSIB = ((b_reg & 7) == x64::RSP);
-    uint8_t b[9]; size_t n = 0;
-    b[n++] = rex_(false, dst >= 8, false, b_reg >= 8);
-    b[n++] = 0x0F; b[n++] = 0xBF;
-    b[n++] = modrm_(0b10, dst & 7, needsSIB ? 0b100 : (b_reg & 7));
-    if (needsSIB) b[n++] = sib_(0, 0b100, b_reg & 7);
-    b[n++] = uint8_t(imm); b[n++] = uint8_t(imm >> 8);
-    b[n++] = uint8_t(imm >> 16); b[n++] = uint8_t(imm >> 24);
-    emitBytes(b, n);
-}
 // movzx r32, byte ptr [base + off]  (0F B6 /r SIB) — indexed 8-bit zero-extending load.
 void HostAssembler::load8Idx(Reg d, Reg base, Reg off) {
     const uint8_t op[2] = {0x0F, 0xB6};
-    emitIndexed(op, 2, /*prefix66=*/false, /*forceRex=*/false, xr(d), xr(base), xr(off));
-}
-// movzx r32, word ptr [base + off]  (0F B7 /r SIB) — indexed 16-bit zero-extending load.
-void HostAssembler::load16Idx(Reg d, Reg base, Reg off) {
-    const uint8_t op[2] = {0x0F, 0xB7};
     emitIndexed(op, 2, /*prefix66=*/false, /*forceRex=*/false, xr(d), xr(base), xr(off));
 }
 

@@ -1,10 +1,10 @@
 // A diagonal run — light i at (i, i). The kind of fixture that otherwise needs its own class.
 
 class DiagonalLayout {
-  uint8_t count = 16;
+  byte count = 16;
 
   defineControls() {
-    addUint8("count", count, 1, 64);
+    addControl("count", count, 1, 64);
   }
 
   placeLights() {

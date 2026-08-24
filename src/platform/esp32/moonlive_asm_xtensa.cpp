@@ -206,7 +206,14 @@ void XtensaAssembler::movImm(Reg d, int32_t imm) {
     // A negative below the 12-bit field's reach has no encoding here, and falling through to the
     // unsigned path below would materialise a different number in silence — the failure mode that
     // cost this backend a long debugging session. Fail the compile instead.
-    if (imm < -2048) { overflow_ = true; return; }
+    // Outside every short encoding below, build the full 32-bit value the way movPtr does: the
+    // same byte-at-a-time chain, absolute so it survives the block's copy to its final address.
+    // The old positive path MASKED to 16 bits silently — invisible while the language capped
+    // literals at 65535, and the first thing a Q16.16 literal (2.0 is 131072) stepped on.
+    if (imm < -2048 || imm > 0xffff) {
+        movPtr(d, reinterpret_cast<const void*>(static_cast<uintptr_t>(static_cast<uint32_t>(imm))));
+        return;
+    }
     if (imm < 0) {
         const uint32_t f = static_cast<uint32_t>(imm) & 0xfff;
         const uint8_t b[3] = {uint8_t((dr << 4) | 0x2),
@@ -215,7 +222,7 @@ void XtensaAssembler::movImm(Reg d, int32_t imm) {
         emit(b, 3);                                                      // movi aD, #imm12
         return;
     }
-    const uint32_t v = static_cast<uint32_t>(imm) & 0xffff;
+    const uint32_t v = static_cast<uint32_t>(imm);
     if (v <= 0xff) {
         const uint8_t b[3] = {uint8_t((dr << 4) | 0x2), 0xa0, uint8_t(v)};
         emit(b, 3);
@@ -290,11 +297,80 @@ void XtensaAssembler::addImm(Reg d, Reg a, int32_t imm) {
 void XtensaAssembler::mulReg(Reg d, Reg a, Reg b) {
     emit3(0x820000u | (uint32_t(ar(d)) << 12) | (uint32_t(ar(a)) << 8) | (uint32_t(ar(b)) << 4));
 }
+// mulsh aD, aA, aB — the SIGNED high 32 bits of the product; with mull it gives the Q16.16
+// multiply its middle 32 bits. MUL32_HIGH is present on LX6 and LX7.
+//
+// Every encoding here is an emit3 WORD, the same shape mull above uses. A first version built the
+// memory bytes by hand from an objdump listing — and the two toolchains print differently:
+// xtensa-esp32-elf-objdump shows the 24-bit word, xtensa-esp32s3-elf-objdump shows memory byte
+// order. Reading word-hex as memory bytes reversed every instruction, and the reversed slli
+// decoded as `l32r a1` — a stack-pointer clobber that hung the board hard enough for the system
+// watchdog. The host tests can never execute these bytes; only a device shows it.
+void XtensaAssembler::mulhi(Reg d, Reg a, Reg b) {
+    emit3(0xb20000u | (uint32_t(ar(d)) << 12) | (uint32_t(ar(a)) << 8) | (uint32_t(ar(b)) << 4));
+}
+// slli aD, aA, #n : the field holds 32-n, split across bits 20-23 (high bit) and 4-7 (low
+// nibble). n==0 is unencodable and the lowering never asks.
+void XtensaAssembler::shlImm(Reg d, Reg a, uint8_t n) {
+    // 1..31 only: the field holds 32-n, so n==0 and n>=32 have no encoding and would emit a
+    // shift by some other amount. Refuse, the way shrImm below does.
+    if (n == 0 || n >= 32) { overflow_ = true; return; }
+    const uint32_t k = 32u - n;
+    emit3(((k >> 4) << 20) | 0x010000u | (uint32_t(ar(d)) << 12) | (uint32_t(ar(a)) << 8) |
+          ((k & 0x0fu) << 4));
+}
+// srai aD, aA, #n : arithmetic, sign-filling. The amount rides bits 8-11 (low nibble) and bit 20
+// (high bit, folded into the 0x2/0x3 opcode nibble).
+void XtensaAssembler::sarImm(Reg d, Reg a, uint8_t n) {
+    if (n >= 32) { overflow_ = true; return; }   // the amount field is five bits
+    emit3(((0x2u | (uint32_t(n) >> 4)) << 20) | 0x010000u | (uint32_t(ar(d)) << 12) |
+          ((uint32_t(n) & 0x0fu) << 8) | (uint32_t(ar(a)) << 4));
+}
+// The LOGICAL right shift. srli only encodes 1..15; a shift of 16 is spelled extui aD, aA, 16, 16,
+// which extracts the top 16 bits — between them they cover every shift the front end emits.
+void XtensaAssembler::shrImm(Reg d, Reg a, uint8_t n) {
+    if (n >= 1 && n <= 15) {
+        emit3(0x410000u | (uint32_t(ar(d)) << 12) | (uint32_t(n) << 8) | (uint32_t(ar(a)) << 4));
+        return;
+    }
+    // extui's width field caps at 16, so 16 is the only wide shift it can express. Anything else
+    // has NO encoding here, and falling through to a shift-by-16 would emit a silently wrong
+    // constant — the failure mode movImm above was just fixed for. Fail the compile instead.
+    if (n != 16) { overflow_ = true; return; }
+    emit3(0xf50000u | (uint32_t(ar(d)) << 12) | (uint32_t(ar(a)) << 4));   // extui aD, aA, 16, 16
+}
+// a12: the dedicated address scratch, OUTSIDE the R0..R9 -> a2..a11 vreg map, so computing an
+// address into it can never clobber a live virtual register. Shared by every indexed access.
+static constexpr uint8_t kAddrScratch = 12;   // a12
+
+// The 4-byte slot access, in the NARROW forms: l32i.n / s32i.n are 2 bytes where l16ui was 3,
+// and they cover offsets 0..60 in steps of 4 — every arena offset, since the arena is 64 bytes.
+// RRRN format: imm/4 in the top nibble, then base, then the value/destination, then 0x8 (load)
+// or 0x9 (store).
+void XtensaAssembler::load32(Reg d, Reg base, int32_t imm) {
+    emit2(uint16_t(((uint32_t(imm) / 4) << 12) | (uint32_t(ar(base)) << 8) |
+                   (uint32_t(ar(d)) << 4) | 0x8));
+}
+void XtensaAssembler::store32(Reg base, int32_t imm, Reg val) {
+    emit2(uint16_t(((uint32_t(imm) / 4) << 12) | (uint32_t(ar(base)) << 8) |
+                   (uint32_t(ar(val)) << 4) | 0x9));
+}
+// The indexed forms compute the address into a12 first, the same dedicated scratch the byte path
+// uses: it sits outside the R0..R9 vreg map, so it never clobbers a live vreg.
+void XtensaAssembler::load32Idx(Reg d, Reg base, Reg off) {
+    emit2(uint16_t((kAddrScratch << 12) | (uint32_t(ar(base)) << 8) |
+                   (uint32_t(ar(off)) << 4) | 0xa));                      // add.n a12, base, off
+    emit2(uint16_t((uint32_t(kAddrScratch) << 8) | (uint32_t(ar(d)) << 4) | 0x8));
+}
+void XtensaAssembler::store32Idx(Reg base, Reg off, Reg val) {
+    emit2(uint16_t((kAddrScratch << 12) | (uint32_t(ar(base)) << 8) |
+                   (uint32_t(ar(off)) << 4) | 0xa));                      // add.n a12, base, off
+    emit2(uint16_t((uint32_t(kAddrScratch) << 8) | (uint32_t(ar(val)) << 4) | 0x9));
+}
 // Xtensa s8i only offsets a base by an immediate (no register-offset store), so compute the
 // address into a dedicated scratch a12 — OUTSIDE the R0..R9 → a2..a11 vreg map, so it never
 // clobbers a live virtual register — then s8i aVal, a12, 0.
 // add.n a12, aBase, aOff : (12<<12)|(base<<8)|(off<<4)|0xa  ;  s8i aVal, a12, 0 : [(val<<4)|2, 0x40|12, 0]
-static constexpr uint8_t kAddrScratch = 12;   // a12
 void XtensaAssembler::store8(Reg base, Reg off, Reg val) {
     emit2(uint16_t((kAddrScratch << 12) | (ar(base) << 8) | (ar(off) << 4) | 0xa));   // add.n a12, base, off
     const uint8_t b[3] = {uint8_t((ar(val) << 4) | 0x2), uint8_t(0x40 | kAddrScratch), 0x00};
@@ -306,40 +382,12 @@ void XtensaAssembler::load8(Reg d, Reg base, int32_t imm) {
     emit(b, 3);
 }
 
-void XtensaAssembler::store16(Reg base, Reg off, Reg val) {
-    emit2(uint16_t((kAddrScratch << 12) | (ar(base) << 8) | (ar(off) << 4) | 0xa));   // add.n a12, base, off
-    // s16i aVal, a12, 0: RRI8 with r = 5 where s8i uses 4.
-    const uint8_t b[3] = {uint8_t((ar(val) << 4) | 0x2), uint8_t(0x50 | kAddrScratch), 0x00};
-    emit(b, 3);
-}
-// l16ui aDst, aBase, #imm : bytes [ (dst<<4)|2, 0x10|base, imm/2 ]. The RRI8 immediate is SCALED
-// by 2 for a halfword access, so the field holds imm/2 and an odd offset is not encodable: a
-// halfword member sits on an even byte, which the arena cursor guarantees.
-void XtensaAssembler::load16(Reg d, Reg base, int32_t imm) {
-    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t(0x10 | ar(base)),
-                          uint8_t((imm >> 1) & 0xff)};
-    emit(b, 3);
-}
-// l16si aDst, aBase, #imm: the same RRI8 shape as l16ui, differing only in the `r` field, which
-// is the HIGH nibble of the second byte (l8ui r=0, l16ui r=1, l16si r=9). The first byte carries
-// the destination and the LSAI opcode and does not change.
-// Xtensa has l16si but NO l8si, which is why int16_t is a member type here and int8_t is not.
-void XtensaAssembler::load16S(Reg d, Reg base, int32_t imm) {
-    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t(0x90 | ar(base)),
-                          uint8_t((imm >> 1) & 0xff)};
-    emit(b, 3);
-}
 
 // Xtensa has no register-offset load either. The computed address goes through kAddrScratch, the
-// same temp store8/store16 use, and the RRI8 offset is 0 so the halfword scaling never applies.
+// same temp store8 uses, and the RRI8 offset is 0 so the offset scaling never applies.
 void XtensaAssembler::load8Idx(Reg d, Reg base, Reg off) {
     emit2(uint16_t((kAddrScratch << 12) | (ar(base) << 8) | (ar(off) << 4) | 0xa));   // add.n a12, base, off
     const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), kAddrScratch, 0x00};           // l8ui d, a12, 0
-    emit(b, 3);
-}
-void XtensaAssembler::load16Idx(Reg d, Reg base, Reg off) {
-    emit2(uint16_t((kAddrScratch << 12) | (ar(base) << 8) | (ar(off) << 4) | 0xa));   // add.n a12, base, off
-    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t(0x10 | kAddrScratch), 0x00};  // l16ui d, a12, 0
     emit(b, 3);
 }
 

@@ -17,7 +17,9 @@ enum class Tok { Ident, Number, String, Assign, LParen, RParen, LBrace, RBrace, 
 struct Lexer {
     const char* p;
     Tok kind = Tok::Error;
-    long number = 0;
+    int64_t number = 0;
+    // Whether the literal just lexed carried a decimal point, i.e. it is a Q16.16 value.
+    bool numberIsFixed = false;
     const char* identBeg = nullptr;
     size_t identLen = 0;
     const char* tokBeg = nullptr;
@@ -32,11 +34,50 @@ struct Lexer {
     static bool isIdentCont(char c) { return isIdentStart(c) || isDigit(c); }
     uint16_t col() const { return static_cast<uint16_t>((tokBeg - srcBeg) + 1); }
 
-    // Read a run of digits into v (capped); returns true if at least one digit was consumed.
-    bool readNumber(long& v) {
+    // Read a number into v, and say whether it carried a decimal point.
+    //
+    // A decimal point makes it a FIXED literal: `1.5` reads as the Q16.16 word 98304, so a script
+    // writes the number it means rather than the scaled integer. The fraction is accumulated as a
+    // numerator over a power of ten and scaled once, which keeps it exact for the digits a script
+    // would write.
+    //
+    // Overflow FAILS rather than truncating: the old cap stopped consuming digits at 1000000 and
+    // left the value silently wrong, so `99999999` became a number nobody wrote.
+    bool readNumber(int64_t& v, bool& isFixed, bool& overflowed) {
         if (!isDigit(*p)) return false;
-        v = 0;
-        while (isDigit(*p)) { v = v * 10 + (*p - '0'); p++; if (v > 1000000) break; }
+        v = 0; isFixed = false; overflowed = false;
+        // INT64 THROUGHOUT, and every check made BEFORE the multiply that could overflow.
+        //
+        // `long` is 32 bits on both ESP32 targets, and a script COMPILES ON THE DEVICE: the guard
+        // `v > INT32_MAX` after `v = v*10 + d` could never fire there, because the multiply had
+        // already wrapped (signed overflow, UB). `0.99999` was worse — num*65536 needs 33 bits.
+        // Both produced a number nobody wrote, on hardware, while every host test stayed green.
+        while (isDigit(*p)) {
+            if (v > (INT64_MAX - 9) / 10) { overflowed = true; return true; }
+            v = v * 10 + (*p - '0');
+            p++;
+            // The MAGNITUDE, not the value: a leading minus is a separate token, so 2147483648
+            // is legal here and becomes INT32_MIN. The signed range is checked where the sign is
+            // known — parsePrimary for an expression, parseDecl for an initializer.
+            if (v > -static_cast<int64_t>(INT32_MIN)) { overflowed = true; return true; }
+        }
+        if (*p == '.' && isDigit(p[1])) {
+            isFixed = true;
+            p++;
+            int64_t num = 0, den = 1;
+            while (isDigit(*p)) {
+                // Bounded so den * 65536 and num * 65536 both stay well inside int64; digits past
+                // that precision are consumed and dropped rather than shifting the value.
+                if (den <= 100000000LL) { num = num * 10 + (*p - '0'); den *= 10; }
+                p++;
+            }
+            // The MAGNITUDE: 32768.0 is legal with a leading minus (the most negative Q16.16
+            // value) and refused without one, which is a judgement only the sign-aware caller can
+            // make. Same rule the integer path follows for 2147483648.
+            if (v > 32768) { overflowed = true; return true; }
+            // The integer part scales by 65536; the fraction is num/den of that, rounded.
+            v = (v << 16) + (num * 65536 + den / 2) / den;
+        }
         return true;
     }
 
@@ -96,8 +137,10 @@ struct Lexer {
             kind = Tok::String; return;
         }
         if (isDigit(c)) {
-            long v = 0; readNumber(v);
-            number = v; kind = Tok::Number; return;
+            int64_t v = 0; bool fx = false, over = false;
+            readNumber(v, fx, over);
+            if (over) { err = "number out of range"; kind = Tok::Error; return; }
+            number = v; numberIsFixed = fx; kind = Tok::Number; return;
         }
         if (isIdentStart(c)) {
             identBeg = p;
@@ -160,6 +203,22 @@ struct Parser {
     DeclaredControl    members[kMaxCtrls] = {};
     // Arena bytes the members declared so far occupy: the cursor the next declaration is placed at.
     // Separate from memberCount now that a member's size is not always one byte.
+    // THE TYPE OF THE VALUE JUST PARSED. The front end is a single-pass parser with no AST, so a
+    // type rides alongside the register rather than hanging off a tree node: every parse function
+    // sets this before returning, and the places where two values meet compare it.
+    //
+    // Only `fixed` is tracked distinctly. byte and bool DECAY to int the moment they are read —
+    // they are semantics on storage, not on arithmetic — and a string never enters an expression.
+    // So this answers one question: is this value Q16.16, or a plain integer?
+    bool               exprIsFixed = false;
+    // When the value just parsed is EXACTLY one integer literal, the index of its Const op;
+    // -1 otherwise. This is what lets `v * 2` and `if (v < 0)` work on a fixed value: an integer
+    // LITERAL meeting a fixed operand converts at compile time by patching the already-emitted
+    // Const (the number the script wrote, rescaled — free at run time), where a fixed-meets-int
+    // VARIABLE stays a compile error naming toFixed/toInt. The distinction is safety: a literal's
+    // meaning is visible at the call site; a variable's scaling is not.
+    int                exprLitConst = -1;
+
     uint8_t            memberBytes = 0;
     uint8_t            memberCount = 0;
 
@@ -243,13 +302,43 @@ struct Parser {
     // the three backends ALREADY have (Const/Add/Mul) — a - b is emitted as a + (b * -1), because
     // no ISA here has a subtract and Xtensa's add-immediate encodes only 1..15, so negating the
     // immediate would silently produce a wrong constant.
+    /// Both operands of a binary operator must agree, and an INTEGER LITERAL meeting a fixed
+    /// operand agrees by converting: its Const is patched to the same number in Q16.16, costing
+    /// nothing at run time. Anything else mixed is a compile error naming the conversion to
+    /// write, because the alternative is a number 65,536 times off with nothing reporting it: the
+    /// two representations are indistinguishable at run time.
+    ///
+    /// Returns the type of the combined expression (true = fixed) via `outFixed`.
+    bool meet(bool lhsFixed, int lhsLit, bool rhsFixed, int rhsLit, bool& outFixed) {
+        if (lhsFixed == rhsFixed) { outFixed = lhsFixed; return true; }
+        const int lit = lhsFixed ? rhsLit : lhsLit;    // the int side, if it is a bare literal
+        if (lit >= 0) {
+            const int32_t v = ir.ops[lit].imm;
+            if (v < -32768 || v > 32767) {
+                fail("this number is out of range for a fixed value");
+                return false;
+            }
+            ir.ops[lit].imm = v << 16;
+            outFixed = true;
+            return true;
+        }
+        fail("this mixes a whole number and a fixed value: write toFixed(x) or toInt(x)");
+        return false;
+    }
+
     VReg parseExpr() {
         VReg lhs = parseTerm();
         while (!failed && (lex.kind == Tok::Plus || lex.kind == Tok::Minus)) {
             const bool negate = (lex.kind == Tok::Minus);
             lex.advance();
+            const bool lhsFixed = exprIsFixed;
+            const int  lhsLit   = exprLitConst;
             VReg rhs = parseTerm();
             if (failed) return 0;
+            bool outFixed = false;
+            if (!meet(lhsFixed, lhsLit, exprIsFixed, exprLitConst, outFixed)) return 0;
+            exprIsFixed = outFixed;
+            exprLitConst = -1;                     // a combined value is no longer one literal
             if (negate) {
                 VReg m = alloc();
                 emit({IrOp::Const, m, 0,0,0,0, -1, nullptr, {}});
@@ -300,18 +389,53 @@ struct Parser {
         while (!failed && (lex.kind == Tok::Star || lex.kind == Tok::Slash
                            || lex.kind == Tok::Percent)) {
             const Tok op = lex.kind;
+            const bool lhsFixed = exprIsFixed;
+            const int  lhsLit   = exprLitConst;
             lex.advance();
             VReg rhs = parsePrimary();
             if (failed) return 0;
-            if (op == Tok::Star) {
+            bool bothFixed = false;
+            if (!meet(lhsFixed, lhsLit, exprIsFixed, exprLitConst, bothFixed)) return 0;
+            exprLitConst = -1;
+            if (op == Tok::Star && bothFixed) {
+                // Q16.16 * Q16.16 has THIRTY-TWO fraction bits, so the product has to come back
+                // down by 16. The answer is the 64-bit product's middle word: the high half's low
+                // 16 bits joined to the low half's top 16. Three instructions and no call, which
+                // is why the backends grew mulhi rather than routing this through a host function.
+                VReg hi = alloc();
+                emit({IrOp::Mulhi, hi, lhs, rhs, 0,0, 0, nullptr, {}});
+                VReg lo = alloc();
+                emit({IrOp::Mul, lo, lhs, rhs, 0,0, 0, nullptr, {}});
+                emit({IrOp::Shr, lo, lo, 0,0,0, 16, nullptr, {}});   // LOGICAL: the low word is unsigned
+                emit({IrOp::Shl, hi, hi, 0,0,0, 16, nullptr, {}});
+                VReg dst = alloc();
+                emit({IrOp::Add, dst, hi, lo, 0,0, 0, nullptr, {}});
+                freeTemp(hi); freeTemp(lo); freeTemp(lhs); freeTemp(rhs);
+                lhs = dst;
+                exprIsFixed = true;
+            } else if (op == Tok::Star) {
                 VReg dst = alloc();
                 emit({IrOp::Mul, dst, lhs, rhs, 0,0, 0, nullptr, {}});
                 freeTemp(lhs); freeTemp(rhs);
                 lhs = dst;
+                exprIsFixed = false;
+            } else if (op == Tok::Slash && bothFixed) {
+                // Q16.16 / Q16.16 goes through its own host call: the quotient needs the
+                // numerator widened to (a << 16) BEFORE the divide, and no 32-bit register can
+                // hold that past |128.0|. A first attempt split the shift around an integer
+                // divide (8 before, 8 after) and silently wrapped for larger values, which froze
+                // two shipped shaders. fdiv does the widening in int64 in the host — exact over
+                // the whole range, and a divide is a host call on every ISA here anyway.
+                lhs = emitBinaryCall("fdiv", 4, lhs, rhs, "'/' on fixed needs the fdiv built-in");
+                exprIsFixed = true;
             } else if (op == Tok::Slash) {
                 lhs = emitBinaryCall("div", 3, lhs, rhs, "'/' needs a div(a, b) built-in");
+                exprIsFixed = false;
             } else {
+                // (a*2^16) mod (b*2^16) IS (a mod b)*2^16, so the remainder of two fixed values
+                // is fixed — which is what makes the fractional-part idiom `x % 1.0` work.
                 lhs = emitBinaryCall("mod", 3, lhs, rhs, "'%' needs a mod(a, b) built-in");
+                exprIsFixed = bothFixed;
             }
             if (failed) return 0;
         }
@@ -322,6 +446,38 @@ struct Parser {
     // offset); an ident followed by `(` is a call.
     VReg parsePrimary() {
         if (failed) return 0;
+        // An int unless something below says otherwise, and not a bare literal unless the number
+        // branch says so. Set here rather than in each branch so a new kind of primary cannot
+        // forget to answer either question.
+        exprIsFixed = false;
+        exprLitConst = -1;
+        // toFixed(v) / toInt(v): the conversions, EXPLICIT because a silent one is a number
+        // 65,536 times off. Each is a single shift, recognized here rather than registered as a
+        // builtin so it costs an instruction and not a host call.
+        if (lex.kind == Tok::Ident && (atKeyword("toFixed", 7) || atKeyword("toInt", 5))) {
+            const bool up = atKeyword("toFixed", 7);
+            lex.advance();
+            if (!expect(Tok::LParen, "expected '(' after the conversion")) return 0;
+            VReg v = parseExpr();
+            if (failed) return 0;
+            if (up && exprIsFixed) { fail("this value is already fixed"); return 0; }
+            if (!up && !exprIsFixed) { fail("this value is already a whole number"); return 0; }
+            // A LITERAL converting up is range-checked here, exactly as adoption checks one at a
+            // meet point: `toFixed(40000)` would otherwise shift past what Q16.16 holds and wrap
+            // into a number nobody wrote. A computed value cannot be checked at compile time and
+            // saturates at run time like any other overflow.
+            if (up && exprLitConst >= 0) {
+                const int32_t lit = ir.ops[exprLitConst].imm;
+                if (lit < -32768 || lit > 32767)
+                    { fail("this number is out of range for a fixed value"); return 0; }
+            }
+            if (!expect(Tok::RParen, "expected ')' to close the conversion")) return 0;
+            VReg dst = alloc();
+            emit({up ? IrOp::Shl : IrOp::Sar, dst, v, 0,0,0, 16, nullptr, {}});
+            freeTemp(v);
+            exprIsFixed = up;
+            return dst;
+        }
         if (lex.kind == Tok::LParen) {                   // grouping
             lex.advance();
             VReg v = parseExpr();
@@ -330,6 +486,23 @@ struct Parser {
         }
         if (lex.kind == Tok::Minus) {                    // unary minus: 0 - v, as (v * -1)
             lex.advance();
+            // A NEGATED LITERAL folds here, before the positive form is range-checked: the
+            // magnitude 2147483648 is legal only with the sign attached, so parsing the number
+            // first made INT32_MIN unwritable in an expression (`v = -2147483648;` was refused
+            // while the identical initializer compiled). Folding also spares a Const and a Mul.
+            if (lex.kind == Tok::Number) {
+                const int64_t neg = -lex.number;
+                if (neg < INT32_MIN || neg > INT32_MAX) { fail("number out of range"); return 0; }
+                VReg v = alloc();
+                emit({IrOp::Const, v, 0,0,0,0, static_cast<int32_t>(neg), nullptr, {}});
+                // A FIXED literal folds here too: `-32768.0` is the most negative Q16.16 value and
+                // its magnitude is one past the positive limit, so parsing the number first and
+                // negating after made it unwritable — the same shape as INT32_MIN.
+                exprIsFixed = lex.numberIsFixed;
+                exprLitConst = lex.numberIsFixed ? -1 : int(ir.count) - 1;
+                lex.advance();
+                return v;
+            }
             VReg v = parsePrimary();
             if (failed) return 0;
             VReg m = alloc();
@@ -339,10 +512,32 @@ struct Parser {
             freeTemp(m); freeTemp(v);
             return dst;
         }
+        // `true` and `false`, the way a bool is written. Ordinary literals rather than a separate
+        // token kind: they evaluate to 1 and 0, so every existing comparison and arithmetic path
+        // takes them unchanged, and a script says `bool on = true;` instead of spelling a C-ism.
+        if (lex.kind == Tok::Ident && (atKeyword("true", 4) || atKeyword("false", 5))) {
+            VReg v = alloc();
+            emit({IrOp::Const, v, 0,0,0,0, atKeyword("true", 4) ? 1 : 0, nullptr, {}});
+            lex.advance();
+            return v;
+        }
         if (lex.kind == Tok::Number) {
-            if (lex.number < 0 || lex.number > 65535) { fail("number out of range (0..65535)"); return 0; }
+            // The whole signed range: a member holds 32 bits, so a literal that fits one is
+            // legal. The old 0..65535 cap was the widest MEMBER of the day, which made a literal
+            // and the member it was assigned to disagree about what a number could be.
+            if (lex.number < INT32_MIN || lex.number > INT32_MAX)
+                { fail("number out of range"); return 0; }
+            // A positive fixed literal stops at 32767.99998; the magnitude 32768.0 the lexer now
+            // admits is legal only with the minus the branch above folds.
+            if (lex.numberIsFixed && lex.number > INT32_MAX)      // 32767.99998 in Q16.16
+                { fail("number out of range for a fixed value"); return 0; }
             VReg v = alloc();
             emit({IrOp::Const, v, 0,0,0,0, static_cast<int32_t>(lex.number), nullptr, {}});
+            // A decimal point made it a fixed value at the lexer; the word is already scaled.
+            exprIsFixed = lex.numberIsFixed;
+            // A bare integer literal may still ADOPT fixed at a meet point (see meet()), which
+            // patches this very op. Recording the index here is what makes that possible.
+            if (!lex.numberIsFixed) exprLitConst = int(ir.count) - 1;
             lex.advance();
             return v;
         }
@@ -386,8 +581,16 @@ struct Parser {
                     lex.advance();
                     VReg idx = parseExpr();
                     if (failed) return 0;
+                    // An INDEX counts elements, so it is a whole number like a loop counter.
+                    if (exprIsFixed) { fail("an array index is a whole number: write toInt(x)"); return 0; }
                     if (!expect(Tok::RBracket, "expected ']' to close an array index")) { freeTemp(idx); return 0; }
                     VReg v = alloc();
+                    // The value this expression yields is an ELEMENT, so its type is the array's.
+                    // Leaving the index's state here made `heat[3] * 0.5` adopt the INDEX literal
+                    // — patching the 3 to 196608, clamping to the last element, and reading a byte
+                    // as though it were fixed.
+                    exprIsFixed = (members[mi].type == CtrlType::Fixed);
+                    exprLitConst = -1;
                     emit({IrOp::LoadIdx, v, idx, 0, 0, 0,
                           idxPack(members[mi].offset, ctrlWidth(members[mi].type),
                                   members[mi].count), nullptr, {}});
@@ -396,16 +599,21 @@ struct Parser {
                 }
                 if (members[mi].count > 1) { fail("an array needs an index: write name[i]"); return 0; }
                 VReg v = alloc();
-                // Three member types, three loads: the signed one sign-extends, which is the
-                // whole point of declaring int16_t rather than uint16_t.
-                const IrOp loadOp = members[mi].type == CtrlType::Int16  ? IrOp::LoadCtrl16S
-                                  : members[mi].type == CtrlType::Uint16 ? IrOp::LoadCtrl16
-                                                                         : IrOp::LoadCtrl;
-                emit({loadOp, v, 0,0,0,0, members[mi].offset, nullptr, {}});
+                exprIsFixed = (members[mi].type == CtrlType::Fixed);
+                // ONE load for every scalar type. A slot is 4 bytes and already holds what its
+                // type promises (byte and bool are masked on the way in), so there is no width or
+                // sign to choose here: the three-way pick this replaces is exactly where a
+                // sign-blind read used to turn -100 into 65436.
+                emit({IrOp::LoadCtrl32, v, 0,0,0,0, members[mi].offset, nullptr, {}});
                 return v;
             }
             VReg out = 0;
+            const Builtin* called = table.find(lex.identBeg, lex.identLen);
             parseCall(&out);   // otherwise a call used as an expression must return a value
+            // The result's type is the builtin's business: uvX/uvY hand back a fixed coordinate,
+            // everything else a whole number.
+            exprIsFixed = called && called->fixedReturn;
+            exprLitConst = -1;
             return out;
         }
         fail("expected a number, a control name, or a function call");
@@ -510,26 +718,40 @@ struct Parser {
                     if (lex.kind != Tok::Ident) { fail("expected the member this control is bound to"); return; }
                     const int mi = findMember(lex.identBeg, lex.identLen);
                     if (mi < 0) { fail("no member of that name is declared in this class"); return; }
-                    // The BUILTIN'S width must match the MEMBER'S. addUint8 on a uint16_t member
-                    // would drive only its low byte and addUint16 on a uint8_t member would write
-                    // past it, both silently — so the mismatch is a diagnostic naming the call to
-                    // use instead. A control also drives one value, never an array: binding one
-                    // would move element 0 and leave the rest, with nothing on screen saying so.
-                    if (members[mi].type != fn->refType)
-                        { fail(fn->refType == CtrlType::Uint16
-                                   ? "addUint16 binds a uint16_t member"
-                                   : "addUint8 binds a uint8_t member"); return; }
-                    // No addInt16 exists: an int16_t member is script-internal scratch, not a
-                    // control. The two messages above therefore name only what each call takes,
-                    // rather than recommending the sibling call, which for an int16_t member
-                    // would fail just the same.
+                    // A control surfaces a value the UI can drive, so the member's type has to be
+                    // one the UI has a widget for. int, byte and bool do; fixed and string do not
+                    // yet, and saying so beats publishing a slider that writes a Q16.16 word the
+                    // user cannot reason about. A control also drives one value, never an array:
+                    // binding one would move element 0 and leave the rest, with nothing on screen
+                    // saying so.
+                    if (members[mi].type == CtrlType::Fixed || members[mi].type == CtrlType::Str)
+                        { fail("a control binds an int, byte or bool member"); return; }
                     if (members[mi].count > 1)
                         { fail("a control binds a single member, not an array"); return; }
+                    // The offset AND the member's type travel in one word: the arena is 64 bytes,
+                    // so the low byte carries the offset and the next byte the type. addControl
+                    // needs the type to know which widget to publish, and it has no other way to
+                    // learn it — the builtin sees values, not declarations.
                     v = alloc();
-                    emit({IrOp::Const, v, 0,0,0,0, members[mi].offset, nullptr, {}});
+                    emit({IrOp::Const, v, 0,0,0,0,
+                          members[mi].offset | (int32_t(members[mi].type) << 8), nullptr, {}});
                     lex.advance();
                 } else {
+                    const bool wantFixed = ((fn->fixedArgs >> n) & 1u) != 0;
                     v = parseExpr();
+                    if (failed) return;
+                    // Each argument is checked against what the BUILTIN declares. Most take whole
+                    // numbers — a channel, a light index, an angle16 — and a fixed value crossing
+                    // uncoverted would read 65,536 times off. escape() is the exception: it takes
+                    // four fixed coordinates, so uv output flows straight in.
+                    if (wantFixed != exprIsFixed) {
+                        bool adopted = false;
+                        if (!wantFixed || !meet(true, -1, exprIsFixed, exprLitConst, adopted)) {
+                            fail(wantFixed ? "this argument is a fixed value: write toFixed(x)"
+                                           : "this argument is a whole number: write toInt(x)");
+                            return;
+                        }
+                    }
                 }
                 if (failed) return;
                 if (slotHighWater >= kMaxLocals) { fail("too many arguments to hold"); return; }
@@ -607,17 +829,24 @@ struct Parser {
         // A control name must not shadow a builtin: a declared `random16` would make `random16(…)`
         // ambiguous (control read vs call). Reject it at the source so the resolution never collides.
         if (table.find(name, nameLen)) { fail("member name shadows a built-in function"); return; }
+        // The conversions and the boolean literals are resolved BEFORE a member name, so a member
+        // called one of these could be declared and then never read. Refused for the same reason a
+        // builtin name is: the alternative is a member that silently does not exist.
+        if (isReservedWord(name, nameLen)) { fail("member name is a reserved word"); return; }
         lex.advance();
-        // An ARRAY: `uint8_t heat[16];`. The length is a literal, not an expression, because the
+        // An ARRAY: `byte heat[16];`. The length is a literal, not an expression, because the
         // arena is sized at compile time: a length read from a control would make the member's
         // size depend on a value the UI changes while the program runs.
         uint8_t count = 1;
         if (lex.kind == Tok::LBracket) {
-            // int16_t arrays are refused, not mis-read: element access lowers through the UNSIGNED
-            // indexed load on every backend, so a negative element would silently read as a large
-            // positive where a scalar member of the same type reads correctly. Add the signed
-            // indexed load to all four backends before lifting this.
-            if (type == CtrlType::Int16) { fail("int16_t arrays are not supported"); return; }
+            // A string is a reference into the compiled program's pool, so an array of them would
+            // be an array of references with no way to fill it: there is no runtime string.
+            if (type == CtrlType::Str) { fail("string arrays are not supported"); return; }
+            // A fixed ARRAY waits for element type-tracking to be worth having: the element's
+            // type has to reach the expression that reads it and the value that writes it, which
+            // scalars get from their declaration and elements would need per-array. Refused
+            // rather than half-working, the same stance string arrays take.
+            if (type == CtrlType::Fixed) { fail("fixed arrays are not supported yet"); return; }
             lex.advance();
             if (lex.kind != Tok::Number) { fail("expected an array length (a number)"); return; }
             if (lex.number < 1 || lex.number > kCtrlBytes) { fail("array length out of range"); return; }
@@ -627,15 +856,21 @@ struct Parser {
             if (!expect(Tok::Semicolon, "expected ';': an array has no initializer")) return;
             if (lex.kind == Tok::Error) { fail(lex.err); return; }
             if (memberCount >= kMaxCtrls) { fail("too many members"); return; }
-            const uint8_t align = ctrlWidth(type);
+            // Elements pack at their own width — a byte[] is one byte each, which is what keeps a
+            // heat map at 1x on a board with no PSRAM — but the array STARTS on a 4-byte boundary
+            // so the scalar slots around it stay aligned.
+            const uint8_t elem = ctrlWidth(type);
             uint16_t at = memberBytes;
-            if (align > 1 && (at % align) != 0) at = uint16_t(at + (align - at % align));
-            const uint16_t need = uint16_t(count) * align;
+            if ((at % 4) != 0) at = uint16_t(at + (4 - at % 4));
+            const uint16_t need = uint16_t(count) * elem;
             if (at + need > kCtrlBytes) { fail("the class declares more member data than the arena holds"); return; }
             // Zero, not a written initializer: an element-wise initializer list would be a second
             // syntax for what a `for` in the script already expresses, and every element seeding to
             // the same value is what a decay or particle buffer starts from anyway.
-            members[memberCount] = {name, 0, 255, 0, static_cast<uint8_t>(nameLen), type,
+            // The RANGE is not the compiler's to state: it arrives with the addControl call at
+            // run time, through addDeclaredControl. Zeroed here rather than carrying a 0..255
+            // that an int or fixed member would flatly contradict.
+            members[memberCount] = {name, 0, 0, 0, static_cast<uint8_t>(nameLen), type,
                                     static_cast<uint8_t>(at), count};
             memberBytes = static_cast<uint8_t>(at + need);
             memberCount++;
@@ -648,24 +883,71 @@ struct Parser {
         // one point where a number is the only thing that can follow.
         bool negated = false;
         if (lex.kind == Tok::Minus) { negated = true; lex.advance(); }
-        if (lex.kind != Tok::Number) { fail("expected a default value (a number)"); return; }
-        if (negated) lex.number = -lex.number;
-        // The initializer is range-checked against the DECLARED type, so a member cannot be given
-        // a value it silently truncates.
-        // Checked against the DECLARED type, so `int16_t d = 60000;` is refused here rather than
-        // silently becoming -5536 at run time. That value was a real bug: a script used a large
-        // number as a "start big" sentinel, a builtin read it through a signed window, and every
-        // light rendered black with nothing reporting an error.
-        const long defMin = type == CtrlType::Int16 ? -32768 : 0;
-        const long defMax = type == CtrlType::Int16  ? 32767
-                          : type == CtrlType::Uint16 ? 65535 : 255;
-        if (lex.number < defMin || lex.number > defMax) {
-            fail(type == CtrlType::Int16  ? "int16_t default out of range (-32768..32767)"
-               : type == CtrlType::Uint16 ? "uint16_t default out of range (0..65535)"
-                                          : "uint8_t default out of range (0..255)");
+        // `true`/`false` seed a bool the way a script writes one.
+        if (lex.kind == Tok::Ident && (atKeyword("true", 4) || atKeyword("false", 5))) {
+            if (type != CtrlType::Bool) { fail("true and false initialize a bool member"); return; }
+            // `-true` parsed: the minus was consumed above and then never consulted, so the member
+            // seeded to 1 as though the sign had not been written. A sign has no meaning on a
+            // boolean, so say so rather than silently discarding it.
+            if (negated) { fail("true and false take no sign"); return; }
+            const long b = atKeyword("true", 4) ? 1 : 0;
+            lex.advance();
+            if (!expect(Tok::Semicolon, "expected ';' after the member declaration")) return;
+            if (lex.kind == Tok::Error) { fail(lex.err); return; }
+            if (memberCount >= kMaxCtrls) { fail("too many members"); return; }
+            uint16_t bat = memberBytes;
+            if ((bat % 4) != 0) bat = uint16_t(bat + (4 - bat % 4));
+            if (bat + 4 > kCtrlBytes)
+                { fail("the class declares more member data than the arena holds"); return; }
+            members[memberCount] = {name, 0, 1, static_cast<int32_t>(b),
+                                    static_cast<uint8_t>(nameLen), type,
+                                    static_cast<uint8_t>(bat), 1};
+            memberBytes = static_cast<uint8_t>(bat + 4);
+            memberCount++;
             return;
         }
-        long def = lex.number;
+        // A quoted initializer reaches here only for a string member; say what is actually true
+        // rather than asking for a number, which the string case then refuses in the other
+        // direction. The two messages used to point at each other.
+        if (lex.kind == Tok::String) { fail("a string member cannot be initialized yet"); return; }
+        if (lex.kind != Tok::Number) { fail("expected a default value (a number)"); return; }
+        if (negated) lex.number = -lex.number;
+        // Range-checked against the DECLARED type, so a member cannot be given a value it would
+        // silently truncate. `byte n = 300;` is refused here rather than becoming 44 at run time,
+        // which is the class of bug this type system exists to remove: the old widths turned an
+        // out-of-range initializer into an arbitrary in-range one with nothing reporting it.
+        int64_t defMin = INT32_MIN, defMax = INT32_MAX;
+        const char* rangeErr = nullptr;
+        switch (type) {
+            case CtrlType::Byte:  defMin = 0; defMax = 255;
+                                  rangeErr = "byte default out of range (0..255)";
+                                  if (lex.numberIsFixed)
+                                      { fail("a byte member takes a whole number"); return; }
+                                  break;
+            case CtrlType::Bool:  defMin = 0; defMax = 1;
+                                  rangeErr = "bool default is 0 or 1";
+                                  if (lex.numberIsFixed)
+                                      { fail("a bool member takes true or false"); return; }
+                                  break;
+            case CtrlType::Str:   fail("a string member cannot be initialized yet"); return;
+            case CtrlType::Int:   rangeErr = "default out of range";
+                                  if (lex.numberIsFixed)
+                                      { fail("an int member takes a whole number"); return; }
+                                  break;
+            case CtrlType::Fixed:
+                // A whole number seeding a fixed member is converted HERE, at compile time: the
+                // script writes `fixed zoom = 2;` and means 2.0, and no runtime shift is spent on
+                // a constant. A decimal literal arrived scaled already.
+                if (!lex.numberIsFixed) {
+                    if (lex.number < -32768 || lex.number > 32767)
+                        { fail("fixed default out of range (-32768.0..32767.99998)"); return; }
+                    lex.number = lex.number << 16;
+                }
+                rangeErr = "fixed default out of range (-32768.0..32767.99998)";
+                break;
+        }
+        if (lex.number < defMin || lex.number > defMax) { fail(rangeErr); return; }
+        int64_t def = lex.number;
         lex.advance();
         if (!expect(Tok::Semicolon, "expected ';' after the member declaration")) return;
         // A lexer error carries a specific message; surface it rather than letting it fall through
@@ -679,23 +961,36 @@ struct Parser {
         // byte consumes several, so the n-th member is no longer at byte n. Checked against the
         // arena's byte budget rather than against the record count, because those are now two
         // different limits and a script can exhaust either one first.
-        // A wide member is placed on an EVEN byte. Two of the three backends scale a halfword
-        // load's immediate by the access size (arm64 ldrh, Xtensa l16ui), so an odd offset is not
-        // encodable at all: the alignment is the ISA's rule, honored here once rather than worked
-        // around in two assemblers.
-        const uint8_t align = ctrlWidth(type);
+        // Every scalar takes one 4-byte SLOT on a 4-byte boundary, whatever its type. That is the
+        // whole storage rule: no per-type width to align to, and the backends' 32-bit load and
+        // store scale their immediate by 4, which every arena offset already satisfies.
         uint16_t at = memberBytes;
-        if (align > 1 && (at % align) != 0) at = uint16_t(at + (align - at % align));
-        const uint16_t need = uint16_t(ctrlWidth(type));
+        if ((at % 4) != 0) at = uint16_t(at + (4 - at % 4));
+        const uint16_t need = ctrlSlotBytes(type);
         if (at + need > kCtrlBytes) { fail("the class declares more member data than the arena holds"); return; }
-        // def is uint16_t on the record precisely so a wide member's initializer survives; casting
-        // it to a byte here truncated `uint16_t phase = 1000;` to 232. Invisible to a test that
+        // def is int32_t on the record so a member's whole initializer survives; casting it
+        // narrower here truncated `uint16_t phase = 1000;` to 232. Invisible to a test that
         // observes through setRGB, because the error is always a multiple of 256.
-        members[memberCount] = {name, 0, 255, static_cast<uint16_t>(def),
+        // Range zeroed for the reason the array path gives: the control's range comes from
+        // addControl at run time, not from the declaration.
+        members[memberCount] = {name, 0, 0, static_cast<int32_t>(def),
                                 static_cast<uint8_t>(nameLen), type,
                                 static_cast<uint8_t>(at), 1};
         memberBytes = static_cast<uint8_t>(at + need);
         memberCount++;
+    }
+
+    /// The words the expression parser resolves before it looks for a member: the two conversions
+    /// and the two boolean literals. A member may not take one of these names.
+    static bool isReservedWord(const char* n, size_t len) {
+        static const struct { const char* w; size_t len; } kWords[] = {
+            {"toFixed", 7}, {"toInt", 5}, {"true", 4}, {"false", 5},
+            // The type keywords too: `int int = 5;` parsed, declaring a member whose name the
+            // class-body loop reads as the start of another declaration.
+            {"int", 3}, {"byte", 4}, {"bool", 4}, {"fixed", 5}, {"string", 6}};
+        for (const auto& k : kWords)
+            if (len == k.len && std::strncmp(n, k.w, k.len) == 0) return true;
+        return false;
     }
 
     // Is the current Ident this exact keyword? Keywords are matched by text rather than lexed as
@@ -704,15 +999,20 @@ struct Parser {
     bool atKeyword(const char* kw, size_t len) const {
         return lex.kind == Tok::Ident && lex.identLen == len && std::strncmp(lex.identBeg, kw, len) == 0;
     }
-    // Is the current Ident the `uint8_t` type keyword (the only declared type in Stage 1)?
+    // The five type keywords. Names a script author would reach for, not the storage widths the
+    // language used to make them spell: a type says what a value MEANS, and the slot it occupies
+    // is the compiler's business.
     bool atTypeKeyword() const {
-        return atKeyword("uint8_t", 7) || atKeyword("uint16_t", 8) || atKeyword("int16_t", 7);
+        return atKeyword("int", 3) || atKeyword("byte", 4) || atKeyword("bool", 4) ||
+               atKeyword("fixed", 5) || atKeyword("string", 6);
     }
     /// The type the current keyword names. Only called when atTypeKeyword() is true.
     CtrlType currentType() const {
-        if (atKeyword("uint16_t", 8)) return CtrlType::Uint16;
-        if (atKeyword("int16_t", 7))  return CtrlType::Int16;
-        return CtrlType::Uint8;
+        if (atKeyword("byte", 4))   return CtrlType::Byte;
+        if (atKeyword("bool", 4))   return CtrlType::Bool;
+        if (atKeyword("fixed", 5))  return CtrlType::Fixed;
+        if (atKeyword("string", 6)) return CtrlType::Str;
+        return CtrlType::Int;
     }
 
     // program := { decl } { stmt }.  Declarations (control vars) come first, then one-or-more
@@ -758,6 +1058,8 @@ struct Parser {
         lex.advance();
         if (!expect(Tok::Assign, "expected '=' in the for's first clause")) return false;
         VReg init = parseExpr();
+        // the init: A loop COUNTS, so every clause of its header is a whole number. Without this, a fixed limit runs the body ~65,536 times: a multi-second stall on the render thread rather than a diagnostic.
+        if (exprIsFixed) { fail("a loop counts in whole numbers: write toInt(x)"); return false; }
         if (failed) return false;
         // The counter starts life in its slot; the temp that computed it is released immediately.
         // Bounded on slotHighWater, not just localCount: a call RELEASES its argument staging slots
@@ -786,6 +1088,7 @@ struct Parser {
         // so it has to survive the body — and a body containing a call would otherwise have to keep
         // it in a register across that call.
         VReg limitTmp = parseExpr();
+        if (exprIsFixed) { fail("a loop counts in whole numbers: write toInt(x)"); return false; }
         if (failed) return false;
         if (slotHighWater >= kMaxLocals) { fail("too many loop variables"); return false; }
         const uint8_t limitSlot = slotHighWater++;
@@ -842,6 +1145,7 @@ struct Parser {
             Lexer save = lex;
             lex = stepLex;
             VReg s = parseExpr();
+            if (exprIsFixed) { fail("a loop counts in whole numbers: write toInt(x)"); return false; }
             if (failed) return false;
             // parseExpr stops at the first token it cannot consume, so without this the step
             // silently ignores whatever follows it — `i = i + 1 garbage` compiled clean. The
@@ -903,10 +1207,25 @@ struct Parser {
             lex.advance();
             VReg idx = parseExpr();
             if (failed) return false;
+            if (exprIsFixed) { fail("an array index is a whole number: write toInt(x)"); return false; }
             if (!expect(Tok::RBracket, "expected ']' to close an array index")) { freeTemp(idx); return false; }
             if (!expect(Tok::Assign, "expected '=' in an assignment")) { freeTemp(idx); return false; }
             VReg v = parseExpr();
             if (failed) { freeTemp(idx); return false; }
+            // The same wall the scalar store enforces: an element takes what its type holds, or
+            // the stored word is scaled 65,536 away from what the script meant. A literal adopts
+            // for a fixed[] element exactly as it does at a binary operator.
+            {
+                const bool wantFixed = (members[ai].type == CtrlType::Fixed);
+                if (wantFixed != exprIsFixed) {
+                    bool adopted = false;
+                    if (!wantFixed || !meet(true, -1, exprIsFixed, exprLitConst, adopted)) {
+                        fail(wantFixed ? "a fixed element takes a fixed value: write toFixed(x)"
+                                       : "this element takes a whole number: write toInt(x)");
+                        return false;
+                    }
+                }
+            }
             emit({IrOp::StoreIdx, 0, idx, v, 0, 0,
                   idxPack(members[ai].offset, ctrlWidth(members[ai].type),
                           members[ai].count), nullptr, {}});
@@ -933,15 +1252,56 @@ struct Parser {
         }
         VReg v = parseExpr();
         if (failed) return false;
+        // The wall holds at the STORE too: a fixed member takes a fixed value and every other
+        // member a whole number, or the slot would hold bits scaled 65,536 away from what the
+        // script meant. Locals are loop counters, always whole numbers.
+        if (mi >= 0) {
+            const bool wantFixed = (members[mi].type == CtrlType::Fixed);
+            if (wantFixed != exprIsFixed) {
+                // `c = 5;` on a fixed member converts the literal at compile time, exactly as the
+                // initializer does; anything computed still names its conversion.
+                bool adopted = false;
+                if (wantFixed && !meet(true, -1, exprIsFixed, exprLitConst, adopted) ) return false;
+                if (!wantFixed) {
+                    fail("this member takes a whole number: write toInt(x)");
+                    return false;
+                }
+            }
+        } else if (exprIsFixed) {
+            fail("a loop variable takes a whole number: write toInt(x)");
+            return false;
+        }
         if (li >= 0) emit({IrOp::Spill,     0, v, 0,0,0, locals[li].slot,   nullptr, {}});
-        // Selected by WIDTH, not by naming one type: a store truncates, so signedness does not
-        // matter on the way in, but a 1-byte store into a 2-byte member writes half of it and the
-        // sign-extending load then reads a stale high byte. That bug shipped: int16_t members
-        // assigned in tick() collapsed to 0..255 and a whole shader went one flat color.
-        else         emit({ctrlWidth(members[mi].type) == 2 ? IrOp::StoreCtrl16 : IrOp::StoreCtrl,
-                            0, v, 0,0,0, members[mi].offset, nullptr, {}});
+        // The store NARROWS: a byte or bool member takes StoreCtrl, which writes one byte, so the
+        // value truncates in the instruction itself and the slot's upper three bytes keep the zero
+        // they were seeded with. Nothing else can ever write them, which is what lets a byte
+        // control's descriptor point at the slot's low byte and still see the member's whole
+        // value. int and fixed take StoreCtrl32 and the whole slot. Same reasoning the ARRAY path
+        // has always used, where store8 into a byte[] element narrows the same way.
+        else         emit({storeOpFor(members[mi].type), 0, v, 0,0,0,
+                           members[mi].offset, nullptr, {}});
         freeTemp(v);
         return expect(Tok::Semicolon, "expected ';' after an assignment");
+    }
+
+    /// The store op a member's type needs.
+    ///
+    /// A byte and a bool are NARROWED BY THE STORE ITSELF: StoreCtrl writes one byte, so the
+    /// value truncates in the instruction and the slot's upper three bytes keep the zero they
+    /// were seeded with. Nothing else can ever write them, which is what lets a byte control's
+    /// descriptor point at the slot's low byte and read the member's whole value. The array path
+    /// has always narrowed this way (store8 into a byte[] element); this makes a scalar match.
+    ///
+    /// int and fixed take the whole slot, so they store all four bytes.
+    ///
+    /// A bool truncates the same way, so it holds 0..255 rather than strictly 0 or 1: a script
+    /// writing `flag = 7` reads 7 back, and every use of a bool is a comparison, where any
+    /// non-zero is true. The one value that does NOT survive is a multiple of 256, which
+    /// truncates to 0 — `flag = count` where count is 256 reads false. Normalizing would need a
+    /// compare-and-select the IR has no op for (there is no bitwise op and no Sub), so it waits
+    /// for a script that writes a non-boolean expression into a bool.
+    static IrOp storeOpFor(CtrlType type) {
+        return ctrlWidth(type) == 1 ? IrOp::StoreCtrl : IrOp::StoreCtrl32;
     }
 
     /// `if (a OP b) { … }` with an optional `else { … }`.
@@ -978,9 +1338,17 @@ struct Parser {
             fail("expected a comparison: <, <=, >, >=, == or !=");
             return false;
         }
+        const bool aFixed = exprIsFixed;
+        const int  aLit   = exprLitConst;
         lex.advance();
         VReg b = parseExpr();
         if (failed) { freeTemp(a); return false; }
+        // Same wall as the operators: agreeing sides compare correctly as raw words (Q16.16
+        // preserves order), and disagreeing sides would compare numbers 65,536 apart in meaning.
+        // A literal adopts the fixed side here too, which is what makes `if (v < 0)` natural.
+        bool cmpFixed = false;
+        if (!meet(aFixed, aLit, exprIsFixed, exprLitConst, cmpFixed))
+            { freeTemp(b); freeTemp(a); return false; }
         if (!expect(Tok::RParen, "expected ')' to close the if condition")) { freeTemp(b); freeTemp(a); return false; }
         if (!expect(Tok::LBrace, "expected '{': an if body is braced")) { freeTemp(b); freeTemp(a); return false; }
 

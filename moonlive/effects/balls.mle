@@ -2,19 +2,19 @@
 // Ported from MoonLight's E_balls.sc.
 
 class BallsEffect {
-  uint8_t count = 4;
-  uint8_t size = 5;
-  uint8_t bpm = 20;
+  byte count = 4;
+  byte size = 5;
+  byte bpm = 20;
 
-  uint8_t b = 0;
-  uint8_t radius = 4;
-  uint8_t px = 0;
-  uint8_t py = 0;
+  byte b = 0;
+  byte radius = 4;
+  byte px = 0;
+  byte py = 0;
 
   defineControls() {
-    addUint8("count", count, 1, 4);
-    addUint8("size", size, 1, 10);
-    addUint8("bpm", bpm, 1, 120);
+    addControl("count", count, 1, 4);
+    addControl("size", size, 1, 10);
+    addControl("bpm", bpm, 1, 120);
   }
 
   drawBall() {

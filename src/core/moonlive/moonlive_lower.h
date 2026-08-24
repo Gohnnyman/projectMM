@@ -23,8 +23,8 @@
 // The assembler contract, which all three satisfy:
 //   ctor(size_t cap), newLabel, bind, prologue(uint8_t), epilogue, alignForEntry, finalize,
 //   bytes, size, overflowed, spillStore, spillLoad, slotAddr,
-//   movImm, movPtr, movReg, addImm, addReg, mulReg, store8, load8, store16, load16,
-//   load8Idx, load16Idx,
+//   movImm, movPtr, movReg, addImm, addReg, mulReg, mulhi, shlImm, shrImm, sarImm,
+//   store8, load8, load32, store32, load8Idx, load32Idx, store32Idx,
 //   branchIfZero, branchGeU, branchNe, call, callLabel, and kMaxSpillSlots.
 // The branches are the FUSED forms (compare-and-branch as one call). arm64 has no such
 // instruction and spells each as cmp + b.cond inside its assembler, which is exactly where a
@@ -236,6 +236,33 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
             case IrOp::Add:    a.addReg(reg(op.dst), reg(op.a), reg(op.b)); break;
             case IrOp::AddImm: a.addImm(reg(op.dst), reg(op.a), op.imm); break;
             case IrOp::Mul:    a.mulReg(reg(op.dst), reg(op.a), reg(op.b)); break;
+            case IrOp::Mulhi:  a.mulhi(reg(op.dst), reg(op.a), reg(op.b)); break;
+            // The shift amount is an immediate 1..31. A zero shift is a no-op the front end never
+            // emits (Xtensa cannot even encode it: slli's field holds 32-n).
+            case IrOp::Shl:
+                // A shift of 0 is a move; anything outside 1..31 has no encoding and must REFUSE
+                // rather than silently become one, which is the stance Xtensa's shrImm takes for
+                // the same reason: a wrong constant that still runs is the worst outcome.
+                if (op.imm > 0 && op.imm < 32) a.shlImm(reg(op.dst), reg(op.a), uint8_t(op.imm));
+                else if (op.imm == 0) { if (op.dst != op.a) a.movReg(reg(op.dst), reg(op.a)); }
+                else a.shlImm(reg(op.dst), reg(op.a), 32);   // no encoding: the assembler refuses
+                break;
+            case IrOp::Shr:
+                // A shift of 0 is a move; anything outside 1..31 has no encoding and must REFUSE
+                // rather than silently become one, which is the stance Xtensa's shrImm takes for
+                // the same reason: a wrong constant that still runs is the worst outcome.
+                if (op.imm > 0 && op.imm < 32) a.shrImm(reg(op.dst), reg(op.a), uint8_t(op.imm));
+                else if (op.imm == 0) { if (op.dst != op.a) a.movReg(reg(op.dst), reg(op.a)); }
+                else a.shrImm(reg(op.dst), reg(op.a), 32);   // no encoding: the assembler refuses
+                break;
+            case IrOp::Sar:
+                // A shift of 0 is a move; anything outside 1..31 has no encoding and must REFUSE
+                // rather than silently become one, which is the stance Xtensa's shrImm takes for
+                // the same reason: a wrong constant that still runs is the worst outcome.
+                if (op.imm > 0 && op.imm < 32) a.sarImm(reg(op.dst), reg(op.a), uint8_t(op.imm));
+                else if (op.imm == 0) { if (op.dst != op.a) a.movReg(reg(op.dst), reg(op.a)); }
+                else a.sarImm(reg(op.dst), reg(op.a), 32);   // no encoding: the assembler refuses
+                break;
             // A real register move, NOT add-immediate-zero: Xtensa's addi.n cannot encode 0, since
             // the ISA reuses that slot for -1, so `dst = a + 0` silently computed a - 1. A loop
             // counter initialized through Mov therefore started at -1, the unsigned loop guard saw
@@ -258,8 +285,11 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
                     a.branchNe(reg(op.a), reg(op.b), labelFor(op.imm));
                 break;
             case IrOp::LoadCtrl: a.load8(reg(op.dst), host(kArg4), op.imm); break;   // dst = ctrls[imm]
-            case IrOp::LoadCtrl16S: a.load16S(reg(op.dst), host(kArg4), op.imm); break;  // signed wide member
-            case IrOp::LoadCtrl16: a.load16(reg(op.dst), host(kArg4), op.imm); break;  // dst = *(u16*)(ctrls+imm)
+            // A member's whole 4-byte SLOT. Unlike the byte and halfword stores below, the offset
+            // rides the instruction as an immediate: nothing computes a slot address at run time,
+            // so there is no reason to spend a register and a movImm on a constant.
+            case IrOp::LoadCtrl32: a.load32(reg(op.dst), host(kArg4), op.imm); break;
+            case IrOp::StoreCtrl32: a.store32(host(kArg4), op.imm, reg(op.a)); break;
             // An ARRAY element. `imm` is the array's base, op.c the element width and op.d the
             // element count, so both the scaling and the bound come from the IR rather than from a
             // rule the backends would each have to know.
@@ -289,21 +319,15 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
                 a.movImm(sAddr, width);
                 a.mulReg(idx, idx, sAddr);              // idx *= width  (a byte offset now)
                 a.addImm(idx, idx, idxBase(op.imm));    // ... plus the array's base
+                // Two element widths, which is all ctrlWidth can produce: 1 for byte[] and
+                // bool[], 4 for int[] and fixed[].
                 if (op.op == IrOp::LoadIdx) {
-                    if (width == 2) a.load16Idx(reg(op.dst), host(kArg4), idx);
+                    if (width == 4) a.load32Idx(reg(op.dst), host(kArg4), idx);
                     else            a.load8Idx(reg(op.dst), host(kArg4), idx);
                 } else {
-                    if (width == 2) a.store16(host(kArg4), idx, reg(op.b));
+                    if (width == 4) a.store32Idx(host(kArg4), idx, reg(op.b));
                     else            a.store8(host(kArg4), idx, reg(op.b));
                 }
-                break;
-            }
-            case IrOp::StoreCtrl16: {
-                // Same shape as the byte store: the offset goes through a register because the
-                // per-light writer computes its index, and sCtr rather than sAddr because store16
-                // clobbers its own address temp.
-                a.movImm(sCtr, op.imm);
-                a.store16(host(kArg4), sCtr, reg(op.a));
                 break;
             }
             case IrOp::StoreCtrl: {
