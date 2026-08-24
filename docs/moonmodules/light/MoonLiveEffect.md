@@ -58,9 +58,6 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
   UI shows one is the separate question `defineControls()` answers. A member no control names is
   simply the script's own state.
 
-  The compiled form is the same call with a receiver: `controls_.addUint8("speed", speed, 1, 255)`
-  — a compiled module still names the C++ width it binds, because there the member really is a
-  `uint8_t`. A script does not: its `addControl` reads the widget from how the member was declared.
   The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addControl("speed", speed, base, base * 4 + 5)` is valid.
 
   `defineControls()` runs once after a successful compile, the way the Scheduler runs a compiled module's. Editing a control's slider does **not** recompile: the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops.

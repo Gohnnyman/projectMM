@@ -8,25 +8,19 @@ This page covers **Windows**. For macOS and Linux, the [README](https://github.c
 
 ---
 
-## 1. Download it
+## 1. Download the installer
 
 Open the [web installer](https://moonmodules.org/projectMM/install/) and set **Install to** to `This computer (Windows x64)`. The Release picker offers stable releases and `latest`, a build published on every merge to main; pick a stable one unless you want the newest unreleased changes.
 
-![The web installer with Windows x64 selected, and the downloaded zip in the browser's Downloads panel](../assets/tutorials/windows-01-download.png)
+![The web installer with Windows x64 selected, and the download in the browser's Downloads panel](../assets/tutorials/windows-01-download.png)
 
-**Download** gives you `projectMM-windows-x64-vX.Y.Z.zip`. There is nothing to sign up for and nothing else to install: the zip holds the application and a README, and that is all it needs.
+**Download** gives you `projectMM-windows-x64-vX.Y.Z-setup.exe`. There is nothing to sign up for and nothing else to install.
 
-## 2. Extract it, do not run it from inside the zip
+## 2. Run it
 
-Open the zip and Windows offers you **Extract all** or **Run**.
+The installer installs for your user, so there is no administrator prompt. It adds a **Start-menu entry with an icon** and a proper uninstaller, and starts projectMM when it finishes.
 
-![Windows offering Extract all or Run when opening the executable inside the zip](../assets/tutorials/windows-02-extract.png)
-
-**Choose Extract all.** Running straight from a zip makes Windows unpack the application into a temporary folder that it may clear at any time, so you end up running a copy that quietly disappears later. Extract it somewhere you would keep a program, then run it from there.
-
-## 3. Run it, and get past SmartScreen
-
-Double-click `projectMM.exe`. The first time, Windows stops you:
+Windows stops you the first time:
 
 ![Microsoft Defender SmartScreen warning that it prevented an unrecognized app from starting](../assets/tutorials/windows-03-smartscreen.png)
 
@@ -34,7 +28,7 @@ This is expected. SmartScreen warns about any application it has not seen signed
 
 Click **More info**, then **Run anyway**. You only have to do this once for a given copy.
 
-## 4. That is it
+## 3. That is it
 
 A console window opens showing what projectMM is doing, and your browser opens the interface at `http://localhost:8080/`.
 
@@ -46,7 +40,7 @@ Out of the box you get a 16x16 grid and a running effect, which is enough to con
 
 Two options worth knowing: `--no-browser` stops it opening a browser (for a headless machine), and `--port <n>` serves somewhere other than 8080.
 
-## 5. Where your settings live
+## 4. Where your settings live
 
 Everything you change is saved automatically, in a folder that belongs to **your Windows user** rather than to the application:
 
@@ -56,17 +50,21 @@ Everything you change is saved automatically, in a folder that belongs to **your
 
 This applies from the release that introduced it. On an older build, settings sat in a `build\.config` folder beside the executable instead, and the log said `write failed` for each save when that folder could not be created.
 
-The location is deliberate, and it has a consequence worth knowing: **your settings are not in the folder you extracted to**. Move the application, replace it with a newer version, or delete the extracted folder entirely, and your configuration is still there. To start completely fresh, delete that folder.
+The location is deliberate, and it has a consequence worth knowing: **your settings are not where the application is**. Move it, install a newer version over it, uninstall it, or delete the folder you extracted, and your configuration is still there. To start completely fresh, delete that folder.
 
 Paste `%LOCALAPPDATA%\projectMM` into the Explorer address bar to open it.
 
-## 6. Or use the installer
+## 5. Or use the zip
 
-From the next release there is also `projectMM-windows-x64-vX.Y.Z-setup.exe`. It does the same thing as the steps above, with less clicking: it installs for your user, so there is no administrator prompt, and adds a **Start-menu entry with an icon** and a proper uninstaller.
+Every release also ships `projectMM-windows-x64-vX.Y.Z.zip`, which is the right choice if you want to keep projectMM in a folder of your own, or run it from a USB stick. It holds the application and a README, and nothing else is needed. Download it from the [release page](https://github.com/MoonModules/projectMM/releases) rather than the web installer, which offers the installer for this platform.
 
-The zip stays available and is the right choice if you want to keep projectMM in a folder of your own, or run it from a USB stick.
+**Extract it before running.** Opening the zip, Windows offers **Extract all** or **Run**:
 
-Both are unsigned, so SmartScreen warns for either. Installing a new version over an old one keeps your settings, because the program and the settings live in different places; uninstalling removes the program and leaves your settings behind.
+![Windows offering Extract all or Run when opening the executable inside the zip](../assets/tutorials/windows-02-extract.png)
+
+Choose **Extract all**. Running straight from a zip makes Windows unpack the application into a temporary folder that it may clear at any time, so you end up running a copy that quietly disappears later. Extract it somewhere you would keep a program, then run `projectMM.exe` from there — SmartScreen warns the same way, and the settings location is the same.
+
+Both forms are unsigned, so SmartScreen warns for either. Installing a new version over an old one keeps your settings, because the program and the settings live in different places; uninstalling removes the program and leaves your settings behind.
 
 ---
 

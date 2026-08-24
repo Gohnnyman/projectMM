@@ -17,6 +17,7 @@
 // Intel SDM Vol. 2 encoding tables and marked with the human-readable assembly they represent.
 
 #include "doctest.h"
+#include <array>
 
 #if (defined(__x86_64__) || defined(_M_X64)) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
 
@@ -572,6 +573,45 @@ TEST_CASE("x86_64: a class with a script-to-script call compiles") {
     REQUIRE(r.ok);
     CHECK(r.len > 0);
     CHECK(r.entryCount == 2);
+}
+
+// The Q16.16 multiply, whose sequence must survive d aliasing a or b.
+//
+// This backend had NO encoding tests for the new primitives while arm64, Xtensa and RISC-V all
+// gained them — and its mulhi borrowed rax, which IS a vreg here (R13). With d == rax the old
+// pop restored the stale value over the result; with b == rax the movsxd destroyed b before it
+// was read. Both are silently wrong answers, not crashes. Bytes checked against clang's own
+// assembly of the same sequence.
+TEST_CASE("x86_64: mulhi reads both sources before it writes its destination") {
+    HostAssembler a; a.mulhi(R0, R1, R2); a.finalize();
+    const uint8_t* b = a.bytes();
+    REQUIRE(a.size() >= 12);
+    // push r10 / push r11 open the sequence: the scratch pair is saved, so no vreg is disturbed
+    // whichever registers the three operands turn out to be.
+    CHECK(b[0] == 0x41); CHECK(b[1] == 0x52);        // push r10
+    CHECK(b[2] == 0x41); CHECK(b[3] == 0x53);        // push r11
+    // ...and pop restores them at the end, AFTER the result has been moved into d.
+    CHECK(b[a.size() - 4] == 0x41); CHECK(b[a.size() - 3] == 0x5b);   // pop r11
+    CHECK(b[a.size() - 2] == 0x41); CHECK(b[a.size() - 1] == 0x5a);   // pop r10
+}
+
+// The same sequence with the destination aliasing each source in turn, and with R13 (rax) in
+// every position. None may produce a different shape: the result is computed in scratch and only
+// then written, so aliasing cannot destroy an operand that has still to be read.
+TEST_CASE("x86_64: mulhi emits the same shape however its operands alias") {
+    const size_t base = [] { HostAssembler a; a.mulhi(R0, R1, R2); a.finalize(); return a.size(); }();
+    for (const auto& regs : {std::array<Reg, 3>{R0, R0, R1},    // d aliases a
+                             std::array<Reg, 3>{R0, R1, R0},    // d aliases b
+                             std::array<Reg, 3>{R0, R0, R0},    // all three
+                             std::array<Reg, 3>{R13, R1, R2},   // d is rax
+                             std::array<Reg, 3>{R0, R13, R2},   // a is rax
+                             std::array<Reg, 3>{R0, R1, R13}})  // b is rax
+    {
+        HostAssembler a; a.mulhi(regs[0], regs[1], regs[2]); a.finalize();
+        CHECK(a.size() == base);
+        CHECK(a.bytes()[0] == 0x41);                 // still opens by saving the scratch
+        CHECK(a.bytes()[a.size() - 1] == 0x5a);      // still closes by restoring it
+    }
 }
 
 }  // namespace

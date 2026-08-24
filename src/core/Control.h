@@ -294,6 +294,11 @@ struct ControlDescriptor {
     // A scripted module is exactly that (a MoonLive script declares its own), so the default has
     // to travel with the control instance. INT32_MIN means "none declared", so a control that
     // never sets one costs nothing on the wire and the type-level route is unchanged.
+    //
+    // The cost of a sentinel rather than a flag: a control whose default IS INT32_MIN cannot say
+    // so, and is serialized as having none. Nothing declares one — the value is 2.1 billion below
+    // any range a control here carries — and the alternative is a bool on every descriptor for a
+    // case that has never occurred. Revisit if one ever does.
     static constexpr int32_t kNoDefault = INT32_MIN;
     int32_t def = kNoDefault;
     bool hidden = false;    // UI visibility flag. Set via ControlList::setHidden() after addX().

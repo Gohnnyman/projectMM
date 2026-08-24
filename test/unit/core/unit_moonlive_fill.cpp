@@ -816,9 +816,9 @@ TEST_CASE("a int member crosses the 255 boundary without wrapping") {
 TEST_CASE("every scalar member takes a whole slot whatever its type") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
-                        "  byte  small = 1;\n"     // takes byte 0, leaving the cursor odd
-                        "  int wide = 900;\n"    // must skip byte 1 and land on byte 2
-                        "  byte  after = 2;\n"     // lands after the wide member
+                        "  byte  small = 1;\n"    // slot 0
+                        "  int wide = 900;\n"     // slot 4: a byte costs a whole slot too
+                        "  byte  after = 2;\n"    // slot 8
                         "  defineControls() {\n"
                         "    addControl(\"small\", small, 0, 9);\n"
                         "    addControl(\"after\", after, 0, 9);\n"

@@ -1729,15 +1729,22 @@ function createControl(moduleName, moduleType, ctrl) {
         }
         case "int32":
         case "int16": {
-            // ctrl.min/ctrl.max are always present (server sends them). A min/max at the
-            // type's own limit means "unbounded" — fall back to a ±percentage range, since
-            // a slider spanning the full type is useless to drag.
-            const lo = ctrl.type === "int32" ? -2147483648 : -32768;
-            const hi = ctrl.type === "int32" ?  2147483647 :  32767;
+            // ctrl.min/ctrl.max are always present (server sends them). An int16 at the type's
+            // own limit means "unbounded" and falls back to a +-percentage range, since a slider
+            // spanning the full type is useless to drag.
+            //
+            // An int32 does NOT: its range is what the script declared, and narrowing an
+            // unbounded one to -100..200 hid every value outside that window — a control
+            // declared 0..1000 sitting at 900 rendered as a slider pinned to its top with the
+            // real value unreachable. A bounded int32 keeps its bounds; an unbounded one spans
+            // the type, which the number input beside the slider makes usable.
+            const isI32 = ctrl.type === "int32";
+            const lo = isI32 ? -2147483648 : -32768;
+            const hi = isI32 ?  2147483647 :  32767;
             const rawMin = Number(ctrl.min ?? lo);
             const rawMax = Number(ctrl.max ?? hi);
-            const min = rawMin <= lo ? -100 : rawMin;
-            const max = rawMax >= hi ?  200 : rawMax;
+            const min = (!isI32 && rawMin <= lo) ? -100 : rawMin;
+            const max = (!isI32 && rawMax >= hi) ?  200 : rawMax;
             const raw = Number(ctrl.value ?? 0);
             const clamped = Math.max(min, Math.min(max, raw));
             const input = document.createElement("input");

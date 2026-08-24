@@ -23,6 +23,7 @@ const RELEASE = [
     asset("projectMM-macos-arm64-v3.0.0.tar.gz"),
     asset("projectMM-macos-arm64-v3.0.0.dmg"),
     asset("projectMM-windows-x64-v3.0.0.zip"),
+    asset("projectMM-windows-x64-v3.0.0-setup.exe"),
     asset("projectMM-linux-x64-v3.0.0.tar.gz"),
     asset("projectmm_3.0.0_amd64.deb"),
 ];
@@ -44,11 +45,26 @@ test("each desktop platform is offered once, however many archives it ships", ()
 });
 
 test("a platform shipping both an installer and a tarball offers the installer", () => {
-    // macOS ships a .dmg to drag and a .tar.gz for scripting; Linux ships a .deb and a
-    // tarball. The user clicking Download wants the one their OS knows how to open.
+    // macOS ships a .dmg to drag, Windows a setup.exe, Linux a .deb — each beside a plain
+    // archive for scripting. The user clicking Download wants the one their OS knows how to
+    // open. ALL THREE are asserted: this test covered only macOS and Linux while Windows was
+    // shipping a setup.exe the picker could not even see, so the one platform with a broken
+    // download was the one nothing checked.
     const got = parseFirmwaresFromAssets(RELEASE, "v3.0.0");
     assert.match(got.find(f => f.firmware === "desktop-macos-arm64").binaryUrl, /\.dmg$/);
+    assert.match(got.find(f => f.firmware === "desktop-windows-x64").binaryUrl, /-setup\.exe$/);
     assert.match(got.find(f => f.firmware === "desktop-linux-x64").binaryUrl, /\.deb$/);
+});
+
+test("a windows installer whose name carries a suffix after the version is still matched", () => {
+    // projectMM-windows-x64-v3.0.0-setup.exe puts `-setup` AFTER the version, where every other
+    // asset ends at its extension. A pattern anchored on "version then extension" silently
+    // dropped it, and the release page had an installer the install page never offered.
+    const got = parseFirmwaresFromAssets(RELEASE, "v3.0.0");
+    const win = got.find(f => f.firmware === "desktop-windows-x64");
+    assert.ok(win, "windows must be offered at all");
+    assert.ok(win.assets.some(a => /-setup\.exe$/.test(a.name)),
+              "the installer must appear among the platform's assets");
 });
 
 test("a version with dots does not break the platform match", () => {
@@ -91,4 +107,18 @@ test("an ESP32 firmware and its ethernet variant remain mutually flashable", () 
     assert.ok(isCompatible("esp32", "esp32-eth"));
     assert.ok(isCompatible("esp32-eth-wifi", "esp32"));
     assert.equal(isCompatible("esp32", "esp32s3-n16r8"), false);
+});
+
+// An OLDER release may ship only an archive where the newest ships an installer: v3.0.0 has a
+// .tar.gz for macOS and no .dmg at all. The picker offers what exists, which is right — but a
+// user who selected a stable release and received a .tar.gz had no way to see why, because the
+// option said only "macOS arm64". The form now rides the label.
+test("a release with only an archive still offers it, for every platform it has", () => {
+    const OLD_RELEASE = [
+        asset("projectMM-macos-arm64-v3.0.0.tar.gz"),
+        asset("projectMM-windows-x64-v3.0.0.zip"),
+    ];
+    const got = parseFirmwaresFromAssets(OLD_RELEASE, "v3.0.0");
+    assert.match(got.find(f => f.firmware === "desktop-macos-arm64").binaryUrl, /\.tar\.gz$/);
+    assert.match(got.find(f => f.firmware === "desktop-windows-x64").binaryUrl, /\.zip$/);
 });

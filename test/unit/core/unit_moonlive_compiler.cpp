@@ -194,7 +194,27 @@ TEST_CASE("compileSource: a literal may be any value an int member can hold") {
     CHECK(eng.compile(mmScript("setRGB(random16(65535), 0, 0, 255);"), kTable, kSys));
     CHECK(eng.compile(mmScript("setRGB(1000, 0, 0, 255);"), kTable, kSys));
     CHECK(eng.compile(mmScript("int big = 70000;\nsetRGB(big / 1000, 0, 0, 255);"), kTable, kSys));
+    // The signed 32-bit boundaries themselves, which is where the lexer's overflow guard lives.
+    CHECK(eng.compile(mmScript("int hi = 2147483647;\nsetRGB(hi / 100000000, 0, 0, 255);"),
+                      kTable, kSys));
+    CHECK(eng.compile(mmScript("int lo = -2147483648;\nsetRGB(0 - lo / 100000000, 0, 0, 255);"),
+                      kTable, kSys));
     eng.free();
+}
+
+// The lexer accumulates in int64 and checks BEFORE each multiply. `long` is 32 bits on both ESP32
+// targets and a script COMPILES ON THE DEVICE, so the old guard could never fire there: the
+// multiply wrapped first (signed overflow, UB) and the script got a number nobody wrote, while
+// every host test stayed green. These are the two shapes that broke.
+TEST_CASE("a number too large for an int is refused rather than wrapped") {
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(mmScript("int huge = 3000000000;\nsetRGB(0, huge, 0, 0);"),
+                            kTable, kSys));
+    eng.free();
+    moonlive::MoonLive eng2;
+    CHECK_FALSE(eng2.compile(mmScript("int huge = 99999999999;\nsetRGB(0, huge, 0, 0);"),
+                             kTable, kSys));
+    eng2.free();
 }
 
 TEST_CASE("compileSource: out-of-range index is bounds-rejected at runtime") {
@@ -668,18 +688,10 @@ TEST_CASE("a nonzero seed selects the Julia set rather than the Mandelbrot set")
     CHECK(render(mmScript("setRGB(0, escape(0.0, 0.0, -0.4, 0.6, 40), 7, 0);"), 1)[0] > 0);
 }
 
-// An int16_t member is how a script holds a value that goes below zero: a velocity, a delta, a
-// distance from a center. Stored in the arena as two bytes and read back SIGN-EXTENDED, where a
-// uint16_t member would return 65436 for -100.
-TEST_CASE("an int member written negative reads back negative") {
-    CHECK(render(mmScript("int neg = -100; "
-                          "if (neg < 0) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 7);
-}
-
 // ASSIGNED in tick(), not just seeded by the initializer: the store and the load are different
-// ops, and the bug this pins wrote only ONE byte of the two-byte member, so the sign-extending
-// load read a stale high byte and every stored coordinate collapsed to 0..255. A whole shader
-// rendered one flat color, and the initializer-only test above stayed green throughout.
+// ops, and the bug this pins wrote only part of the member, so the load read a stale byte and
+// every stored coordinate collapsed to 0..255. A whole shader rendered one flat color, and the
+// initializer-only test above stayed green throughout. The 4-byte slot removes the class.
 TEST_CASE("an int member assigned a negative in tick reads back negative") {
     CHECK(render(mmScript("int v = 0; "
                           "v = 100 - 11000; "
@@ -691,8 +703,10 @@ TEST_CASE("an int member assigned a negative in tick reads back negative") {
                           "if (v / 2 < 0 - 5000) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 7);
 }
 
-// The same value in a uint16_t member is a large positive, which is the distinction the type makes.
-TEST_CASE("a int member holds the same bits as a large positive") {
+// 65436 is simply a positive number to an int. It is here because it USED to be the bit pattern a
+// uint16_t member held for -100, so the two were indistinguishable in storage; with a 4-byte
+// signed slot they are different values and the comparison says so.
+TEST_CASE("an int member holds a large positive") {
     CHECK(render(mmScript("int pos = 65436; "
                           "if (pos < 0) { setRGB(0, 7, 0, 0); } else { setRGB(0, 3, 0, 0); }"), 1)[0] == 3);
 }
@@ -884,6 +898,39 @@ TEST_CASE("a fixed divide by zero saturates toward the numerator's sign") {
                           "fixed z = 0.0;\n"
                           "if (a / z < 0) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
                  1)[0] == 9);
+}
+// The new ops under REGISTER PRESSURE. sourcesOf/writesDst tell the allocator which vregs an op
+// reads and whether it defines one; get either wrong for a new op and the allocator spills the
+// wrong value or keeps a dead one, which shows up as an arithmetic answer that is wrong only in
+// the programs big enough to spill. A long chain of live fixed values forces that state.
+TEST_CASE("the fixed ops survive being spilled") {
+    // Eight members live at once, each read after the chain has moved on, so the allocator has to
+    // park and reload values across Mulhi/Shl/Shr/Sar and the 32-bit slot access.
+    CHECK(render(mmScript("fixed a = 1.5;\n"
+                          "fixed b = 2.0;\n"
+                          "fixed c = 0.5;\n"
+                          "fixed d = 4.0;\n"
+                          "fixed e = 0.25;\n"
+                          "fixed f = 8.0;\n"
+                          "fixed g = 0.125;\n"
+                          "fixed h = 0.0;\n"
+                          "h = a * b + c * d + e * f + g;\n"
+                          // 1.5*2 + 0.5*4 + 0.25*8 + 0.125 = 3 + 2 + 2 + 0.125 = 7.125
+                          "setRGB(0, toInt(h * toFixed(16)), 0, 0);"), 1)[0] == 114);
+}
+
+// The same for the whole-number ops the slot access shares: a value stored to a member, read back
+// after other work has claimed every register, and compared.
+TEST_CASE("a member survives a spill across the 32-bit slot access") {
+    CHECK(render(mmScript("int a = 1000;\n"
+                          "int b = 2000;\n"
+                          "int c = 3000;\n"
+                          "int d = 4000;\n"
+                          "int e = 5000;\n"
+                          "int f = 6000;\n"
+                          "int g = 0;\n"
+                          "g = a + b + c + d + e + f;\n"
+                          "setRGB(0, g / 100, 0, 0);"), 1)[0] == 210);
 }
 #endif   // MM_MOONLIVE_HAS_HOST_JIT
 
@@ -1120,7 +1167,6 @@ TEST_CASE("toFixed refuses a literal outside the fixed range") {
 // language change that a shipped script no longer parses would otherwise reach a board before it
 // reached a test. Read from disk deliberately, so the check cannot drift from what ships.
 TEST_CASE("every shipped script compiles") {
-    struct Role { const char* dir; const moonlive::SysVarTable& (*sys)(); };
     // A layout places lights, a modifier transforms coordinates, an effect draws: three different
     // sets of system variables, so each folder compiles against its own.
     const moonlive::SysVarTable& layout = moonlive::layoutSysVars();
@@ -1137,10 +1183,18 @@ TEST_CASE("every shipped script compiles") {
         std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path();
     int checked = 0;
     for (const auto& role : kRoles) {
-        for (const auto& entry : std::filesystem::directory_iterator(repo / "moonlive" / role.dir)) {
+        const std::filesystem::path dir = repo / "moonlive" / role.dir;
+        // REPORTED, not skipped: a folder that moved would otherwise make this test pass while
+        // checking nothing, which is the failure mode it exists to prevent.
+        INFO("script folder: ", dir.string());
+        REQUIRE(std::filesystem::is_directory(dir));
+        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
             if (!entry.is_regular_file()) continue;
+            // The exact extensions, not a substring: `.ml` also matches an editor backup or a
+            // note file that has no business being compiled.
+            const std::string ext = entry.path().extension().string();
+            if (ext != ".mle" && ext != ".mll" && ext != ".mlm") continue;
             const std::string path = entry.path().string();
-            if (path.find(".ml") == std::string::npos) continue;
             std::ifstream in(path);
             std::stringstream ss; ss << in.rdbuf();
             const std::string src = ss.str();

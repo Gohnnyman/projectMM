@@ -89,10 +89,12 @@ TEST_CASE("RISC-V sarImm sets the arithmetic-shift bit that srli lacks") {
     Asm r(64); r.sarImm(R0, R1, 16);
     const uint32_t wl = uint32_t(l.bytes()[0]) | (uint32_t(l.bytes()[1]) << 8)
                       | (uint32_t(l.bytes()[2]) << 16) | (uint32_t(l.bytes()[3]) << 24);
+    REQUIRE(r.size() == 4);                        // read as four bytes below, so say so first
     const uint32_t wr = uint32_t(r.bytes()[0]) | (uint32_t(r.bytes()[1]) << 8)
                       | (uint32_t(r.bytes()[2]) << 16) | (uint32_t(r.bytes()[3]) << 24);
     CHECK((wl & 0x7fu) == 0x13u);                  // OP-IMM
     CHECK(((wl >> 12) & 7u) == 1u);                // slli funct3 1
+    CHECK((wr & 0x7fu) == 0x13u);                  // OP-IMM for the shift too, not just the shl
     CHECK(((wr >> 12) & 7u) == 5u);                // srai/srli funct3 5
     CHECK((wr & (1u << 30)) != 0u);                // the bit that makes it ARITHMETIC
     CHECK(((wr >> 20) & 0x1fu) == 16u);            // the shift amount

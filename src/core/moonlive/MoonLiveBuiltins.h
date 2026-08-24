@@ -48,11 +48,6 @@ constexpr uint8_t ctrlWidth(CtrlType t) {
 /// for a width.
 constexpr uint8_t ctrlSlotBytes(CtrlType) { return 4; }
 
-/// Does a value of this type need masking on the way into its slot? Byte keeps its slot's upper
-/// bytes zero, which is what lets a byte control's descriptor point at the slot's low byte.
-constexpr bool ctrlMasksOnStore(CtrlType t) {
-    return t == CtrlType::Byte || t == CtrlType::Bool;
-}
 
 
 // Neutral inline opcodes — "store shapes a backend can emit", not "LED operations". A host maps

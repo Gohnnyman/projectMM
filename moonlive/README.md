@@ -53,8 +53,8 @@ else { setRGB(i, 0, 0, 0); }
 ```
 
 **Members can be wider than a byte, and can be arrays.** `byte` spans 0..255; `int` spans
-0..65535, which is what a position on a wall wider than 255 needs. An array is declared with a
-literal length and starts at zero:
+-2,147,483,648..2,147,483,647, which is what a position on a wall wider than 255 needs. An array is
+declared with a literal length and starts at zero:
 
 ```c
 int phase = 900;      // a value a byte cannot hold

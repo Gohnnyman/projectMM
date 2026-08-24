@@ -17,7 +17,7 @@ enum class Tok { Ident, Number, String, Assign, LParen, RParen, LBrace, RBrace, 
 struct Lexer {
     const char* p;
     Tok kind = Tok::Error;
-    long number = 0;
+    int64_t number = 0;
     // Whether the literal just lexed carried a decimal point, i.e. it is a Q16.16 value.
     bool numberIsFixed = false;
     const char* identBeg = nullptr;
@@ -43,25 +43,37 @@ struct Lexer {
     //
     // Overflow FAILS rather than truncating: the old cap stopped consuming digits at 1000000 and
     // left the value silently wrong, so `99999999` became a number nobody wrote.
-    bool readNumber(long& v, bool& isFixed, bool& overflowed) {
+    bool readNumber(int64_t& v, bool& isFixed, bool& overflowed) {
         if (!isDigit(*p)) return false;
         v = 0; isFixed = false; overflowed = false;
+        // INT64 THROUGHOUT, and every check made BEFORE the multiply that could overflow.
+        //
+        // `long` is 32 bits on both ESP32 targets, and a script COMPILES ON THE DEVICE: the guard
+        // `v > INT32_MAX` after `v = v*10 + d` could never fire there, because the multiply had
+        // already wrapped (signed overflow, UB). `0.99999` was worse — num*65536 needs 33 bits.
+        // Both produced a number nobody wrote, on hardware, while every host test stayed green.
         while (isDigit(*p)) {
+            if (v > (INT64_MAX - 9) / 10) { overflowed = true; return true; }
             v = v * 10 + (*p - '0');
             p++;
-            if (v > 2147483647L) { overflowed = true; return true; }
+            // The MAGNITUDE, not the value: a leading minus is a separate token, so 2147483648
+            // is legal here and becomes INT32_MIN. The signed range is checked where the sign is
+            // known — parsePrimary for an expression, parseDecl for an initializer.
+            if (v > -static_cast<int64_t>(INT32_MIN)) { overflowed = true; return true; }
         }
         if (*p == '.' && isDigit(p[1])) {
             isFixed = true;
             p++;
-            long num = 0, den = 1;
+            int64_t num = 0, den = 1;
             while (isDigit(*p)) {
-                if (den <= 100000000L) { num = num * 10 + (*p - '0'); den *= 10; }
-                p++;                                   // digits past the useful precision are read
-            }                                          // and dropped, rather than shifting the value
-            if (v > 32767L) { overflowed = true; return true; }
-            // The integer part scales by 65536; the fraction is num/den of that.
-            v = (v << 16) + (num * 65536L + den / 2) / den;
+                // Bounded so den * 65536 and num * 65536 both stay well inside int64; digits past
+                // that precision are consumed and dropped rather than shifting the value.
+                if (den <= 100000000LL) { num = num * 10 + (*p - '0'); den *= 10; }
+                p++;
+            }
+            if (v > 32767) { overflowed = true; return true; }
+            // The integer part scales by 65536; the fraction is num/den of that, rounded.
+            v = (v << 16) + (num * 65536 + den / 2) / den;
         }
         return true;
     }
@@ -122,7 +134,7 @@ struct Lexer {
             kind = Tok::String; return;
         }
         if (isDigit(c)) {
-            long v = 0; bool fx = false, over = false;
+            int64_t v = 0; bool fx = false, over = false;
             readNumber(v, fx, over);
             if (over) { err = "number out of range"; kind = Tok::Error; return; }
             number = v; numberIsFixed = fx; kind = Tok::Number; return;
@@ -873,7 +885,7 @@ struct Parser {
         // silently truncate. `byte n = 300;` is refused here rather than becoming 44 at run time,
         // which is the class of bug this type system exists to remove: the old widths turned an
         // out-of-range initializer into an arbitrary in-range one with nothing reporting it.
-        long defMin = INT32_MIN, defMax = INT32_MAX;
+        int64_t defMin = INT32_MIN, defMax = INT32_MAX;
         const char* rangeErr = nullptr;
         switch (type) {
             case CtrlType::Byte:  defMin = 0; defMax = 255;
@@ -904,7 +916,7 @@ struct Parser {
                 break;
         }
         if (lex.number < defMin || lex.number > defMax) { fail(rangeErr); return; }
-        long def = lex.number;
+        int64_t def = lex.number;
         lex.advance();
         if (!expect(Tok::Semicolon, "expected ';' after the member declaration")) return;
         // A lexer error carries a specific message; surface it rather than letting it fall through
@@ -939,7 +951,10 @@ struct Parser {
     /// and the two boolean literals. A member may not take one of these names.
     static bool isReservedWord(const char* n, size_t len) {
         static const struct { const char* w; size_t len; } kWords[] = {
-            {"toFixed", 7}, {"toInt", 5}, {"true", 4}, {"false", 5}};
+            {"toFixed", 7}, {"toInt", 5}, {"true", 4}, {"false", 5},
+            // The type keywords too: `int int = 5;` parsed, declaring a member whose name the
+            // class-body loop reads as the start of another declaration.
+            {"int", 3}, {"byte", 4}, {"bool", 4}, {"fixed", 5}, {"string", 6}};
         for (const auto& k : kWords)
             if (len == k.len && std::strncmp(n, k.w, k.len) == 0) return true;
         return false;

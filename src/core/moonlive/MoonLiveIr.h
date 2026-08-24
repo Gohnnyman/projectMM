@@ -211,10 +211,6 @@ constexpr uint8_t idxBase(int32_t p)  { return uint8_t(p & 0xff); }
 constexpr uint8_t idxWidth(int32_t p) { return uint8_t((p >> 8) & 0xff); }
 constexpr uint8_t idxCount(int32_t p) { return uint8_t((p >> 16) & 0xff); }
 
-/// Bytes a whole member occupies (its elements, at its width).
-constexpr uint16_t ctrlBytes(const DeclaredControl& d) {
-    return uint16_t(d.count) * ctrlWidth(d.type);
-}
 
 /// Branch targets one IR program may use. Two per `for` (entry guard + back edge), and the counter
 /// runs for the whole program rather than per scope — a label is never reused once a loop closes —
