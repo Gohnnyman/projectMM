@@ -391,7 +391,21 @@ public:
         }
 
         if (!platform::ethLinkUp()) {
-            setStatus("no ethernet link", Severity::Warning);
+            // On a host the same "link down" reads back for an unplugged cable AND for an `interface`
+            // that matches no adapter, which is the far more common mistake and is invisible from the
+            // status alone. Name the field in that case so the message carries its own fix; an ESP32
+            // has one MAC and no such ambiguity, so it keeps the plain wording.
+            if constexpr (platform::hasNamedNetInterfaces) {
+                if (interface[0] == '\0') {
+                    setStatus("no ethernet link - set 'interface' to a network adapter", Severity::Warning);
+                } else {
+                    std::snprintf(statusBuf_, sizeof(statusBuf_),
+                                  "no ethernet link - cable, or no adapter matches '%s'", interface);
+                    setStatus(statusBuf_, Severity::Warning);
+                }
+            } else {
+                setStatus("no ethernet link", Severity::Warning);
+            }
             framesReported_ = framesSent_;
             return;
         }

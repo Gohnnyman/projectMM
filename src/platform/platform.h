@@ -461,6 +461,58 @@ uint16_t ethLinkSpeedMbps() MM_NONBLOCKING;
 // nullptr or "" to return to capture mode.
 bool ethBindRawInterface(const char* ifName);
 
+// --- NDI video output -------------------------------------------------------------------------
+//
+// projectMM as an NDI source: the rendered frame reaches OBS, Resolume, TouchDesigner or any other
+// NDI receiver, on this machine or another. Gated by `hasNdi` (desktop true, ESP32 false).
+//
+// **The runtime is the USER'S, never ours.** projectMM is GPL-3.0 and the NDI runtime is
+// proprietary with redistribution terms GPL cannot carry downstream, so it is resolved on demand
+// (dlopen / LoadLibrary) and never linked, never bundled, and its headers are never included — the
+// same arrangement, and for the same reason, as Npcap for raw Ethernet. A machine without it builds
+// and runs identically; ndiAvailable() simply reads false and the driver says so.
+
+// Is the NDI runtime present and loaded? False when it is not installed, which is not an error —
+// the driver reports it as a status. Loads on first call.
+bool ndiAvailable();
+
+// Create a named NDI source. `name` is what a receiver lists (a device name, typically). Returns
+// false when the runtime is absent or creation fails. Replaces any sender already open.
+bool ndiSenderOpen(const char* name);
+
+// Destroy the sender. Safe with none open, so a driver's release() need not track state.
+void ndiSenderClose();
+
+// Send one frame: tightly-packed RGB, 3 bytes per pixel, w*h*3 bytes. `fps` is declared to the
+// receiver as the frame rate. Returns false when no sender is open. The platform layer owns the
+// conversion to NDI's own frame layout, so no NDI type reaches the light domain.
+bool ndiSendFrame(const uint8_t* rgb, uint16_t w, uint16_t h, uint8_t fps);
+
+// Desktop-only test seam, mirroring ethTestFrame* above: with no NDI runtime installed there is
+// nothing to send into, and CI never has one, so the frames the driver produced are RECORDED
+// instead. That is what lets the conversion be pinned — the geometry, the packing, the pacing —
+// without the proprietary runtime, leaving the bench to confirm only that a receiver sees it.
+#ifndef ESP_PLATFORM
+// Force the runtime's apparent presence, overriding whatever is really installed. A developer
+// machine may well HAVE a real NDI runtime (Resolume and NDI Tools both ship one), so a test that
+// wants the not-installed path must be able to say so rather than rely on the machine lacking it.
+// `true` also makes ndiSenderOpen()/ndiSendFrame() record instead of touching the real runtime.
+enum class NdiTestMode : uint8_t { Off, ForceAvailable, ForceMissing };
+void setTestNdiMode(NdiTestMode mode);
+inline void setTestNdiAvailable(bool available) {
+    setTestNdiMode(available ? NdiTestMode::ForceAvailable : NdiTestMode::Off);
+}
+size_t ndiTestFrameCount();
+// The recorded frame's geometry and its tight-RGB bytes (w*h*3), as the driver handed them over.
+uint16_t ndiTestFrameWidth(size_t i);
+uint16_t ndiTestFrameHeight(size_t i);
+uint8_t  ndiTestFrameFps(size_t i);
+const uint8_t* ndiTestFrameData(size_t i);
+// The name the sender was opened with, so a test can pin the blank-means-device-name rule.
+const char* ndiTestSenderName();
+void ndiTestClearFrames();
+#endif
+
 // Desktop-only test seam: the frames ethSendRaw() captured, so a host test can pin what the driver
 // put on the wire. Active whenever no raw interface is bound, which is the default and the only
 // mode an unprivileged test process ever sees. Count resets with ethTestClearFrames(); a frame

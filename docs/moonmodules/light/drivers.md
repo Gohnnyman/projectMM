@@ -152,6 +152,33 @@ Origin: projectMM, on [MoonLight](https://github.com/ewowi/MoonLight/blob/main/s
 
 Detail: [technical](moxygen/PreviewDriver.md)
 
+<a id="ndi"></a>
+
+### NDI 🖥️ · video out
+
+Publishes the layer as an **NDI video source**, so OBS, Resolume, TouchDesigner, MadMapper or any other NDI receiver can pick projectMM up by name — on this machine or another one on the network. Where the Preview driver draws the lights for a person, this hands the same frame to a production tool as video.
+
+The grid's `physicalWidth` × `physicalHeight` becomes the frame; each light is one pixel, with the driver's own output correction applied so a receiver sees what the wall sees.
+
+**Desktop only.** The NDI runtime is a desktop library with no microcontroller build, so the driver is offered on macOS, Windows and Linux and not on an ESP32.
+
+**You install the runtime; projectMM never ships it.** projectMM is GPL-3.0 and the NDI runtime is proprietary, so it is loaded on demand and never bundled — the same arrangement as Npcap for the [Panel Card](#panelcard) driver. Without it the driver simply reports `NDI runtime not installed`; nothing else changes.
+
+- **macOS** — install [NDI Tools](https://ndi.video/tools/) (free). It ships the runtime inside its app bundles rather than system-wide, which projectMM knows to look for. A Resolume install also carries one.
+- **Windows** — the [NDI Tools](https://ndi.video/tools/) or SDK installer puts `Processing.NDI.Lib.x64.dll` on the PATH.
+- **Linux** — install the NDI SDK; projectMM looks for `libndi.so.5`, `libndi.so.6` and `libndi.so`.
+
+To watch the output you need a receiver: **NDI Video Monitor** (part of NDI Tools) is the simplest, and OBS gains an "NDI Source" via the [DistroAV](https://github.com/DistroAV/DistroAV) plugin.
+
+- `sourceName` — the name a receiver lists. Blank uses the device's own name.
+- `fps` — frame-rate ceiling (default 30, 1–120). NDI paces the receiver from this.
+
+Status tells you where you are: `NDI runtime not installed` (install it), `could not create the NDI source` (the runtime is there but refused), or `sending <w>x<h> at <n> fps` when it is live.
+
+Origin: projectMM, against NewTek/Vizrt's documented NDI C API
+
+Detail: [technical](moxygen/NdiDriver.md)
+
 ## LED driver — details
 
 **Which driver?**

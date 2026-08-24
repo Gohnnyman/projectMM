@@ -126,6 +126,7 @@
 // S31, which is RGMII gigabit, and the P4, where the 100 Mbit wire-time limit is worth measuring).
 // Everything else would carry ~2.8 KB of flash for a driver it cannot use, so it does not link it.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
+#include "light/drivers/NdiDriver.h"
 #include "light/drivers/PanelCardDriver.h"
 #endif
 #include "core/HttpServerModule.h"
@@ -261,6 +262,9 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::HueDriver>("HueDriver", "light/drivers.md#hue");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers.md#networksend");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers.md#preview");
+    // NDI needs a desktop runtime to load, so the picker offers it only where one can exist.
+    if constexpr (mm::platform::hasNdi)
+        mm::ModuleFactory::registerType<mm::NdiDriver>("NdiDriver", "light/drivers.md#ndi");
     // Same firmware gate as the include above.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::PanelCardDriver>("PanelCardDriver", "light/drivers.md#panelcard");
