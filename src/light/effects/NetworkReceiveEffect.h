@@ -52,8 +52,8 @@ public:
     uint16_t channelsPerUniverse = static_cast<uint16_t>(MAX_CHANNELS_PER_UNIVERSE);
 
     void defineControls() override {
-        controls_.addUint16("universe_start", universeStart);
-        controls_.addUint16("channels_per_universe", channelsPerUniverse);
+        controls_.addControl("universe_start", universeStart);
+        controls_.addControl("channels_per_universe", channelsPerUniverse);
     }
 
     void release() override {

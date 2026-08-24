@@ -35,11 +35,11 @@ public:
 
     void defineControls() override {
         controls_.addTextArea("text", text_, sizeof(text_));
-        controls_.addBool("scroll", scroll);
+        controls_.addControl("scroll", scroll);
         static constexpr const char* kFontOptions[] = {"4x6", "6x8"};
         controls_.addSelect("font", font, kFontOptions, fonts::kCount);
-        controls_.addUint8("speed", speed, 1, 255);
-        controls_.addUint8("hue", hue, 0, 255);
+        controls_.addControl("speed", speed, 1, 255);
+        controls_.addControl("hue", hue, 0, 255);
     }
 
     void tick() MM_NONBLOCKING override {

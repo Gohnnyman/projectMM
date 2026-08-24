@@ -3,10 +3,15 @@
 #include <cstdint>
 #include <cstddef>
 
-// MM_MOONLIVE_HAS_HOST_JIT is defined in platform_config.h (per-platform), so the
-// arch check stays behind the platform boundary and this header stays neutral. The macro
-// (not a constexpr) is required because #include-side test files gate whole TEST_CASEs
-// on `#if MM_MOONLIVE_HAS_HOST_JIT`.
+// MM_MOONLIVE_HAS_HOST_JIT is defined in platform_config.h (per-platform), so the arch check stays
+// behind the platform boundary and this header stays neutral.
+//
+// It exists for the TEST HARNESS and nothing else — no shipping code branches on it. A build with
+// no backend degrades at RUN time instead: lowerToBytes returns 0 (moonlive_asm_noarch.cpp),
+// compile() reports the failure, and a scripted module renders dark. But a test that calls
+// render() cannot even be COMPILED there, so ~40 TEST_CASEs are gated on `#if
+// MM_MOONLIVE_HAS_HOST_JIT`. That is why it is a macro rather than a constexpr, and why the
+// noarch path does not make it redundant: one answers the program, the other answers the build.
 #include "platform/platform.h"
 
 // MoonLive — per-ISA code emitter (the backend seam, §3.2 of livescripts-analysis-top-down.md).

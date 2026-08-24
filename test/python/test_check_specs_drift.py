@@ -18,20 +18,20 @@ from check_specs import _check_range_drift, _check_author_url_drift  # noqa: E40
 # ---- range drift ----
 
 def test_range_drift_flags_a_conflicting_range():
-    src = 'controls_.addUint8("floor", floor, 0, 255);'
+    src = 'controls_.addControl("floor", floor, 0, 255);'
     md = "- `floor` — noise floor (0–128)."     # .md says 0–128, .h says 0–255
     issues = _check_range_drift(src, md)
     assert issues and "floor" in issues[0] and "0–255" in issues[0]
 
 
 def test_range_drift_silent_when_ranges_match():
-    src = 'controls_.addUint8("freq_x", freq_x, 1, 8);'
+    src = 'controls_.addControl("freq_x", freq_x, 1, 8);'
     md = "- `freq_x` — wave frequency (1–8)."
     assert _check_range_drift(src, md) == []
 
 
 def test_range_drift_tolerates_hyphen_and_to_spellings():
-    src = 'controls_.addUint8("count", count, 1, 255);'
+    src = 'controls_.addControl("count", count, 1, 255);'
     for prose in ("(1-255)", "1 to 255", "(1–255)"):
         md = f"- `count` — rings {prose}."
         assert _check_range_drift(src, md) == [], prose
@@ -39,14 +39,14 @@ def test_range_drift_tolerates_hyphen_and_to_spellings():
 
 def test_range_drift_silent_when_prose_states_no_range():
     # Many controls legitimately don't restate their range (pins, obvious 0–255).
-    src = 'controls_.addUint8("gain", gain, 1, 255);'
+    src = 'controls_.addControl("gain", gain, 1, 255);'
     md = "- `gain` — microphone gain."
     assert _check_range_drift(src, md) == []
 
 
 def test_range_drift_ignores_non_range_controls():
-    # addBool / addSelect / addPin carry no numeric range → nothing to check.
-    src = 'controls_.addBool("enabled", enabled);\ncontrols_.addPin("sdPin", sdPin);'
+    # A bool addControl / addSelect / addPin carry no numeric range → nothing to check.
+    src = 'controls_.addControl("enabled", enabled);\ncontrols_.addPin("sdPin", sdPin);'
     assert _check_range_drift(src, "- `enabled` — on/off. - `sdPin` — data pin.") == []
 
 

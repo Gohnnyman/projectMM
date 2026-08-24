@@ -41,12 +41,12 @@ public:
     uint8_t twist    = 30;   // how much the radius shears the angle, giving the field a spiral set
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 0, 60);
-        controls_.addUint8("scale", scale, 1, 255);
-        controls_.addUint8("segments", segments, 1, 16);
-        controls_.addUint8("warp", warp, 0, 255);
-        controls_.addUint8("octaves", octaves, 1, 4);
-        controls_.addUint8("twist", twist, 0, 255);
+        controls_.addControl("bpm", bpm, 0, 60);
+        controls_.addControl("scale", scale, 1, 255);
+        controls_.addControl("segments", segments, 1, 16);
+        controls_.addControl("warp", warp, 0, 255);
+        controls_.addControl("octaves", octaves, 1, 4);
+        controls_.addControl("twist", twist, 0, 255);
     }
 
     void tick() MM_NONBLOCKING override {

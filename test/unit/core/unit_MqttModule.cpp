@@ -40,12 +40,12 @@ struct FakeDrivers : public MoonModule {
     uint8_t brightness = 100;
     uint8_t palette = 0;
     void defineControls() override {
-        controls_.addBool("on", on);
-        controls_.addUint8("brightness", brightness, 0, 255);
+        controls_.addControl("on", on);
+        controls_.addControl("brightness", brightness, 0, 255);
         // A Uint8 palette with the real built-in range (0..255 is a superset of the ~60 built-ins),
         // so a nearest-palette index the MQTT map returns isn't clamped away by an artificially small
         // Select — the real Drivers.palette binds 0..kCount-1.
-        controls_.addUint8("palette", palette, 0, 255);
+        controls_.addControl("palette", palette, 0, 255);
     }
 };
 

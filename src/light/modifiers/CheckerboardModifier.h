@@ -22,8 +22,8 @@ public:
     bool invert = false;    // flip which squares pass through
 
     void defineControls() override {
-        controls_.addUint8("size", size, 1, 64);
-        controls_.addBool("invert", invert);
+        controls_.addControl("size", size, 1, 64);
+        controls_.addControl("invert", invert);
     }
 
     // A mask leaves the logical box unchanged (no modifyLogicalSize override).

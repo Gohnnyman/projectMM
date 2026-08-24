@@ -22,8 +22,8 @@ public:
     uint8_t sparking = 120;
 
     void defineControls() override {
-        controls_.addUint8("cooling", cooling, 1, 255);
-        controls_.addUint8("sparking", sparking, 1, 255);
+        controls_.addControl("cooling", cooling, 1, 255);
+        controls_.addControl("sparking", sparking, 1, 255);
     }
 
     void prepare() override {

@@ -38,8 +38,8 @@ public:
     uint8_t type = 2;    // index into kTypeOptions (default Sine)
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 0, 255);
-        controls_.addUint8("fade", fade, 0, 255);
+        controls_.addControl("bpm", bpm, 0, 255);
+        controls_.addControl("fade", fade, 0, 255);
         controls_.addSelect("type", type, kTypeOptions, kTypeCount);
     }
 

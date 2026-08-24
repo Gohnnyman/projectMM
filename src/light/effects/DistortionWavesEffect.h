@@ -29,9 +29,9 @@ public:
     uint8_t speed = 50;   // animation speed, 0..100 (0 = frozen)
 
     void defineControls() override {
-        controls_.addUint8("freq_x", freq_x, 1, 8);
-        controls_.addUint8("freq_y", freq_y, 1, 8);
-        controls_.addUint8("speed", speed, 0, 100);
+        controls_.addControl("freq_x", freq_x, 1, 8);
+        controls_.addControl("freq_y", freq_y, 1, 8);
+        controls_.addControl("speed", speed, 0, 100);
     }
 
     void tick() MM_NONBLOCKING override {

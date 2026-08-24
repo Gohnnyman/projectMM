@@ -27,8 +27,8 @@ struct Knob : public mm::MoonModule {
     uint8_t value = 10;
     bool showExtra = false;   // toggling this ADDS/REMOVES a control → a real schema change
     void defineControls() override {
-        controls_.addUint8("value", value, 0, 100);
-        if (showExtra) controls_.addUint8("extra", value, 0, 100);
+        controls_.addControl("value", value, 0, 100);
+        if (showExtra) controls_.addControl("extra", value, 0, 100);
     }
 };
 struct Box : public mm::MoonModule {
@@ -61,8 +61,8 @@ struct FakeDrivers : public mm::MoonModule {
     bool on = true;
     uint8_t brightness = 20;
     void defineControls() override {
-        controls_.addBool("on", on);
-        controls_.addUint8("brightness", brightness, 0, 255);
+        controls_.addControl("on", on);
+        controls_.addControl("brightness", brightness, 0, 255);
     }
 };
 

@@ -17,7 +17,7 @@ public:
     uint8_t speed = 20; // BPM — one full hue cycle every 3 s; 60 (a whole rainbow per second) reads too fast
 
     void defineControls() override {
-        controls_.addUint8("speed", speed, 1, 255);
+        controls_.addControl("speed", speed, 1, 255);
     }
 
     void tick() MM_NONBLOCKING override {

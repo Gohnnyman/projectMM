@@ -65,10 +65,10 @@ Forward-looking to-build items for the **core / infrastructure** domain (`src/co
   second, uint8 and uint16). Only the re-read after a slot write is still wrong.
 
   **Reproduce** (in `unit_moonlive_fill.cpp`, which has `kCtrlTable`/`kSys` to hand): compile
-  `class T { uint16_t big = 5; defineControls() { addUint16("big", big, 0, 1000); } tick() {
+  `class T { int big = 5; defineControls() { addControl("big", big, 0, 1000); } tick() {
   setRGB(0, big, 0, 0); } }`, `run(..., kEntryTick)` → 5, write the slot to 7, run again → still 5.
 
-  **Impact: desktop only, nothing ships broken.** `addUint16` is hardware-verified on both ISAs
+  **Impact: desktop only, nothing ships broken.** A wide control is hardware-verified on both ISAs
   (S3 Xtensa and S31 RISC-V drive ember's `cycle` to 2000 and back). What is missing is DESKTOP
   coverage of the live-edit loop — the path users touch most — so no host test can pin it and the
   next regression there would surface only on a board. Add the runtime assertion together with the

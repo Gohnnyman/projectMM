@@ -25,9 +25,9 @@ using namespace mm;
 
 
 // Every case here compiles a script and runs the emitted native code, so all of them need a JIT
-// backend for the host ISA. `MM_MOONLIVE_HAS_HOST_JIT` is 0 on x86_64 — which is what CI runs — and
-// there a modifier maps nothing for a reason that has nothing to do with the modifier. Gated as a
-// block, the same way unit_moonlive_fill / unit_moonlive_ir do it.
+// backend for the host ISA. arm64 and x86-64 both have one; a --no-jit build does not, and there a
+// modifier maps nothing for a reason that has nothing to do with the modifier. Gated as a block,
+// the same way unit_moonlive_fill / unit_moonlive_ir do it.
 #if MM_MOONLIVE_HAS_HOST_JIT
 
 namespace {

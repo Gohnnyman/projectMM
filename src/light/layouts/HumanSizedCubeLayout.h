@@ -30,9 +30,9 @@ public:
     uint8_t depth  = 10;
 
     void defineControls() override {
-        controls_.addUint8("width",  width,  1, 20);
-        controls_.addUint8("height", height, 1, 20);
-        controls_.addUint8("depth",  depth,  1, 20);
+        controls_.addControl("width",  width,  1, 20);
+        controls_.addControl("height", height, 1, 20);
+        controls_.addControl("depth",  depth,  1, 20);
     }
 
     const char* tags() const override { return "💫"; }

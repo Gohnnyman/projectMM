@@ -22,6 +22,36 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### A module declares every control with `addControl` (2026-08-24)
+
+`addUint8`, `addUint16`, `addInt16`, `addInt32` and `addBool` are replaced by one overloaded
+`addControl(name, variable, min, max)`. The widget follows the variable's own type, which the
+compiler already knows, so the name no longer repeats a width the declaration states:
+
+```cpp
+controls_.addUint8("speed", speed_, 1, 255);     // before
+controls_.addControl("speed", speed_, 1, 255);   // after
+```
+
+This is the same call a MoonLive script makes, which is the point: someone who has written a
+script can read a compiled module, and someone who has read a module can write a script.
+
+The **widget-specific** adders keep their names — `addPin`, `addSelect`, `addPalette`, `addText`,
+`addTextArea`, `addFilePath`, `addPassword`, `addIPv4`, `addReadOnly`, `addReadOnlyInt`,
+`addProgress`, `addList`, `addButton`. Those name a widget rather than a width, and the intent is
+not recoverable from the C++ type: `uint8_t` backs a slider, a dropdown *and* a palette picker, and
+an `int8_t` silently becoming a Pin would register as a claimed GPIO in the pin map. `addControl`
+on an `int8_t` is deliberately deleted, with a diagnostic naming the two real options.
+
+**Action: *nothing* for a device.** No control name, type, range, wire format or persisted value
+changes — a renamed call produces a byte-identical descriptor, which is why nothing on the device
+can notice.
+
+**Action for a third-party module: *recompile*.** Rename the five calls to `addControl`; the
+arguments are unchanged. A missed one is a compile error, never a silent behaviour change: the
+overloads bind by exact reference type, so a call that compiles produces the widget it always did.
+
+
 ### Desktop settings move to a per-user directory (2026-08-23)
 
 The desktop build wrote its configuration to `build/.config`, resolved against whatever directory the process happened to start in. That is a source-checkout layout, and it shipped: a downloaded binary either could not write there at all, failing every save and logging one line per save, or it wrote settings that belonged to that *folder* rather than to the user, so moving the executable lost them.

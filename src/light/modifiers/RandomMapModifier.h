@@ -34,7 +34,7 @@ public:
     ~RandomMapModifier() override { releasePerm(); }
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 0, 60);
+        controls_.addControl("bpm", bpm, 0, 60);
     }
 
     // `bpm` only changes future reshuffle timing — the current permutation is unchanged,

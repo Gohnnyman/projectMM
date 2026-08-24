@@ -683,7 +683,7 @@ TEST_CASE("an if inside a for runs the body every iteration") {
 }
 
 // The condition is an ordinary expression on both sides, not a name-against-literal special case:
-// the same orthogonality that lets addUint8 take a computed range.
+// the same orthogonality that lets addControl take a computed range.
 TEST_CASE("an if condition may be an expression on both sides") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
@@ -921,7 +921,7 @@ TEST_CASE("an int member is published as a control spanning its full range") {
     //
     // The initial READ is fine, here and everywhere: what looked like a broken read was run()
     // being called without an entry name, which starts at the block start — `defineControls`,
-    // not `tick`. addUint16 itself is hardware-verified on both ISAs (S3 and S31 drive ember's
+    // not `tick`. a wide control is hardware-verified on both ISAs (S3 and S31 drive ember's
     // `cycle` to 2000 and back).
 }
 
@@ -1056,7 +1056,7 @@ TEST_CASE("an out-of-range array read is clamped and leaves system variables int
 }
 
 // The index is an arbitrary EXPRESSION, not a bare loop counter: the same orthogonality that lets
-// addUint8 take a computed range and an if condition take one on both sides.
+// addControl take a computed range and an if condition take one on both sides.
 TEST_CASE("an array index may be an expression") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"

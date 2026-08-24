@@ -110,7 +110,7 @@ public:
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
-        controls_.addBool("loopbackTest", loopbackTest);
+        controls_.addControl("loopbackTest", loopbackTest);
         controls_.setAdvanced(controls_.count() - 1);   // expert-mode: a bench self-test, not a normal-use control
         // loopbackTxPin / loopbackRxPin are always bound (so persistence can load
         // them any time) but only shown while the test mode is on — same always-
@@ -122,7 +122,7 @@ public:
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
         controls_.addPin("loopbackRxPin", loopbackRxPin);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
-        controls_.addBool("loopbackFrame", loopbackFrame);
+        controls_.addControl("loopbackFrame", loopbackFrame);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
     }
 

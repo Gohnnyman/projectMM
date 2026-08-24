@@ -71,8 +71,8 @@ public:
     /// ON leg tears the preview until the slot-sharing fix lands), so it shows only when System.expertMode
     /// is on. It still persists and still accepts API writes; only the default UI hides it.
     void defineDriverControls() override {
-        controls_.addUint8("fps", fps, 1, 60);
-        controls_.addBool("resumableFrames", resumableFrames);
+        controls_.addControl("fps", fps, 1, 60);
+        controls_.addControl("resumableFrames", resumableFrames);
         controls_.setAdvanced(controls_.count() - 1);
     }
 

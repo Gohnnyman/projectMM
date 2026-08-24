@@ -28,7 +28,7 @@ public:
     uint8_t fade = 70;  // per-frame fadeToBlackBy amount (0..255)
 
     void defineControls() override {
-        controls_.addUint8("fade", fade, 0, 255);
+        controls_.addControl("fade", fade, 0, 255);
     }
 
     void tick() MM_NONBLOCKING override {

@@ -48,7 +48,7 @@ public:
         // RECEIVE a width: the pipeline derives its bounding box from the coordinates the layouts
         // actually place (Layouts::prepare, "max coordinate + 1 per axis"), so a width handed in
         // from outside would be a second, disagreeing source of truth. A script that wants one
-        // declares it under its OWN name (`addUint8("cols", cols, 1, 64)`) and it becomes a real
+        // declares it under its OWN name (`addControl("cols", cols, 1, 64)`) and it becomes a real
         // slider. Not `width`: that is a system variable the engine writes, so a script cannot
         // declare it and the compiler refuses the name.
         script_.publishDeclaredControls(controls_);

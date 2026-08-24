@@ -22,10 +22,10 @@ public:
                                // strip layout where the strip snakes back and forth row to row.
 
     void defineControls() override {
-        controls_.addInt16("width",  width,  1, 512);
-        controls_.addInt16("height", height, 1, 512);
-        controls_.addInt16("depth",  depth,  1, 512);
-        controls_.addBool("serpentine", serpentine);
+        controls_.addControl("width",  width,  1, 512);
+        controls_.addControl("height", height, 1, 512);
+        controls_.addControl("depth",  depth,  1, 512);
+        controls_.addControl("serpentine", serpentine);
     }
 
     nrOfLightsType lightCount() const override {

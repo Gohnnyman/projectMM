@@ -35,7 +35,7 @@
 namespace mm {
 
 void HttpServerModule::defineControls() {
-    controls_.addUint16("port", port);
+    controls_.addControl("port", port);
 }
 
 void HttpServerModule::setup() {

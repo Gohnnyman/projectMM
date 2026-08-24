@@ -27,7 +27,7 @@ public:
     Dim dimensions() const override { return Dim::D2; }
 
     // The effect carries its script's NAME as an editable, persisted text control, plus a control
-    // for every control the script declared (`addUint8("speed", speed, 0, 99)`). The
+    // for every control the script declared (`addControl("speed", speed, 0, 99)`). The
     // engine exposes the declared list after a compile; each becomes a real uint8 control bound by
     // reference to the engine's live control-arena slot, so a slider write lands in the slot the
     // next render tick reads, with no recompile (the live-edit guarantee). Naming a different

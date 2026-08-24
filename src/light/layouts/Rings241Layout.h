@@ -36,7 +36,7 @@ public:
     uint8_t scale = 2;
 
     void defineControls() override {
-        controls_.addUint8("scale", scale, 1, 10);
+        controls_.addControl("scale", scale, 1, 10);
     }
 
     nrOfLightsType lightCount() const override {

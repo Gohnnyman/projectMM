@@ -39,11 +39,11 @@ public:
     uint8_t size   = 2;     // radius of the bright source
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 0, 120);
-        controls_.addUint8("zoom", zoom, 0, 64);
-        controls_.addUint8("rotate", rotate, 0, 64);
-        controls_.addUint8("decay", decay, 1, 128);
-        controls_.addUint8("size", size, 0, 16);
+        controls_.addControl("bpm", bpm, 0, 120);
+        controls_.addControl("zoom", zoom, 0, 64);
+        controls_.addControl("rotate", rotate, 0, 64);
+        controls_.addControl("decay", decay, 1, 128);
+        controls_.addControl("size", size, 0, 16);
     }
 
     void prepare() override {

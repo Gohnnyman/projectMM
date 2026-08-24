@@ -96,7 +96,7 @@ public:
         // Encoders first: they sit ABOVE the pads on the surfaces this mirrors, and control order is
         // render order.
         for (uint8_t i = 0; i < kEncoderCount; i++) {
-            controls_.addUint8(kEncoderNames[i], encoders_[i]);
+            controls_.addControl(kEncoderNames[i], encoders_[i]);
             controls_.setEncoder(controls_.count() - 1, true, nullptr);
         }
         controls_.addList("presets", *this);
@@ -104,7 +104,7 @@ public:
         // and is settable from anywhere the control system reaches — which is what a MIDI surface
         // will bind to later. Rendered as a bank of vertical sliders by the UI.
         for (uint8_t i = 0; i < kFaderCount; i++) {
-            controls_.addUint8(kFaderNames[i], faders_[i]);
+            controls_.addControl(kFaderNames[i], faders_[i]);
             controls_.setFader(controls_.count() - 1, true, faderTarget(i));
         }
         // The save form. All HIDDEN: these are what the pad popup drives, not controls a user reads
@@ -117,7 +117,7 @@ public:
         // The pad a save is aimed at: transient UI intent, reset at setup (see setup()), never a
         // restored value. The declared max is kMaxPresets-1, so a persisted or API-supplied kNoSlot
         // would clamp to the last pad; savePreset re-checks the range for the same reason.
-        controls_.addUint8("slot", saveSlot_, 0, kMaxPresets - 1);
+        controls_.addControl("slot", saveSlot_, 0, kMaxPresets - 1);
         controls_.setHidden(controls_.count() - 1, true);
         // One flag per capturable subtree rather than a single multi-select: the set is small and
         // fixed, and a checkbox each is what makes "what will this preset contain" readable at a

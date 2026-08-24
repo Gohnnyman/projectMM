@@ -48,12 +48,12 @@ public:
     bool    drift    = true; // slide the pattern instead of holding still
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 0, 60);
-        controls_.addUint8("scale", scale, 1, 16);
-        controls_.addUint8("thickness", thickness, 5, 200);
-        controls_.addUint8("softness", softness, 1, 200);
-        controls_.addUint8("shuffle", shuffle, 0, 255);
-        controls_.addBool("drift", drift);
+        controls_.addControl("bpm", bpm, 0, 60);
+        controls_.addControl("scale", scale, 1, 16);
+        controls_.addControl("thickness", thickness, 5, 200);
+        controls_.addControl("softness", softness, 1, 200);
+        controls_.addControl("shuffle", shuffle, 0, 255);
+        controls_.addControl("drift", drift);
     }
 
     void tick() MM_NONBLOCKING override {

@@ -34,10 +34,10 @@ public:
                                       // of the system-wide palette (advised: a primary-ish palette)
 
     void defineControls() override {
-        controls_.addUint8("turnsPerSecond", turnsPerSecond, 0, 20);
-        controls_.addUint8("cubeSize", cubeSize, 1, 8);
-        controls_.addBool("randomTurning", randomTurning);
-        controls_.addBool("usePalette", usePalette);
+        controls_.addControl("turnsPerSecond", turnsPerSecond, 0, 20);
+        controls_.addControl("cubeSize", cubeSize, 1, 8);
+        controls_.addControl("randomTurning", randomTurning);
+        controls_.addControl("usePalette", usePalette);
     }
 
     // The 6 face colors drawCube paints with. Classic Rubik's set (red, dark-orange, blue, green,

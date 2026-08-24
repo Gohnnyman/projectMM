@@ -37,9 +37,9 @@ public:
     bool mirrorZ = true;
 
     void defineControls() override {
-        controls_.addBool("mirrorX", mirrorX);
-        controls_.addBool("mirrorY", mirrorY);
-        controls_.addBool("mirrorZ", mirrorZ);
+        controls_.addControl("mirrorX", mirrorX);
+        controls_.addControl("mirrorY", mirrorY);
+        controls_.addControl("mirrorZ", mirrorZ);
     }
 
     void modifyLogicalSize(Coord3D& size) override {

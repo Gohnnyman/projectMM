@@ -41,11 +41,11 @@ public:
     bool    colorByColumn = false;  // color per band instead of by height
 
     void defineControls() override {
-        controls_.addUint8("attack", attack, 1, 255);
-        controls_.addUint8("release", release, 1, 128);
-        controls_.addUint8("peakDecay", peakDecay, 0, 32);
-        controls_.addBool("showPeaks", showPeaks);
-        controls_.addBool("colorByColumn", colorByColumn);
+        controls_.addControl("attack", attack, 1, 255);
+        controls_.addControl("release", release, 1, 128);
+        controls_.addControl("peakDecay", peakDecay, 0, 32);
+        controls_.addControl("showPeaks", showPeaks);
+        controls_.addControl("colorByColumn", colorByColumn);
     }
 
     void prepare() override {

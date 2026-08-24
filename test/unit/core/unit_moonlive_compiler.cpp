@@ -311,8 +311,8 @@ TEST_CASE("MoonLive recompiling swaps the program live (fill <-> setRGB)") {
     CHECK(buf[1*3+0] == 255); CHECK(buf[0] == 0);
 }
 
-// CONTROLS: a declaration is a member, and `addUint8("name", name, lo, hi)` in defineControls
-// A control is declared by CALLING addUint8 inside defineControls, the same call a compiled module
+// CONTROLS: a declaration is a member, and `addControl("name", name, lo, hi)` in defineControls
+// A control is declared by CALLING addControl inside defineControls, the same call a compiled module
 // makes. The declaration alone is a member: state the script owns, which the UI never sees unless
 // the script asks for it. That split is the whole point, so both halves are checked here.
 //
@@ -345,7 +345,7 @@ TEST_CASE("a control is declared by calling addControl, and a plain member is no
 }
 
 // A control's range is an ORDINARY EXPRESSION, like every other argument in the language. Making
-// addUint8 the one call whose arguments must be literals would be a special case wearing a
+// addControl the one call whose arguments must be literals would be a special case wearing a
 // disguise, so this pins that it is not one.
 TEST_CASE("a control's range can be computed, not just written as a literal") {
     moonlive::MoonLive eng;

@@ -159,7 +159,7 @@ public:
         if constexpr (!platform::hasNamedNetInterfaces)
             controls_.setHidden(controls_.count() - 1, true);
         addWindowControls();   // start / count — which slice of the shared buffer this sink sends
-        controls_.addUint8("fps", fps, 1, 120);
+        controls_.addControl("fps", fps, 1, 120);
     }
 
     /// Geometry and the window change how much of the buffer is corrected, so both re-run the

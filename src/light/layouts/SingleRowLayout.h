@@ -31,10 +31,10 @@ public:
     bool reversedOrder = false;
 
     void defineControls() override {
-        controls_.addUint8("starting X", startX, 0, 255);
-        controls_.addUint16("width", width, 1, 1000);
-        controls_.addUint16("Y position", yPosition, 0, 255);
-        controls_.addBool("reversed order", reversedOrder);
+        controls_.addControl("starting X", startX, 0, 255);
+        controls_.addControl("width", width, 1, 1000);
+        controls_.addControl("Y position", yPosition, 0, 255);
+        controls_.addControl("reversed order", reversedOrder);
     }
 
     nrOfLightsType lightCount() const override {

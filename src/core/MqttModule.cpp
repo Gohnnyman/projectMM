@@ -394,10 +394,10 @@ void MqttModule::release() {
 
 void MqttModule::defineControls() {
     controls_.addText("broker", broker_, sizeof(broker_));
-    controls_.addUint16("port", port_, 1, 65535);
+    controls_.addControl("port", port_, 1, 65535);
     controls_.addText("username", username_, sizeof(username_));
     controls_.addPassword("password", password_, sizeof(password_));
-    controls_.addBool("haDiscovery", haDiscovery_);   // announce a HA MQTT-discovery light (default off; WLED /json covers HA)
+    controls_.addControl("haDiscovery", haDiscovery_);   // announce a HA MQTT-discovery light (default off; WLED /json covers HA)
     controls_.addReadOnly("mqtt_status", statusStr_, sizeof(statusStr_));
     MoonModule::defineControls();
 }

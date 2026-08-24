@@ -172,15 +172,15 @@ public:
                     // One write at publish time settles it; every later write comes through
                     // applyControlValue's parseBool, which yields 0 or 1 by construction.
                     *slot = (*slot != 0) ? 1 : 0;
-                    controls.addBool(decls[i].name, *reinterpret_cast<bool*>(slot));
+                    controls.addControl(decls[i].name, *reinterpret_cast<bool*>(slot));
                     break;
                 case moonlive::CtrlType::Byte:
-                    controls.addUint8(decls[i].name, *slot,
+                    controls.addControl(decls[i].name, *slot,
                                       static_cast<uint8_t>(decls[i].min),
                                       static_cast<uint8_t>(decls[i].max));
                     break;
                 default:   // Int; Fixed and Str never reach here (the compiler refuses to bind one)
-                    controls.addInt32(decls[i].name, *reinterpret_cast<int32_t*>(slot),
+                    controls.addControl(decls[i].name, *reinterpret_cast<int32_t*>(slot),
                                       decls[i].min, decls[i].max);
                     break;
             }

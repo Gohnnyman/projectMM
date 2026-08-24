@@ -33,9 +33,9 @@ public:
     bool    oneColor     = false; // all bricks in a column share one slowly-advancing color
 
     void defineControls() override {
-        controls_.addUint8("speed", speedControl, 0, 255);
-        controls_.addUint8("width", widthControl, 0, 255);
-        controls_.addBool("oneColor", oneColor);
+        controls_.addControl("speed", speedControl, 0, 255);
+        controls_.addControl("width", widthControl, 0, 255);
+        controls_.addControl("oneColor", oneColor);
     }
 
     // Per-column falling-brick state (MoonLight's Tetris struct). `step` doubles as the state

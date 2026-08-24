@@ -35,9 +35,9 @@ public:
     bool towardsZ = false;
 
     void defineControls() override {
-        controls_.addBool("shrink", shrink);
-        controls_.addBool("towardsX", towardsX);
-        controls_.addBool("towardsZ", towardsZ);
+        controls_.addControl("shrink", shrink);
+        controls_.addControl("towardsX", towardsX);
+        controls_.addControl("towardsZ", towardsZ);
     }
 
     void modifyLogicalSize(Coord3D& size) override {

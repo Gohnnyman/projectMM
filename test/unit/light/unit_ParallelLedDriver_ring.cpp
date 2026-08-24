@@ -65,7 +65,7 @@ public:
     // whole-frame-only backends). Mirror the real driver: the source-snapshot knob under the path, gated
     // on wantsRing() — this mock's controllable wantRing_ drives the visibility the hide test checks.
     void addRingControls(mm::ControlList& controls) override {
-        controls.addBool("ringSnapshot", owner_->ringSnapshotRef());
+        controls.addControl("ringSnapshot", owner_->ringSnapshotRef());
         controls.setHidden(controls.count() - 1, !wantsRing());
     }
     bool busControlTriggersBuild(const char*) const override { return false; }

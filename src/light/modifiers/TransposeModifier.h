@@ -32,12 +32,12 @@ public:
     bool inverseZ = false;
 
     void defineControls() override {
-        controls_.addBool("XY", transposeXY);
-        controls_.addBool("XZ", transposeXZ);
-        controls_.addBool("YZ", transposeYZ);
-        controls_.addBool("inverse X", inverseX);
-        controls_.addBool("inverse Y", inverseY);
-        controls_.addBool("inverse Z", inverseZ);
+        controls_.addControl("XY", transposeXY);
+        controls_.addControl("XZ", transposeXZ);
+        controls_.addControl("YZ", transposeYZ);
+        controls_.addControl("inverse X", inverseX);
+        controls_.addControl("inverse Y", inverseY);
+        controls_.addControl("inverse Z", inverseZ);
     }
 
     void modifyLogicalSize(Coord3D& size) override {

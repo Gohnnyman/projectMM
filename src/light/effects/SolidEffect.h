@@ -40,14 +40,14 @@ public:
     static constexpr uint8_t kColorModeCount = 5;
 
     void defineControls() override {
-        controls_.addUint8("red", red, 0, 255);
-        controls_.addUint8("green", green, 0, 255);
-        controls_.addUint8("blue", blue, 0, 255);
-        controls_.addUint8("white", white, 0, 255);
-        controls_.addUint8("brightness", brightness, 0, 255);
+        controls_.addControl("red", red, 0, 255);
+        controls_.addControl("green", green, 0, 255);
+        controls_.addControl("blue", blue, 0, 255);
+        controls_.addControl("white", white, 0, 255);
+        controls_.addControl("brightness", brightness, 0, 255);
         controls_.addSelect("colorMode", colorMode, kColorModeOptions, kColorModeCount);
-        controls_.addUint8("minRGB", minRGB, 0, 255);
-        controls_.addBool("randomColors", randomColors);
+        controls_.addControl("minRGB", minRGB, 0, 255);
+        controls_.addControl("randomColors", randomColors);
     }
 
     // The band modes (3/4) need a 256-entry table of valid wheel indices. 256 bytes is small, but

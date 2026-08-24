@@ -107,7 +107,7 @@ Past half full, the status also names the tightest limit the script is approachi
 |---|---|
 | `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-places the lights live |
 
-Plus one control per `addUint8` / `addUint16` in the script's `defineControls()`.
+Plus one control per `addControl` in the script's `defineControls()`.
 
 Editing any of them rebuilds the pipeline, because every one can change where the lights are. A script that fails to compile leaves a fixture with no lights, shows the parse error on the module, and the device keeps running.
 

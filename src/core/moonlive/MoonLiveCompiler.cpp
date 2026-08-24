@@ -90,7 +90,7 @@ struct Lexer {
                 // Every line comment is whitespace. A comment that CHANGED BEHAVIOR lived here:
                 // `// @control 1..120` declared a control's range, which is not C and does not
                 // resemble the compiled module a script stands in for. `defineControls()` calling
-                // `addUint8("bpm", bpm, 1, 120)` replaced it, so the token, its capture and the
+                // `addControl("bpm", bpm, 1, 120)` replaced it, so the token, its capture and the
                 // `lineStart` this needed are all gone.
                 while (*p && *p != '\n') p++;
                 continue;
@@ -192,7 +192,7 @@ struct Parser {
 
     // Every class-scope `uint8_t x = 0;` is a MEMBER: the class model, where a declaration inside
     // the class is a member of it. Whether the UI shows one is a separate question the script
-    // answers by calling addUint8 in defineControls, so `controls` below is a VIEW of these rather
+    // answers by calling addControl in defineControls, so `controls` below is a VIEW of these rather
     // than a second storage: a control's offset IS its member's arena byte.
     //
     // `DeclaredControl` carries both because they are the same record. A member that no control
@@ -681,7 +681,7 @@ struct Parser {
                 //   a STRING, for the UI label. A frame slot is a machine word, so the pointer
                 //   into the source fits; the host reads it as a `const char*`.
                 //
-                //   a MEMBER BY NAME, meaning its ADDRESS rather than its value. `addUint8("bpm",
+                //   a MEMBER BY NAME, meaning its ADDRESS rather than its value. `addControl("bpm",
                 //   bpm, 1, 120)` reads as the reference a compiled module passes, and the compiler
                 //   supplies the arena offset the host binds to. Only where the builtin asks for it
                 //   (byRef), so `setRGB(bpm, …)` still reads bpm's value as it always did.
@@ -1191,7 +1191,7 @@ struct Parser {
     /// appear to work and then vanish, which is worse than being refused.
     ///
     /// A CONTROL is deliberately NOT refused, though the UI does own its value. Whether a member
-    /// becomes a control is decided at RUN time, by `defineControls()` calling `addUint8` on it,
+    /// becomes a control is decided at RUN time, by `defineControls()` calling `addControl` on it,
     /// so the parser cannot know: that is the direct consequence of a control being an ordinary
     /// call rather than an annotation. Writing one is also legitimate (an effect that ramps its
     /// own speed and lets the slider re-take it), and the outcome is visible rather than silent:

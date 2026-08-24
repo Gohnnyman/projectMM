@@ -200,11 +200,11 @@ public:
         controls_.addSelect("sampleRate", sampleRateSel, kRateOptions, kSampleRateCount);
         controls_.setHidden(controls_.count() - 1, !localMode);
         // floor/gain condition the local FFT/level mapping.
-        controls_.addUint8("floor", floor, 0, 255); controls_.setHidden(controls_.count() - 1, !localMode);
-        controls_.addUint8("gain", gain, 1, 255);   controls_.setHidden(controls_.count() - 1, !localMode);
+        controls_.addControl("floor", floor, 0, 255); controls_.setHidden(controls_.count() - 1, !localMode);
+        controls_.addControl("gain", gain, 1, 255);   controls_.setHidden(controls_.count() - 1, !localMode);
         // "send audio": broadcast the locally-analyzed frame. Only meaningful in Local mode.
         if constexpr (platform::hasNetwork) {
-            controls_.addBool("send audio", send);
+            controls_.addControl("send audio", send);
             controls_.setHidden(controls_.count() - 1, !localMode);
         }
         // --- Simulate group: the synthesized-pattern picker, shown only in Simulate mode. ---
@@ -219,7 +219,7 @@ public:
             // The UDP port — the Send destination and the Receive listen port. Defaults to WLED's
             // 11988 (interop with WLED/MoonLight); change it on BOTH ends to run a private
             // projectMM-only sync group on a non-WLED port.
-            controls_.addUint16("syncPort", syncPort, 1, 65535);
+            controls_.addControl("syncPort", syncPort, 1, 65535);
             controls_.setHidden(controls_.count() - 1, !hasSocket);
             controls_.addReadOnly("sync status", syncStr_, sizeof(syncStr_));
             controls_.setHidden(controls_.count() - 1, !hasSocket);

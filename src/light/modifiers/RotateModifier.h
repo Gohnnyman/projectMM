@@ -37,7 +37,7 @@ public:
     uint8_t speed = 1;   // rotation speed, 1..255 (turns faster as it rises)
 
     void defineControls() override {
-        controls_.addUint8("speed", speed, 1, 255);
+        controls_.addControl("speed", speed, 1, 255);
     }
 
     // `speed` only changes how fast the angle advances; rotation is applied live in
