@@ -6,41 +6,65 @@ This page covers **Windows**. For macOS and Linux, the [README](https://github.c
 
 > Looking to flash a device instead? That is [Install & first light](../gettingstarted.md). This page is about running projectMM *on the computer itself*.
 
+Five steps, one of which is Windows asking whether you trust an unsigned application. That is not a fault, and it is covered below.
+
 ---
 
-## 1. Download the installer
+## 1. Download it
 
 Open the [web installer](https://moonmodules.org/projectMM/install/) and set **Install to** to `This computer (Windows x64)`. The Release picker offers stable releases and `latest`, a build published on every merge to main; pick a stable one unless you want the newest unreleased changes.
 
-![The web installer with Windows x64 selected, and the download in the browser's Downloads panel](../assets/tutorials/windows-01-download.png)
+![The web installer with Windows x64 selected, and the downloaded setup.exe in the browser's Downloads panel carrying a SmartScreen warning](../assets/tutorials/windows-01-download.png)
 
-**Download** gives you `projectMM-windows-x64-vX.Y.Z-setup.exe`. There is nothing to sign up for and nothing else to install.
+**Download** gives you `projectMM-windows-x64-vX.Y.Z-setup.exe`.
 
-## 2. Run it
+Your browser will most likely flag it straight away: *"isn't commonly downloaded. Make sure you trust … before you open it."* That is step 2, and it is expected.
 
-The installer installs for your user, so there is no administrator prompt. It adds a **Start-menu entry with an icon** and a proper uninstaller, and starts projectMM when it finishes.
+## 2. Tell the browser to keep it
 
-Windows stops you the first time:
+Microsoft Defender SmartScreen judges a download by its **reputation**, built from how many people have downloaded that exact file from a publisher it recognises. projectMM is not code-signed, and every build produces a brand-new file, so its reputation is always zero. The warning is about the certificate, not about the contents.
 
-![Microsoft Defender SmartScreen warning that it prevented an unrecognized app from starting](../assets/tutorials/windows-03-smartscreen.png)
+In the Downloads panel, click the **`⋯`** next to the file, then open the **Delete** dropdown and choose **Keep anyway**:
 
-This is expected. SmartScreen warns about any application it has not seen signed by a paid, registered publisher, and projectMM is not code-signed. It is a statement about the certificate, not about the file.
+![The SmartScreen download dialog, with the Delete dropdown open showing Keep anyway](../assets/tutorials/windows-02-keep-anyway.png)
 
-Click **More info**, then **Run anyway**. You only have to do this once for a given copy.
+Chrome puts the same choice behind the download entry's **`⋯`**, then **Keep** and **Keep anyway**.
 
-## 3. That is it
+Worth knowing so it does not surprise you later: **this happens for every new build.** Reputation attaches to a file, not to a project, so a fresh `latest` build starts from nothing again. Only code signing changes that, and it is on the backlog.
+
+## 3. Run the setup
+
+Double-click the file you just kept, and the installer opens straight away. Keeping it in step 2 was the trust decision, so Windows does not ask a second time:
+
+![The projectMM setup dialog, showing the install location under AppData Local Programs](../assets/tutorials/windows-03-setup.png)
+
+There is nothing to decide here. It installs **for your user only**, into `%LOCALAPPDATA%\Programs\projectMM`, which is why it never asks for an administrator password. It needs about 1.3 MB. Click **Install**.
+
+If a copy of projectMM is already running, the installer stops it before replacing the files. That is deliberate: a running copy holds a lock on its own executable, and the install would otherwise fail part-way.
+
+## 4. Start it
+
+projectMM is now in the Start menu with its own icon. Type `projectMM` and open it:
+
+![The Windows Start menu showing projectMM with its icon, and an Uninstall projectMM entry](../assets/tutorials/windows-04-start-menu.png)
+
+The **Uninstall projectMM** entry beside it is the clean way to remove it later, and it leaves your settings in place (§6).
+
+## 5. That is it
 
 A console window opens showing what projectMM is doing, and your browser opens the interface at `http://localhost:8080/`.
 
-![projectMM running: the web interface with a live preview, alongside the console window showing the startup log](../assets/tutorials/windows-04-running.png)
+![projectMM running: the web interface with a live 3D preview and the Effects panel](../assets/tutorials/windows-05-running.png)
 
-The console window **is** the application. It shows the log, and closing it stops projectMM. The line that matters on a first run is `projectMM is running: http://localhost:8080/`; the address just below it (`HTTP server -> http://192.168.1.245:8080` in the screenshot) is the same interface reachable from your phone or another machine on your network.
+The console window **is** the application. It shows the log, and closing it stops projectMM. The line that matters on a first run is `projectMM is running: http://localhost:8080/`; the address printed just below it is the same interface, reachable from your phone or another machine on your network.
 
-Out of the box you get a 16x16 grid and a running effect, which is enough to confirm everything works. From here, [How projectMM works](how-projectmm-works.md) explains the Layouts, Effects and Drivers you see on the left.
+On a first install you get a default grid and a running effect, enough to confirm everything works. The screenshot above is not a first install: that machine already had projectMM configured with a Game of Life layer, and the setup left it exactly as it was. That is §6.
+
+From here, [How projectMM works](how-projectmm-works.md) explains the Layouts, Effects and Drivers down the left-hand side.
 
 Two options worth knowing: `--no-browser` stops it opening a browser (for a headless machine), and `--port <n>` serves somewhere other than 8080.
 
-## 4. Where your settings live
+## 6. Where your settings live
 
 Everything you change is saved automatically, in a folder that belongs to **your Windows user** rather than to the application:
 
@@ -48,23 +72,28 @@ Everything you change is saved automatically, in a folder that belongs to **your
 %LOCALAPPDATA%\projectMM
 ```
 
-This applies from the release that introduced it. On an older build, settings sat in a `build\.config` folder beside the executable instead, and the log said `write failed` for each save when that folder could not be created.
+Note that this is *not* where the program went. The program sits under `Programs\projectMM`; your settings live beside it in a separate folder, and that separation is what makes upgrades safe:
 
-The location is deliberate, and it has a consequence worth knowing: **your settings are not where the application is**. Move it, install a newer version over it, uninstall it, or delete the folder you extracted, and your configuration is still there. To start completely fresh, delete that folder.
+- **Installing a new version keeps your settings.** The installer replaces the program and never touches the settings folder.
+- **Uninstalling keeps them too.** Delete `%LOCALAPPDATA%\projectMM` by hand if you want a genuinely clean slate.
 
 Paste `%LOCALAPPDATA%\projectMM` into the Explorer address bar to open it.
 
-## 5. Or use the zip
+## 7. Updating
 
-Every release also ships `projectMM-windows-x64-vX.Y.Z.zip`, which is the right choice if you want to keep projectMM in a folder of your own, or run it from a USB stick. It holds the application and a README, and nothing else is needed. Download it from the [release page](https://github.com/MoonModules/projectMM/releases) rather than the web installer, which offers the installer for this platform.
+You do not have to watch the releases page. When a newer release exists, projectMM lights an **⬆ badge** in its top bar, next to the device name. You can see it in the screenshot in §5.
 
-**Extract it before running.** Opening the zip, Windows offers **Extract all** or **Run**:
+On a desktop the badge opens the **release page**, not the Firmware card. A device flashed over the network can install a new firmware in place; a desktop cannot replace its own running executable, so updating means downloading the new setup and running it. That is steps 1 to 4 of this page again, and it takes about a minute.
 
-![Windows offering Extract all or Run when opening the executable inside the zip](../assets/tutorials/windows-02-extract.png)
+The badge only appears when a release actually ships a build for your OS, and it tracks **stable releases**. If you are running a `latest` build, it will point you at the newest stable one rather than at newer `latest` builds.
 
-Choose **Extract all**. Running straight from a zip makes Windows unpack the application into a temporary folder that it may clear at any time, so you end up running a copy that quietly disappears later. Extract it somewhere you would keep a program, then run `projectMM.exe` from there — SmartScreen warns the same way, and the settings location is the same.
+**Nothing is lost.** Running the new setup replaces the program and leaves `%LOCALAPPDATA%\projectMM` untouched, so your layouts, effects and drivers come back exactly as you left them.
 
-Both forms are unsigned, so SmartScreen warns for either. Installing a new version over an old one keeps your settings, because the program and the settings live in different places; uninstalling removes the program and leaves your settings behind.
+## 8. Or run it without installing
+
+The [releases page](https://github.com/MoonModules/projectMM/releases) also carries `projectMM-windows-x64-vX.Y.Z.zip`: the same application with no installer, no Start-menu entry and no uninstaller. Choose it if you want projectMM in a folder of your own, or on a USB stick.
+
+Two things differ. **Extract it before running**, rather than opening the executable from inside the zip, because Windows unpacks a zip-launched program into a temporary folder it may clear at any time. And there is no Start-menu shortcut, so you launch it from wherever you put it. Settings still live in the same per-user folder, so both forms share one configuration.
 
 ---
 
@@ -72,11 +101,13 @@ Both forms are unsigned, so SmartScreen warns for either. Installing a new versi
 
 | Symptom | Look at |
 |---|---|
-| SmartScreen has no **Run anyway** | Click **More info** first; the button is hidden until you do. |
-| It opened and closed immediately | Run it from a terminal (`cd` to the folder, then `.\projectMM.exe`) so the error stays on screen instead of vanishing with the window. |
+| The download is flagged and will not open | §2. The choice hides behind the **`⋯`** and the **Delete** dropdown, which is easy to miss. |
+| A blue **"Windows protected your PC"** appears when you run it | Only happens if the file reached you without the step-2 prompt, so the trust question waits until you run it instead. Click **More info**, then **Run anyway**; the button is hidden until you click **More info**. |
+| It opened and closed immediately | Run it from a terminal so the error stays on screen instead of vanishing with the window. |
 | The browser shows nothing at `localhost:8080` | Check the console window is still open. Closing it stops projectMM. If another program already uses port 8080, start with `--port 8081`. |
 | Another machine cannot reach it | Use the `HTTP server ->` address from the log, not `localhost`. Windows Firewall prompts on first run; it needs to be allowed on your private network. |
 | Settings do not survive a restart | The log will say `cannot use ... persistence disabled` and name the directory it tried. That is the fault, not the saving itself. |
+| The installer fails saying a file is in use | A copy of projectMM is running that it could not stop. Close the console window and run the setup again. |
 
 ---
 
