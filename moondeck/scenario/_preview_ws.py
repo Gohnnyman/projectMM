@@ -1,11 +1,12 @@
-"""Minimal RFC 6455 WebSocket client for the device's /ws preview stream.
+"""Minimal RFC 6455 WebSocket client for the device's /wsp preview stream.
 
 Stdlib-only (socket/base64/os/time) — the live test scripts must run anywhere
 uv runs, with no third-party deps. Sibling-private helper like _observed.py.
 
-The device pushes two things on /ws: full-state JSON as text frames (~1 Hz) and
+The device serves TWO WebSocket paths: `/ws` (control plane, JSON state) and `/wsp`
+(the lossy preview channel, binary only). This reader takes `/wsp`, so it sees
 PreviewDriver binary frames — 0x03 coordinate tables and 0x02 RGB frames
-(`[0x02][count u16 LE][stride u16 LE][rgb × count]`, see
+(`[0x02][count u32 LE][stride u16 LE][rgb × count]`, a 7-byte header, see
 src/light/drivers/PreviewDriver.h). This reader skips everything except 0x02.
 
 Two simplifications the firmware guarantees (HttpServerModule.cpp):
@@ -24,14 +25,14 @@ import time
 
 
 class PreviewSocket:
-    """One /ws connection. `host` is the device's HTTP address ("ip[:port]")."""
+    """One /wsp connection. `host` is the device's HTTP address ("ip[:port]")."""
 
     def __init__(self, host: str, timeout_s: float = 5.0):
         h, _, p = host.partition(":")
         self.sock = socket.create_connection((h, int(p or 80)), timeout=timeout_s)
         key = base64.b64encode(os.urandom(16)).decode()
         self.sock.sendall(
-            (f"GET /ws HTTP/1.1\r\nHost: {host}\r\n"
+            (f"GET /wsp HTTP/1.1\r\nHost: {host}\r\n"
              f"Upgrade: websocket\r\nConnection: Upgrade\r\n"
              f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n").encode())
         raw = b""
@@ -98,8 +99,8 @@ def wait_for_solid(host: str, rgb, tolerance: int = 0, min_match_pct: float = 10
                 break
             if opcode != 0x2 or not payload or payload[0] != 0x02:
                 continue  # text/state frame or 0x03 coordinate table
-            count = payload[1] | (payload[2] << 8)
-            triples = payload[5:5 + count * 3]
+            count = payload[1] | (payload[2] << 8) | (payload[3] << 16) | (payload[4] << 24)
+            triples = payload[7:7 + count * 3]
             if count == 0 or len(triples) < count * 3:
                 continue
             matched = 0

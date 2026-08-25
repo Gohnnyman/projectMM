@@ -46,8 +46,10 @@ class Scheduler;
 /// forward-only producer, and a resumable buffered send (`sendBufferedFrame`) that drains a
 /// memory-adaptive chunk per client per `tick20ms` from a stable caller-owned buffer — so a large
 /// frame is delivered over wall-clock ticks without spinning any loop, yet stays one atomic WS
-/// message. One buffered send is in flight at a time (newest-wins backpressure: a new offer while
-/// one is active is dropped). Clients send nothing back over WS; mutations go through REST.
+/// message. One buffered send is in flight at a time per slot (newest-wins backpressure: a new
+/// offer while one is active is dropped). Two WS channels by traffic class: `/ws` carries the
+/// control plane (JSON state and patches), `/wsp` carries the lossy binary preview stream plus
+/// one client uplink, the `[0x51][stride]` resolution request. Other mutations go through REST.
 ///
 /// **State push — diff on the wire (the recognizable snapshot-then-patch model, cf. Redux /
 /// Firestore sync, JSON Patch RFC 6902):** the state a client needs is the full module tree
@@ -135,25 +137,53 @@ public:
     bool sendBufferedFrame(const uint8_t* header, size_t headerLen,
                            const uint8_t* body, size_t bodyLen) override;
     bool bufferedSendIdle() const override { return !previewSend_.active; }
-    // Drop the in-flight buffered send. Frees the body first when the frame OWNS it (a state frame
-    // owns its ~30 KB JSON; a preview frame borrows its pixel buffer) — same rule as release(), so
-    // this is self-safe for any caller, not only ones that know a borrowed frame is in flight.
-    // A cancelled OWNED frame is a state resync that was still draining (a preview-geometry rebuild
-    // can cancel mid-drain); re-arm fullResyncPending_ so the resync is retried on the next push
-    // rather than silently lost — a client that already saw a partial state must not be left stale.
+    // Drop the in-flight buffered preview frame (a geometry rebuild is about to free its body).
+    // A client that already received part of the message has a desynced stream if we just stop -
+    // the next message's bytes get parsed as this one's payload, so the only honest exit for a
+    // mid-frame client is CLOSE (it reconnects and gets the fresh table). Untouched clients keep
+    // their connection.
     void cancelBufferedSend() override {
-        if (previewSend_.ownsBody) {
-            platform::free(const_cast<uint8_t*>(previewSend_.body));
-            previewSend_.body = nullptr;
-            previewSend_.ownsBody = false;
-            fullResyncPending_ = true;   // a state drain was interrupted → retry it
+        if (previewSend_.active) {
+            const size_t total = previewSend_.hdrLen + previewSend_.bodyLen;
+            for (int i = 0; i < MAX_PREVIEW_CLIENTS; i++)
+                if (previewClients_[i].valid() &&
+                    previewSend_.sent[i] > 0 && previewSend_.sent[i] < total)
+                    previewClients_[i].close();
         }
         previewSend_.active = false;
     }
-    /// Bumped on each new WS client (see handleWebSocketUpgrade). PreviewDriver watches it to
-    /// re-stream its coordinate table the moment a fresh page connects, so a refresh shows the
-    /// preview immediately.
+    /// Bumped on each new client on EITHER channel (see handleWebSocketUpgrade). PreviewDriver
+    /// watches it to re-stream its coordinate table the moment a fresh viewer connects, so a
+    /// refresh, and a preview pane opened late in a session, shows positions immediately.
     uint32_t clientGeneration() const override { return wsClientGeneration_; }
+
+    /// Is anyone on the PREVIEW channel? The binary path fans out to `/wsp`, so with no client
+    /// there the producer should not build a frame at all, closing the preview pane stops the
+    /// work, not just the send.
+    bool hasSubscribers() const override {
+        for (const auto& pc : previewClients_) if (pc.valid()) return true;
+        return false;
+    }
+
+    int subscriberCount() const override {
+        int n = 0;
+        for (const auto& pc : previewClients_) if (pc.valid()) n++;
+        return n;
+    }
+
+    /// Coarsest (largest) hint across live preview clients, see BinaryBroadcaster::maxClientHint.
+    uint32_t maxClientHint() const override {
+        uint32_t m = 0;
+        for (int i = 0; i < MAX_PREVIEW_CLIENTS; i++)
+            if (previewClients_[i].valid() && previewHints_[i] > m) m = previewHints_[i];
+        return m;
+    }
+
+    /// Parse one client→server frame from the preview channel: a masked WS frame whose payload is
+    /// [0x51][hint u8]. Returns the payload byte (0..255) or -1 when the buffer holds no such
+    /// message; the caller validates the range (only 1..64 is a servable stride).
+    /// Pure and static so the byte handling is unit-testable without a socket.
+    static int parsePreviewUplink(const uint8_t* buf, int n);
 
     // The cross-core sender lease (see BinaryBroadcaster). Guards previewSend_ + the wsClients_ socket
     // writes against this module's own core-0 drain / state push while an offloaded PreviewDriver
@@ -269,6 +299,21 @@ private:
     platform::TcpConnection wsClients_[MAX_WS_CLIENTS];
     uint32_t wsClientGeneration_ = 0;   // ++ on each new WS client; see clientGeneration()
 
+    // `/wsp`, the SECOND channel, for lossy binary streams (the preview). Its own connections, so a
+    // 10 KB preview frame can never delay a state push: they are separate TCP connections, which is
+    // the standard remedy for the head-of-line blocking one socket carrying both traffic classes
+    // produces. `/ws` stays the control plane (JSON state + patches).
+    //
+    // Its cap is DELIBERATELY lower than MAX_WS_CLIENTS. Both arrays draw on one
+    // CONFIG_LWIP_MAX_SOCKETS budget of 16, shared with HTTP, mDNS, Art-Net, MQTT and OTA, a
+    // preview socket per WS client would consume the whole budget at the cap and starve the rest.
+    // 4 is sized from the observed use: one browser almost always, two often enough that it must
+    // just work, more only occasionally, while REST callers (Home Assistant, scripts) never open
+    // a preview socket at all. A refused upgrade costs that client only its preview; its /ws
+    // control connection is untouched.
+    static constexpr int MAX_PREVIEW_CLIENTS = 4;
+    platform::TcpConnection previewClients_[MAX_PREVIEW_CLIENTS];
+
     // begin/push/endBinaryFrame stream a binary WS frame straight to every client with NO
     // frame-sized buffer: the header goes out on begin, each pushed slice is fanned to all
     // clients, and end reports whether every client got the whole frame. A producer (PreviewDriver
@@ -278,7 +323,16 @@ private:
     // Max TOTAL WouldBlock spins for one span in sendAllOrClose before a stuck client is closed.
     // Used by the begin/push/end stream (coord table + downsampled color frame); the full-res
     // color frame goes through the resumable sendBufferedFrame instead, which never spins.
-    static constexpr int kDirectSendSpins = 2000;
+    // Stall budget for one send span, in WALL-CLOCK ms, long enough for TCP to actually drain a
+    // full buffer (several round-trips), short enough to bound the tick. An iteration count here
+    // burned out in ~100 µs on a fast chip and closed healthy viewers (see sendAllOrClose).
+    static constexpr uint32_t kDirectSendBudgetMs = 150;
+    // Per-message skip mask for the preview fan-out: a client whose buffer was full at the header
+    // probe takes no part in this message at all (a clean whole-frame drop on the lossy channel).
+    bool previewFrameSkip_[MAX_PREVIEW_CLIENTS] = {};
+    // Last hint each preview client posted (0 = none yet). Cleared when the slot turns over, so a
+    // new client never inherits its predecessor's request.
+    uint8_t previewHints_[MAX_PREVIEW_CLIENTS] = {};
 
     // Resumable full-frame send (BinaryBroadcaster::sendBufferedFrame). One WS message = a copied
     // header + a pointer into the caller's STABLE body buffer (the PreviewDriver producer buffer),
@@ -292,38 +346,53 @@ private:
         size_t hdrLen = 0;
         const uint8_t* body = nullptr;        // the frame body — see ownsBody for lifetime
         size_t bodyLen = 0;
-        size_t sent[MAX_WS_CLIENTS] = {};     // per-client cursor over [hdr ++ body]; a slow client lags
+        size_t sent[MAX_PREVIEW_CLIENTS] = {};  // per-PREVIEW-client cursor over [hdr ++ body]; a slow client lags
         bool active = false;
-        // Body lifetime: the preview path BORROWS body (PreviewDriver keeps its pixel buffer alive),
-        // so ownsBody is false and the drain frees nothing. The state push builds a fresh JSON buffer
-        // per second that must outlive the chunked drain, so it hands OWNERSHIP (ownsBody true) and the
-        // drain frees it on completion / on release. One slot serves both large-frame producers.
-        bool ownsBody = false;
+        // body is BORROWED: PreviewDriver keeps its pixel buffer alive; prepare() cancels before a
+        // resize frees it. The state push has its own slot (StateSend) since the channel split -
+        // sharing this one routed the full state to /wsp and starved every /ws client of its resync.
     };
     PreviewSend previewSend_;
-    // Guards the WS sender — previewSend_ AND the wsClients_ socket writes — because it has TWO
-    // producers on TWO cores once the multicore split engages: core 0 (this module's tick20ms drain,
-    // the 1 Hz state push, connect/disconnect) and core 1 (the offloaded PreviewDriver's tick, which
-    // arms a frame and directly streams the coordinate table). Without it, core 1's partial-write
-    // stream interleaves with core 0's drain inside one WS frame (corrupt framing) or observes a torn
-    // previewSend_. try_lock only, never a blocking lock: whichever core loses the race SKIPS its
-    // slot (the hot-path rule, CLAUDE.md § Hot path). Preview already has that skip path — it is the
-    // same back-off its adaptive frame rate takes when the link is busy — so a lost race costs one
-    // preview frame, never a stalled render or encode.
+    // Resumable full-state send to the CONTROL channel (`/ws`): same cursor-per-client shape as
+    // PreviewSend, but it drains to wsClients_ and always OWNS its JSON body (built per resync,
+    // freed on drain-complete / release). Each WS message a client receives stays atomic: while
+    // this is active, the patch and WLED pushes to /ws are skipped so nothing interleaves.
+    struct StateSend {
+        uint8_t hdr[16] = {};
+        size_t hdrLen = 0;
+        const uint8_t* body = nullptr;
+        size_t bodyLen = 0;
+        size_t sent[MAX_WS_CLIENTS] = {};
+        bool active = false;
+    };
+    StateSend stateSend_;
+    // Guards the PREVIEW channel's shared state: previewSend_ and the previewClients_ sockets,
+    // which have producers on TWO cores once the multicore split engages. Core 1 (the offloaded
+    // PreviewDriver's tick) arms frames and directly streams the coordinate table; core 0 touches
+    // the same sockets and bookkeeping in drainPreviewSend, the uplink reap and /wsp admission.
+    // Without it, a partial-write stream on one core interleaves with the other inside one WS
+    // frame (corrupt framing), a close lands under a concurrent write on the same fd, or one side
+    // observes a torn previewSend_. The CONTROL channel (wsClients_, stateSend_) is deliberately
+    // outside its scope: every /ws writer runs on core 0. try_lock only, never a blocking lock:
+    // whichever core loses the race SKIPS its slot (the hot-path rule, CLAUDE.md § Hot path); a
+    // lost race costs one preview frame or defers a reap/admission one tick, never a stalled
+    // render or encode.
     mutable TryLock wsLock_;
-    // Queue a TEXT frame (opcode 0x81) whose body this module OWNS, through the same resumable slot the
-    // preview binary send uses — so the (20 KB) state JSON drains in chunks on tick20ms instead of a
-    // blocking write on the render tick. Takes ownership of `ownedBody` (freed on drain-complete /
-    // release). Returns false (and frees ownedBody) if a send is already in flight — drop-new, the next
-    // second's state is fresher. Internal (not the BinaryBroadcaster interface, which stays binary).
+    // Queue a TEXT frame (opcode 0x81) whose body this module OWNS into the STATE slot, the
+    // (20 KB) full-state JSON drains in chunks to /ws clients on tick20ms instead of a blocking
+    // write on the render tick. Takes ownership of `ownedBody` (freed on drain-complete /
+    // release). Returns false (and frees ownedBody) if a state send is already in flight -
+    // drop-new, the next second's state is fresher.
     bool startBufferedTextSend(char* ownedBody, size_t bodyLen);
     // Drain one memory-adaptive chunk per client of the in-flight resumable send; mark it done when
     // every live client has the whole frame, freeing an owned body then. Called from tick20ms. No-op
     // when none is active.
     void drainPreviewSend();
+    // Same, for the in-flight full-state send to /ws clients. Called from tick20ms.
+    void drainStateSend();
     // Largest chunk to push per client per drain tick, derived from free contiguous memory so a
     // tight board takes small bites (bounded tick occupancy) and a roomy board drains fast.
-    size_t previewChunkBytes() const;
+    size_t drainChunkBytes() const;
 
     // All JSON API responses (/api/state, /api/types, /api/system) and the WS
     // state push stream through a JsonSink — no shared fixed-size buffer.
@@ -485,7 +554,10 @@ private:
     // -----------------------------------------------------------------------
     // WebSocket
     // -----------------------------------------------------------------------
-    void handleWebSocketUpgrade(platform::TcpConnection& conn, const char* req);
+    /// `previewChannel` = the request arrived on `/wsp`, so the connection joins previewClients_
+    /// (the lossy binary channel) instead of the control plane's wsClients_.
+    void handleWebSocketUpgrade(platform::TcpConnection& conn, const char* req,
+                                bool previewChannel = false);
     void pushStateToWebSockets();
     void pushWledStateToWebSockets();   // WLED-app {state,info} frame on /ws (see impl)
     static bool sendWsTextFrame(platform::TcpConnection& conn, const char* data, int len);

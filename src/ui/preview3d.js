@@ -8,6 +8,8 @@
 // app only through the DOM (#preview canvas, --bg-0 theme color) and
 // localStorage (mm_cam). No app.js state crosses the boundary.
 
+import { nextStrideState, initialStrideState } from "./preview-adapt.js";
+
 let gl = null;
 let glProgram = null;
 let glBuffer = null;
@@ -318,7 +320,12 @@ function setupLayout() {
         const pip = forcePip || window.innerWidth < PIP_BELOW;
         ws.classList.toggle("mode-pip", pip);
         ws.classList.toggle("mode-docked", !pip);
-        ws.classList.toggle("preview-hidden", pip && dismissed);
+        const hidden = pip && dismissed;
+        ws.classList.toggle("preview-hidden", hidden);
+        // Tell the app whether frames are wanted. The device streams the preview only to clients on
+        // its `/wsp` channel, so a dismissed pane closing that socket is what actually stops the
+        // traffic at the source, not just hiding pixels the device already paid to send.
+        if (wantsFrames_) wantsFrames_(!hidden);
         const showBtn = document.getElementById("preview-show");
         if (showBtn) showBtn.hidden = !(pip && dismissed);
         // The dock button means "pop out" when docked, "re-dock" when floating.
@@ -441,7 +448,11 @@ function updatePreviewStatus() {
     const el = document.getElementById("preview-status");
     if (!el) return;
     const parts = [];
-    if (previewStride_ > 1) parts.push(`1/${previewStride_} · link limited`);   // resolution shed
+    // Name the RIGHT cause: a stride we asked for is the link adapting; a stride above our own
+    // request is the device's fixed point cap (a grid larger than the preview will ever draw) -
+    // targetFps cannot make that finer, so calling it "link limited" sent the wrong message.
+    if (previewStride_ > 1)
+        parts.push(`1/${previewStride_}` + (previewStride_ > adaptState_.stride ? " · point cap" : " · link limited"));
     if (effectiveFps_ > 0)  parts.push(`${Math.round(effectiveFps_)} fps`);      // adaptive rate
     if (parts.length) {
         el.textContent = "preview " + parts.join(" · ");
@@ -469,6 +480,17 @@ function parsePreviewCoords(view, buf) {
     // Validate the full payload BEFORE mutating any parser state — a truncated buffer must leave
     // previewStride_ / the status line untouched (else they'd describe coords we never stored).
     if (buf.byteLength < 10 + count * 3) return;
+    // A geometry change (the bounding box moved) is a NEW canvas: verdicts measured on the old one
+    // (a coarse stride earned on a big wall, a remembered failed stride) do not apply, and keeping
+    // them leaves a small grid needlessly coarse for the better part of a minute while the bands
+    // walk back. Restart the controller and tell the device, exactly as a fresh connect does.
+    // A stride-only rebuild keeps the same box and resets nothing.
+    if (lastBox_ && (lastBox_.bx !== bx || lastBox_.by !== by || lastBox_.bz !== bz)) {
+        adaptState_ = initialStrideState();
+        adaptFrames_ = 0;
+        if (sendHint_) sendHint_(adaptState_.stride);
+    }
+    lastBox_ = { bx, by, bz };
     previewStride_ = view.getUint16(8, true) || 1;   // = device's adaptive downscale factor
     updatePreviewStatus();
     const pos = new Uint8Array(buf, 10);
@@ -489,6 +511,7 @@ function parsePreviewCoords(view, buf) {
 }
 
 function renderPreviewFrame(view, buf) {
+    adaptFrames_++;   // the controller's measurement: frames that actually arrived
     if (!gl) initWebGL();
     if (!gl) return;
     // Hold frames until positions have arrived (the device sends the table on a geometry
@@ -851,8 +874,56 @@ function buildMVP(ex, ey, ez, tx, ty, tz, aspect) {
 }
 
 // Public surface — the only entry points app.js touches.
+// Set by app.js: called with true when the preview wants frames, false when it is dismissed.
+let wantsFrames_ = null;
+
+// --- client-side adaptation (see preview-adapt.js for the controller itself) -------------------
+// The loop runs only while the preview socket is open (app.js calls adaptStart/adaptStop with the
+// socket lifecycle), so a hidden or dismissed pane costs nothing and sends nothing.
+let adaptState_ = initialStrideState();
+let lastBox_ = null;   // bounding box of the last coord table; a change means new geometry
+let adaptFrames_ = 0;
+let adaptTimer_ = null;
+let adaptTargetFps_ = 24;   // fed from the device state by app.js (the user's targetFps control)
+let sendHint_ = null;       // installed by app.js: (stride) => send [0x51, stride] up the socket
+
+function adaptTick() {
+    const achieved = adaptFrames_ / 2;   // the window is 2 s
+    adaptFrames_ = 0;
+    const next = nextStrideState(adaptState_, achieved, adaptTargetFps_);
+    if (next.request && sendHint_) sendHint_(next.stride);
+    const { request, ...rest } = next;   // keep EVERY state field; only `request` is transient
+    adaptState_ = rest;
+}
+
 export const preview = {
     init: initWebGL,
+    /// The adaptation loop follows the preview socket's lifecycle (app.js owns the socket).
+    adaptStart() {
+        adaptState_ = initialStrideState();
+        adaptFrames_ = 0;
+        // ANNOUNCE the fresh request immediately: the device keeps the last stride it adopted, so
+        // without this a reconnect (a hide/return, a WiFi blip) leaves it serving whatever the
+        // DYING connection's throttled measurements ratcheted to, bench: stuck at 1/64 on a
+        // healthy link, with this fresh client believing it was at 1 and so requesting nothing.
+        if (sendHint_) sendHint_(adaptState_.stride);
+        if (!adaptTimer_) adaptTimer_ = setInterval(adaptTick, 2000);
+    },
+    adaptStop() {
+        if (adaptTimer_) { clearInterval(adaptTimer_); adaptTimer_ = null; }
+    },
+    // A NEW target invalidates every conclusion measured against the old one (a source-limited
+    // hold, a remembered failed stride), so the controller restarts clean and re-announces.
+    setTargetFps(v) {
+        if (!(v > 0) || v === adaptTargetFps_) return;
+        adaptTargetFps_ = v;
+        adaptState_ = initialStrideState();
+        if (sendHint_) sendHint_(adaptState_.stride);
+    },
+    onSendHint(cb) { sendHint_ = cb; },
+    /// Install the frames-wanted callback and report the current state immediately, so the caller
+    /// can open or close the preview socket without waiting for the next visibility change.
+    onWantsFrames(cb) { wantsFrames_ = cb; if (cb) cb(!document.querySelector(".preview-hidden")); },
     setupLayout: setupLayout,
     onBinaryMessage: renderPreviewBinary,
     resetCamera: resetCamera,

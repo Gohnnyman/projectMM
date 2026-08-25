@@ -1,24 +1,28 @@
 #pragma once
-// NdiDriver — projectMM as an NDI video source.
-//
-// The rendered frame reaches OBS, Resolume, TouchDesigner or any other NDI receiver, on this
-// machine or another. That last part is why NDI and not Spout/Syphon: a shared GPU texture cannot
-// leave the box, and one NDI implementation covers Windows, macOS, Linux and ARM where Spout and
-// Syphon are two platform-specific ones covering two of them.
-//
-// **Desktop only** (`platform::hasNdi`): the NDI runtime is a closed binary built only for Intel
-// and ARM (SSSE3 / NEON floor), so no ESP32 can load one and there is no source to port. An ESP32
-// reaches the same receivers over Art-Net / sACN / DDP, which projectMM implements itself.
-//
-// **The runtime is the user's.** projectMM is GPL-3.0 and the NDI runtime is proprietary, so it is
-// never bundled or linked — the platform layer resolves it on demand, exactly as it does Npcap for
-// the panel-card driver. A machine without it runs normally and this driver says so in its status.
-// The whole NDI surface lives behind `platform::` (see platform.h § NDI); no NDI type appears here.
-//
-// Prior art: the NDI protocol and SDK are NewTek/Vizrt's; this driver is our own code against the
-// documented C API. The frame-pacing and status shape follow PreviewDriver, the other driver that
-// turns the rendered buffer into frames for a remote consumer.
-// Author: projectMM original
+/// NdiDriver, projectMM as an NDI video source.
+///
+/// The rendered frame reaches OBS, Resolume, TouchDesigner or any other NDI receiver, on this
+/// machine or another.
+///
+/// **Why NDI and not Spout/Syphon.** One implementation covers Windows, macOS, Linux and ARM, it
+/// discovers by name, and it crosses machines. Spout (Windows) and Syphon (macOS) share a GPU texture
+/// zero-copy and are bit-exact, but they are same-machine only, are TWO platform-specific
+/// implementations, and leave Linux and the Pi with nothing. At LED-wall pixel counts the latency
+/// difference sits far below one frame of the render loop, so coverage decides, not latency.
+///
+/// **Desktop only** (`platform::hasNdi`): the NDI runtime is a closed binary built only for Intel
+/// and ARM (SSSE3 / NEON floor), so no ESP32 can load one and there is no source to port. An ESP32
+/// reaches the same receivers over Art-Net / sACN / DDP, which projectMM implements itself.
+///
+/// **The runtime is the user's.** projectMM is GPL-3.0 and the NDI runtime is proprietary, so it is
+/// never bundled or linked, the platform layer resolves it on demand, exactly as it does Npcap for
+/// the panel-card driver. A machine without it runs normally and this driver says so in its status.
+/// The whole NDI surface lives behind `platform::` (see platform.h § NDI); no NDI type appears here.
+///
+/// Prior art: the NDI protocol and SDK are NewTek/Vizrt's; this driver is our own code against the
+/// documented C API. The frame-pacing and status shape follow PreviewDriver, the other driver that
+/// turns the rendered buffer into frames for a remote consumer.
+/// Author: projectMM original
 
 #include "core/Control.h"
 #include "core/ScratchBuffer.h"
@@ -147,7 +151,11 @@ public:
     }
 
     // Controls
-    char    sourceName[32] = "";   // blank = the device name
+    /// The name a receiver lists this source under. Blank uses the device's own name, which is what
+    /// a user scanning OBS's source list expects to find.
+    char    sourceName[32] = "";
+    /// Frame-rate ceiling. The driver sends no faster than this and declares the rate in each frame;
+    /// the link may deliver fewer.
     uint8_t fps            = 30;
 
 private:

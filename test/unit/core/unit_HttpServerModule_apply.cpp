@@ -558,3 +558,28 @@ TEST_CASE("a file write with no scheduler is a no-op, not a crash") {
     http.applyFileChanged("/moonlive/plasma.mle");   // must simply return
     CHECK(true);
 }
+
+// The preview channel's one uplink message: a masked client frame whose payload is [0x51][hint].
+// These are network bytes, so the parser's job is mostly refusal: wrong opcode, unmasked, wrong
+// length, truncated, all -1, never a read past the buffer.
+TEST_CASE("preview uplink parser accepts exactly the one defined message") {
+    // [0x82 binary][0x82 masked len2][mask 4][0x51^m0][7^m1]
+    uint8_t good[] = {0x82, 0x82, 0x11, 0x22, 0x33, 0x44, static_cast<uint8_t>(0x51 ^ 0x11),
+                      static_cast<uint8_t>(7 ^ 0x22)};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(good, sizeof(good)) == 7);
+
+    uint8_t text[] = {0x81, 0x82, 0x11, 0x22, 0x33, 0x44, static_cast<uint8_t>(0x51 ^ 0x11),
+                      static_cast<uint8_t>(2 ^ 0x22)};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(text, sizeof(text)) == 2);   // text frames too
+
+    uint8_t unmasked[] = {0x82, 0x02, 0x51, 0x07};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(unmasked, sizeof(unmasked)) == -1);
+
+    uint8_t wrongOp[] = {0x82, 0x82, 0, 0, 0, 0, 0x99, 0x07};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(wrongOp, sizeof(wrongOp)) == -1);
+
+    uint8_t ping[] = {0x89, 0x80, 0, 0, 0, 0};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(ping, sizeof(ping)) == -1);
+
+    CHECK(mm::HttpServerModule::parsePreviewUplink(good, 5) == -1);             // truncated
+}

@@ -43,6 +43,8 @@ struct CaptureBroadcaster : mm::BinaryBroadcaster {
     std::vector<uint8_t> lastCoord, lastFrame;
     std::vector<uint8_t> cur_;     // payload accumulated across pushBinaryFrame between begin/end
     uint32_t generation = 0;       // bump to simulate a new client connecting
+    uint32_t hint = 0;             // the coarsest stride a client requested (maxClientHint)
+    uint32_t maxClientHint() const override { return hint; }
     bool acceptNext = true;        // false → endBinaryFrame reports a color frame not fully sent
     bool dropCoord = false;        // true → endBinaryFrame reports a coord table not fully sent
 
@@ -163,7 +165,51 @@ TEST_CASE("PreviewDriver coordinate table carries the real lights, not the box")
     CHECK(rig.cap.lastCoord.size() == 10u + 210u * 3u);
 }
 
-// Per-frame 0x02 RGB count matches the coordinate-table count.
+// The device serves the resolution the CLIENT requests, it no longer measures the link itself
+// (a device-side controller can only see its own socket, and cycled; the receiver measures the
+// true end-to-end rate). The stride changes exactly when a request arrives, and never otherwise.
+TEST_CASE("PreviewDriver adopts the client-requested stride, and only then") {
+    mm::GridLayout g; g.width = 64; g.height = 64; g.depth = 1;
+    PreviewRig rig(&g);
+
+    uint32_t t = 1000;
+    auto tickAt = [&](int n) { for (int i=0;i<n;i++){ t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); } };
+
+    tickAt(1);
+    const mm::nrOfLightsType before = rig.preview->downscaleForTest();
+    const int coordsBefore = rig.cap.coordMsgs;
+
+    tickAt(50);                                       // 5 s with no request: nothing may change
+    CHECK(rig.preview->downscaleForTest() == before);
+    CHECK(rig.cap.coordMsgs == coordsBefore);
+
+    rig.cap.hint = 4;                                 // a client asks for 1/4
+    tickAt(1);
+    CHECK(rig.preview->downscaleForTest() == 4);
+    CHECK(rig.cap.coordMsgs == coordsBefore + 1);     // one rebuild, announcing the new lattice
+
+    tickAt(50);                                       // the request is STANDING, no drift back
+    CHECK(rig.preview->downscaleForTest() == 4);
+    CHECK(rig.cap.coordMsgs == coordsBefore + 1);
+
+    rig.cap.hint = 1;                                 // the client asks for full detail again
+    tickAt(1);
+    CHECK(rig.preview->downscaleForTest() == 1);
+    mm::platform::setTestNowMs(0);
+}
+
+// Garbage from the network must not steer the lattice: hints outside [1, 64] are ignored.
+TEST_CASE("PreviewDriver ignores an out-of-range stride request") {
+    mm::GridLayout g; g.width = 32; g.height = 32; g.depth = 1;
+    PreviewRig rig(&g);
+    mm::platform::setTestNowMs(1000); rig.preview->tick();
+    const mm::nrOfLightsType before = rig.preview->downscaleForTest();
+    rig.cap.hint = 200;
+    mm::platform::setTestNowMs(1100); rig.preview->tick();
+    CHECK(rig.preview->downscaleForTest() == before);
+    mm::platform::setTestNowMs(0);
+}
+
 TEST_CASE("PreviewDriver per-frame RGB count matches the coordinate table") {
     mm::SphereLayout s;
     s.radius = 4;
@@ -193,7 +239,7 @@ TEST_CASE("PreviewDriver small grid sends all lights exactly") {
 // stride produced on a grid whose width didn't divide the stride. The wire "stride" field
 // carries the per-axis lattice/downscale factor (color k still maps 1:1 to coord k).
 TEST_CASE("PreviewDriver downsamples a large layout on a regular spatial lattice") {
-    // 200×200 = 40000 lights, over the 4096 display cap → the lattice downsample engages. The
+    // 200×200 = 40000 lights, over the 16384 display cap → the lattice downsample engages. The
     // extent (199) is ≤255/axis, so positions are sent at EXACT integer grid coordinates (no
     // byte-scaling rounding) — letting the regularity check below compare true lattice positions.
     mm::GridLayout g;
@@ -202,7 +248,7 @@ TEST_CASE("PreviewDriver downsamples a large layout on a regular spatial lattice
     rig.produce();
 
     CHECK(rig.cap.coordStride() >= 2);            // display cap forces a lattice step (the factor)
-    CHECK(rig.cap.coordCount() <= 4096);          // downsampled under the display cap
+    CHECK(rig.cap.coordCount() <= 16384);         // downsampled under the display cap
     CHECK(rig.cap.coordCount() > 0);
     CHECK(rig.cap.coordCount() == rig.cap.frameCount());  // table + RGB agree (lockstep)
 
@@ -244,9 +290,9 @@ TEST_CASE("PreviewDriver keeps a sparse large-box layout at full resolution") {
 }
 
 // Default fps is the rate-limited preview stream rate.
-TEST_CASE("PreviewDriver fps default") {
+TEST_CASE("PreviewDriver targetFps default") {
     mm::PreviewDriver driver;
-    CHECK(driver.fps == 24);
+    CHECK(driver.targetFps == 24);
 }
 
 // Regression: a coordinate table dropped under backpressure must be RETRIED, and color
@@ -385,34 +431,17 @@ TEST_CASE("PreviewDriver buffered send uses the sparse driver buffer, not the de
     CHECK(rig.cap.lastBody != rig.layer.buffer().data());    // NOT the dense box — the mapped output
 }
 
-// The per-module memory readout (dynamicBytes) must ACCOUNT the resumable-path buffers — the staging
-// buffer and the kept-index cache — not read 0 while ~24 KB is allocated (the bug: raw platform::alloc
-// buffers bypass ScratchBuffer's auto-accounting, so they were invisible). With resumableFrames ON and a
-// downsampled layout, dynamicBytes is non-zero and covers both buffers; OFF frees them and it drops to 0.
-//
-// SKIPPED (doctest::skip): this case was written when resumableFrames defaulted ON — its ON assertions
-// relied on the rig constructor's applyState() allocating the staging buffer via that default. resumableFrames
-// now defaults OFF (the synchronous transport is the shipped default; the resumable path tears the preview),
-// and toggling the flag ON post-construction + prepare() does NOT re-allocate the buffers in this rig the way
-// the constructor path did, so the ON reads drop to 0. The dynamicBytes accounting itself (driverHeapBytes
-// sums stageCap_ + keptIdxCap_) is unchanged and correct — only this test's default assumption broke. The
-// un-skip is backlogged (docs/backlog/backlog-light.md § "PreviewDriver `resumableFrames` default OFF"): wire
-// the flag ON into the rig BEFORE its first applyState so the acquire path runs. Original body is in git history.
-TEST_CASE("PreviewDriver reports its resumable-path buffers in dynamicBytes" * doctest::skip()) {
-    MESSAGE("skipped — see docs/backlog/backlog-light.md (resumableFrames default OFF)");
-}
-
-// Dense-grid CLOSED-FORM downsample, exact color placement: a 200×1 strip pinned over a small cap
+// Dense-grid CLOSED-FORM downsample, exact color placement: a wide strip pinned over the cap
 // strides in x only, so the kept lights are columns 0,s,2s,… The color pass must read each from its
 // dense buffer index (closed-form x for a 1-row grid) and pack them in the SAME order as the coord
 // table: no placeLights. Painting a known color at a kept column and finding it at the matching
 // frame position pins the index math + the lattice order.
 TEST_CASE("PreviewDriver dense downsample packs colors by closed-form index, in lattice order") {
-    const int width = 5000;                            // > the 4096 display cap → forces a stride
+    const int width = 20000;                           // > the 16384 display cap → forces a stride
     mm::GridLayout g; g.width = width; g.height = 1; g.depth = 1;
     PreviewRig rig(&g);
     const int s = rig.cap.coordStride();
-    REQUIRE(s >= 2);                                   // 5000 cols over the 4096 cap → strided in x
+    REQUIRE(s >= 2);                                   // 20000 cols over the 16384 cap → strided in x
     const int kept = rig.cap.coordCount();
     REQUIRE(kept == (width + s - 1) / s);              // ceil(width/s) — closed-form count
 
@@ -451,67 +480,6 @@ TEST_CASE("PreviewDriver gates the next frame on the buffered send draining (ada
     mm::platform::setTestNowMs(0);
 }
 
-// ADAPTIVE RESOLUTION RECOVERY: the downsample coarsens ADDITIVELY (downscale_++ on slow frames, a
-// gentle anti-stall) but refines MULTIPLICATIVELY (halve toward 1 on a run of clean frames). So a grid
-// that briefly coarsened on a slow link snaps back to full resolution in ~log2 refine events, not one
-// step per unit — the fix for a small grid taking ~10 s to reach full detail. This pins the halving so
-// the recovery can't silently regress to the old linear crawl.
-TEST_CASE("PreviewDriver refines resolution multiplicatively (fast recovery to full res)") {
-    mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;   // 256 lights, trivially full-res-able
-    PreviewRig rig(&g);
-
-    uint32_t t = 1000;
-    auto tickSlow = [&] { rig.cap.bufferedDrains = 5; t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); };
-    auto tickFast = [&] { rig.cap.bufferedDrains = 0; t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); };
-
-    // Drive it coarse: a run of slow frames coarsens downscale_ well above 1 (additive +1 per event).
-    for (int i = 0; i < 40; i++) tickSlow();
-    const mm::nrOfLightsType coarsened = rig.preview->downscaleForTest();
-    REQUIRE(coarsened > 1);      // it did downsample under the slow link
-
-    // Now the link is prompt. Count how many refine EVENTS (clean-streak completions) it takes to reach
-    // full res. Multiplicative halving needs ~log2(coarsened) events, far fewer than (coarsened-1) linear
-    // steps. kUpscaleAfterFast clean frames per event; bound the loop generously and assert it converged.
-    int refineEvents = 0;
-    mm::nrOfLightsType prev = coarsened;
-    for (int i = 0; i < 200 && rig.preview->downscaleForTest() > 1; i++) {
-        tickFast();
-        const mm::nrOfLightsType now = rig.preview->downscaleForTest();
-        if (now < prev) { refineEvents++; CHECK(now <= (prev + 1) / 2); prev = now; }   // each event at least halves
-    }
-    CHECK(rig.preview->downscaleForTest() == 1);          // reached full resolution
-    // log2(64 max) = 6 events ceiling; a real coarsened value needs far fewer. Linear would be up to 63.
-    CHECK(refineEvents <= 6);
-
-    mm::platform::setTestNowMs(0);
-}
-
-// RE-ANCHOR ON REBUILD: a link-struggle coarsening must NOT carry across a geometry change and hold a
-// now-fitting grid coarse. A rebuild resets downscale_ to 1, so the memory/display cap alone sets the
-// stride for the new grid — a grid that fits renders at full res immediately, no inherited ramp. (This
-// is the "add a small grid → stuck at 4 blobs for ~10 s because a prior config had coarsened" fix.)
-TEST_CASE("PreviewDriver re-anchors resolution on a geometry rebuild (no inherited coarsening)") {
-    mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;
-    PreviewRig rig(&g);
-
-    uint32_t t = 1000;
-    auto tickSlow = [&] { rig.cap.bufferedDrains = 5; t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); };
-
-    // Coarsen it under a slow link.
-    for (int i = 0; i < 40; i++) tickSlow();
-    REQUIRE(rig.preview->downscaleForTest() > 1);   // it coarsened
-
-    // A rebuild (a resize, or just re-preparing the same fitting grid) must re-anchor to full res: the
-    // 16×16 (256 lights) is well under the cap, so with downscale_ reset it renders at stride 1.
-    rig.preview->applyState();                       // prepare() re-anchors downscale_
-    CHECK(rig.preview->downscaleForTest() == 1);     // did NOT inherit the stale coarsening
-
-    mm::platform::setTestNowMs(0);
-}
-
-// USE-AFTER-FREE GUARD: a geometry rebuild (resize) frees+reallocs the producer buffer, so any
-// in-flight buffered send (which holds a pointer into it) MUST be cancelled in prepare before
-// the buffer goes away — else drainPreviewSend would read freed memory.
 TEST_CASE("PreviewDriver cancels an in-flight buffered send on rebuild (resize safety)") {
     mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;
     PreviewRig rig(&g);

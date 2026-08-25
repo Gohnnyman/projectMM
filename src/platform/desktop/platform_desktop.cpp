@@ -1616,16 +1616,24 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
     // deadline (mirrors the ESP32 impl): this runs on the render thread, and a stalled peer whose TCP
     // receive window is full would otherwise make send() block forever and hang the loop. On timeout,
     // return false so the caller closes that client instead of wedging the device.
-    constexpr uint32_t kWriteDeadlineMs = 2000;
+    // TWO bounds, mirroring the ESP32 impl: the stall bound (progress resets it) lets a
+    // slow-but-steady transfer finish (a total-only bound truncated large assets under a parallel
+    // cold-cache page load); the total bound keeps a byte-trickling peer from holding the loop.
+    constexpr uint32_t kWriteStallMs = 2000;
+    constexpr uint32_t kWriteTotalMs = 8000;
     const uint32_t start = millis();
+    uint32_t lastProgress = start;
     size_t sent = 0;
     while (sent < len) {
         auto n = ::send(sock(fd_), reinterpret_cast<const char*>(data + sent),
                         static_cast<int>(len - sent), 0);
         if (n > 0) {
             sent += static_cast<size_t>(n);
+            lastProgress = millis();
         } else if (sockWouldBlock()) {
-            if (millis() - start >= kWriteDeadlineMs) return false;   // stalled peer — don't hang the loop
+            const uint32_t now = millis();
+            if (now - lastProgress >= kWriteStallMs || now - start >= kWriteTotalMs)
+                return false;   // stalled or crawling peer: close it, never hang the loop
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
 #ifndef _WIN32
         } else if (errno == EINTR) {

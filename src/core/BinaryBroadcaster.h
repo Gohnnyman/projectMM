@@ -39,10 +39,9 @@ struct BinaryBroadcaster {
     //                            effective frame rate self-limits to what the link sustains.
     //   cancelBufferedSend()   — abandon the in-flight send NOW. The caller calls this before it
     //                            frees/reallocates the `body` buffer (a geometry rebuild), keeping a
-    //                            cursor reading only live memory. The sole caller today cancels on a
-    //                            new-client connect, which also bumps clientGeneration() and re-sends
-    //                            a fresh coordinate table — so a client that got a partial frame is
-    //                            re-primed by the next full message.
+    //                            cursor reading only live memory. A client caught mid-message is
+    //                            closed by the implementation (the only honest exit once bytes are
+    //                            out); it reconnects and the generation bump primes it fresh.
     // Only PreviewDriver uses this today (the color frames: full-res hands the producer buffer,
     // downsampled hands its gathered staging buffer). The coord table keeps the begin/push/end path
     // (rare — geometry/client changes only).
@@ -59,10 +58,31 @@ struct BinaryBroadcaster {
     // the producer re-broadcasts to everyone, idempotent on existing clients.
     virtual uint32_t clientGeneration() const = 0;
 
+    // Is anyone listening? A producer of a LOSSY stream asks before doing the work: with no
+    // subscriber there is nothing to send, and building a frame nobody receives is pure waste on
+    // the render path. This is what makes closing a preview pane actually stop the traffic, rather
+    // than the device broadcasting to a channel with no clients.
+    //
+    // Default true, so a transport with no notion of subscribers (a test double, a single-sink
+    // implementation) keeps its existing behaviour without overriding.
+    virtual bool hasSubscribers() const { return true; }
+
+    // How many subscribers are listening right now. Purely observational (a status line, a log);
+    // producers must not branch per subscriber through this, the channel stays broadcast-only.
+    virtual int subscriberCount() const { return hasSubscribers() ? 1 : 0; }
+
+    // The largest HINT any current subscriber has posted upstream, 0 = none. A hint is an opaque
+    // small integer whose meaning belongs to the PRODUCER (the core neither assigns nor interprets
+    // it, it only stores bytes a subscriber sent). MAX is the aggregate because for a lossy
+    // producer the conservative request must win: the preview interprets the hint as a stride,
+    // where larger = coarser = safe for every listener at once.
+    virtual uint32_t maxClientHint() const { return 0; }
+
     // Exclusive access to the sender, for a producer that does NOT run on the transport's own thread.
-    // The multicore split (Drivers `multicore`) ticks the offloaded PreviewDriver on core 1 while this
-    // transport drains and pushes state on core 0 — two producers, two cores, one socket set and one
-    // resumable send slot. A producer therefore brackets its whole message in tryAcquire/releaseSend:
+    // The multicore split (Drivers `multicore`) ticks the offloaded PreviewDriver on core 1 while
+    // this transport drains, reaps and admits on core 0: two producers, two cores, one preview
+    // socket set and one resumable send slot (the control channel stays core-0-only and outside
+    // this lease). A producer therefore brackets its whole message in tryAcquire/releaseSend:
     // a multi-call stream (begin/push/end) must not have another core's write land between its parts,
     // and a frame arm must not race the drain that is reading the slot.
     //
