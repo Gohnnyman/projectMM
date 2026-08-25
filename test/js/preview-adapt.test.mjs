@@ -1,138 +1,126 @@
-// The preview's client-side stride controller, the one place adaptation now lives. A device-side
-// version of this logic cycled for a bench day precisely because it could not be tested like this:
-// these cases pin the bands, the dead band, and the failed-stride skip-once-then-forget rule.
-//
-// Run: `node --test test/js/**/*.test.mjs`.
-
-import { test } from "node:test";
+// The preview's drops-driven resolution controller (src/ui/preview-adapt.js): two rules over
+// 2-second windows, reading only the device's own drop reports. These tests are the functional
+// documentation of how the preview trades detail for rate.
+// Run: `node --test "test/js/**/*.test.mjs"`.
+import test from "node:test";
 import assert from "node:assert/strict";
-import { nextStrideState, initialStrideState } from "../../src/ui/preview-adapt.js";
+import { nextPullState, initialPullState } from "../../src/ui/preview-adapt.js";
 
-const step = (st, achieved, target = 24) => nextStrideState(st, achieved, target);
+const step = (s, delivered, dropped) => nextPullState(s, delivered, dropped);
 
-test("a single bad window is a hiccup and changes nothing; two coarsen", () => {
-    let s = step({ stride: 1, failedStride: 0, goodWindows: 0, badWindows: 0 }, 7, 24);  // 29%
-    assert.equal(s.stride, 1);          // one GC pause must not cost a visible rebuild
-    assert.ok(!s.request);
-    s = step(s, 7, 24);                 // ...but a persisting slowdown does
-    assert.equal(s.stride, 2);
-    assert.equal(s.failedStride, 1);
-    assert.ok(s.request);
-});
-
-test("true starvation coarsens immediately, waiting helps nobody at ~0 fps", () => {
-    const s = step({ stride: 2, failedStride: 0, goodWindows: 0, badWindows: 0 }, 0, 24);
-    assert.equal(s.stride, 4);
-    assert.ok(s.request);
-});
-
-test("ordinary jitter still counts as clean, the bar a real link can actually clear", () => {
-    // 22/24 ≈ 92%: below the old 95% bar this window would RESET the clean run, stranding the
-    // preview coarse until a refresh (bench-observed). At the 80% bar it refines normally.
-    let s = { stride: 2, failedStride: 0, goodWindows: 0, badWindows: 0 };
-    s = step(s, 22); s = step(s, 23); s = step(s, 22);
-    assert.equal(s.stride, 1);
-    assert.ok(s.request);
-});
-
-test("the dead band holds: 70% of target changes nothing, ever", () => {
-    let s = { stride: 2, failedStride: 0, goodWindows: 2 };
+test("a clean link never loses detail: any run of drop-free windows holds full resolution", () => {
+    let s = initialPullState();
     for (let i = 0; i < 50; i++) {
-        s = step(s, 17, 24);            // ~70%
-        assert.equal(s.stride, 2);
-        assert.ok(!s.request);
-        assert.equal(s.goodWindows, 0); // a mediocre window resets the clean run
-        assert.equal(s.badWindows, 0);  // ...and the bad run: hold means hold
+        s = step(s, 24, 0);
+        assert.equal(s.stride, 1);
+        assert.equal(s.request, false);
     }
 });
 
-test("meeting the target refines only after three consecutive clean windows", () => {
-    let s = { stride: 4, failedStride: 0, goodWindows: 0 };
-    s = step(s, 24); assert.equal(s.stride, 4);
-    s = step(s, 24); assert.equal(s.stride, 4);
-    s = step(s, 24);
-    assert.equal(s.stride, 2);          // the third window earns the halving
+test("one dirty window is a hiccup and changes nothing; a second in a row coarsens", () => {
+    let s = initialPullState();
+    s = step(s, 20, 8);                  // 40% dropped: dirty
+    assert.equal(s.stride, 1);           // tolerated once
+    s = step(s, 20, 8);
+    assert.equal(s.stride, 2);           // persistent: halve the detail
     assert.ok(s.request);
 });
 
-test("a stride that failed is skipped once, then forgotten, one retry per two clean runs", () => {
-    let s = { stride: 2, failedStride: 1, goodWindows: 0 };
-    for (let i = 0; i < 3; i++) s = step(s, 24);
-    assert.equal(s.stride, 2);          // first clean run: refinement into 1 is SKIPPED...
-    assert.equal(s.failedStride, 0);    // ...and the verdict is cleared
-    for (let i = 0; i < 3; i++) s = step(s, 24);
-    assert.equal(s.stride, 1);          // second clean run: the retry happens
-});
-
-test("the coarse end is capped at 64 and the fine end at 1", () => {
-    let s = { stride: 64, failedStride: 0, goodWindows: 0 };
-    s = step(s, 0);
-    assert.equal(s.stride, 64);
-    assert.ok(!s.request);              // nothing coarser to ask for
-    s = { stride: 1, failedStride: 0, goodWindows: 2 };
-    s = step(s, 24);
-    assert.equal(s.stride, 1);          // nothing finer than full detail
-});
-
-test("a fresh connection starts at full detail and a zero target does nothing", () => {
-    const s0 = initialStrideState();
-    assert.equal(s0.stride, 1);
-    const s = nextStrideState(s0, 0, 0);
-    assert.equal(s.stride, 1);
-    assert.ok(!s.request);
-});
-
-test("a renderer-limited source keeps full detail: coarsening that does not pay is reverted", () => {
-    // A heavy effect renders 6 fps; the device sends 6 fps at ANY stride. Target 24.
-    let s = initialStrideState();
-    s = step(s, 6);                      // bad window 1: hiccup tolerance
-    s = step(s, 6);                      // bad window 2: coarsens to 2, expecting a payoff
+test("trace drops are pacing jitter, not congestion: they hold refining but never coarsen", () => {
+    let s = initialPullState();
+    for (let i = 0; i < 20; i++) {
+        s = step(s, 40, 2);              // 5% dropped, every window
+        assert.equal(s.stride, 1);       // never coarsens on trace amounts
+    }
+    s = step(s, 10, 5); s = step(s, 10, 5);          // real congestion -> 2
     assert.equal(s.stride, 2);
-    s = step(s, 6);                      // the audit window: still 6 fps, coarsening paid nothing
-    assert.equal(s.stride, 1);           // detail restored
+    for (let i = 0; i < 20; i++) s = step(s, 40, 2); // trace forever: refine never fires either
+    assert.equal(s.stride, 2);
+});
+
+test("heavy starvation coarsens immediately: more frames dropped than delivered", () => {
+    let s = initialPullState();
+    s = step(s, 3, 20);
+    assert.equal(s.stride, 2);
     assert.ok(s.request);
-    for (let i = 0; i < 20; i++) {       // and it HOLDS there at the source's ceiling
-        s = step(s, 6);
+});
+
+test("a renderer-limited device keeps full detail: slow frames without drops are not congestion", () => {
+    // A heavy effect renders 6 fps and every frame is delivered. Coarsening could not raise that
+    // rate, and the controller never tries: no drops, no change.
+    let s = initialPullState();
+    for (let i = 0; i < 30; i++) {
+        s = step(s, 12, 0);              // 6 fps = 12 frames per 2 s window
         assert.equal(s.stride, 1);
     }
 });
 
-test("a coarsen that pays is kept, and the chain may continue", () => {
-    let s = initialStrideState();
-    s = step(s, 5); s = step(s, 5);      // → stride 2
-    assert.equal(s.stride, 2);
-    s = step(s, 11);                     // audit: 5 → 11 fps, the step paid
-    assert.equal(s.stride, 2);
-    s = step(s, 11); s = step(s, 11);    // still <60% of 24 → next step
-    assert.equal(s.stride, 4);
-    s = step(s, 23);                     // audit passes again; near target now
-    assert.equal(s.stride, 4);
-});
-
-test("source-limited hold re-arms on real deterioration, and audits the retry too", () => {
-    let s = initialStrideState();
-    s = step(s, 6); s = step(s, 6); s = step(s, 6);   // limited at 6 → held at stride 1
-    assert.equal(s.stride, 1);
-    s = step(s, 2);                      // far below the remembered ceiling: bands re-arm and,
-    assert.equal(s.stride, 2);           // at hard starvation, a coarsen is attempted at once...
-    s = step(s, 2);                      // ...audited, found unpaid (still 2 fps), and reverted:
-    assert.equal(s.stride, 1);           // even a dying source never earns needless coarseness
-    s = step(s, 13);                     // well above the old ceiling: re-arm (bad window 1)
-    s = step(s, 13);                     // persistent shortfall coarsens again
-    assert.equal(s.stride, 2);
-    s = step(s, 30);                     // and this time it PAYS (13 → 30), so it is kept
-    assert.equal(s.stride, 2);
-});
-
-test("a link delivering nothing never counts as a payoff, however often it is asked", () => {
-    // 0 fps before and after a coarsen is not a 25% improvement, it is a dead link. Reading it as
-    // "paid" would ratchet the stride to 64 while not one frame arrives.
-    let s = initialStrideState();
-    s = step(s, 0);                      // starvation coarsens at once
-    assert.equal(s.stride, 2);
-    for (let i = 0; i < 10; i++) {
-        s = step(s, 0);
-        assert.ok(s.stride <= 2, `stride ratcheted to ${s.stride} on a dead link`);
+test("a dead link holds its stride: nothing delivered and nothing dropped is not a verdict", () => {
+    let s = initialPullState();
+    s = step(s, 20, 8); s = step(s, 20, 8);          // congestion earned stride 2
+    for (let i = 0; i < 20; i++) {
+        s = step(s, 0, 0);                            // then total silence
+        assert.equal(s.stride, 2);                    // no flapping on no information
     }
-    assert.equal(s.stride, 1);           // settles back at full detail: coarser bought nothing
+});
+
+test("clean windows refine one rung at a time back to full detail", () => {
+    let s = initialPullState();
+    s = step(s, 10, 5); s = step(s, 10, 5);          // -> 2
+    s = step(s, 10, 5); s = step(s, 10, 5);          // -> 4
+    assert.equal(s.stride, 4);
+    s = step(s, 20, 0); s = step(s, 20, 0);          // two clean windows -> refine
+    assert.equal(s.stride, 2);
+    assert.ok(s.request);
+    // the refine held (4 clean windows forgive it), then the next refine may come
+    let refined = false;
+    for (let i = 0; i < 8 && !refined; i++) { s = step(s, 30, 0); refined = s.stride === 1; }
+    assert.equal(s.stride, 1);
+});
+
+test("a refine that brings the drops back is taken back, and the next try waits twice as long", () => {
+    let s = initialPullState();
+    s = step(s, 10, 5); s = step(s, 10, 5);          // -> 2 (congested at full detail)
+    s = step(s, 20, 0); s = step(s, 20, 0);          // clean at 2 -> refine to 1
+    assert.equal(s.stride, 1);
+    s = step(s, 10, 4);                               // drops immediately back: the refine failed
+    assert.equal(s.stride, 2);                        // taken back at once, no second bad window
+    assert.equal(s.refineWait, 4);                    // and the next attempt is more patient
+    s = step(s, 20, 0); s = step(s, 20, 0); s = step(s, 20, 0);
+    assert.equal(s.stride, 2);                        // 3 clean windows: still waiting
+    s = step(s, 20, 0);
+    assert.equal(s.stride, 1);                        // the 4th earns the retry
+});
+
+test("repeatedly failing refines back off exponentially and cap, so a borderline link cannot oscillate", () => {
+    let s = initialPullState();
+    s = step(s, 10, 5); s = step(s, 10, 5);          // -> 2
+    let waits = [];
+    for (let round = 0; round < 6; round++) {
+        while (s.stride > 1) s = step(s, 20, 0);      // clean until the refine fires
+        assert.equal(s.stride, 1);
+        s = step(s, 10, 4);                           // and it always fails
+        assert.equal(s.stride, 2);
+        waits.push(s.refineWait);
+    }
+    assert.deepEqual(waits, [4, 8, 16, 32, 32, 32]);  // 2x each failure, capped at 32
+});
+
+test("the stride caps at 64 however bad it gets, and never goes below 1", () => {
+    let s = initialPullState();
+    for (let i = 0; i < 20; i++) s = step(s, 1, 50);
+    assert.equal(s.stride, 64);
+    for (let i = 0; i < 200; i++) s = step(s, 30, 0);
+    assert.equal(s.stride, 1);
+});
+
+test("a held refine is forgiven: later congestion coarsens without extra backoff punishment", () => {
+    let s = initialPullState();
+    s = step(s, 10, 5); s = step(s, 10, 5);          // -> 2
+    s = step(s, 20, 0); s = step(s, 20, 0);          // refine to 1
+    for (let i = 0; i < 4; i++) s = step(s, 20, 0);  // the refine HOLDS for 4 clean windows
+    assert.equal(s.refineWait, 2);                   // patience reset
+    s = step(s, 10, 5); s = step(s, 10, 5);          // unrelated congestion much later
+    assert.equal(s.stride, 2);
+    assert.equal(s.refineWait, 2);                   // coarsened, but not punished as a failed refine
 });

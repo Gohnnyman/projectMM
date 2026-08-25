@@ -312,10 +312,11 @@ async function init() {
     preview.setupLayout();
     // Open the preview channel only while the pane wants frames, and close it the moment it does
     // not, the device then builds nothing at all for a dismissed preview.
-    // The controller's uplink: one tiny message, [0x51][stride], on the socket it already holds.
-    preview.onSendHint((stride) => {
+    // The pull model's uplink: tiny request messages ([0x51][stride][fps] standing,
+    // [0x52][stride] one-shot) on the socket the pane already holds.
+    preview.onSendRequest((bytes) => {
         if (wsPreview && wsPreview.readyState === WebSocket.OPEN)
-            wsPreview.send(new Uint8Array([0x51, stride]));
+            wsPreview.send(Uint8Array.from(bytes));
     });
     preview.onWantsFrames((wanted) => {
         previewWanted = wanted;

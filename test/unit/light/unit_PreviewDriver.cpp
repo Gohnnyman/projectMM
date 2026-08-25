@@ -41,39 +41,29 @@ namespace {
 struct CaptureBroadcaster : mm::BinaryBroadcaster {
     int coordMsgs = 0, frameMsgs = 0;
     std::vector<uint8_t> lastCoord, lastFrame;
-    std::vector<uint8_t> cur_;     // payload accumulated across pushBinaryFrame between begin/end
-    uint32_t generation = 0;       // bump to simulate a new client connecting
-    uint32_t hint = 0;             // the coarsest stride a client requested (maxClientHint)
-    uint32_t maxClientHint() const override { return hint; }
-    bool acceptNext = true;        // false → endBinaryFrame reports a color frame not fully sent
-    bool dropCoord = false;        // true → endBinaryFrame reports a coord table not fully sent
-
-    void beginBinaryFrame(size_t /*totalLen*/) override { cur_.clear(); }
-    void pushBinaryFrame(const uint8_t* data, size_t len) override {
-        cur_.insert(cur_.end(), data, data + len);
+    bool acceptNext = true;        // false → a color-frame send is refused (slot busy)
+    bool dropCoord = false;        // true → a coord-table send is refused (slot busy)
+    // The registered inbound-message sink (the driver): tests speak the pull protocol through it.
+    ClientMessageSink* sink = nullptr;
+    void setClientMessageSink(ClientMessageSink* s) override { sink = s; }
+    // Convenience: a client in `slot` posts a standing [0x51][stride][fps] frame request.
+    void ask(uint8_t stride, uint8_t fps = 0, int slot = 0) {
+        const uint8_t m[3] = {0x51, stride, fps};
+        if (sink) sink->onClientMessage(slot, m, 3);
     }
-    bool endBinaryFrame() override {
-        if (cur_.empty()) return false;
-        const uint8_t type = cur_[0];
-        if (type == 0x03) {
-            if (dropCoord) return false;       // simulate the table not reaching the client
-            coordMsgs++; lastCoord = cur_; return true;
-        }
-        if (type == 0x02) {
-            if (!acceptNext) return false;     // simulate the color frame not reaching the client
-            frameMsgs++; lastFrame = cur_; return true;
-        }
-        return true;
+    // Convenience: a client asks for the coordinate table ([0x52][stride]).
+    void askTable(uint8_t stride = 1, int slot = 0) {
+        const uint8_t m[2] = {0x52, stride};
+        if (sink) sink->onClientMessage(slot, m, 2);
     }
-    uint32_t clientGeneration() const override { return generation; }
     // Single-threaded test transport: one producer thread, so there is no race to exclude — grant
     // unconditionally (the "may return true unconditionally" case in BinaryBroadcaster).
     bool tryAcquireSend() override { return true; }
     void releaseSend() override {}
 
-    // Resumable buffered send — the color-frame path (coord table uses begin/push/end). The mock
-    // captures it as a 0x02 frame (header ++ body). `bufferedDrains` models a slow link: the send
-    // stays "in flight" for that many bufferedSendIdle() polls before going idle (0 = instant).
+    // The ONE resumable send: every /wsp message (0x03 tables and 0x02 frames alike) arrives
+    // here, routed by its type byte. `bufferedDrains` models a slow link: the send stays "in
+    // flight" for that many bufferedSendIdle() polls before going idle (0 = instant).
     // bufferedFrames counts accepted sends; bufferedDropped counts newest-wins backpressure drops.
     int bufferedFrames = 0, bufferedDropped = 0;
     int bufferedDrains = 0;            // ticks a send stays active (set >0 to model a slow link)
@@ -82,10 +72,18 @@ struct CaptureBroadcaster : mm::BinaryBroadcaster {
     bool sendBufferedFrame(const uint8_t* header, size_t headerLen,
                            const uint8_t* body, size_t bodyLen) override {
         if (active_) { bufferedDropped++; return false; }   // newest-wins backpressure
-        if (!acceptNext) return false;
-        bufferedFrames++; frameMsgs++;
-        lastFrame.assign(header, header + headerLen);
-        lastFrame.insert(lastFrame.end(), body, body + bodyLen);
+        const uint8_t type = headerLen ? header[0] : 0;
+        if (type == 0x03) {
+            if (dropCoord) return false;       // simulate the table send refused (slot busy)
+            coordMsgs++;
+            lastCoord.assign(header, header + headerLen);
+            lastCoord.insert(lastCoord.end(), body, body + bodyLen);
+        } else {
+            if (!acceptNext) return false;     // simulate the color frame refused
+            bufferedFrames++; frameMsgs++;
+            lastFrame.assign(header, header + headerLen);
+            lastFrame.insert(lastFrame.end(), body, body + bodyLen);
+        }
         lastBody = body;
         remaining_ = bufferedDrains;       // >0 → stays "in flight" to model a slow link
         active_ = (remaining_ > 0);
@@ -104,7 +102,10 @@ struct CaptureBroadcaster : mm::BinaryBroadcaster {
     }
     int coordCount() const { return lastCoord.size() >= 5 ? static_cast<int>(u32le(lastCoord, 1)) : -1; }
     int frameCount() const { return lastFrame.size() >= 5 ? static_cast<int>(u32le(lastFrame, 1)) : -1; }
-    int coordStride() const { return lastCoord.size() >= 10 ? lastCoord[8] | (lastCoord[9] << 8) : -1; }
+    int coordStride() const { return lastCoord.size() >= 11 ? lastCoord[8] | (lastCoord[9] << 8) : -1; }
+    int coordEpoch() const { return lastCoord.size() >= 11 ? lastCoord[10] : -1; }
+    int frameEpoch() const { return lastFrame.size() >= 9 ? lastFrame[7] : -1; }
+    int frameDrops() const { return lastFrame.size() >= 9 ? lastFrame[8] : -1; }
 
 private:
     mutable bool active_ = false;     // a buffered send is in flight
@@ -144,7 +145,9 @@ struct PreviewRig {
     }
 
     void produce() {
-        preview->buildAndSendCoordTable();
+        cap.askTable();                    // the client asks for positions (the pull model)
+        preview->buildCoordTable();
+        preview->sendCoordTable();
         preview->sendFrame();
     }
 };
@@ -161,8 +164,8 @@ TEST_CASE("PreviewDriver coordinate table carries the real lights, not the box")
     REQUIRE(rig.cap.coordMsgs > 0);
     CHECK(rig.cap.coordCount() == 210);   // the shell, not 729
     CHECK(rig.cap.coordStride() == 1);    // small → exact, no downsample
-    // 0x03 = [0x03][count:u32][bx][by][bz][stride:u16] (10-byte hdr) + count*3 position bytes
-    CHECK(rig.cap.lastCoord.size() == 10u + 210u * 3u);
+    // 0x03 = [0x03][count:u32][bx][by][bz][stride:u16][epoch] (11-byte hdr) + count*3 positions
+    CHECK(rig.cap.lastCoord.size() == 11u + 210u * 3u);
 }
 
 // The device serves the resolution the CLIENT requests, it no longer measures the link itself
@@ -175,24 +178,20 @@ TEST_CASE("PreviewDriver adopts the client-requested stride, and only then") {
     uint32_t t = 1000;
     auto tickAt = [&](int n) { for (int i=0;i<n;i++){ t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); } };
 
-    tickAt(1);
-    const mm::nrOfLightsType before = rig.preview->downscaleForTest();
     const int coordsBefore = rig.cap.coordMsgs;
-
-    tickAt(50);                                       // 5 s with no request: nothing may change
-    CHECK(rig.preview->downscaleForTest() == before);
+    tickAt(50);                                       // 5 s with NO standing request: pure silence
+    CHECK(rig.cap.frameMsgs == 0);
     CHECK(rig.cap.coordMsgs == coordsBefore);
 
-    rig.cap.hint = 4;                                 // a client asks for 1/4
+    rig.cap.ask(4);                                   // a client asks for 1/4
     tickAt(1);
-    CHECK(rig.preview->downscaleForTest() == 4);
-    CHECK(rig.cap.coordMsgs == coordsBefore + 1);     // one rebuild, announcing the new lattice
+    CHECK(rig.preview->downscaleForTest() == 4);      // served exactly as requested
 
     tickAt(50);                                       // the request is STANDING, no drift back
     CHECK(rig.preview->downscaleForTest() == 4);
-    CHECK(rig.cap.coordMsgs == coordsBefore + 1);
+    CHECK(rig.cap.coordMsgs == coordsBefore);         // and no table was volunteered for it
 
-    rig.cap.hint = 1;                                 // the client asks for full detail again
+    rig.cap.ask(1);                                   // the client asks for full detail again
     tickAt(1);
     CHECK(rig.preview->downscaleForTest() == 1);
     mm::platform::setTestNowMs(0);
@@ -202,11 +201,12 @@ TEST_CASE("PreviewDriver adopts the client-requested stride, and only then") {
 TEST_CASE("PreviewDriver ignores an out-of-range stride request") {
     mm::GridLayout g; g.width = 32; g.height = 32; g.depth = 1;
     PreviewRig rig(&g);
+    rig.cap.ask(4);                                   // a real standing request first
     mm::platform::setTestNowMs(1000); rig.preview->tick();
-    const mm::nrOfLightsType before = rig.preview->downscaleForTest();
-    rig.cap.hint = 200;
+    CHECK(rig.preview->downscaleForTest() == 4);
+    rig.cap.ask(200);                                 // garbage: ignored at the store
     mm::platform::setTestNowMs(1100); rig.preview->tick();
-    CHECK(rig.preview->downscaleForTest() == before);
+    CHECK(rig.preview->downscaleForTest() == 4);      // the real request still stands
     mm::platform::setTestNowMs(0);
 }
 
@@ -218,8 +218,8 @@ TEST_CASE("PreviewDriver per-frame RGB count matches the coordinate table") {
 
     REQUIRE(rig.cap.frameMsgs > 0);
     CHECK(rig.cap.frameCount() == 210);
-    // 0x02 = [0x02][count:u32][stride:u16] (7-byte hdr) + count*3 RGB bytes
-    CHECK(rig.cap.lastFrame.size() == 7u + 210u * 3u);
+    // 0x02 = [0x02][count:u32][stride:u16][epoch][drops] (9-byte hdr) + count*3 RGB bytes
+    CHECK(rig.cap.lastFrame.size() == 9u + 210u * 3u);
 }
 
 // A small grid sends every light at its grid position (stride 1, exact).
@@ -238,17 +238,21 @@ TEST_CASE("PreviewDriver small grid sends all lights exactly") {
 // index) so the payload fits the send-buffer cap without the diagonal moiré that linear
 // stride produced on a grid whose width didn't divide the stride. The wire "stride" field
 // carries the per-axis lattice/downscale factor (color k still maps 1:1 to coord k).
-TEST_CASE("PreviewDriver downsamples a large layout on a regular spatial lattice") {
-    // 200×200 = 40000 lights, over the 16384 display cap → the lattice downsample engages. The
-    // extent (199) is ≤255/axis, so positions are sent at EXACT integer grid coordinates (no
+TEST_CASE("PreviewDriver downsamples on a regular spatial lattice when a client asks coarser") {
+    // There is NO display cap: a host build (unlimited memory) serves any layout at full detail,
+    // and coarseness exists only as a client REQUEST. Ask for 1/2 and pin the lattice geometry.
+    // The extent (199) is ≤255/axis, so positions are sent at EXACT integer grid coordinates (no
     // byte-scaling rounding) — letting the regularity check below compare true lattice positions.
     mm::GridLayout g;
     g.width = 200; g.height = 200; g.depth = 1;
     PreviewRig rig(&g);
+    rig.cap.ask(2);                               // the client requests 1/2
+    mm::platform::setTestNowMs(2000); rig.preview->tick();   // adopt the request
+    mm::platform::setTestNowMs(0);
     rig.produce();
 
-    CHECK(rig.cap.coordStride() >= 2);            // display cap forces a lattice step (the factor)
-    CHECK(rig.cap.coordCount() <= 16384);         // downsampled under the display cap
+    CHECK(rig.cap.coordStride() == 2);            // served exactly as asked
+    CHECK(rig.cap.coordCount() == 100 * 100);     // ceil(200/2) per axis
     CHECK(rig.cap.coordCount() > 0);
     CHECK(rig.cap.coordCount() == rig.cap.frameCount());  // table + RGB agree (lockstep)
 
@@ -299,32 +303,32 @@ TEST_CASE("PreviewDriver targetFps default") {
 // frames withheld until it lands — otherwise the device sends 0x02 frames the browser skips
 // (count mismatch) and the preview freezes for the whole session. Drives tick() (where the
 // coord-pending logic lives) with a broadcaster that drops every 0x03, then lets it through.
-TEST_CASE("PreviewDriver retries a dropped coordinate table, withholds frames until it lands") {
+TEST_CASE("a table request outranks frames, is retried while refused, and frames then resume") {
     mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;   // 256 lights, full res
     PreviewRig rig(&g);
-    rig.cap.dropCoord = true;                 // every coord table is lost to backpressure
     rig.cap.frameMsgs = 0;                     // ignore any frame from rig construction
-    rig.cap.generation = 1;                    // a "new client" — forces tick() to rebuild+resend
-                                               // the coord table, which dropCoord now loses
+    rig.cap.coordMsgs = 0;
+    rig.cap.ask(1);                            // a viewer wants frames...
+    rig.cap.askTable();                        // ...and asked for the positions first
+    rig.cap.dropCoord = true;                  // but every table send is refused (slot busy)
 
-    // Advance the test clock past the fps gate (interval = 1000/24 ≈ 42 ms) before each tick().
     uint32_t t = 1000;
     auto tick = [&] { t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); };
 
-    // Pump tick() several times. The rebuilt 0x03 never lands, so NO color frame may go out —
-    // a 0x02 now would carry a count the browser can't map (the freeze the guard prevents).
+    // Pump tick(). The owed 0x03 outranks frames, so while it cannot go out, NOTHING does — a
+    // 0x02 now would carry a count the asker cannot map.
     for (int i = 0; i < 5; i++) tick();
-    CHECK(rig.cap.frameMsgs == 0);            // frames withheld while the table is pending
+    CHECK(rig.cap.frameMsgs == 0);
+    CHECK(rig.cap.coordMsgs == 0);
 
-    // Link recovers: the table now lands, and frames resume — matching the same count.
-    rig.cap.dropCoord = false;
-    tick();                                    // retries the pending table (it lands)
-    tick();                                    // now a color frame may go out
-    CHECK(rig.cap.coordMsgs > 0);              // the table finally reached the client
-    CHECK(rig.cap.frameMsgs > 0);              // frames resumed
-    CHECK(rig.cap.coordCount() == rig.cap.frameCount());   // and they agree (no freeze)
+    rig.cap.dropCoord = false;                 // the slot frees
+    tick();                                    // the owed table lands
+    tick();                                    // and frames resume
+    CHECK(rig.cap.coordMsgs == 1);             // sent exactly once, not spammed
+    CHECK(rig.cap.frameMsgs > 0);
+    CHECK(rig.cap.coordCount() == rig.cap.frameCount());
 
-    mm::platform::setTestNowMs(0);             // release the clock override
+    mm::platform::setTestNowMs(0);
 }
 
 // Regression: deleting the active Layer must not leave a driver holding a
@@ -367,37 +371,33 @@ TEST_CASE("PreviewDriver tolerates the active Layer being deleted") {
     CHECK(preview->layer() == nullptr);  // cleared, not dangling
 
     // And producing a frame on the empty pipeline is a safe no-op (no crash).
-    preview->buildAndSendCoordTable();
+    preview->buildCoordTable();
     preview->sendFrame();
     CHECK(cap.frameMsgs == 0);           // nothing to send with no layer
 }
 
-// Coordinates are sent ONLY when the geometry changes or a new client connects — never
-// per-frame and never on a timer (a periodic full-table rebuild would starve the tick).
-// A new client (clientGeneration bump) re-sends immediately so a page refresh shows the
-// preview at once. Driven through tick() with a frozen clock for determinism.
-TEST_CASE("PreviewDriver sends coordinates only on change / new client, never on a timer") {
+// The pull model: a coordinate table is sent ONLY when a client asks ([0x52]) — never on a
+// timer, never per-frame, never volunteered on a connect or a geometry change (the device is a
+// dumb producer; a client whose cache misses asks). Driven through tick() with a frozen clock.
+TEST_CASE("PreviewDriver sends the coordinate table only when a client asks, never on its own") {
     mm::platform::setTestNowMs(100000);
     PreviewRig rig(new mm::GridLayout(), 3);
+    rig.cap.ask(1);                      // a standing frame request, but NO table request
+    rig.cap.coordMsgs = 0;
 
-    rig.preview->tick();                 // first loop: coords sent (count was 0)
-    int afterFirst = rig.cap.coordMsgs;
-    CHECK(afterFirst >= 1);
-
-    // Advance a FULL 3 seconds with no new client and no rebuild: tick() keeps sending
-    // color frames but must NOT re-send the coordinate table. This is the regression
-    // guard — the removed ~1 Hz timer would have re-sent ~3 times here.
-    for (int t = 1; t <= 3; t++) {
-        mm::platform::setTestNowMs(100000 + t * 1000);
+    // 3 seconds of frames: the table is never volunteered.
+    for (int t = 1; t <= 30; t++) {
+        mm::platform::setTestNowMs(100000 + t * 100);
         rig.preview->tick();
     }
-    CHECK(rig.cap.coordMsgs == afterFirst);   // no timer-driven re-send across 3s
+    CHECK(rig.cap.frameMsgs > 0);
+    CHECK(rig.cap.coordMsgs == 0);
 
-    // A new client connects (generation bumps). The next tick() re-sends coords at once.
-    rig.cap.generation++;
-    mm::platform::setTestNowMs(104200);
-    rig.preview->tick();
-    CHECK(rig.cap.coordMsgs == afterFirst + 1);   // re-sent for the fresh client
+    // The client asks: the next tick answers, exactly once.
+    rig.cap.askTable();
+    mm::platform::setTestNowMs(104100); rig.preview->tick();
+    mm::platform::setTestNowMs(104200); rig.preview->tick();
+    CHECK(rig.cap.coordMsgs == 1);
 
     mm::platform::setTestNowMs(0);       // restore the real clock for other tests
 }
@@ -437,11 +437,15 @@ TEST_CASE("PreviewDriver buffered send uses the sparse driver buffer, not the de
 // table: no placeLights. Painting a known color at a kept column and finding it at the matching
 // frame position pins the index math + the lattice order.
 TEST_CASE("PreviewDriver dense downsample packs colors by closed-form index, in lattice order") {
-    const int width = 20000;                           // > the 16384 display cap → forces a stride
+    const int width = 20000;
     mm::GridLayout g; g.width = width; g.height = 1; g.depth = 1;
     PreviewRig rig(&g);
+    rig.cap.ask(3);                                    // the client requests 1/3 (no cap forces one)
+    mm::platform::setTestNowMs(2000); rig.preview->tick();
+    mm::platform::setTestNowMs(0);
+    rig.produce();                                     // ask for + receive the table (pull model)
     const int s = rig.cap.coordStride();
-    REQUIRE(s >= 2);                                   // 20000 cols over the 16384 cap → strided in x
+    REQUIRE(s == 3);                                   // served exactly as asked
     const int kept = rig.cap.coordCount();
     REQUIRE(kept == (width + s - 1) / s);              // ceil(width/s) — closed-form count
 
@@ -452,9 +456,9 @@ TEST_CASE("PreviewDriver dense downsample packs colors by closed-form index, in 
 
     rig.preview->sendFrame();
     // 0x02 = 7-byte hdr + (r,g,b)×kept. The 2nd kept light is the 2nd triple → its G byte at 7+3+1.
-    REQUIRE(rig.cap.lastFrame.size() == 7u + static_cast<size_t>(kept) * 3u);
-    CHECK(rig.cap.lastFrame[7 + 3 + 1] == 150);        // painted column landed at the 2nd position
-    CHECK(rig.cap.lastFrame[7 + 1] == 0);              // column 0 is black (1st position)
+    REQUIRE(rig.cap.lastFrame.size() == 9u + static_cast<size_t>(kept) * 3u);
+    CHECK(rig.cap.lastFrame[9 + 3 + 1] == 150);        // painted column landed at the 2nd position
+    CHECK(rig.cap.lastFrame[9 + 1] == 0);              // column 0 is black (1st position)
 
     mm::platform::setTestMaxAllocBlock(0);
 }
@@ -464,6 +468,7 @@ TEST_CASE("PreviewDriver dense downsample packs colors by closed-form index, in 
 TEST_CASE("PreviewDriver gates the next frame on the buffered send draining (adaptive fps)") {
     mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;
     PreviewRig rig(&g);
+    rig.cap.ask(1);                    // a standing request: the pull model serves only the asked
     rig.cap.bufferedDrains = 3;        // each send stays "in flight" for 3 idle-polls (slow link)
 
     uint32_t t = 1000;
@@ -496,4 +501,30 @@ TEST_CASE("PreviewDriver cancels an in-flight buffered send on rebuild (resize s
     rig.preview->applyState();       // must cancel the in-flight send
 
     CHECK(rig.cap.bufferedCanceled == cancelsBefore + 1);   // the stale send was cancelled
+}
+
+TEST_CASE("a wedged link never blocks a tick, never closes a client, and resumes when it drains") {
+    // The step-1 contract of the lean transport: the producer can only ARM messages; every socket
+    // byte moves on the transport tick at TCP's pace. A link that stops draining therefore holds
+    // the preview (one frame parked in the slot), costs the render loop nothing, and, since the
+    // broadcaster interface has no per-client close at all, the producer CANNOT disconnect anyone.
+    mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;
+    PreviewRig rig(&g);
+    rig.cap.ask(1);                    // a standing request: the pull model serves only the asked
+    rig.cap.bufferedDrains = 1000;     // effectively wedged: stays in flight for 1000 idle-polls
+
+    const int tableAtSetup = rig.cap.coordMsgs;   // the rig's prepare already delivered the table
+    uint32_t t = 1000;
+    for (int i = 0; i < 100; i++) { t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); }
+    CHECK(rig.cap.bufferedFrames == 1);            // ONE frame parked in the slot, nothing spammed
+    CHECK(rig.cap.coordMsgs == tableAtSetup);      // and no table churn either
+    CHECK(rig.cap.bufferedDropped == 0);           // held, not spam-and-dropped
+
+    rig.cap.bufferedDrains = 0;        // the link recovers
+    while (!rig.cap.bufferedSendIdle()) {}
+    const int before = rig.cap.bufferedFrames;
+    for (int i = 0; i < 3; i++) { t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); }
+    CHECK(rig.cap.bufferedFrames > before);        // and the stream simply resumes
+
+    mm::platform::setTestNowMs(0);
 }

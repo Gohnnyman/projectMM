@@ -41,13 +41,12 @@ class Scheduler;
 /// stream through a `JsonSink` — no fixed-buffer ceiling, so a tree of any size serializes correctly.
 ///
 /// **WebSocket:** `GET /ws` with `Upgrade: websocket` does the RFC 6455 handshake (SHA-1 +
-/// base64), up to `MAX_WS_CLIENTS` (8) concurrent clients. Binary frames take two paths, both without a frame-sized
-/// buffer: a synchronous stream (`beginBinaryFrame` / `pushBinaryFrame` / `endBinaryFrame`) for a
-/// forward-only producer, and a resumable buffered send (`sendBufferedFrame`) that drains a
-/// memory-adaptive chunk per client per `tick20ms` from a stable caller-owned buffer — so a large
-/// frame is delivered over wall-clock ticks without spinning any loop, yet stays one atomic WS
-/// message. One buffered send is in flight at a time per slot (newest-wins backpressure: a new
-/// offer while one is active is dropped). Two WS channels by traffic class: `/ws` carries the
+/// base64), up to `MAX_WS_CLIENTS` (8) concurrent clients. Every binary message takes ONE path:
+/// the resumable buffered send (`sendBufferedFrame`), draining a memory-adaptive chunk per client
+/// per `tick20ms` from a stable caller-owned buffer, so a large frame is delivered over
+/// wall-clock ticks without any loop ever waiting on a socket, yet stays one atomic WS message.
+/// One buffered send is in flight at a time per slot (newest-wins backpressure: a new offer while
+/// one is active is dropped); a client is closed only on a real error or FIN, never for slowness. Two WS channels by traffic class: `/ws` carries the
 /// control plane (JSON state and patches), `/wsp` carries the lossy binary preview stream plus
 /// one client uplink, the `[0x51][stride]` resolution request. Other mutations go through REST.
 ///
@@ -127,9 +126,6 @@ public:
     /// BinaryBroadcaster — stream one binary WS frame to every connected client, pushed
     /// incrementally so no frame-sized buffer is held. Producers (PreviewDriver) push the
     /// payload bytes; this prepends the WS header. Domain-neutral: no knowledge of the content.
-    void beginBinaryFrame(size_t totalLen) override;
-    void pushBinaryFrame(const uint8_t* data, size_t len) override;
-    bool endBinaryFrame() override;
 
     /// Resumable one-frame send from a stable caller-owned buffer (no copy), drained a bounded chunk
     /// per client per tick20ms (drainPreviewSend) so a large frame stays off this module's hot path;
@@ -152,10 +148,6 @@ public:
         }
         previewSend_.active = false;
     }
-    /// Bumped on each new client on EITHER channel (see handleWebSocketUpgrade). PreviewDriver
-    /// watches it to re-stream its coordinate table the moment a fresh viewer connects, so a
-    /// refresh, and a preview pane opened late in a session, shows positions immediately.
-    uint32_t clientGeneration() const override { return wsClientGeneration_; }
 
     /// Is anyone on the PREVIEW channel? The binary path fans out to `/wsp`, so with no client
     /// there the producer should not build a frame at all, closing the preview pane stops the
@@ -171,21 +163,16 @@ public:
         return n;
     }
 
-    /// Coarsest (largest) hint across live preview clients, see BinaryBroadcaster::maxClientHint.
-    uint32_t maxClientHint() const override {
-        uint32_t m = 0;
-        for (int i = 0; i < MAX_PREVIEW_CLIENTS; i++)
-            if (previewClients_[i].valid() && previewHints_[i] > m) m = previewHints_[i];
-        return m;
-    }
+    /// Register the producer that receives this channel's inbound client messages (opaque bytes).
+    void setClientMessageSink(ClientMessageSink* sink) override { clientSink_ = sink; }
 
-    /// Parse one client→server frame from the preview channel: a masked WS frame whose payload is
-    /// [0x51][hint u8]. Returns the payload byte (0..255) or -1 when the buffer holds no such
-    /// message; the caller validates the range (only 1..64 is a servable stride). `consumed`, when
-    /// given, receives the whole frame's length (header + mask + payload) so a caller can walk a
-    /// read that coalesced several frames, or 0 when nothing could be parsed.
+    /// Parse ONE masked client data frame (text/binary, payload up to 8 bytes) from a /wsp read,
+    /// unmasking the payload into `out`. Returns the payload length (>=0) or -1 when the buffer
+    /// holds no complete parseable frame; `consumed` receives the whole frame's byte length so a
+    /// caller can walk a read that coalesced several frames (0 when nothing was consumed). The
+    /// payload's MEANING belongs to the registered sink; this only does RFC 6455 framing.
     /// Pure and static so the byte handling is unit-testable without a socket.
-    static int parsePreviewUplink(const uint8_t* buf, int n, int* consumed = nullptr);
+    static int parsePreviewUplink(const uint8_t* buf, int n, uint8_t out[8], int* consumed);
 
     // The cross-core sender lease (see BinaryBroadcaster). Guards previewSend_ + the wsClients_ socket
     // writes against this module's own core-0 drain / state push while an offloaded PreviewDriver
@@ -299,7 +286,6 @@ private:
     // is just an fd + a small cursor, so the array stays tiny.
     static constexpr int MAX_WS_CLIENTS = 8;
     platform::TcpConnection wsClients_[MAX_WS_CLIENTS];
-    uint32_t wsClientGeneration_ = 0;   // ++ on each new WS client; see clientGeneration()
 
     // `/wsp`, the SECOND channel, for lossy binary streams (the preview). Its own connections, so a
     // 10 KB preview frame can never delay a state push: they are separate TCP connections, which is
@@ -316,25 +302,7 @@ private:
     static constexpr int MAX_PREVIEW_CLIENTS = 4;
     platform::TcpConnection previewClients_[MAX_PREVIEW_CLIENTS];
 
-    // begin/push/endBinaryFrame stream a binary WS frame straight to every client with NO
-    // frame-sized buffer: the header goes out on begin, each pushed slice is fanned to all
-    // clients, and end reports whether every client got the whole frame. A producer (PreviewDriver
-    // streaming the producer buffer / placeLights) holds no copy. wsFrameAllSent_ tracks the
-    // current frame's all-sent result across the push calls.
-    bool wsFrameAllSent_ = true;
-    // Max TOTAL WouldBlock spins for one span in sendAllOrClose before a stuck client is closed.
-    // Used by the begin/push/end stream (coord table + downsampled color frame); the full-res
-    // color frame goes through the resumable sendBufferedFrame instead, which never spins.
-    // Stall budget for one send span, in WALL-CLOCK ms, long enough for TCP to actually drain a
-    // full buffer (several round-trips), short enough to bound the tick. An iteration count here
-    // burned out in ~100 µs on a fast chip and closed healthy viewers (see sendAllOrClose).
-    static constexpr uint32_t kDirectSendBudgetMs = 150;
-    // Per-message skip mask for the preview fan-out: a client whose buffer was full at the header
-    // probe takes no part in this message at all (a clean whole-frame drop on the lossy channel).
-    bool previewFrameSkip_[MAX_PREVIEW_CLIENTS] = {};
-    // Last hint each preview client posted (0 = none yet). Cleared when the slot turns over, so a
-    // new client never inherits its predecessor's request.
-    uint8_t previewHints_[MAX_PREVIEW_CLIENTS] = {};
+    ClientMessageSink* clientSink_ = nullptr;   // the producer's inbound-message sink (PreviewDriver)
 
     // Resumable full-frame send (BinaryBroadcaster::sendBufferedFrame). One WS message = a copied
     // header + a pointer into the caller's STABLE body buffer (the PreviewDriver producer buffer),
@@ -344,7 +312,9 @@ private:
     // the in-flight one kept). The caller calls cancelBufferedSend() before freeing/reallocating the
     // body (a geometry rebuild), so a cursor never reads freed memory.
     struct PreviewSend {
-        uint8_t hdr[16] = {};                 // WS + app header, copied (caller's may be a stack local)
+        // 24, not 16: a payload over 64 KB takes the 10-byte WS length form, and the preview app
+        // headers add up to 11 more. 16 silently refused every uncapped-size frame.
+        uint8_t hdr[24] = {};                 // WS + app header, copied (caller's may be a stack local)
         size_t hdrLen = 0;
         const uint8_t* body = nullptr;        // the frame body — see ownsBody for lifetime
         size_t bodyLen = 0;
@@ -563,9 +533,6 @@ private:
     void pushStateToWebSockets();
     void pushWledStateToWebSockets();   // WLED-app {state,info} frame on /ws (see impl)
     static bool sendWsTextFrame(platform::TcpConnection& conn, const char* data, int len);
-    // Write the whole span to one client via repeated non-blocking writeSome; close it + return
-    // false if it can't all go (a stuck/too-slow client). The push primitive behind begin/push/end.
-    static bool sendAllOrClose(platform::TcpConnection& ws, const uint8_t* data, size_t len);
 };
 
 } // namespace mm

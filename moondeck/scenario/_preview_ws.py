@@ -6,7 +6,7 @@ uv runs, with no third-party deps. Sibling-private helper like _observed.py.
 The device serves TWO WebSocket paths: `/ws` (control plane, JSON state) and `/wsp`
 (the lossy preview channel, binary only). This reader takes `/wsp`, so it sees
 PreviewDriver binary frames — 0x03 coordinate tables and 0x02 RGB frames
-(`[0x02][count u32 LE][stride u16 LE][rgb × count]`, a 7-byte header, see
+(`[0x02][count u32 LE][stride u16 LE][epoch u8][drops u8][rgb × count]`, a 9-byte header, see
 src/light/drivers/PreviewDriver.h). This reader skips everything except 0x02.
 
 Two simplifications the firmware guarantees (HttpServerModule.cpp):
@@ -50,6 +50,13 @@ class PreviewSocket:
                 + head.split(b"\r\n", 1)[0].decode(errors="replace"))
         # Bytes after the handshake headers are already the first frame(s).
         self._buf = rest
+        # The pull model: a client that asks for nothing receives nothing. Post the standing
+        # frame request ([0x51][stride][fps]) as a masked client frame (RFC 6455 requires it).
+        mask = os.urandom(4)
+        payload = bytes([0x51, 1, 25])
+        frame = bytes([0x82, 0x80 | len(payload)]) + mask + bytes(
+            b ^ mask[i % 4] for i, b in enumerate(payload))
+        self.sock.sendall(frame)
         # Status 101 is proof enough; skipping the Sec-WebSocket-Accept check
         # saves the SHA-1 dance against our own firmware.
 
@@ -100,7 +107,7 @@ def wait_for_solid(host: str, rgb, tolerance: int = 0, min_match_pct: float = 10
             if opcode != 0x2 or not payload or payload[0] != 0x02:
                 continue  # text/state frame or 0x03 coordinate table
             count = payload[1] | (payload[2] << 8) | (payload[3] << 16) | (payload[4] << 24)
-            triples = payload[7:7 + count * 3]
+            triples = payload[9:9 + count * 3]
             if count == 0 or len(triples) < count * 3:
                 continue
             matched = 0

@@ -144,7 +144,7 @@ Detail: [technical](moxygen/HueDriver.md)
 
 Streams a true-shape 3D preview to the web UI as a **point list**, only the real lights at their real positions, so a sphere/ring/arbitrary map shows in its true shape. The one boot-wired driver.
 
-It streams on its **own WebSocket channel** (`/wsp`), so a large frame never delays the control plane, and only while the pane is visible, dismissing the preview, or leaving the tab, stops the work at the source. Your browser measures the rate that actually arrives and asks the device for the detail level that reaches `targetFps`, so a fast connection previews finer than a slow one. See [§ Preview, details](#preview-details).
+It streams on its **own WebSocket channel** (`/wsp`), so a large frame never delays the control plane, and only while a viewer asks, dismissing the preview or leaving the tab stops the work at the source entirely. The device reports dropped frames in each frame it sends; your browser trades detail for rate on that signal, so a fast connection previews finer than a slow one. See [§ Preview — details](#preview-details).
 
 - `targetFps`, the frame rate the preview aims for (default 24, 1–60). The device never sends faster; when the connection cannot keep up, the browser trades detail to get closer: **lower it for full detail at a slower rate, raise it for a smoother but coarser preview**.
 
@@ -177,7 +177,7 @@ Detail: [technical](moxygen/NdiDriver.md)
 
 **Close the preview when you do not need it.** The device renders preview frames only while the preview pane is open. Dismissing it stops that work entirely, which frees the device for rendering and keeps the UI responsive on a large layout, worth doing while you are editing effects on a big wall.
 
-**The preview thins itself out.** On a very large layout it shows a regular sample of the lights rather than all, the status reads `preview 1/9` and so on. Your browser measures the frame rate that actually arrives and asks the device for coarser detail when it falls short of `targetFps`, finer when there is headroom, and a step to coarser is kept only when it actually raises the rate, so a slow *effect* never costs preview detail. A fast connection therefore previews in more detail than a weak one, with nothing to configure.
+**The preview thins itself out.** When the connection cannot carry full detail, the preview shows a regular sample of the lights rather than all, the status reads `preview 1/4` and so on. The device reports every frame it had to drop, and your browser reacts: persistent drops trade detail for rate, drop-free stretches earn the detail back one step at a time, and a step that brings the drops back is taken back with growing patience, so a borderline connection settles instead of flickering between sizes. A slow *effect* drops nothing, so it never costs preview detail. A fast connection previews everything, with nothing to configure.
 
 **If the preview looks choppy**, it is the connection rather than the device: frames are dropped rather than queued, so the wall itself is never held up by the preview. Lower `targetFps` if you would rather keep full detail at a slower rate.
 

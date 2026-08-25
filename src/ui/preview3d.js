@@ -8,7 +8,7 @@
 // app only through the DOM (#preview canvas, --bg-0 theme color) and
 // localStorage (mm_cam). No app.js state crosses the boundary.
 
-import { nextStrideState, initialStrideState } from "./preview-adapt.js";
+import { nextPullState, initialPullState } from "./preview-adapt.js";
 
 let gl = null;
 let glProgram = null;
@@ -432,11 +432,11 @@ function setupLayout() {
 }
 
 // True-shape preview: two binary message types on the preview WebSocket.
-//   0x03 coordinate table (once per layout/LUT rebuild + ~1 Hz keepalive):
-//        [0x03][count:u32][bx:u8][by:u8][bz:u8][stride:u16][(x,y,z):u8×3 × count]
+//   0x03 coordinate table (answered on a [0x52] request; cached per (epoch, stride)):
+//        [0x03][count:u32][bx:u8][by:u8][bz:u8][stride:u16][epoch:u8][(x,y,z):u8×3 × count]
 //        Stores the real lights' normalised positions in previewCoords_ (the
 //        geometry); per-frame 0x02 messages then just recolor those points.
-//   0x02 per-frame channels: [0x02][count:u32][stride:u16][(r,g,b) × count]
+//   0x02 per-frame channels: [0x02][count:u32][stride:u16][epoch:u8][drops:u8][(r,g,b) × count]
 //        Color for light i sits at position previewCoords_[i].
 // count is u32 so a >65535-light panel (HUB75 walls) isn't capped by the wire format.
 // Light index i in the 0x02 stream matches coordinate-table entry i (both are
@@ -449,10 +449,10 @@ function updatePreviewStatus() {
     if (!el) return;
     const parts = [];
     // Name the RIGHT cause: a stride we asked for is the link adapting; a stride above our own
-    // request is the device's fixed point cap (a grid larger than the preview will ever draw) -
-    // targetFps cannot make that finer, so calling it "link limited" sent the wrong message.
+    // request was imposed elsewhere (the device's memory cap, or a coarser co-viewer's request),
+    // and targetFps cannot make that finer.
     if (previewStride_ > 1)
-        parts.push(`1/${previewStride_}` + (previewStride_ > adaptState_.stride ? " · point cap" : " · link limited"));
+        parts.push(`1/${previewStride_}` + (previewStride_ > adaptState_.stride ? " · capped" : " · link limited"));
     if (effectiveFps_ > 0)  parts.push(`${Math.round(effectiveFps_)} fps`);      // adaptive rate
     if (parts.length) {
         el.textContent = "preview " + parts.join(" · ");
@@ -473,62 +473,86 @@ function renderPreviewBinary(buf) {
 // Parse + cache the coordinate table: normalised (x,y,z) per point, centred on
 // the bounding box so the cloud sits around the origin like the old grid did.
 function parsePreviewCoords(view, buf) {
-    // Header: [0x03][count:u32][bx][by][bz][stride:u16] = 10 bytes.
-    if (buf.byteLength < 10) return;
+    // Header: [0x03][count:u32][bx][by][bz][stride:u16][epoch] = 11 bytes.
+    if (buf.byteLength < 11) return;
     const count = view.getUint32(1, true);
     const bx = view.getUint8(5), by = view.getUint8(6), bz = view.getUint8(7);
     // Validate the full payload BEFORE mutating any parser state — a truncated buffer must leave
-    // previewStride_ / the status line untouched (else they'd describe coords we never stored).
-    if (buf.byteLength < 10 + count * 3) return;
-    // A geometry change (the bounding box moved) is a NEW canvas: verdicts measured on the old one
-    // (a coarse stride earned on a big wall, a remembered failed stride) do not apply, and keeping
-    // them leaves a small grid needlessly coarse for the better part of a minute while the bands
-    // walk back. Restart the controller and tell the device, exactly as a fresh connect does.
-    // A stride-only rebuild keeps the same box and resets nothing.
-    if (lastBox_ && (lastBox_.bx !== bx || lastBox_.by !== by || lastBox_.bz !== bz)) {
-        adaptState_ = initialStrideState();
+    // the cache / status line untouched (else they'd describe coords we never stored).
+    if (buf.byteLength < 11 + count * 3) return;
+    const stride = view.getUint16(8, true) || 1;
+    const epoch = view.getUint8(10);
+    // A geometry change (a new epoch) is a NEW canvas: verdicts measured on the old one do not
+    // apply. Restart the controller and re-announce, exactly as a fresh connect does. A
+    // stride-only table keeps the epoch and resets nothing.
+    if (lastEpoch_ !== null && lastEpoch_ !== epoch) {
+        adaptState_ = initialPullState();
         adaptFrames_ = 0;
-        if (sendHint_) sendHint_(adaptState_.stride);
+        announceRequest();
     }
-    lastBox_ = { bx, by, bz };
-    previewStride_ = view.getUint16(8, true) || 1;   // = device's adaptive downscale factor
-    updatePreviewStatus();
-    const pos = new Uint8Array(buf, 10);
+    lastEpoch_ = epoch;
+    const pos = new Uint8Array(buf, 11);
     const maxDim = Math.max(1, bx, by, bz);
-    previewMaxDim_ = maxDim;
-    previewCoords_ = new Float32Array(count * 3);
+    const coords = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-        previewCoords_[i * 3 + 0] = (pos[i * 3 + 0] / maxDim) - 0.5 * bx / maxDim;
-        previewCoords_[i * 3 + 1] = (pos[i * 3 + 1] / maxDim) - 0.5 * by / maxDim;
-        previewCoords_[i * 3 + 2] = (pos[i * 3 + 2] / maxDim) - 0.5 * bz / maxDim;
+        coords[i * 3 + 0] = (pos[i * 3 + 0] / maxDim) - 0.5 * bx / maxDim;
+        coords[i * 3 + 1] = (pos[i * 3 + 1] / maxDim) - 0.5 * by / maxDim;
+        coords[i * 3 + 2] = (pos[i * 3 + 2] / maxDim) - 0.5 * bz / maxDim;
     }
-    previewCoordCount_ = count;
-    previewBox_ = { x: bx, y: by, z: bz };
-    // Draw the grid layout NOW, off (placeholder rings), so a fresh page / UI refresh shows the
-    // geometry the instant the table arrives — not only once the first color frame happens to land
-    // (which never comes if the scene is paused/idle). Color frames then light it.
+    // CACHE the table per (epoch, stride): a stride change back to a cached rung costs zero table
+    // traffic, the lean channel's core idea. Tables from dead epochs are dropped (the device
+    // renumbered the world); browser memory for one epoch's whole ladder is a few hundred KB.
+    for (const k of tableCache_.keys()) if (!k.startsWith(epoch + ":")) tableCache_.delete(k);
+    tableCache_.set(epoch + ":" + stride, { coords, count, maxDim, bx, by, bz });
+    activateTable(epoch, stride);
+    // Draw the geometry NOW, dark, so a fresh page shows the layout the instant the table arrives,
+    // not only once the first color frame lands. Color frames then light it.
     drawLights(null);
+}
+
+// Make a cached table the rendering one. Returns false when the cache misses (the caller then
+// asks the device for it: the pull model).
+function activateTable(epoch, stride) {
+    const t = tableCache_.get(epoch + ":" + stride);
+    if (!t) return false;
+    previewCoords_ = t.coords;
+    previewCoordCount_ = t.count;
+    previewMaxDim_ = t.maxDim;
+    previewBox_ = { x: t.bx, y: t.by, z: t.bz };
+    previewStride_ = stride;
+    updatePreviewStatus();
+    return true;
+}
+
+// Ask the device for the coordinate table ([0x52][stride]), at most once per half second: the
+// answer is paced by the drain, and re-asking faster only queues duplicate work.
+function requestTable(stride) {
+    const now = performance.now();
+    if (now - lastTableReq_ < 500) return;
+    lastTableReq_ = now;
+    if (sendRequest_) sendRequest_([0x52, stride]);
 }
 
 function renderPreviewFrame(view, buf) {
     adaptFrames_++;   // the controller's measurement: frames that actually arrived
     if (!gl) initWebGL();
     if (!gl) return;
-    // Hold frames until positions have arrived (the device sends the table on a geometry
-    // rebuild and when a new client connects, so a fresh client gets it on connect).
-    if (!previewCoords_ || previewCoordCount_ === 0) return;
-    // Header: [0x02][count:u32][stride:u16] = 7 bytes.
-    if (buf.byteLength < 7) return;
+    // Header: [0x02][count:u32][stride:u16][epoch][drops] = 9 bytes.
+    if (buf.byteLength < 9) return;
     const count = view.getUint32(1, true);
     const stride = view.getUint16(5, true) || 1;
-    if (buf.byteLength < 7 + count * 3) return;
-    const rgb = new Uint8Array(buf, 7);
-    // RGB[i] colors the light at previewCoords_[i]. The color frame and the coordinate table
-    // MUST describe the same light set — if their count OR stride (downscale factor) disagree, a
-    // geometry rebuild (a resize, or the device's adaptive downscale changing the lattice) is
-    // mid-flight: the colors would land on the wrong positions (a visibly scrambled frame).
-    // Skip such a frame; the matching coord table arrives within ~1 frame and they realign.
-    if (count !== previewCoordCount_ || stride !== previewStride_) return;
+    const epoch = view.getUint8(7);
+    windowDrops_ += view.getUint8(8);   // sum the device's drop reports over the controller window
+    if (buf.byteLength < 9 + count * 3) return;
+    // (epoch, stride) is the table-cache key. A hit renders immediately (a stride flip costs zero
+    // table traffic); a miss asks the device for the positions and skips this frame, the pull
+    // model's whole geometry story.
+    if ((epoch !== lastEpoch_ || stride !== previewStride_) && !activateTable(epoch, stride)) {
+        requestTable(stride);
+        return;
+    }
+    if (count !== previewCoordCount_) return;   // mid-rebuild mismatch: the next table realigns
+    const rgb = new Uint8Array(buf, 9);
     drawLights(rgb);
     measureFrameRate();
 }
@@ -880,33 +904,48 @@ let wantsFrames_ = null;
 // --- client-side adaptation (see preview-adapt.js for the controller itself) -------------------
 // The loop runs only while the preview socket is open (app.js calls adaptStart/adaptStop with the
 // socket lifecycle), so a hidden or dismissed pane costs nothing and sends nothing.
-let adaptState_ = initialStrideState();
-let lastBox_ = null;   // bounding box of the last coord table; a change means new geometry
+let adaptState_ = initialPullState();
+let lastEpoch_ = null;          // geometry epoch of the active table; a change means a new canvas
+const tableCache_ = new Map();  // "epoch:stride" -> {coords, count, maxDim, bx, by, bz}
+let lastTableReq_ = 0;          // requestTable throttle stamp
+let windowDrops_ = 0;           // drops reported by the device over the current window
+let lastFrameAt_ = 0;           // self-repair: silence past ~2 s re-announces the standing request
 let adaptFrames_ = 0;
 let adaptTimer_ = null;
 let adaptTargetFps_ = 24;   // fed from the device state by app.js (the user's targetFps control)
-let sendHint_ = null;       // installed by app.js: (stride) => send [0x51, stride] up the socket
+let sendRequest_ = null;    // installed by app.js: (bytes) => send them up the /wsp socket
+
+// The standing frame request, the pull model's one recurring message:
+// [0x51][stride][fps]. Sent on connect, on every controller decision, and as self-repair.
+function announceRequest() {
+    if (sendRequest_) sendRequest_([0x51, adaptState_.stride, adaptTargetFps_ & 0xff]);
+}
 
 function adaptTick() {
-    const achieved = adaptFrames_ / 2;   // the window is 2 s
+    // SELF-REPAIR: a device reboot loses every standing request, and the client cannot tell a
+    // silent link from a forgotten one, so silence past one whole window re-announces. One tiny
+    // message; a healthy stream renders it a no-op.
+    if (adaptFrames_ === 0 && performance.now() - lastFrameAt_ > 2000) announceRequest();
+    else if (adaptFrames_ > 0) lastFrameAt_ = performance.now();
+
+    const delivered = adaptFrames_;
+    const dropped = windowDrops_;
     adaptFrames_ = 0;
-    const next = nextStrideState(adaptState_, achieved, adaptTargetFps_);
-    if (next.request && sendHint_) sendHint_(next.stride);
-    const { request, ...rest } = next;   // keep EVERY state field; only `request` is transient
-    adaptState_ = rest;
+    windowDrops_ = 0;
+    adaptState_ = nextPullState(adaptState_, delivered, dropped);
+    if (adaptState_.request) announceRequest();
 }
 
 export const preview = {
     init: initWebGL,
     /// The adaptation loop follows the preview socket's lifecycle (app.js owns the socket).
     adaptStart() {
-        adaptState_ = initialStrideState();
+        adaptState_ = initialPullState();
         adaptFrames_ = 0;
-        // ANNOUNCE the fresh request immediately: the device keeps the last stride it adopted, so
-        // without this a reconnect (a hide/return, a WiFi blip) leaves it serving whatever the
-        // DYING connection's throttled measurements ratcheted to, bench: stuck at 1/64 on a
-        // healthy link, with this fresh client believing it was at 1 and so requesting nothing.
-        if (sendHint_) sendHint_(adaptState_.stride);
+        lastFrameAt_ = performance.now();
+        // ANNOUNCE the standing request immediately: under the pull model an unannounced client
+        // receives NOTHING, the device serves only what is asked.
+        announceRequest();
         if (!adaptTimer_) adaptTimer_ = setInterval(adaptTick, 2000);
     },
     adaptStop() {
@@ -916,12 +955,12 @@ export const preview = {
     // hold, a remembered failed stride), so the controller restarts clean and re-announces.
     setTargetFps(v) {
         if (!(v > 0) || v === adaptTargetFps_) return;
-        adaptTargetFps_ = v;
-        adaptState_ = initialStrideState();
+        adaptTargetFps_ = Math.min(25, v);
+        adaptState_ = initialPullState();
         adaptFrames_ = 0;   // the frames counted so far belong to the OLD target's window
-        if (sendHint_) sendHint_(adaptState_.stride);
+        announceRequest();
     },
-    onSendHint(cb) { sendHint_ = cb; },
+    onSendRequest(cb) { sendRequest_ = cb; },
     /// Install the frames-wanted callback and report the current state immediately, so the caller
     /// can open or close the preview socket without waiting for the next visibility change.
     onWantsFrames(cb) { wantsFrames_ = cb; if (cb) cb(!document.querySelector(".preview-hidden")); },

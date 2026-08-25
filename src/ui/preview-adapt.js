@@ -1,104 +1,71 @@
-// The preview's adaptation controller, CLIENT-side, deliberately.
+// The preview's resolution controller: a pure function over 2-second windows, unit-tested in
+// test/js/preview-adapt.test.mjs. It reads ONE signal: the device's own drops counter (each 0x02
+// frame reports how many frames were discarded at the source since the last delivered one). Drops
+// are ground truth for "the link cannot carry frames this big at this rate", so there is nothing
+// to probe and nothing to guess:
 //
-// The device used to guess link quality from how fast its socket drained, and cycled: the sender
-// can only see its own buffer. The RECEIVER measures the true end-to-end rate (frames actually
-// arriving, its own render cost included) and requests the stride it wants, the HLS/DASH shape,
-// where the receiver picks the quality and the server serves what is asked.
+//   COARSEN while drops persist. One window with drops is a hiccup and changes nothing; two in a
+//   row (or a window where more frames were dropped than delivered) halves the detail.
+//   REFINE after enough clean windows, one rung at a time. A refine that brings the drops back is
+//   taken back, and the next attempt waits twice as long (exponential backoff, capped), the
+//   abandon-fast retry-slowly rule ABR players use against oscillation.
 //
-// Pure module, no DOM: preview3d.js drives it with measurements; test/js pins it in node.
+// Everything else follows for free. A renderer-limited device (a heavy effect at 6 fps) delivers
+// every frame it makes: zero drops, full detail, correctly held. A dead link delivers nothing and
+// drops nothing: the stride simply stands. targetFps never enters this function; it is the rate
+// half of the standing request, and rate and size meet only at the device's send slot.
 
-/// One controller evaluation, run per measurement window (~2 s).
-///
-/// `st` is the controller state and is not mutated: { stride, failedStride, goodWindows,
-/// badWindows }. Returns the next state plus `request: true` when the new stride should be sent.
-///
-/// Bands (achieved fps vs the user's targetFps):
-///   < 20%            → COARSER immediately, genuine starvation, waiting helps nobody
-///   < 60% twice      → COARSER (double, cap 64), remembering the stride that failed. TWO windows,
-///                      so a single hiccup (a GC pause, a timer stall) never costs a visible
-///                      rebuild, it has to persist 4 s to count
-///   ≥ 80% for 3 wins → FINER (halve), unless halving lands on the remembered failure, which is
-///                      skipped ONCE and then cleared, so a temporary slowdown is forgotten while
-///                      a persistent limit costs one retry per two clean runs instead of cycling.
-///                      80, not higher: the sender's own fps-slot quantisation and ordinary jitter
-///                      keep even a perfect link below ~95%, and a bar the link can never clear
-///                      strands the preview coarse until a refresh (bench-observed on the desktop)
-///   otherwise        → HOLD, resetting both runs, the dead band that makes settling stable
-export function nextStrideState(st, achievedFps, targetFps) {
-    const s = { stride: st.stride, failedStride: st.failedStride, goodWindows: st.goodWindows,
-                badWindows: st.badWindows || 0, coarsenFrom: st.coarsenFrom || 0,
-                coarsenFps: st.coarsenFps || 0, srcLimitFps: st.srcLimitFps || 0, request: false };
-    if (!(targetFps > 0)) return s;
-
-    // COARSENING MUST PAY. Halving the points should raise the rate; when it does not, the
-    // bottleneck is upstream of the link, the device's own render loop (a heavy effect at 6 fps
-    // sends 6 fps at ANY stride). Ratcheting coarser then destroys detail for nothing, all the way
-    // to 1/64. So the window after a coarsen checks the receipt: no meaningful improvement →
-    // revert, and hold at that detail until the rate genuinely changes.
-    if (s.coarsenFrom) {
-        // A payoff must be a real gain: >=25% MORE than before, and strictly above zero.
-        // Without the second half, a dead link (0 fps before and after) satisfies 0 >= 0 and
-        // reads as paid, so the stride ratchets to 64 while nothing arrives at all.
-        const paid = achievedFps > 0 && achievedFps * 4 >= s.coarsenFps * 5;
-        if (!paid) {
-            // Remember the ceiling this source actually delivers. A dead link measures 0, which is
-            // falsy, so store -1 there: the hold below must still engage, or the controller flaps
-            // coarsen/revert every window and re-requests forever on a link carrying nothing.
-            s.srcLimitFps = achievedFps > 0 ? achievedFps : -1;
-            s.stride = s.coarsenFrom;         // give the detail back, it cost nothing to keep
-            s.failedStride = 0;
-            s.request = true;
-        }
-        s.coarsenFrom = 0; s.coarsenFps = 0;
-        s.goodWindows = 0; s.badWindows = 0;
-        return s;
-    }
-    // While source-limited, a below-target rate is EXPECTED, only a real deterioration (well
-    // under the source's own ceiling) or a recovery to target re-arms the bands.
-    if (s.srcLimitFps) {
-        const ceiling = s.srcLimitFps > 0 ? s.srcLimitFps : 0;   // -1 is the "delivers nothing" marker
-        if (achievedFps * 5 >= targetFps * 4) s.srcLimitFps = 0;        // source recovered
-        else if (achievedFps * 2 >= ceiling && achievedFps <= ceiling * 2)
-            return s;                                                    // steady at its ceiling: hold
-        else s.srcLimitFps = 0;               // left the band either way: re-arm the bands
-    }
-
-    const coarsen = () => {
-        if (s.stride < 64) {
-            s.coarsenFrom = s.stride;         // next window audits whether this step paid
-            s.coarsenFps = achievedFps;
-            s.failedStride = s.stride;
-            s.stride = Math.min(s.stride * 2, 64);
-            s.request = true;
-        }
-        s.badWindows = 0;
+export function initialPullState() {
+    return {
+        stride: 1,        // the detail this client requests (1 = full, halved per coarsen, cap 64)
+        dropRun: 0,       // consecutive windows that saw drops
+        cleanRun: 0,      // consecutive windows without drops
+        refineWait: 2,    // clean windows required before the next refine try (backs off 2x)
+        sinceRefine: -1,  // windows since the last refine (-1 = none pending judgment)
+        request: false,   // this transition wants a new standing request announced
     };
-    if (achievedFps * 5 < targetFps * 3) {
-        s.goodWindows = 0;
-        s.badWindows++;
-        if (achievedFps * 5 < targetFps || s.badWindows >= 2) coarsen();
-    } else if (achievedFps * 5 >= targetFps * 4) {
-        s.badWindows = 0;
-        s.goodWindows++;
-        if (s.goodWindows >= 3) {
-            s.goodWindows = 0;
-            if (s.stride > 1) {
-                const finer = s.stride >> 1;
-                if (finer === s.failedStride) s.failedStride = 0;   // skip once, then forget
-                else { s.stride = finer; s.request = true; }
-            }
-        }
-    } else {
-        s.goodWindows = 0;
-        s.badWindows = 0;
-    }
-    return s;
 }
 
-/// The fresh state a (re)connect starts from. Stride 1 = full detail: the first windows then
-/// coarsen to what the link truly carries, rather than starting coarse on a link that never
-/// needed it.
-export function initialStrideState() {
-    return { stride: 1, failedStride: 0, goodWindows: 0, badWindows: 0,
-             coarsenFrom: 0, coarsenFps: 0, srcLimitFps: 0 };
+export function nextPullState(st, delivered, dropped) {
+    const s = { ...st, request: false };
+    // A silent window (nothing delivered, nothing dropped) carries no evidence in either
+    // direction: a dead link, a hibernating tab, a paused effect. Verdicts wait for data.
+    if (delivered === 0 && dropped === 0) return s;
+    // Grade the window by drop RATIO, not presence: a couple of skipped slots per window is the
+    // sender's normal pacing jitter (a frame occasionally not drained by its slot), not
+    // congestion, and coarsening on it made a healthy WiFi link wander (bench). HEAVY = more
+    // dropped than delivered; DIRTY = a quarter or more; anything less is trace.
+    const heavy = dropped >= Math.max(1, delivered);
+    const dirty = dropped * 4 >= Math.max(1, delivered);
+    if (dirty) {
+        s.cleanRun = 0;
+        s.dropRun++;
+        // A refine done within the last two windows is what brought the drops back: take it back
+        // and make the next attempt wait twice as long.
+        const failedRefine = s.sinceRefine >= 0 && s.sinceRefine < 2;
+        if (failedRefine || s.dropRun >= 2 || heavy) {
+            if (s.stride < 64) { s.stride *= 2; s.request = true; }
+            if (failedRefine) s.refineWait = Math.min(32, s.refineWait * 2);
+            s.dropRun = 0;
+            s.sinceRefine = -1;
+        }
+    } else if (dropped > 0) {
+        // Trace drops: pressure exists but not enough to act on. Hold the refine clock (walking
+        // finer INTO pressure would fail) without counting toward a coarsen.
+        s.cleanRun = 0;
+        s.dropRun = 0;
+        if (s.sinceRefine >= 0) s.sinceRefine++;
+    } else {
+        s.dropRun = 0;
+        s.cleanRun++;
+        if (s.sinceRefine >= 0) s.sinceRefine++;
+        if (s.sinceRefine >= 4) { s.sinceRefine = -1; s.refineWait = 2; }  // the refine held: forgiven
+        if (s.stride > 1 && s.cleanRun >= s.refineWait && s.sinceRefine < 0) {
+            s.stride >>= 1;
+            s.cleanRun = 0;
+            s.sinceRefine = 0;
+            s.request = true;
+        }
+    }
+    return s;
 }
