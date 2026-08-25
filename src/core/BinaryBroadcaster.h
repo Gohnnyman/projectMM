@@ -11,20 +11,6 @@ namespace mm {
 // producer depends only on "something I can send bytes to" — not on the HTTP
 // server's full surface. Domain-neutral: the bytes' meaning is the caller's.
 struct BinaryBroadcaster {
-    // Stream ONE binary WS frame whose payload is PUSHED incrementally, so the caller never
-    // holds the whole frame in a buffer. Begin/push/end trio, fitting a forward-only producer
-    // like Layouts::placeLights (push from inside its callback):
-    //   beginBinaryFrame(totalLen)  — build + send the WS header (totalLen = exact payload size)
-    //   pushBinaryFrame(data, len)  — send the next payload slice (call as many times as needed)
-    //   endBinaryFrame()            — finish; returns true if every client got the whole frame
-    // The implementation streams straight to the clients with no frame-sized staging buffer, so a
-    // large frame (e.g. PreviewDriver's coordinate table, tens of KB) goes out on a memory-tight
-    // board where a contiguous staging block won't fit. The caller MUST push exactly `totalLen`
-    // bytes between begin and end. Only one frame may be open at a time.
-    virtual void beginBinaryFrame(size_t totalLen) = 0;
-    virtual void pushBinaryFrame(const uint8_t* data, size_t len) = 0;
-    virtual bool endBinaryFrame() = 0;
-
     // RESUMABLE one-frame send for a payload that lives in a STABLE caller-owned buffer (no copy):
     // one WS message = `header` (copied — small, may be a stack local) followed by `body` (a pointer
     // the caller keeps stable until the send completes or is cancelled). The implementation drains it
@@ -39,32 +25,44 @@ struct BinaryBroadcaster {
     //                            effective frame rate self-limits to what the link sustains.
     //   cancelBufferedSend()   — abandon the in-flight send NOW. The caller calls this before it
     //                            frees/reallocates the `body` buffer (a geometry rebuild), keeping a
-    //                            cursor reading only live memory. The sole caller today cancels on a
-    //                            new-client connect, which also bumps clientGeneration() and re-sends
-    //                            a fresh coordinate table — so a client that got a partial frame is
-    //                            re-primed by the next full message.
+    //                            cursor reading only live memory. A client caught mid-message is
+    //                            closed by the implementation (the only honest exit once bytes are
+    //                            out); it reconnects and the generation bump primes it fresh.
     // Only PreviewDriver uses this today (the color frames: full-res hands the producer buffer,
-    // downsampled hands its gathered staging buffer). The coord table keeps the begin/push/end path
-    // (rare — geometry/client changes only).
+    // downsampled and the coord table hand their gathered staging buffers), so every /wsp message
+    // rides the one paced path.
     virtual bool sendBufferedFrame(const uint8_t* header, size_t headerLen,
                                    const uint8_t* body, size_t bodyLen) = 0;
     virtual bool bufferedSendIdle() const = 0;
     virtual void cancelBufferedSend() = 0;
 
-    // A counter that increments each time a new client connects. A producer whose
-    // first message is stateful (e.g. PreviewDriver's coordinate table, which color
-    // frames then reference) watches this: when it changes, a fresh client just joined
-    // and needs that priming message re-sent NOW, rather than waiting for the producer's
-    // periodic re-broadcast. Cheap, broadcast-only (no per-client send / inbound routing):
-    // the producer re-broadcasts to everyone, idempotent on existing clients.
-    virtual uint32_t clientGeneration() const = 0;
+
+
+    // How many subscribers are listening right now. Purely observational (a status line, a log);
+    // producers must not branch per subscriber through this, the channel stays broadcast-only.
+    virtual int subscriberCount() const { return 0; }
+
+    // Inbound client messages, delivered OPAQUELY: the transport unmasks a client's WS frame
+    // (framing is its job) and hands the payload bytes to the registered sink; only the producer
+    // knows what they mean. onClientGone fires when a client's slot closes or turns over, so a
+    // producer keeping per-slot standing state (the preview's [stride][fps] request) can drop it
+    // with the client. Both fire on the transport's own thread (core 0 under the split); a
+    // producer ticking elsewhere stores single-byte fields the reader tolerates racing on, the
+    // lossy-channel rule.
+    struct ClientMessageSink {
+        virtual void onClientMessage(int slot, const uint8_t* payload, int len) = 0;
+        virtual void onClientGone(int slot) = 0;
+    protected:
+        ~ClientMessageSink() = default;
+    };
+    virtual void setClientMessageSink(ClientMessageSink* sink) { (void)sink; }
 
     // Exclusive access to the sender, for a producer that does NOT run on the transport's own thread.
-    // The multicore split (Drivers `multicore`) ticks the offloaded PreviewDriver on core 1 while this
-    // transport drains and pushes state on core 0 — two producers, two cores, one socket set and one
-    // resumable send slot. A producer therefore brackets its whole message in tryAcquire/releaseSend:
-    // a multi-call stream (begin/push/end) must not have another core's write land between its parts,
-    // and a frame arm must not race the drain that is reading the slot.
+    // The multicore split (Drivers `multicore`) ticks the offloaded PreviewDriver on core 1 while
+    // this transport drains, reaps and admits on core 0: two producers, two cores, one preview
+    // socket set and one resumable send slot (the control channel stays core-0-only and outside
+    // this lease). A producer therefore brackets its whole message in tryAcquire/releaseSend:
+    // a frame arm must not race the drain that is reading the slot.
     //
     // TRY-acquire, never block: the caller may be on the render or encode thread, where blocking is a
     // hot-path violation (CLAUDE.md § Hot path). false = the transport is busy this instant → SKIP the

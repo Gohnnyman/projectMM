@@ -22,6 +22,16 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### PreviewDriver's `fps` becomes `targetFps`, and now trades resolution (2026-08-25)
+
+The control is renamed and its meaning changed, so the rename is the point rather than cosmetic.
+
+**Before:** `fps` was a ceiling. The driver never exceeded it, but a link that could not sustain the rate simply delivered fewer frames and the control did nothing about it.
+
+**Now:** `targetFps` is the rate you *want*. The driver still never exceeds it, and when the link cannot keep up it **trades preview resolution** to get closer, lower it for full detail at a slower rate, raise it for a smoother but coarser preview. That makes the slider the place where you choose between detail and smoothness, which is what users were reaching for.
+
+**Action: none required.** The preview is a view, not output. A device that had a non-default `fps` saved falls back to the default 24 on first boot with this firmware, because the persisted key changed; set `targetFps` if you had tuned it. Mixed versions degrade soft: an old UI against new firmware sends no detail request and gets full detail (capped by memory); a new UI against old firmware sends an uplink message the device ignores.
+
 ### A module declares every control with `addControl` (2026-08-24)
 
 `addUint8`, `addUint16`, `addInt16`, `addInt32` and `addBool` are replaced by one overloaded

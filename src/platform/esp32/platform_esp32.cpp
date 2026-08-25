@@ -2027,15 +2027,26 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
     // device — observed as a WS client connect making the board reboot every few seconds. So bound the wait
     // by a wall-clock deadline well above a healthy drain (µs) and well below the WDT: on timeout, return
     // false so the caller closes that client (the browser reconnects) instead of taking the device down.
-    constexpr uint32_t kWriteDeadlineMs = 2000;
+    // TWO bounds. The stall bound (progress resets it) is what lets a slow-but-steady transfer
+    // finish: bounding only the total truncated large assets mid-body on a cold-cache page load
+    // (six parallel responses contending on WiFi), which broke the UI's module imports until a
+    // refresh. The TOTAL bound is what keeps this loop off the task WDT (12 s, panic): a peer
+    // trickling one byte per stall window would otherwise hold the render thread indefinitely,
+    // a remotely triggerable reboot. Generous total, still far under the WDT.
+    constexpr uint32_t kWriteStallMs = 2000;
+    constexpr uint32_t kWriteTotalMs = 8000;
     const uint32_t start = millis();
+    uint32_t lastProgress = start;
     size_t sent = 0;
     while (sent < len) {
         auto n = lwip_write(fd_, data + sent, len - sent);
         if (n > 0) {
             sent += static_cast<size_t>(n);
+            lastProgress = millis();
         } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            if (millis() - start >= kWriteDeadlineMs) return false;   // stalled peer — don't hang the render loop
+            const uint32_t now = millis();
+            if (now - lastProgress >= kWriteStallMs || now - start >= kWriteTotalMs)
+                return false;   // stalled or crawling peer: close it, never hang the render loop
             vTaskDelay(pdMS_TO_TICKS(1)); // wait for send buffer space
         } else {
             return false; // real error

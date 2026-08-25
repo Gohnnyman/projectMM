@@ -56,10 +56,21 @@ void HttpServerModule::onSchemaChanged() {
 }
 
 void HttpServerModule::release() {
-    // Drop any in-flight send before the clients go (frees an owned state-frame body; a preview frame
-    // borrows its buffer, nothing to free) — the same self-safe drop cancelBufferedSend() does.
+    // Drop the in-flight sends before the clients go: the preview frame borrows its buffer
+    // (nothing to free); the state frame owns its JSON body.
     cancelBufferedSend();
+    if (stateSend_.active) {
+        platform::free(const_cast<uint8_t*>(stateSend_.body));
+        stateSend_.body = nullptr;
+        stateSend_.active = false;
+    }
     for (auto& ws : wsClients_) ws.close();
+    // Every close site notifies the producer (see cancelBufferedSend): without this, ghost
+    // standing requests would keep the driver gathering frames for nobody after a release.
+    for (int i = 0; i < MAX_PREVIEW_CLIENTS; i++) {
+        if (previewClients_[i].valid() && clientSink_) clientSink_->onClientGone(i);
+        previewClients_[i].close();
+    }
     server_.close();
     if (instance_ == this) { MoonModule::setSchemaChangedHook(nullptr); instance_ = nullptr; }
     MoonModule::release();   // chain: uniform override-and-chain (no buffers/children today, but the convention holds)
@@ -75,10 +86,10 @@ void HttpServerModule::tick20ms() MM_NONBLOCKING {
     // (architecture.md § Parallelism). Drain BEFORE accept so a connection burst can't starve an
     // active send. No-op when nothing is in flight.
     drainPreviewSend();
+    drainStateSend();
     // Fast-path a PENDING FULL RESYNC on the 20 ms cadence instead of waiting for the 1 s tick: a
     // fresh WS connect (or a structural change) sets fullResyncPending_, and the client shows NOTHING
-    // until the full state arrives — including no preview, since a preview frame can't take the shared
-    // send slot before the state does. Gated on the flag, so this is a rare event (a connect), not a
+    // until the full state arrives. Gated on the flag, so this is a rare event (a connect), not a
     // per-20 ms serialize: the expensive buildStateJson runs only when a resync is actually pending,
     // and the steady-state value patch stays on tick1s (unchanged). Cuts connect→first-preview latency
     // from up to ~1 s + drain down to a few tens of ms. No-op in the common (no-resync) case.
@@ -96,9 +107,9 @@ void HttpServerModule::tick20ms() MM_NONBLOCKING {
     // connection the instant the backlog is empty, which breaks the loop early in the common idle case.
     constexpr int kAcceptsPerTick = 8;
     // Bound the batch by WALL-CLOCK too, not just count: each handleConnection serves synchronously and a
-    // stalled peer can burn up to the write deadline (TcpConnection::write's ~2 s) per connection, so 8
-    // stalled clients in one tick could stack to ~16 s — past the task WDT. Break once the batch has spent
-    // this budget; the remaining backlog drains on the next tick. Subtraction-based compare, rollover-safe.
+    // stalled peer can burn up to TcpConnection::write's total ceiling (8 s) per connection, so a batch of
+    // stalled clients could stack past the task WDT. Break once the batch has spent this budget; the
+    // remaining backlog drains on the next tick. Subtraction-based compare, rollover-safe.
     constexpr uint32_t kAcceptBudgetMs = 100;
     const uint32_t batchStart = platform::millis();
     for (int i = 0; i < kAcceptsPerTick; i++) {
@@ -224,10 +235,14 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     if (queryStart) *queryStart = 0;
 
     // Check for WebSocket upgrade (case-insensitive header check)
-    if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/ws") == 0 &&
+    // Two WebSocket paths: `/ws` is the control plane (JSON state), `/wsp` the lossy binary
+    // preview channel. Separate connections so a large preview frame cannot delay a state push.
+    const bool isWs  = std::strcmp(path, "/ws") == 0;
+    const bool isWsp = std::strcmp(path, "/wsp") == 0;
+    if (std::strcmp(method, "GET") == 0 && (isWs || isWsp) &&
         (std::strstr(req, "Upgrade: websocket") || std::strstr(req, "upgrade: websocket") ||
          std::strstr(req, "Upgrade: WebSocket"))) {
-        handleWebSocketUpgrade(conn, req);
+        handleWebSocketUpgrade(conn, req, isWsp);
         return; // don't close — connection is now a WebSocket
     }
 
@@ -242,6 +257,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         else if (std::strcmp(path, "/install-picker.js") == 0) serveFile(conn, "install-picker.js", "application/javascript");
         else if (std::strcmp(path, "/semver.js") == 0) serveFile(conn, "semver.js", "application/javascript");
         else if (std::strcmp(path, "/preview3d.js") == 0) serveFile(conn, "preview3d.js", "application/javascript");
+        else if (std::strcmp(path, "/preview-adapt.js") == 0) serveFile(conn, "preview-adapt.js", "application/javascript");
         else if (std::strcmp(path, "/style.css") == 0) serveFile(conn, "style.css", "text/css");
         else if (std::strcmp(path, "/moonlight-logo.png") == 0) serveFile(conn, "moonlight-logo.png", "image/png");
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
@@ -828,6 +844,7 @@ void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* file
     else if (std::strcmp(filename, "install-picker.js") == 0) { data = ui::installPickerJs; dataLen = ui::installPickerJsLen; gzipped = true; }
     else if (std::strcmp(filename, "semver.js") == 0) { data = ui::semverJs; dataLen = ui::semverJsLen; gzipped = true; }
     else if (std::strcmp(filename, "preview3d.js") == 0) { data = ui::preview3dJs; dataLen = ui::preview3dJsLen; gzipped = true; }
+    else if (std::strcmp(filename, "preview-adapt.js") == 0) { data = ui::previewAdaptJs; dataLen = ui::previewAdaptJsLen; gzipped = true; }
     else if (std::strcmp(filename, "style.css") == 0) { data = ui::styleCss; dataLen = ui::styleCssLen; gzipped = true; }
     else if (std::strcmp(filename, "moonlight-logo.png") == 0) { data = ui::logoPng; dataLen = ui::logoPngLen; }
 
@@ -2321,7 +2338,8 @@ void HttpServerModule::handleFirmwareUrl(platform::TcpConnection& conn, const ch
     sendResponse(conn, 202, "application/json", "{\"ok\":true}");
 }
 
-void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, const char* req) {
+void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, const char* req,
+                                              bool previewChannel) {
     // Extract Sec-WebSocket-Key
     const char* keyHeader = std::strstr(req, "Sec-WebSocket-Key: ");
     if (!keyHeader) { conn.close(); return; }
@@ -2353,17 +2371,46 @@ void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, con
         acceptKey);
     conn.write(reinterpret_cast<const uint8_t*>(response), respLen);
 
+    // A preview client lands in its own, smaller array: the two channels have separate caps because
+    // they share one lwIP socket budget (see MAX_PREVIEW_CLIENTS). A preview client needs none of the
+    // control-plane bookkeeping below, no state resync, no generation bump, because it receives
+    // only binary frames the driver pushes.
+    if (previewChannel) {
+        // The slot array and previewSend_ bookkeeping are shared with core 1 (which arms frames
+        // under the same lease), so the cursor decision below needs it. Busy is the COMMON case
+        // (core 1 streams most ticks), so refusing the connection there made the browser retry on
+        // its ~1.2 s backoff over and over, a bench-visible storm of zero-frame reconnects.
+        // Instead ADMIT unconditionally and, when the lease is busy, take the conservative cursor:
+        // "this message is already done for me". That is exactly what the newcomer needs (its
+        // stream starts at the next whole frame) and it is safe without reading previewSend_'s
+        // lengths, since a cursor at SIZE_MAX is past any total the drain computes.
+        LockGuard admitLease{wsLock_};
+        for (int i = 0; i < MAX_PREVIEW_CLIENTS; i++) {
+            if (previewClients_[i].valid()) continue;
+            previewClients_[i] = std::move(conn);
+            // The slot turns over: the producer drops its predecessor's standing request. The new
+            // client announces its own wishes itself (the pull model), so nothing is volunteered.
+            if (clientSink_) clientSink_->onClientGone(i);
+            // A frame mid-drain to OTHER clients keeps draining; this slot marks itself already
+            // done so the newcomer is never spliced into a half-sent message (its stream starts
+            // with the next whole frame). Cancelling the send instead abandoned the frame
+            // mid-message for every existing viewer, a torn stream on their side.
+            previewSend_.sent[i] = !admitLease ? SIZE_MAX
+                                 : (previewSend_.active ? previewSend_.hdrLen + previewSend_.bodyLen : 0);
+            return;
+        }
+        conn.close();   // preview cap reached: the client keeps /ws and simply shows no preview
+        return;
+    }
+
     // Store connection as WebSocket client.
     for (int i = 0; i < MAX_WS_CLIENTS; i++) {
         if (!wsClients_[i].valid()) {
             wsClients_[i] = std::move(conn);
-            previewSend_.sent[i] = 0;   // fresh slot: clear any stale cursor a prior client left here
-            // Abandon any in-flight buffered frame: this new client would otherwise either be skipped
-            // (its stale cursor ≥ total looked "done", so it got no frame and the browser showed
-            // nothing) or spliced into a half-sent message. Cancelling makes the next frame start
-            // clean for every client. The generation bump re-streams the coord table first.
-            previewSend_.active = false;
-            wsClientGeneration_++;
+            // A full state mid-drain to other clients is exactly what this newcomer needs too: its
+            // cursor starts at 0, so it receives the whole in-flight message from the top, no
+            // splice, no cancel. requestFullResync below still queues a fresh one for everyone.
+            stateSend_.sent[i] = 0;
             // A new client needs the FULL state, not a patch against a baseline it never received.
             // Global cache → resync everyone (cheap, connects are rare); the next push sends full state.
             requestFullResync();
@@ -2390,18 +2437,12 @@ void HttpServerModule::pushStateToWebSockets() {
         // to drain in chunks on tick20ms, NOT a blocking write on the render tick. buildStateJson
         // serialises the WHOLE tree — the expensive path — but only when fullResyncPending_, not every
         // second.
-        // The shared send slot may hold an in-flight frame. A borrowed PREVIEW frame is a *view* — the
-        // full state is what makes a freshly-connected client usable at all, so the resync PREEMPTS a
-        // preview (otherwise continuous preview from another client could keep the new client blank;
-        // preview resumes on its next frame). An OWNED frame in flight is ITSELF a state drain from a
-        // prior push that hasn't finished — don't stomp it; let it complete and skip this push (the
-        // slot is single-occupancy, and a half-then-half state is worse than one whole one arriving a
-        // tick later). fullResyncPending_ stays TRUE until startBufferedTextSend actually accepts the
-        // new payload, so a rejected/failed start retries next tick rather than dropping the resync.
-        if (!bufferedSendIdle()) {
-            if (previewSend_.ownsBody) return;   // a state drain is already in flight — let it finish
-            cancelBufferedSend();                // preempt a borrowed preview
-        }
+        // A prior full state still draining finishes first, the slot is single-occupancy, and a
+        // half-then-half state is worse than one whole one arriving a tick later. fullResyncPending_
+        // stays TRUE until startBufferedTextSend actually accepts the new payload, so this push
+        // simply retries next tick. (The preview has its own slot on its own channel; the two no
+        // longer contend.)
+        if (stateSend_.active) return;
         JsonSink sink;
         buildStateJson(sink);
         const size_t len = sink.size();
@@ -2416,6 +2457,10 @@ void HttpServerModule::pushStateToWebSockets() {
         // leaves, ~1–2 KB). This is the whole fix: the 30 KB of unchanging option/detail metadata is
         // NEVER serialised or sent here, so tick1s no longer spikes the render thread. The patch is
         // small, so it sends inline (no resumable drain) — a non-blocking per-client write of ~2 KB.
+        // While a full state is mid-drain, hold the patch: a small frame written into the middle
+        // of the chunked big one would interleave inside a WS message on that client. One skipped
+        // second of telemetry; the drained full state carries the fresh values anyway.
+        if (stateSend_.active) return;
         JsonSink sink;
         const uint16_t changed = buildStatePatch(sink);
         if (changed > 0) {
@@ -2439,6 +2484,7 @@ void HttpServerModule::pushStateToWebSockets() {
 // Build and push the WLED {state, info} object to every WS client. Shares the same body
 // writers as /json/si.
 void HttpServerModule::pushWledStateToWebSockets() {
+    if (stateSend_.active) return;   // never interleave with the chunked full-state drain
     bool hasClients = false;
     for (auto& ws : wsClients_) if (ws.valid()) { hasClients = true; break; }
     if (!hasClients) return;
@@ -2467,6 +2513,38 @@ void HttpServerModule::pushWledStateToWebSockets() {
 // small text frame we care about is handled; we ignore continuation/binary/control frames
 // (a ping/close is rare on this short-lived control socket and harmless to skip).
 void HttpServerModule::pollWledStateFromWebSockets() {
+    // Reap preview clients that closed cleanly. They send nothing, so the ONLY other signal is a
+    // failed send, which can lag by seconds, and meanwhile the slot counts against the preview cap.
+    // With the cap reached, every new preview connection is refused and the preview appears to
+    // "stall until you refresh". Bench-observed on an S3 (2026-08-25). read() == 0 is a peer FIN;
+    // -1 is "nothing pending" and leaves a live client alone.
+    // No lease needed: since every /wsp byte moves through the resumable drain on this core, the
+    // encode core never touches these sockets, so a read or close here races nothing.
+    for (int i = 0; i < MAX_PREVIEW_CLIENTS; i++) {
+        auto& pc = previewClients_[i];
+        if (!pc.valid()) continue;
+        uint8_t buf[64];
+        const int n = pc.read(buf, sizeof(buf));
+        if (n == 0) {                                  // clean close (peer FIN): free the slot NOW
+            pc.close();
+            if (clientSink_) clientSink_->onClientGone(i);
+            continue;
+        }
+        if (n > 0 && clientSink_) {
+            // WALK the read: TCP coalesces, so several small requests can arrive as one buffer.
+            // Each complete frame's unmasked payload goes to the sink in arrival order; the
+            // payload's meaning is the producer's business (the pull-model boundary).
+            for (int off = 0; off < n; ) {
+                uint8_t payload[8];
+                int used = 0;
+                const int len = parsePreviewUplink(buf + off, n - off, payload, &used);
+                if (used <= 0) break;                  // nothing parseable left (or a partial tail)
+                if (len > 0) clientSink_->onClientMessage(i, payload, len);
+                off += used;
+            }
+        }
+    }
+
     for (auto& ws : wsClients_) {
         if (!ws.valid()) continue;
         uint8_t f[512];
@@ -2537,60 +2615,24 @@ bool HttpServerModule::sendWsTextFrame(platform::TcpConnection& conn, const char
     return conn.write(reinterpret_cast<const uint8_t*>(data), len);
 }
 
-// Write the whole span via repeated non-blocking writeSome; close the client + return false if it
-// can't all go right now. Bounded TOTAL would-block spins (not reset on progress) hard-bound how
-// long this synchronous send can occupy the caller's loop; a span that doesn't complete in budget
-// closes the client (the browser reconnects). Used by the begin/push/end stream (the coord table
-// and downsampled color frame); the full-res color frame uses the resumable sendBufferedFrame.
-bool HttpServerModule::sendAllOrClose(platform::TcpConnection& ws, const uint8_t* data, size_t len) {
-    size_t sent = 0;
-    int stalls = 0;
-    while (sent < len) {
-        int n = ws.writeSome(data + sent, len - sent);
-        if (n < 0) { ws.close(); return false; }       // real socket error
-        if (n == 0) {                                  // WouldBlock — lwIP send buffer momentarily full
-            if (++stalls > kDirectSendSpins) { ws.close(); return false; }
-            continue;
-        }
-        sent += static_cast<size_t>(n);
-    }
-    return true;
+int HttpServerModule::parsePreviewUplink(const uint8_t* buf, int n, uint8_t out[8], int* consumed) {
+    if (consumed) *consumed = 0;
+    // One masked client frame: [0x81|0x82][0x80|len][mask x4][payload...]. Framing only: the
+    // payload is handed on opaquely. Anything that is not a small masked data frame (a ping, a
+    // close, an oversized payload) is refused, and a malformed length can never read past `n`,
+    // these are network bytes, bounds first.
+    if (n < 6) return -1;                                  // header(2) + mask(4) is the minimum
+    const uint8_t op = buf[0] & 0x0F;
+    if (op != 0x01 && op != 0x02) return -1;               // text/binary only
+    if (!(buf[1] & 0x80)) return -1;                       // client frames must be masked (RFC 6455)
+    const int len = buf[1] & 0x7F;
+    if (len > 8 || n < 6 + len) return -1;                 // small request payloads only
+    if (consumed) *consumed = 6 + len;
+    const uint8_t* mask = buf + 2;
+    for (int i = 0; i < len; i++) out[i] = buf[6 + i] ^ mask[i & 3];
+    return len;
 }
 
-// Streamed frame: header now, payload pushed in slices, no frame-sized staging buffer — so a
-// large frame (PreviewDriver's coordinate table or color frame) goes out on a memory-tight
-// board where a contiguous block won't fit. The producer (placeLights) pushes forward-only;
-// each slice fans to every client before the next push. A client that can't keep up is closed
-// (its WS message ends incomplete → it reconnects), so this never blocks the tick indefinitely.
-void HttpServerModule::beginBinaryFrame(size_t totalLen) {
-    wsFrameAllSent_ = true;
-    uint8_t wsHeader[10];
-    int wsHeaderLen;
-    wsHeader[0] = 0x82;
-    if (totalLen < 126) { wsHeader[1] = static_cast<uint8_t>(totalLen); wsHeaderLen = 2; }
-    else if (totalLen < 65536) {
-        wsHeader[1] = 126; wsHeader[2] = static_cast<uint8_t>((totalLen >> 8) & 0xFF);
-        wsHeader[3] = static_cast<uint8_t>(totalLen & 0xFF); wsHeaderLen = 4;
-    } else {
-        wsHeader[1] = 127;
-        for (int i = 0; i < 8; i++)
-            wsHeader[2 + i] = static_cast<uint8_t>((static_cast<uint64_t>(totalLen) >> (56 - 8 * i)) & 0xFF);
-        wsHeaderLen = 10;
-    }
-    for (auto& ws : wsClients_) {
-        if (ws.valid() && !sendAllOrClose(ws, wsHeader, static_cast<size_t>(wsHeaderLen)))
-            wsFrameAllSent_ = false;
-    }
-}
-
-void HttpServerModule::pushBinaryFrame(const uint8_t* data, size_t len) {
-    if (!data || len == 0) return;
-    for (auto& ws : wsClients_) {
-        if (ws.valid() && !sendAllOrClose(ws, data, len)) wsFrameAllSent_ = false;
-    }
-}
-
-bool HttpServerModule::endBinaryFrame() { return wsFrameAllSent_; }
 
 // Resumable full-frame send. One WS message = WS framing header + the caller's app header (both
 // copied into previewSend_.hdr) + the caller's `body` (a pointer, NOT copied). Each client's
@@ -2632,10 +2674,9 @@ bool HttpServerModule::sendBufferedFrame(const uint8_t* header, size_t headerLen
     std::memcpy(previewSend_.hdr + wsLen, header, headerLen);
 
     previewSend_.hdrLen = wsLen + headerLen;
-    previewSend_.body = body;
+    previewSend_.body = body;        // borrowed: PreviewDriver keeps the pixel buffer alive
     previewSend_.bodyLen = bodyLen;
-    previewSend_.ownsBody = false;   // preview borrows its pixel buffer (kept alive by PreviewDriver)
-    for (int i = 0; i < MAX_WS_CLIENTS; i++) previewSend_.sent[i] = 0;
+    for (int i = 0; i < MAX_PREVIEW_CLIENTS; i++) previewSend_.sent[i] = 0;
     previewSend_.active = true;
     // Deliberately do NOT drain here. sendBufferedFrame is called from PreviewDriver's tick() on the
     // RENDER thread; a socket writeSome is variable-cost (0..~ms) and would land that cost — and its
@@ -2649,16 +2690,15 @@ bool HttpServerModule::sendBufferedFrame(const uint8_t* header, size_t headerLen
 // push so the 20 KB JSON drains in chunks on tick20ms rather than a blocking write on the render tick.
 bool HttpServerModule::startBufferedTextSend(char* ownedBody, size_t bodyLen) {
     // A send already in flight: drop this one and free its buffer — the next second's state is fresher.
-    if (previewSend_.active) { platform::free(ownedBody); return false; }
+    if (stateSend_.active) { platform::free(ownedBody); return false; }
     // No app header for the state frame (the JSON is the whole payload), just the WS text header.
-    const size_t wsLen = writeWsFrameHeader(previewSend_.hdr, 0x81, bodyLen);
-    previewSend_.hdrLen = wsLen;
-    previewSend_.body = reinterpret_cast<const uint8_t*>(ownedBody);
-    previewSend_.bodyLen = bodyLen;
-    previewSend_.ownsBody = true;    // we allocated this JSON buffer; the drain frees it when done
-    for (int i = 0; i < MAX_WS_CLIENTS; i++) previewSend_.sent[i] = 0;
-    previewSend_.active = true;
-    return true;   // drained on tick20ms, same as preview — never a blocking write on the render tick
+    const size_t wsLen = writeWsFrameHeader(stateSend_.hdr, 0x81, bodyLen);
+    stateSend_.hdrLen = wsLen;
+    stateSend_.body = reinterpret_cast<const uint8_t*>(ownedBody);
+    stateSend_.bodyLen = bodyLen;
+    for (auto& c : stateSend_.sent) c = 0;
+    stateSend_.active = true;
+    return true;   // drained on tick20ms, never a blocking write on the render tick
 }
 
 // Per-client cursor over the logical [hdr ++ body] stream: write whatever the socket takes now (up
@@ -2675,11 +2715,11 @@ void HttpServerModule::drainPreviewSend() {
     if (!lease) return;
     if (!previewSend_.active) return;
     const size_t total = previewSend_.hdrLen + previewSend_.bodyLen;
-    const size_t chunk = previewChunkBytes();
+    const size_t chunk = drainChunkBytes();
     bool anyLiveClient = false;
     bool allDone = true;
-    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
-        auto& ws = wsClients_[i];
+    for (int i = 0; i < MAX_PREVIEW_CLIENTS; i++) {
+        auto& ws = previewClients_[i];
         if (!ws.valid()) continue;
         anyLiveClient = true;
         size_t& cur = previewSend_.sent[i];
@@ -2692,7 +2732,11 @@ void HttpServerModule::drainPreviewSend() {
             else { src = previewSend_.body + (cur - previewSend_.hdrLen); span = total - cur; }
             if (span > budget) span = budget;
             int n = ws.writeSome(src, span);
-            if (n < 0) { ws.close(); break; }    // real error — drop this client
+            if (n < 0) {                         // real error: drop this client and its requests
+                ws.close();
+                if (clientSink_) clientSink_->onClientGone(i);
+                break;
+            }
             if (n == 0) break;                   // WouldBlock — leave the rest for next tick (no spin)
             cur += static_cast<size_t>(n);
             budget -= static_cast<size_t>(n);
@@ -2700,23 +2744,54 @@ void HttpServerModule::drainPreviewSend() {
         if (ws.valid() && cur < total) allDone = false;
     }
     // Done when every live client finished, or no client remains to send to.
-    if (!anyLiveClient || allDone) {
-        if (previewSend_.ownsBody) {   // free the state JSON buffer we allocated for this frame
-            platform::free(const_cast<uint8_t*>(previewSend_.body));
-            previewSend_.body = nullptr;
-            previewSend_.ownsBody = false;
+    if (!anyLiveClient || allDone) previewSend_.active = false;
+}
+
+// The same cursor drain for the full-state frame, over the CONTROL clients. Core-0 only (tick20ms,
+// the pushes, admission all run there), so unlike the preview slot it needs no sender lease.
+void HttpServerModule::drainStateSend() {
+    if (!stateSend_.active) return;
+    const size_t total = stateSend_.hdrLen + stateSend_.bodyLen;
+    const size_t chunk = drainChunkBytes();
+    bool anyLiveClient = false;
+    bool allDone = true;
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        auto& ws = wsClients_[i];
+        if (!ws.valid()) continue;
+        anyLiveClient = true;
+        size_t& cur = stateSend_.sent[i];
+        size_t budget = chunk;
+        while (cur < total && budget > 0) {
+            const uint8_t* src;
+            size_t span;
+            if (cur < stateSend_.hdrLen) { src = stateSend_.hdr + cur; span = stateSend_.hdrLen - cur; }
+            else { src = stateSend_.body + (cur - stateSend_.hdrLen); span = total - cur; }
+            if (span > budget) span = budget;
+            int n = ws.writeSome(src, span);
+            if (n < 0) { ws.close(); break; }    // real error, drop this client
+            if (n == 0) break;                   // WouldBlock, resume next tick
+            cur += static_cast<size_t>(n);
+            budget -= static_cast<size_t>(n);
         }
-        previewSend_.active = false;
+        if (ws.valid() && cur < total) allDone = false;
+    }
+    if (!anyLiveClient || allDone) {
+        platform::free(const_cast<uint8_t*>(stateSend_.body));   // the frame owns its JSON body
+        stateSend_.body = nullptr;
+        stateSend_.active = false;
     }
 }
 
 // Per-tick per-client chunk cap, derived from free contiguous memory: a tight board takes small
 // bites (so one drain can't dominate the tick), a roomy board drains a big frame in a tick or two.
 // Bounded both ways — never below a floor (forward progress) nor above a ceiling (tick occupancy).
-size_t HttpServerModule::previewChunkBytes() const {
+size_t HttpServerModule::drainChunkBytes() const {
     constexpr size_t kFloor = 2048;     // always make real progress, even on a fragmented board
     constexpr size_t kCeil  = 65536;    // cap tick occupancy regardless of how much RAM is free
     const size_t block = platform::maxAllocBlock();
+    // 0 = unlimited/not reported (desktop): no artificial ceiling; writeSome stops at the socket
+    // buffer anyway, so TCP itself paces the drain and the endpoints are the only limits.
+    if (block == 0) return static_cast<size_t>(1) << 30;
     size_t chunk = block / 8;           // a fraction of the largest contiguous block
     if (chunk < kFloor) chunk = kFloor;
     if (chunk > kCeil)  chunk = kCeil;

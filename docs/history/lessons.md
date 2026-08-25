@@ -604,3 +604,19 @@ evidence which *looks* most authoritative here is the evidence that lies.
   emitted x86-64 instructions for real, so the tests that only exist on that host actually execute.
   Worth doing on any change to a backend, an encoder, or the register allocator — it is minutes,
   and it is the difference between finding these locally and finding them in CI.
+
+## A lossy channel never closes a client for slowness (2026-08-25)
+
+The preview transport spent a bench day being patched before the pattern surfaced: every
+symptom (reconnect storms, blank refreshes, renderWait spikes charged to the LEDs) traced to a
+synchronous send path that treated a slow socket as a fault, spinning up to a stall budget on
+the output core and then **closing the client**. That converts ordinary congestion into
+disconnects, disconnects into re-primed state, and re-primed state into more congestion, a
+feedback loop.
+
+The rule that replaced it, and holds generally: **on a lossy stream, drop at the source and let
+TCP pace the rest.** Write only what the socket takes now (`writeSome`, never a wait), skip the
+frame when the previous one has not drained, report the skip to the receiver (its one honest
+congestion signal), and close only on a real error or FIN. The receiver steers quality from the
+drop reports. Every give-up budget that remains must bound *lack of progress*, never elapsed
+total, or slow-but-healthy transfers get truncated.

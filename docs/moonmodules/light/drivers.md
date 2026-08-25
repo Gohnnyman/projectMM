@@ -142,9 +142,11 @@ Detail: [technical](moxygen/HueDriver.md)
 
 <img src="../../assets/light/drivers/PreviewDriver.png" width="300" alt="PreviewDriver controls">
 
-Streams a true-shape 3D preview to the web UI over WebSocket as a **point list** — only the real lights at their real positions, so a sphere/ring/arbitrary map shows in its true shape. The one boot-wired driver.
+Streams a true-shape 3D preview to the web UI as a **point list**, only the real lights at their real positions, so a sphere/ring/arbitrary map shows in its true shape. The one boot-wired driver.
 
-- `fps` — preview stream rate (default 24, 1–60; independent of the render loop).
+It streams on its **own WebSocket channel** (`/wsp`), so a large frame never delays the control plane, and it runs only while a viewer requests it: dismissing the preview or leaving the tab stops the work at the source entirely. The device reports dropped frames in each frame it sends; your browser trades detail for rate on that signal, so a fast connection previews finer than a slow one. See [§ Preview, details](#preview-details).
+
+- `targetFps`, the frame rate the preview aims for (default 24, 1–60). The device never sends faster; when the connection cannot keep up, the browser trades detail to get closer: **lower it for full detail at a slower rate, raise it for a smoother but coarser preview**.
 
 Origin: projectMM, on [MoonLight](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h)'s PhysicalLayer model
 
@@ -156,28 +158,52 @@ Detail: [technical](moxygen/PreviewDriver.md)
 
 ### NDI 🖥️ · video out
 
-Publishes the layer as an **NDI video source**, so OBS, Resolume, TouchDesigner, MadMapper or any other NDI receiver can pick projectMM up by name — on this machine or another one on the network. Where the Preview driver draws the lights for a person, this hands the same frame to a production tool as video.
+Publishes the layer as an **NDI video source**, so OBS, Resolume, TouchDesigner or any other NDI receiver picks projectMM up by name, on this machine or another on the network. Where the Preview driver draws the lights for a person, this hands the same frame to a production tool as video.
 
-The grid's `physicalWidth` × `physicalHeight` becomes the frame; each light is one pixel, with the driver's own output correction applied so a receiver sees what the wall sees.
+The grid's `physicalWidth` × `physicalHeight` becomes the frame, one light per pixel, with the driver's own output correction applied so a receiver sees what the wall sees.
 
-**Desktop only.** The NDI runtime is a desktop library with no microcontroller build, so the driver is offered on macOS, Windows and Linux and not on an ESP32.
-
-**You install the runtime; projectMM never ships it.** projectMM is GPL-3.0 and the NDI runtime is proprietary, so it is loaded on demand and never bundled — the same arrangement as Npcap for the [Panel Card](#panelcard) driver. Without it the driver simply reports `NDI runtime not installed`; nothing else changes.
-
-- **macOS** — install [NDI Tools](https://ndi.video/tools/) (free). It ships the runtime inside its app bundles rather than system-wide, which projectMM knows to look for. A Resolume install also carries one.
-- **Windows** — the [NDI Tools](https://ndi.video/tools/) or SDK installer puts `Processing.NDI.Lib.x64.dll` on the PATH.
-- **Linux** — install the NDI SDK; projectMM looks for `libndi.so.5`, `libndi.so.6` and `libndi.so`.
-
-To watch the output you need a receiver: **NDI Video Monitor** (part of NDI Tools) is the simplest, and OBS gains an "NDI Source" via the [DistroAV](https://github.com/DistroAV/DistroAV) plugin.
+**Desktop only**, and **you install the NDI runtime yourself**, projectMM never ships it. Without it the driver reports `NDI runtime not installed` and nothing else changes. See [§ NDI, details](#ndi-details).
 
 - `sourceName` — the name a receiver lists. Blank uses the device's own name.
 - `fps` — frame-rate ceiling (default 30, 1–120). The driver sends no faster than this and declares the rate in every frame.
 
-Status tells you where you are: `NDI runtime not installed` (install it), `could not create the NDI source` (the runtime is there but refused), or `sending <w>x<h> at <n> fps` when it is live.
-
 Origin: projectMM, against NewTek/Vizrt's documented NDI C API
 
 Detail: [technical](moxygen/NdiDriver.md)
+
+<a id="preview-details"></a>
+
+## Preview, details
+
+**Close the preview when you do not need it.** The device renders preview frames only while the preview pane is open. Dismissing it stops that work entirely, which frees the device for rendering and keeps the UI responsive on a large layout, worth doing while you are editing effects on a big wall.
+
+**The preview thins itself out.** When the connection cannot carry full detail, the preview shows a regular sample of the lights rather than all, the status reads `preview 1/4` and so on. The device reports every frame it had to drop, and your browser reacts: persistent drops trade detail for rate, drop-free stretches earn the detail back one step at a time, and a step that brings the drops back is taken back with growing patience, so a borderline connection settles instead of flickering between sizes. A slow *effect* drops nothing, so it never costs preview detail. A fast connection previews everything, with nothing to configure.
+
+**If the preview looks choppy**, it is the connection rather than the device: frames are dropped rather than queued, so the wall itself is never held up by the preview. Lower `targetFps` if you would rather keep full detail at a slower rate.
+
+<a id="ndi-details"></a>
+
+## NDI, details
+
+**You install the NDI runtime yourself**, projectMM cannot ship it. Until you do, the driver reports `NDI runtime not installed` and everything else works normally.
+
+| OS | Where it comes from |
+|---|---|
+| macOS | [NDI Tools](https://ndi.video/tools/) (free). It puts the runtime inside its app bundles rather than system-wide, which projectMM knows to look for; a Resolume install also carries one. |
+| Windows | The [NDI Tools](https://ndi.video/tools/) or SDK installer puts `Processing.NDI.Lib.x64.dll` on the PATH. |
+| Linux | The NDI SDK. |
+
+**To see the output** you need a receiver. **NDI Video Monitor** (part of NDI Tools) is the simplest; OBS gains an "NDI Source" via the [DistroAV](https://github.com/DistroAV/DistroAV) plugin. projectMM appears by the name in `sourceName`, or the device's own name when that is blank.
+
+**Desktop only.** No NDI runtime exists for the ESP32 chips, so the driver is not offered there. An ESP32 reaches the same tools over Art-Net, sACN or DDP instead, send with the [Network Send](#networksend) driver, receive with the NetworkReceive effect.
+
+**Status line**
+
+| It says | It means |
+|---|---|
+| `NDI runtime not installed` | Install it, per the table above |
+| `could not create the NDI source` | The runtime is there but refused, usually a name clash with another source |
+| `sending <w>x<h> at <n> fps` | Live; look for it in your receiver |
 
 ## LED driver — details
 
@@ -196,7 +222,7 @@ RMT is its own driver; the rest are `peripheral` choices on the one **Parallel L
 
 **RMT vs the three parallel peripherals.** All drive WS2812B-class strips with the same `pins` / `ledsPerPin` / `loopback*` controls and the same wire contract; they differ in parallelism, chip, and — for the two i80-bus peripherals (**i80** and **MoonI80**) — in who programs the DMA.
 
-**Lane, pin, strand.** A **lane** is one bus data line; a **strand** is one chain of LEDs. The i80 **bus** is 8 or 16 lanes wide (a hardware fact — `lcd_ll_set_data_wire_width` takes nothing else), but you configure only the **pins** that drive something, at any count from 1: the driver rounds the bus up around them and parks the spare lanes on a pin the peripheral already drives, where nothing reads them.
+**Lane, pin, strand.** A **lane** is one bus data line; a **strand** is one chain of LEDs. The i80 **bus** is 8 or 16 lanes wide (a hardware fact, not a setting), but you configure only the **pins** that drive something, at any count from 1: the driver rounds the bus up around them and parks the spare lanes on a pin the peripheral already drives, where nothing reads them.
 
 - **Direct:** one pin = one lane = one strand. 1–16 strands.
 - **Through an expander:** each data pin feeds one '595 and fans out to 8 strands, so **1–8 data pins → up to 64 strands** (the driver's ceiling). The **latch** also costs a lane — the peripheral has only one clock output, so it has to ride a data line — but the strand ceiling binds first. hpwit's board populates 6 pins → **48 strands**.

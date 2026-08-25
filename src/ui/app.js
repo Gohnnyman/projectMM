@@ -174,6 +174,9 @@ function connectWs() {
 
     ws.onmessage = (e) => {
         if (sock !== ws || wsPaused) return;   // ignore a stale socket's late frame
+        // Binary never arrives here: the preview has its own `/wsp` connection (see
+        // connectPreview below), so this socket carries only control-plane JSON. A binary frame
+        // would mean an older firmware still multiplexing both, so keep handling it.
         if (e.data instanceof ArrayBuffer) {
             preview.onBinaryMessage(e.data);
             return;
@@ -188,7 +191,14 @@ function connectWs() {
             // the existing `state` in place, then refresh the DOM. A patch before any full state is
             // ignored (we have nothing to patch); the device resyncs on connect so this self-corrects.
             if (Array.isArray(data.patch)) {
-                if (state && Array.isArray(state.modules)) { applyStatePatch(data.patch); updateValues(); }
+                if (state && Array.isArray(state.modules)) {
+                    applyStatePatch(data.patch);
+                    updateValues();
+                    // A targetFps slider move arrives as a PATCH, and the preview controller aims
+                    // at whatever it last heard: without this, the advertised detail/smoothness
+                    // chooser only takes effect on the next reconnect.
+                    preview.setTargetFps(previewTargetFps(state));
+                }
                 return;
             }
             // The same /ws also carries WLED-compatibility {state,info} frames for the native WLED app
@@ -196,12 +206,18 @@ function connectWs() {
             // without a `modules` array, or it would clobber `state` and blank the module view.
             if (!Array.isArray(data.modules)) return;
             state = data;
+            // Defer the DOM rebuild while the user is mid-interaction: a full state arrives on every
+            // (re)connect, and rebuilding under an open dropdown makes it unselectable. The state is
+            // already stored above, so updateValues() below still shows fresh values; the structural
+            // render happens on the next full state once the interaction ends.
+            if (userIsEditing()) { updateValues(); preview.setTargetFps(previewTargetFps(state)); return; }
             renderCards();     // a full state may add/remove/reshape cards (structural resync) — full render
             // The nav is built from the same tree, so a structural change (a module added or removed)
             // must rebuild it too, or the sidebar keeps entries the state no longer has. AFTER
             // renderCards, because its fallback may reassign selectedModule and the nav highlights it.
             renderNav();
             updateValues();
+            preview.setTargetFps(previewTargetFps(state));
         } catch {
             // ignore malformed messages
         }
@@ -227,9 +243,32 @@ function setWsDot(connected) {
     dot.className = connected ? "ws-dot connected" : "ws-dot disconnected";
 }
 
-// Visibility / bfcache hooks
+// Visibility / bfcache hooks: ONE handler per event (two handlers for the same event is the
+// split-rule trap). wsPaused gates message handling for the interval where a socket is open but
+// the tab just hid.
 document.addEventListener("visibilitychange", () => {
     wsPaused = (document.visibilityState === "hidden");
+    if (document.hidden) {
+        closePreviewSocket();                      // stop the stream and the bad measurements NOW
+        wsHideTimer = setTimeout(() => {
+            hiddenByVisibility = true;
+            wsUnloading = true;                    // suppress the auto-reconnect while hidden
+            // A backoff reconnect armed BEFORE the tab hid would otherwise fire afterwards and
+            // open a fresh control socket on a hidden tab, exactly the work this closes.
+            if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+            if (ws) { try { ws.close(); } catch {} }
+        }, WS_HIDE_GRACE_MS);
+    } else {
+        clearTimeout(wsHideTimer);
+        wsHideTimer = null;
+        if (hiddenByVisibility) {
+            hiddenByVisibility = false;
+            wsUnloading = false;
+            connectWs();                           // control first: the full state repaints the UI
+        }
+        // the preview follows the pane's own wants-frames state
+        if (previewWanted) connectPreview();
+    }
 });
 window.addEventListener("pageshow", (e) => {
     if (e.persisted) {
@@ -248,6 +287,7 @@ window.addEventListener("pagehide", () => {
     clearInterval(wsHeartbeat);
     if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }   // no reconnect after unload
     if (ws) { try { ws.close(1000); } catch { /* already closing */ } }
+    if (wsPreview) { try { wsPreview.close(1000); } catch { /* already closing */ } }   // same silent handover for /wsp
 });
 
 // ---------------------------------------------------------------------------
@@ -270,6 +310,19 @@ async function init() {
     connectWs();
     preview.init();
     preview.setupLayout();
+    // Open the preview channel only while the pane wants frames, and close it the moment it does
+    // not, the device then builds nothing at all for a dismissed preview.
+    // The pull model's uplink: tiny request messages ([0x51][stride][fps] standing,
+    // [0x52][stride] one-shot) on the socket the pane already holds.
+    preview.onSendRequest((bytes) => {
+        if (wsPreview && wsPreview.readyState === WebSocket.OPEN)
+            wsPreview.send(Uint8Array.from(bytes));
+    });
+    preview.onWantsFrames((wanted) => {
+        previewWanted = wanted;
+        if (wanted) { wspRetryMs = WSP_RETRY_MIN_MS; connectPreview(); }
+        else disconnectPreview();
+    });
     // First-paint shortcut: render from a one-shot /api/state so the cards appear immediately instead of
     // waiting for the WS's first full-state push. The WS then keeps everything live. If this fetch fails
     // (a contended slot), it's non-fatal — the WS full state fills in the moment it lands. Since the WS is
@@ -302,11 +355,114 @@ async function init() {
     // buttons then appear on the next structural render instead of interrupting the edit.
     fetch("/api/types").then(r => r.json()).then(j => {
         availableTypes = j.types || [];
-        const el = document.activeElement;
-        const editing = el && (el.matches("input, textarea") || el.closest("select")
-                               || document.querySelector('select[data-open="true"]'));
-        if (state && !editing) renderCards();
+        if (state && !userIsEditing()) renderCards();
     }).catch(() => {});
+}
+
+// The PREVIEW socket, a second connection, deliberately.
+//
+// Preview frames are LOSSY and large (hundreds of KB/s on a big layout); control-plane state is
+// small and must not be delayed. Sharing one TCP connection makes the small messages queue behind
+// the large ones, textbook head-of-line blocking, which showed up as a flickering connection dot
+// and a UI that stopped responding while a big preview streamed. Separate connections is the
+// standard remedy, and it lets the device raise preview resolution instead of capping it to
+// protect the control plane.
+//
+// The device streams only to clients on this channel, so CLOSING this socket stops the work at the
+// source: a dismissed preview costs the device nothing.
+let wsPreview = null;
+let wspRetryTimer = null;   // pending preview reconnect, cancelled on close/hide
+let previewWanted = false;              // does the pane currently want frames?
+const WSP_RETRY_MIN_MS = 1000, WSP_RETRY_MAX_MS = 15000;
+let wspRetryMs = WSP_RETRY_MIN_MS;
+
+function connectPreview() {
+    if (wsPreview && (wsPreview.readyState === WebSocket.OPEN ||
+                      wsPreview.readyState === WebSocket.CONNECTING)) return;
+    const p = new WebSocket(`ws://${location.host}/wsp`);
+    wsPreview = p;
+    p.binaryType = "arraybuffer";
+    p.onmessage = (e) => {
+        if (p !== wsPreview || wsPaused) return;   // a stale socket's late frame is a no-op
+        if (e.data instanceof ArrayBuffer) preview.onBinaryMessage(e.data);
+    };
+    // RECONNECT. A dropped preview socket must come back on its own: WiFi hiccups, a device
+    // reboot, or the transient close a browser does when a tab is backgrounded all end the socket
+    // while the pane is still visible, and without a retry the preview stayed dead until the user
+    // pressed refresh (observed on an S3 over WiFi, 2026-08-25). Backoff so a device that REFUSES
+    // the upgrade (its preview cap is full) is not hammered; reset on a successful open.
+    p.onopen = () => {
+        if (p !== wsPreview) return;
+        wspRetryMs = WSP_RETRY_MIN_MS;
+        preview.adaptStart();   // the client-side controller runs only while this socket lives
+    };
+    p.onclose = () => {
+        if (p !== wsPreview) return;   // superseded by a newer socket, nothing to do
+        wsPreview = null;
+        preview.adaptStop();
+        if (!previewWanted) return;    // the pane was dismissed; staying closed is correct
+        // Tracked so closePreviewSocket can cancel it: an untracked retry armed just before a
+        // tab-hide would reopen the preview on a hidden tab and undo the hibernation.
+        wspRetryTimer = setTimeout(() => {
+            wspRetryTimer = null;
+            if (previewWanted && !wsPreview && !document.hidden) connectPreview();
+        }, wspRetryMs);
+        wspRetryMs = Math.min(wspRetryMs * 2, WSP_RETRY_MAX_MS);
+    };
+    p.onerror = () => { try { p.close(); } catch {} };   // onclose above does the retry
+}
+
+/// Close the socket without touching `previewWanted`, the pane's intent survives a tab-hide,
+/// which is what lets the return path reopen it.
+function closePreviewSocket() {
+    if (wspRetryTimer) { clearTimeout(wspRetryTimer); wspRetryTimer = null; }
+    if (!wsPreview) return;
+    const p = wsPreview;
+    wsPreview = null;
+    preview.adaptStop();
+    try { p.close(); } catch {}
+}
+
+function disconnectPreview() {
+    previewWanted = false;    // the pane was dismissed: intent gone too
+    closePreviewSocket();
+}
+
+// TAB VISIBILITY → socket hibernation. A hidden tab must cost the device NOTHING: its throttled
+// timers make it the worst client shape, subscribed but draining at a trickle, and its ~0 fps
+// measurements would coarsen the shared preview for everyone (coarsest request wins). So:
+//   hidden  → the preview socket closes IMMEDIATELY (the expensive stream, and the bad measurer);
+//             the control socket follows after a grace, so a quick alt-tab never pays the ~30 KB
+//             full-state resync. With both closed the device does nothing but render effects.
+//   visible → control reconnects first (the resync repaints the UI), then the preview via the
+//             normal wants-frames path, whose controller restarts fresh at full detail.
+const WS_HIDE_GRACE_MS = 10000;
+let wsHideTimer = null;
+let hiddenByVisibility = false;
+
+
+// The user's Preview targetFps, from the state tree, the client-side controller aims for it.
+function previewTargetFps(st) {
+    let v = 0;
+    const walk = (ms) => { for (const m of ms || []) {
+        if (m.type === "PreviewDriver")
+            for (const c of m.controls || []) if (c.name === "targetFps") v = c.value;
+        walk(m.children);
+    } };
+    walk(st && st.modules);
+    return v;
+}
+
+// Is the user mid-interaction with a control? A full renderCards() rebuilds the DOM, so it destroys
+// an open native select or a field being typed into, the control vanishes from under the cursor.
+// ONE home for the test, because both re-render triggers need it: the /api/types arrival above and
+// the WebSocket full state. The WS case is the one users hit: a full state is sent on every connect,
+// so a browser that drops and reconnects (a big layout on modest hardware) re-renders repeatedly,
+// and a dropdown can become impossible to click before it disappears.
+function userIsEditing() {
+    const el = document.activeElement;
+    return !!(el && (el.matches("input, textarea") || el.closest("select")
+                     || document.querySelector('select[data-open="true"]')));
 }
 
 // The message for a failed fetch Response: the server's own `{"error": …}` body (JSON, e.g.

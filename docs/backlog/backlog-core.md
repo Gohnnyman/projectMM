@@ -426,7 +426,7 @@ module by a path rather than a bare name.
 
 ### HTTP file serving blocks the render tick (backlog)
 
-`HttpServerModule::handleConnection()` serves large embedded files (`app.js`, `style.css`) with the blocking `TcpConnection::write` — a page load can briefly stall `loop20ms`. One-shot per load (lower priority than the per-tick preview issue, which is fixed). Fix: serve large HTTP responses with `writeChunks` (the same non-blocking path used for preview frames).
+`HttpServerModule::handleConnection()` serves large embedded files (`app.js`, `style.css`) with the blocking `TcpConnection::write` — a page load can briefly stall `loop20ms`. One-shot per load (lower priority than the per-tick preview issue, which is fixed). Fix: serve large HTTP responses through a resumable per-client cursor drained on tick20ms (the shape the preview and full-state sends use).
 
 ### Generic control + state topics over MQTT — the automation escape hatch (backlog)
 
@@ -510,8 +510,9 @@ work moved to a worker or made resumable, so each is a design change rather than
 Confirmed by external review (CodeRabbit, PR #56).
 
 **`tick()` — every frame, the sharp ones:**
-- `PreviewDriver::tick` — `sendFrame()` writes a socket synchronously; `buildAndSendCoordTable()`
-  resizes `keptIdx_`. Currently suppressed at the site with the reason.
+- `PreviewDriver::tick` — the socket half is FIXED (the pull-model transport only ARMS a message;
+  every socket byte moves on the transport tick). What remains: `buildCoordTable()` resizes
+  `keptIdx_` and the staging buffer on a rebuild/adopt tick. Suppressed at the site with the reason.
 - `ParallelLedDriver::tick` — `tickSync()`/`tickRing()` reach `busWaitIfBusy()`, which spins for
   the DMA peripheral. Deliberate (the driver owns the bus for the frame) but blocking. Suppressed.
 - `Drivers::tick` — joins/stops the render-split worker synchronously on the timed-out recovery
@@ -839,13 +840,6 @@ They are **not** CI failures (CI is Debug) and each one inspected so far is a fa
 
 Not done with the multi-destination/tab-UI merge because 17 warnings across four core files is its own change, not a tail on someone else's.
 
-## Preview stream: tail byte-phase desync under backpressure
-
-**Symptom (board B, 2026-07-14):** on a large grid the preview's bottom region (the frame tail) shows per-pixel noise; with a SOLID effect it flickers pure R / pure G / pure B at max brightness. Pure primaries from solid content = the frame bytes read at an offset that is not a multiple of 3 — tearing alone cannot discolor identical frames, so the resumable sender's offset accounting slips. Survives a browser refresh; occurs "occasionally" (per-frame), worst when the device is network-starved.
-
-**Suspect:** `HttpServerModule::sendBufferedFrame` (the zero-copy resumable send whose body is the live producer buffer, draining across transport ticks) — the resume-after-partial-socket-write path. Verify by logging the resume offset vs bytes actually written on EWOULDBLOCK; the fix is offset accounting, plus a resync rule (a client that missed bytes gets a fresh frame header, not a phase-shifted tail — the *robust to any input* bar).
-
-**Not** the shift-register transport bug and **not** buffer corruption: the composite buffer is proven correct (Solid writes every light; the preview alone garbles).
 
 ## MoonLive core/platform layering + JIT sdkconfig scoping (CodeRabbit #29, 4 findings)
 

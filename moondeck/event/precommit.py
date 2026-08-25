@@ -64,7 +64,7 @@ def build_gates(firmware, full_esp32=False):
 
         Gate("host tests (JS)",
              ["node", "--test", "test/js/**/*.test.mjs"],
-             lambda f: touches(f, "web-installer/", "test/js/")),
+             lambda f: touches(f, "web-installer/", "test/js/", "src/ui/")),
 
         # Needs a board plugged in, so it is recommended rather than blocking. Its trigger
         # is the provisioning path it covers; run_gates drops it from the report entirely

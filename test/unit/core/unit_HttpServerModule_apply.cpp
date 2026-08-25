@@ -558,3 +558,82 @@ TEST_CASE("a file write with no scheduler is a no-op, not a crash") {
     http.applyFileChanged("/moonlive/plasma.mle");   // must simply return
     CHECK(true);
 }
+
+// The preview channel's inbound framing: masked client data frames whose payloads are handed on
+// OPAQUELY (the producer owns their meaning). The parser's job is refusal and unmasking: wrong
+// opcode, unmasked, oversized, truncated, all -1, never a read past the buffer.
+TEST_CASE("the preview uplink parser unmasks exactly one small client data frame") {
+    uint8_t out[8];
+    int used = 0;
+    // [0x82 binary][0x82 masked len2][mask 4][0x51^m0][7^m1]
+    uint8_t good[] = {0x82, 0x82, 0x11, 0x22, 0x33, 0x44, static_cast<uint8_t>(0x51 ^ 0x11),
+                      static_cast<uint8_t>(7 ^ 0x22)};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(good, sizeof(good), out, &used) == 2);
+    CHECK(used == 8);
+    CHECK(out[0] == 0x51);
+    CHECK(out[1] == 7);
+
+    // A 3-byte payload (the [0x51][stride][fps] standing request) round-trips too.
+    uint8_t req[] = {0x82, 0x83, 0x11, 0x22, 0x33, 0x44, static_cast<uint8_t>(0x51 ^ 0x11),
+                     static_cast<uint8_t>(4 ^ 0x22), static_cast<uint8_t>(24 ^ 0x33)};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(req, sizeof(req), out, &used) == 3);
+    CHECK(used == 9);
+    CHECK(out[0] == 0x51); CHECK(out[1] == 4); CHECK(out[2] == 24);
+
+    uint8_t unmasked[] = {0x82, 0x02, 0x51, 0x07};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(unmasked, sizeof(unmasked), out, &used) == -1);
+
+    uint8_t ping[] = {0x89, 0x80, 0, 0, 0, 0};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(ping, sizeof(ping), out, &used) == -1);
+
+    CHECK(mm::HttpServerModule::parsePreviewUplink(good, 5, out, &used) == -1);   // truncated
+    CHECK(used == 0);
+}
+
+// TCP coalesces: two requests sent in quick succession can land in ONE read. The parser reports
+// how many bytes a frame occupied so the caller can walk the whole buffer and deliver each
+// payload in arrival order.
+TEST_CASE("the preview uplink parser reports a frame's length so a coalesced read can be walked") {
+    uint8_t two[] = {
+        0x82, 0x82, 0x11, 0x22, 0x33, 0x44, static_cast<uint8_t>(0x51 ^ 0x11),
+        static_cast<uint8_t>(2 ^ 0x22),
+        0x82, 0x82, 0x55, 0x66, 0x77, 0x88, static_cast<uint8_t>(0x52 ^ 0x55),
+        static_cast<uint8_t>(8 ^ 0x66),
+    };
+    uint8_t out[8];
+    int used = 0;
+    CHECK(mm::HttpServerModule::parsePreviewUplink(two, sizeof(two), out, &used) == 2);
+    CHECK(used == 8);
+    CHECK(out[0] == 0x51); CHECK(out[1] == 2);
+    CHECK(mm::HttpServerModule::parsePreviewUplink(two + used, static_cast<int>(sizeof(two)) - used,
+                                                   out, &used) == 2);
+    CHECK(used == 8);
+    CHECK(out[0] == 0x52); CHECK(out[1] == 8);
+
+    // A partial tail consumes nothing, so the walk stops instead of spinning or reading past it.
+    int tail = 0;
+    CHECK(mm::HttpServerModule::parsePreviewUplink(two, 5, out, &tail) == -1);
+    CHECK(tail == 0);
+}
+
+// The request channel takes only SMALL payloads: anything using the WebSocket extended-length
+// forms (126/127) or a plain length over 8 is refused whole, consuming nothing, so a hostile or
+// confused client cannot make the walker misstep into its bytes.
+TEST_CASE("the preview uplink parser refuses oversized and extended-length frames") {
+    uint8_t out[8];
+    int used = 7;
+
+    uint8_t tooLong[6 + 9] = {0x82, static_cast<uint8_t>(0x80 | 9), 1, 2, 3, 4};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(tooLong, sizeof(tooLong), out, &used) == -1);
+    CHECK(used == 0);
+
+    uint8_t ext16[64] = {0x82, static_cast<uint8_t>(0x80 | 126), 0, 20, 1, 2, 3, 4};
+    used = 7;
+    CHECK(mm::HttpServerModule::parsePreviewUplink(ext16, sizeof(ext16), out, &used) == -1);
+    CHECK(used == 0);
+
+    uint8_t ext64[64] = {0x82, static_cast<uint8_t>(0x80 | 127), 0, 0, 0, 0, 0, 0, 0, 20};
+    used = 7;
+    CHECK(mm::HttpServerModule::parsePreviewUplink(ext64, sizeof(ext64), out, &used) == -1);
+    CHECK(used == 0);
+}
