@@ -123,3 +123,16 @@ test("source-limited hold re-arms on real deterioration, and audits the retry to
     s = step(s, 30);                     // and this time it PAYS (13 → 30), so it is kept
     assert.equal(s.stride, 2);
 });
+
+test("a link delivering nothing never counts as a payoff, however often it is asked", () => {
+    // 0 fps before and after a coarsen is not a 25% improvement, it is a dead link. Reading it as
+    // "paid" would ratchet the stride to 64 while not one frame arrives.
+    let s = initialStrideState();
+    s = step(s, 0);                      // starvation coarsens at once
+    assert.equal(s.stride, 2);
+    for (let i = 0; i < 10; i++) {
+        s = step(s, 0);
+        assert.ok(s.stride <= 2, `stride ratcheted to ${s.stride} on a dead link`);
+    }
+    assert.equal(s.stride, 1);           // settles back at full detail: coarser bought nothing
+});

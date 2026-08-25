@@ -183,9 +183,18 @@ public:
         // and a whole message spliced into a half-drained one corrupts every client's framing
         // (bench: "Invalid frame header" reconnect loop on WiFi, where a frame drains for many
         // ticks). The need re-evaluates next tick, gen/coordPending_ are only consumed on send.
+        // A GENERATION-driven re-stream is additionally rate-limited: a reconnecting client bumps
+        // the generation, and re-streaming the whole table to EVERY viewer on each bump turns one
+        // transient close into a feedback storm on a congested link (bench: a ~1.3 s reconnect
+        // cadence, each fresh client dying mid-table). One table per second caps the damage; a
+        // fresh viewer waits at most that long for positions. Cold start and a stride change are
+        // not rate-limited, their tables must land before color frames make sense.
+        const bool genOnly = coordCount_ != 0 && !coordPending_ && gen != lastClientGen_;
         const bool needCoords = coordCount_ == 0 || gen != lastClientGen_ || coordPending_;
-        if (needCoords && broadcaster_->bufferedSendIdle()) {
+        if (needCoords && broadcaster_->bufferedSendIdle()
+            && !(genOnly && now - lastCoordStreamMs_ < 1000)) {
             lastClientGen_ = gen;
+            lastCoordStreamMs_ = now;
             buildAndSendCoordTable();   // streams positions; sets coordPending_ if not all clients got it
         }
 
@@ -569,6 +578,7 @@ private:
     uint8_t bx_ = 0, by_ = 0, bz_ = 0;
     int32_t posScale_ = 0;            // 0 = positions 1:1; else largest box edge (>255) to scale by
     uint32_t lastSendTime_ = 0;
+    uint32_t lastCoordStreamMs_ = 0;   // last generation-driven table stream, for the 1/s cap
     uint32_t lastClientGen_ = 0;   // last seen broadcaster_->clientGeneration() — re-send coords on change
 
     // The served per-axis lattice stride: the coarsest standing client request (1 = full

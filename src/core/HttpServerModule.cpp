@@ -2371,13 +2371,15 @@ void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, con
     // control-plane bookkeeping below, no state resync, no generation bump, because it receives
     // only binary frames the driver pushes.
     if (previewChannel) {
-        // Under the sender lease: the slot array and previewSend_ bookkeeping are shared with
-        // core 1 (which arms frames and reads hdrLen/bodyLen under the same lease); an un-fenced
-        // read of `active` here could pair with torn lengths and mark a WRONG done-cursor. Busy
-        // means core 1 is mid stream; admission is rare, so the honest move is to refuse this
-        // attempt and let the browser's own retry land on a quiet tick.
+        // The slot array and previewSend_ bookkeeping are shared with core 1 (which arms frames
+        // under the same lease), so the cursor decision below needs it. Busy is the COMMON case
+        // (core 1 streams most ticks), so refusing the connection there made the browser retry on
+        // its ~1.2 s backoff over and over, a bench-visible storm of zero-frame reconnects.
+        // Instead ADMIT unconditionally and, when the lease is busy, take the conservative cursor:
+        // "this message is already done for me". That is exactly what the newcomer needs (its
+        // stream starts at the next whole frame) and it is safe without reading previewSend_'s
+        // lengths, since a cursor at SIZE_MAX is past any total the drain computes.
         LockGuard admitLease{wsLock_};
-        if (!admitLease) { conn.close(); return; }
         for (int i = 0; i < MAX_PREVIEW_CLIENTS; i++) {
             if (previewClients_[i].valid()) continue;
             previewClients_[i] = std::move(conn);
@@ -2386,8 +2388,8 @@ void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, con
             // done so the newcomer is never spliced into a half-sent message (its stream starts
             // with the next whole frame). Cancelling the send instead abandoned the frame
             // mid-message for every existing viewer, a torn stream on their side.
-            previewSend_.sent[i] = previewSend_.active
-                ? previewSend_.hdrLen + previewSend_.bodyLen : 0;
+            previewSend_.sent[i] = !admitLease ? SIZE_MAX
+                                 : (previewSend_.active ? previewSend_.hdrLen + previewSend_.bodyLen : 0);
             // The generation bump is what makes PreviewDriver re-stream its coordinate table, and
             // a /wsp client needs one exactly as a /ws client does: without it, a viewer whose
             // page kept no cached table (pane opened later in the session) receives color frames
@@ -2527,12 +2529,21 @@ void HttpServerModule::pollWledStateFromWebSockets() {
             const int n = pc.read(buf, sizeof(buf));
             if (n == 0) { pc.close(); previewHints_[i] = 0; continue; }   // clean close: free the slot NOW
             if (n > 0) {
-                const int hint = parsePreviewUplink(buf, n);
-                // S2 of the bench review: validate at the STORE. maxClientHint() aggregates by MAX,
-                // so one out-of-range value (a buggy or hostile client posting 255) would mask every
-                // legitimate request for as long as its slot lives. Only a stride the driver can
-                // serve is a request at all.
-                if (hint >= 1 && hint <= 64) previewHints_[i] = static_cast<uint8_t>(hint);
+                // WALK the read: TCP coalesces, so two hints sent in quick succession (a controller
+                // that coarsens twice, a target change followed by a band step) can arrive as one
+                // buffer. Parsing only the first would leave the device serving a stale request
+                // until the next window. The LAST valid hint in the buffer is the current one.
+                for (int off = 0; off < n; ) {
+                    int used = 0;
+                    const int hint = parsePreviewUplink(buf + off, n - off, &used);
+                    if (used <= 0) break;                  // nothing parseable left (or a partial tail)
+                    // Validate at the STORE. maxClientHint() aggregates by MAX, so one out-of-range
+                    // value (a buggy or hostile client posting 255) would mask every legitimate
+                    // request for as long as its slot lives. Only a stride the driver can serve is
+                    // a request at all.
+                    if (hint >= 1 && hint <= 64) previewHints_[i] = static_cast<uint8_t>(hint);
+                    off += used;
+                }
             }
         }
     }
@@ -2612,7 +2623,8 @@ bool HttpServerModule::sendWsTextFrame(platform::TcpConnection& conn, const char
 // long this synchronous send can occupy the caller's loop; a span that doesn't complete in budget
 // closes the client (the browser reconnects). Used by the begin/push/end stream (the coord table
 // and downsampled color frame); the full-res color frame uses the resumable sendBufferedFrame.
-int HttpServerModule::parsePreviewUplink(const uint8_t* buf, int n) {
+int HttpServerModule::parsePreviewUplink(const uint8_t* buf, int n, int* consumed) {
+    if (consumed) *consumed = 0;
     // One masked client frame: [0x81|0x82][0x80|len][mask x4][payload...]. The only message the
     // channel defines is [0x51][hint]; everything else (pings, stray text) is ignored, and a
     // malformed length can never read past `n`, these are network bytes, bounds first.
@@ -2622,6 +2634,7 @@ int HttpServerModule::parsePreviewUplink(const uint8_t* buf, int n) {
     if (!(buf[1] & 0x80)) return -1;                       // client frames must be masked (RFC 6455)
     const int len = buf[1] & 0x7F;
     if (len != 2 || n < 6 + len) return -1;
+    if (consumed) *consumed = 6 + len;
     const uint8_t* mask = buf + 2;
     const uint8_t p0 = buf[6] ^ mask[0], p1 = buf[7] ^ mask[1];
     if (p0 != 0x51) return -1;

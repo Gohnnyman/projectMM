@@ -36,9 +36,15 @@ export function nextStrideState(st, achievedFps, targetFps) {
     // to 1/64. So the window after a coarsen checks the receipt: no meaningful improvement →
     // revert, and hold at that detail until the rate genuinely changes.
     if (s.coarsenFrom) {
-        const paid = achievedFps * 4 >= s.coarsenFps * 5;   // ≥ +25%
+        // A payoff must be a real gain: >=25% MORE than before, and strictly above zero.
+        // Without the second half, a dead link (0 fps before and after) satisfies 0 >= 0 and
+        // reads as paid, so the stride ratchets to 64 while nothing arrives at all.
+        const paid = achievedFps > 0 && achievedFps * 4 >= s.coarsenFps * 5;
         if (!paid) {
-            s.srcLimitFps = achievedFps;      // remember the source's ceiling
+            // Remember the ceiling this source actually delivers. A dead link measures 0, which is
+            // falsy, so store -1 there: the hold below must still engage, or the controller flaps
+            // coarsen/revert every window and re-requests forever on a link carrying nothing.
+            s.srcLimitFps = achievedFps > 0 ? achievedFps : -1;
             s.stride = s.coarsenFrom;         // give the detail back, it cost nothing to keep
             s.failedStride = 0;
             s.request = true;
@@ -50,8 +56,9 @@ export function nextStrideState(st, achievedFps, targetFps) {
     // While source-limited, a below-target rate is EXPECTED, only a real deterioration (well
     // under the source's own ceiling) or a recovery to target re-arms the bands.
     if (s.srcLimitFps) {
+        const ceiling = s.srcLimitFps > 0 ? s.srcLimitFps : 0;   // -1 is the "delivers nothing" marker
         if (achievedFps * 5 >= targetFps * 4) s.srcLimitFps = 0;        // source recovered
-        else if (achievedFps * 2 >= s.srcLimitFps && achievedFps <= s.srcLimitFps * 2)
+        else if (achievedFps * 2 >= ceiling && achievedFps <= ceiling * 2)
             return s;                                                    // steady at its ceiling: hold
         else s.srcLimitFps = 0;               // left the band either way: re-arm the bands
     }

@@ -27,7 +27,7 @@ test("hiding the tab closes the preview socket immediately, keeping the pane's i
 test("the control socket closes only after a grace, so alt-tab costs no resync", () => {
     const i = app.indexOf("WS_HIDE_GRACE_MS");
     assert.ok(i > 0, "no hide grace constant");
-    assert.ok(/setTimeout\([\s\S]{0,400}WS_HIDE_GRACE_MS\)/.test(app),
+    assert.ok(/setTimeout\([\s\S]{0,900}WS_HIDE_GRACE_MS\)/.test(app),
               "the control-socket close must sit behind the grace timer");
     assert.ok(app.includes("clearTimeout(wsHideTimer)"),
               "returning within the grace must cancel the pending close");
@@ -51,4 +51,11 @@ test("closing the preview socket stops the adaptation loop with it", () => {
     assert.ok(i > 0);
     assert.ok(app.slice(i, i + 400).includes("preview.adaptStop()"),
               "a closed socket must not keep measuring, that is the backgrounded-tab bug");
+});
+
+test("hiding cancels a pending reconnect, so no control socket opens on a hidden tab", () => {
+    const i = app.indexOf('addEventListener("visibilitychange"');
+    const hidden = app.slice(i, app.indexOf("} else {", i));
+    assert.ok(/clearTimeout\(wsReconnectTimer\)/.test(hidden),
+              "the hide path must cancel a reconnect armed before the tab hid");
 });

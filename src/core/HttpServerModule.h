@@ -181,9 +181,11 @@ public:
 
     /// Parse one client→server frame from the preview channel: a masked WS frame whose payload is
     /// [0x51][hint u8]. Returns the payload byte (0..255) or -1 when the buffer holds no such
-    /// message; the caller validates the range (only 1..64 is a servable stride).
+    /// message; the caller validates the range (only 1..64 is a servable stride). `consumed`, when
+    /// given, receives the whole frame's length (header + mask + payload) so a caller can walk a
+    /// read that coalesced several frames, or 0 when nothing could be parsed.
     /// Pure and static so the byte handling is unit-testable without a socket.
-    static int parsePreviewUplink(const uint8_t* buf, int n);
+    static int parsePreviewUplink(const uint8_t* buf, int n, int* consumed = nullptr);
 
     // The cross-core sender lease (see BinaryBroadcaster). Guards previewSend_ + the wsClients_ socket
     // writes against this module's own core-0 drain / state push while an offloaded PreviewDriver

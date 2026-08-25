@@ -583,3 +583,26 @@ TEST_CASE("preview uplink parser accepts exactly the one defined message") {
 
     CHECK(mm::HttpServerModule::parsePreviewUplink(good, 5) == -1);             // truncated
 }
+
+// TCP coalesces: two hints sent in quick succession can land in ONE read. The parser reports how
+// many bytes a frame occupied so the caller can walk the whole buffer; stopping at the first would
+// leave the device serving a stale request until the next window.
+TEST_CASE("the preview uplink parser reports a frame's length so a coalesced read can be walked") {
+    uint8_t two[] = {
+        0x82, 0x82, 0x11, 0x22, 0x33, 0x44, static_cast<uint8_t>(0x51 ^ 0x11),
+        static_cast<uint8_t>(2 ^ 0x22),                       // first hint: stride 2
+        0x82, 0x82, 0x55, 0x66, 0x77, 0x88, static_cast<uint8_t>(0x51 ^ 0x55),
+        static_cast<uint8_t>(8 ^ 0x66),                       // second hint: stride 8
+    };
+    int used = 0;
+    CHECK(mm::HttpServerModule::parsePreviewUplink(two, sizeof(two), &used) == 2);
+    CHECK(used == 8);
+    CHECK(mm::HttpServerModule::parsePreviewUplink(two + used, static_cast<int>(sizeof(two)) - used,
+                                                   &used) == 8);
+    CHECK(used == 8);
+
+    // A partial tail consumes nothing, so the walk stops instead of spinning or reading past it.
+    int tail = 0;
+    CHECK(mm::HttpServerModule::parsePreviewUplink(two, 5, &tail) == -1);
+    CHECK(tail == 0);
+}

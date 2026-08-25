@@ -918,6 +918,7 @@ export const preview = {
         if (!(v > 0) || v === adaptTargetFps_) return;
         adaptTargetFps_ = v;
         adaptState_ = initialStrideState();
+        adaptFrames_ = 0;   // the frames counted so far belong to the OLD target's window
         if (sendHint_) sendHint_(adaptState_.stride);
     },
     onSendHint(cb) { sendHint_ = cb; },

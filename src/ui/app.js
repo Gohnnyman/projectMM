@@ -253,6 +253,9 @@ document.addEventListener("visibilitychange", () => {
         wsHideTimer = setTimeout(() => {
             hiddenByVisibility = true;
             wsUnloading = true;                    // suppress the auto-reconnect while hidden
+            // A backoff reconnect armed BEFORE the tab hid would otherwise fire afterwards and
+            // open a fresh control socket on a hidden tab, exactly the work this closes.
+            if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
             if (ws) { try { ws.close(); } catch {} }
         }, WS_HIDE_GRACE_MS);
     } else {
