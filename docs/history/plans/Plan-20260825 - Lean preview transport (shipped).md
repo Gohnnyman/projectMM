@@ -1,5 +1,7 @@
 # Plan, Lean preview transport
 
+(PR #81: all four steps implemented, gates green, bench acceptance on four boards + desktop.)
+
 ## The evidence that forces this
 
 One day of bench time produced three symptoms with one root cause:

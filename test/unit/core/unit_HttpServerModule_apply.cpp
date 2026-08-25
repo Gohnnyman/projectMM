@@ -615,3 +615,25 @@ TEST_CASE("the preview uplink parser reports a frame's length so a coalesced rea
     CHECK(mm::HttpServerModule::parsePreviewUplink(two, 5, out, &tail) == -1);
     CHECK(tail == 0);
 }
+
+// The request channel takes only SMALL payloads: anything using the WebSocket extended-length
+// forms (126/127) or a plain length over 8 is refused whole, consuming nothing, so a hostile or
+// confused client cannot make the walker misstep into its bytes.
+TEST_CASE("the preview uplink parser refuses oversized and extended-length frames") {
+    uint8_t out[8];
+    int used = 7;
+
+    uint8_t tooLong[6 + 9] = {0x82, static_cast<uint8_t>(0x80 | 9), 1, 2, 3, 4};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(tooLong, sizeof(tooLong), out, &used) == -1);
+    CHECK(used == 0);
+
+    uint8_t ext16[64] = {0x82, static_cast<uint8_t>(0x80 | 126), 0, 20, 1, 2, 3, 4};
+    used = 7;
+    CHECK(mm::HttpServerModule::parsePreviewUplink(ext16, sizeof(ext16), out, &used) == -1);
+    CHECK(used == 0);
+
+    uint8_t ext64[64] = {0x82, static_cast<uint8_t>(0x80 | 127), 0, 0, 0, 0, 0, 0, 0, 20};
+    used = 7;
+    CHECK(mm::HttpServerModule::parsePreviewUplink(ext64, sizeof(ext64), out, &used) == -1);
+    CHECK(used == 0);
+}

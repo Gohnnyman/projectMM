@@ -21,11 +21,11 @@
 
 namespace {
 
-// Captures the two preview message types so tests can inspect them. PreviewDriver STREAMS each
-// frame via begin/push/end (no frame buffer); the mock reassembles the pushed slices, strips the
-// WS header (begin is given the PAYLOAD length, so what's pushed is exactly the payload), and
-// classifies by first byte at end. dropCoord/acceptNext make endBinaryFrame report a client that
-// didn't get the whole frame (false) to drive the coord-pending retry + adaptive-downscale paths.
+// Captures the two preview message types so tests can inspect them. Every message arrives through
+// the ONE resumable send (sendBufferedFrame) as header ++ body, classified by the type byte:
+// 0x03 tables (11-byte header, epoch at [10]) into lastCoord, 0x02 frames (9-byte header, epoch
+// at [7], drops at [8]) into lastFrame. dropCoord/acceptNext make a send report "slot busy"
+// (false) to drive the request-retry and drop-counting paths.
 // -Wnon-virtual-dtor: BinaryBroadcaster's own destructor is protected and non-virtual on
 // purpose ("not owned through this interface"), so no code can delete through a base pointer.
 // This double is a stack local in every test, never owned polymorphically — and it cannot copy
@@ -95,8 +95,8 @@ struct CaptureBroadcaster : mm::BinaryBroadcaster {
     }
     void cancelBufferedSend() override { if (active_) bufferedCanceled++; active_ = false; }
 
-    // 0x03 = [type][count:u32][bx][by][bz][stride:u16] (10-byte header)
-    // 0x02 = [type][count:u32][stride:u16] (7-byte header)
+    // 0x03 = [type][count:u32][bx][by][bz][stride:u16][epoch] (11-byte header)
+    // 0x02 = [type][count:u32][stride:u16][epoch][drops] (9-byte header)
     static uint32_t u32le(const std::vector<uint8_t>& b, size_t o) {
         return b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (static_cast<uint32_t>(b[o + 3]) << 24);
     }
@@ -145,7 +145,8 @@ struct PreviewRig {
     }
 
     void produce() {
-        cap.askTable();                    // the client asks for positions (the pull model)
+        // Drives the build/send methods directly (bypassing tick), so no [0x52] is posted: a
+        // standing tableRequested_ flag would leak into the tick-driven tests that follow.
         preview->buildCoordTable();
         preview->sendCoordTable();
         preview->sendFrame();
@@ -315,7 +316,7 @@ TEST_CASE("a table request outranks frames, is retried while refused, and frames
     uint32_t t = 1000;
     auto tick = [&] { t += 100; mm::platform::setTestNowMs(t); rig.preview->tick(); };
 
-    // Pump tick(). The owed 0x03 outranks frames, so while it cannot go out, NOTHING does — a
+    // Pump tick(). The owed 0x03 outranks frames, so while it cannot go out, NOTHING does: a
     // 0x02 now would carry a count the asker cannot map.
     for (int i = 0; i < 5; i++) tick();
     CHECK(rig.cap.frameMsgs == 0);
@@ -376,7 +377,7 @@ TEST_CASE("PreviewDriver tolerates the active Layer being deleted") {
     CHECK(cap.frameMsgs == 0);           // nothing to send with no layer
 }
 
-// The pull model: a coordinate table is sent ONLY when a client asks ([0x52]) — never on a
+// The pull model: a coordinate table is sent ONLY when a client asks ([0x52]), never on a
 // timer, never per-frame, never volunteered on a connect or a geometry change (the device is a
 // dumb producer; a client whose cache misses asks). Driven through tick() with a frozen clock.
 TEST_CASE("PreviewDriver sends the coordinate table only when a client asks, never on its own") {

@@ -6,7 +6,7 @@ uv runs, with no third-party deps. Sibling-private helper like _observed.py.
 The device serves TWO WebSocket paths: `/ws` (control plane, JSON state) and `/wsp`
 (the lossy preview channel, binary only). This reader takes `/wsp`, so it sees
 PreviewDriver binary frames — 0x03 coordinate tables and 0x02 RGB frames
-(`[0x02][count u32 LE][stride u16 LE][epoch u8][drops u8][rgb × count]`, a 9-byte header, see
+(`[0x02][count u32 LE][stride u16 LE][epoch u8][drops u8][rgb x count]`, a 9-byte header, see
 src/light/drivers/PreviewDriver.h). This reader skips everything except 0x02.
 
 Two simplifications the firmware guarantees (HttpServerModule.cpp):

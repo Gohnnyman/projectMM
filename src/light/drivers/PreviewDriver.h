@@ -19,39 +19,44 @@ namespace mm {
 /// HTTP server is a domain-neutral BinaryBroadcaster that just writes the bytes:
 ///
 // --8<-- [start:wire-format]
-///   0x03 coordinate table (sent when the geometry changes — every LUT/layout rebuild
-///        via prepare — and when a new client connects, so a refresh gets it; never
-///        per-frame):
-///        [0x03][count:u32][bx:u8][by:u8][bz:u8][stride:u16][(x,y,z):u8×3 × count]
+///   0x03 coordinate table (sent ONLY in answer to a client's [0x52] request; the client
+///        caches tables per (epoch, stride), so a stride change to a known rung asks nothing):
+///        [0x03][count:u32][bx:u8][by:u8][bz:u8][stride:u16][epoch:u8][(x,y,z):u8x3 x count]
 ///        bx/by/bz = bounding-box extent (for client centring); positions are
-///        1 byte/axis (a layout box ≤255/axis is the realistic case). count is u32 so a
-///        >65535-light panel (big ArtNet/HUB75 walls) isn't capped by the wire format —
-///        it matches nrOfLightsType (u32 on PSRAM boards).
+///        1 byte/axis (scaled when an axis exceeds 255). count is u32 so a >65535-light
+///        panel isn't capped by the wire format; epoch bumps on every geometry rebuild
+///        and keys the client's cache.
 ///
-///   0x02 per-frame channels: [0x02][count:u32][stride:u16][(r,g,b) × count]
-///        RGB by driver index, every `stride`-th light. The browser positions
-///        triple i at coord-table entry i*stride.
+///   0x02 per-frame channels: [0x02][count:u32][stride:u16][epoch:u8][drops:u8][(r,g,b) x count]
+///        RGB of every kept light, in the coord table's order. drops = frames discarded
+///        at the source since the last delivered one, the congestion signal the client's
+///        controller adapts on.
+///
+///   Client requests (masked WS frames, unmasked by core, interpreted only here):
+///        [0x51][stride][fps]  standing frame request (most conservative across viewers wins;
+///                             the targetFps control is the ceiling)
+///        [0x52][stride]       one-shot: send me the coordinate table
 // --8<-- [end:wire-format]
 ///
 /// `count` is the number of points actually kept after lattice downsampling (the
 /// lights whose position satisfies `pos ≡ 0 mod stride`) — a client sizes its buffer
-/// from this `count`, not from the light total. `stride` rises above 1 only when the
-/// point set would exceed the runtime send-buffer cap (`min(display, memory)`); below
-/// the cap every light is sent (stride 1), so a sparse layout streams in full.
+/// from this `count`, not from the light total. `stride` rises above 1 when a client
+/// requests it, or when the memory cap forces a floor; with no cap in play every light
+/// is sent (stride 1), so a sparse layout streams in full.
 /// **Its own channel (`/wsp`), and why.** Preview frames are lossy and large; control-plane state is
 /// small and latency-sensitive. Sharing one WebSocket made the small messages queue behind the big
 /// ones, head-of-line blocking, which users saw as a flickering connection indicator and a UI that
 /// stopped responding while a large layout streamed. Separate TCP connections is the standard remedy
 /// for that mixed-criticality pairing.
 ///
-/// **Resolution is client-driven.** The browser measures the frame rate that actually arrives and
-/// posts the lattice stride it wants as a `[0x51][stride]` uplink; the device serves the coarsest
-/// standing request across viewers, full detail when none stands. A fixed point ceiling
-/// (`maxPreviewPoints()`: min of the 16384 display cap and the memory cap) bounds what any request
-/// can ask for.
+/// **Resolution is client-driven.** The browser reads the drops counter each frame carries (the
+/// device's own congestion signal) and posts the `[0x51][stride][fps]` standing request it wants;
+/// the device serves the most conservative request across viewers. The memory cap
+/// (`maxPreviewPoints()`) is the only floor a request cannot go finer than.
 ///
-/// **No subscriber, no work.** `tick()` returns immediately when the channel has no clients, so a
-/// dismissed preview pane costs the device nothing, not merely nothing on the wire.
+/// **No request, no work.** `tick()` returns immediately when no standing request exists, so a
+/// dismissed preview pane (or a hidden tab) costs the device nothing, not merely nothing on the
+/// wire.
 ///
 /// @card PreviewDriver.png
 class PreviewDriver : public DriverBase, public BinaryBroadcaster::ClientMessageSink {
@@ -107,12 +112,12 @@ public:
     /// Preview shows the raw logical buffer, no correction.
     bool hasCorrectionControls() const override { return false; }
 
-    /// Bind the controls: `targetFps` (1-60), the frame rate the preview aims for. The device never
+    /// Bind the controls: `targetFps` (1-25), the frame rate the preview aims for. The device never
     /// sends faster, and when the link cannot sustain it the BROWSER trades resolution to get
     /// closer: a low target keeps full detail at a low rate, a high target accepts a coarser
     /// preview to stay responsive.
     void defineDriverControls() override {
-        controls_.addControl("targetFps", targetFps, 1, 60);
+        controls_.addControl("targetFps", targetFps, 1, 25);
     }
 
     /// Point the driver at the sparse driver buffer the LED/ArtNet drivers also read
@@ -140,6 +145,25 @@ public:
         // and each asks via [0x52]. The device never volunteers a table (the pull model).
         epoch_++;
         buildCoordTable();
+        // Pre-size the staging and index buffers for the FINEST stride this geometry can be
+        // served at (stride 1, bounded by the memory cap). Both are grow-only, so every later
+        // stride adopt on the render tick reuses this capacity and allocates nothing: the one
+        // allocation the tick path could reach moves here, the cold rebuild seam.
+        if (layer_ && layer_->layouts()) {
+            const nrOfLightsType finest = layer_->layouts()->totalLightCount();
+            const nrOfLightsType capPts = maxPreviewPoints();
+            const size_t maxPts = finest < capPts ? finest : capPts;
+            ensureStaging(maxPts * 3u);
+            if (!denseGrid() && keptIdxCap_ < maxPts) {
+                auto* grown = static_cast<nrOfLightsType*>(platform::alloc(maxPts * sizeof(nrOfLightsType)));
+                if (grown) {
+                    if (keptIdx_) platform::free(keptIdx_);
+                    keptIdx_ = grown;
+                    keptIdxCap_ = static_cast<nrOfLightsType>(maxPts);
+                    publishHeapBytes();
+                }
+            }
+        }
         refreshStatus();   // surface an index-cache alloc miss in the tab
     }
 
@@ -560,18 +584,6 @@ private:
     bool denseGrid() const { return layer_ && !layer_->lut().hasLUT(); }
 
     nrOfLightsType maxPreviewPoints() const {
-        // TWO independent bounds, take the smaller:
-        //  (1) DISPLAY cap — a preview is a browser canvas a few hundred px wide; beyond ~4096
-        //      points the lights are sub-pixel and indistinguishable, so MORE points only cost link
-        //      bandwidth (a 16K-point 49 KB frame streams at <1 targetFps even on Ethernet). Capping to a
-        //      display-sensible count is what makes a big-RAM board (P4) downsample to a frame the
-        //      LINK can actually push fast — the bottleneck here is throughput, not memory. WLED-MM
-        //      caps its live preview the same way. The lattice downsample (and the browser's status)
-        //      handle anything larger gracefully.
-        //  (2) MEMORY cap — derived from maxAllocBlock() so a tight/fragmented board downsamples even
-        //      SOONER than the display cap (architecture.md § Scaling to available memory).
-        // min(display, memory): the display cap normally wins (it's the smaller); the memory cap
-        // only bites on a board too tight to stream even 4096 points.
         // NO display cap: the only bounds are MEMORY (staging + index tables must fit this
         // board's largest free block) and the index type. Everything else self-degrades where it
         // actually binds: a link that cannot carry full-res frames reports drops and the client

@@ -371,6 +371,7 @@ async function init() {
 // The device streams only to clients on this channel, so CLOSING this socket stops the work at the
 // source: a dismissed preview costs the device nothing.
 let wsPreview = null;
+let wspRetryTimer = null;   // pending preview reconnect, cancelled on close/hide
 let previewWanted = false;              // does the pane currently want frames?
 const WSP_RETRY_MIN_MS = 1000, WSP_RETRY_MAX_MS = 15000;
 let wspRetryMs = WSP_RETRY_MIN_MS;
@@ -400,7 +401,12 @@ function connectPreview() {
         wsPreview = null;
         preview.adaptStop();
         if (!previewWanted) return;    // the pane was dismissed; staying closed is correct
-        setTimeout(() => { if (previewWanted && !wsPreview) connectPreview(); }, wspRetryMs);
+        // Tracked so closePreviewSocket can cancel it: an untracked retry armed just before a
+        // tab-hide would reopen the preview on a hidden tab and undo the hibernation.
+        wspRetryTimer = setTimeout(() => {
+            wspRetryTimer = null;
+            if (previewWanted && !wsPreview && !document.hidden) connectPreview();
+        }, wspRetryMs);
         wspRetryMs = Math.min(wspRetryMs * 2, WSP_RETRY_MAX_MS);
     };
     p.onerror = () => { try { p.close(); } catch {} };   // onclose above does the retry
@@ -409,6 +415,7 @@ function connectPreview() {
 /// Close the socket without touching `previewWanted`, the pane's intent survives a tab-hide,
 /// which is what lets the return path reopen it.
 function closePreviewSocket() {
+    if (wspRetryTimer) { clearTimeout(wspRetryTimer); wspRetryTimer = null; }
     if (!wsPreview) return;
     const p = wsPreview;
     wsPreview = null;

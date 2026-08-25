@@ -50,3 +50,15 @@ test("the /api/types arrival keeps its guard too", () => {
     assert.ok(block.includes("userIsEditing()"),
               "/api/types must not rebuild the DOM mid-edit either");
 });
+
+test("a truncated preview frame feeds no adaptation counters: validate first, then count", () => {
+    // Source-pinned: renderPreviewFrame must complete BOTH length checks before adaptFrames_ or
+    // windowDrops_ move, or a garbage frame steers the resolution controller.
+    const src = readFileSync(new URL("../../src/ui/preview3d.js", import.meta.url), "utf8");
+    const fn = src.slice(src.indexOf("function renderPreviewFrame"));
+    const body = fn.slice(0, fn.indexOf("drawLights(rgb)"));
+    const lastCheck = body.lastIndexOf("byteLength < 9 + count * 3");
+    assert.ok(lastCheck > 0, "the body-length check must exist");
+    assert.ok(body.indexOf("adaptFrames_++") > lastCheck, "frames counted only after full validation");
+    assert.ok(body.indexOf("windowDrops_ +=") > lastCheck, "drops counted only after full validation");
+});

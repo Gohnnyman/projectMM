@@ -228,16 +228,6 @@ The migrated 1D PacMan and 1D Ant effects were removed — a chase rendered on a
 
 Only **NoiseEffect**, **PlasmaEffect** and **RipplesEffect** have z-aware math. The other honest-D2 effects use `Layer::extrude` to duplicate the z=0 plane, so every z-slice is identical on 3D layers. Candidates for genuine D3 promotion: Metaballs/GlowParticles (add z to blob coordinates), Plasma palette/Spiral (add z-driven phase term), Fire (z-drift heat grid), Rings/LavaLamp/Checkerboard/Particles (add z to each element). Prioritise after seeing real 3D installations; each promoted effect also needs its `dynamicBytes` budget for the full 3D buffer.
 
-### Full-density interpolated preview for large layouts (backlog)
-
-The preview index-downsamples a large layout to fit the WS send budget (e.g. 128×128 = 16384 lights → ~1639 sent at stride 10), so the UI shows a sparse sample, not every light. To show **all** lights at their real positions with **interpolated** colors for the unsent ones:
-
-- Decouple the `0x03` coordinate-table density from the per-frame `0x02` stride. Positions are static and sent once, so the table can carry **all** light coordinates (16384 × 3 = ~48 KB one-time — acceptable off the per-frame path, possibly chunked) while the per-frame RGB stays strided to protect ArtNet/the link.
-- The browser holds the full position set and, per frame, interpolates each unsent light's color from its nearest sent neighbours (the sent indices are known from the stride). True positions, guessed colors — better than the removed dense-box block-replicate because positions are exact.
-- Open questions: 48 KB one-time table vs `MAX_WRITE_CHUNKS` / send-buffer (needs chunked send or a raised cap, with the same partial-write care as `writeChunks`' drain); interpolation cost on a 16384-point cloud each frame in JS; whether nearest-neighbour or weighted is worth it.
-
-Not simple — own planning pass. Until then the preview is a faithful strided *sample* (correct shape/color/motion, not per-pixel). A cheap interim (point-size scaled by stride to fatten samples into their cells) was tried and reverted as not what's wanted — it filled the volume but didn't add real points.
-
 ### Self-describing preview frame header (mid term)
 
 The preview wire format is a private opcode protocol: `0x02` per-frame channels, `0x03` coordinate table, each a hand-rolled byte layout, and the color payload is **always RGB** regardless of the buffer's `channelsPerLight`. Every new data kind (RGBW display, beam direction, …) means inventing another opcode and another fixed layout by hand. The minimal fix that stops that sprawl: a small **typed header** — `[type][format][count][stride]` where `format` enumerates `{RGB, RGBW, …}` — so one message kind carries any per-light channel layout and the browser shader reads `format` to interpret the payload. Do it concrete-first, when RGBW *display* (below) is actually wanted, not speculatively. Prereq for both items below.
@@ -256,9 +246,6 @@ Today a "light" is a point at a static coordinate with a color. A **moving head*
 
 Today each layout child describes one light type (all LED strips, or all par lights), and the current model is one Layouts container per light type. Whether a single Layouts should hold mixed types (LED strips + par lights together), and how the per-channel layout would reconcile across them, isn't designed. Deferred until a concrete need forces it; it's adjacent to the fixture model above (a real fixture/attribute model may reframe how mixed types are expressed). (Moved from architecture.md § What we leave undesigned; a deferred design decision, not a settled 🚧 one.)
 
-### Extract the resumable backpressure transport as a domain-neutral channel (long term)
-
-The preview's transport — resumable cross-tick send from a stable buffer + newest-wins backpressure drop + adaptive graceful degradation (see [architecture.md § graceful degradation under transport backpressure](../architecture.md)) — is **payload-agnostic**: any bulky throttled stream (a future MJPEG/video preview, fixture-state streams, fleet telemetry) could ride it. The *payload* model (count/stride/RGB) is light-specific; the *byte-pump* is not. When a second consumer for this transport appears, promote the pump into a domain-neutral core primitive (a `ThrottledChannel`-style sink) that PreviewDriver becomes *a* producer on, rather than owning the protocol. Concrete-first: extract on the second use, not before — until then the seam stays inside HttpServerModule/PreviewDriver.
 
 ## LCD / DMA driver work
 

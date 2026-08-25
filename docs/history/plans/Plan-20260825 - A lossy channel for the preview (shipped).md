@@ -1,5 +1,7 @@
 # Plan, A lossy channel for the preview stream
 
+(PR #81. The device-side adaptation this plan sketched was later replaced, see the Lean preview transport plan.)
+
 ## The problem, measured
 
 On a 768×384 layout with the preview open, over 10 s on the single `/ws` socket:

@@ -41,14 +41,17 @@ class Scheduler;
 /// stream through a `JsonSink` — no fixed-buffer ceiling, so a tree of any size serializes correctly.
 ///
 /// **WebSocket:** `GET /ws` with `Upgrade: websocket` does the RFC 6455 handshake (SHA-1 +
-/// base64), up to `MAX_WS_CLIENTS` (8) concurrent clients. Every binary message takes ONE path:
+/// base64). Two WS channels by traffic class, with separate caps on one lwIP socket budget:
+/// `/ws` carries the control plane (JSON state and patches, `MAX_WS_CLIENTS` = 8) and `/wsp` the
+/// lossy binary preview stream (`MAX_PREVIEW_CLIENTS` = 4). Every binary message takes ONE path:
 /// the resumable buffered send (`sendBufferedFrame`), draining a memory-adaptive chunk per client
 /// per `tick20ms` from a stable caller-owned buffer, so a large frame is delivered over
 /// wall-clock ticks without any loop ever waiting on a socket, yet stays one atomic WS message.
 /// One buffered send is in flight at a time per slot (newest-wins backpressure: a new offer while
-/// one is active is dropped); a client is closed only on a real error or FIN, never for slowness. Two WS channels by traffic class: `/ws` carries the
-/// control plane (JSON state and patches), `/wsp` carries the lossy binary preview stream plus
-/// one client uplink, the `[0x51][stride]` resolution request. Other mutations go through REST.
+/// one is active is dropped); a client is closed only on a real error or FIN, never for slowness.
+/// Inbound `/wsp` payloads are unmasked and handed opaquely to the registered producer sink; the
+/// producer's vocabulary is `[0x51][stride][fps]` (standing frame request) and `[0x52][stride]`
+/// (one-shot table request). Other mutations go through REST.
 ///
 /// **State push — diff on the wire (the recognizable snapshot-then-patch model, cf. Redux /
 /// Firestore sync, JSON Patch RFC 6902):** the state a client needs is the full module tree
@@ -143,19 +146,16 @@ public:
             const size_t total = previewSend_.hdrLen + previewSend_.bodyLen;
             for (int i = 0; i < MAX_PREVIEW_CLIENTS; i++)
                 if (previewClients_[i].valid() &&
-                    previewSend_.sent[i] > 0 && previewSend_.sent[i] < total)
+                    previewSend_.sent[i] > 0 && previewSend_.sent[i] < total) {
                     previewClients_[i].close();
+                    // Every close site notifies the producer, or the dead slot's standing
+                    // request would keep steering the shared stream until the slot is reused.
+                    if (clientSink_) clientSink_->onClientGone(i);
+                }
         }
         previewSend_.active = false;
     }
 
-    /// Is anyone on the PREVIEW channel? The binary path fans out to `/wsp`, so with no client
-    /// there the producer should not build a frame at all, closing the preview pane stops the
-    /// work, not just the send.
-    bool hasSubscribers() const override {
-        for (const auto& pc : previewClients_) if (pc.valid()) return true;
-        return false;
-    }
 
     int subscriberCount() const override {
         int n = 0;

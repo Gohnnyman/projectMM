@@ -11,14 +11,6 @@ namespace mm {
 // producer depends only on "something I can send bytes to" — not on the HTTP
 // server's full surface. Domain-neutral: the bytes' meaning is the caller's.
 struct BinaryBroadcaster {
-    // Stream ONE binary WS frame whose payload is PUSHED incrementally, so the caller never
-    // holds the whole frame in a buffer. Begin/push/end trio, fitting a forward-only producer
-    // like Layouts::placeLights (push from inside its callback):
-    // The implementation streams straight to the clients with no frame-sized staging buffer, so a
-    // large frame (e.g. PreviewDriver's coordinate table, tens of KB) goes out on a memory-tight
-    // board where a contiguous staging block won't fit. The caller MUST push exactly `totalLen`
-    // bytes between begin and end. Only one frame may be open at a time.
-
     // RESUMABLE one-frame send for a payload that lives in a STABLE caller-owned buffer (no copy):
     // one WS message = `header` (copied — small, may be a stack local) followed by `body` (a pointer
     // the caller keeps stable until the send completes or is cancelled). The implementation drains it
@@ -45,18 +37,10 @@ struct BinaryBroadcaster {
     virtual void cancelBufferedSend() = 0;
 
 
-    // Is anyone listening? A producer of a LOSSY stream asks before doing the work: with no
-    // subscriber there is nothing to send, and building a frame nobody receives is pure waste on
-    // the render path. This is what makes closing a preview pane actually stop the traffic, rather
-    // than the device broadcasting to a channel with no clients.
-    //
-    // Default true, so a transport with no notion of subscribers (a test double, a single-sink
-    // implementation) keeps its existing behaviour without overriding.
-    virtual bool hasSubscribers() const { return true; }
 
     // How many subscribers are listening right now. Purely observational (a status line, a log);
     // producers must not branch per subscriber through this, the channel stays broadcast-only.
-    virtual int subscriberCount() const { return hasSubscribers() ? 1 : 0; }
+    virtual int subscriberCount() const { return 0; }
 
     // Inbound client messages, delivered OPAQUELY: the transport unmasks a client's WS frame
     // (framing is its job) and hands the payload bytes to the registered sink; only the producer

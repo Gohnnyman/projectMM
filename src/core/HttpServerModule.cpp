@@ -65,7 +65,12 @@ void HttpServerModule::release() {
         stateSend_.active = false;
     }
     for (auto& ws : wsClients_) ws.close();
-    for (auto& pc : previewClients_) pc.close();   // the /wsp channel goes with them
+    // Every close site notifies the producer (see cancelBufferedSend): without this, ghost
+    // standing requests would keep the driver gathering frames for nobody after a release.
+    for (int i = 0; i < MAX_PREVIEW_CLIENTS; i++) {
+        if (previewClients_[i].valid() && clientSink_) clientSink_->onClientGone(i);
+        previewClients_[i].close();
+    }
     server_.close();
     if (instance_ == this) { MoonModule::setSchemaChangedHook(nullptr); instance_ = nullptr; }
     MoonModule::release();   // chain: uniform override-and-chain (no buffers/children today, but the convention holds)
@@ -2784,7 +2789,7 @@ size_t HttpServerModule::drainChunkBytes() const {
     constexpr size_t kFloor = 2048;     // always make real progress, even on a fragmented board
     constexpr size_t kCeil  = 65536;    // cap tick occupancy regardless of how much RAM is free
     const size_t block = platform::maxAllocBlock();
-    // 0 = unlimited/not reported (desktop): no artificial ceiling — writeSome stops at the socket
+    // 0 = unlimited/not reported (desktop): no artificial ceiling; writeSome stops at the socket
     // buffer anyway, so TCP itself paces the drain and the endpoints are the only limits.
     if (block == 0) return static_cast<size_t>(1) << 30;
     size_t chunk = block / 8;           // a fraction of the largest contiguous block

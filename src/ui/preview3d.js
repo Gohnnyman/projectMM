@@ -534,16 +534,18 @@ function requestTable(stride) {
 }
 
 function renderPreviewFrame(view, buf) {
-    adaptFrames_++;   // the controller's measurement: frames that actually arrived
     if (!gl) initWebGL();
     if (!gl) return;
-    // Header: [0x02][count:u32][stride:u16][epoch][drops] = 9 bytes.
+    // Header: [0x02][count:u32][stride:u16][epoch][drops] = 9 bytes. Validate the WHOLE frame
+    // before feeding the adaptation counters: a truncated frame is not a delivered frame, and
+    // counting its drops byte would steer the controller on garbage.
     if (buf.byteLength < 9) return;
     const count = view.getUint32(1, true);
     const stride = view.getUint16(5, true) || 1;
     const epoch = view.getUint8(7);
-    windowDrops_ += view.getUint8(8);   // sum the device's drop reports over the controller window
     if (buf.byteLength < 9 + count * 3) return;
+    adaptFrames_++;                     // the controller's measurement: frames that actually arrived
+    windowDrops_ += view.getUint8(8);   // sum the device's drop reports over the controller window
     // (epoch, stride) is the table-cache key. A hit renders immediately (a stride flip costs zero
     // table traffic); a miss asks the device for the positions and skips this frame, the pull
     // model's whole geometry story.
@@ -942,6 +944,7 @@ export const preview = {
     adaptStart() {
         adaptState_ = initialPullState();
         adaptFrames_ = 0;
+        windowDrops_ = 0;
         lastFrameAt_ = performance.now();
         // ANNOUNCE the standing request immediately: under the pull model an unannounced client
         // receives NOTHING, the device serves only what is asked.
@@ -958,6 +961,7 @@ export const preview = {
         adaptTargetFps_ = Math.min(25, v);
         adaptState_ = initialPullState();
         adaptFrames_ = 0;   // the frames counted so far belong to the OLD target's window
+        windowDrops_ = 0;
         announceRequest();
     },
     onSendRequest(cb) { sendRequest_ = cb; },

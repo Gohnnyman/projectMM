@@ -1,5 +1,7 @@
 # Plan, Client-driven preview adaptation
 
+(Superseded by the Lean preview transport plan: the fps-band controller and the push-model transport it steered were replaced by the pull model with the drops signal.)
+
 ## Context: a day of device-side guessing
 
 The preview got its own lossy channel (`/wsp`), a subscriber gate, backpressure and a

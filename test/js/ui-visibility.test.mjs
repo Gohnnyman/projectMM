@@ -59,3 +59,13 @@ test("hiding cancels a pending reconnect, so no control socket opens on a hidden
     assert.ok(/clearTimeout\(wsReconnectTimer\)/.test(hidden),
               "the hide path must cancel a reconnect armed before the tab hid");
 });
+
+test("a preview reconnect armed before hiding is cancelled, and never fires on a hidden tab", () => {
+    assert.ok(app.includes("wspRetryTimer = setTimeout("),
+              "the preview retry must be tracked, not a fire-and-forget setTimeout");
+    const closer = app.slice(app.indexOf("function closePreviewSocket"));
+    assert.ok(/clearTimeout\(wspRetryTimer\)/.test(closer.slice(0, 400)),
+              "closing the preview socket must cancel a pending retry");
+    assert.ok(app.includes("!document.hidden) connectPreview()"),
+              "a retry that fires anyway must refuse to open a socket on a hidden tab");
+});

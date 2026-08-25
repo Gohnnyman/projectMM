@@ -144,7 +144,7 @@ Detail: [technical](moxygen/HueDriver.md)
 
 Streams a true-shape 3D preview to the web UI as a **point list**, only the real lights at their real positions, so a sphere/ring/arbitrary map shows in its true shape. The one boot-wired driver.
 
-It streams on its **own WebSocket channel** (`/wsp`), so a large frame never delays the control plane, and only while a viewer asks, dismissing the preview or leaving the tab stops the work at the source entirely. The device reports dropped frames in each frame it sends; your browser trades detail for rate on that signal, so a fast connection previews finer than a slow one. See [§ Preview — details](#preview-details).
+It streams on its **own WebSocket channel** (`/wsp`), so a large frame never delays the control plane, and it runs only while a viewer requests it: dismissing the preview or leaving the tab stops the work at the source entirely. The device reports dropped frames in each frame it sends; your browser trades detail for rate on that signal, so a fast connection previews finer than a slow one. See [§ Preview, details](#preview-details).
 
 - `targetFps`, the frame rate the preview aims for (default 24, 1–60). The device never sends faster; when the connection cannot keep up, the browser trades detail to get closer: **lower it for full detail at a slower rate, raise it for a smoother but coarser preview**.
 
