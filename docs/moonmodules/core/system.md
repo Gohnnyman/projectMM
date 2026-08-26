@@ -94,7 +94,11 @@ Over-the-air firmware flashing — the one operation that swaps the binary and n
 <img src="../../assets/core/FirmwareUpdateModule.png" width="300" alt="Firmware update module controls">
 
 - `firmware` — the OTA image to flash.
-- read-only — `version`, `build`, `firmwarePartition`, `update_pct` (progress).
+- read-only: `version`, `build`, `firmwarePartition`, `update_pct` (progress; absent on MoonBase
+  devices, where the update overlay carries the progress instead), and on 4 MB
+  boards `moonbase`: the second boot image is present, so installs run through the
+  reboot-into-MoonBase cycle behind one "updating firmware" overlay, and a **MoonBase** button
+  opens the maintenance image directly ([architecture.md § MoonBase](../../architecture.md#moonbase-the-second-boot-image-4-mb-boards)).
 
 Detail: [technical](moxygen/FirmwareUpdateModule.md)
 

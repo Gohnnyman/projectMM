@@ -227,8 +227,15 @@ function connectWs() {
         if (sock !== ws) return;   // a stale socket closing after we already moved on — leave the live one alone
         clearInterval(wsHeartbeat);
         wsHeartbeat = null;
-        if (wsUnloading) return;   // the page is going away — don't reconnect (and don't touch the DOM)
+        if (wsUnloading) return;   // the page is going away, don't reconnect (and don't touch the DOM)
         setWsDot(false);
+        // A long-dead socket may mean the device switched images under this tab (a suspended
+        // tab restored from memory never re-runs the page-load check). Once the backoff has
+        // ripened, ask; the update overlay owns that conversation during an install, so skip
+        // while it is up.
+        if (wsRetryMs >= 5000 && !document.querySelector(".fw-overlay")) {
+            moonbaseHandoff();   // async; reconnects continue unless it flips the page
+        }
         // Exponential backoff with 5s ceiling; track the timer so pagehide can cancel a pending reconnect.
         wsReconnectTimer = setTimeout(connectWs, wsRetryMs);
         wsRetryMs = Math.min(wsRetryMs * 2, 5000);
@@ -330,6 +337,7 @@ async function init() {
     // REST snapshot overwrite the newer, live WS state — just skip the commit.
     try {
         const resp = await fetch("/api/state");
+        if (resp.status === 404 && await moonbaseHandoff()) return;
         if (resp.ok && (!state || !Array.isArray(state.modules))) {
             const snap = await resp.json();
             if (snap && Array.isArray(snap.modules)) {
@@ -1114,6 +1122,216 @@ function renderChildTabs(mod, childrenEl, depth) {
     if (child) renderModuleTree(child, panel, depth + 1);
 }
 
+// ---- MoonBase update flow ----
+// On a MoonBase device (FirmwareUpdate exposes a `moonbase` control) the app cannot flash itself:
+// one app slot, and it is running from it. Instead it reboots into the MoonBase factory image,
+// which installs into the app slot and reboots back: same IP throughout (same MAC, same DHCP
+// lease). The whole cycle runs behind one full-screen overlay, shown BEFORE the reboot so there
+// is no dead gap. GET /moonbase is the identity probe: MoonBase answers it with its live install
+// status; the app 404s it: so "404 again after an install ran" means the new firmware is up.
+function deviceHasMoonBase(mod) {
+    return (mod.controls || []).some(c => c.name === "moonbase");
+}
+
+function showUpdateOverlay() {
+    const ov = document.createElement("div");
+    ov.className = "fw-overlay";
+    const box = document.createElement("div");
+    box.className = "fw-overlay-box";
+    const h = document.createElement("h2");
+    h.textContent = "Updating firmware\u2026";
+    const msg = document.createElement("p");
+    msg.className = "fw-overlay-msg";
+    const bar = document.createElement("progress");   // no value = indeterminate sweep
+    const dismiss = document.createElement("button");
+    dismiss.textContent = "close";
+    dismiss.style.display = "none";
+    dismiss.addEventListener("click", () => ov.remove());
+    const cancel = document.createElement("button");
+    cancel.textContent = "cancel install";
+    let uploadCtl = null;   // the in-flight file upload's AbortController, set by the flow
+    cancel.addEventListener("click", () => {
+        // A URL install hears POST /cancel; a file upload cancels by dropping its connection
+        // (MoonBase's single-connection server is busy receiving it), so abort the fetch.
+        if (uploadCtl) uploadCtl.abort();
+        fetch("/cancel", { method: "POST" }).catch(() => {});
+    });
+    box.append(h, msg, bar, cancel, dismiss);
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    return {
+        status(text) { msg.textContent = text; },
+        progress(read, total) { if (total > 0) { bar.max = total; bar.value = read; } },
+        fail(text) { msg.textContent = text; bar.remove(); cancel.remove(); dismiss.style.display = ""; },
+        setUpload(ctl) { uploadCtl = ctl; },
+    };
+}
+
+const fwSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Probe GET /moonbase once: "up" (200 + status text), "app" (404: the application is answering),
+// or "silent" (no answer: the device is mid-reboot). Never throws.
+async function probeMoonBase() {
+    // Bounded: against a powered-off device an untimed fetch hangs for up to a minute on the
+    // TCP connect, which starves the poll loop of the very silence it is trying to measure.
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 2500);
+    try {
+        const r = await fetch("/moonbase", { cache: "no-store", signal: ctl.signal });
+        if (r.ok) return { state: "up", text: await r.text() };
+        return { state: "app" };
+    } catch (_) {
+        return { state: "silent" };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// When this app page finds MoonBase answering underneath it (a cached or suspended tab over
+// a device that switched images), say so and load MoonBase's real page: the cache-busting
+// query makes the browser fetch it instead of re-serving this one. True when the handoff ran.
+async function moonbaseHandoff() {
+    if ((await probeMoonBase()).state !== "up") return false;
+    document.body.innerHTML = "";
+    const note = document.createElement("p");
+    note.style.cssText = "font:16px system-ui;margin:3rem auto;max-width:30rem;text-align:center";
+    note.textContent = "This device is in MoonBase (maintenance mode) \u2014 opening its page\u2026";
+    document.body.appendChild(note);
+    setTimeout(() => location.replace("/?" + Date.now()), 1200);
+    return true;
+}
+
+// The one-click cycle. opts is {url} (device installs it unattended off the NVS-staged URL) or
+// {file} (the browser holds the image and pushes it to MoonBase once MoonBase answers).
+const MOONBASE_SILENT_MSG = "MoonBase did not answer. If its WiFi fell back, join the " +
+                            "MoonBase access point and open http://4.3.2.1";
+
+// Poll until MoonBase serves (a 200 on the probe). False on deadline: the device never came up,
+// or came up unreachable (AP fallback).
+async function waitForMoonBase(deadline) {
+    while (Date.now() < deadline) {
+        await fwSleep(2000);
+        if ((await probeMoonBase()).state === "up") return true;
+    }
+    return false;
+}
+
+async function moonbaseUpdateFlow(opts) {
+    const ui = showUpdateOverlay();   // opens before the reboot: no dead gap
+    try {
+        ui.status("Restarting into MoonBase\u2026");
+        // The kickoff response can be cut off by the reboot; a dead socket here is not a failure.
+        let res = null;
+        try {
+            res = opts.url
+                ? await fetch("/api/firmware/url", {
+                      method: "POST", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ url: opts.url }) })
+                : await fetch("/api/firmware/moonbase", { method: "POST" });
+        } catch (_) {}
+        if (res && !res.ok && res.status !== 202) throw new Error(await errorMessage(res));
+
+        if (opts.file) {
+            // The upload needs MoonBase serving before the browser can push the image.
+            if (!(await waitForMoonBase(Date.now() + 120000))) throw new Error(MOONBASE_SILENT_MSG);
+            ui.status(`Installing ${fmSize(opts.file.size)}\u2026`);
+            const uploadCtl = new AbortController();
+            ui.setUpload(uploadCtl);
+            try {
+                const r = await fetch("/install", {
+                    method: "POST", headers: { "Content-Type": "application/octet-stream" },
+                    body: opts.file, signal: uploadCtl.signal });
+                if (!r.ok) throw new Error(await r.text());
+            } catch (err) {
+                if (err instanceof Error && err.name === "AbortError") {
+                    // The user's cancel, not a failure: the dropped connection aborts the
+                    // write on the device, which stays waiting in MoonBase.
+                    ui.fail("Install canceled \u2014 the device is waiting in MoonBase.");
+                    return;
+                }
+                if (err instanceof Error && err.message.startsWith("error")) throw err;
+                // A dead socket mid-upload (power cut, WiFi drop) is not a verdict: the watch
+                // loop below sees where the device lands and retries the upload from there.
+            } finally {
+                ui.setUpload(null);
+            }
+        }
+
+        // Watch until the app answers again. On the unattended URL path MoonBase installs BEFORE
+        // it ever serves, so a successful cycle is silence followed by the new app's 404 on the
+        // probe; MoonBase answering (200) is the upload path's install window, and on the URL
+        // path its failure parking spot (the probe body is its status). The dying OLD app also
+        // 404s the probe for a moment, so "app" only counts as done once the device has been
+        // seen away, or after a grace period long enough that the kickoff reboot must have run.
+        const watchStart = Date.now();
+        let deadline = watchStart + 300000;
+        let sawAway = false;
+        let silentStreak = 0;
+        let retries = 0;
+        while (Date.now() < deadline) {
+            await fwSleep(2000);
+            const probe = await probeMoonBase();
+            if (probe.state !== "silent") silentStreak = 0;
+            if (probe.state === "silent") {
+                sawAway = true;
+                // A reboot is a few silent probes; many in a row is a device that lost power or
+                // the network. Say so instead of freezing on the last byte count.
+                if (++silentStreak >= 4) {
+                    ui.status("The device is not answering \u2014 waiting for it to come back\u2026");
+                }
+            } else if (probe.state === "up" && probe.text === "idle" && sawAway) {
+                // MoonBase is up with NOTHING running after the cycle already started: the
+                // install was interrupted (a power cut lands exactly here: blank otadata boots
+                // MoonBase, and the staged URL was already consumed). The browser still holds
+                // the payload, so the one click survives the cut: hand it over again.
+                if (retries >= 2) throw new Error("the install keeps getting interrupted");
+                retries++;
+                deadline += 180000;   // a retry restarts the ~40 s install; extend the watch
+                ui.status("The install was interrupted \u2014 retrying\u2026");
+                try {
+                    if (opts.url) {
+                        await fetch("/install-url", { method: "POST", body: opts.url });
+                    } else {
+                        await fetch("/install", {
+                            method: "POST", headers: { "Content-Type": "application/octet-stream" },
+                            body: opts.file });
+                    }
+                    // The response itself is not consumed: MoonBase reboots on success and the
+                    // probes below see the outcome either way.
+                } catch (_) {}
+            } else if (probe.state === "up") {
+                sawAway = true;   // MoonBase answering means the old app is gone
+                if (probe.text === "canceled") {
+                    ui.fail("Install canceled \u2014 the device is waiting in MoonBase.");
+                    return;
+                }
+                if (probe.text.startsWith("error")) throw new Error(probe.text);
+                // The unattended install reports "downloading: N of M bytes"; render it the
+                // way the file path reads, with a real bar.
+                const dl = probe.text.match(/downloading: (\d+) of (\d+) bytes/);
+                if (dl) {
+                    const read = parseInt(dl[1], 10), total = parseInt(dl[2], 10);
+                    ui.status(`Installing ${fmSize(total || read)}\u2026`);
+                    ui.progress(read, total);
+                } else {
+                    // "idle" is MoonBase's quiescent state; mid-cycle it means the install
+                    // has not started yet, which deserves better words than "Idle".
+                    ui.status(!probe.text || probe.text === "idle"
+                              ? "Preparing the install\u2026" : probe.text);
+                }
+            } else if (probe.state === "app" && (sawAway || Date.now() - watchStart > 20000)) {
+                ui.status("Done \u2014 reloading\u2026");
+                await fwSleep(1000);
+                location.reload();
+                return;
+            }
+        }
+        throw new Error("timed out waiting for the new firmware");
+    } catch (err) {
+        ui.fail("Update failed: " + err.message);
+    }
+}
+
 function createCard(mod, depth) {
     const card = document.createElement("div");
     card.className = "card";
@@ -1358,6 +1576,11 @@ function createCard(mod, depth) {
                     a.remove();
                     return;
                 }
+                if (deviceHasMoonBase(mod)) {
+                    // MoonBase device: the whole install runs unattended behind the overlay.
+                    moonbaseUpdateFlow({ url: binaryUrl });
+                    return;
+                }
                 const res = await fetch("/api/firmware/url", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -1388,6 +1611,11 @@ function createCard(mod, depth) {
             const file = (upInput.files || [])[0];
             upInput.value = "";                   // reset so re-picking the same file re-fires change
             if (!file) return;
+            if (deviceHasMoonBase(mod)) {
+                // MoonBase device: reboot into MoonBase, then the browser pushes this file to it.
+                moonbaseUpdateFlow({ file });
+                return;
+            }
             upBtn.disabled = true;
             upStatus.textContent = `uploading ${fmSize(file.size)}…`;
             try {
@@ -1410,6 +1638,23 @@ function createCard(mod, depth) {
         fileRow.appendChild(upBtn);
         fileRow.appendChild(upStatus);
         fileRow.appendChild(upInput);
+        // MoonBase devices: open the maintenance image directly: reboot into MoonBase and land
+        // on its page (same address, so a reload gets there once it answers). The way back is
+        // MoonBase's own "Boot the app" button.
+        if (deviceHasMoonBase(mod)) {
+            const mbBtn = document.createElement("button");
+            mbBtn.className = "fm-tool";
+            mbBtn.textContent = "MoonBase";
+            mbBtn.title = "Reboot into MoonBase, the maintenance image, install firmware, then boot back";
+            mbBtn.addEventListener("click", async () => {
+                const ui = showUpdateOverlay();
+                ui.status("Restarting into MoonBase\u2026");
+                try { await fetch("/api/firmware/moonbase", { method: "POST" }); } catch (_) {}
+                if (await waitForMoonBase(Date.now() + 120000)) { location.reload(); return; }
+                ui.fail(MOONBASE_SILENT_MSG);
+            });
+            fileRow.appendChild(mbBtn);
+        }
         controlsHost.appendChild(fileRow);
     }
 

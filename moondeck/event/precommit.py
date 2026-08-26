@@ -46,13 +46,13 @@ def build_gates(firmware, full_esp32=False):
 
         Gate("device-model catalog",
              UV + ["moondeck/check/check_devices.py"],
-             lambda f: touches(f, "web-installer/deviceModels.json",
+             lambda f: touches(f, "mooninstaller/deviceModels.json",
                                "moondeck/check/check_devices.py")),
 
         Gate("firmware list",
              UV + ["moondeck/check/check_firmwares.py"],
              lambda f: touches(f, "moondeck/build/build_esp32.py",
-                               "web-installer/firmwares.json",
+                               "mooninstaller/firmwares.json",
                                "moondeck/check/check_firmwares.py")),
 
         # The cross-language contracts ctest cannot reach: the Improv frame wire format
@@ -64,7 +64,7 @@ def build_gates(firmware, full_esp32=False):
 
         Gate("host tests (JS)",
              ["node", "--test", "test/js/**/*.test.mjs"],
-             lambda f: touches(f, "web-installer/", "test/js/", "src/ui/")),
+             lambda f: touches(f, "mooninstaller/", "test/js/", "src/ui/")),
 
         # Needs a board plugged in, so it is recommended rather than blocking. Its trigger
         # is the provisioning path it covers; run_gates drops it from the report entirely
@@ -72,7 +72,7 @@ def build_gates(firmware, full_esp32=False):
         Gate("Improv smoke test", None,
              lambda f: touches(f, "src/core/ImprovFrame.h",
                                "src/platform/esp32/platform_esp32_improv.cpp",
-                               "web-installer/index.html", "src/ui/install-picker.js",
+                               "mooninstaller/index.html", "src/ui/install-picker.js",
                                "moondeck/build/improv_"),
              manual_hint="recommended with an ESP32 connected: "
                          "uv run moondeck/build/improv_smoke_test.py --port <port>"),

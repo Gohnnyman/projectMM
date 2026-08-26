@@ -32,7 +32,8 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 SOURCE_DIRS = ("src", "esp32")
 SOURCE_FILES = ("CMakeLists.txt", "library.json")
 SOURCE_SUFFIXES = {".c", ".cpp", ".h", ".hpp", ".cmake", ".json", ".txt", ".py", ".js",
-                   ".html", ".css", ".defaults"}
+                   ".html", ".css", ".defaults", ".csv",  # .csv: partition tables feed the image
+                   ".yml"}                                 # .yml: idf_component.yml pins components
 
 # Build outputs and caches live under the source dirs; they are products, not inputs, and
 # including them would compare the binary against itself.
@@ -148,6 +149,29 @@ def main():
         print(f"  newer  : {newest_path.relative_to(ROOT)} ({stale_by:.0f} min after the build)")
         print(f"  rebuild: {build_cmd}")
         return 1
+
+    # MoonBase firmwares carry a second image (built into build/moonbase-<chip>/ by the same
+    # build run): it must exist and be newer than every moonbase/ source, by the same
+    # sources-not-clock rule as the app image.
+    import importlib
+    sys.path.insert(0, str(ROOT / "moondeck" / "build"))
+    FIRMWARES = importlib.import_module("build_esp32").FIRMWARES
+    spec = FIRMWARES.get(args.firmware, {})
+    if spec.get("moonbase"):
+        mb_bin = ROOT / "build" / f"moonbase-{spec['chip']}" / "projectMM-moonbase.bin"
+        if not mb_bin.exists():
+            print(f"No MoonBase image for {args.firmware}.")
+            print(f"  expected: {mb_bin.relative_to(ROOT)}")
+            print(f"  build it: {build_cmd}")
+            return 1
+        mb_built = mb_bin.stat().st_mtime
+        mb_newest = max((f.stat().st_mtime for f in (ROOT / "moonbase").rglob("*")
+                         if f.is_file() and f.suffix in SOURCE_SUFFIXES
+                         and not SKIP_PARTS.intersection(f.parts)), default=0)
+        if mb_newest > mb_built:
+            print(f"MoonBase image for {args.firmware} is STALE: a moonbase/ source is newer.")
+            print(f"  rebuild: {build_cmd}")
+            return 1
 
     if args.max_age_hours and age_h > args.max_age_hours:
         print(f"Firmware for {args.firmware} is older than {args.max_age_hours}h "

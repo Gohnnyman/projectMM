@@ -64,11 +64,11 @@ APP_VERSION = _app_version()
 # Device-model catalog (single source of truth, shared with the web installer)
 # ---------------------------------------------------------------------------
 
-DEVICE_MODELS_FILE = ROOT / "web-installer" / "deviceModels.json"
+DEVICE_MODELS_FILE = ROOT / "mooninstaller" / "deviceModels.json"
 
 
 def _load_device_models():
-    """Load web-installer/deviceModels.json. Returns [] on missing/malformed file —
+    """Load mooninstaller/deviceModels.json. Returns [] on missing/malformed file —
     `_deduce_device_model` then always returns "" (no firmware uniquely identifies
     a board), MoonDeck JS shows only the empty default. The web installer
     Step 2 picker will share this file.
@@ -81,11 +81,11 @@ def _load_device_models():
 
 DEVICE_MODELS = _load_device_models()
 
-FIRMWARES_FILE = ROOT / "web-installer" / "firmwares.json"
+FIRMWARES_FILE = ROOT / "mooninstaller" / "firmwares.json"
 
 
 def _load_firmwares():
-    """Shipping firmware-variant names from web-installer/firmwares.json — the
+    """Shipping firmware-variant names from mooninstaller/firmwares.json — the
     generated projection of build_esp32's FIRMWARES dict (the single source of
     truth, shared with the CI release matrix). Returns [] on missing/malformed
     file, so the MoonDeck UI just shows no firmware entries. Filtering on
@@ -275,7 +275,7 @@ def _deduce_device_model(firmware: str) -> str:
     """Firmware → deviceModel name when exactly one catalog entry claims this
     firmware. Returns "" when zero (unknown firmware) or multiple device models
     claim it (ambiguous — user picks). Catalog lives at
-    web-installer/deviceModels.json; see docs/architecture.md § Firmware vs board.
+    mooninstaller/deviceModels.json; see docs/architecture.md § Firmware vs board.
     """
     if not firmware:
         return ""
@@ -286,7 +286,7 @@ def _deduce_device_model(firmware: str) -> str:
 def _push_device(ip: str, model: str) -> bool:
     """POST /api/control on the device for every per-board control in deviceModels.json.
 
-    For device models that have a catalog entry in web-installer/deviceModels.json: fans
+    For device models that have a catalog entry in mooninstaller/deviceModels.json: fans
     out the full `controls.<Module>.<control>` block (matching the web
     installer's and the device-side `?deviceModel=` Inject path — same generic
     iteration, so adding a new field to a deviceModel entry Just Works without
@@ -1390,7 +1390,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"modules": test_meta.list_test_modules()})
 
         elif self.path == "/api/device-models":
-            # Serves web-installer/deviceModels.json (loaded at startup). The web
+            # Serves mooninstaller/deviceModels.json (loaded at startup). The web
             # installer (Step 2) fetches the same file directly from Pages;
             # MoonDeck reads it locally and exposes it here so the JS UI shares
             # one source of truth with the Python deduce path.

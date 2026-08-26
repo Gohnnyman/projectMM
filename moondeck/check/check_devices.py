@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the installer board catalog (web-installer/deviceModels.json).
+"""Validate the installer board catalog (mooninstaller/deviceModels.json).
 
 The catalog is hand-maintained data consumed identically by three clients (the
 web installer, the device UI's ?deviceModel= inject, and MoonDeck), so a typo drifts
@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-CATALOG = ROOT / "web-installer" / "deviceModels.json"
+CATALOG = ROOT / "mooninstaller" / "deviceModels.json"
 MAIN_CPP = ROOT / "src" / "main.cpp"
 DOCS = ROOT / "docs"
 

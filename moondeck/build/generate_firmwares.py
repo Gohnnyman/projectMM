@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate web-installer/firmwares.json from the FIRMWARES dict.
+"""Generate mooninstaller/firmwares.json from the FIRMWARES dict.
 
 The firmware-variant list was hand-copied across the CI matrix, the two ESP Web
 Tools manifest loops, MoonDeck, and the docs — six copies that drifted (MoonDeck's
@@ -17,7 +17,7 @@ check_firmwares.py guards the committed file against drift from FIRMWARES.
 physical hardware). See docs/architecture.md § Firmware vs board.
 
 Inputs:
-  --out <path>   — firmwares.json destination (web-installer/firmwares.json).
+  --out <path>   — firmwares.json destination (mooninstaller/firmwares.json).
 """
 
 import argparse

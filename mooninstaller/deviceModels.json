@@ -2,6 +2,7 @@
   {
     "name": "Olimex ESP32-Gateway Rev G",
     "chip": "ESP32",
+    "flashBaud": 460800,
     "firmwares": [
       "esp32",
       "esp32-eth"

@@ -516,9 +516,11 @@ private:
     MoonModule* listMutationModule_ = nullptr;  // module whose list a CRUD op resolved to (for markDirty)
     void afterListMutation();
     void handleReboot(platform::TcpConnection& conn);
-    /// OTA: `POST /api/firmware/url` body=`{"url":"..."}`. Body parsed; URL handed
-    /// to platform::http_fetch_to_ota which spawns a task and returns. Caller
-    /// gets 202 immediately; progress streams via FirmwareUpdateModule controls.
+    void handleBootMoonBase(platform::TcpConnection& conn);
+    /// OTA: `POST /api/firmware/url` body=`{"url":"..."}`. On a MoonBase device the URL is
+    /// staged in NVS and the device reboots into MoonBase, which installs it unattended
+    /// (202 + {"moonbase":true}). Otherwise the URL goes to platform::http_fetch_to_ota,
+    /// which spawns a task and returns: 202 immediately, progress via FirmwareUpdateModule.
     void handleFirmwareUrl(platform::TcpConnection& conn, const char* body);
     void handleFirmwareUpload(platform::TcpConnection& conn, const char* initialBody,
                               size_t initialLen, size_t contentLen);   // POST /api/firmware/upload

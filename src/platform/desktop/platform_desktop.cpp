@@ -1341,6 +1341,13 @@ bool otaWriteStream(FsWriteSrc /*src*/, void* /*user*/, size_t /*contentLen*/,
     return false;
 }
 
+// No partitions on desktop: there is no recovery image and nothing to boot into.
+bool otaHasMoonBase() { return false; }
+bool otaBootMoonBase() { return false; }
+bool otaRunningMoonBase() { return false; }
+bool moonbaseStageInstallUrl(const char*) { return false; }
+void moonbaseClearStagedUrl() {}
+
 // Outbound HTTP request (plain HTTP, LAN, no TLS) — see platform.h. Blocking, bounded by a
 // receive/send timeout. Builds the request into a stack buffer, connects, sends, reads the
 // response, and returns the status code + the body (after the \r\n\r\n). Used by HueDriver

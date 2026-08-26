@@ -2,7 +2,7 @@
 
 A driver sends lights somewhere. It reads its slice of the [Drivers](moxygen/Drivers.md) container's shared buffer, applies its own [output correction](moxygen/DriverBase.md), and outputs — over a wire (WS2812), the network (Art-Net / E1.31 / DDP), to a smart-light hub (Hue), or to the web UI (Preview).
 
-Several drivers can share one buffer, each driving its own slice. Every driver starts with the same [shared controls](#shared-driver-controls), then adds its own. Drivers are added per board through the catalog ([`deviceModels.json`](../../../web-installer/deviceModels.json)); `PreviewDriver` is the one boot-wired driver.
+Several drivers can share one buffer, each driving its own slice. Every driver starts with the same [shared controls](#shared-driver-controls), then adds its own. Drivers are added per board through the catalog ([`deviceModels.json`](../../../mooninstaller/deviceModels.json)); `PreviewDriver` is the one boot-wired driver.
 
 **Jump to:** [shared controls](#shared-driver-controls) · [LED](#led-drivers) · [Network](#network-drivers) · [Smart light](#smart-light-drivers) · [Preview](#preview-drivers)
 

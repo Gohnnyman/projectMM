@@ -12,7 +12,7 @@ Pages → the installer 404s at fetch-firmware. That exact mismatch (a manifest 
 file the deploy didn't stage, or a shipping firmware with no manifest at all) shipped a broken
 v2.0.0 installer; this test pins the contract so it can't recur:
 
-  1. every `ships: true` firmware in web-installer/firmwares.json generates a valid manifest, and
+  1. every `ships: true` firmware in mooninstaller/firmwares.json generates a valid manifest, and
   2. every part path in every manifest matches one of the staged-file globs above.
 
 Self-contained: it feeds generate_manifest.py a synthetic flasher_args.json (the real one only
@@ -28,13 +28,16 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-FIRMWARES_JSON = ROOT / "web-installer" / "firmwares.json"
+FIRMWARES_JSON = ROOT / "mooninstaller" / "firmwares.json"
 GENERATE = ROOT / "moondeck" / "build" / "generate_manifest.py"
 
 # The exact globs the deploy's `gh release download` stages onto Pages (release.yml,
 # "Stage cumulative release content"). A manifest part must match one of these, or the
 # installer fetches a file that isn't there. Keep in lockstep with that step's --pattern list.
-STAGED_GLOBS = ["firmware-*.bin", "shared-ota-data.bin", "partition-table-*.bin"]
+STAGED_GLOBS = ["firmware-*.bin", "shared-*.bin", "partition-table-*.bin"]
+# shared-*.bin covers shared-ota-data.bin plus the MoonBase pair (shared-moonbase-<chip>.bin,
+# shared-ota-data-slot0.bin); the same glob appears in release.yml's upload files and the
+# Pages self-host download patterns, which is exactly the sync this test guards.
 
 # A minimal but realistic IDF flasher_args.json — the four files every projectMM build emits.
 # generate_manifest.py maps these to the bundle names (firmware-<F>-v<ver>.bin, etc.).

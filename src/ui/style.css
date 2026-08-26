@@ -1786,3 +1786,28 @@ body.cards-resizing {
         inset 0 1px 0 color-mix(in srgb, #fff 40%, transparent),
         0 0 12px color-mix(in srgb, var(--pad-tint) 55%, transparent);
 }
+
+/* Full-screen firmware-update overlay (MoonBase cycle): opened before the device reboots so the
+   user sees one continuous "updating" experience across reboot -> install -> reboot. */
+.fw-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 10, 20, 0.85);
+}
+.fw-overlay-box {
+    background: var(--card-bg-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2rem 2.5rem;
+    max-width: 26rem;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+.fw-overlay-box progress { width: 100%; }
+.fw-overlay-msg { color: var(--fg-muted); margin: 0; overflow-wrap: anywhere; }

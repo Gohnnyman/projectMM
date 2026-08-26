@@ -131,6 +131,25 @@ def main() -> int:
         print(f"generate_manifest: no recognised parts in {args.flasher_args}")
         return 1
 
+    # MoonBase firmwares: flasher_args stages the app at the first app partition: the factory
+    # slot, MoonBase's home: because IDF knows nothing about the two-image scheme. Remap the app
+    # to ota_0, swap the blank ota-data for the slot-0 image (a blank one would boot MoonBase on
+    # first start), and add MoonBase at the factory slot. Offsets come from the same partition CSV
+    # the firmware builds with (moonbase_table_csv), so manifest and table cannot disagree.
+    # release.yml stages the two shared-moonbase assets these paths point at.
+    from build_esp32 import moonbase_table_csv, partition_offsets
+    spec = FIRMWARES[args.firmware]
+    if spec.get("moonbase"):
+        offs = partition_offsets(moonbase_table_csv(args.firmware))
+        for part in parts:
+            if part["path"] == f"{prefix}.bin":
+                part["offset"] = int(offs["ota_0"], 16)
+            elif part["path"] == "shared-ota-data.bin":
+                part["path"] = "shared-ota-data-slot0.bin"
+        parts.append({"path": f"shared-moonbase-{spec['chip']}.bin",
+                      "offset": int(offs["factory"], 16)})
+        parts.sort(key=lambda p: p["offset"])
+
     # ESP Web Tools resolves the per-part `path` relative to the manifest URL,
     # so absolute URLs are the simplest robust shape — the manifest stays
     # correct whether it's served from Pages, a release page, or a mirror.

@@ -662,6 +662,25 @@ bool http_fetch_to_ota(const char* url,
 bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
                     char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut);
 
+// MOONBASE, the second boot image, present only on tables that carry a factory app (the 4 MB
+// boards): a small, rarely changing firmware that owns the device when the application is not
+// running or cannot be trusted. Its first job is installing firmware into the one large app slot,
+// since a board cannot rewrite the partition it is executing from, so an update there is two
+// stages: otaBootMoonBase() + reboot, then install from MoonBase.
+// All of these are false / no-ops on a dual-OTA table and on desktop.
+bool otaHasMoonBase();      // does this table carry MoonBase?
+bool otaBootMoonBase();     // point the bootloader at it; false when there is none
+bool otaRunningMoonBase();  // are we executing from it right now?
+// Stage an install URL for MoonBase to pick up on its next boot (NVS namespace "moonbase",
+// key "url", at most 255 bytes: MoonBase reads it into a 256-byte buffer and the HTTP route
+// rejects anything longer). This is what makes a URL install unattended: the app stages the URL, reboots into
+// MoonBase, and MoonBase installs it with no browser in the loop. MoonBase erases the key before
+// attempting the install, so a bad URL cannot boot-loop the device.
+bool moonbaseStageInstallUrl(const char* url);
+// Erase a staged URL that never got consumed: a power cut between staging and the boot-partition
+// switch leaves it armed, and the next unrelated MoonBase visit would auto-install it.
+void moonbaseClearStagedUrl();
+
 // Synchronous outbound HTTP request to a LAN host — plain HTTP, no TLS (the Philips Hue v1
 // API, which HueDriver drives, allows it). Connects to `host:port`, sends `method path`
 // with `reqBody` (NUL-terminated; "" for none — a Content-Length + JSON content-type are

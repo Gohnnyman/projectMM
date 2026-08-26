@@ -92,7 +92,7 @@ function makeState() {
         sortedReleases: [],    // releases sorted newest-first; render() fills this
         releaseIdx: 0,         // index into sortedReleases
         firmware: null,        // selected firmware key
-        boards: [],            // parsed web-installer/deviceModels.json, [] if unavailable
+        boards: [],            // parsed mooninstaller/deviceModels.json, [] if unavailable
         selectedBoard: null,   // user pick from board <select>; "" for (any board)
         hasPort: null,         // web installer only: () => bool, "is a USB port
                                // picked?". When set, Install is disabled until it
@@ -223,10 +223,12 @@ function parseFirmwaresFromAssets(assets, tag) {
     }
 
     for (const a of assets) {
-        // Reject the part-suffixed .bins (bootloader / partition-table / ota-data)
-        // — they're install fragments, not the main image. The OTA path needs the
-        // app image only; esp_https_ota internally fetches what it needs.
-        if (/-(?:bootloader|partition-table|ota-data)\.bin$/.test(a.name)) continue;
+        // Reject the part-suffixed .bins (bootloader / partition-table / ota-data /
+        // moonbase): they're install fragments, not the main image. The OTA path needs
+        // the app image only. The shared-moonbase asset is doubly excluded (the `shared-`
+        // prefix already fails binaryRe): offering MoonBase as an OTA target would replace
+        // a device's app with an image that can only install, not run the show.
+        if (/(?:-(?:bootloader|partition-table|ota-data)|moonbase[^/]*|-slot0)\.bin$/.test(a.name)) continue;
         const m = binaryRe.exec(a.name);
         if (m) {
             const firmware = m[1];
@@ -334,7 +336,7 @@ function relativeTime(iso) {
 // Uses the same `.control-row` / `.control-label` / `<select>` shape as the
 // rest of `createControl()` in app.js so the picker visually integrates with
 // the card it's mounted in. The web installer overrides these with its own
-// styles in web-installer/index.html, which gives the installer page the same
+// styles in mooninstaller/index.html, which gives the installer page the same
 // look without app.js loading.
 // Draw the field rows immediately, before the network fetches resolve, so the
 // user sees the full form straight away instead of a lone "Loading…" line that
