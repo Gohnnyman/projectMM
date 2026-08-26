@@ -213,6 +213,24 @@ Detail: [technical](moxygen/GridBlacksLayout.md)
 
 [Tests](../../tests/unit-tests.md#gridblackslayout)
 
+<a id="rectangle"></a>
+
+### Rectangle
+
+Lights around the **perimeter** of a `width` × `height` box, nothing inside it — the strip-around-a-frame primitive. Each corner holds one light, so the count is `2·(width + height) − 4`; a box one light thick degenerates to a plain line. Use [Grid](#grid) when the interior has LEDs too.
+
+- `width` / `height` — box extent in lights along each edge (1–500); 32×18 default is 16:9.
+- `startCorner` — which corner light 0 sits at: top-left / top-right / bottom-right / bottom-left.
+- `clockwise` — direction the indices run from that corner.
+
+The last two describe the **wiring, not the shape**: they reorder indices while every coordinate stays identical, so set them to match your build and an effect's "top edge" lights the physical top edge. Same split [Single Row](#singlerow) draws with `reversed order` and [Grid](#grid) with `serpentine`.
+
+Origin: projectMM
+
+Detail: [technical](moxygen/RectangleLayout.md)
+
+[Tests](../../tests/unit-tests.md#rectanglelayout)
+
 <a id="sphere"></a>
 
 ### Sphere

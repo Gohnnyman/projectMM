@@ -810,6 +810,25 @@ Detail: [technical](moxygen/NoiseEffect.md)
 
 ## projectMM-native effects
 
+<a id="ambilight"></a>
+
+### Ambilight 📺
+
+Paints the layer with the live frame from the [Video](../core/services.md#video) service, so lights around a display glow the colour of the picture nearest them — the screen-follow / Hyperion behaviour. Each light shows the **mean** of the source rectangle mapping to it, which is steady where a single sampled pixel would flicker on grain and moving edges.
+
+- `brightness` — scales the sampled colour. Dims *the video*, unlike the driver's brightness which dims everything.
+- `saturation` — how far each channel is pushed from its zone's luma, as a percentage (100 = the mean untouched). Averaging mixes hues, so screen-follow lighting reads washed out without a boost.
+
+**The layout decides the shape.** The effect fills a logical box and knows nothing else. On a [Rectangle](layouts.md#rectangle) the interior maps to no LED, so a border strip shows the frame's border; on a [Grid](layouts.md#grid) the same effect is a video wall. Where your strip starts and which way it runs are `startCorner` and `clockwise` on the layout, not settings here.
+
+With no video source it paints black — every effect owns its background, so returning early would leave the previous effect's picture frozen on the strip.
+
+Origin: projectMM
+
+Detail: [technical](moxygen/AmbilightEffect.md)
+
+[Tests](../../tests/unit-tests.md#ambilighteffect)
+
 <a id="audiospectrum"></a>
 
 ### AudioSpectrum 📊

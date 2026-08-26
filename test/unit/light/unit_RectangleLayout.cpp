@@ -1,0 +1,185 @@
+// @module RectangleLayout
+
+#include "doctest.h"
+#include "light/layouts/RectangleLayout.h"
+
+#include <cstdint>
+#include <set>
+#include <utility>
+#include <vector>
+
+// Pins the hollow-rectangle perimeter walk: the corner-counted-once light count, the reference
+// clockwise-from-top-left order, the degenerate line cases, and the eight wiring permutations
+// (4 start corners × 2 directions). The wiring controls must reorder INDICES only — the set of
+// emitted coordinates is a property of the box and must be byte-identical however the strip is
+// wired, which is the invariant these tests exist to hold.
+
+using mm::RectangleLayout;
+
+namespace {
+
+// Collect (index → position) by walking the layout the way the Layer's LUT build does.
+std::vector<std::pair<int, int>> walk(const RectangleLayout& r) {
+    std::vector<std::pair<int, int>> out;
+    mm::CoordSink sink{
+        [](void* ctx, mm::nrOfLightsType, mm::lengthType x, mm::lengthType y, mm::lengthType) {
+            static_cast<std::vector<std::pair<int, int>>*>(ctx)->push_back({x, y});
+        },
+        nullptr, &out};
+    r.placeLights(sink);
+    return out;
+}
+
+}  // namespace
+
+// A rectangle is FLAT: every light sits at z = 0. Nothing in the x/y checks below would notice a
+// stray depth, but a non-zero z inflates the layout's bounding box, so the Layer allocates a buffer
+// `depth` times larger for one plane of lights — a silent 10x memory cost, not a visible fault.
+TEST_CASE("RectangleLayout: every light is emitted flat at z = 0") {
+    RectangleLayout r;
+    r.width = 7; r.height = 5;
+    int maxZ = -1;
+    mm::CoordSink sink{
+        [](void* ctx, mm::nrOfLightsType, mm::lengthType, mm::lengthType, mm::lengthType z) {
+            int& m = *static_cast<int*>(ctx);
+            if (z > m) m = static_cast<int>(z);
+        },
+        nullptr, &maxZ};
+    r.placeLights(sink);
+    CHECK(maxZ == 0);
+}
+
+// The perimeter of a w×h box counts each corner once: 2·(w+h) − 4. A strip bent around a frame has
+// exactly one LED in each corner, even though that corner belongs to two edges.
+TEST_CASE("RectangleLayout: light count is the perimeter with corners counted once") {
+    RectangleLayout r;
+    r.width = 4; r.height = 3;
+    CHECK(r.lightCount() == 10);      // 2*(4+3) - 4
+    r.width = 32; r.height = 18;      // the 16:9 default
+    CHECK(r.lightCount() == 96);
+    r.width = 2; r.height = 2;
+    CHECK(r.lightCount() == 4);       // the smallest real rectangle
+}
+
+// lightCount() must agree with what placeLights() actually emits, or the Layer allocates a buffer
+// of one size and the LUT build walks another.
+TEST_CASE("RectangleLayout: emitted light count matches lightCount()") {
+    RectangleLayout r;
+    r.width = 7; r.height = 5;
+    CHECK(walk(r).size() == r.lightCount());
+}
+
+// The reference walk: clockwise from the top-left corner, along the top edge first.
+TEST_CASE("RectangleLayout: default walk runs clockwise from the top-left corner") {
+    RectangleLayout r;
+    r.width = 4; r.height = 3;        // 10 lights
+    const auto p = walk(r);
+    REQUIRE(p.size() == 10);
+    // top edge, left to right
+    CHECK(p[0] == std::pair{0, 0});
+    CHECK(p[1] == std::pair{1, 0});
+    CHECK(p[2] == std::pair{2, 0});
+    CHECK(p[3] == std::pair{3, 0});
+    // right edge, top to bottom (the top-right corner was already emitted)
+    CHECK(p[4] == std::pair{3, 1});
+    CHECK(p[5] == std::pair{3, 2});
+    // bottom edge, right to left
+    CHECK(p[6] == std::pair{2, 2});
+    CHECK(p[7] == std::pair{1, 2});
+    CHECK(p[8] == std::pair{0, 2});
+    // left edge, bottom to top — one cell, both its corners already placed
+    CHECK(p[9] == std::pair{0, 1});
+}
+
+// Every light lands on its own cell: the walk goes round the frame exactly once. A duplicate would
+// mean two LEDs mapped to one logical position (one of them dark), a gap would mean an unlit LED.
+TEST_CASE("RectangleLayout: every light occupies a distinct perimeter cell") {
+    RectangleLayout r;
+    r.width = 9; r.height = 6;
+    const auto p = walk(r);
+    const std::set<std::pair<int, int>> unique(p.begin(), p.end());
+    CHECK(unique.size() == p.size());
+    // and none of them is an interior cell — this is a HOLLOW rectangle
+    for (const auto& [x, y] : p)
+        CHECK((x == 0 || x == r.width - 1 || y == 0 || y == r.height - 1));
+}
+
+// startCorner and clockwise change the WIRING, not the shape. Whatever corner the strip enters at
+// and whichever way it runs, the same set of cells lights up — only the index order differs. This
+// is what lets an effect's "top edge" be the physical top edge on any build.
+TEST_CASE("RectangleLayout: all eight wirings emit the same cells, in different order") {
+    RectangleLayout ref;
+    ref.width = 6; ref.height = 4;
+    const auto base = walk(ref);
+    const std::set<std::pair<int, int>> expected(base.begin(), base.end());
+
+    for (uint8_t corner = 0; corner < RectangleLayout::kStartCornerCount; corner++) {
+        for (bool cw : {true, false}) {
+            RectangleLayout r;
+            r.width = 6; r.height = 4;
+            r.startCorner = corner;
+            r.clockwise = cw;
+            const auto p = walk(r);
+            const std::set<std::pair<int, int>> got(p.begin(), p.end());
+            CHECK(p.size() == base.size());
+            CHECK(got == expected);       // same cells...
+            CHECK(got.size() == p.size());  // ...each still exactly once
+        }
+    }
+}
+
+// Light 0 lands on the corner the user named — the control's whole purpose. (x, y) origin is
+// top-left, so "bottom" is y = height − 1.
+TEST_CASE("RectangleLayout: light 0 sits on the chosen start corner") {
+    const int w = 6, h = 4;
+    const std::pair<int, int> corners[4] = {
+        {0, 0}, {w - 1, 0}, {w - 1, h - 1}, {0, h - 1}};   // TL, TR, BR, BL — kStartCornerOptions order
+    for (uint8_t c = 0; c < 4; c++) {
+        RectangleLayout r;
+        r.width = w; r.height = h;
+        r.startCorner = c;
+        CHECK(walk(r)[0] == corners[c]);
+    }
+}
+
+// Counter-clockwise reverses the direction of travel while keeping the same first light: from the
+// top-left corner it heads DOWN the left edge instead of right along the top.
+TEST_CASE("RectangleLayout: counter-clockwise reverses travel from the same corner") {
+    RectangleLayout r;
+    r.width = 4; r.height = 3;
+    r.clockwise = false;
+    const auto p = walk(r);
+    REQUIRE(p.size() == 10);
+    CHECK(p[0] == std::pair{0, 0});   // same start corner
+    CHECK(p[1] == std::pair{0, 1});   // ...but down the left edge (clockwise gave (1,0))
+    CHECK(p[2] == std::pair{0, 2});
+    CHECK(p[3] == std::pair{1, 2});   // then right along the bottom
+}
+
+// A box one light thick has no interior to go around, so it degenerates to a plain line. The
+// rectangle formula would walk those cells twice and light phantom positions, so it is not used.
+TEST_CASE("RectangleLayout: a one-light-thick box degenerates to a line, not a doubled-back frame") {
+    RectangleLayout row;
+    row.width = 5; row.height = 1;
+    CHECK(row.lightCount() == 5);          // not 2*5 + 2*1 - 4 == 8
+    const auto rp = walk(row);
+    REQUIRE(rp.size() == 5);
+    CHECK(rp[0] == std::pair{0, 0});
+    CHECK(rp[4] == std::pair{4, 0});
+
+    RectangleLayout col;
+    col.width = 1; col.height = 5;
+    CHECK(col.lightCount() == 5);
+    const auto cp = walk(col);
+    REQUIRE(cp.size() == 5);
+    CHECK(cp[0] == std::pair{0, 0});
+    CHECK(cp[4] == std::pair{0, 4});
+}
+
+// A zero side is not a shape. It emits nothing rather than dividing by zero in the modular walk.
+TEST_CASE("RectangleLayout: a zero-sided box emits no lights") {
+    RectangleLayout r;
+    r.width = 0; r.height = 10;
+    CHECK(r.lightCount() == 0);
+    CHECK(walk(r).empty());
+}

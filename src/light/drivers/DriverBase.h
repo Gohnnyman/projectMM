@@ -58,9 +58,9 @@ public:
     virtual LedHwBlock hwBlock() const { return LedHwBlock::None; }
 
     /// Template method: every driver card leads with the per-driver output correction
-    /// (localBrightness / lightPreset / whiteMode / Custom offsets), added once here in the base
-    /// so no driver re-implements the placement (the No-duplication rule) — then the driver's own
-    /// controls via defineDriverControls(). A driver overrides defineDriverControls(), NOT this.
+    /// (localBrightness / lightPreset / whiteMode / gamma / balance / Custom offsets), added once
+    /// here in the base so no driver re-implements the placement (the No-duplication rule) — then
+    /// the driver's own controls via defineDriverControls(), which a driver overrides instead.
     /// A driver that emits raw RGB and ignores correction (Preview) or fixes it internally (Hue)
     /// opts out by returning false from hasCorrectionControls().
     void defineControls() final {
@@ -127,6 +127,12 @@ public:
         const uint8_t effective =
             static_cast<uint8_t>((globalBrightness * localBrightness_) / 255);
         correction_.whiteMode = static_cast<WhiteMode>(whiteMode_);
+        // Fill inputs, so they must be in place before the rebuild below. Pushed here rather than in
+        // onControlChanged so a rebuild from ANY trigger carries the current values.
+        correction_.gamma10 = gamma10_;
+        correction_.balRed = balRed_;
+        correction_.balGreen = balGreen_;
+        correction_.balBlue = balBlue_;
         // Resolve the referenced preset's channel-role wiring from the library into our flat
         // Correction (cold path). On a missing id (a deleted preset) fall back to the library default
         // so a driver degrades to a valid RGB output rather than crashing — Robust-to-any-input.
@@ -145,7 +151,7 @@ public:
     }
 
     /// Base onControlChanged: rebuild this driver's correction when one of ITS correction
-    /// controls (order/white/brightness/Custom offsets) changed, reusing the last global
+    /// controls (order/white/brightness/gamma/balance/Custom offsets) changed, reusing the last global
     /// brightness the container pushed. A driver overriding onControlChanged() for its own
     /// controls chains to this so it doesn't re-implement the correction branch (the
     /// Complexity-lives-in-core rule: the correction rule lives here, once, for every driver).
@@ -252,6 +258,10 @@ protected:
     uint8_t presetSel_ = 0;          // the preset Select's chosen INDEX (mapped to an id in onControlChanged)
     uint8_t whiteMode_ = static_cast<uint8_t>(WhiteMode::Min);  // index into kWhiteModeOptions
     uint8_t localBrightness_ = 255;  // per-driver dim, multiplied with the global brightness
+    // Calibration for THIS fixture, so per-driver rather than global — two strips on one board can
+    // need different values. Semantics in Correction.h.
+    uint8_t gamma10_ = Correction::kGammaOff;
+    uint8_t balRed_ = 255, balGreen_ = 255, balBlue_ = 255;
     uint8_t lastGlobalBrightness_ = 0;  // last global brightness the container pushed (for self-rebuilds)
     // The PERSISTED reference: a preset id is a runtime handle (reassigned each boot), so what
     // survives a reboot is the preset NAME — stable, human-readable, and reorder-proof. A hidden
@@ -260,8 +270,10 @@ protected:
 
     /// Add the correction controls: localBrightness first (the setting a user reaches for most),
     /// then the preset Select (its options are the LightPresets library's names; the chosen index
-    /// maps to a stable preset id), then whiteMode. A driver calls this from its defineDriverControls
-    /// via the DriverBase::defineControls template method. The Select is rebuilt from the library on
+    /// maps to a stable preset id), then whiteMode, then the calibration block (gamma and the three
+    /// white-balance trims) — the wiring a user must get right first, then the values they tune once
+    /// against the fixture. A driver calls this from its defineDriverControls via the
+    /// DriverBase::defineControls template method. The Select is rebuilt from the library on
     /// every defineControls (which re-runs on a control change), so adding/renaming a preset shows up.
     void defineCorrectionControls() {
         controls_.addUint8("localBrightness", localBrightness_, 0, 255);
@@ -274,6 +286,11 @@ protected:
         // tracks the live reference.
         auto* lib = LightPresetsModule::active();
         controls_.setHidden(controls_.count() - 1, !(lib && lib->presetHasSynthChannel(presetId_)));
+        // Tenths, so the name carries the scale; the floor is 1.0 (off).
+        controls_.addUint8("gamma x10", gamma10_, Correction::kGammaOff, 30);
+        controls_.addUint8("balanceRed", balRed_, 0, 255);
+        controls_.addUint8("balanceGreen", balGreen_, 0, 255);
+        controls_.addUint8("balanceBlue", balBlue_, 0, 255);
         // The durable reference (the preset NAME) persists but isn't shown — the lightPreset Select
         // above is the user-facing control; presetRef_ just carries the reference across a reboot.
         controls_.addText("presetRef", presetRef_, sizeof(presetRef_));
@@ -289,7 +306,9 @@ protected:
     /// affectsPrepare() and its correction rebuilds in onControlChanged (both handled by DriverBase).
     static bool isCorrectionControl(const char* name) {
         return std::strcmp(name, "lightPreset") == 0 || std::strcmp(name, "localBrightness") == 0
-            || std::strcmp(name, "whiteMode") == 0;
+            || std::strcmp(name, "whiteMode") == 0 || std::strcmp(name, "gamma x10") == 0
+            || std::strcmp(name, "balanceRed") == 0 || std::strcmp(name, "balanceGreen") == 0
+            || std::strcmp(name, "balanceBlue") == 0;
     }
 
 private:

@@ -32,6 +32,27 @@ Detail: [technical](moxygen/AudioService.md)
 
 [Tests](../../tests/unit-tests.md#audioservice)
 
+<a id="video"></a>
+
+### Video
+
+A Service (added by the user, not auto-wired): the video source that feeds screen-follow effects via `VideoService::latestFrame()`. It is the counterpart of [Audio](#audio) for a picture — one decode per tick, published once, read by however many effects want it. `source` is the module's identity and decides which controls are shown.
+
+- `source` — `test pattern` synthesises a frame in memory and needs no hardware or files; `file` reads a binary PPM off the filesystem.
+- `file` — (file) path to a binary PPM (P6, maxval 255). Upload it through the File Manager, or point at any path on the device.
+- `reload` — (file) re-read the file in place, without rebuilding the pipeline.
+- status — the live frame's dimensions (`640x480`), or the reason there is no frame.
+
+**The test pattern is a diagnostic, not decoration.** It paints four coloured border bands — red top, green right, blue bottom, yellow left — plus a white block sweeping along the top edge. On a border-mounted strip that makes orientation self-evident: a mis-set `startCorner` or `clockwise` on the [Rectangle](../light/layouts.md#rectangle) layout shows up as the wrong physical edge lighting, rather than as a subtly wrong picture you have to squint at. The sweeping block shows liveness and which way "forward" runs.
+
+**Why PPM.** The device's real capture path decodes MJPEG in the ESP32-P4's JPEG hardware, behind the platform layer; there is no software JPEG decoder in this codebase, and adding one so the desktop build could open a `.jpg` would buy a dependency for a development convenience. PPM is a raw RGB dump behind a three-line ASCII header, so it needs no decoder and is one command away from any source material:
+
+```sh
+ffmpeg -i clip.mp4 -frames:v 1 -vf scale=64:36 -pix_fmt rgb24 frame.ppm
+```
+
+[Tests](../../tests/unit-tests.md#videoservice)
+
 <a id="ir"></a>
 
 ### IR

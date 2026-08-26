@@ -20,17 +20,17 @@ using mm::Correction;
 TEST_CASE("Correction brightness LUT: full brightness is identity") {
     Correction c;
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
-    for (int v = 0; v < 256; v++) CHECK(c.briLut[v] == v);
+    for (int v = 0; v < 256; v++) CHECK(c.briLut[0][v] == v);
 }
 
 // At brightness=128, every entry is roughly halved using scale8 (255→128, 128→64, 2→1).
 TEST_CASE("Correction brightness LUT: half brightness halves each value (scale8)") {
     Correction c;
     mm::test::rebuildFromPreset(c, 128, mm::test::PresetOrder::RGB);
-    CHECK(c.briLut[0] == 0);
-    CHECK(c.briLut[255] == 128);   // (255*128)/255 = 128
-    CHECK(c.briLut[128] == 64);    // (128*128)/255 = 64
-    CHECK(c.briLut[2] == 1);       // (2*128)/255 = 1
+    CHECK(c.briLut[0][0] == 0);
+    CHECK(c.briLut[0][255] == 128);   // (255*128)/255 = 128
+    CHECK(c.briLut[0][128] == 64);    // (128*128)/255 = 64
+    CHECK(c.briLut[0][2] == 1);       // (2*128)/255 = 1
 }
 
 // RGB preset at full brightness passes the source RGB through unchanged (3 output channels, no white).
@@ -181,7 +181,7 @@ TEST_CASE("Correction roles array: arbitrary Custom wiring derives correct offse
     CHECK(c.offGreen == 2);
     CHECK(c.offRed == 3);
     CHECK(c.outChannels == 4);
-    CHECK(c.briLut[255] == 128);   // LUT refreshed (brightness applied)
+    CHECK(c.briLut[0][255] == 128);   // LUT refreshed (brightness applied)
     const uint8_t src[3] = {200, 100, 60};  // scaled: 100, 50, 30 → min = 30
     uint8_t out[4] = {};
     c.apply(src, out);
@@ -300,4 +300,97 @@ TEST_CASE("Correction: UV dark on warm colors; whiteMode None zeroes WW/Y/UV") {
         CHECK(out[4] == 0);            // Yellow zeroed
         CHECK(out[5] == 0);            // UV zeroed
     }
+}
+
+// --- Gamma and per-channel white balance ------------------------------------------------------
+// Both fold into the SAME three output tables the brightness scale fills, so neither costs
+// anything per light. These pin the fill: that the defaults are a true no-op, that the curve has
+// the right shape, that it runs before the brightness scale (not after), and that a channel trim
+// reaches the white derivation as well as the RGB channels.
+
+// An untouched Correction must behave exactly as it did before gamma existed: gamma 1.0, no trim,
+// so all three rows are the same linear ramp. This is the guard that a device which never opens
+// the calibration controls sees byte-identical output.
+TEST_CASE("Correction gamma: default is off, so all three channels stay linear and identical") {
+    Correction c;
+    CHECK(c.gamma10 == Correction::kGammaOff);
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    for (int v = 0; v < 256; v++) {
+        CHECK(c.briLut[0][v] == v);
+        CHECK(c.briLut[1][v] == v);
+        CHECK(c.briLut[2][v] == v);
+    }
+}
+
+// Gamma 2.2 is the standard correction for a linear-duty LED driven from perceptual values: it
+// pulls the midtones down (a linear ramp reads as "bright fast then flat") while leaving both
+// endpoints fixed, so black stays black and full stays full.
+TEST_CASE("Correction gamma: 2.2 pulls midtones down and pins both endpoints") {
+    Correction c;
+    c.gamma10 = 22;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    CHECK(c.briLut[0][0] == 0);       // black stays black
+    CHECK(c.briLut[0][255] == 255);   // full stays full
+    CHECK(c.briLut[0][64] == 12);     // (64/255)^2.2  * 255
+    CHECK(c.briLut[0][128] == 56);    // (128/255)^2.2 * 255 — well under the linear 128
+    CHECK(c.briLut[0][192] == 137);
+    // The curve is a shape, not a dim: it must be monotonic, or a fade would visibly step back.
+    for (int v = 1; v < 256; v++) CHECK(c.briLut[0][v] >= c.briLut[0][v - 1]);
+}
+
+// The curve is applied to the source value and the brightness scale then dims the RESULT. Doing it
+// the other way round would re-shape the curve at every brightness, so a colour would shift as the
+// user dragged the slider. At brightness 128 with gamma 2.2 the midtone lands on gamma(128)/2 = 28;
+// scaling first would instead give gamma(64) = 12, which is the regression this catches.
+TEST_CASE("Correction gamma: the curve runs before brightness, so dimming never reshapes it") {
+    Correction c;
+    c.gamma10 = 22;
+    mm::test::rebuildFromPreset(c, 128, mm::test::PresetOrder::RGB);
+    CHECK(c.briLut[0][128] == 28);    // gamma first: (56 * 128) / 255
+    CHECK(c.briLut[0][255] == 128);   // endpoint still just the brightness scale
+}
+
+// A white-balance trim scales one channel only. Leaving the weakest channel at 255 and lowering
+// the other two is how a white point is pulled neutral on a strip whose dies differ in efficiency.
+TEST_CASE("Correction white balance: trimming one channel leaves the others untouched") {
+    Correction c;
+    c.balGreen = 128;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    CHECK(c.briLut[0][255] == 255);   // red untrimmed
+    CHECK(c.briLut[1][255] == 128);   // green at half
+    CHECK(c.briLut[2][255] == 255);   // blue untrimmed
+    const uint8_t src[3] = {200, 200, 200};   // a "white" triple the strip would render green-cast
+    uint8_t out[3] = {};
+    c.apply(src, out);
+    CHECK(out[0] == 200);
+    CHECK(out[1] == 100);             // pulled down to match the weaker channels
+    CHECK(out[2] == 200);
+}
+
+// On an RGBW fixture the white channel is derived as min(R,G,B) from the CORRECTED values, so a
+// balance trim reaches it too — otherwise the synthesized white would carry the very cast the trim
+// exists to remove. This is the case that matters on an SK6812 RGBW strip, where the separate white
+// phosphor sits right beside the RGB dies and makes any mismatch obvious.
+TEST_CASE("Correction white balance: RGBW white is derived from the balanced channels") {
+    Correction c;
+    c.balBlue = 128;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGBW);
+    const uint8_t src[3] = {200, 200, 200};
+    uint8_t out[4] = {};
+    c.apply(src, out);
+    CHECK(out[0] == 200);   // R
+    CHECK(out[1] == 200);   // G
+    CHECK(out[2] == 100);   // B trimmed
+    CHECK(out[3] == 100);   // W = min of the BALANCED channels, not the raw 200
+}
+
+// Gamma and balance are two inputs to one fill, not two stages: a channel's table is the curve
+// scaled by that channel's trim, and the hot path still does a single lookup.
+TEST_CASE("Correction: gamma and white balance compose into the one table") {
+    Correction c;
+    c.gamma10 = 22;
+    c.balBlue = 128;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    CHECK(c.briLut[0][200] == 149);   // red: curve only — (200/255)^2.2 * 255
+    CHECK(c.briLut[2][200] == 74);    // blue: the same curve, then the half trim — (149 * 128) / 255
 }

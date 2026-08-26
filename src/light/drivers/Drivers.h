@@ -123,10 +123,11 @@ public:
     /// Reach the live Drivers (the one that owns the encode worker) to quiesce it around a mutation.
     static Drivers* active() { return ActiveInstance<Drivers>::active(); }
 
-    /// Global brightness (0–255). Scales every channel through a 256-entry LUT
-    /// (`(v × brightness) / 255`); changing it rebuilds only the LUT on the cheap
-    /// `onControlChanged` tier — no pipeline realloc, so the slider is fluent. Gamma /
-    /// white-balance fold into this LUT later as a per-channel R/G/B split.
+    /// Global brightness (0–255). Scales every channel through each driver's per-channel LUT
+    /// (`(v × brightness) / 255`, after that driver's gamma curve and white-balance trim);
+    /// changing it rebuilds only those LUTs on the cheap `onControlChanged` tier — no pipeline
+    /// realloc, so the slider is fluent. Gamma and white balance are per-DRIVER (they describe a
+    /// fixture, not the board), so they live on DriverBase; only brightness is global.
     ///
     /// Default low (≈8%). A fresh device with LEDs wired but no power budget set
     /// (such as a strip on USB 5V) draws far less at 20 than at full white, so the
