@@ -41,19 +41,21 @@ struct FrozenClock {
 };
 }  // namespace
 
-// Regression: the mic status ("mic: set sckPin / wsPin / sdPin", and the other mic diagnostics) is a
-// LOCAL-mode read-out. Switching to Receive network / Simulate must clear it so a stale mic message
-// doesn't linger on the status row — those modes report through the separate "sync status" row and have
-// no mic to diagnose. Before the fix, prepare()'s non-Local branch deinit()'d the peripheral but left
-// the status string set from the prior Local build (or from boot with pins unset).
+// Regression: the mic/capture status is a LOCAL-mode read-out. Switching to Receive network /
+// Simulate must clear it so a stale message doesn't linger on the status row — those modes report
+// through the separate "sync status" row and have no input to diagnose. Before the fix,
+// prepare()'s non-Local branch deinit()'d the peripheral but left the status string set.
+// What Local mode leaves depends on the host: a capture-capable desktop usually inits cleanly
+// (no status at all — capture IS live), a locked-down one reports "capture init failed", an I2S
+// target with unset pins reports "mic: set sckPin / wsPin / sdPin". The rule under test is the
+// same in every case: whatever Local left, leaving Local clears it.
 TEST_CASE("AudioService: switching out of Local mode clears the mic status") {
     AudioService a;
-    a.mode = 0;                      // Local audio, pins unset (the default) → mic status set on build
+    a.mode = 0;                      // Local audio
     a.applyState();
-    // On a host build hasI2sMic is false, so reinit() sets "mic: no I2S on this platform"; on a device
-    // with unset pins it's "mic: set sckPin / wsPin / sdPin". Either way Local mode leaves a mic status.
-    CHECK(a.status() != nullptr);
-    CHECK(std::strstr(a.status(), "mic") != nullptr);
+    // Any of the three Local outcomes above is legitimate; only note which one happened.
+    const bool localLeftStatus = a.status() != nullptr && a.status()[0] != 0;
+    (void)localLeftStatus;
 
     a.mode = 1;                      // receive network
     a.applyState();                  // prepare() non-Local branch must clear the stale mic status
@@ -111,6 +113,29 @@ TEST_CASE("AudioService Local+send: broadcasts are throttled to ~kSyncSendInterv
     a.tick();
     CHECK((uint8_t)(a.syncFrameCounterForTest() - c0) == 1);
 
+    a.release();
+}
+
+// The fleet-source contract: a desktop in Local mode with "send audio" on captures its own
+// audio AND broadcasts — send fires from the same tick() that runs the capture path, so the
+// capture gate no longer starves the sender (the pre-capture desktop returned from tick()
+// before ever sending in Local mode was impossible: sends ran first — this pins that the two
+// paths now COEXIST on a capture host: capture may be live, and sends still fire throttled).
+TEST_CASE("AudioService Local+send on a capture host: capture and broadcast coexist") {
+    if constexpr (!platform::hasAudioCapture) return;
+    FrozenClock clk(1);
+    AudioService a;
+    a.mode = 0;
+    a.send = true;
+    a.syncPort = kTestSyncPort;
+    a.applyState();   // may or may not bring capture up (host permission dependent) — both fine
+    a.tick();         // opens the socket + first send, then runs the local capture path
+    REQUIRE(a.syncOpenForTest());
+    CHECK(std::strcmp(status(a), "sending") == 0);
+    const uint8_t c0 = a.syncFrameCounterForTest();
+    clk.advance(AudioService::syncSendIntervalMsForTest() + 5);
+    a.tick();         // capture read + throttled send in one tick, no early return
+    CHECK((uint8_t)(a.syncFrameCounterForTest() - c0) == 1);
     a.release();
 }
 

@@ -2,8 +2,9 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>     // cosf/sinf/sqrtf for the naive desktop DFT (audioFft)
-#include <numbers>   // std::numbers::pi_v — same DFT
+#include <bit>       // std::countr_zero — the radix-2 audioFft's bit-reversal
+#include <cmath>     // cos/sin/sqrt for audioFft's twiddles and magnitudes
+#include <numbers>   // std::numbers::pi_v, same kernel
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -2018,40 +2019,50 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*l
     return {};   // not supported off the P4
 }
 
-// Audio codec — desktop has no codec, so init is a no-op that succeeds (there's
-// nothing to bring up); the inert audioMicInit below is what keeps capture off.
-bool audioCodecInit(CodecType /*type*/, const AudioCodecPins& /*pins*/, uint32_t /*sampleRate*/) {
-    return true;
-}
-void audioCodecDeinit() {}
+// Audio codec + capture live in platform_desktop_audio.cpp (the miniaudio TU): codec is a
+// succeed-no-op (nothing to bring up), the mic seam reads the OS capture device.
 
-// I2S microphone — no capture on desktop (hasI2sMic == false, AudioService inert),
-// so init fails and read returns nothing.
-bool audioMicInit(AudioMicHandle& /*h*/, uint16_t /*wsPin*/, uint16_t /*sdPin*/,
-                  uint16_t /*sckPin*/, int16_t /*mclkPin*/, uint32_t /*sampleRate*/) {
-    return false;
-}
-size_t audioMicRead(AudioMicHandle& /*h*/, int32_t* /*out*/, size_t /*maxSamples*/) {
-    return 0;
-}
-void audioMicDeinit(AudioMicHandle& /*h*/) {}
-
-// FFT kernel — a real but naive O(n^2) DFT. NOT the production kernel (the ESP32
-// uses esp-dsp's fast radix-2), but a correct reference so the host tests run the
-// genuine magnitude->band path on synthesized signals. n must be a power of two;
-// fills outMag[0..n/2) with the bin magnitudes.
+// FFT kernel — iterative radix-2 Cooley-Tukey (the textbook in-place decimation-in-time
+// form), the production desktop kernel now that live capture runs 512-point blocks ~43x/s
+// on the render tick (the previous naive O(n^2) DFT was, per its own comment, only fast
+// enough for host tests). Identical contract: n a power of two, outMag[0..n/2) filled with
+// unnormalized bin magnitudes sqrt(re^2+im^2); numerically equivalent to the DFT (pinned by
+// unit_platform_audiofft against a DFT reference).
 void audioFft(const float* windowed, size_t n, float* outMag) {
-    if (!windowed || !outMag || n == 0) return;
-    const float twoPiOverN = -2.0f * std::numbers::pi_v<float> / static_cast<float>(n);
-    for (size_t k = 0; k < n / 2; k++) {
-        float re = 0.0f, im = 0.0f;
-        for (size_t t = 0; t < n; t++) {
-            const float a = twoPiOverN * static_cast<float>(k) * static_cast<float>(t);
-            re += windowed[t] * std::cos(a);
-            im += windowed[t] * std::sin(a);
-        }
-        outMag[k] = std::sqrt(re * re + im * im);
+    if (!windowed || !outMag || n == 0 || (n & (n - 1)) != 0) return;
+    constexpr size_t kMaxN = 4096;
+    if (n > kMaxN) return;
+    static float re[kMaxN], im[kMaxN];   // scratch; render-thread only, like the ESP32 kernel's
+
+    // Bit-reversal permutation while loading the input.
+    const int bits = static_cast<int>(std::countr_zero(n));
+    for (size_t i = 0; i < n; i++) {
+        size_t r = 0;
+        for (int b = 0; b < bits; b++) r |= ((i >> b) & 1u) << (bits - 1 - b);
+        re[r] = windowed[i];
+        im[r] = 0.0f;
     }
+
+    // Butterflies: stages of doubling span, twiddles advanced per group.
+    for (size_t len = 2; len <= n; len <<= 1) {
+        const float ang = -2.0f * std::numbers::pi_v<float> / static_cast<float>(len);
+        const float wRe = std::cos(ang), wIm = std::sin(ang);
+        for (size_t i = 0; i < n; i += len) {
+            float curRe = 1.0f, curIm = 0.0f;
+            for (size_t j = 0; j < len / 2; j++) {
+                const size_t a = i + j, b = a + len / 2;
+                const float tRe = re[b] * curRe - im[b] * curIm;
+                const float tIm = re[b] * curIm + im[b] * curRe;
+                re[b] = re[a] - tRe; im[b] = im[a] - tIm;
+                re[a] += tRe;        im[a] += tIm;
+                const float nRe = curRe * wRe - curIm * wIm;
+                curIm = curRe * wIm + curIm * wRe;
+                curRe = nRe;
+            }
+        }
+    }
+
+    for (size_t k = 0; k < n / 2; k++) outMag[k] = std::sqrt(re[k] * re[k] + im[k] * im[k]);
 }
 
 // No I2C bus on the desktop host — report it as unavailable (the sentinel), the same as

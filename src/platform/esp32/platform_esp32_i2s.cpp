@@ -186,6 +186,17 @@ size_t audioMicRead(AudioMicHandle&, int32_t*, size_t) { return 0; }
 void audioMicDeinit(AudioMicHandle&) {}
 void audioFft(const float*, size_t, float*) {}
 
+
+// OS capture devices are a desktop concept (hasAudioCapture == false here); the stubs exist
+// because the discarded if-constexpr branches in shared code still compile them.
+size_t audioCaptureDevices(const char* const** optionsOut) {
+    if (optionsOut) *optionsOut = nullptr;
+    return 0;
+}
+bool audioCaptureInit(AudioMicHandle& /*h*/, uint8_t /*deviceIndex*/, uint32_t /*sampleRate*/) {
+    return false;
+}
+
 }  // namespace mm::platform
 
 #endif  // SOC_I2S_SUPPORTED

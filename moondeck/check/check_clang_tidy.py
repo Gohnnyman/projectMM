@@ -30,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Third-party code that lives inside our tree. Findings here are upstream's to fix.
-VENDORED = ("test/doctest.h",)
+VENDORED = ("test/doctest.h", "src/platform/desktop/vendor/miniaudio.h")
 
 # A diagnostic line: path:line:col: severity: message [check-name]
 #

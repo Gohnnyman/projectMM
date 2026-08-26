@@ -50,6 +50,7 @@ DedeHai's current audio experiment is a PoC MSGEQ7-based path (offloading the sp
 analyser chip) — a different point in the same space, noted for completeness.
 
 ## Source-seam extensions (widen what feeds the pipeline)
+- **Desktop OS capture — shipped (2026-08).** miniaudio-backed selectable-device capture (mic or loopback) into the same seam; the DC/RMS/FFT stages untouched, per the design intent above. A desktop with `send audio` on is a fleet-wide sync source.
 
 All of the following widen the **source seam** — what feeds the pipeline — leaving the DC-blocker / RMS
 / FFT / band analysis untouched. In roughly increasing hardware complexity:

@@ -39,8 +39,11 @@ namespace mm {
 /// boot-looped a mic-less device. When added, its pins default to unset (−1, the
 /// standard Pin-control sentinel, so GPIO 0 stays a usable mic pin) and it stays
 /// idle with a status note until the user enters the real GPIOs. Chip-agnostic:
-/// gated on `platform::hasI2sMic`, inert with a status note on targets without I2S
-/// and on desktop.
+/// gated on `platform::hasAudioInput` — a pin-wired I2S mic on boards, an OS capture
+/// device on desktop (the `device` Select: the system default mic out of the box, and
+/// loopback devices such as BlackHole when installed, so effects can follow what the
+/// machine plays). A desktop in Local mode with "send audio" on is a WLED audio-sync
+/// SOURCE: one machine's capture drives a whole fleet of boards in Receive mode.
 ///
 /// **The AudioFrame pipeline.** Each `tick()` that completes a block: read a block
 /// of samples, DC-blocker high-pass, compute the level, window + FFT, map to bands.
@@ -59,10 +62,11 @@ namespace mm {
 /// left slot); if `level` stays at the floor with sound present, the mic is filling
 /// the other slot — one wire, not firmware.
 ///
-/// **Platform seams.** Only the I2S read and the FFT kernel are platform code
-/// (`platform_esp32_i2s.cpp`: IDF's `i2s_std` driver + esp-dsp's float
-/// `dsps_fft2r_fc32`, the radix-2 real FFT); everything else is plain domain math
-/// that runs in CI on the desktop's reference DFT. The signal math is host-tested
+/// **Platform seams.** Only the audio read and the FFT kernel are platform code
+/// (boards: `platform_esp32_i2s.cpp`, IDF's `i2s_std` driver + esp-dsp's radix-2 FFT;
+/// desktop: `platform_desktop_audio.cpp`, miniaudio capture into a lock-free ring +
+/// a radix-2 Cooley-Tukey in `platform_desktop.cpp`); everything else is plain domain
+/// math, host-tested in CI. The signal math is host-tested
 /// domain code (`AudioLevel.h`, `AudioBands.h`); this module owns the lifecycle,
 /// the controls, and the two seams.
 ///
@@ -108,6 +112,9 @@ public:
     // real GPIOs, so adding it can't grab arbitrary pins or wedge a board with no
     // mic. The bench INMP441 wiring is SCK=6 / WS=4 / SD=5. Order follows the I2S
     // datasheet convention: clocks (SCK, WS) then data (SD) then the optional MCLK. ---
+    /// OS capture device (desktop): an index into platform::audioCaptureDevices' list.
+    /// 0 = "default" (order-stable). Changing it re-opens capture live (no reboot).
+    uint8_t device = 0;
     int8_t sckPin = -1;          ///< bit clock / BCLK (-1 = unset). Changing it re-creates the I2S channel live (no reboot).
     int8_t wsPin = -1;           ///< word-select / LRCLK (-1 = unset). Changing it re-creates the I2S channel live.
     int8_t sdPin = -1;           ///< serial data in / DOUT (-1 = unset). Changing it re-creates the I2S channel live.
@@ -189,13 +196,27 @@ public:
             static constexpr const char* kModeOptions[] = {"local audio", "simulate"};
             controls_.addSelect("mode", mode, kModeOptions, 2);
         }
-        // --- Local-audio group: the on-board mic / line-in and its analysis. Shown only in Local mode. The
-        // pins default UNSET (-1) so adding the module can't grab GPIOs; order follows the I2S datasheet
-        // (clocks, data, optional MCLK). ---
-        controls_.addPin("sckPin", sckPin);        controls_.setHidden(controls_.count() - 1, !localMode);
-        controls_.addPin("wsPin", wsPin);          controls_.setHidden(controls_.count() - 1, !localMode);
-        controls_.addPin("sdPin", sdPin);          controls_.setHidden(controls_.count() - 1, !localMode);
-        controls_.addPin("mclkPin", mclkPin);      controls_.setHidden(controls_.count() - 1, !localMode);
+        // --- Local-audio group: the audio input and its analysis. Shown only in Local mode. On
+        // I2S targets that means the mic pins (default UNSET, -1, so adding the module can't grab
+        // GPIOs; order follows the I2S datasheet: clocks, data, optional MCLK). On desktop it is
+        // the OS capture device instead. ---
+        if constexpr (platform::hasI2sMic) {
+            controls_.addPin("sckPin", sckPin);        controls_.setHidden(controls_.count() - 1, !localMode);
+            controls_.addPin("wsPin", wsPin);          controls_.setHidden(controls_.count() - 1, !localMode);
+            controls_.addPin("sdPin", sdPin);          controls_.setHidden(controls_.count() - 1, !localMode);
+            controls_.addPin("mclkPin", mclkPin);      controls_.setHidden(controls_.count() - 1, !localMode);
+        }
+        if constexpr (platform::hasAudioCapture) {
+            // The OS capture input: entry 0 "default" follows the system setting; loopback
+            // devices (BlackHole and friends) appear when installed. Re-enumerated on every
+            // rebuild, so a hot-plugged device shows up on the next control change. Persisted
+            // by INDEX (the Select writer's contract): if the OS reorders devices, re-pick —
+            // "default" at 0 is order-stable and the shipped default.
+            const char* const* deviceOptions = nullptr;
+            const uint8_t deviceCount = static_cast<uint8_t>(platform::audioCaptureDevices(&deviceOptions));
+            controls_.addSelect("device", device, deviceOptions, deviceCount);
+            controls_.setHidden(controls_.count() - 1, !localMode);
+        }
         static constexpr const char* kRateOptions[] = {"8000", "16000", "22050", "44100"};
         controls_.addSelect("sampleRate", sampleRateSel, kRateOptions, kSampleRateCount);
         controls_.setHidden(controls_.count() - 1, !localMode);
@@ -243,6 +264,7 @@ public:
     bool affectsPrepare(const char* name) const override {
         return std::strcmp(name, "wsPin") == 0 || std::strcmp(name, "sdPin") == 0
             || std::strcmp(name, "sckPin") == 0 || std::strcmp(name, "mclkPin") == 0
+            || std::strcmp(name, "device") == 0
             || std::strcmp(name, "sampleRate") == 0 || std::strcmp(name, "mode") == 0
             || std::strcmp(name, "send audio") == 0 || std::strcmp(name, "syncPort") == 0;
     }
@@ -339,9 +361,11 @@ public:
         // below never executes in Simulate mode.
         if (mode == kSimMode) { synthesizeFrame(simulate == 1); return; }
 
-        // From here on it's Local mode. Off I2S (desktop / mic-less) or before a good init there's no mic,
-        // so nothing is produced — the last frame is held (no synthetic fallback; that's Simulate mode's job).
-        if constexpr (!platform::hasI2sMic) {
+        // From here on it's Local mode. With no audio input on the platform, or before a good
+        // init, nothing is produced — the last frame is held (no synthetic fallback; that's
+        // Simulate mode's job). hasAudioInput covers both worlds: a pin-wired I2S mic on
+        // boards, an OS capture device on desktop.
+        if constexpr (!platform::hasAudioInput) {
             return;
         } else {
             if (!inited_) return;
@@ -540,8 +564,21 @@ private:
     /// unset pin (-1) or missing I2S support leaves the module idle with a status
     /// note rather than attempting an init. Called from setup() and prepare().
     void reinit() {
+        if constexpr (platform::hasAudioCapture) {
+            // Desktop: the OS capture device the `device` Select picked. Failure is a live
+            // status, not a crash — a denied OS microphone permission lands here too.
+            deinit();
+            inited_ = platform::audioCaptureInit(mic_, device, sampleRate());
+            if (!inited_) {
+                setStatus("capture init failed — pick another device", Severity::Error);
+                return;
+            }
+            dc_.reset();
+            clearStatus();
+            return;
+        }
         if constexpr (!platform::hasI2sMic) {
-            setStatus("mic: no I2S on this platform", Severity::Warning);
+            setStatus("mic: no audio input on this platform", Severity::Warning);
             return;
         }
         deinit();
@@ -593,7 +630,7 @@ private:
     }
 
     void deinit() {
-        if constexpr (!platform::hasI2sMic) return;
+        if constexpr (!platform::hasAudioInput) return;
         if (inited_) platform::audioMicDeinit(mic_);
         platform::audioCodecDeinit();   // releases the codec + its I2C bus (no-op if none)
         inited_ = false;

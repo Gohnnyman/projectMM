@@ -57,9 +57,13 @@ constexpr uint8_t parlioLanes = 16;
 constexpr uint8_t i2sLanes = 0;
 
 // No I2S microphone — AudioService guards on this and is inert on desktop. The
-// audioFft seam still has a (naive-DFT) desktop implementation so the audio
-// band math runs end-to-end in host tests; only live capture is absent.
+// No pin-wired I2S peripheral on a desktop host; live audio comes from OS capture
+// devices instead (hasAudioCapture below), through the same audioMicRead seam.
 constexpr bool hasI2sMic = false;
+
+// OS audio capture (microphone / loopback devices) via the vendored miniaudio backend in
+// platform_desktop_audio.cpp. The device is picked by AudioService's `device` control.
+constexpr bool hasAudioCapture = true;
 
 // Audio-codec config type — desktop has no codec (audioCodecInit stubs to true),
 // but platform.h declares audioCodecInit(CodecType, const AudioCodecPins&, …) for

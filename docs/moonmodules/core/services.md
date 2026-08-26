@@ -14,15 +14,16 @@ Detail: [technical](moxygen/Services.md)
 
 ### Audio
 
-A Service (added by the user, not auto-wired): the audio source that feeds the FFT audio-reactive effects consume via `AudioService::latestFrame()`. `mode` is the first choice, the module's identity, and each mode shows only its own detail controls: Local audio runs its own peripheral (an I²S microphone or line-in ADC) and analyzes it locally, Receive network is a pure network sink a peer's WLED-compatible audio drives, and Simulate is a synthesized source for demos and tests. Idle until real GPIOs are entered in Local mode. The Receive network mode and every network-sync control (`send audio`, `syncPort`, `sync status`) exist only on network-capable targets (`platform::hasNetwork`); a no-network build offers just Local audio and Simulate, without a mode picker if those are the only two.
+A Service (added by the user, not auto-wired): the audio source that feeds the FFT audio-reactive effects consume via `AudioService::latestFrame()`. `mode` is the first choice, the module's identity, and each mode shows only its own detail controls: Local audio runs its own input (an I²S microphone or line-in ADC on boards; an OS capture device on desktop) and analyzes it locally, Receive network is a pure network sink a peer's WLED-compatible audio drives, and Simulate is a synthesized source for demos and tests. On I²S targets Local mode idles until real GPIOs are entered; on desktop it captures the picked device right away. A desktop in Local mode with `send audio` on is a WLED audio-sync source: one machine's microphone or loopback drives a whole fleet of boards in Receive mode. The Receive network mode and every network-sync control (`send audio`, `syncPort`, `sync status`) exist only on network-capable targets (`platform::hasNetwork`); a no-network build offers just Local audio and Simulate, without a mode picker if those are the only two.
 
 <img src="../../assets/core/AudioService.png" width="300" alt="Audio module controls">
 
 - `mode` — Local audio / Receive network / Simulate: analyze the on-board mic/line-in, consume a peer's audio off the network (WLED-compatible), or feed a synthesized signal. Receive network appears only on a network build; the controls below are its detail, shown per mode.
-- `sckPin` / `wsPin` / `sdPin` — (Local) the I²S GPIOs (bit clock / word-select / data; unset until entered).
-- `mclkPin` — (Local) master-clock GPIO for a line-in ADC that needs one (e.g. the PCM1808); leave unset for a plain mic.
+- `sckPin` / `wsPin` / `sdPin` — (Local, I²S targets) the I²S GPIOs (bit clock / word-select / data; unset until entered).
+- `mclkPin` — (Local, I²S targets) master-clock GPIO for a line-in ADC that needs one (e.g. the PCM1808); leave unset for a plain mic.
+- `device` — (Local, desktop) the OS capture input: `default` follows the system setting; loopback devices such as [BlackHole](https://existential.audio/blackhole/) appear when installed, so effects can follow what the machine plays. Picked by list position: if the OS reorders devices, re-pick (`default` is order-stable).
 - `sampleRate` — (Local) mic/ADC sample rate.
-- `floor` / `gain` — (Local) noise floor and input gain for the analysis.
+- `floor` / `gain` — (Local) noise floor and input gain for the analysis. The default gain suits a quiet MEMS mic; a loopback device delivers near-full-scale digital audio, so turn `gain` down hard (single digits) or everything clips to maximum.
 - `send audio` — (Local, network build) broadcast the local analysis as WLED audio-sync packets for the WLED ecosystem.
 - `simulate` — (Simulate) the synthetic pattern: `music` (a plausible song) or `sweep` (a deterministic band-marching test pattern).
 - `syncPort` — (network build) the UDP port (default 11988, the WLED standard), shown when sending or receiving; set it the same on both ends. `sync status` reports the live send/receive state.

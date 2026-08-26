@@ -335,7 +335,8 @@ def collect_code():
     src_dir = ROOT / "src"
     test_dir = ROOT / "test"
 
-    src_files = list(src_dir.rglob("*.h")) + list(src_dir.rglob("*.cpp"))
+    src_files = [f for f in list(src_dir.rglob("*.h")) + list(src_dir.rglob("*.cpp"))
+                 if "/vendor/" not in f.as_posix()]   # upstream code is not our LOC
     kpi["src_files"] = len(src_files)
     # encoding="utf-8" — sources contain non-ASCII (→, µ, ×) in comments.
     # errors="replace" so any garbled file in the build dir doesn't crash KPI.

@@ -48,23 +48,27 @@ PO decisions: selectable input device; all three desktop OSes in v1; backend = v
 
 ## Steps (each builds + tests green)
 
-1. **Vendor + build plumbing**: miniaudio.h, the implementation TU (defines+pragmas only),
+Status 2026-08-27: steps 1-6 implemented and green locally; remaining before shipped: the
+Windows/Linux CI compile proof (first push), the PO fleet test, and the Windows tester's
+run after the merge.
+
+1. **Vendor + build plumbing** (done; miniaudio 0.11.25 pinned, compiles fully warning-clean under local clang after two suppression rounds; macOS/CI-linux/windows proof on push): miniaudio.h, the implementation TU (defines+pragmas only),
    CMake (`platform_desktop_audio.cpp`, Linux `dl`), gate exclusions
    (check_clang_tidy VENDORED tuple, check_lizard, repo_health, collect_kpi, clang-format glob —
    verify each script's mechanism before editing). CI on all three OSes proves warning-cleanliness
    before anything depends on it.
-2. **SpscRing**: `src/core/SpscRing.h` + `test/unit/core/unit_SpscRing.cpp` (FIFO across wrap,
+2. **SpscRing** (done; 3 cases incl. a real two-thread 200k-element run): `src/core/SpscRing.h` + `test/unit/core/unit_SpscRing.cpp` (FIFO across wrap,
    drop-newest semantics, bounded two-thread run) + test/CMakeLists.txt.
-3. **Platform seam + capture**: platform_config.h flags (both platforms), platform.h declarations +
+3. **Platform seam + capture** (done; enumeration verified against the real device list, lifecycle test tolerant of host permission): platform_config.h flags (both platforms), platform.h declarations +
    `hasAudioInput`, desktop audio block moves from platform_desktop.cpp (~:2022-2057) into
    platform_desktop_audio.cpp (lazy ma_context, enumeration with static name cache,
    capture device → SpscRing<int32_t,4096>, ring-pop audioMicRead, stop/uninit deinit),
    ESP32 stubs in platform_esp32_i2s.cpp. Test `unit_AudioCapture.cpp`: enumeration ≥1 with
    "default" at 0; init/read/deinit lifecycle (tolerant of init-failure on locked-down hosts —
    miniaudio's null backend makes success the CI norm); bad index fails cleanly; double-deinit safe.
-4. **Radix-2 FFT** replacing the DFT body + `unit_platform_audiofft.cpp` (equivalence vs local DFT
+4. **Radix-2 FFT** (done; 766-assertion equivalence vs the DFT reference) replacing the DFT body + `unit_platform_audiofft.cpp` (equivalence vs local DFT
    reference on random vectors + sine; silence → zeros).
-5. **AudioService wiring** (one step with its tests): gates → `hasAudioInput`; pins block under
+5. **AudioService wiring** (done; all 23 scenarios pass, the Audio scenario now does a live capture reinit mid-render; the fleet-source coexistence case pins send+capture in one tick) (one step with its tests): gates → `hasAudioInput`; pins block under
    `hasI2sMic`; `device` member + Select + affectsPrepare; reinit's capture branch with status
    "capture init failed — pick another device"; deinit; tick1s wire-diagnosis gated to `hasI2sMic`;
    class `///` refreshed ("inert on desktop" no longer true; name the loopback/BlackHole use AND
@@ -72,7 +76,7 @@ PO decisions: selectable input device; all three desktop OSes in v1; backend = v
    expectations; scenario_Audio_mutation.json pin steps → mode/device steps; regenerate test docs.
    **Send-audio pin**: extend unit_AudioService_sync (real localhost UDP harness exists) with a
    case proving Local+send broadcasts a frame on a `hasAudioCapture` build.
-6. **Docs + verification**: services.md #audio (`device` bullet, pins "(Local, I2S targets)",
+6. **Docs + verification** (done incl. the NSMicrophoneUsageDescription packaging key and a bench-learned doc line: loopback audio needs single-digit gain, the mic-tuned default clips everything to max): services.md #audio (`device` bullet, pins "(Local, I2S targets)",
    desktop-as-source sentence); audio-dsp-roadmap source-seam line; plan file per process.
    **macOS packaging**: `NSMicrophoneUsageDescription` in the .app Info.plist
    (moondeck/ci/package_desktop.py) — without it macOS kills the process at first capture.
@@ -80,7 +84,15 @@ PO decisions: selectable input device; all three desktop OSes in v1; backend = v
 
 ## Verification
 
-- ctest (new: SpscRing, AudioCapture, audiofft; updated: AudioService, sync) + scenarios + spec check.
+- ctest (new: SpscRing, AudioCapture, audiofft; updated: AudioService, sync) + scenarios + spec check — all green.
+- Desktop bench: PO-verified 2026-08-27 — device dropdown listed the Mac's real inputs (BlackHole
+  2ch included), mic capture reacted in AudioSpectrum, BlackHole loopback followed Spotify via a
+  Multi-Output Device, and the GEQ3D stillness discriminated to an audio-shape/gain topic
+  (Simulate sweep moved it), parked.
+- ESP32 zero delta: verified, -112 bytes (the pins block now compiles out where hasI2sMic is
+  false). Future size checks read the repo-health delta instead of A/B builds (PO rule).
+- Still open: the fleet test (desktop send audio -> board Receive) and the Windows tester's run
+  after the merge.
 - Desktop bench (PO): run `build/projectMM` on macOS, pick the mic in the Audio card device
   dropdown, see AudioSpectrum/GEQ effects react; install BlackHole and see it appear + react to
   played music.

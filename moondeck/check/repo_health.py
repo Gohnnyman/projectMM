@@ -77,6 +77,10 @@ def measure_loc():
     for area, prefix in AREAS.items():
         total = 0
         for f in _git_files(prefix):
+            # vendor/ holds upstream single-header code (miniaudio); its ~96k lines are not
+            # our repo's size and would drown every LOC trend they sit in.
+            if "/vendor/" in f.as_posix():
+                continue
             if f.suffix in CODE_SUFFIXES and f.is_file():
                 total += _read(f).count("\n")
         loc[area] = total

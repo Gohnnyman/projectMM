@@ -151,6 +151,7 @@ endif()
 # codegen) — it lives here because emitted machine code is platform/ISA-specific.
 add_library(mm_platform
     src/platform/desktop/platform_desktop.cpp
+    src/platform/desktop/platform_desktop_audio.cpp
     src/platform/desktop/moonlive_emit_noarch.cpp
     src/platform/desktop/moonlive_asm_noarch.cpp
     src/platform/desktop/moonlive_emit_arm64.cpp
@@ -163,7 +164,10 @@ target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 # speed (PanelCardDriver warns below gigabit, and a ColorLight card tears rather than erroring).
 # Npcap is deliberately NOT linked: platform_desktop.cpp resolves wpcap.dll at run time so the
 # build needs no SDK and the binary runs without it.
-target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32> $<$<PLATFORM_ID:Windows>:iphlpapi>)
+# `dl` on Linux: miniaudio (platform_desktop_audio.cpp) runtime-links ALSA/PulseAudio via
+# dlopen, so no audio SDK is a build requirement — the same no-SDK rule as Npcap above.
+target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32> $<$<PLATFORM_ID:Windows>:iphlpapi>
+                                          $<$<PLATFORM_ID:Linux>:dl> $<$<PLATFORM_ID:Linux>:pthread>)
 
 # The two libraries genuinely need each other: mm_core calls into the platform surface, and the
 # platform's MoonLive backend calls back into core's target-independent IR passes (lowerWith ->
