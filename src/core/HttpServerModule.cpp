@@ -2285,6 +2285,9 @@ void HttpServerModule::handleBootMoonBase(platform::TcpConnection& conn) {
         sendResponse(conn, 409, "application/json", "{\"error\":\"no MoonBase on this device\"}");
         return;
     }
+    // This route means "MoonBase with NOTHING staged" by definition; a URL left over from a
+    // power cut between an earlier staging and its boot switch must not fire here.
+    platform::moonbaseClearStagedUrl();
     FilesystemModule::flushPending();
     sendResponse(conn, 200, "application/json", "{\"ok\":true,\"moonbase\":true}");
     conn.close();

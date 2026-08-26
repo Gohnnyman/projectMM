@@ -147,9 +147,10 @@ of code is fine; a new IDF component is the expensive kind).
 - **Hardware diagnostics**: chip/flash/PSRAM identification and a minimal pin tester, for
   triaging a board that misbehaves under the full app.
 - **Ethernet: shipped for classic RMII (2026-08-26)**. MoonBase reads the eth wiring from the
-  same config file as the credentials (ethType gates it) and brings BOTH interfaces up, so the
-  browser keeps whichever address the app had. Still open here: the P4's IP101/managed-component
-  PHY and the S3's SPI W5500, which matter only if MoonBase ever goes beyond the 4 MB classics.
+  same config file as the credentials (ethType gates it) and runs ONE interface at a time in
+  the app's own preference order (eth, else WiFi, else AP), so the browser keeps the address
+  the app had. Still open here: the P4's IP101/managed-component PHY and the S3's SPI W5500,
+  which matter only if MoonBase ever goes beyond the 4 MB classics.
 - **Static IP for MoonBase**: MoonBase always uses DHCP; a venue network without a DHCP server
   (fixed-address rigs exist) would reach the app (static `addressing`) but not MoonBase. Read
   the addressing block from the same config scrape when a venue actually asks for it (the app

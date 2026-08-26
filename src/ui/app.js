@@ -1149,9 +1149,11 @@ function showUpdateOverlay() {
     dismiss.addEventListener("click", () => ov.remove());
     const cancel = document.createElement("button");
     cancel.textContent = "cancel install";
+    let uploadCtl = null;   // the in-flight file upload's AbortController, set by the flow
     cancel.addEventListener("click", () => {
-        // Best-effort: only a running URL install can hear it (MoonBase's /cancel); the watch
-        // loop sees the resulting "canceled" status and ends the overlay from there.
+        // A URL install hears POST /cancel; a file upload cancels by dropping its connection
+        // (MoonBase's single-connection server is busy receiving it), so abort the fetch.
+        if (uploadCtl) uploadCtl.abort();
         fetch("/cancel", { method: "POST" }).catch(() => {});
     });
     box.append(h, msg, bar, cancel, dismiss);
@@ -1161,6 +1163,7 @@ function showUpdateOverlay() {
         status(text) { msg.textContent = text; },
         progress(read, total) { if (total > 0) { bar.max = total; bar.value = read; } },
         fail(text) { msg.textContent = text; bar.remove(); cancel.remove(); dismiss.style.display = ""; },
+        setUpload(ctl) { uploadCtl = ctl; },
     };
 }
 
@@ -1232,15 +1235,25 @@ async function moonbaseUpdateFlow(opts) {
             // The upload needs MoonBase serving before the browser can push the image.
             if (!(await waitForMoonBase(Date.now() + 120000))) throw new Error(MOONBASE_SILENT_MSG);
             ui.status(`Installing ${fmSize(opts.file.size)}\u2026`);
+            const uploadCtl = new AbortController();
+            ui.setUpload(uploadCtl);
             try {
                 const r = await fetch("/install", {
                     method: "POST", headers: { "Content-Type": "application/octet-stream" },
-                    body: opts.file });
+                    body: opts.file, signal: uploadCtl.signal });
                 if (!r.ok) throw new Error(await r.text());
             } catch (err) {
+                if (err instanceof Error && err.name === "AbortError") {
+                    // The user's cancel, not a failure: the dropped connection aborts the
+                    // write on the device, which stays waiting in MoonBase.
+                    ui.fail("Install canceled \u2014 the device is waiting in MoonBase.");
+                    return;
+                }
                 if (err instanceof Error && err.message.startsWith("error")) throw err;
                 // A dead socket mid-upload (power cut, WiFi drop) is not a verdict: the watch
                 // loop below sees where the device lands and retries the upload from there.
+            } finally {
+                ui.setUpload(null);
             }
         }
 

@@ -628,14 +628,8 @@ def stale_feature_cache(build_dir: Path, extra: list[str], chip: str) -> str | N
     # merge order) and compare against what the generated sdkconfig actually says.
     wanted_table = None
     if wanted_frags:
-        for frag in wanted_frags.split(";"):
-            fp = ESP32_DIR / frag
-            if not fp.exists():
-                continue
-            m2 = re.search(r'^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="([^"]+)"',
-                           fp.read_text(), re.MULTILINE)
-            if m2:
-                wanted_table = m2.group(1)
+        resolved = table_from_fragments(wanted_frags.split(";"))
+        wanted_table = str(resolved.relative_to(ESP32_DIR))
     gen = build_dir / "sdkconfig"
     if wanted_table and gen.exists():
         m2 = re.search(r'^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="([^"]+)"',
@@ -810,11 +804,11 @@ def main():
 # binary at the first app partition (0x10000: the factory slot, MoonBase's home), because it
 # knows nothing about the two-image scheme. These helpers are the one place that knows better.
 
-def moonbase_table_csv(firmware: str) -> Path:
-    """The partition CSV a firmware's fragments select (last fragment naming one wins,
-    IDF's own merge order)."""
+def table_from_fragments(fragments) -> Path:
+    """The partition CSV a fragment list selects (last fragment naming one wins, IDF's own
+    merge order). The one resolver: moonbase_table_csv and stale_feature_cache both use it."""
     csv = ESP32_DIR / "partitions" / "esp32dev.csv"
-    for frag in FIRMWARES[firmware]["fragments"]:
+    for frag in fragments:
         fp = ESP32_DIR / frag
         if not fp.exists():
             continue
@@ -823,6 +817,10 @@ def moonbase_table_csv(firmware: str) -> Path:
         if m:
             csv = ESP32_DIR / m.group(1)
     return csv
+
+
+def moonbase_table_csv(firmware: str) -> Path:
+    return table_from_fragments(FIRMWARES[firmware]["fragments"])
 
 
 def partition_offsets(csv_path: Path) -> dict:
@@ -915,7 +913,9 @@ def build_moonbase(cmd: list[str], env: dict, chip: str) -> None:
     binp = build_dir / "projectMM-moonbase.bin"
     if binp.exists():
         kb = binp.stat().st_size / 1024
-        print(f"MoonBase image: {kb:.0f} KB (slot: 896 KB)")
+        # Slot fit is printed by IDF itself ("Smallest app partition ... free"); repeating a
+        # hardcoded slot size here would lie the day the table changes.
+        print(f"MoonBase image: {kb:.0f} KB")
 
 
 if __name__ == "__main__":

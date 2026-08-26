@@ -194,9 +194,9 @@ the recovery path.
    The power-cut procedure then ran (PO): the overlay reports the silence, and once MoonBase
    is back it re-submits the install from the payload the browser still holds; the cycle
    completes with no clicks. Ethernet shipped after that (classic RMII): MoonBase reads the
-   eth wiring from the same config file as the credentials, brings BOTH interfaces up so the
-   browser keeps whichever address the app had, and an install over eth streams at the same
-   flash-bound rate as WiFi. Bench note from that work: after the table migration the
+   eth wiring from the same config file as the credentials, runs ONE interface at a time in the
+   app's own preference order (so the browser keeps the address the app had, PO decision), and
+   an install over eth streams at the same flash-bound rate as WiFi. Bench note from that work: after the table migration the
    deviceModel catalog push had never been re-applied (ethType stood at 0), and applying
    ethType live did not bring eth up where the boot init did, an app-side observation worth
    its own look.
@@ -208,9 +208,11 @@ the recovery path.
    shared-moonbase-<chip>.bin + shared-ota-data-slot0.bin; install-picker rejects both
    (pinned by a JS test); check_esp32_built also gates the MoonBase image's freshness. A
    temporary `moonbase-test-release.yml` workflow (push-triggered on this branch, since GitHub
-   only registers a dispatchable workflow from the default branch; esp32 only) publishes a
-   `moonbase-test` prerelease from this branch so the picker's URL install can be tested against
-   real GitHub assets before the merge; it is deleted afterwards.
+   only registers a dispatchable workflow from the default branch; esp32 only) published a
+   `moonbase-test` prerelease from this branch so the picker's URL install could be tested
+   against real GitHub assets; it was deleted again before the merge, so it never reaches main.
+   The `moonbase-test` release and tag on GitHub are deleted after the merge
+   (`gh release delete moonbase-test --cleanup-tag`).
 9. **Migration and docs** (done): architecture.md § MoonBase is the concept's one home;
    README feature bullet credits Tasmota's safeboot and MycilaSafeBoot; building.md notes the
    one-pass 4 MB flash; MIGRATING.md carries the erase-flash entry; the FirmwareUpdate catalog

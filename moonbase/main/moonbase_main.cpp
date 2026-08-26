@@ -656,22 +656,27 @@ void serveOne(int sock) {
             if (n <= 0) break;
             prefixLen += static_cast<size_t>(n);
         }
-        const size_t n = prefixLen < sizeof(stagedUrlTask_) - 1 ? prefixLen
-                                                                 : sizeof(stagedUrlTask_) - 1;
-        std::memcpy(stagedUrlTask_, head + headLen, n);
-        stagedUrlTask_[n] = '\0';
-        std::snprintf(status_, sizeof(status_), "starting the install");
-        installing_ = true;   // cleared by the task after its final attempt
-        if (xTaskCreate(unattendedInstallTask, "mb_install", 12288, nullptr, 5, nullptr) != pdPASS) {
-            // A failed spawn with the flag left set would refuse every later install: THE
-            // deadlock this guard exists to prevent.
-            installing_ = false;
-            std::snprintf(status_, sizeof(status_), "error: cannot start the install task");
-            sendResponse(sock, "500 Internal Server Error", "text/plain", status_);
+        if (contentLen >= sizeof(stagedUrlTask_)) {
+            // Same 255-byte contract the app's route enforces (platform.h): refusing beats
+            // truncating into a URL that fails later as a misleading download error.
+            sendResponse(sock, "400 Bad Request", "text/plain", "error: url too long (max 255)");
         } else {
-            // 202: the install runs on its own task while this server keeps answering GET
-            // /moonbase with live progress; the caller watches that, not this response.
-            sendResponse(sock, "202 Accepted", "text/plain", status_);
+            std::memcpy(stagedUrlTask_, head + headLen, prefixLen);
+            stagedUrlTask_[prefixLen] = '\0';
+            std::snprintf(status_, sizeof(status_), "starting the install");
+            cancelRequested_ = false;   // a /cancel racing the previous task's exit must not latch
+            installing_ = true;   // cleared by the task after its final attempt
+            if (xTaskCreate(unattendedInstallTask, "mb_install", 12288, nullptr, 5, nullptr) != pdPASS) {
+                // A failed spawn with the flag left set would refuse every later install: THE
+                // deadlock this guard exists to prevent.
+                installing_ = false;
+                std::snprintf(status_, sizeof(status_), "error: cannot start the install task");
+                sendResponse(sock, "500 Internal Server Error", "text/plain", status_);
+            } else {
+                // 202: the install runs on its own task while this server keeps answering GET
+                // /moonbase with live progress; the caller watches that, not this response.
+                sendResponse(sock, "202 Accepted", "text/plain", status_);
+            }
         }
     } else if (std::strncmp(head, "POST /install", 13) == 0) {
         if (installing_) {
@@ -814,7 +819,12 @@ extern "C" void app_main() {
     if (ethStart()) {
         online = (xEventGroupWaitBits(netEvents_, kNetGotIp, pdFALSE, pdFALSE,
                                       pdMS_TO_TICKS(8000)) & kNetGotIp) != 0;
-        if (!online) ethStop();   // no link or no lease: WiFi takes over, alone
+        if (!online) {
+            ethStop();   // no link or no lease: WiFi takes over, alone
+            // A lease that raced in between the wait timing out and the teardown is an
+            // interface that no longer exists; it must not satisfy the WiFi wait below.
+            xEventGroupClearBits(netEvents_, kNetGotIp);
+        }
     }
     if (!online) online = wifiStation(20000);
 
@@ -827,6 +837,7 @@ extern "C" void app_main() {
         // answers, and "idle" would read as nothing happening while an install is pending.
         std::snprintf(status_, sizeof(status_), "preparing the install");
         std::snprintf(stagedUrlTask_, sizeof(stagedUrlTask_), "%s", stagedUrl);
+        cancelRequested_ = false;   // a /cancel racing a previous task's exit must not latch
         installing_ = true;   // cleared by the task after its final attempt
         if (xTaskCreate(unattendedInstallTask, "mb_install", 12288, nullptr, 5, nullptr) != pdPASS) {
             installing_ = false;   // a latched flag would refuse every later install

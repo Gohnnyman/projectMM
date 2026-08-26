@@ -1,33 +1,12 @@
-# Partition table for ESP32 classic (4 MB flash) WITH MoonBase.
-#
-# A 4 MB board has room for one application, not two. The dual-OTA layout (esp32dev.csv) spends
-# half the chip on a second copy of the firmware, which is what ran the app slot out of space in
-# 2026-08. Here that second copy is replaced by MoonBase: a small image in the `factory` slot that
-# owns the device while the application is being replaced (a board cannot rewrite the partition it
-# is executing from). See moonbase/ and the MoonBase plan.
-#
-# The app slot grows by a third as a result: 1856 KB -> 2496 KB.
-#
-# MoonBase is 896 KB against a measured 742 KB image (WiFi + SoftAP + HTTPS + OTA, size-tuned
-# sdkconfig), leaving ~154 KB of headroom.
-#
-# HTTPS is 166 KB of that image and is kept deliberately. Install-from-URL is what lets a device
-# fetch its own release rather than having the file pushed from whatever machine happens to be in
-# front of it, and the releases live on GitHub, which is HTTPS-only. The alternative that keeps
-# the convenience without TLS is to serve firmware over plain HTTP, which means the device would
-# execute whatever an attacker on the path substituted; signing the image instead would cost
-# comparable space plus real work. Authenticated downloads are worth the flash.
-#
-# The headroom is sized for a new COMPONENT, not for features: factory reset, re-provisioning,
-# config backup and diagnostics are a few KB each, while one component can cost more than all of
-# them together. An undersized factory partition cannot be regrown without a second full-erase
-# migration of every device in the field, so it is budgeted long once.
+# Partition table for ESP32 classic (4 MB flash) WITH MoonBase: the factory slot carries the
+# small maintenance image and the second OTA slot is gone, growing the app slot 1856 -> 2496 KB.
+# Why and how: architecture.md, MoonBase: the second boot image (the concept's one home).
 #
 # The filesystem partition is `littlefs` in both name and subtype (0x83, which ESP-IDF and the
 # joltwallet driver both define). Older tables label the same volume `spiffs` with subtype 0x82,
-# which is a legacy misnomer: the contents have always been LittleFS. platform_esp32_fs.cpp looks
-# for the littlefs subtype first and falls back to the spiffs one, so a device that keeps an older
-# table across an OTA still finds its config.
+# a legacy misnomer: the contents have always been LittleFS. platform_esp32_fs.cpp looks for the
+# littlefs subtype first and falls back to the spiffs one, so a device that keeps an older table
+# across an OTA still finds its config.
 #
 # A device adopts this table only through a FULL SERIAL FLASH: OTA writes the app, never the
 # partition table.

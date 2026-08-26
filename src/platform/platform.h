@@ -677,6 +677,9 @@ bool otaRunningMoonBase();  // are we executing from it right now?
 // MoonBase, and MoonBase installs it with no browser in the loop. MoonBase erases the key before
 // attempting the install, so a bad URL cannot boot-loop the device.
 bool moonbaseStageInstallUrl(const char* url);
+// Erase a staged URL that never got consumed: a power cut between staging and the boot-partition
+// switch leaves it armed, and the next unrelated MoonBase visit would auto-install it.
+void moonbaseClearStagedUrl();
 
 // Synchronous outbound HTTP request to a LAN host — plain HTTP, no TLS (the Philips Hue v1
 // API, which HueDriver drives, allows it). Connects to `host:port`, sends `method path`

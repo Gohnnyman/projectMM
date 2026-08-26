@@ -1346,6 +1346,7 @@ bool otaHasMoonBase() { return false; }
 bool otaBootMoonBase() { return false; }
 bool otaRunningMoonBase() { return false; }
 bool moonbaseStageInstallUrl(const char*) { return false; }
+void moonbaseClearStagedUrl() {}
 
 // Outbound HTTP request (plain HTTP, LAN, no TLS) — see platform.h. Blocking, bounded by a
 // receive/send timeout. Builds the request into a stack buffer, connects, sends, reads the

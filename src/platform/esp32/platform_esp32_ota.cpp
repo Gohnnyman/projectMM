@@ -321,6 +321,14 @@ bool otaRunningMoonBase() {
     return run && run->subtype == ESP_PARTITION_SUBTYPE_APP_FACTORY;
 }
 
+void moonbaseClearStagedUrl() {
+    nvs_handle_t h;
+    if (nvs_open("moonbase", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_erase_key(h, "url");
+    nvs_commit(h);
+    nvs_close(h);
+}
+
 // Stage the install URL in NVS for MoonBase to consume on its next boot (see platform.h).
 bool moonbaseStageInstallUrl(const char* url) {
     if (!url || !url[0]) return false;
