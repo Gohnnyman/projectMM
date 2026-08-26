@@ -93,8 +93,17 @@ inline bool otaInFlight() {
 /// mutually OTA-compatible (same chip, different feature flags), the legacy `esp32-eth-wifi` key
 /// strips to `esp32`, and `esp32s3-n16r8` is only itself.
 ///
+/// **MoonBase devices** (4 MB tables; the read-only `moonbase` control marks one): the app cannot
+/// flash itself: one app slot, and it is running from it. `POST /api/firmware/url` stages the URL
+/// in NVS and reboots into the MoonBase factory image, which installs unattended and reboots back;
+/// uploads re-POST from the browser once MoonBase answers. See architecture.md, MoonBase:
+/// the second boot image.
+///
 /// **Prior art:** `esp_https_ota` is the standard ESP-IDF OTA-from-HTTP component used by every ESP32
-/// OTA flow since IDF v4.x; the install-picker UI is the new layer on top.
+/// OTA flow since IDF v4.x; the install-picker UI is the new layer on top. The MoonBase scheme,
+/// a minimal boot image in place of a second OTA slot: follows Tasmota's safeboot and Mathieu
+/// Carbou's MycilaSafeBoot (https://github.com/mathieucarbou/MycilaSafeBoot), rewritten minimal
+/// against ESP-IDF (moonbase/).
 /// @card FirmwareUpdateModule.png
 class FirmwareUpdateModule : public MoonModule {
 public:
@@ -138,6 +147,11 @@ public:
         totalFlashVal_ = static_cast<uint32_t>(platform::firmwarePartition());
         if (totalFlashVal_ > 0) {
             controls_.addProgress("firmwarePartition", firmwareSizeVal_, totalFlashVal_);
+        }
+        // Present only on tables that carry a MoonBase factory image: its presence tells the UI to
+        // install through the reboot-into-MoonBase flow rather than in place (app.js reads it).
+        if (platform::otaHasMoonBase()) {
+            controls_.addReadOnly("moonbase", moonbaseStr_, sizeof(moonbaseStr_));
         }
 
         // OTA status goes through MoonModule::setStatus() (the per-module status
@@ -197,6 +211,7 @@ private:
     char     firmwareStr_[24] = {};  ///< build variant name, such as "esp32s3-n16r8"
     uint32_t firmwareSizeVal_ = 0;   ///< bytes used in the app partition
     uint32_t totalFlashVal_   = 0;   ///< app partition size
+    char     moonbaseStr_[8]  = "standby";  ///< MoonBase present in the factory slot
 };
 
 } // namespace mm

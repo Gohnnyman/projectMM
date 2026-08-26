@@ -1,0 +1,89 @@
+name: MoonBase test release
+
+# TEMPORARY: delete after the MoonBase branch merges to main.
+# Publishes a `moonbase-test` prerelease from THIS branch so the picker's URL-based
+# install can be tested against real GitHub release assets before the merge (the
+# real release pipeline only runs from main and version tags). Manual trigger only;
+# esp32 (the bench Olimex) is the only firmware built. Mirrors release.yml's esp32
+# job + staging + manifest, reduced to one variant and one fixed tag.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: moonbase-test-release
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0   # compute_version.py counts commits since the last v* tag
+
+      - name: Cache ESP-IDF tooling
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.espressif
+            ~/esp/esp-idf
+          key: esp-idf-v6.1-rc1-${{ runner.os }}-v1
+
+      - name: Compute version
+        id: ver
+        # `latest`-channel versioning (<core>-dev.<N>) so the version is a real,
+        # orderable semver the picker can compare; the release channel burned into
+        # the binary is `moonbase-test` so a device shows where the image came from.
+        run: |
+          set -euo pipefail
+          V=$(python moondeck/build/compute_version.py --tag latest)
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Build firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1-rc1
+          target: esp32
+          path: 'esp32'
+          command: python ../moondeck/build/build_esp32.py --firmware esp32 --release "moonbase-test" --version "${{ steps.ver.outputs.version }}"
+
+      - name: Stage assets + manifest
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          V="${{ steps.ver.outputs.version }}"
+          B=build/esp32-esp32
+          PREFIX="firmware-esp32-v$V"
+          cp "$B/projectMM.bin"                       "dist/${PREFIX}.bin"
+          cp "$B/bootloader/bootloader.bin"           "dist/${PREFIX}-bootloader.bin"
+          SIZE=$(jq -r .flash_settings.flash_size "$B/flasher_args.json" | tr 'A-Z' 'a-z')
+          cp "$B/partition_table/partition-table.bin" "dist/partition-table-$SIZE.bin"
+          cp "$B/ota_data_initial.bin"                "dist/shared-ota-data.bin"
+          cp build/moonbase-esp32/projectMM-moonbase.bin dist/shared-moonbase-esp32.bin
+          python3 -c "import sys; sys.path.insert(0,'moondeck/build'); \
+            import build_esp32, pathlib; \
+            pathlib.Path('dist/shared-ota-data-slot0.bin').write_bytes(build_esp32.otadata_slot0_bytes())"
+          python3 moondeck/build/generate_manifest.py --firmware esp32 --version "$V" \
+            --release-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/moonbase-test" \
+            --flasher-args "$B/flasher_args.json" --out dist/manifest-esp32.json
+
+      - name: Publish moonbase-test prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          # Replace any previous test release; keep-tag deletion semantics don't
+          # matter here: the tag is repointed to the current commit on create.
+          gh release delete moonbase-test --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          # The release NAME is the version string: the picker machine-reads it the
+          # same way it reads the real `latest` prerelease (no "v" prefix).
+          gh release create moonbase-test dist/* \
+            --repo "$GITHUB_REPOSITORY" --prerelease --title "$V" \
+            --target "$GITHUB_SHA" \
+            --notes "Temporary MoonBase URL-install test release from the moonbase branch. Do not install on devices you care about; superseded by the next real release."

@@ -1,0 +1,66 @@
+# Partition table for ESP32 classic (4 MB flash) WITH MoonBase.
+#
+# A 4 MB board has room for one application, not two. The dual-OTA layout (esp32dev.csv) spends
+# half the chip on a second copy of the firmware, which is what ran the app slot out of space in
+# 2026-08. Here that second copy is replaced by MoonBase: a small image in the `factory` slot that
+# owns the device while the application is being replaced (a board cannot rewrite the partition it
+# is executing from). See moonbase/ and the MoonBase plan.
+#
+# The app slot grows by a third as a result: 1856 KB -> 2496 KB.
+#
+# MoonBase is 896 KB against a measured 742 KB image (WiFi + SoftAP + HTTPS + OTA, size-tuned
+# sdkconfig), leaving ~154 KB of headroom.
+#
+# HTTPS is 166 KB of that image and is kept deliberately. Install-from-URL is what lets a device
+# fetch its own release rather than having the file pushed from whatever machine happens to be in
+# front of it, and the releases live on GitHub, which is HTTPS-only. The alternative that keeps
+# the convenience without TLS is to serve firmware over plain HTTP, which means the device would
+# execute whatever an attacker on the path substituted; signing the image instead would cost
+# comparable space plus real work. Authenticated downloads are worth the flash.
+#
+# The headroom is sized for a new COMPONENT, not for features: factory reset, re-provisioning,
+# config backup and diagnostics are a few KB each, while one component can cost more than all of
+# them together. An undersized factory partition cannot be regrown without a second full-erase
+# migration of every device in the field, so it is budgeted long once.
+#
+# The filesystem partition is `littlefs` in both name and subtype (0x83, which ESP-IDF and the
+# joltwallet driver both define). Older tables label the same volume `spiffs` with subtype 0x82,
+# which is a legacy misnomer: the contents have always been LittleFS. platform_esp32_fs.cpp looks
+# for the littlefs subtype first and falls back to the spiffs one, so a device that keeps an older
+# table across an OTA still finds its config.
+#
+# A device adopts this table only through a FULL SERIAL FLASH: OTA writes the app, never the
+# partition table.
+#
+# MIGRATION LOSES USER CONFIG. The old 4 MB table put the filesystem at 0x3B0000; this one puts it
+# at 0x360000, so the existing volume is not where the new table looks for it. A migrating device
+# comes up unprovisioned: WiFi credentials, module config and scripts all have to be set again.
+# Aligning to the old offset would have preserved them at the cost of freezing the filesystem at
+# its old 256 KB, which is not worth it for a one-time step someone performs with a cable in hand.
+#
+# Layout (4 MB = 0x400000):
+#   0x0000-0x8FFF     bootloader (reserved)
+#   0x9000-0xDFFF     nvs          (  20 KB)
+#   0xE000-0xFFFF     otadata      (   8 KB)
+#   0x10000-0xEFFFF   moonbase     ( 896 KB)  -> factory
+#   0xF0000-0x35FFFF  app          (2496 KB)  -> ota_0
+#   0x360000-0x3E8FFF littlefs     ( 548 KB)  -> config, scripts, presets
+#   0x3E9000-0x3F8FFF coredump     (  64 KB)
+#
+# On the SubType column, which ESP-IDF fixes and we cannot rename:
+#   app/factory  the fallback app. The bootloader runs it when otadata is blank or invalid, which
+#                is exactly how a power cut mid-install lands back in MoonBase.
+#   app/ota_0    an UPDATABLE app slot, number 0. It does not mean "holds an OTA"; it means the
+#                bootloader may select it via otadata, which is what makes esp_ota_write able to
+#                target it. A factory partition can never be updated over the air.
+#   data/ota     not an app: 8 KB of bookkeeping (two records, each a sequence number plus CRC)
+#                naming which ota_N slot to boot.
+# Only the first column is a name of our choosing.
+#
+# Name,     Type, SubType, Offset,   Size,     Flags
+nvs,        data, nvs,     0x9000,   0x5000,
+otadata,    data, ota,     0xe000,   0x2000,
+moonbase,   app,  factory, 0x10000,  0xE0000,
+app,        app,  ota_0,   0xF0000,  0x270000,
+littlefs,   data, littlefs,0x360000, 0x89000,
+coredump,   data, coredump,0x3E9000, 0x10000,

@@ -22,6 +22,18 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### 4 MB boards move to the MoonBase partition table (2026-08-26)
+
+**Action: erase flash** (USB re-flash; all on-device config is lost and must be re-entered).
+
+The 4 MB variants (`esp32`, `esp32-wrover`, `esp32-eth`) replace the dual-OTA layout with
+[MoonBase](architecture.md#moonbase-the-second-boot-image-4-mb-boards): the app slot grows
+1856 → 2496 KB and the filesystem 256 → 548 KB, but the filesystem moves (0x3B0000 → 0x360000),
+so the existing volume is not where the new table looks, WiFi credentials, module config and
+scripts all re-enter through provisioning. A partition table only changes over USB: a device
+still on the old table keeps OTA-updating *within* that table for as long as the app fits its
+1856 KB slot; the web installer is the migration path. 8/16 MB boards are unaffected.
+
 ### PreviewDriver's `fps` becomes `targetFps`, and now trades resolution (2026-08-25)
 
 The control is renamed and its meaning changed, so the rename is the point rather than cosmetic.

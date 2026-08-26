@@ -43,6 +43,11 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+
+# build_esp32.py is the single source of truth for firmware variants (same import
+# generate_manifest.py and collect_kpi.py use).
+sys.path.insert(0, str(ROOT / "moondeck" / "build"))
+from build_esp32 import FIRMWARES  # noqa: E402
 INSTALL_DIR = ROOT / "web-installer"
 ASSETS_BOARDS_DIR = ROOT / "docs" / "assets" / "boards"
 PICKER_JS = ROOT / "src" / "ui" / "install-picker.js"
@@ -207,6 +212,14 @@ def stage_local_builds(builds: list[Path]) -> list[str]:
                         releases_dir / f"partition-table-{size}.bin")
             shutil.copy(build_dir / "ota_data_initial.bin",
                         releases_dir / "shared-ota-data.bin")
+            # MoonBase firmwares also ship the shared maintenance image + the slot-0 otadata
+            # their manifests reference (same names release.yml stages).
+            if FIRMWARES.get(firmware, {}).get("moonbase"):
+                from build_esp32 import otadata_slot0_bytes
+                chip = FIRMWARES[firmware]["chip"]
+                shutil.copy(build_dir.parent / f"moonbase-{chip}" / "projectMM-moonbase.bin",
+                            releases_dir / f"shared-moonbase-{chip}.bin")
+                (releases_dir / "shared-ota-data-slot0.bin").write_bytes(otadata_slot0_bytes())
         except FileNotFoundError as e:
             # Partial build (bootloader / partition-table missing) — skip this
             # firmware rather than half-stage it, the picker would offer it

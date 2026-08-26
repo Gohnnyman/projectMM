@@ -11,7 +11,9 @@ from yesterday vs an edit five minutes ago) is visible in the log.
 """
 
 import argparse
+import json
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -78,6 +80,28 @@ def _fmt_age(seconds: float) -> str:
     if s < 86400: return f"{s // 3600}h"
     return f"{s // 86400}d"
 
+
+def _moonbase_flash_cmd(build_dir, firmware: str, port: str, baud: int, env: dict) -> list[str]:
+    """The explicit write list for a MoonBase-layout flash, moonbase_flash_files() is the one
+    place that knows the corrected layout (app remapped to ota_0, slot-0 otadata so the fresh
+    flash boots the app, MoonBase at factory). idf.py flash cannot be used here: IDF's own
+    flash_args stages the app at the factory offset."""
+    from build_esp32 import moonbase_flash_files
+    try:
+        writes = moonbase_flash_files(firmware, build_dir)
+    except FileNotFoundError as e:
+        print(f"MoonBase flash: {e}")
+        sys.exit(1)
+    chip_m = re.search(r'CONFIG_IDF_TARGET="([^"]+)"', (build_dir / "sdkconfig").read_text())
+    if not chip_m:
+        print(f"MoonBase flash: no CONFIG_IDF_TARGET in {build_dir / 'sdkconfig'}; rebuild first.")
+        sys.exit(1)
+    py = shutil.which("python", path=env.get("PATH", "")) or sys.executable
+    cmd = [py, "-m", "esptool", "--chip", chip_m.group(1), "--port", port, "--baud", str(baud),
+           "write_flash"]
+    for off, path in writes:
+        cmd += [off, str(path)]
+    return cmd
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -155,7 +179,15 @@ def main():
     # the console; we just also scan it.
     print(f"==> flash baud: {baud}")
     mac = ""
-    proc = subprocess.Popen(cmd + b_arg + ["flash", "-p", args.port, "-b", str(baud)],
+    # A MoonBase variant cannot use `idf.py flash`: with a factory + ota_0 table, IDF stages the
+    # application at the FACTORY offset (0x10000), which is MoonBase's slot and too small for it.
+    # The parts are placed at explicit offsets instead, the same shape the web-installer manifest
+    # uses, with each offset read from the built partition table rather than hardcoded.
+    if FIRMWARES.get(args.firmware, {}).get("moonbase"):
+        flash_cmd = _moonbase_flash_cmd(build_dir, args.firmware, args.port, baud, env)
+    else:
+        flash_cmd = cmd + b_arg + ["flash", "-p", args.port, "-b", str(baud)]
+    proc = subprocess.Popen(flash_cmd,
                             cwd=ESP32_DIR, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     for line in proc.stdout:

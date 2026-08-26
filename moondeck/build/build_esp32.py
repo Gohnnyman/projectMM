@@ -135,7 +135,8 @@ FIRMWARES: dict[str, dict] = {
     # replaces the old separate `esp32` (WiFi-only) + `esp32-eth-wifi` keys.
     "esp32": {
         "chip": "esp32",
-        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth", "sdkconfig.defaults.moonbase-4mb"],
+        "moonbase": True,   # 4 MB: factory MoonBase + one big app slot (see moonbase/)
         "eth_only": False,
         "description": "ESP32 classic — WiFi + Ethernet (RMII; per-board pins/PHY "
                        "from deviceModels.json, default LAN8720 pins).",
@@ -150,7 +151,8 @@ FIRMWARES: dict[str, dict] = {
     # API and web UI reachable through a forwarded host port.
     "qemu": {
         "chip": "esp32",
-        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.qemu"],
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.qemu", "sdkconfig.defaults.moonbase-4mb"],
+        "moonbase": True,   # 4 MB: factory MoonBase + one big app slot (see moonbase/)
         "eth_only": True,
         "description": "ESP32 classic under QEMU, emulated Ethernet (openeth), no WiFi. "
                        "Run with moondeck/qemu/run_qemu.py, not flashed to hardware.",
@@ -173,7 +175,8 @@ FIRMWARES: dict[str, dict] = {
     "esp32-wrover": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth",
-                      "sdkconfig.defaults.wrover"],
+                      "sdkconfig.defaults.wrover", "sdkconfig.defaults.moonbase-4mb"],
+        "moonbase": True,   # 4 MB: factory MoonBase + one big app slot (see moonbase/)
         "eth_only": False,
         "description": "ESP32-WROVER (classic ESP32, 4 MB flash + 4 MB quad PSRAM) — WiFi + "
                        "Ethernet. Same silicon as `esp32`; this variant enables PSRAM for "
@@ -182,7 +185,8 @@ FIRMWARES: dict[str, dict] = {
     },
     "esp32-eth": {
         "chip": "esp32",
-        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth", "sdkconfig.defaults.moonbase-4mb"],
+        "moonbase": True,   # 4 MB: factory MoonBase + one big app slot (see moonbase/)
         "eth_only": True,
         "description": "ESP32 classic — Ethernet only (WiFi compiled out; smaller "
                        "image, more RAM). Per-board pins/PHY from deviceModels.json. The "
@@ -605,6 +609,42 @@ def stale_feature_cache(build_dir: Path, extra: list[str], chip: str) -> str | N
         return (f"IDF_TARGET cached as {cached_target!r} but this firmware "
                 f"wants {chip!r}")
     # The feature toggles whose presence/absence changes which code compiles.
+    # The FRAGMENT LIST is a feature flag too: IDF generates sdkconfig from
+    # SDKCONFIG_DEFAULTS only when the file is absent, so adding a fragment to a
+    # firmware (the MoonBase partition table did this first) silently leaves an
+    # existing dir on the OLD config. The cache still holds the LAST run's list at
+    # this point, so a mismatch is detectable and means: wipe and reconfigure.
+    wanted_frags = next((a.split("=", 1)[1] for a in extra
+                         if a.startswith("-DSDKCONFIG_DEFAULTS=")), None)
+    m = re.search(r"^SDKCONFIG_DEFAULTS:[^=]*=(.*)$", text, re.MULTILINE)
+    cached_frags = m.group(1).strip() if m else None
+    if wanted_frags and cached_frags and cached_frags != wanted_frags:
+        return (f"SDKCONFIG_DEFAULTS cached as {cached_frags!r} but this firmware "
+                f"wants {wanted_frags!r}")
+
+    # And the one generated value dangerous enough to verify outright: the partition table. The
+    # list comparison above cannot catch a dir poisoned BEFORE the rule existed (its cache already
+    # matches), so read what the fragments want (last fragment naming a table wins, IDF's own
+    # merge order) and compare against what the generated sdkconfig actually says.
+    wanted_table = None
+    if wanted_frags:
+        for frag in wanted_frags.split(";"):
+            fp = ESP32_DIR / frag
+            if not fp.exists():
+                continue
+            m2 = re.search(r'^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="([^"]+)"',
+                           fp.read_text(), re.MULTILINE)
+            if m2:
+                wanted_table = m2.group(1)
+    gen = build_dir / "sdkconfig"
+    if wanted_table and gen.exists():
+        m2 = re.search(r'^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="([^"]+)"',
+                       gen.read_text(), re.MULTILINE)
+        have_table = m2.group(1) if m2 else None
+        if have_table != wanted_table:
+            return (f"generated sdkconfig uses partition table {have_table!r} but the "
+                    f"fragments want {wanted_table!r}")
+
     # For each, "wanted" = does this firmware pass the -D, "cached" = is it set
     # in the existing cache. A disagreement means a stale dir.
     # MM_TASK_CPU_STATS is here too: toggling --task-cpu-stats on an existing dir must wipe, or the
@@ -758,6 +798,124 @@ def main():
 
     # Show flash/RAM usage summary
     subprocess.run(cmd + b_arg + ["size"], cwd=ESP32_DIR, env=env)
+
+    if FIRMWARES[firmware].get("moonbase"):
+        build_moonbase(cmd, env, chip)
+
+
+# ---- MoonBase flash layout, shared by every consumer of the build output ----
+# flash_esp32.py (serial flash), generate_manifest.py (web installer), preview_installer.py
+# (release preview) and run_qemu.py (emulator image) all assemble a flash layout from IDF's
+# flasher_args.json. On a MoonBase table that file is WRONG about the app: IDF stages the app
+# binary at the first app partition (0x10000: the factory slot, MoonBase's home), because it
+# knows nothing about the two-image scheme. These helpers are the one place that knows better.
+
+def moonbase_table_csv(firmware: str) -> Path:
+    """The partition CSV a firmware's fragments select (last fragment naming one wins,
+    IDF's own merge order)."""
+    csv = ESP32_DIR / "partitions" / "esp32dev.csv"
+    for frag in FIRMWARES[firmware]["fragments"]:
+        fp = ESP32_DIR / frag
+        if not fp.exists():
+            continue
+        m = re.search(r'^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="([^"]+)"',
+                      fp.read_text(), re.MULTILINE)
+        if m:
+            csv = ESP32_DIR / m.group(1)
+    return csv
+
+
+def partition_offsets(csv_path: Path) -> dict:
+    """SubType -> offset (hex string) for the rows a MoonBase layout needs: 'factory',
+    'ota_0' and 'ota' (the otadata bookkeeping partition)."""
+    import csv as _csv
+    out = {}
+    for row in _csv.reader(csv_path.read_text().splitlines()):
+        if not row or row[0].strip().startswith("#") or len(row) < 5:
+            continue
+        subtype = row[2].strip()
+        if subtype in ("factory", "ota_0", "ota"):
+            out[subtype] = row[3].strip()
+    return out
+
+
+def otadata_slot0_bytes() -> bytes:
+    """An otadata image with slot 0 (ota_0) selected, so a fresh full flash boots the app with
+    MoonBase standing by (blank otadata boots the factory slot: MoonBase). Two 4 KB copies; the
+    record is 32 bytes: uint32 seq, 24 bytes 0xFF, uint32 CRC over the seq alone
+    (bootloader_common_ota_select_crc: crc32_le seeded UINT32_MAX == zlib.crc32(seq, 0xFFFFFFFF)).
+    Byte-identical to what IDF's otatool writes for --slot 0, verified against a bench readback.
+    """
+    import struct, zlib
+    seq = struct.pack("<I", 1)
+    record = seq + b"\xff" * 24 + struct.pack("<I", zlib.crc32(seq, 0xFFFFFFFF))
+    page = record + b"\xff" * (0x1000 - len(record))
+    return page + b"\xff" * 0x1000
+
+
+def moonbase_flash_files(firmware: str, build_dir: Path) -> list[tuple[str, Path]]:
+    """The corrected (offset, file) write list for a MoonBase-table flash: IDF's flash_files with
+    the app remapped to ota_0, the blank otadata replaced by the slot-0 image (written into the
+    build dir), and MoonBase added at the factory slot."""
+    import json as _json
+    offs = partition_offsets(moonbase_table_csv(firmware))
+    chip = FIRMWARES[firmware]["chip"]
+    moonbase_bin = build_dir.parent / f"moonbase-{chip}" / "projectMM-moonbase.bin"
+    if not all(k in offs for k in ("factory", "ota_0", "ota")) or not moonbase_bin.exists():
+        raise FileNotFoundError(
+            f"MoonBase layout needs factory/ota_0/otadata offsets and a built image "
+            f"(run build_esp32.py first; missing: {moonbase_bin})")
+    otadata = build_dir / "ota_data_slot0.bin"
+    otadata.write_bytes(otadata_slot0_bytes())
+    fa = _json.loads((build_dir / "flasher_args.json").read_text())
+    writes: list[tuple[str, Path]] = []
+    for off, rel in fa["flash_files"].items():
+        name = Path(rel).name
+        if name == "projectMM.bin":
+            writes.append((offs["ota_0"], build_dir / rel))
+        elif name == "ota_data_initial.bin":
+            writes.append((offs["ota"], otadata))
+        else:
+            writes.append((off, build_dir / rel))
+    writes.append((offs["factory"], moonbase_bin))
+    return writes
+
+
+def build_moonbase(cmd: list[str], env: dict, chip: str) -> None:
+    """Build the MoonBase image for `chip` into build/moonbase-<chip>.
+
+    MoonBase (moonbase/) is the second boot image the 4 MB variants carry in their factory
+    partition: a small firmware whose job is installing the application, since a board with one
+    app slot cannot rewrite the partition it is executing from. It is chip-specific but variant-
+    agnostic, so the four classic variants share one build. Its size budget lives in
+    moonbase/sdkconfig.defaults; the shared partition table keeps the two images provably agreed
+    on where everything lives.
+    """
+    moonbase_dir = ROOT / "moonbase"
+    build_dir = ROOT / "build" / f"moonbase-{chip}"
+    b_arg = ["-B", str(build_dir), f"-DSDKCONFIG={build_dir}/sdkconfig"]
+    # Same trap as stale_feature_cache: IDF generates sdkconfig from the defaults only when it is
+    # absent, so an edited moonbase/sdkconfig.defaults silently changes nothing. One defaults file
+    # here, so mtime is a sufficient staleness signal.
+    gen = build_dir / "sdkconfig"
+    defaults = moonbase_dir / "sdkconfig.defaults"
+    if gen.exists() and defaults.stat().st_mtime > gen.stat().st_mtime:
+        print(f"MoonBase build dir {build_dir.name} predates sdkconfig.defaults; "
+              "removing it for a clean reconfigure.")
+        shutil.rmtree(build_dir)
+    if not build_dir.exists():
+        print(f"Setting MoonBase target to {chip}...")
+        r = subprocess.run(cmd + b_arg + ["set-target", chip], cwd=moonbase_dir, env=env)
+        if r.returncode != 0:
+            sys.exit(r.returncode)
+    print(f"Building MoonBase for {chip}...")
+    r = subprocess.run(cmd + b_arg + ["build"], cwd=moonbase_dir, env=env)
+    if r.returncode != 0:
+        sys.exit(r.returncode)
+    binp = build_dir / "projectMM-moonbase.bin"
+    if binp.exists():
+        kb = binp.stat().st_size / 1024
+        print(f"MoonBase image: {kb:.0f} KB (slot: 896 KB)")
 
 
 if __name__ == "__main__":

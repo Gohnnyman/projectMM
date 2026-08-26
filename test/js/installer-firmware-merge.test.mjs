@@ -91,3 +91,19 @@ test("mergeFirmwares: no extras returns the published list unchanged (production
     assert.strictEqual(mergeFirmwares(published, null), published);
     assert.strictEqual(mergeFirmwares(published, []), published);
 });
+
+test("parseFirmwaresFromAssets: MoonBase assets are never offered as an OTA image", () => {
+    // shared-moonbase-<chip>.bin is the maintenance image a MoonBase manifest references, and
+    // shared-ota-data-slot0.bin its boot-slot record. Offering either as a device's OTA target
+    // would replace the app with an image that can only install, not run the show.
+    const assets = [
+        asset("manifest-esp32.json"),
+        asset("firmware-esp32-v2.0.0.bin"),
+        asset("shared-moonbase-esp32.bin"),
+        asset("shared-ota-data-slot0.bin"),
+    ];
+    const fw = parseFirmwaresFromAssets(assets, "v2.0.0");
+    assert.deepEqual(fw.map((f) => f.firmware), ["esp32"]);
+    assert.match(fw[0].binaryUrl, /firmware-esp32-v2\.0\.0\.bin$/,
+                 "the app image stays the binary, not a MoonBase asset");
+});

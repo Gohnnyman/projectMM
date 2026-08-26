@@ -124,31 +124,37 @@ DevicesModule discovers via **passive UDP presence** (UDP 65506) feeding a [`Dev
 
 Full design + the reasoned transport split: [Plan-20260629 — UDP device discovery + mDNS advertise-only (shipped)](../history/plans/archive/Plan-20260629%20-%20UDP%20device%20discovery%20%2B%20mDNS%20advertise-only%20%28shipped%29.md).
 
+## MoonBase follow-ups
+
+MoonBase v1 ([architecture.md § MoonBase](../architecture.md#moonbase-the-second-boot-image-4-mb-boards))
+ships exactly one action: install firmware (upload + URL). The name is deliberately broader than
+"recovery", these are the candidate next actions, each solving something only a separate boot
+image can solve. The budget rule from the partition table applies to all of them: the 896 KB slot
+has ~150 KB headroom, sized for one new *component*, so each action must earn its bytes (a few KB
+of code is fine; a new IDF component is the expensive kind).
+
+- **Factory reset**: erase the filesystem (and optionally NVS) from MoonBase's page: recovers a
+  device whose config crashes the app on boot, without a USB cable.
+- **Boot with config disabled**: one-shot flag the app reads at startup to skip loading
+  `/.config`: diagnose "is it my config or the firmware?" without erasing anything.
+- **WiFi re-provisioning**: edit the stored credentials from MoonBase's page (today it only
+  *reads* them; the AP fallback plus the app's provisioning already covers most of this).
+- **Config backup / restore**: download the filesystem as an archive before a risky change,
+  upload it back after; also the migration answer for future partition-table moves.
+- **Firmware downgrade guard**: MoonBase installs whatever image it is given; a version display
+  (read from the incoming image's app descriptor) before flashing would make an accidental
+  downgrade visible.
+- **Hardware diagnostics**: chip/flash/PSRAM identification and a minimal pin tester, for
+  triaging a board that misbehaves under the full app.
+- **Ethernet**: MoonBase is WiFi-only today; the eth-only 4 MB variants (`esp32-eth`) fall back
+  to the AP when no WiFi credentials exist. Needs the per-board PHY/pin config brought over,
+  which is the real cost.
+
 ## ESP32 performance and memory
-
-### Flash budget — the 4 MB classic ESP32 is the ceiling (investigation)
-
-The binary has grown ~1.4 → ~1.48 MB as effects, audio sync, IR, and Ethernet landed. Per-board headroom against the app (OTA) partition slot:
-
-| Board | app slot | binary | used |
-|---|---|---|---|
-| **classic esp32 (4 MB)** | 1.75 MB | ~1.48 MB | **~84 %** ⚠️ |
-| esp32s3-n8r8 (8 MB) | 3.00 MB | ~1.48 MB | ~49 % |
-| 16 MB boards | 4.00 MB | ~1.48 MB | ~37 % |
-
-Only the **4 MB classic** is tight (the partition comment itself notes "~200 KB headroom"); the 8/16 MB boards have years of room. So this is a *classic-ESP32-only* constraint, not a global one — the fix should shrink the small-flash build without touching the flagship boards.
-
-Levers, roughly by payoff-per-effort:
-
-1. **`-Os` for the size-bound builds.** The ESP32 build currently runs the IDF default optimization (`CONFIG_COMPILER_OPTIMIZATION_DEBUG`, ~`-Og`), **not** `CONFIG_COMPILER_OPTIMIZATION_SIZE` (`-Os`). Setting size-opt on the classic (and any small-flash) firmware typically buys 5–15 % flash for free — measure the tick/FPS delta, since `-Os` can cost a little hot-path speed; if it does, gate it to the flash-bound firmwares only, not the S3/P4 where headroom is fine.
-2. **`MM_MINIMAL` feature profile for the 4 MB target.** The classic board doesn't need every effect/driver compiled in. A build profile that compiles out heavy optional modules (the same `firmware_cmake_args()` seam the eth/wifi gating already uses) keeps the flagship boards full-featured while the small board ships a curated subset — the standard "small board, smaller build" pattern.
-3. **Repartition the 4 MB classic.** If A/B OTA isn't required on the classic, a single-app-slot layout nearly doubles the app ceiling (1.75 → ~3.5 MB). Trade-off: OTA loses its rollback slot. Decide per-board, not globally.
-
-Start with (1) — it's a one-line sdkconfig change with a measurable payoff and no code churn; (2)/(3) only if (1) plus normal growth still crowds the classic. The UI embed is already gzipped (`app.js` ~140 KB → ~40 KB), so UI growth is cheap in flash; the pressure is C++ `.text`.
 
 ### Size estimates for unbuilt features (reference)
 
-Estimates, not measurements, so they live here rather than in [performance.md](../performance.md) which carries measured numbers only. Feeds the [flash budget](#flash-budget-the-4-mb-classic-esp32-is-the-ceiling-investigation) decision.
+Estimates, not measurements, so they live here rather than in [performance.md](../performance.md) which carries measured numbers only. (The 4 MB flash-budget investigation these once fed is resolved: MoonBase's single-app-slot layout grew the classic app slot to 2496 KB, see architecture.md § MoonBase.)
 
 | Feature | Est. | Rationale |
 |---|---|---|

@@ -34,7 +34,10 @@ GENERATE = ROOT / "moondeck" / "build" / "generate_manifest.py"
 # The exact globs the deploy's `gh release download` stages onto Pages (release.yml,
 # "Stage cumulative release content"). A manifest part must match one of these, or the
 # installer fetches a file that isn't there. Keep in lockstep with that step's --pattern list.
-STAGED_GLOBS = ["firmware-*.bin", "shared-ota-data.bin", "partition-table-*.bin"]
+STAGED_GLOBS = ["firmware-*.bin", "shared-*.bin", "partition-table-*.bin"]
+# shared-*.bin covers shared-ota-data.bin plus the MoonBase pair (shared-moonbase-<chip>.bin,
+# shared-ota-data-slot0.bin); the same glob appears in release.yml's upload files and the
+# Pages self-host download patterns, which is exactly the sync this test guards.
 
 # A minimal but realistic IDF flasher_args.json — the four files every projectMM build emits.
 # generate_manifest.py maps these to the bundle names (firmware-<F>-v<ver>.bin, etc.).

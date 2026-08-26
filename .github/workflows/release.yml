@@ -225,6 +225,19 @@ jobs:
           # Per-firmware flasher_args.json — the release job feeds it to
           # generate_manifest.py so offsets come from the real build.
           cp "$B/flasher_args.json"                   "dist/flasher-${{ matrix.firmware }}.json"
+          # MoonBase, the second boot image on the 4 MB tables (built alongside those firmwares
+          # by build_esp32.py): chip-shared, so staged under a shared name like the partition
+          # table. The slot-0 otadata is what makes a fresh install boot the APP with MoonBase
+          # standing by: blank otadata would boot MoonBase. Their manifests reference both
+          # (generate_manifest.py), and install-picker.js excludes them from OTA offers.
+          for MB in build/moonbase-*/projectMM-moonbase.bin; do
+            [ -f "$MB" ] || continue
+            CHIP=$(basename "$(dirname "$MB")"); CHIP=${CHIP#moonbase-}
+            cp "$MB" "dist/shared-moonbase-$CHIP.bin"
+            uv run python -c "import sys; sys.path.insert(0,'moondeck/build'); \
+              import build_esp32, pathlib; \
+              pathlib.Path('dist/shared-ota-data-slot0.bin').write_bytes(build_esp32.otadata_slot0_bytes())"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
@@ -270,8 +283,28 @@ jobs:
           set -euo pipefail
           V=$(uv run python moondeck/build/compute_version.py --tag "$TAG")
           echo "version=$V" >> "$GITHUB_OUTPUT"
+      # ccache: the macOS runner compiles the whole desktop tree from cold every run (the ESP32
+      # jobs get a prebuilt IDF container; this one gets nothing), which is why it was the slowest
+      # job in the workflow at ~10 min. CMake picks the launcher up from the environment, so the
+      # build script stays unchanged. The key rotates per run and restores from the newest
+      # matching prefix, the standard save-always cache shape for a compiler cache.
+      - name: Install ccache
+        run: brew install ccache
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-macos-14-${{ github.sha }}
+          restore-keys: |
+            ccache-macos-14-
       - name: Build + package macOS arm64
+        env:
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+          CMAKE_C_COMPILER_LAUNCHER: ccache
         run: uv run moondeck/ci/package_desktop.py --version "${{ steps.ver.outputs.version }}"
+      - name: ccache stats
+        if: always()
+        run: ccache --show-stats
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-macos
@@ -532,7 +565,7 @@ jobs:
           # is a glob pattern, the action does NOT strip `#` as comment syntax.
           files: |
             dist/firmware-*.bin
-            dist/shared-ota-data.bin
+            dist/shared-*.bin
             dist/partition-table-*.bin
             dist/manifest-*.json
             dist/projectMM-*.tar.gz
@@ -615,7 +648,7 @@ jobs:
               --dir "pages/install/releases/$T" \
               --pattern 'firmware-*.bin' \
               --pattern '*-ota-data.bin' \
-              --pattern 'shared-ota-data.bin' \
+              --pattern 'shared-*.bin' \
               --pattern 'partition-table-*.bin' \
               --pattern 'manifest-*.json' \
               --pattern 'projectMM-*.tar.gz' \

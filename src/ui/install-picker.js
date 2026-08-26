@@ -223,10 +223,12 @@ function parseFirmwaresFromAssets(assets, tag) {
     }
 
     for (const a of assets) {
-        // Reject the part-suffixed .bins (bootloader / partition-table / ota-data)
-        // — they're install fragments, not the main image. The OTA path needs the
-        // app image only; esp_https_ota internally fetches what it needs.
-        if (/-(?:bootloader|partition-table|ota-data)\.bin$/.test(a.name)) continue;
+        // Reject the part-suffixed .bins (bootloader / partition-table / ota-data /
+        // moonbase): they're install fragments, not the main image. The OTA path needs
+        // the app image only. The shared-moonbase asset is doubly excluded (the `shared-`
+        // prefix already fails binaryRe): offering MoonBase as an OTA target would replace
+        // a device's app with an image that can only install, not run the show.
+        if (/(?:-(?:bootloader|partition-table|ota-data)|moonbase[^/]*|-slot0)\.bin$/.test(a.name)) continue;
         const m = binaryRe.exec(a.name);
         if (m) {
             const firmware = m[1];

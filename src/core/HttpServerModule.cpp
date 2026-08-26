@@ -364,6 +364,10 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             handleReboot(conn);
         } else if (std::strcmp(path, "/api/firmware/url") == 0 && body) {
             handleFirmwareUrl(conn, body);
+        } else if (std::strcmp(path, "/api/firmware/moonbase") == 0) {
+            // Reboot into MoonBase with nothing staged: the UI uses this for install-from-file,
+            // where the browser holds the image and re-POSTs it to MoonBase once it answers.
+            handleBootMoonBase(conn);
         } else if (std::strcmp(path, "/api/firmware/upload") == 0 && body) {
             // OTA from an uploaded .bin body (no URL, no host to serve it) — the browser POSTs the
             // firmware image straight to the device, which streams it into the OTA partition. Same
@@ -2273,6 +2277,22 @@ void HttpServerModule::handleListDeleteRow(platform::TcpConnection& conn, const 
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
 }
 
+// Reboot into MoonBase. 409 when this table has none or MoonBase is already running: the UI
+// only offers the button when the `moonbase` control exists, so a 409 here means a raw API
+// caller on the wrong device, and an error is the honest answer.
+void HttpServerModule::handleBootMoonBase(platform::TcpConnection& conn) {
+    if (!platform::otaHasMoonBase() || platform::otaRunningMoonBase()) {
+        sendResponse(conn, 409, "application/json", "{\"error\":\"no MoonBase on this device\"}");
+        return;
+    }
+    FilesystemModule::flushPending();
+    sendResponse(conn, 200, "application/json", "{\"ok\":true,\"moonbase\":true}");
+    conn.close();
+    platform::delayMs(200);
+    platform::otaBootMoonBase();
+    platform::reboot();  // noreturn
+}
+
 void HttpServerModule::handleReboot(platform::TcpConnection& conn) {
     FilesystemModule::flushPending();
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
@@ -2316,6 +2336,34 @@ void HttpServerModule::handleFirmwareUrl(platform::TcpConnection& conn, const ch
         sendResponse(conn, 400, "application/json",
                      "{\"error\":\"url must start with http:// or https://\"}");
         return;
+    }
+
+    // A MoonBase device cannot update in place: it has one app slot, and it is running from it.
+    // Stage the URL in NVS and reboot into MoonBase, which installs it unattended and reboots
+    // back: the UI shows one "updating firmware" experience over the whole cycle. 202 with
+    // {"moonbase":true} tells the caller which of the two flows it got.
+    if (platform::otaHasMoonBase() && !platform::otaRunningMoonBase()) {
+        // The staged URL crosses into MoonBase through a 256-byte NVS read
+        // (moonbase_main.cpp loadCredentials' sibling); a longer URL would fail that read
+        // silently and park the device in MoonBase with nothing to show for it. Reject it
+        // here, where the caller can still see why.
+        if (std::strlen(url) > 255) {
+            sendResponse(conn, 400, "application/json",
+                         "{\"error\":\"url too long for the MoonBase handoff (max 255)\"}");
+            return;
+        }
+        if (!platform::moonbaseStageInstallUrl(url)) {
+            sendResponse(conn, 500, "application/json",
+                         "{\"error\":\"could not stage install url\"}");
+            return;
+        }
+        std::snprintf(g_otaStatus, sizeof(g_otaStatus), "rebooting");
+        FilesystemModule::flushPending();
+        sendResponse(conn, 202, "application/json", "{\"ok\":true,\"moonbase\":true}");
+        conn.close();
+        platform::delayMs(200);
+        platform::otaBootMoonBase();
+        platform::reboot();  // noreturn, boots MoonBase, which installs and reboots back
     }
 
     // Seed the shared globals so the first WS push after this response shows

@@ -263,6 +263,36 @@ Three distinct things, kept distinct in the vocabulary:
 
 A deviceModel can run multiple firmwares (the Olimex Gateway runs both `esp32-eth` and the default `esp32`); a firmware can run on multiple deviceModels (`esp32` runs on any classic ESP32 dev kit). The `esp32s3-n16r8` firmware is S3-only and does not run on the Olimex Gateway or other classic-ESP32 hardware. The codebase reserves "deviceModel" exclusively for the physical product and "firmware" exclusively for the compiled binary.
 
+### MoonBase: the second boot image (4 MB boards)
+
+A 4 MB board has room for one application, not two, so the dual-OTA layout (half the chip spent
+on a second copy of the firmware) is replaced on those boards by **MoonBase**: a small,
+rarely-changing image in the partition table's `factory` slot that owns the device while the
+application is being replaced, a board cannot rewrite the partition it is executing from. The
+app slot grows by a third in exchange. 8/16 MB boards keep dual-OTA and are untouched by any of
+this.
+
+The update cycle: the app stages the install URL in NVS (or nothing, for a browser upload),
+points the bootloader at MoonBase and reboots; MoonBase joins the network with the app's stored
+credentials (AP fallback at 4.3.2.1), installs into the single app slot, from the staged URL
+unattended, or from an upload, and reboots back. The UI covers the whole cycle with one
+"updating firmware" overlay, telling the two images apart via `GET /moonbase` (MoonBase answers
+with its live status; the app 404s it). Pointing the bootloader at a factory partition *erases*
+otadata, so a power cut anywhere mid-install boots MoonBase and the user retries over the
+network, a stronger power-fail story than dual-OTA's. A failed install deliberately stays in
+MoonBase, visibly, rather than silently reverting to the old app; the way back is its explicit
+"Boot the app" action, which only boots an image that validates.
+
+MoonBase is a standalone ESP-IDF project (`moonbase/`, ~750 KB against an 896 KB slot) sharing
+no sources with the app, the deliberate trade for an image that must stay small and, once
+working, hardly change. `moondeck/build/build_esp32.py` builds it alongside the 4 MB variants
+and owns the flash-layout helpers every consumer uses (serial flash, web-installer manifests,
+release preview, the QEMU image): IDF's own `flasher_args.json` knows nothing of the two-image
+scheme and stages the app at the factory offset, so each of those paths applies the same
+correction from one place. Prior art: Tasmota's safeboot scheme and
+[MycilaSafeBoot](https://github.com/mathieucarbou/MycilaSafeBoot) proved the single-slot +
+recovery-image pattern; MoonBase is our from-scratch, minimal take on it.
+
 ### Config provenance: MCU → deviceModel
 
 Firmware-vs-deviceModel is a **two-level** model for **where a pin or setting default legitimately comes from**. The installer and MoonDeck use it so a user picks their hardware instead of hand-typing every GPIO. A default belongs at the level that actually *fixes* it:
