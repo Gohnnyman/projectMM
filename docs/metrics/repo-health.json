@@ -1,5 +1,5 @@
 {
-  "commit": "b6592232",
+  "commit": "cdca107b",
   "flash": {
     "esp32s3-n16r8": 1832800,
     "desktop": 1268136,
@@ -16,11 +16,11 @@
   },
   "perf": {
     "desktop": {
-      "tick_us": 132,
-      "fps": 7575
+      "tick_us": 178,
+      "fps": 5617
     },
     "esp32": {
-      "tick_us": 8346,
+      "tick_us": 8367,
       "fps": 119
     }
   },

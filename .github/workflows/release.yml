@@ -135,6 +135,11 @@ jobs:
           # Bump the suffix when changing the IDF version to invalidate.
           key: esp-idf-v6.1-rc1-${{ runner.os }}-v1
 
+      # The staging step's MoonBase block runs `uv run python` on the RUNNER (the ESP-IDF
+      # docker action only provides Python inside its container), so uv must exist there.
+      # First main run without it: `uv: command not found`, exit 127, three 4 MB variants.
+      - uses: astral-sh/setup-uv@v3
+
       # The release-channel tag burned into the binary as MM_RELEASE (shown by
       # SystemModule alongside the semver). Same resolution as the release
       # job's "Resolve effective tag" step — kept here because this build job
@@ -160,9 +165,7 @@ jobs:
         id: ver
         # The channel (latest vs stable) and the -rc handling both live in
         # compute_version.py — pass only the tag, the helper derives the rest, so
-        # this step and the release job's identical step can't disagree. Raw
-        # `python` (not `uv run`): this job has no setup-uv (the ESP-IDF docker
-        # action provides Python) and the script is stdlib-only.
+        # this step and the release job's identical step can't disagree.
         # Tag passed via env (not inline ${{ }}) so it reaches the script as a
         # plain shell variable, never spliced into the command text — no shell
         # injection from a crafted tag/ref.
@@ -170,7 +173,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          V=$(python moondeck/build/compute_version.py --tag "$TAG")
+          V=$(uv run python moondeck/build/compute_version.py --tag "$TAG")
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Build firmware
