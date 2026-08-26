@@ -124,7 +124,7 @@ ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 # `ships`: True for variants the release matrix builds + publishes. A variant can
 # exist here (buildable from the CLI) yet be held out of CI with ships=False.
 # This dict is the SINGLE source of truth — generate_firmwares.py projects it to
-# web-installer/firmwares.json, which the CI matrix, the ESP Web Tools manifest
+# mooninstaller/firmwares.json, which the CI matrix, the ESP Web Tools manifest
 # loops, and MoonDeck all read (check_firmwares.py guards the projection).
 FIRMWARES: dict[str, dict] = {
     # Default classic ESP32: WiFi AND Ethernet in one binary. The RMII Ethernet
@@ -157,7 +157,7 @@ FIRMWARES: dict[str, dict] = {
         "description": "ESP32 classic under QEMU, emulated Ethernet (openeth), no WiFi. "
                        "Run with moondeck/qemu/run_qemu.py, not flashed to hardware.",
         "ships": False,
-        # Not silicon: keep it out of web-installer/firmwares.json entirely. `ships` already stops
+        # Not silicon: keep it out of mooninstaller/firmwares.json entirely. `ships` already stops
         # the release pipeline building it; this stops it reaching the installer's list, whose
         # entries are things a user can flash to a board.
         "installable": False,

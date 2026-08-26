@@ -1,5 +1,5 @@
 {
-  "commit": "df8344a9",
+  "commit": "b6d4812d",
   "flash": {
     "esp32s3-n16r8": 1831360,
     "desktop": 1268136,
@@ -16,8 +16,8 @@
   },
   "perf": {
     "desktop": {
-      "tick_us": 2243,
-      "fps": 445
+      "tick_us": 419,
+      "fps": 2386
     },
     "esp32": {
       "tick_us": 2151,

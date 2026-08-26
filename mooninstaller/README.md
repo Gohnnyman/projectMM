@@ -319,7 +319,7 @@ for F in esp32 esp32-eth esp32s3-n16r8; do
 done
 
 # Drop the install page + shared picker module in place.
-cp web-installer/index.html "$DIST"/
+cp mooninstaller/index.html "$DIST"/
 cp src/ui/install-picker.js "$DIST"/
 
 cd "$DIST" && python3 -m http.server 8000
@@ -376,6 +376,6 @@ don't ship the API.
 Manual setup, one-time per repo: **Settings → Pages → Source: GitHub Actions**.
 
 No deploy-from-branch — the workflow is the only producer. A separate
-`web-installer/`-only Pages deploy was considered and rejected: it would
+`mooninstaller/`-only Pages deploy was considered and rejected: it would
 have to re-run the same cumulative-content dance, so a docs-only deploy
 buys nothing.

@@ -20,7 +20,7 @@ The hard part is the **name collision**: while the move is in progress, `MoonMod
 
 These are the ones that break running devices, OTA, or the installer if mistimed — they change **at the switch**, not before:
 
-- **Binary name** `projectMM.bin` (`library.json`, `moondeck/build/flash_esp32.py`, `generate_manifest.py`, `package_desktop.py`) — renaming changes OTA asset names and the web-installer manifest; old + new must line up with the release that ships under the new repo.
+- **Binary name** `projectMM.bin` (`library.json`, `moondeck/build/flash_esp32.py`, `generate_manifest.py`, `package_desktop.py`) — renaming changes OTA asset names and the mooninstaller manifest; old + new must line up with the release that ships under the new repo.
 - **OTA download URLs** `github.com/MoonModules/projectMM/releases/...` (`docs/install/install.js`, `FirmwareUpdateModule`) — deployed devices fetch updates from here; the URL only resolves to the new repo after the repo rename.
 - **mDNS / device identity** the `MM-XXXX` hostname prefix (`SystemModule.h`) — devices on the LAN announce as `MM-….local`. Changing the prefix (e.g. to `ML-`) renames every device's network identity; deliberately deferred (own decision: keep `MM-` or move to `ML-`).
 - **Repo URL** in docs/READMEs/`package_desktop.py` source links.

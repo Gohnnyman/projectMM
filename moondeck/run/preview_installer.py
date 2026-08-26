@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Locally preview the web installer at web-installer/index.html.
+"""Locally preview the web installer at mooninstaller/index.html.
 
 Stages a small directory (the install page + the shared install-picker
 module) and serves it with `python -m http.server`, plus the
@@ -12,7 +12,7 @@ depending on what's been built locally:
   - **render-only** (no `build/esp32-*/projectMM.bin` present): the
     picker populates against the real GitHub Releases API, dropdowns
     work, but clicking Install fails because the local server has no
-    `releases/` tree. Equivalent to "Recipe A" in web-installer/README.md.
+    `releases/` tree. Equivalent to "Recipe A" in mooninstaller/README.md.
     Useful for iterating on HTML/CSS/JS without tagging a release.
 
   - **flash-ready** (at least one local ESP32 build exists): the
@@ -48,10 +48,10 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 # generate_manifest.py and collect_kpi.py use).
 sys.path.insert(0, str(ROOT / "moondeck" / "build"))
 from build_esp32 import FIRMWARES  # noqa: E402
-INSTALL_DIR = ROOT / "web-installer"
+INSTALL_DIR = ROOT / "mooninstaller"
 ASSETS_BOARDS_DIR = ROOT / "docs" / "assets" / "boards"
 PICKER_JS = ROOT / "src" / "ui" / "install-picker.js"
-# Board-catalog / chip-detection half of the picker — web-installer only (not
+# Board-catalog / chip-detection half of the picker — mooninstaller only (not
 # embedded in firmware), imported by index.html. Staged alongside PICKER_JS.
 PICKER_BOARDS_JS = ROOT / "src" / "ui" / "install-picker-boards.js"
 STAGE_DIR = ROOT / "build" / "install-preview"
@@ -82,9 +82,9 @@ PORT = 8421
 
 def _stage_runtime_files(src_dir: Path, dst_dir: Path):
     """Copy every browser-loadable file (.html/.js/.css/.json/.png/.ico/.svg) from
-    src_dir to dst_dir — mirrors release.yml's `cp -r web-installer/. pages/install/`.
+    src_dir to dst_dir — mirrors release.yml's `cp -r mooninstaller/. pages/install/`.
     README.md / other .md are docs, skipped. The deploy's `cp -r` is recursive, so a
-    subdirectory of static assets (web-installer/assets/, the app-store badges) is
+    subdirectory of static assets (mooninstaller/assets/, the app-store badges) is
     staged too — walk the tree rather than just the top level, or those 404 in preview
     while working in production."""
     exts = (".html", ".js", ".css", ".json", ".png", ".ico", ".svg")

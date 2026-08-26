@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_esp32 import find_idf, idf_env, idf_cmd, FIRMWARES, build_dir_for
 
 
-CATALOG = ROOT / "web-installer" / "deviceModels.json"
+CATALOG = ROOT / "mooninstaller" / "deviceModels.json"
 # MoonDeck / CLI flashing defaults FAST: this path is the DIY bench, where the operator
 # knows their board and the USB bridge is almost always a modern one that sustains 921600
 # (~2x faster). A board with a flaky bridge opts DOWN via its catalog `flashBaud` (e.g. a
@@ -181,7 +181,7 @@ def main():
     mac = ""
     # A MoonBase variant cannot use `idf.py flash`: with a factory + ota_0 table, IDF stages the
     # application at the FACTORY offset (0x10000), which is MoonBase's slot and too small for it.
-    # The parts are placed at explicit offsets instead, the same shape the web-installer manifest
+    # The parts are placed at explicit offsets instead, the same shape the mooninstaller manifest
     # uses, with each offset read from the built partition table rather than hardcoded.
     if FIRMWARES.get(args.firmware, {}).get("moonbase"):
         flash_cmd = _moonbase_flash_cmd(build_dir, args.firmware, args.port, baud, env)

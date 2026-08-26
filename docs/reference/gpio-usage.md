@@ -1,6 +1,6 @@
 # GPIO usage per MCU — hardware reference
 
-Which GPIOs are safe to wire a mic, an LED strand, or an Ethernet PHY to on each MCU projectMM supports, so a bench build picks a pin from here instead of re-scraping the datasheet. This is **chip**-level (which GPIOs the silicon reserves or role-assigns); a specific product's *board* wiring is its catalog entry in [`web-installer/deviceModels.json`](../../web-installer/deviceModels.json), and the one fully-mapped board is the [ESP32-S31 coreboard](esp32-s31-coreboard.md).
+Which GPIOs are safe to wire a mic, an LED strand, or an Ethernet PHY to on each MCU projectMM supports, so a bench build picks a pin from here instead of re-scraping the datasheet. This is **chip**-level (which GPIOs the silicon reserves or role-assigns); a specific product's *board* wiring is its catalog entry in [`mooninstaller/deviceModels.json`](../../mooninstaller/deviceModels.json), and the one fully-mapped board is the [ESP32-S31 coreboard](esp32-s31-coreboard.md).
 
 Each chip lists two kinds of pin to avoid:
 

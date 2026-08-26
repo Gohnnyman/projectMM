@@ -9,7 +9,7 @@ Run: uv run moondeck/ci/make_ico.py <source.png> <out.ico>
 Pillow is declared inline (PEP 723) rather than added to the project, because this is the only
 thing in the tree that needs it and it runs at most once per build. uv fetches it on demand.
 
-The source is the same web-installer/favicon.png the macOS .icns is derived from, so the mark has
+The source is the same mooninstaller/favicon.png the macOS .icns is derived from, so the mark has
 one home. A resize is unavoidable: ICO stores each image's dimensions in a SINGLE byte (with 0
 meaning 256), so the 320x320 source cannot be embedded as-is at any size.
 """

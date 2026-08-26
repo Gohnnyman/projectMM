@@ -1038,7 +1038,7 @@ export const installer = {
                 // no deviceUrl; the host's onSuccess handler treats an
                 // empty url as "user opted into AP fallback, walk them
                 // through joining MM-XXXX manually" (see Step 2 in
-                // web-installer/index.html and the closeModal path in
+                // mooninstaller/index.html and the closeModal path in
                 // handleSuccess).
                 //
                 // Note on the two "skip" shapes: `uiWaitForIp()` returns

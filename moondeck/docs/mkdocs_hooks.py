@@ -38,7 +38,7 @@ import gen_api  # noqa: E402  (same dir, on sys.path via _HERE above)
 # ---- source-link rewrite: docs link OUT to repo files the site can't host ----
 
 # The blob base for links that escape docs/ into the repo (src/, moondeck/, test/,
-# CLAUDE.md, README.md, web-installer/). The site can't serve these — src/ isn't
+# CLAUDE.md, README.md, mooninstaller/). The site can't serve these — src/ isn't
 # published — so a relative link 404s on the deployed site. Rewrite to an absolute
 # GitHub blob URL so "source [Foo.h]" resolves everywhere (locally-served preview +
 # moonmodules.org). A `.h` link for a module that HAS a generated technical page is
@@ -53,7 +53,7 @@ _BLOB_BASE = gen_api._BLOB_BASE   # one definition — branch-pinned, see gen_ap
 _API_MODULES: dict[str, str] = {}
 
 # Repo top-level dirs/files a doc may link into but the site doesn't host.
-_OUT_OF_DOCS = ("src/", "moondeck/", "test/", "esp32/", "web-installer/",
+_OUT_OF_DOCS = ("src/", "moondeck/", "test/", "esp32/", "mooninstaller/",
                 ".github/", "CLAUDE.md", "README.md", "library.json", "CMakeLists.txt",
                 ".clang-tidy", ".clangd")
 
@@ -484,7 +484,7 @@ def on_post_build(config):
     release.yml does its OWN, more complete install/ staging (incl. the
     releases/<tag>/ firmware binaries), so this must NOT run there and risk
     overlaying the binary-less repo copy over it. Mirrors release.yml's
-    `cp -r web-installer/. pages/install/` + the install-picker*.js + library.json
+    `cp -r mooninstaller/. pages/install/` + the install-picker*.js + library.json
     siblings. Best-effort: absent files are skipped."""
     import os
     import shutil
@@ -494,7 +494,7 @@ def on_post_build(config):
 
     site = Path(config["site_dir"])
     dst = site / "install"
-    src = ROOT / "web-installer"
+    src = ROOT / "mooninstaller"
     if not src.is_dir():
         return
     dst.mkdir(parents=True, exist_ok=True)

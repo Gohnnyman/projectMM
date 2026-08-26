@@ -10,7 +10,7 @@ name: Test
 # New Python/JS unit suites land under test/python and test/js and run here.
 
 # Paths cover every input to the host-side tests: the Python/JS sources under test
-# (scripts, web-installer), the test files themselves, AND the device-side C++ frame
+# (scripts, mooninstaller), the test files themselves, AND the device-side C++ frame
 # contract (src/core/Improv*.h + the platform handler) — a wire-format change in the
 # firmware must run the cross-language golden-vector tests so it can't drift from the
 # Python/JS builders silently. pull_request gates every PR; push runs main only (a
@@ -20,7 +20,7 @@ on:
   pull_request:
     paths: &test-paths
       - 'moondeck/**'
-      - 'web-installer/**'
+      - 'mooninstaller/**'
       - 'src/core/ImprovFrame.h'
       - 'src/core/ImprovOpReassembler.h'
       - 'src/platform/esp32/platform_esp32_improv.cpp'

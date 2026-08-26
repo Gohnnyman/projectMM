@@ -18,7 +18,7 @@
 import { installPicker } from "./install-picker.js";
 import { myDevices }    from "./devices.js";
 import { installer, ESPTOOL_JS_VERSION } from "./install-orchestrator.js";
-// Board catalog + chip detection — web-installer only, kept out of the
+// Board catalog + chip detection — mooninstaller only, kept out of the
 // firmware-embedded install-picker.js and injected here via boardSupport.
 import * as boardSupport from "./install-picker-boards.js";
 
@@ -942,7 +942,7 @@ document.addEventListener('DOMContentLoaded', () => {
       container: document.getElementById("picker-mount"),
       ownFirmwareKey: null,  // web installer flashes any firmware variant
       installRowExtras: document.getElementById("erase-row"),
-      boardSupport,  // board catalog + chip detection (web-installer-only module)
+      boardSupport,  // board catalog + chip detection (mooninstaller-only module)
       extraFirmwaresByTag,
       // Gate Install on a picked USB port — the web installer requires the user
       // to choose the port in the dropdown before flashing. (notifyPortChanged()

@@ -13,7 +13,7 @@ let firmwares = [];
 let scenarios = [];   // [{name, module, also}]
 let testModules = []; // ["CamelCaseName", ...]
 // Device-model catalog loaded from /api/device-models (served by moondeck.py from
-// web-installer/deviceModels.json) — the same file the web installer fetches. Empty until
+// mooninstaller/deviceModels.json) — the same file the web installer fetches. Empty until
 // init() loads it; renderDevices waits on init.
 let deviceModels = []; // [{ name, firmwares: [...], ... }] — `name` is the identifier + label
                        // (single-name catalog, matched by b.name); firmwares[0] is the default.

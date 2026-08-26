@@ -150,7 +150,7 @@ def package_deb(binary: Path, version: str) -> Path | None:
         "Categories=Graphics;Utility;\n", encoding="utf-8")
     icons = stage / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps"
     icons.mkdir(parents=True)
-    fav = ROOT / "web-installer" / "favicon.png"
+    fav = ROOT / "mooninstaller" / "favicon.png"
     if fav.exists():
         shutil.copy2(fav, icons / "projectmm.png")
 
@@ -246,7 +246,7 @@ def make_icns(dest: Path) -> Path | None:
     .icns can carry are left out rather than upscaled, since a soft icon reads worse than a smaller
     crisp one. Swap in a 1024 master and they can be added.
     """
-    src = ROOT / "web-installer" / "favicon.png"
+    src = ROOT / "mooninstaller" / "favicon.png"
     if not src.exists() or shutil.which("iconutil") is None:
         print("package_desktop: no favicon or no iconutil, the app will use the default icon")
         return None
@@ -448,7 +448,7 @@ def windows_icon(version: str) -> Path | None:
     if built.exists():
         return built
     out = DIST_DIR / "projectMM.ico"
-    src = ROOT / "web-installer" / "favicon.png"
+    src = ROOT / "mooninstaller" / "favicon.png"
     if not src.exists():
         print("package_desktop: no favicon to generate an icon from")
         return None
