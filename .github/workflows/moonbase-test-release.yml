@@ -3,12 +3,17 @@ name: MoonBase test release
 # TEMPORARY: delete after the MoonBase branch merges to main.
 # Publishes a `moonbase-test` prerelease from THIS branch so the picker's URL-based
 # install can be tested against real GitHub release assets before the merge (the
-# real release pipeline only runs from main and version tags). Manual trigger only;
-# esp32 (the bench Olimex) is the only firmware built. Mirrors release.yml's esp32
+# real release pipeline only runs from main and version tags). Triggered by a push of
+# this branch: workflow_dispatch alone cannot work here, GitHub only registers a
+# dispatchable workflow from the default branch. esp32 (the bench Olimex) is the only
+# firmware built. Mirrors release.yml's esp32
 # job + staging + manifest, reduced to one variant and one fixed tag.
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - moonbase
 
 permissions:
   contents: write
