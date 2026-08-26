@@ -191,8 +191,15 @@ the recovery path.
    was flash-bound, not network-bound: identical over TLS and plain HTTP, fixed by one bulk
    erase up front instead of per-sector erases inlined with the writes, plus 32 KB receive
    chunks; WiFi power save is also off in MoonBase (it throttled RTT 20x for no benefit).
-   Still open: the power-cut procedure (PO, physical: cut power at ~10/50/95% of an install;
-   expected: the board boots MoonBase, a retry completes, config survives).
+   The power-cut procedure then ran (PO): the overlay reports the silence, and once MoonBase
+   is back it re-submits the install from the payload the browser still holds; the cycle
+   completes with no clicks. Ethernet shipped after that (classic RMII): MoonBase reads the
+   eth wiring from the same config file as the credentials, brings BOTH interfaces up so the
+   browser keeps whichever address the app had, and an install over eth streams at the same
+   flash-bound rate as WiFi. Bench note from that work: after the table migration the
+   deviceModel catalog push had never been re-applied (ethType stood at 0), and applying
+   ethType live did not bring eth up where the boot init did, an app-side observation worth
+   its own look.
 8. **CI and installer** (done): `build_esp32.py` owns the shared layout helpers
    (moonbase_table_csv / partition_offsets / otadata_slot0_bytes / moonbase_flash_files), the
    one place that corrects IDF's flasher_args, consumed by the serial flash, the manifests, the

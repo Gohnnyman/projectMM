@@ -61,10 +61,15 @@ bool parseNumber(std::string tok, uint32_t& out) {
     if (suffix == 'K' || suffix == 'k') { mult = 1024; tok.pop_back(); }
     else if (suffix == 'M' || suffix == 'm') { mult = 1024 * 1024; tok.pop_back(); }
     if (tok.empty()) return false;
+    // strtoul silently wraps a negative token; a partition offset or size is never signed.
+    if (tok.front() == '-' || tok.front() == '+') return false;
     errno = 0;
     char* end = nullptr;
     const unsigned long v = std::strtoul(tok.c_str(), &end, 0);   // base 0: 0x.. is hex
     if (errno != 0 || end == tok.c_str() || *end != '\0') return false;
+    // The K/M multiply (and the plain value) must fit uint32: 4096M or 0x100000000 is a typo,
+    // not a 4 GB partition.
+    if (v > UINT32_MAX / mult) return false;
     out = static_cast<uint32_t>(v) * mult;
     return true;
 }
@@ -112,6 +117,17 @@ std::vector<Table> allTables() {
 }
 
 }  // namespace
+
+TEST_CASE("the CSV number parser rejects signed and uint32-overflowing values") {
+    uint32_t v = 0;
+    CHECK_FALSE(parseNumber("-1", v));            // strtoul would wrap this to 4 GB - 1
+    CHECK_FALSE(parseNumber("4096M", v));         // 4 GiB: past uint32 after the suffix multiply
+    CHECK_FALSE(parseNumber("0x100000000", v));   // past uint32 as a plain value
+    CHECK(parseNumber("0x3E9000", v));
+    CHECK(v == 0x3E9000u);
+    CHECK(parseNumber("512K", v));
+    CHECK(v == 512u * 1024u);
+}
 
 TEST_CASE("every partition table describes a layout that fits its flash without overlaps") {
     const auto tables = allTables();

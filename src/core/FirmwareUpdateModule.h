@@ -163,7 +163,12 @@ public:
         // (via markDirty → HttpServerModule rebuildControls) when totalSnap_
         // changes. Initially 0; the UI shows "0KB / 0KB" until esp_https_ota
         // reports the image size, then "X KB / 1297KB" for the rest.
-        controls_.addProgress("update_pct", bytesRead_, totalSnap_);
+        // On a MoonBase device the in-place OTA task this control reports on never runs
+        // (installs happen in MoonBase; the update overlay carries the progress), so the
+        // control does not exist there.
+        if (!platform::otaHasMoonBase()) {
+            controls_.addProgress("update_pct", bytesRead_, totalSnap_);
+        }
     }
 
     void tick1s() MM_NONBLOCKING override {
@@ -179,9 +184,9 @@ public:
         // estimate until the new task reports the new size). rebuildControls
         // re-runs defineControls() so the addProgress' captured `aux` (total)
         // is refreshed to the new totalSnap_ value.
-        if (g_otaBytesTotal != totalSnap_) {
+        if (g_otaBytesTotal != totalSnap_ && !platform::otaHasMoonBase()) {
             totalSnap_ = g_otaBytesTotal;
-            rebuildControls();
+            rebuildControls();   // refresh update_pct's captured total; absent on MoonBase devices
         }
     }
 

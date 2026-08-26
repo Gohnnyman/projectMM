@@ -227,8 +227,15 @@ function connectWs() {
         if (sock !== ws) return;   // a stale socket closing after we already moved on — leave the live one alone
         clearInterval(wsHeartbeat);
         wsHeartbeat = null;
-        if (wsUnloading) return;   // the page is going away — don't reconnect (and don't touch the DOM)
+        if (wsUnloading) return;   // the page is going away, don't reconnect (and don't touch the DOM)
         setWsDot(false);
+        // A long-dead socket may mean the device switched images under this tab (a suspended
+        // tab restored from memory never re-runs the page-load check). Once the backoff has
+        // ripened, ask; the update overlay owns that conversation during an install, so skip
+        // while it is up.
+        if (wsRetryMs >= 5000 && !document.querySelector(".fw-overlay")) {
+            moonbaseHandoff();   // async; reconnects continue unless it flips the page
+        }
         // Exponential backoff with 5s ceiling; track the timer so pagehide can cancel a pending reconnect.
         wsReconnectTimer = setTimeout(connectWs, wsRetryMs);
         wsRetryMs = Math.min(wsRetryMs * 2, 5000);
@@ -330,22 +337,7 @@ async function init() {
     // REST snapshot overwrite the newer, live WS state — just skip the commit.
     try {
         const resp = await fetch("/api/state");
-        if (resp.status === 404) {
-            // A 404 on the app's own state API means this page is a CACHED copy of the app
-            // talking to a different server at the same address: MoonBase. Confirm, then hand
-            // over cleanly instead of rendering a half-dead skeleton — the cache-busting query
-            // makes the browser fetch MoonBase's page instead of re-serving this one.
-            const mb = await probeMoonBase();
-            if (mb.state === "up") {
-                document.body.innerHTML = "";
-                const note = document.createElement("p");
-                note.style.cssText = "font:16px system-ui;margin:3rem auto;max-width:30rem;text-align:center";
-                note.textContent = "This device is in MoonBase (maintenance mode) \u2014 opening its page\u2026";
-                document.body.appendChild(note);
-                setTimeout(() => location.replace("/?" + Date.now()), 1200);
-                return;
-            }
-        }
+        if (resp.status === 404 && await moonbaseHandoff()) return;
         if (resp.ok && (!state || !Array.isArray(state.modules))) {
             const snap = await resp.json();
             if (snap && Array.isArray(snap.modules)) {
@@ -1155,13 +1147,20 @@ function showUpdateOverlay() {
     dismiss.textContent = "close";
     dismiss.style.display = "none";
     dismiss.addEventListener("click", () => ov.remove());
-    box.append(h, msg, bar, dismiss);
+    const cancel = document.createElement("button");
+    cancel.textContent = "cancel install";
+    cancel.addEventListener("click", () => {
+        // Best-effort: only a running URL install can hear it (MoonBase's /cancel); the watch
+        // loop sees the resulting "canceled" status and ends the overlay from there.
+        fetch("/cancel", { method: "POST" }).catch(() => {});
+    });
+    box.append(h, msg, bar, cancel, dismiss);
     ov.appendChild(box);
     document.body.appendChild(ov);
     return {
         status(text) { msg.textContent = text; },
         progress(read, total) { if (total > 0) { bar.max = total; bar.value = read; } },
-        fail(text) { msg.textContent = text; bar.remove(); dismiss.style.display = ""; },
+        fail(text) { msg.textContent = text; bar.remove(); cancel.remove(); dismiss.style.display = ""; },
     };
 }
 
@@ -1183,6 +1182,20 @@ async function probeMoonBase() {
     } finally {
         clearTimeout(timer);
     }
+}
+
+// When this app page finds MoonBase answering underneath it (a cached or suspended tab over
+// a device that switched images), say so and load MoonBase's real page: the cache-busting
+// query makes the browser fetch it instead of re-serving this one. True when the handoff ran.
+async function moonbaseHandoff() {
+    if ((await probeMoonBase()).state !== "up") return false;
+    document.body.innerHTML = "";
+    const note = document.createElement("p");
+    note.style.cssText = "font:16px system-ui;margin:3rem auto;max-width:30rem;text-align:center";
+    note.textContent = "This device is in MoonBase (maintenance mode) \u2014 opening its page\u2026";
+    document.body.appendChild(note);
+    setTimeout(() => location.replace("/?" + Date.now()), 1200);
+    return true;
 }
 
 // The one-click cycle. opts is {url} (device installs it unattended off the NVS-staged URL) or
@@ -1275,6 +1288,10 @@ async function moonbaseUpdateFlow(opts) {
                 } catch (_) {}
             } else if (probe.state === "up") {
                 sawAway = true;   // MoonBase answering means the old app is gone
+                if (probe.text === "canceled") {
+                    ui.fail("Install canceled \u2014 the device is waiting in MoonBase.");
+                    return;
+                }
                 if (probe.text.startsWith("error")) throw new Error(probe.text);
                 // The unattended install reports "downloading: N of M bytes"; render it the
                 // way the file path reads, with a real bar.

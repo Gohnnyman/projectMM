@@ -146,15 +146,34 @@ of code is fine; a new IDF component is the expensive kind).
   downgrade visible.
 - **Hardware diagnostics**: chip/flash/PSRAM identification and a minimal pin tester, for
   triaging a board that misbehaves under the full app.
-- **Ethernet**: MoonBase is WiFi-only today; the eth-only 4 MB variants (`esp32-eth`) fall back
-  to the AP when no WiFi credentials exist. Needs the per-board PHY/pin config brought over,
-  which is the real cost.
+- **Ethernet: shipped for classic RMII (2026-08-26)**. MoonBase reads the eth wiring from the
+  same config file as the credentials (ethType gates it) and brings BOTH interfaces up, so the
+  browser keeps whichever address the app had. Still open here: the P4's IP101/managed-component
+  PHY and the S3's SPI W5500, which matter only if MoonBase ever goes beyond the 4 MB classics.
+- **Static IP for MoonBase**: MoonBase always uses DHCP; a venue network without a DHCP server
+  (fixed-address rigs exist) would reach the app (static `addressing`) but not MoonBase. Read
+  the addressing block from the same config scrape when a venue actually asks for it (the app
+  itself applies static addressing to eth already).
 - **MoonBase as the only update mechanism, all boards** (PO, 2026-08-26): would delete the app's
   whole in-place OTA path (a real subtraction) and grow every app slot, with the stronger
-  power-fail story everywhere. Three deciding factors first: Ethernet in MoonBase (the P4 has no
-  WiFi of its own), a migration that does not lose config (backup/restore above), and accepting
+  power-fail story everywhere. Three deciding factors first: MoonBase Ethernet beyond classic RMII (the P4 has no
+  WiFi of its own and uses a different PHY; the S3 uses SPI W5500), a migration that does not lose config (backup/restore above), and accepting
   ~45 s of visible downtime per update where dual-OTA installs in the background. Trigger:
   MoonBase proven in the field on the 4 MB boards.
+
+## Provisioning and live-reconfig gaps (bench, 2026-08-26)
+
+Both surfaced while bringing up MoonBase Ethernet on the migrated Olimex; neither is MoonBase's.
+
+- **A migrated device is not fully provisioned until the deviceModel catalog push is re-applied.**
+  After the MoonBase table migration the board ran for days with `deviceModel` empty and
+  `ethType` 0: Improv/AP provisioning restores WiFi credentials only, and nothing tells the user
+  the catalog half (eth wiring, per-board settings) is missing. Candidates: MoonDeck re-pushes
+  the catalog on discovering a device whose deviceModel is empty, or the UI badges the state.
+- **`ethType` does not apply live.** Setting it to 1 over the API (cable in, pins valid) left
+  Ethernet down; the same config brought it up at the next boot. Every setting applies live is
+  a core principle (architecture.md, Live reconfiguration), so the eth init path is missing from
+  the control's apply/build-state sweep.
 
 ## ESP32 performance and memory
 
@@ -395,7 +414,7 @@ Device-model injection over Improv shipped as **"Improv = REST over serial"** (t
 
 **Open follow-up: closed-loop APPLY_OP pacing (read-back ack + retry).** The installer paces APPLY_OP frames open-loop (`sendApplyOpFrame` waits a fixed ~120 ms between ops) rather than reading the device's ack back, because a Web Serial duplex read while the writer lock is held is awkward. The delay covers the worst-case single-buffer consume window with headroom, and each op is idempotent (a lost op re-applies cleanly on a re-flash), so this is robust today. The closed-loop upgrade — read the RPC response, retry once on error `0x82` (buffer busy) — removes the fixed delay (faster install) and makes op-loss impossible rather than improbable. Worth doing if a real install is ever observed dropping an op, or when the config push grows large enough that the cumulative fixed delay is noticeable. Touches only `install-orchestrator.js`.
 
-**Open follow-up: shared JS helpers across device-UI and mooninstaller.** `safeLocalGet` / `safeLocalSet` (3-line hostile-storage guards) are duplicated in `src/ui/install-picker.js` (device firmware, embedded as a C string via `embed_ui.cmake`) and `docs/install/devices.js` (web installer page, served from Pages). The two live in different build contexts so the shared extract isn't trivial — it'd need a new `src/ui/safe-storage.js` plus updates to: `embed_ui.cmake` (embed the new file), `ui_embedded.h` generator (new C array), HTTP server file routing (new path served), `release.yml` workflow staging, `preview_installer.py` staging. Five files for one 3-line helper is too much pre-merge. Worth doing when the next shared helper arrives — `relativeTime` and `formatBytes` are candidates. Two helpers earn the build-glue cost; one doesn't.
+**Open follow-up: shared JS helpers across device-UI and mooninstaller.** `safeLocalGet` / `safeLocalSet` (3-line hostile-storage guards) are duplicated in `src/ui/install-picker.js` (device firmware, embedded as a C string via `embed_ui.cmake`) and `mooninstaller/devices.js` (web installer page, served from Pages). The two live in different build contexts so the shared extract isn't trivial — it'd need a new `src/ui/safe-storage.js` plus updates to: `embed_ui.cmake` (embed the new file), `ui_embedded.h` generator (new C array), HTTP server file routing (new path served), `release.yml` workflow staging, `preview_installer.py` staging. Five files for one 3-line helper is too much pre-merge. Worth doing when the next shared helper arrives — `relativeTime` and `formatBytes` are candidates. Two helpers earn the build-glue cost; one doesn't.
 
 **Open follow-up: P4 Improv scan on a cold WiFi link (bench check).** `improvHandleScan` in `src/platform/esp32/platform_esp32_improv.cpp` calls `esp_wifi_scan_start`, which needs the WiFi driver started. On native ESP32/S3 the driver is up by the time a user provisions; on the P4 the radio lives on the C6 and comes up only after the esp_hosted prelude in `ensureWifiInit()` (triggered by `wifiApInit` / `wifiStaInit`). A scan requested on a P4 that has not initialised WiFi returns an error cleanly rather than scanning a cold link, so nothing crashes. The check: bench-verify whether a P4 provisioned from cold needs the link brought up first, and if so route the scan through the public `wifiAp`/`wifiSta` path.
 
@@ -668,9 +687,9 @@ The second half of the core [multi-device runtime](../architecture.md#multi-devi
 
 The light-domain payoff is a wall of controllers animating in lockstep: effects already animate off elapsed time, so feeding them the leader's synced clock instead of each device's local one is the whole change on the render side. Device-to-device light *distribution* is a separate topology question and rides the existing ArtNet / E1.31 / DDP standards rather than a bespoke protocol.
 
-### Three-level device model: MCU → Board → Device (config provenance)
+### Config provenance: firmware/MCU → deviceModel (catalog follow-ups)
 
-The model itself is now a shipped design — see architecture.md § Config provenance (the three levels + the `txPowerSetting` example + "default only at the level that fixes it"). The catalog that carries it is `mooninstaller/deviceModels.json` (schema). The remaining forward-looking pieces — a `devices.json`/MCU-layer split and annotated-pin images — stay gated by the sequencing rule (no catalog field ahead of a consumer).
+The model itself is now a shipped design; see architecture.md § Config provenance (deviceModel is the one provenance level, the `txPowerSetting` example, and "default only where the hardware actually fixes it"). The catalog that carries it is `mooninstaller/deviceModels.json` (schema). The remaining forward-looking pieces — a `devices.json`/MCU-layer split and annotated-pin images — stay gated by the sequencing rule (no catalog field ahead of a consumer).
 
 ### Persistence overlay: partial-save / schema-change audit (backlog)
 
