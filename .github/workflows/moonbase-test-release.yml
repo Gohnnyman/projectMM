@@ -39,6 +39,8 @@ jobs:
             ~/esp/esp-idf
           key: esp-idf-v6.1-rc1-${{ runner.os }}-v1
 
+      - uses: astral-sh/setup-uv@v3
+
       - name: Compute version
         id: ver
         # `latest`-channel versioning (<core>-dev.<N>) so the version is a real,
@@ -46,7 +48,7 @@ jobs:
         # the binary is `moonbase-test` so a device shows where the image came from.
         run: |
           set -euo pipefail
-          V=$(python moondeck/build/compute_version.py --tag latest)
+          V=$(uv run python moondeck/build/compute_version.py --tag latest)
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Build firmware
@@ -70,10 +72,10 @@ jobs:
           cp "$B/partition_table/partition-table.bin" "dist/partition-table-$SIZE.bin"
           cp "$B/ota_data_initial.bin"                "dist/shared-ota-data.bin"
           cp build/moonbase-esp32/projectMM-moonbase.bin dist/shared-moonbase-esp32.bin
-          python3 -c "import sys; sys.path.insert(0,'moondeck/build'); \
+          uv run python -c "import sys; sys.path.insert(0,'moondeck/build'); \
             import build_esp32, pathlib; \
             pathlib.Path('dist/shared-ota-data-slot0.bin').write_bytes(build_esp32.otadata_slot0_bytes())"
-          python3 moondeck/build/generate_manifest.py --firmware esp32 --version "$V" \
+          uv run python moondeck/build/generate_manifest.py --firmware esp32 --version "$V" \
             --release-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/moonbase-test" \
             --flasher-args "$B/flasher_args.json" --out dist/manifest-esp32.json
 

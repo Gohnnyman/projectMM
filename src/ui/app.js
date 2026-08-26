@@ -330,6 +330,22 @@ async function init() {
     // REST snapshot overwrite the newer, live WS state — just skip the commit.
     try {
         const resp = await fetch("/api/state");
+        if (resp.status === 404) {
+            // A 404 on the app's own state API means this page is a CACHED copy of the app
+            // talking to a different server at the same address: MoonBase. Confirm, then hand
+            // over cleanly instead of rendering a half-dead skeleton — the cache-busting query
+            // makes the browser fetch MoonBase's page instead of re-serving this one.
+            const mb = await probeMoonBase();
+            if (mb.state === "up") {
+                document.body.innerHTML = "";
+                const note = document.createElement("p");
+                note.style.cssText = "font:16px system-ui;margin:3rem auto;max-width:30rem;text-align:center";
+                note.textContent = "This device is in MoonBase (maintenance mode) \u2014 opening its page\u2026";
+                document.body.appendChild(note);
+                setTimeout(() => location.replace("/?" + Date.now()), 1200);
+                return;
+            }
+        }
         if (resp.ok && (!state || !Array.isArray(state.modules))) {
             const snap = await resp.json();
             if (snap && Array.isArray(snap.modules)) {
@@ -1144,6 +1160,7 @@ function showUpdateOverlay() {
     document.body.appendChild(ov);
     return {
         status(text) { msg.textContent = text; },
+        progress(read, total) { if (total > 0) { bar.max = total; bar.value = read; } },
         fail(text) { msg.textContent = text; bar.remove(); dismiss.style.display = ""; },
     };
 }
@@ -1153,12 +1170,18 @@ const fwSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Probe GET /moonbase once: "up" (200 + status text), "app" (404: the application is answering),
 // or "silent" (no answer: the device is mid-reboot). Never throws.
 async function probeMoonBase() {
+    // Bounded: against a powered-off device an untimed fetch hangs for up to a minute on the
+    // TCP connect, which starves the poll loop of the very silence it is trying to measure.
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 2500);
     try {
-        const r = await fetch("/moonbase", { cache: "no-store" });
+        const r = await fetch("/moonbase", { cache: "no-store", signal: ctl.signal });
         if (r.ok) return { state: "up", text: await r.text() };
         return { state: "app" };
     } catch (_) {
         return { state: "silent" };
+    } finally {
+        clearTimeout(timer);
     }
 }
 
@@ -1196,10 +1219,16 @@ async function moonbaseUpdateFlow(opts) {
             // The upload needs MoonBase serving before the browser can push the image.
             if (!(await waitForMoonBase(Date.now() + 120000))) throw new Error(MOONBASE_SILENT_MSG);
             ui.status(`Installing ${fmSize(opts.file.size)}\u2026`);
-            const r = await fetch("/install", {
-                method: "POST", headers: { "Content-Type": "application/octet-stream" },
-                body: opts.file });
-            if (!r.ok) throw new Error(await r.text());
+            try {
+                const r = await fetch("/install", {
+                    method: "POST", headers: { "Content-Type": "application/octet-stream" },
+                    body: opts.file });
+                if (!r.ok) throw new Error(await r.text());
+            } catch (err) {
+                if (err instanceof Error && err.message.startsWith("error")) throw err;
+                // A dead socket mid-upload (power cut, WiFi drop) is not a verdict: the watch
+                // loop below sees where the device lands and retries the upload from there.
+            }
         }
 
         // Watch until the app answers again. On the unattended URL path MoonBase installs BEFORE
@@ -1209,17 +1238,57 @@ async function moonbaseUpdateFlow(opts) {
         // 404s the probe for a moment, so "app" only counts as done once the device has been
         // seen away, or after a grace period long enough that the kickoff reboot must have run.
         const watchStart = Date.now();
-        const deadline = watchStart + 300000;
+        let deadline = watchStart + 300000;
         let sawAway = false;
+        let silentStreak = 0;
+        let retries = 0;
         while (Date.now() < deadline) {
             await fwSleep(2000);
             const probe = await probeMoonBase();
+            if (probe.state !== "silent") silentStreak = 0;
             if (probe.state === "silent") {
                 sawAway = true;
+                // A reboot is a few silent probes; many in a row is a device that lost power or
+                // the network. Say so instead of freezing on the last byte count.
+                if (++silentStreak >= 4) {
+                    ui.status("The device is not answering \u2014 waiting for it to come back\u2026");
+                }
+            } else if (probe.state === "up" && probe.text === "idle" && sawAway) {
+                // MoonBase is up with NOTHING running after the cycle already started: the
+                // install was interrupted (a power cut lands exactly here: blank otadata boots
+                // MoonBase, and the staged URL was already consumed). The browser still holds
+                // the payload, so the one click survives the cut: hand it over again.
+                if (retries >= 2) throw new Error("the install keeps getting interrupted");
+                retries++;
+                deadline += 180000;   // a retry restarts the ~40 s install; extend the watch
+                ui.status("The install was interrupted \u2014 retrying\u2026");
+                try {
+                    if (opts.url) {
+                        await fetch("/install-url", { method: "POST", body: opts.url });
+                    } else {
+                        await fetch("/install", {
+                            method: "POST", headers: { "Content-Type": "application/octet-stream" },
+                            body: opts.file });
+                    }
+                    // The response itself is not consumed: MoonBase reboots on success and the
+                    // probes below see the outcome either way.
+                } catch (_) {}
             } else if (probe.state === "up") {
                 sawAway = true;   // MoonBase answering means the old app is gone
                 if (probe.text.startsWith("error")) throw new Error(probe.text);
-                ui.status(probe.text || "Installing\u2026");
+                // The unattended install reports "downloading: N of M bytes"; render it the
+                // way the file path reads, with a real bar.
+                const dl = probe.text.match(/downloading: (\d+) of (\d+) bytes/);
+                if (dl) {
+                    const read = parseInt(dl[1], 10), total = parseInt(dl[2], 10);
+                    ui.status(`Installing ${fmSize(total || read)}\u2026`);
+                    ui.progress(read, total);
+                } else {
+                    // "idle" is MoonBase's quiescent state; mid-cycle it means the install
+                    // has not started yet, which deserves better words than "Idle".
+                    ui.status(!probe.text || probe.text === "idle"
+                              ? "Preparing the install\u2026" : probe.text);
+                }
             } else if (probe.state === "app" && (sawAway || Date.now() - watchStart > 20000)) {
                 ui.status("Done \u2014 reloading\u2026");
                 await fwSleep(1000);

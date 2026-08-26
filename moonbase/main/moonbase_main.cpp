@@ -138,8 +138,10 @@ void loadCredentials() {
 // Network
 // ---------------------------------------------------------------------------------------------
 
-void onGotIp(void*, esp_event_base_t, int32_t, void*) {
-    xEventGroupSetBits(netEvents_, kNetGotIp);
+void onGotIp(void*, esp_event_base_t, int32_t id, void*) {
+    // Registered for every IP event; only an acquired STA address means online
+    // (IP_EVENT_STA_LOST_IP arrives on the same base and must not set the bit).
+    if (id == IP_EVENT_STA_GOT_IP) xEventGroupSetBits(netEvents_, kNetGotIp);
 }
 
 void onWifiEvent(void*, esp_event_base_t, int32_t id, void*) {
@@ -163,7 +165,14 @@ bool wifiStation(uint32_t waitMs) {
 
     const EventBits_t bits = xEventGroupWaitBits(netEvents_, kNetGotIp, pdFALSE, pdFALSE,
                                                  pdMS_TO_TICKS(waitMs));
-    if (bits & kNetGotIp) return true;
+    if (bits & kNetGotIp) {
+        // Modem power save (the default, re-armed at association) throttles receive
+        // throughput to tens of KB/s. Disabled AFTER the connection is up so nothing
+        // re-enables it; MoonBase runs for minutes on a powered board, full RX beats
+        // the milliwatts.
+        esp_wifi_set_ps(WIFI_PS_NONE);
+        return true;
+    }
     esp_wifi_stop();
     esp_wifi_deinit();
     return false;
@@ -228,9 +237,13 @@ const char kPage[] =
     "const r=await fetch('/install',{method:'POST',body:f});"
     "S(await r.text());}"
     "async function url(){const u=document.getElementById('u').value;if(!u)return;"
-    "S('downloading...');"
-    "const r=await fetch('/install-url',{method:'POST',body:u});"
-    "S(await r.text());}"
+    "const r=await fetch('/install-url',{method:'POST',body:u});S(await r.text());"
+    // The install runs on its own task (202); watch its status until the app answers (404
+    // on /moonbase means the new firmware is up, at this same address).
+    "if(r.ok){const t=setInterval(async()=>{try{const p=await fetch('/moonbase');"
+    "if(p.status==404){clearInterval(t);S('done, the app is starting...');"
+    "setTimeout(()=>location.reload(),3000);}else{S(await p.text());}}"
+    "catch(_){S('restarting...');}},2000);}}"
     "async function ba(){const r=await fetch('/boot-app',{method:'POST'});S(await r.text());"
     "if(r.ok)setTimeout(()=>location.reload(),8000);}"
     "</script>";
@@ -243,14 +256,34 @@ const esp_partition_t* appPartition() {
 
 // Write a firmware image pulled from `url` straight into the application slot. This is what makes
 // an unattended install possible: point MoonBase at a release asset and it fetches it itself.
+// True while any install is writing the app slot. Torn reads are harmless (same display-only
+// pattern the app uses); the guard only has to stop a SECOND install from starting.
+volatile bool installing_ = false;
+
 bool installFromUrl(const char* url) {
     esp_http_client_config_t http = {};
     http.url = url;
     http.timeout_ms = 20000;
     http.keep_alive_enable = true;
     http.crt_bundle_attach = esp_crt_bundle_attach;   // GitHub and friends are HTTPS
+    // A GitHub release asset 302-redirects to a signed URL whose Location header (plus a
+    // multi-KB content-security-policy on the redirect response) overflows the client's
+    // default 512-byte header buffer, failing the connection AFTER a clean TLS handshake.
+    // Same values as the app's http_fetch_to_ota (platform_esp32_ota.cpp).
+    http.disable_auto_redirect = false;
+    http.max_redirection_count = 10;
+    // Large receive chunks: fewer, larger flash writes per loop. Measured on the bench
+    // (classic ESP32, 40 MHz DIO flash): 4 KB chunks stream at ~46 KB/s, 16 KB at ~86,
+    // 32 KB roughly the same as 16 (write-bound from there); RAM is plentiful here.
+    http.buffer_size = 32768;
+    http.buffer_size_tx = 4096;
     esp_https_ota_config_t ota = {};
     ota.http_config = &http;
+    // One bulk erase of the whole slot up front instead of a sector erase inlined with every
+    // 4 KB write: per-sector erases dominated the install at ~25 KB/s (identical over TLS and
+    // plain HTTP, so the wire was never the limit). The upfront erase costs a few seconds,
+    // "preparing the install" covers it.
+    ota.bulk_flash_erase = true;
 
     esp_https_ota_handle_t handle = nullptr;
     esp_err_t beginErr = esp_https_ota_begin(&ota, &handle);
@@ -263,11 +296,18 @@ bool installFromUrl(const char* url) {
     }
     esp_err_t err;
     while ((err = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
-        std::snprintf(status_, sizeof(status_), "downloading: %d bytes",
-                      esp_https_ota_get_image_len_read(handle));
+        std::snprintf(status_, sizeof(status_), "downloading: %d of %d bytes",
+                      esp_https_ota_get_image_len_read(handle),
+                      esp_https_ota_get_image_size(handle));
     }
-    if (err != ESP_OK || esp_https_ota_finish(handle) != ESP_OK) {
-        std::snprintf(status_, sizeof(status_), "error: the download failed");
+    if (err != ESP_OK) {
+        esp_https_ota_abort(handle);   // finish() is for a COMPLETE download; abort frees this one
+        std::snprintf(status_, sizeof(status_), "error: the download failed (0x%x)",
+                      static_cast<unsigned>(err));
+        return false;
+    }
+    if (esp_https_ota_finish(handle) != ESP_OK) {
+        std::snprintf(status_, sizeof(status_), "error: the image is not valid firmware");
         return false;
     }
     std::snprintf(status_, sizeof(status_), "installed, restarting");
@@ -306,7 +346,7 @@ void sendResponse(int sock, const char* status, const char* type, const char* bo
 
 // Write `contentLen` bytes from the socket into the application slot. `prefix` carries whatever
 // arrived in the same read as the headers.
-bool installFromSocket(int sock, const char* prefix, size_t prefixLen, size_t contentLen) {
+bool installFromSocketLocked(int sock, const char* prefix, size_t prefixLen, size_t contentLen) {
     const esp_partition_t* part = appPartition();
     if (!part) { std::snprintf(status_, sizeof(status_), "error: no app partition"); return false; }
     if (contentLen == 0 || contentLen > part->size) {
@@ -322,6 +362,7 @@ bool installFromSocket(int sock, const char* prefix, size_t prefixLen, size_t co
     }
 
     size_t written = 0;
+    if (prefixLen > contentLen) prefixLen = contentLen;   // never store bytes past the declared body
     if (prefixLen) {
         if (esp_ota_write(handle, prefix, prefixLen) != ESP_OK) {
             esp_ota_abort(handle);
@@ -368,6 +409,26 @@ bool installFromSocket(int sock, const char* prefix, size_t prefixLen, size_t co
 }
 
 // Read the request head, dispatch, and (on a successful install) restart into the application.
+// The staged-URL install, off the main task (which serves meanwhile). A connect attempted
+// straight after GOT_IP can fail (0x7002, ESP_ERR_HTTP_CONNECT) where the same connect succeeds
+// seconds later: the LAN is still warming up around a freshly associated station. A short retry
+// absorbs that; a genuinely unreachable URL still fails through to the page after the last
+// attempt, where status_ shows the error.
+char stagedUrlTask_[256];
+
+void unattendedInstallTask(void*) {
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (attempt) vTaskDelay(pdMS_TO_TICKS(3000));
+        if (installFromUrl(stagedUrlTask_)) esp_restart();   // straight back into the new app
+        // A failed attempt leaves its error in status_; while retries remain that error is
+        // TRANSIENT, and a watcher treating "error:" as terminal (the app's overlay does)
+        // must not see it. The final attempt's error stays as the terminal answer.
+        if (attempt < 2) std::snprintf(status_, sizeof(status_), "download failed, retrying");
+    }
+    installing_ = false;   // set by the spawner; held across the retries
+    vTaskDelete(nullptr);
+}
+
 void serveOne(int sock) {
     // TCP does not coalesce: the header block (or a small body) can arrive in several
     // segments, so read until the blank line is seen, bounded by the buffer. A request
@@ -382,18 +443,22 @@ void serveOne(int sock) {
         head[got] = '\0';
         if ((bodyStart = std::strstr(head, "\r\n\r\n"))) break;
     }
-    if (got == 0) return;
+    if (got == 0) { ::close(sock); return; }   // serveOne owns the fd; a bare return leaks it
     head[got] = '\0';
     const size_t headLen = bodyStart ? static_cast<size_t>(bodyStart + 4 - head) : got;
     size_t prefixLen = got - headLen;
 
+    // HTTP header names are case-insensitive; strcasestr is not in the std namespace but is
+    // provided by newlib, and the probe is bounded by the header buffer.
     size_t contentLen = 0;
-    if (const char* cl = std::strstr(head, "Content-Length:")) {
+    if (const char* cl = strcasestr(head, "Content-Length:")) {
         contentLen = static_cast<size_t>(std::strtoul(cl + 15, nullptr, 10));
     }
 
     bool installed = false;
-    if (std::strncmp(head, "POST /install-url", 17) == 0) {
+    if (std::strncmp(head, "POST /install-url", 17) == 0 && installing_) {
+        sendResponse(sock, "409 Conflict", "text/plain", "error: an install is already running");
+    } else if (std::strncmp(head, "POST /install-url", 17) == 0) {
         // The body is the URL itself; small enough to finish reading into the same buffer.
         while (prefixLen < contentLen && headLen + prefixLen < sizeof(head) - 1) {
             const int n = ::recv(sock, head + headLen + prefixLen,
@@ -401,14 +466,28 @@ void serveOne(int sock) {
             if (n <= 0) break;
             prefixLen += static_cast<size_t>(n);
         }
-        char url[256] = {};
-        const size_t n = prefixLen < sizeof(url) - 1 ? prefixLen : sizeof(url) - 1;
-        std::memcpy(url, head + headLen, n);
-        installed = installFromUrl(url);
-        sendResponse(sock, installed ? "200 OK" : "500 Internal Server Error", "text/plain", status_);
+        const size_t n = prefixLen < sizeof(stagedUrlTask_) - 1 ? prefixLen
+                                                                 : sizeof(stagedUrlTask_) - 1;
+        std::memcpy(stagedUrlTask_, head + headLen, n);
+        stagedUrlTask_[n] = '\0';
+        std::snprintf(status_, sizeof(status_), "starting the install");
+        installing_ = true;   // cleared by the task after its final attempt
+        xTaskCreate(unattendedInstallTask, "mb_install", 12288, nullptr, 5, nullptr);
+        // 202: the install runs on its own task while this server keeps answering GET
+        // /moonbase with live progress; the caller watches that, not this response.
+        sendResponse(sock, "202 Accepted", "text/plain", status_);
     } else if (std::strncmp(head, "POST /install", 13) == 0) {
-        installed = installFromSocket(sock, head + headLen, prefixLen, contentLen);
-        sendResponse(sock, installed ? "200 OK" : "500 Internal Server Error", "text/plain", status_);
+        if (installing_) {
+            sendResponse(sock, "409 Conflict", "text/plain", "error: an install is already running");
+        } else {
+            installing_ = true;
+            installed = installFromSocketLocked(sock, head + headLen, prefixLen, contentLen);
+            installing_ = false;
+            sendResponse(sock, installed ? "200 OK" : "500 Internal Server Error", "text/plain", status_);
+        }
+    } else if (std::strncmp(head, "POST /boot-app", 14) == 0 && installing_) {
+        // Booting away mid-write would abandon a half-written slot; refuse, visibly.
+        sendResponse(sock, "409 Conflict", "text/plain", "error: an install is already running");
     } else if (std::strncmp(head, "POST /boot-app", 14) == 0) {
         // Switch back to the installed application without installing anything.
         // esp_ota_set_boot_partition validates the image first, so a half-written app is
@@ -424,7 +503,9 @@ void serveOne(int sock) {
         // answering at the shared address (the app 404s it). Body = the live install status, so
         // the poll doubles as a progress read during an unattended install.
         sendResponse(sock, "200 OK", "text/plain", status_);
-    } else if (std::strncmp(head, "GET / ", 6) == 0 || std::strncmp(head, "GET /index", 10) == 0) {
+    } else if (std::strncmp(head, "GET / ", 6) == 0 || std::strncmp(head, "GET /?", 6) == 0 ||
+               std::strncmp(head, "GET /index", 10) == 0) {
+        // "/?<ts>" is the app page's cache-busting handoff to this page (app.js).
         sendResponse(sock, "200 OK", "text/html", kPage);
     } else {
         sendResponse(sock, "404 Not Found", "text/plain", "not found");
@@ -503,15 +584,16 @@ extern "C" void app_main() {
     bool online = wifiStation(20000);
 
     // STA only: on the fallback AP the URL's network is not reachable, and a user is present.
+    // The install runs on its OWN task so the main task serves throughout: GET /moonbase then
+    // reports "downloading: N of M bytes" live, which is what the app's update overlay renders
+    // as a progress bar. 12 KB stack for the same reason as the main task: the TLS handshake.
     if (online && stagedUrl[0]) {
-        // A connect attempted straight after GOT_IP can fail (0x7002, ESP_ERR_HTTP_CONNECT)
-        // where the same connect succeeds seconds later: the LAN is still warming up around a
-        // freshly associated station. A short retry absorbs that; a genuinely unreachable URL
-        // still fails through to the page after the last attempt.
-        for (int attempt = 0; attempt < 3; attempt++) {
-            if (attempt) vTaskDelay(pdMS_TO_TICKS(3000));
-            if (installFromUrl(stagedUrl)) esp_restart();   // straight back into the new app
-        }
+        // Status set BEFORE the task spawns: the overlay polls from the moment MoonBase
+        // answers, and "idle" would read as nothing happening while an install is pending.
+        std::snprintf(status_, sizeof(status_), "preparing the install");
+        std::snprintf(stagedUrlTask_, sizeof(stagedUrlTask_), "%s", stagedUrl);
+        installing_ = true;   // cleared by the task after its final attempt
+        xTaskCreate(unattendedInstallTask, "mb_install", 12288, nullptr, 5, nullptr);
     }
 
     if (!online) online = wifiAccessPoint();

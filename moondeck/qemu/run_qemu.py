@@ -56,7 +56,9 @@ def merged_flash(force: bool) -> str:
     # which made this cache never expire: after a rebuild the emulator kept booting the PREVIOUS
     # app, and code that was plainly in the .bin appeared not to run at all.
     app = os.path.join(BUILD, "projectMM.bin")
-    newest_input = max((os.path.getmtime(p) for p in (args, app) if os.path.exists(p)), default=0)
+    moonbase = os.path.join(os.path.dirname(BUILD), "moonbase-esp32", "projectMM-moonbase.bin")
+    newest_input = max((os.path.getmtime(p) for p in (args, app, moonbase)
+                        if os.path.exists(p)), default=0)
     if os.path.exists(out) and not force and os.path.getmtime(out) > newest_input:
         return out
     # find_idf_python returns the venv DIRECTORY; the interpreter is bin/python inside it.

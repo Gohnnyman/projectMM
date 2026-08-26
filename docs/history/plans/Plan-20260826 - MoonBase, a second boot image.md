@@ -91,8 +91,9 @@ own `sdkconfig.defaults` carrying the size flags above, and no dependency on `sr
 duplication is the deliberate trade for an image that must stay small and, once working, hardly
 change.
 
-What it does, in order: bring up the network (Ethernet where present, else stored WiFi
-credentials, else its own AP at **4.3.2.1** matching `NetworkModule.h:943`), then serve a single
+What it does, in order: bring up the network (stored WiFi
+credentials, else its own AP at **4.3.2.1** matching `NetworkModule.h:943`; Ethernet is a
+follow-up, see the backlog), then serve a single
 page offering the maintenance actions, then reboot back into the app.
 
 Version 1 ships exactly one action: **install firmware**, both by upload and by URL (the URL form
@@ -167,11 +168,10 @@ the recovery path.
    `build_esp32.py` appends the fragment (last, so it wins) and builds `moonbase/` into
    `build/moonbase-<chip>/`; `stale_feature_cache` now also wipes a build dir whose fragment list
    or generated partition table no longer matches (IDF never regenerates sdkconfig on its own).
-   `flash_esp32.py` writes explicit offsets parsed from the build's own CSV (IDF's flasher_args
-   stages the app at the factory offset on this table), adds MoonBase at the factory slot, and
-   selects ota_0 via otatool so a fresh full flash boots the app with MoonBase as fallback.
+   `flash_esp32.py` writes the corrected layout in one pass (app at ota_0, MoonBase at factory,
+   a slot-0 otadata so the fresh flash boots the app with MoonBase as fallback).
    `check_firmwares.py` verified the flag stays out of `firmwares.json`. Olimex erased and
-   flashed through this exact path; bench verification of the boot pending.
+   flashed through this exact path; boot from ota_0 bench-verified.
 7. **The switch route and UI** (done). Bench record: the one-click FILE install ran
    PO-verified through the overlay; the unattended URL cycle was verified at the mechanism
    level by curl (staged-NVS handoff, plain-HTTP for LAN sources, a 3-attempt retry absorbing
@@ -179,9 +179,20 @@ the recovery path.
    could never see that path succeed (MoonBase installs before it serves, so success is silence
    then the new app), which is fixed; the overlay URL flow re-verifies via the moonbase-test
    release. The MoonBase button on the Firmware card and MoonBase's "Boot the app" are the two
-   explicit ways across. Still open: the power-cut procedure. the 202-and-reboot branch, a read-only `moonbase` control on
-   `FirmwareUpdateModule`, the countdown-and-retry flow. Guarded so 8/16 MB behaviour is unchanged.
-   *Gate: PO runs an end-to-end update, then the power-cut procedure.*
+   explicit ways across. The moonbase-test release then caught two GitHub-only failures the LAN
+   test could not see: the TLS handshake overflowed the 3.5 KB main-task stack (now 12 KB), and
+   GitHub's signed redirect overflowed the HTTP client's 512-byte header buffer (now 4 KB, the
+   app's own OTA values); with both fixed, a GitHub HTTPS install completes in under 40 s.
+   The unattended install then moved onto its own task so MoonBase serves while downloading:
+   GET /moonbase reports "preparing the install" then "downloading: N of M bytes" live, the
+   overlay renders that as the same progress bar the file path shows, and a second install (or
+   Boot-the-app mid-write) gets a 409. PO-verified through the picker against the test release.
+   The install then sped up 3x (25 to ~86 KB/s streamed; the whole URL install ~30 s): the rate
+   was flash-bound, not network-bound: identical over TLS and plain HTTP, fixed by one bulk
+   erase up front instead of per-sector erases inlined with the writes, plus 32 KB receive
+   chunks; WiFi power save is also off in MoonBase (it throttled RTT 20x for no benefit).
+   Still open: the power-cut procedure (PO, physical: cut power at ~10/50/95% of an install;
+   expected: the board boots MoonBase, a retry completes, config survives).
 8. **CI and installer** (done): `build_esp32.py` owns the shared layout helpers
    (moonbase_table_csv / partition_offsets / otadata_slot0_bytes / moonbase_flash_files), the
    one place that corrects IDF's flasher_args, consumed by the serial flash, the manifests, the
@@ -189,7 +200,8 @@ the recovery path.
    otadata blob is byte-identical to otatool's own output (bench readback). release.yml stages
    shared-moonbase-<chip>.bin + shared-ota-data-slot0.bin; install-picker rejects both
    (pinned by a JS test); check_esp32_built also gates the MoonBase image's freshness. A
-   temporary `moonbase-test-release.yml` workflow (manual, esp32 only) publishes a
+   temporary `moonbase-test-release.yml` workflow (push-triggered on this branch, since GitHub
+   only registers a dispatchable workflow from the default branch; esp32 only) publishes a
    `moonbase-test` prerelease from this branch so the picker's URL install can be tested against
    real GitHub assets before the merge; it is deleted afterwards.
 9. **Migration and docs** (done): architecture.md § MoonBase is the concept's one home;

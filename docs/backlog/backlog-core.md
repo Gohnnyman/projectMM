@@ -149,6 +149,12 @@ of code is fine; a new IDF component is the expensive kind).
 - **Ethernet**: MoonBase is WiFi-only today; the eth-only 4 MB variants (`esp32-eth`) fall back
   to the AP when no WiFi credentials exist. Needs the per-board PHY/pin config brought over,
   which is the real cost.
+- **MoonBase as the only update mechanism, all boards** (PO, 2026-08-26): would delete the app's
+  whole in-place OTA path (a real subtraction) and grow every app slot, with the stronger
+  power-fail story everywhere. Three deciding factors first: Ethernet in MoonBase (the P4 has no
+  WiFi of its own), a migration that does not lose config (backup/restore above), and accepting
+  ~45 s of visible downtime per update where dual-OTA installs in the background. Trigger:
+  MoonBase proven in the field on the 4 MB boards.
 
 ## ESP32 performance and memory
 

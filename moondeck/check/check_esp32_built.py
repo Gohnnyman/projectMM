@@ -32,7 +32,8 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 SOURCE_DIRS = ("src", "esp32")
 SOURCE_FILES = ("CMakeLists.txt", "library.json")
 SOURCE_SUFFIXES = {".c", ".cpp", ".h", ".hpp", ".cmake", ".json", ".txt", ".py", ".js",
-                   ".html", ".css", ".defaults", ".csv"}   # .csv: partition tables feed the image
+                   ".html", ".css", ".defaults", ".csv",  # .csv: partition tables feed the image
+                   ".yml"}                                 # .yml: idf_component.yml pins components
 
 # Build outputs and caches live under the source dirs; they are products, not inputs, and
 # including them would compare the binary against itself.

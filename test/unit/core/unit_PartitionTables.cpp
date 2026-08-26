@@ -25,9 +25,25 @@ struct Partition {
 
 struct Table {
     std::string file;
-    uint32_t flashBytes = 0;   // inferred from the largest end offset, rounded up to a power of two
+    uint32_t flashBytes = 0;   // the flash the table is written for; declaredFlashBytes below
     std::vector<Partition> parts;
 };
+
+// Each table's flash capacity, DECLARED rather than inferred from the largest end offset:
+// an inferred capacity would grow with an oversized table and hide exactly the overflow this
+// suite exists to catch. A new table must be added here, which is the point.
+uint32_t declaredFlashBytes(const std::string& file) {
+    static const std::pair<const char*, uint32_t> kCapacity[] = {
+        {"esp32dev.csv",          4u * 1024 * 1024},
+        {"esp32dev_moonbase.csv", 4u * 1024 * 1024},
+        {"esp32s3_n8r8.csv",      8u * 1024 * 1024},
+        {"ota_16mb.csv",         16u * 1024 * 1024},
+    };
+    for (const auto& [name, bytes] : kCapacity)
+        if (file == name) return bytes;
+    FAIL("partition table ", file, " has no declared flash capacity; add it to kCapacity");
+    return 0;
+}
 
 std::filesystem::path partitionDir() {
     // test/unit/core/<this file> -> repo root -> esp32/partitions
@@ -84,11 +100,7 @@ Table readTable(const std::filesystem::path& path) {
         REQUIRE_MESSAGE(parseNumber(f[4], p.size), t.file, ": bad size for ", p.name);
         t.parts.push_back(p);
     }
-    uint32_t maxEnd = 0;
-    for (const auto& p : t.parts) maxEnd = p.end() > maxEnd ? p.end() : maxEnd;
-    uint32_t flash = 1024u * 1024u;
-    while (flash < maxEnd) flash <<= 1;
-    t.flashBytes = flash;
+    t.flashBytes = declaredFlashBytes(t.file);
     return t;
 }
 

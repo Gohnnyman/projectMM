@@ -35,8 +35,13 @@ CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
 
 # One connection at a time, small buffers: MoonBase serves one page and receives one file.
 CONFIG_LWIP_MAX_SOCKETS=6
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
+# RX sizing is the install's throughput ceiling (TCP window / RTT): the earlier minimal
+# values capped a LAN download at ~25 KB/s. MoonBase's one job is moving a ~2 MB image, and
+# with no app there is RAM to spare, so receive gets real buffers and a real window.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=24
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=24
 CONFIG_ESP_WIFI_TX_BUFFER_TYPE=0
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
 
@@ -51,3 +56,9 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../esp32/partitions/esp32dev_moonbase.cs
 # bundle, but a LAN source (MoonDeck serving a dev build) has no certificate and is inside the
 # user's own network. The staged-URL handoff writes whatever the app was asked to install.
 CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
+
+# The whole of MoonBase runs on the main task (app_main installs, then serves), and a GitHub
+# install rides mbedTLS: certificate-chain verification against the bundle peaks near 8 KB of
+# stack, which overflowed the 3.5 KB default the moment the TLS handshake ran (the plain-HTTP
+# LAN path fit, which is why the bench missed it). RAM is not scarce here; 12 KB buys margin.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
