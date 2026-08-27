@@ -203,16 +203,21 @@ public:
     /// and become unreachable.
     bool respectsEnabled() const MM_NONBLOCKING override { return false; }
 
+    /// Bring-up (netif create, driver install, the eth→WiFi→AP cascade) runs once at boot and
+    /// is not re-entrant: a live re-setup crashed on hardware. Restored network config lands on
+    /// disk and applies at the next boot (backlog-core: re-entrant network bring-up).
+    bool appliesConfigLive() const override { return false; }
+
     void setup() override {
         // Push the DHCP hostname (option 12) before any bring-up so the device shows
         // its name — not "Unknown" — in the router's client list. Stored once; every
         // netif the platform creates (eth, the wifi cascade, a later reconnect) reads
         // it. Same name as mDNS/SoftAP: deviceName, default MM-XXXX.
         //
-        // Live-rename boundary: setHostname() is single-writer-before-readers by
-        // contract (see platform_esp32.cpp) — NOT safe to re-call after bring-up from
-        // tick1s without platform-side synchronization. And the DHCP hostname only
-        // rides the DISCOVER, so it can't change until the next lease renewal regardless.
+        // Live-rename boundary: setHostname() is mutex-guarded platform-side (see
+        // platform_esp32.cpp), so a re-run of setup() after bring-up (a config-file
+        // restore applying live) is safe. The DHCP hostname still only rides the
+        // DISCOVER, so it can't change until the next lease renewal regardless.
         // So a live deviceName rename updates mDNS immediately (syncMdns re-registers)
         // and the SoftAP SSID on its next start; the DHCP/router-list name follows on the
         // next renewal or reconnect, picking up the new value here. That lag is inherent

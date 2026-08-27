@@ -45,6 +45,48 @@ test("a truncated read fails the backup loudly instead of archiving it", async (
         /truncated/);
 });
 
+test("a mid-walk rewrite re-lists once and archives the fresh bytes", async () => {
+    // The device's debounced autosave can rewrite a file between listing and read: the walk
+    // re-lists and re-reads once, so the grown file is archived, not misread as non-text.
+    let listCalls = 0;
+    const t2 = {
+        "/": [{ name: "grow.json", isDir: false, size: 4 }],
+    };
+    const fetchDir = async d => {
+        listCalls++;
+        if (listCalls > 1) return [{ name: "grow.json", isDir: false, size: 9 }];
+        return t2[d] || [];
+    };
+    const { files, skipped } = await collectFiles(fetchDir, async () => "grown-new", "/");
+    assert.deepEqual(skipped, []);
+    assert.equal(files["/grow.json"], "grown-new");
+});
+
+test("a file that fails to read is skipped and named; the rest still archive", async () => {
+    const t2 = { "/": [
+        { name: "ok.json", isDir: false, size: 2 },
+        { name: "gone.json", isDir: false, size: 5 },
+    ] };
+    const { files, skipped } = await collectFiles(
+        async d => t2[d] || [],
+        async p => { if (p === "/gone.json") throw Error("404"); return "ok"; });
+    assert.deepEqual(skipped, ["/gone.json"]);
+    assert.deepEqual(Object.keys(files), ["/ok.json"]);
+});
+
+test("siblings of one type are checked against their own controls, not the first's", () => {
+    // Two script modules of the same type publish DIFFERENT controls; the diff resolves each
+    // child positionally, so a control real on child 1 is not reported missing via child 0.
+    const state = [{ type: "Effects", controls: [], children: [
+        { type: "MoonLiveEffect", controls: [{ name: "script" }, { name: "speed" }] },
+        { type: "MoonLiveEffect", controls: [{ name: "script" }, { name: "cols" }] },
+    ] }];
+    const cfg = JSON.stringify({ enabled: true,
+        "0.type": "MoonLiveEffect", "0.speed": 3,
+        "1.type": "MoonLiveEffect", "1.cols": 8 });
+    assert.deepEqual(diffRestore({ "/.config/Effects.json": cfg }, state), []);
+});
+
 test("restore creates parent directories before children, each once", () => {
     const dirs = restoreDirs({
         "/.config/presets/p1.json": "", "/.config/Network.json": "", "/scripts/a.mle": "",

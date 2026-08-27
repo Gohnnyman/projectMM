@@ -29,9 +29,10 @@ backlog-core.md:819 against bundling a zip lib into app.js); tier order 1 → 2 
   "firmware": "<firmware>", "build": "<build>",
   "files": { "/.config/NetworkModule.json": "<raw text>", "/scripts/x.mle": "...", ... } }
 ```
-Whole filesystem, text files as strings (device files are all text today); byte-length of each
-fetch verified against /api/dir's size (the fmLoadInto pattern, app.js:5231-5237), a mismatch
-fails the backup loudly rather than archiving a truncated file. Contains the WiFi password:
+Text files as strings, byte-length verified against /api/dir's size. As built: an unreadable,
+oversized-read or non-text file is skipped and reported by name; only a retried short read
+(real truncation) aborts the backup, so the bundle holds every successfully read and verified
+file rather than claiming the whole filesystem. Contains the WiFi password:
 the UI says "keep this file private" at download.
 
 **Backup** (new toolbar button ⤓ "Backup device config" in the File Manager bar, after ↥ Upload,

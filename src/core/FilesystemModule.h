@@ -5,6 +5,8 @@
 
 #include "core/MoonModule.h"
 
+#include <atomic>
+
 #include <cstddef>
 #include <cstdint>
 
@@ -170,11 +172,23 @@ public:
     /// is not config. Returns whether a module matched AND its subtree applied.
     bool applyConfigFile(const char* path);
 
+    /// The DEFERRED entry the file-upload path uses: queue the module named by a written
+    /// `/.config/<Type>.json`; tick20ms() applies it on the RENDER task. Applying inline on the
+    /// small web-server task crashed the ESP32 (NetworkModule::setup() re-run mid-request), and
+    /// deferring also sends the HTTP response before a network-reconfiguring apply can cut the
+    /// socket. Returns whether the path names a live top-level module (same rules as
+    /// applyConfigFile). Multi-file uploads coalesce to one apply per module.
+    bool requestConfigApply(const char* path);
+
+    void tick20ms() MM_NONBLOCKING override;
+
 private:
     static inline FilesystemModule* instance_ = nullptr;
     Scheduler* scheduler_ = nullptr;
     bool mounted_ = false;
     bool dirtyPending_ = false;
+    int moduleIndexForConfigPath(const char* path);
+    std::atomic<uint32_t> pendingApplyMask_{0};   // bit = scheduler module index; web task sets, render tick consumes
     bool everSaved_ = false;       ///< false until the first successful save
     uint32_t lastDirtyMs_ = 0;
     uint32_t lastSaveMs_ = 0;

@@ -8,14 +8,41 @@ import assert from "node:assert/strict";
 
 import { applyMigrations } from "../../src/ui/migrate.js";
 
+test("a user preset that shares a renamed filename is the user's, not migrated", () => {
+    const { files, report } = applyMigrations({ "/.config/presets/Layers.json": '{"x":1}' });
+    assert.ok(files["/.config/presets/Layers.json"]);          // untouched name...
+    assert.equal(files["/.config/presets/Effects.json"], undefined);
+    assert.ok(!report.some(r => r.detail.includes("file →")));  // ...and no file rename reported
+});
+
+test("a driver's preset control migrates to lightPreset with its value", () => {
+    const cfg = { "0.type": "RmtLedDriver", "0.preset": 2, "0.enabled": true };
+    const { files } = applyMigrations({ "/.config/Drivers.json": JSON.stringify(cfg) });
+    const out = JSON.parse(files["/.config/Drivers.json"]);
+    assert.equal(out["0.lightPreset"], 2);
+    assert.equal(out["0.preset"], undefined);
+    assert.equal(out["0.enabled"], true);
+});
+
+test("a bundle carrying both old and new names reports the collision, never silent", () => {
+    const cfg = { "0.type": "PreviewDriver", "0.fps": 24, "0.targetFps": 30 };
+    const { files, report } = applyMigrations({ "/.config/Drivers.json": JSON.stringify(cfg) });
+    const out = JSON.parse(files["/.config/Drivers.json"]);
+    assert.equal(out["0.targetFps"], 30);   // last write wins (plain key iterated after the rename)...
+    assert.ok(report.some(r => r.kind === "review" && r.detail.includes("later one won")));   // ...and says so
+});
+
 test("renamed config files land under their new names, reported", () => {
     const { files, report } = applyMigrations({
         "/.config/Layers.json": JSON.stringify({ enabled: true }),
+        "/.config/LayoutGroup.json": JSON.stringify({ enabled: false }),
         "/.config/DriverGroup.json": JSON.stringify({ enabled: true }),
     });
     assert.ok(files["/.config/Effects.json"]);
+    assert.ok(files["/.config/Layouts.json"]);
     assert.ok(files["/.config/Drivers.json"]);
     assert.equal(files["/.config/Layers.json"], undefined);
+    assert.equal(JSON.parse(files["/.config/Layouts.json"]).enabled, false);   // values survive the rename
     assert.ok(report.some(r => r.kind === "renamed" && r.detail.includes("Effects.json")));
 });
 
@@ -66,6 +93,7 @@ test("control renames apply, and semantics changes flag review instead of guessi
     assert.equal(out["0.targetFps"], 30);
     assert.equal(out["0.fps"], undefined);
     assert.equal(out["1.useRing"], 2);              // name maps (scope follows the type rename); value untouched...
+    assert.equal(out["1.type"], "ParallelLedDriver");
     assert.ok(report.some(r => r.kind === "review" && r.where.includes("useRing")));   // ...but flagged
 });
 

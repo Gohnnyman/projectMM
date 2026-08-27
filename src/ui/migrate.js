@@ -112,12 +112,18 @@ function renameKeys(obj, file, report) {
         const dot = key.lastIndexOf(".");
         const prefix = dot >= 0 ? key.slice(0, dot + 1) : "";
         const name = dot >= 0 ? key.slice(dot + 1) : key;
+        // A rewritten key landing on one that already exists (a hand-edited bundle carrying
+        // both old and new names) is last-write-wins, but never silently: report it.
+        const collide = (k) => {
+            if (k in out) report.push({ kind: "review", where: `${file} ${k}`,
+                detail: "two entries map to this key; the later one won" });
+        };
         if (name === "type" && typeof value === "string" && TYPE_RENAMES[value]) {
             const r = TYPE_RENAMES[value];
             out[key] = r.type;
             report.push({ kind: "renamed", where: `${file} ${key}`, detail: `${value} → ${r.type} (${r.date})` });
             if (r.review) report.push({ kind: "review", where: `${file} ${prefix}`, detail: r.review });
-            if (r.set) for (const [k, v] of Object.entries(r.set)) out[prefix + k] = v;
+            if (r.set) for (const [k, v] of Object.entries(r.set)) { collide(prefix + k); out[prefix + k] = v; }
             continue;
         }
         const nodeType = nodeTypes[prefix];
@@ -138,6 +144,7 @@ function renameKeys(obj, file, report) {
             report.push({ kind: "renamed", where: `${file} ${key}`, detail: `${name} → ${cr.name} (${cr.date})` });
             if (cr.review) report.push({ kind: "review", where: `${file} ${prefix}${cr.name}`, detail: cr.review });
         }
+        collide(prefix + newName);   // fires for either order: rename-then-plain or plain-then-rename
         out[prefix + newName] = newValue;
     }
     return out;
@@ -152,7 +159,9 @@ export function applyMigrations(files) {
     for (const [path, content] of Object.entries(files)) {
         let newPath = path;
         const base = path.slice(path.lastIndexOf("/") + 1);
-        if (path.startsWith("/.config/") && FILE_RENAMES[base]) {
+        // Depth one only, mirroring the device's own one-level config rule: a PRESET the
+        // user happened to name Layers.json is their file, not a container's.
+        if (path === "/.config/" + base && FILE_RENAMES[base]) {
             const fr = FILE_RENAMES[base];
             newPath = path.slice(0, path.lastIndexOf("/") + 1) + fr.to;
             report.push({ kind: "renamed", where: path, detail: `file → ${newPath} (${fr.date})` });
@@ -278,6 +287,7 @@ export function diffRestore(files, stateModules, typeNames = []) {
             report.push({ kind: "module", where: path, detail: `module type ${type} does not exist on this firmware` });
             continue;
         }
+        const top = byType.get(type);   // undefined when registered but not yet instantiated
         let cfg;
         try { cfg = JSON.parse(content); } catch (_) { continue; }   // applyMigrations already flagged it
         // Resolve each key's node by its child-prefix chain; "type" announces a child's type.
@@ -285,11 +295,22 @@ export function diffRestore(files, stateModules, typeNames = []) {
         for (const [key, value] of Object.entries(cfg)) {
             if (key === "type" || key.endsWith(".type")) childTypes[key.slice(0, -"type".length)] = value;
         }
-        // null = the type is unknown (report it); undefined = registered but not instantiated
-        // yet (control check waits for the post-reboot tree, skip silently).
-        const controlsOf = (type_) => {
-            const node = byType.get(type_);
-            if (node) return new Set((node.controls || []).map(c => c.name));
+        // Resolve the LIVE node positionally through the child-index chain, not by first
+        // instance of the type: two siblings of one type can publish different control sets
+        // (a script-defined module's controls depend on its own script). null = the type is
+        // unknown (report it); undefined = no live node to check against yet (registered but
+        // not instantiated, or the chain is not walkable), the robust loader covers it.
+        const resolveNode = (prefix) => {
+            let node = top;
+            for (const part of prefix.split(".")) {
+                if (part === "" || !node) break;
+                node = (node.children || [])[Number(part)];
+            }
+            return node;
+        };
+        const controlsOf = (type_, prefix_) => {
+            const node = resolveNode(prefix_);
+            if (node && node.type === type_) return new Set((node.controls || []).map(c => c.name));
             return known.has(type_) ? undefined : null;
         };
         for (const [key] of Object.entries(cfg)) {
@@ -299,7 +320,7 @@ export function diffRestore(files, stateModules, typeNames = []) {
             if (name === "type" || name === "enabled") continue;   // structural, always understood
             const nodeType = prefix === "" ? type : childTypes[prefix];
             if (nodeType === undefined) continue;   // an orphan chain: the missing child is the real finding
-            const controls = controlsOf(nodeType);
+            const controls = controlsOf(nodeType, prefix);
             if (controls === null) {
                 report.push({ kind: "module", where: `${path} ${prefix}`, detail: `child module type ${nodeType} does not exist on this firmware` });
                 delete childTypes[prefix];   // report each missing child once

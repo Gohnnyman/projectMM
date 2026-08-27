@@ -139,6 +139,11 @@ of code is fine; a new IDF component is the expensive kind).
   `/.config`: diagnose "is it my config or the firmware?" without erasing anything.
 - **WiFi re-provisioning**: edit the stored credentials from MoonBase's page (today it only
   *reads* them; the AP fallback plus the app's provisioning already covers most of this).
+- **Re-entrant network bring-up**: NetworkModule::setup() (netif create, driver install, the
+  eth→WiFi→AP cascade) runs once at boot and crashes if re-run live, so it opts out of the
+  live config apply (`appliesConfigLive() = false`) and a restored NetworkModule.json waits
+  for the next boot. The real fix is bring-up that reconciles instead of re-creates; until
+  then the restore dialog offers the restart.
 - **Config backup / restore, tiers 2+3**: tier 1 (browser-side bundle over the file API, with
   the rename map and restore report) ships in the File Manager. Remaining: tier 2, a
   single-archive device endpoint (one request instead of a walk); tier 3, restore hosted on

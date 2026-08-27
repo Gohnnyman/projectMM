@@ -17,7 +17,7 @@ function mockDevice({ dirs, files, state, corruptRead }) {
         if (u.pathname === "/api/dir") return { ok: true, json: async () => dirs[path] };
         if (u.pathname === "/api/file") {
             const text = corruptRead === path ? files[path].slice(0, -1) : files[path];
-            return { ok: true, text: async () => text };
+            return { ok: true, arrayBuffer: async () => new TextEncoder().encode(text).buffer };
         }
         if (u.pathname === "/api/state") return { ok: true, json: async () => state };
         return { ok: false, status: 404 };
@@ -45,12 +45,13 @@ const DEVICE = {
         "/": [{ name: ".config", isDir: true, size: 0 }, { name: "scripts", isDir: true, size: 0 }],
         "/.config": [{ name: "Network.json", isDir: false, size: 15 }, { name: "presets", isDir: true, size: 0 }],
         "/.config/presets": [{ name: "p1.json", isDir: false, size: 8 }],
-        "/scripts": [{ name: "a.mle", isDir: false, size: 7 }, { name: "fw.bin", isDir: false, size: 2 }],
+        "/scripts": [{ name: "a.mle", isDir: false, size: 7 }, { name: "fw.bin", isDir: false, size: 2 }, { name: "bom.mle", isDir: false, size: 10 }],
     },
     files: {
         "/.config/Network.json": '{"enabled":true}'.slice(0, 15),
         "/.config/presets/p1.json": '{"x":1}\n',
         "/scripts/a.mle": "let x=1",
+        "/scripts/bom.mle": "\uFEFFlet y=2",   // BOM-prefixed: 3 BOM bytes count in its size
         "/scripts/fw.bin": "\uFFFD\uFFFD",   // 6 bytes for a 2-byte file: binary read as text
     },
     state: { modules: [{ type: "System", controls: [
@@ -62,7 +63,7 @@ test("the bookmarklet downloads a complete bundle the Restore button accepts", a
     const { env, captured } = mockDevice(DEVICE);
     await runSnippet(env);
     assert.equal(captured.alerts.length, 1);
-    assert.match(captured.alerts[0], /3 files/);
+    assert.match(captured.alerts[0], /4 files/);
     assert.match(captured.alerts[0], /skipped \(not text\): \/scripts\/fw\.bin/);
     assert.match(captured.alerts[0], /private/);
     const bundle = JSON.parse(await captured.blob.text());
@@ -71,7 +72,8 @@ test("the bookmarklet downloads a complete bundle the Restore button accepts", a
     assert.equal(bundle.device, "schelpje");
     assert.equal(bundle.firmware, "esp32-4mb");
     assert.deepEqual(Object.keys(bundle.files).sort(),
-        ["/.config/Network.json", "/.config/presets/p1.json", "/scripts/a.mle"]);
+        ["/.config/Network.json", "/.config/presets/p1.json", "/scripts/a.mle", "/scripts/bom.mle"]);
+    assert.equal(bundle.files["/scripts/bom.mle"], "\uFEFFlet y=2");   // BOM preserved byte-exact
     assert.equal(bundle.files["/scripts/a.mle"], "let x=1");
     assert.match(captured.download, /^projectMM-config-schelpje-\d{4}-\d{2}-\d{2}\.json$/);
 });
@@ -90,5 +92,5 @@ test("without /api/state the bundle still builds, named by hostname", async () =
     await runSnippet(env);
     const bundle = JSON.parse(await captured.blob.text());
     assert.equal(bundle.device, "device.local");
-    assert.equal(Object.keys(bundle.files).length, 3);
+    assert.equal(Object.keys(bundle.files).length, 4);
 });

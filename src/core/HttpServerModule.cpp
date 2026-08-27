@@ -780,8 +780,11 @@ void HttpServerModule::handleWriteFile(platform::TcpConnection& conn, const char
 // See the header for WHY this exists and why it is whole-tree. Here is only the how.
 void HttpServerModule::applyFileChanged(const char* path) {
     // Live reconfiguration: a written /.config/<Type>.json is a config change like any control
-    // edit, so it lands on the running tree NOW, no reboot to apply a restored backup.
-    if (auto* fs = FilesystemModule::instance()) fs->applyConfigFile(path);
+    // edit, so it lands on the running tree without a reboot. Queued for the render task, never
+    // applied here: re-running a system module's setup() on this small task crashed the ESP32,
+    // and deferring also sends this response before a network-reconfiguring apply can cut the
+    // socket (the bench found both).
+    if (auto* fs = FilesystemModule::instance()) fs->requestConfigApply(path);
     if (!scheduler_) return;
     // requestPrepareTree, never prepareTree: the immediate walk runs a scripted layout's JIT'd code
     // on the CALLING task's stack (Scheduler.h:74-77), and a write arrives on the small web-server

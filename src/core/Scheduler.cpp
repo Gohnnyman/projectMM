@@ -95,6 +95,10 @@ void Scheduler::tick() MM_NONBLOCKING {
     // gate, that report is the only thing that will say so.
     if (prepareRequested_.exchange(false, std::memory_order_relaxed)) {
         prepareTree();
+        // The runtime twin of boot's phase 5 (see requestValuesReapply): same tick as the
+        // prepare, so the just-restored file cannot be rewritten by a dirty save in between.
+        if (valuesReapplyRequested_.exchange(false, std::memory_order_relaxed) && reapplyValuesHook_)
+            reapplyValuesHook_(this);
     }
 
     // Scheduler gates loop callbacks by `enabled()` — disabled modules don't tick.

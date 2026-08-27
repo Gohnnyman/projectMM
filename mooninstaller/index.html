@@ -203,19 +203,28 @@
     <div class="card">
       <strong>Back up a device's config first</strong>
       <p class="note" style="margin-top: 4px">
-        Erasing or migrating a device wipes its WiFi credentials and module config. Save it
-        all first, straight from your browser, works on any firmware since v3.0.0 (July 2026): drag
+        Erasing or migrating a device wipes its WiFi credentials and module config, so
+        save it all first. One <code>.json</code> bundle holds everything; keep it
+        private, it contains the WiFi password. Two ways to make one:
+      </p>
+      <ul>
+        <li><strong>Current firmware</strong>: open the device's own page and press
+        <strong>Backup (⤓)</strong> in the File Manager. That is the whole story.</li>
+        <li><strong>Older firmware</strong> (no Backup button yet; any release since
+        v3.0.0, July 2026), or as a browser-side alternative: drag
         <a id="backup-bookmarklet" href="#">Backup projectMM config</a> to your bookmarks
-        bar, open the device's own page, click the bookmark. It downloads one
-        <code>.json</code> bundle. After flashing, restore it via the new firmware's File
-        Manager (⟲), the bundle carries the WiFi credentials, so you can skip the
-        Configure Wi-Fi step entirely: join the device's <code>MM-XXXX</code> access point,
-        open <code>http://4.3.2.1</code>, restore, it applies live, and the device joins
-        your network by itself. Keep the file private, it contains the WiFi password. No bookmarks
-        bar? <button id="backup-copy" type="button">Copy the snippet</button> and paste it
-        into the browser console (F12) on the device's page. Safari can't drag bookmarklets:
+        bar, open the device's own page, click the bookmark. No bookmarks bar?
+        <button id="backup-copy" type="button">Copy the snippet</button> and paste it into
+        the browser console (F12) on the device's page. Safari can't drag bookmarklets:
         copy the snippet into a bookmark's address by hand, typing <code>javascript:</code>
-        in front of it, or use Chrome/Edge (flashing needs them anyway).
+        in front of it, or use Chrome/Edge (flashing needs them anyway).</li>
+      </ul>
+      <p class="note">
+        After flashing, restore the bundle via the new firmware's File Manager (⟲). The
+        bundle carries the WiFi credentials, so you can even skip the Configure Wi-Fi
+        step: join the device's <code>MM-XXXX</code> access point, open
+        <code>http://4.3.2.1</code>, restore, take the offered restart, and the device
+        comes back on your network.
       </p>
     </div>
 

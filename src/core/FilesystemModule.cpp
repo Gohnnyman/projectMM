@@ -211,34 +211,68 @@ void FilesystemModule::loadSubtree(MoonModule* m) {
     }
 }
 
-// See the header. The path names the module: the filename stem IS the top-level typeName (the same
-// contract pathFor writes with).
-bool FilesystemModule::applyConfigFile(const char* path) {
-    if (!scheduler_ || !path) return false;
+// The shared resolution: "/.config/<Type>.json", one level deep, to the scheduler index of the
+// live top-level module of that type. -1 when the path is not a config file or no module matches.
+int FilesystemModule::moduleIndexForConfigPath(const char* path) {
+    if (!scheduler_ || !path) return -1;
     constexpr const char* kPrefix = "/.config/";
     constexpr size_t kPrefixLen = 9;
-    if (std::strncmp(path, kPrefix, kPrefixLen) != 0) return false;
+    if (std::strncmp(path, kPrefix, kPrefixLen) != 0) return -1;
     const char* stem = path + kPrefixLen;
     const size_t stemLen = std::strlen(stem);
     constexpr size_t kExtLen = 5;   // ".json"
-    if (stemLen <= kExtLen || std::strcmp(stem + stemLen - kExtLen, ".json") != 0) return false;
-    if (std::memchr(stem, '/', stemLen) != nullptr) return false;   // one level: presets/ etc. skip
+    if (stemLen <= kExtLen || std::strcmp(stem + stemLen - kExtLen, ".json") != 0) return -1;
+    if (std::memchr(stem, '/', stemLen) != nullptr) return -1;   // one level: presets/ etc. skip
     char type[64];
     const size_t typeLen = stemLen - kExtLen;
-    if (typeLen >= sizeof(type)) return false;
+    if (typeLen >= sizeof(type)) return -1;
     std::memcpy(type, stem, typeLen);
     type[typeLen] = '\0';
     for (uint8_t i = 0; i < scheduler_->moduleCount(); i++) {
         MoonModule* m = scheduler_->module(i);
-        if (m && m != this && std::strcmp(m->typeName(), type) == 0) {
-            char* buf = readWholeFileAlloc(path);
-            if (!buf) return false;
-            const bool applied = applySubtree(m, buf);
-            platform::free(buf);
-            return applied;
-        }
+        // m != this: the engine itself has no controls and never persists a file, same
+        // exclusion the flush loop makes.
+        if (m && m != this && std::strcmp(m->typeName(), type) == 0)
+            return m->appliesConfigLive() ? i : -1;   // opted out: the file applies at next boot
     }
-    return false;   // no module of this type (a foreign file named like one): leave the tree alone
+    return -1;   // no module of this type (a foreign file named like one): leave the tree alone
+}
+
+// See the header. The path names the module: the filename stem IS the top-level typeName (the same
+// contract pathFor writes with).
+bool FilesystemModule::applyConfigFile(const char* path) {
+    const int idx = moduleIndexForConfigPath(path);
+    if (idx < 0) return false;
+    MoonModule* m = scheduler_->module(static_cast<uint8_t>(idx));
+    char* buf = readWholeFileAlloc(path);
+    if (!buf) return false;
+    const bool applied = applySubtree(m, buf);
+    platform::free(buf);
+    // Controls that appear only at prepare() (a script's declared controls) could not
+    // take their values yet: reapply after the prepare this write requested.
+    if (applied) scheduler_->requestValuesReapply();
+    return applied;
+}
+
+// See the header: queue for the render task; one bit per top-level module coalesces a
+// multi-file upload to one apply each.
+bool FilesystemModule::requestConfigApply(const char* path) {
+    const int idx = moduleIndexForConfigPath(path);
+    if (idx < 0 || idx >= 32) return false;
+    pendingApplyMask_.fetch_or(1u << idx, std::memory_order_relaxed);
+    return true;
+}
+
+void FilesystemModule::tick20ms() MM_NONBLOCKING {
+    uint32_t mask = pendingApplyMask_.exchange(0, std::memory_order_relaxed);
+    if (!mask || !scheduler_) return;
+    for (uint8_t i = 0; i < 32 && mask; i++, mask >>= 1) {
+        if (!(mask & 1)) continue;
+        MoonModule* m = scheduler_->module(i);
+        char path[MAX_PATH];
+        if (m && pathFor(m, path, sizeof(path))) applyConfigFile(path);
+    }
+    scheduler_->requestPrepareTree();   // one sweep for the whole batch, next tick
 }
 
 // Overlay every persistable control's saved value onto the module's current control list, in list order.

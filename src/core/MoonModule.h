@@ -491,6 +491,14 @@ public:
     /// can be added (acceptsChildRoles). Surfaced per-instance in /api/state.
     virtual bool userEditable() const { return true; }
 
+    /// Whether a written config file for this module may re-apply onto the RUNNING tree
+    /// (FilesystemModule::applyConfigFile). Default yes: applySubtree drives the same
+    /// lifecycle a runtime module-add does. A boot-wired module whose setup() is not
+    /// re-entrant (NetworkModule: netif/driver bring-up runs once by design; re-running it
+    /// live crashed the bench S3) answers false, and its restored config applies at the
+    /// next boot instead. The real fix, re-entrant bring-up, is a named backlog item.
+    virtual bool appliesConfigLive() const { return true; }
+
     /// Stop any async worker this module owns that could be reading its child array or its
     /// children's state, and return only once that worker is idle. Default: no-op (a module with no
     /// worker has nothing to quiesce). A module that hands work to another thread (Drivers, whose

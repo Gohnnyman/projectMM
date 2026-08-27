@@ -5238,7 +5238,9 @@ async function fmBackupConfig() {
     const fetchFile = async (path) => {
         const res = await fetch("/api/file?path=" + encodeURIComponent(path));
         if (!res.ok) throw new Error(path + ": HTTP " + res.status);
-        return await res.text();
+        // Not res.text(): that strips a leading UTF-8 BOM, which would both fail the
+        // byte-length check and restore a BOM-prefixed file without its BOM.
+        return new TextDecoder("utf-8", { ignoreBOM: true }).decode(await res.arrayBuffer());
     };
     const { files, skipped } = await collectFiles(fetchDir, fetchFile);
     // Device identity for the filename + header, straight off the live state.
@@ -5280,6 +5282,9 @@ async function fmRestoreConfig(file, refresh) {
     if (bundle.format !== "projectMM-config-backup" || !bundle.files) {
         throw new Error("not a projectMM config backup");
     }
+    if (bundle.version !== 1) {
+        throw new Error(`backup version ${bundle.version} is newer than this firmware understands`);
+    }
     // The rename map first: MIGRATING.md's schema breaks, applied client-side and reported.
     const { files, report } = applyMigrations(bundle.files);
     // Directories before files (mkdir is non-recursive); existing dirs answer 500, harmless.
@@ -5292,10 +5297,16 @@ async function fmRestoreConfig(file, refresh) {
     const ordered = Object.entries(files).sort(
         ([a], [b]) => (a.endsWith("/NetworkModule.json") ? 1 : 0) - (b.endsWith("/NetworkModule.json") ? 1 : 0));
     for (const [path, content] of ordered) {
-        const res = await fetch("/api/file?path=" + encodeURIComponent(path), {
-            method: "POST", headers: { "Content-Type": "application/octet-stream" },
-            body: new Blob([content]),
-        }).catch(() => null);
+        let res = null;
+        // One retry: the device serves a single connection at a time, so a busy moment
+        // drops a socket transiently (seen on the bench); only a retried failure is real.
+        for (let attempt = 0; attempt < 2 && (!res || !res.ok); attempt++) {
+            if (attempt) await new Promise(r => setTimeout(r, 300));
+            res = await fetch("/api/file?path=" + encodeURIComponent(path), {
+                method: "POST", headers: { "Content-Type": "application/octet-stream" },
+                body: new Blob([content]),
+            }).catch(() => null);
+        }
         if (!res || !res.ok) {
             failed.push({ kind: "control", where: path, detail: "write failed (" + (res ? res.status : "network") + ")" });
         }
@@ -5305,11 +5316,14 @@ async function fmRestoreConfig(file, refresh) {
     try { live = (await (await fetch("/api/state")).json()).modules || []; } catch (_) {}
     try { typeNames = ((await (await fetch("/api/types")).json()).types || []).map(t => t.name); } catch (_) {}
     const entries = [...report, ...failed, ...diffRestore(files, live, typeNames)];
-    fmShowRestoreReport(entries, refresh);
+    // Network bring-up is not live-re-appliable (it opts out device-side); its restored file
+    // waits for the next boot, so the dialog offers the restart exactly when that matters.
+    const hasNetwork = Object.keys(files).some(p => p.endsWith("/NetworkModule.json"));
+    fmShowRestoreReport(entries, refresh, hasNetwork);
 }
 
 // The report dialog. Not an alert: the list can be long and deserves reading.
-function fmShowRestoreReport(entries, refresh) {
+function fmShowRestoreReport(entries, refresh, offerRestart) {
     const ov = document.createElement("div");
     ov.className = "fw-overlay";
     const box = document.createElement("div");
@@ -5333,13 +5347,24 @@ function fmShowRestoreReport(entries, refresh) {
         }
         box.appendChild(list);
     }
-    // No reboot button: every written config file applied to the running tree as it landed
-    // (live reconfiguration). Network settings went last, if they moved the device to another
-    // network, it is reachable there at its usual name.
+    // Everything applies live except what the device itself declares boot-only: network
+    // bring-up (its module opts out of the live apply) and the web server's listen port
+    // (binds at boot). The restart button appears exactly when the bundle carried those.
     const note = document.createElement("p");
     note.className = "fw-overlay-msg";
-    note.textContent = "Everything is applied live. If network settings changed, the device is now on that network at its usual name.";
+    note.textContent = offerRestart
+        ? "Settings are applied live, except network settings: restart the device to apply them (after the restart it joins the network the backup names)."
+        : "Settings are applied live.";
     box.appendChild(note);
+    if (offerRestart) {
+        const restart = document.createElement("button");
+        restart.textContent = "restart device";
+        restart.addEventListener("click", async () => {
+            try { await fetch("/api/reboot", { method: "POST" }); } catch (_) {}
+            ov.remove();
+        });
+        box.appendChild(restart);
+    }
     const close = document.createElement("button");
     close.textContent = "close";
     close.addEventListener("click", () => { ov.remove(); if (refresh) refresh(); });
