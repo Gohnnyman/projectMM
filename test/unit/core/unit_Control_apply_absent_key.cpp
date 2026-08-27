@@ -305,3 +305,42 @@ TEST_CASE("applyControlValue: the Select overlong-label boundary is exactly the 
     CHECK(mm::applyControlValue(controls[0], j63.c_str(), "peripheral",
                                 mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
 }
+
+// A Select over ENUMERATED options (a NIC list, an audio device list) persists by LABEL when
+// flagged: the index shifts when the machine's device list reorders, but the name is what the
+// user chose. Both directions of robustness: a label round-trips, and an old index-persisted
+// value still applies (the apply path always accepted both).
+TEST_CASE("a persist-label Select saves the option string and loads by it") {
+    static constexpr const char* kNics[] = {"none (capture only)", "Ethernet 5GbE", "WiFi"};
+    uint8_t sel = 1;
+    mm::ControlList controls;
+    controls.addSelect("interface", sel, kNics, 3);
+    controls.setPersistLabel(controls.count() - 1);
+
+    // Save: the LABEL, not the index.
+    mm::JsonSink sink;
+    sink.append("{\"interface\":");
+    mm::writeControlValue(sink, controls[0]);
+    sink.append("}");
+    const std::string saved(sink.data(), sink.size());
+    CHECK(saved.find("\"Ethernet 5GbE\"") != std::string::npos);
+
+    // Load onto a REORDERED list (the machine enumerated differently): the name still wins.
+    static constexpr const char* kReordered[] = {"none (capture only)", "WiFi", "Ethernet 5GbE"};
+    uint8_t sel2 = 0;
+    mm::ControlList reloaded;
+    reloaded.addSelect("interface", sel2, kReordered, 3);
+    reloaded.setPersistLabel(reloaded.count() - 1);
+    CHECK(mm::applyControlValue(reloaded[0], saved.c_str(), "interface",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel2 == 2);   // found by label at its NEW position
+
+    // Backward compatibility: an old config that stored the index still applies.
+    uint8_t sel3 = 0;
+    mm::ControlList old;
+    old.addSelect("interface", sel3, kNics, 3);
+    old.setPersistLabel(old.count() - 1);
+    CHECK(mm::applyControlValue(old[0], "{\"interface\":2}", "interface",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(sel3 == 2);
+}

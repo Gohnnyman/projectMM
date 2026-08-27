@@ -32,6 +32,12 @@ Chrome puts the same choice behind the download entry's **`⋯`**, then **Keep**
 
 Worth knowing so it does not surprise you later: **this happens for every new build.** Reputation attaches to a file, not to a project, so a fresh `latest` build starts from nothing again. Only code signing changes that, and it is on the backlog.
 
+### If Defender quarantines it as a trojan
+
+Occasionally Defender goes a step further and removes the file outright, naming something like `Trojan:Win32/Wacatac.C!ml`. The `!ml` suffix means a **machine-learning guess**, not a match against known malware: an unsigned, zero-reputation executable that opens audio capture devices (the Audio module records from your microphone or a loopback device) fits a pattern the model weighs, and every new build is a brand-new fingerprint for it to judge. The contents are checkable rather than a matter of trust: the binary is compiled from this repository's source in public CI, and the one vendored file behind the audio support (`miniaudio.h`) is byte-identical to its upstream release.
+
+The safest way back is a **fresh download**: delete the quarantined file (**Windows Security → Virus & threat protection → Protection history**) and download the installer again from the [releases page](https://github.com/MoonModules/projectMM/releases) over HTTPS: that re-establishes exactly what you are running without trusting a file out of quarantine. Restoring from Protection history works too, but only for a file you downloaded from the releases page yourself, moments before. An exclusion on the install directory would not help (the quarantined file is the installer in **Downloads**), and a broad Downloads exclusion costs more protection than it is worth. The durable route is reporting the file as a false positive at [microsoft.com/wdsi/filesubmission](https://www.microsoft.com/wdsi/filesubmission): Microsoft typically clears these within days, and it fixes it for everyone.
+
 ## 3. Run the setup
 
 Double-click the file you just kept, and the installer opens straight away. Keeping it in step 2 was the trust decision, so Windows does not ask a second time:

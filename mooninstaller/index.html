@@ -97,12 +97,12 @@
         <label>
           <input type="checkbox" id="erase-before-flash">
           Erase chip first
-          <span class="note erase-note">— wipes saved WiFi + board, adds ~12 s. Tick when switching firmware variant or starting clean.</span>
+          <span class="note erase-note">wipes saved WiFi + board, adds ~12 s. Tick when switching firmware variant, starting clean, or <strong>when a normal update fails</strong> or the device comes back without its settings: the partition layout can change between releases, and only an erase install applies the new one cleanly. Back up first (see below), restore after.</span>
         </label>
         <label>
           <input type="checkbox" id="apply-device-defaults">
           Apply device defaults
-          <span class="note erase-note">— sets this device model's recommended modules/settings. Auto-ticks with erase; untick to keep your current config when re-flashing a configured device.</span>
+          <span class="note erase-note">sets this device model's recommended modules/settings. Auto-ticks with erase; untick to keep your current config when re-flashing a configured device.</span>
         </label>
       </div>
 
@@ -204,7 +204,10 @@
       <strong>Back up a device's config first</strong>
       <p class="note" style="margin-top: 4px">
         Erasing or migrating a device wipes its WiFi credentials and module config, so
-        save it all first. One <code>.json</code> bundle holds everything; keep it
+        save it all first. Backup + restore is also the answer when an update misbehaves.
+        An on-device update that fails, or a device that comes back without its settings,
+        usually means the partition layout changed between releases (right now: 4&nbsp;MB
+        classic boards updating to v4.0+). Back up, erase install, restore. One <code>.json</code> bundle holds everything; keep it
         private, it contains the WiFi password. Two ways to make one:
       </p>
       <ul>

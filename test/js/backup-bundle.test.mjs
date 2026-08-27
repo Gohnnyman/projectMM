@@ -45,6 +45,16 @@ test("a truncated read fails the backup loudly instead of archiving it", async (
         /truncated/);
 });
 
+test("the HLS segment dir is transient encoder output, never backed up", async () => {
+    const t2 = {
+        "/": [{ name: ".hls", isDir: true, size: 0 }, { name: "ok.json", isDir: false, size: 2 }],
+        "/.hls": [{ name: "stream.m3u8", isDir: false, size: 5 }],
+    };
+    const { files, skipped } = await collectFiles(async d => t2[d] || [], async () => "ok");
+    assert.deepEqual(Object.keys(files), ["/ok.json"]);   // segments neither archived...
+    assert.deepEqual(skipped, []);                        // ...nor noise in the report
+});
+
 test("a mid-walk rewrite re-lists once and archives the fresh bytes", async () => {
     // The device's debounced autosave can rewrite a file between listing and read: the walk
     // re-lists and re-reads once, so the grown file is archived, not misread as non-text.

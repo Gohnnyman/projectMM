@@ -120,9 +120,18 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
             sink.appendf("%d", *static_cast<int8_t*>(c.ptr));
             return;
         case ControlType::Select:
+            // persistLabel: the option STRING, for enumerated option lists whose index is not
+            // stable across boots; the apply path matches it back by label. Otherwise the index.
+            if (c.persistLabel && c.aux) {
+                const uint8_t sel = *static_cast<uint8_t*>(c.ptr);
+                auto* options = reinterpret_cast<const char* const*>(c.aux);
+                if (sel < c.max) { sink.writeJsonString(options[sel]); return; }
+            }
+            sink.appendf("%u", *static_cast<uint8_t*>(c.ptr));
+            return;
         case ControlType::Palette:
-            // The selected index — the option strings / swatch colors go in the
-            // metadata block (writeControlMetadata) where the UI also wants them.
+            // The selected index: the swatch colors go in the metadata block
+            // (writeControlMetadata) where the UI also wants them.
             sink.appendf("%u", *static_cast<uint8_t*>(c.ptr));
             return;
         case ControlType::Progress:

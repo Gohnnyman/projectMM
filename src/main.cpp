@@ -50,6 +50,7 @@
 #include "light/effects/SpectrumEffect.h"
 #include "light/effects/FireworksEffect.h"
 #include "light/effects/BallpitEffect.h"
+#include "light/effects/FlyingToastersEffect.h"
 #include "light/effects/TruchetEffect.h"
 #include "light/effects/VectorBallsEffect.h"
 #include "light/effects/RaymarchEffect.h"
@@ -86,6 +87,7 @@
 #include "light/drivers/HueDriver.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/NdiDriver.h"
+#include "light/drivers/HlsDriver.h"
 #include "light/drivers/PreviewDriver.h"
 // LED drivers are compiled in per chip, gated on the SOC peripheral the driver
 // needs — so a board's binary carries only the drivers its silicon can actually
@@ -232,6 +234,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::DissolveEffect>("DissolveEffect", "light/effects.md#dissolve");
     mm::ModuleFactory::registerType<mm::SpectrumEffect>("SpectrumEffect", "light/effects.md#spectrum");
     mm::ModuleFactory::registerType<mm::FireworksEffect>("FireworksEffect", "light/effects.md#fireworks");
+    mm::ModuleFactory::registerType<mm::FlyingToastersEffect>("FlyingToastersEffect", "light/effects.md#flyingtoasters");
     mm::ModuleFactory::registerType<mm::BallpitEffect>("BallpitEffect", "light/effects.md#ballpit");
     mm::ModuleFactory::registerType<mm::TruchetEffect>("TruchetEffect", "light/effects.md#truchet");
     mm::ModuleFactory::registerType<mm::VectorBallsEffect>("VectorBallsEffect", "light/effects.md#vectorballs");
@@ -267,6 +270,8 @@ static void registerModuleTypes() {
     // `if constexpr` discarded branch must still PARSE, so the include above cannot be gated.
     if constexpr (mm::platform::hasNdi)
         mm::ModuleFactory::registerType<mm::NdiDriver>("NdiDriver", "light/drivers.md#ndi");
+    if constexpr (mm::platform::hasHls)
+        mm::ModuleFactory::registerType<mm::HlsDriver>("HlsDriver", "light/drivers.md#hls");
     // Same firmware gate as the include above.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::PanelCardDriver>("PanelCardDriver", "light/drivers.md#panelcard");

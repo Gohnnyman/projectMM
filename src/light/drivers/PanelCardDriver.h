@@ -142,9 +142,12 @@ public:
 
     /// Card firmware generation (index into kFirmwareOptions): 0 is v12-and-older, 1 is v13+.
     uint8_t firmware = 0;
-    /// Host NIC to send from ("eth0", "en0"). Ignored on ESP32, which has one MAC. Blank on a host
-    /// means capture-only: nothing reaches the wire and the status says so.
-    char interface[16] = {};
+    /// Host NIC to send from: a Select over the DETECTED interfaces (platform::rawInterfaces),
+    /// row 0 = capture-only. Persisted by LABEL, not index: a NIC keeps its identity across
+    /// reboots and Npcap reinstalls (the index-mismatch trap a Windows tester reported). Old
+    /// configs that stored a typed name load unchanged: the Select apply path matches labels.
+    /// Not built on ESP32, which has one MAC and nothing to pick.
+    uint8_t interfaceSel_ = 0;
     /// Send-rate ceiling (Hz); tick() rate-limits so a fast render tick doesn't saturate the link.
     uint8_t fps = 40;
 
@@ -153,11 +156,15 @@ public:
     void defineDriverControls() override {
         controls_.addSelect("format", format, kFormatOptions, kFormatCount);
         controls_.addSelect("firmware", firmware, kFirmwareOptions, kFirmwareCount);
-        controls_.addText("interface", interface, sizeof(interface));
-        // Desktop/Raspberry-Pi only: which host NIC to open a raw socket on. An ESP32 has one MAC
-        // and ignores it, so an empty box there would invite input that does nothing.
-        if constexpr (!platform::hasNamedNetInterfaces)
-            controls_.setHidden(controls_.count() - 1, true);
+        // Desktop/Raspberry-Pi only: which host NIC to open a raw socket on, re-enumerated on
+        // every rebuild so a hot-plugged NIC appears (the audio device Select's pattern).
+        if constexpr (platform::hasNamedNetInterfaces) {
+            const char* const* ifOptions = nullptr;
+            const size_t n = platform::rawInterfaces(&ifOptions);
+            controls_.addSelect("interface", interfaceSel_, ifOptions,
+                                static_cast<uint8_t>(n < 255 ? n : 255));
+            controls_.setPersistLabel(controls_.count() - 1);
+        }
         addWindowControls();   // start / count — which slice of the shared buffer this sink sends
         controls_.addControl("fps", fps, 1, 120);
     }
@@ -198,14 +205,17 @@ public:
         // to capture-only rather than leaving the last interface bound until release(). A bind
         // failure is a Warning rather than an Error: the driver still runs and still records frames,
         // which is what a test or a dry run wants — it just is not driving panels.
-        if (!platform::ethBindRawInterface(interface[0] ? interface : nullptr)) {
+        const char* ifName = nullptr;
+        if constexpr (platform::hasNamedNetInterfaces)
+            ifName = platform::rawInterfaceName(interfaceSel_);
+        if (!platform::ethBindRawInterface(ifName)) {
             // Two very different causes reach here and the fixes are opposite: a name that matches
             // no adapter (a typo, or an OS naming the NIC differently) versus the privilege raw L2
             // needs. Blaming root for a typo sends the reader to sudo, which cannot help. Name the
             // string we failed to match so the likelier cause is the one they read first.
-            if (interface[0]) {
+            if (ifName) {
                 std::snprintf(statusBuf_, sizeof(statusBuf_),
-                              "cannot open '%s' - no adapter matches, or needs root", interface);
+                              "cannot open '%s' - no adapter matches, or needs root", ifName);
                 setStatus(statusBuf_, Severity::Warning);
             } else {
                 setStatus("cannot open interface (needs root?)", Severity::Warning);
@@ -406,11 +416,12 @@ public:
             // status alone. Name the field in that case so the message carries its own fix; an ESP32
             // has one MAC and no such ambiguity, so it keeps the plain wording.
             if constexpr (platform::hasNamedNetInterfaces) {
-                if (interface[0] == '\0') {
-                    setStatus("no ethernet link - set 'interface' to a network adapter", Severity::Warning);
+                const char* boundName = platform::rawInterfaceName(interfaceSel_);
+                if (!boundName) {
+                    setStatus("no ethernet link - pick an 'interface' adapter", Severity::Warning);
                 } else {
                     std::snprintf(statusBuf_, sizeof(statusBuf_),
-                                  "no ethernet link - cable, or no adapter matches '%s'", interface);
+                                  "no ethernet link - cable, or no adapter matches '%s'", boundName);
                     setStatus(statusBuf_, Severity::Warning);
                 }
             } else {

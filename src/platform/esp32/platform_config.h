@@ -316,6 +316,10 @@ constexpr bool hasNamedNetInterfaces = false;
 // DDP instead — open protocols, our own implementations, send and receive. Desktop config: true.
 constexpr bool hasNdi = false;
 
+// hasHls: false on every ESP32: H.264 encoding needs a hardware encoder or a desktop-class
+// CPU, and there is no process to spawn. The HLS driver registers only where this is true.
+constexpr bool hasHls = false;
+
 #if defined(CONFIG_ETH_USE_SPI_ETHERNET) && !defined(CONFIG_ETH_USE_ESP32_EMAC)
 constexpr bool hasEthW5500 = true;
 #else

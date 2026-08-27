@@ -207,10 +207,14 @@ export function applyMigrations(files) {
 export async function collectFiles(fetchDir, fetchFile, root = "/") {
     const files = {};
     const skipped = [];
+    // Transient machine output is not config: the HLS segment dir is rewritten every second
+    // by the encoder and would only fill the report with skipped binaries.
+    const kTransientDirs = ["/.hls"];
     async function walk(dir) {
         const entries = await fetchDir(dir);
         for (let e of entries) {
             const p = (dir === "/" ? "" : dir) + "/" + e.name;
+            if (kTransientDirs.includes(p)) continue;
             if (e.isDir) {
                 await walk(p);
             } else {

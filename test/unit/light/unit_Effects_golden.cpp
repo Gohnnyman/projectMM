@@ -69,6 +69,7 @@
 #include "light/effects/DissolveEffect.h"
 #include "light/effects/FireworksEffect.h"
 #include "light/effects/BallpitEffect.h"
+#include "light/effects/FlyingToastersEffect.h"
 #include "light/effects/TruchetEffect.h"
 #include "light/effects/SineEffect.h"
 #include "light/effects/StarSkyEffect.h"
@@ -95,6 +96,7 @@ TEST_CASE("time-driven effects render byte-identical frames (migration guard)") 
     SUBCASE("two colour fields trade places pixel by pixel")        { DissolveEffect e;        golden::checkGolden("DissolveEffect", golden::renderHash(e, 16, 16, 1), 0xeb7810ca874152bcull); }
     SUBCASE("shells rise, stall at their apex and burst into falling sparks")       { FireworksEffect e;       golden::checkGolden("FireworksEffect", golden::renderHash(e, 16, 16, 1), 0x5ffbfcab94c90a94ull); }
     SUBCASE("balls fall, pile up and shove each other aside")         { BallpitEffect e;         golden::checkGolden("BallpitEffect", golden::renderHash(e, 16, 16, 1), 0xdd4efe1ccba2a4b2ull); }
+    SUBCASE("toasters flap and drift diagonally, toast trails along")  { FlyingToastersEffect e;  golden::checkGolden("FlyingToastersEffect", golden::renderHash(e, 16, 16, 1), 0xba9c78ae3373243dull); }
     SUBCASE("arc tiles join into endless winding paths")         { TruchetEffect e;         golden::checkGolden("TruchetEffect", golden::renderHash(e, 16, 16, 1), 0xdcb9b41536eff043ull); }
     SUBCASE("SineEffect")            { SineEffect e;            golden::checkGolden("SineEffect",            golden::renderHash(e, 16, 16, 1), 0xe96c6fd2da1b264bull); }
     SUBCASE("PlasmaEffect")          { PlasmaEffect e;          golden::checkGolden("PlasmaEffect",          golden::renderHash(e, 16, 16, 1), 0xfe821e9102099b93ull); }

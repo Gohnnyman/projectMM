@@ -15,6 +15,7 @@
 #endif
 #include <vector>   // HostBus frame buffers — the memory-backed parallel bus
 #include <thread>
+#include <deque>     // encoder frame queue between the render tick and the writer thread
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
@@ -36,8 +37,13 @@
 #include <netdb.h>      // getaddrinfo — hostname resolution for TcpConnection::connect
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/wait.h>   // waitpid: reaping the spawned ffmpeg (encoderRunning/Stop)
+#include <spawn.h>      // posix_spawn: fd-hygienic, thread-safe child creation (encoderStart)
+extern char** environ;   // posix_spawnp wants the environment explicitly
+#include <csignal>      // SIGPIPE ignore + SIGKILL: the encoder pipe's failure surface
 #include <sys/mman.h>   // mmap/munmap for allocExec (executable pages)
 #include <net/if.h>     // if_nametoindex / ifreq — naming the NIC for raw L2 send
+#include <ifaddrs.h>    // getifaddrs: the raw-interface Select enumerates the host NICs
 #ifdef __linux__
 #include <netpacket/packet.h>   // sockaddr_ll — AF_PACKET raw frames (ethSendRaw)
 #include <net/ethernet.h>       // ETH_P_ALL
@@ -2282,5 +2288,365 @@ const uint8_t* ndiTestFrameData(size_t i) {
 }
 const char* ndiTestSenderName() { return ndiCapturedName_.c_str(); }
 void ndiTestClearFrames() { ndiCaptured_.clear(); }
+
+
+// --- HLS encoder (ffmpeg pipe) -----------------------------------------------------------------
+//
+// One spawned ffmpeg, stdin piped, argv from the driver (platform.h owns the contract). A
+// platform writer thread does the BLOCKING pipe writes on every OS while callers only enqueue
+// whole frames into a fixed reuse ring, so the render tick never touches the pipe and no
+// per-OS non-blocking trickery is needed. POSIX spawns via posix_spawn with default-CLOEXEC;
+// Windows via CreateProcess. Test seam mirrors NdiTestMode so CI never needs an ffmpeg.
+
+namespace {
+// Threading model: encoderStart/Stop/Running are LIFECYCLE calls, made only from the render
+// task (prepare/release/tick1s), so they need no lock among themselves. encoderWrite crosses
+// threads (the encode worker) and the writer thread consumes: those three share encMutex_,
+// which guards only the queue and the dead/stop flags, never a blocking write.
+std::mutex encMutex_;
+std::condition_variable encCv_;
+// A fixed ring of REUSED frame slots, whole frames only (tearing is structurally out): the
+// enqueue path must not heap-allocate per frame (assign() reuses each slot's capacity after
+// the first lap), and 3 slots of burst absorption is the drop-newest boundary.
+constexpr size_t kEncQueueMax = 3;
+std::vector<uint8_t> encSlots_[kEncQueueMax];
+size_t encHead_ = 0;    // slot the writer consumes next
+size_t encCount_ = 0;   // filled slots
+std::thread encWriter_;
+bool encWriterStop_ = false;
+bool encWriterDead_ = false;                  // the writer saw EPIPE/error: the process is gone
+EncoderTestMode encTestMode_ = EncoderTestMode::Off;
+constexpr int kEncTestWriteNormal = 1;   // sentinel: record normally (real results are 0/-1/len)
+int encTestWriteResult_ = kEncTestWriteNormal;
+std::vector<std::vector<uint8_t>> encCaptured_;
+std::string encCapturedArgs_;
+
+#ifdef _WIN32
+HANDLE encProcess_ = nullptr;
+HANDLE encStdin_ = nullptr;
+#else
+pid_t encPid_ = -1;
+int encStdin_ = -1;
+#endif
+}  // namespace
+
+
+// Stop the child and the writer, deadlock-free: signal stop, TERM the child FIRST (a writer
+// blocked in write() only reliably unblocks when the read side dies: EPIPE), join, then close
+// stdin and reap with a short grace before SIGKILL. Called only from the render task.
+static void stopEncoderProcess() {
+    if (encTestMode_ != EncoderTestMode::Off) return;
+    {
+        std::lock_guard<std::mutex> lk(encMutex_);
+        encWriterStop_ = true;
+        // The ring counters are NOT reset here: the writer may be mid-write on the head slot,
+        // and a producer racing this stop must keep seeing that slot as occupied. encoderStart
+        // resets the ring under the lock after the join, when nothing can touch it.
+        encCv_.notify_all();
+    }
+#ifdef _WIN32
+    if (encProcess_) TerminateProcess(encProcess_, 0);
+    if (encWriter_.joinable()) encWriter_.join();
+    if (encStdin_) { CloseHandle(encStdin_); encStdin_ = nullptr; }
+    if (encProcess_) { WaitForSingleObject(encProcess_, 500); CloseHandle(encProcess_); encProcess_ = nullptr; }
+#else
+    if (encPid_ >= 0) ::kill(encPid_, SIGTERM);
+    if (encWriter_.joinable()) encWriter_.join();
+    if (encStdin_ >= 0) { ::close(encStdin_); encStdin_ = -1; }
+    if (encPid_ >= 0) {
+        for (int i = 0; i < 20; i++) {                   // ~200 ms of graceful exit
+            if (::waitpid(encPid_, nullptr, WNOHANG) == encPid_) { encPid_ = -1; break; }
+            ::usleep(10 * 1000);
+        }
+        if (encPid_ >= 0) { ::kill(encPid_, SIGKILL); ::waitpid(encPid_, nullptr, 0); encPid_ = -1; }
+    }
+#endif
+}
+
+bool encoderStart(const char* const argv[]) {
+    stopEncoderProcess();
+    if (encTestMode_ != EncoderTestMode::Off) {
+        encCapturedArgs_.clear();
+        for (const char* const* a = argv; *a; a++) {
+            if (!encCapturedArgs_.empty()) encCapturedArgs_ += ' ';
+            encCapturedArgs_ += *a;
+        }
+        return encTestMode_ == EncoderTestMode::Record;
+    }
+#ifdef _WIN32
+    // Anonymous pipe, our end non-inheritable; ffmpeg resolved via PATH by CreateProcess.
+    SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+    HANDLE readEnd = nullptr, writeEnd = nullptr;
+    if (!CreatePipe(&readEnd, &writeEnd, &sa, 4 * 1024 * 1024)) return false;
+    SetHandleInformation(writeEnd, HANDLE_FLAG_INHERIT, 0);
+    std::string cmd;
+    for (const char* const* a = argv; *a; a++) {
+        if (!cmd.empty()) cmd += ' ';
+        cmd += '"'; cmd += *a; cmd += '"';
+    }
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = readEnd;
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    PROCESS_INFORMATION pi{};
+    const BOOL ok = CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, TRUE,
+                                   CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    CloseHandle(readEnd);
+    if (!ok) { CloseHandle(writeEnd); return false; }
+    CloseHandle(pi.hThread);
+    encProcess_ = pi.hProcess;
+    encStdin_ = writeEnd;
+#else
+    // posix_spawn, not fork/exec: fork in a threaded process can deadlock on the allocator
+    // lock before exec, and a plain exec would leak every parent fd (the HTTP listen socket,
+    // the Art-Net/DDP ports) into a child that outlives a restart. Everything except the
+    // dup2'd stdin is closed in the child: CLOEXEC_DEFAULT on macOS, closefrom on glibc.
+    int fds[2];
+    if (::pipe(fds) != 0) return false;
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, fds[0], 0);
+    pid_t pid = -1;
+    int rc;
+#ifdef __APPLE__
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
+    rc = ::posix_spawnp(&pid, argv[0], &fa, &attr, const_cast<char* const*>(argv), environ);
+    posix_spawnattr_destroy(&attr);
+#else
+    posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+    rc = ::posix_spawnp(&pid, argv[0], &fa, nullptr, const_cast<char* const*>(argv), environ);
+#endif
+    posix_spawn_file_actions_destroy(&fa);
+    ::close(fds[0]);
+    if (rc != 0) { ::close(fds[1]); return false; }
+    ::signal(SIGPIPE, SIG_IGN);             // a dead ffmpeg surfaces as EPIPE, not a signal
+    encPid_ = pid;
+    encStdin_ = fds[1];
+#endif
+    // The writer thread does the BLOCKING writes: the render tick only ever enqueues, so an
+    // encoder that stops reading for a while (scheduler starvation under a free-running render
+    // loop stalled it >250 ms on the bench) costs queued-then-dropped frames, never a stalled
+    // tick, never a torn frame, and never a false death.
+    {
+        std::lock_guard<std::mutex> lk(encMutex_);   // producers may race this restart
+        encWriterStop_ = false;
+        encWriterDead_ = false;
+        encHead_ = 0;
+        encCount_ = 0;
+    }
+    encWriter_ = std::thread([] {
+        for (;;) {
+            const std::vector<uint8_t>* frame = nullptr;
+            {
+                std::unique_lock<std::mutex> lk(encMutex_);
+                encCv_.wait(lk, [] { return encWriterStop_ || encCount_ > 0; });
+                if (encWriterStop_) return;
+                frame = &encSlots_[encHead_];   // the writer owns the head slot until it advances
+            }
+            size_t off = 0;
+            while (off < frame->size()) {
+#ifdef _WIN32
+                DWORD wrote = 0;
+                if (!WriteFile(encStdin_, frame->data() + off,
+                               static_cast<DWORD>(frame->size() - off), &wrote, nullptr)) {
+                    std::lock_guard<std::mutex> lk(encMutex_);
+                    encWriterDead_ = true;
+                    return;
+                }
+                off += wrote;
+#else
+                const ssize_t n = ::write(encStdin_, frame->data() + off, frame->size() - off);
+                if (n < 0 && errno == EINTR) continue;
+                if (n <= 0) {
+                    std::printf("encoder: pipe closed at %zu/%zu bytes\n", off, frame->size());
+                    std::lock_guard<std::mutex> lk(encMutex_);
+                    encWriterDead_ = true;   // EPIPE etc.: the process is gone
+                    return;
+                }
+                off += static_cast<size_t>(n);
+#endif
+            }
+            {
+                std::lock_guard<std::mutex> lk(encMutex_);
+                encHead_ = (encHead_ + 1) % kEncQueueMax;
+                encCount_--;
+            }
+        }
+    });
+    return true;
+}
+
+int encoderWrite(const uint8_t* data, size_t len) {
+    std::lock_guard<std::mutex> lock(encMutex_);
+    if (encTestMode_ == EncoderTestMode::Record) {
+        if (encTestWriteResult_ != kEncTestWriteNormal) return encTestWriteResult_;
+        encCaptured_.emplace_back(data, data + len);
+        return static_cast<int>(len);
+    }
+    if (encWriterDead_) return -1;
+    if (encCount_ >= kEncQueueMax) return 0;   // encoder behind: drop-newest, stay live
+    // assign() into the reused slot: after the first lap each slot holds its capacity, so the
+    // steady-state hot path copies without allocating.
+    encSlots_[(encHead_ + encCount_) % kEncQueueMax].assign(data, data + len);
+    encCount_++;
+    encCv_.notify_one();
+    return static_cast<int>(len);
+}
+
+bool encoderRunning() {
+    if (encTestMode_ != EncoderTestMode::Off) return encTestMode_ == EncoderTestMode::Record;
+    {
+        std::lock_guard<std::mutex> lock(encMutex_);
+        if (encWriterDead_) return false;
+    }
+#ifdef _WIN32
+    if (!encProcess_) return false;
+    return WaitForSingleObject(encProcess_, 0) == WAIT_TIMEOUT;
+#else
+    if (encPid_ < 0) return false;
+    int status = 0;
+    const pid_t r = ::waitpid(encPid_, &status, WNOHANG);
+    if (r == encPid_) {
+        std::printf("encoder: process exited (status %d)\n", status);
+        encPid_ = -1;
+        return false;
+    }
+    if (r < 0 && errno == ECHILD) { encPid_ = -1; return false; }   // reaped elsewhere: a stale
+                                                                    // pid must never be SIGKILLed
+    return true;   // running, or EINTR (a signal is not an exit)
+#endif
+}
+
+void encoderStop() {
+    stopEncoderProcess();
+}
+
+void setTestEncoderMode(EncoderTestMode mode) {
+    encTestMode_ = mode;
+    encTestWriteResult_ = kEncTestWriteNormal;
+    if (mode == EncoderTestMode::Off) { encCaptured_.clear(); encCapturedArgs_.clear(); }
+}
+void setTestEncoderWriteResult(int result) { encTestWriteResult_ = result; }
+size_t encoderTestFrameCount() { return encCaptured_.size(); }
+size_t encoderTestFrameSize(size_t i) { return i < encCaptured_.size() ? encCaptured_[i].size() : 0; }
+const uint8_t* encoderTestFrameData(size_t i) {
+    return i < encCaptured_.size() ? encCaptured_[i].data() : nullptr;
+}
+const char* encoderTestArgs() { return encCapturedArgs_.c_str(); }
+void encoderTestClearFrames() { encCaptured_.clear(); }
+
+
+// --- Raw-interface enumeration (the panel-card `interface` Select) --------------------------
+//
+// Labels for humans, bind names for ethBindRawInterface, entry 0 always the capture-only row.
+// Windows: pcap_findalldevs, labeled by the adapter's friendly description (the pcap device
+// name is a GUID nobody recognizes); POSIX: getifaddrs, where the name IS the label.
+
+namespace {
+// FIXED storage, refilled in place: a Select's aux keeps pointing at these arrays across
+// re-enumerations, so two panel-card instances rebuilding in one sweep can never dangle each
+// other's option pointers (rows update under a stale aux, which is harmless; freed rows would
+// not be). 16 NICs + the capture row cover any sane host.
+constexpr size_t kRawIfMax = 17;
+char rawIfLabels_[kRawIfMax][64];
+char rawIfNames_[kRawIfMax][64];
+const char* rawIfOptions_[kRawIfMax];
+size_t rawIfCount_ = 0;
+std::vector<std::string> rawIfTest_;   // test seam: label == bind name
+
+void rawIfPush(const char* label, const char* name) {
+    if (rawIfCount_ >= kRawIfMax) return;
+    // 63 not 64: the Select apply path rejects labels that FILL its 64-byte buffer as
+    // overlong, so a row must persist at <= 62 chars or the pick dies on reboot.
+    std::snprintf(rawIfLabels_[rawIfCount_], 63, "%s", label);
+    std::snprintf(rawIfNames_[rawIfCount_], sizeof(rawIfNames_[0]), "%s", name);
+    rawIfCount_++;
+}
+}  // namespace
+
+void setTestRawInterfaces(const char* const* names, size_t count) {
+    rawIfTest_.assign(names, names + count);
+}
+
+size_t rawInterfaces(const char* const** optionsOut) {
+    rawIfCount_ = 0;
+    rawIfPush("none (capture only)", "");
+    if (!rawIfTest_.empty()) {
+        for (const auto& n : rawIfTest_) rawIfPush(n.c_str(), n.c_str());
+    } else {
+#ifdef _WIN32
+        if (wpcapLoad()) {
+            PcapIf* devs = nullptr;
+            char err[256] = {};
+            if (pcapFindAllDevs_(&devs, err) == 0 && devs) {
+                MIB_IF_TABLE2* table = nullptr;
+                if (::GetIfTable2(&table) != NO_ERROR) table = nullptr;
+                for (const PcapIf* d = devs; d; d = d->next) {
+                    char desc[256] = {};
+                    const char* label = nullptr;
+                    if (winDescForPcapName(table, d->name, desc, sizeof(desc))) label = desc;
+                    else if (d->description && d->description[0]) label = d->description;
+                    else label = d->name;   // pcap reports no description for some adapters
+                    char row[64];
+                    std::snprintf(row, sizeof(row), "%s", label);
+                    // Two identical adapters would collide as Select rows: suffix the device
+                    // name's tail so each row stays a distinct, matchable label.
+                    for (size_t i = 1; i < rawIfCount_; i++) {
+                        if (std::strcmp(rawIfLabels_[i], row) == 0) {
+                            const char* tail = d->name + (std::strlen(d->name) > 8 ? std::strlen(d->name) - 8 : 0);
+                            std::snprintf(row, sizeof(row), "%s (%s)", label, tail);
+                            break;
+                        }
+                    }
+                    rawIfPush(row, d->name);
+                }
+                if (table) ::FreeMibTable(table);
+                pcapFreeAllDevs_(devs);
+            }
+        }
+#else
+        // The OS's virtual plumbing can never reach a panel card and only buries the real
+        // NICs: loopback plus the well-known virtual prefixes (macOS: VPN tunnels, the
+        // AirDrop/AirPlay radios, Apple-silicon debug, bridges; Linux: container veths).
+        static constexpr const char* kVirtualPrefixes[] = {
+            "lo", "utun", "awdl", "llw", "anpi", "bridge", "gif", "stf", "ap", "pktap",
+            "veth", "docker", "br-", "virbr",
+        };
+        auto isVirtual = [](const char* n) {
+            for (const char* p : kVirtualPrefixes) {
+                const size_t l = std::strlen(p);
+                if (std::strncmp(n, p, l) == 0 && (n[l] == 0 || (n[l] >= '0' && n[l] <= '9')))
+                    return true;
+            }
+            return false;
+        };
+        ifaddrs* addrs = nullptr;
+        if (::getifaddrs(&addrs) == 0 && addrs) {
+            for (const ifaddrs* a = addrs; a; a = a->ifa_next) {
+                if (!a->ifa_name || !(a->ifa_flags & IFF_UP)) continue;
+                if ((a->ifa_flags & IFF_LOOPBACK) || isVirtual(a->ifa_name)) continue;
+                bool seen = false;
+                for (size_t i = 1; i < rawIfCount_; i++)
+                    if (std::strcmp(rawIfNames_[i], a->ifa_name) == 0) { seen = true; break; }
+                if (seen) continue;   // getifaddrs lists one row per address family
+                rawIfPush(a->ifa_name, a->ifa_name);
+            }
+            ::freeifaddrs(addrs);
+        }
+#endif
+    }
+    for (size_t i = 0; i < rawIfCount_; i++) rawIfOptions_[i] = rawIfLabels_[i];
+    if (optionsOut) *optionsOut = rawIfOptions_;
+    return rawIfCount_;
+}
+
+const char* rawInterfaceName(size_t i) {
+    if (i == 0 || i >= rawIfCount_) return nullptr;   // row 0: capture only
+    return rawIfNames_[i];
+}
 
 } // namespace mm::platform

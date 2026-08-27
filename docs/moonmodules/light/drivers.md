@@ -100,7 +100,7 @@ The board renders and sends: effects, layers and MoonLive run on the device, so 
 - `format`: the card's wire format (ColorLight 5A-75).
 - `firmware`: the card's firmware generation, `v12 and older` (default) or `v13 and newer`. v13 and newer act on the *second* copy of the brightness and sync frames, so both are sent twice; v12 and older act on the first, and take a second sync as another latch. Set to `v13 and newer` on a downgraded card, the wall updates once every few seconds. Reading and changing a card's version: [the tutorial](../../tutorials/panel-cards.md#7-card-firmware-and-the-flicker).
 - **No geometry controls**: the wall comes from the [Layout](layouts.md). A `PanelsLayout` already states how many panels there are, their size, wiring order and snaking; this driver reads the finished picture and cuts it into card rows. A row wider than 497 pixels goes out as several packets.
-- `interface`: which NIC to send from on desktop/Raspberry Pi. The kernel name on Linux/macOS (`eth0`, `en0`), or any distinctive part of the adapter description on Windows (`Realtek USB`). **Ignored on ESP32**, which has one MAC. Raw sending is privileged: root or `CAP_NET_RAW` on Linux, BPF access on macOS, and [Npcap](https://npcap.com/) or WinPcap on Windows; without it the driver records frames instead and says so. Step-by-step per OS: [Driving LED panels with a receiving card](../../tutorials/panel-cards.md).
+- `interface`: which NIC to send from on desktop/Raspberry Pi, a dropdown of the DETECTED adapters (friendly names on Windows via Npcap, kernel names on Linux/macOS), re-listed on every control change so a hot-plugged NIC appears. The choice is remembered by adapter NAME, never by index, so it survives reboots and Npcap reinstalls. `none (capture only)` records frames without sending. **Not shown on ESP32**, which has one MAC. Raw sending is privileged: root or `CAP_NET_RAW` on Linux, BPF access on macOS, and [Npcap](https://npcap.com/) or WinPcap on Windows; without it the driver records frames instead and says so. Step-by-step per OS: [Driving LED panels with a receiving card](../../tutorials/panel-cards.md).
 - `fps`: frame-rate limit (default 40, 1 to 120).
 
 **These cards need a 1 Gbit link.** Not for bandwidth — a 256×256 panel at 40 fps is only ~65 Mbit/s — but for wire time: the cards have no buffering and latch on the sync frame, so a whole frame must arrive inside the inter-frame window. At 100 Mbit the same bytes take ten times as long, which breaks that timing and shows up as tearing or wrong rows rather than as an error. The driver reads the negotiated speed and warns, but still sends: a small panel may be fine, and a measurement beats a refusal.
@@ -170,6 +170,25 @@ The grid's `physicalWidth` × `physicalHeight` becomes the frame, one light per 
 Origin: projectMM, against NewTek/Vizrt's documented NDI C API
 
 Detail: [technical](moxygen/NdiDriver.md)
+
+<a id="hls"></a>
+
+### HLS 🖥️ · video out
+
+Streams the layer as **H.264 over HLS** from the device's own HTTP server: open the `url` the card shows in VLC, a browser, or hand it to an Apple TV (VLC for tvOS, or open it in Safari and AirPlay the video, the Apple TV then pulls the stream itself). Where NDI feeds production tools, this feeds anything that plays video.
+
+**Pixel-exact**: the frame IS the grid (`physicalWidth` x `physicalHeight`, one light per pixel, output correction applied), no scaling anywhere; the display letterboxes. Latency is HLS's own: expect **2-5 seconds** glass-to-glass, so this is for watching, not for live-control feedback. Large grids trade framerate, the render loop is single-threaded: 512x512 streams smoothly, TV-native resolutions do not yet.
+
+**Desktop only**, and **you install ffmpeg yourself** (any 5.x+, on PATH), projectMM never ships or links an encoder: `brew install ffmpeg` (macOS), `winget install ffmpeg` (Windows), `sudo apt install ffmpeg` (Debian/Ubuntu/Raspberry Pi OS). Without it the driver reports `ffmpeg not found` and nothing else changes. Segments live in the transient `/.hls/` directory, served at `/hls/`, excluded from config backups.
+
+- `targetFps` — encode-rate ceiling (default 30, 1–120); the render loop runs faster and extra frames are not encoded.
+- `bitrate` — H.264 target in kbit/s (default 8000).
+- `encoder` — the ffmpeg video encoder (Select; default `libx264`, which practically every ffmpeg distribution ships — a build without `--enable-libx264` is the exception). The hardware entries offload the encode entirely and are worth picking on large grids: `h264_videotoolbox` on a Mac (~10% CPU for a 1024x1024 stream on Apple silicon), `h264_v4l2m2m` on a Raspberry Pi, `h264_nvenc` on NVIDIA. An encoder your ffmpeg lacks starts and exits immediately; the status shows `encoder exited - check ffmpeg`.
+- read-only — `url` (the playable address), and the status line reports streaming state, dropped frames, or why the encoder stopped.
+
+Origin: projectMM; encoding by the user's ffmpeg (HLS is Apple's RFC 8216)
+
+Detail: [technical](moxygen/HlsDriver.md)
 
 <a id="preview-details"></a>
 

@@ -107,6 +107,11 @@ constexpr bool hasNamedNetInterfaces = true;
 // actually run. The runtime itself is loaded on demand and is NOT redistributed (see
 // platform_desktop.cpp), so this flag says "the platform supports it", not "it is installed".
 constexpr bool hasNdi = true;
+
+// hasHls: the host can stream its rendered output as H.264/HLS by piping raw frames to the
+// ffmpeg found on PATH (a runtime dependency of the user's, like the NDI runtime and Npcap).
+// True on desktop and the Pi; the encoder process seam lives in the platform layer.
+constexpr bool hasHls = true;
 // Some-IP-stack flag (WiFi OR Ethernet) — mirrors the esp32 config so shared code
 // (WLED audio sync, UDP interop) gates on "has network" uniformly. True on desktop
 // via the WiFi stubs (UdpSocket has a desktop implementation).
