@@ -513,6 +513,53 @@ const char* ndiTestSenderName();
 void ndiTestClearFrames();
 #endif
 
+// --- HLS video output (ffmpeg pipe) -----------------------------------------------------------
+//
+// projectMM as an HLS source: the rendered frame, pixel-exact, reaches a TV, VLC or a browser as
+// H.264 over HLS. Gated by `hasHls` (desktop true, ESP32 false: no hardware encoder there).
+//
+// **ffmpeg is the USER'S, never ours.** One general encode path for every desktop OS and the Pi:
+// the platform spawns the `ffmpeg` found on PATH and pipes raw frames to its stdin; nothing is
+// vendored or linked, the same runtime-dependency arrangement as Npcap and NDI. A machine
+// without ffmpeg builds and runs identically; encoderStart() fails and the driver says so.
+
+// Spawn the encoder process with a NUL-terminated argv (argv[0] = "ffmpeg", resolved via PATH),
+// its stdin piped from us in NON-BLOCKING mode. Replaces any encoder already running. Returns
+// false when ffmpeg is absent or the spawn fails (not an error: the driver reports a status).
+bool encoderStart(const char* const argv[]);
+
+// Write one whole frame to the encoder's stdin. Returns len when fully written, 0 when the pipe
+// refuses the first byte (the caller DROPS the frame), and -1 when the process is gone OR wedged
+// past a ~50 ms completion budget (the caller restarts it): a frame is all-or-complete, never
+// torn, so a mid-frame stall cannot be abandoned and is bounded by the budget instead.
+// Windows deviation, POSIX-only guarantee for now: WriteFile on the anonymous pipe blocks until
+// its 4 MB buffer drains (overlapped rework is backlogged to land with the Windows tester).
+int encoderWrite(const uint8_t* data, size_t len);
+
+// Is the spawned encoder still alive? Reaps the child when it exited.
+bool encoderRunning();
+
+// Stop the encoder: close stdin (lets ffmpeg finalize the playlist), brief wait, then kill.
+// Safe with none running, so a driver's release() need not track state.
+void encoderStop();
+
+#ifndef ESP_PLATFORM
+// Test seam, mirroring NdiTestMode: CI has no ffmpeg and a test must not need one. Record mode
+// makes encoderStart() a no-op recorder of its argv and encoderWrite() a frame recorder;
+// ForceMissing makes encoderStart() fail, for the not-installed path.
+enum class EncoderTestMode : uint8_t { Off, Record, ForceMissing };
+void setTestEncoderMode(EncoderTestMode mode);
+// Force encoderWrite's next results in Record mode (0 = would-block, -1 = dead), so the driver's
+// drop counter and restart path are pinnable; any other value records normally again.
+void setTestEncoderWriteResult(int result);
+size_t encoderTestFrameCount();
+size_t encoderTestFrameSize(size_t i);
+const uint8_t* encoderTestFrameData(size_t i);
+// The argv encoderStart was called with, joined by single spaces (for pinning the arg builder).
+const char* encoderTestArgs();
+void encoderTestClearFrames();
+#endif
+
 // Desktop-only test seam: the frames ethSendRaw() captured, so a host test can pin what the driver
 // put on the wire. Active whenever no raw interface is bound, which is the default and the only
 // mode an unprivileged test process ever sees. Count resets with ethTestClearFrames(); a frame

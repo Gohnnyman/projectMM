@@ -86,6 +86,7 @@
 #include "light/drivers/HueDriver.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/NdiDriver.h"
+#include "light/drivers/HlsDriver.h"
 #include "light/drivers/PreviewDriver.h"
 // LED drivers are compiled in per chip, gated on the SOC peripheral the driver
 // needs — so a board's binary carries only the drivers its silicon can actually
@@ -267,6 +268,8 @@ static void registerModuleTypes() {
     // `if constexpr` discarded branch must still PARSE, so the include above cannot be gated.
     if constexpr (mm::platform::hasNdi)
         mm::ModuleFactory::registerType<mm::NdiDriver>("NdiDriver", "light/drivers.md#ndi");
+    if constexpr (mm::platform::hasHls)
+        mm::ModuleFactory::registerType<mm::HlsDriver>("HlsDriver", "light/drivers.md#hls");
     // Same firmware gate as the include above.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::PanelCardDriver>("PanelCardDriver", "light/drivers.md#panelcard");

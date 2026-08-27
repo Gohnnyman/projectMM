@@ -36,6 +36,10 @@
 #include <netdb.h>      // getaddrinfo — hostname resolution for TcpConnection::connect
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/wait.h>   // waitpid: reaping the spawned ffmpeg (encoderRunning/Stop)
+#include <spawn.h>      // posix_spawn: fd-hygienic, thread-safe child creation (encoderStart)
+extern char** environ;   // posix_spawnp wants the environment explicitly
+#include <csignal>      // SIGPIPE ignore + SIGKILL: the encoder pipe's failure surface
 #include <sys/mman.h>   // mmap/munmap for allocExec (executable pages)
 #include <net/if.h>     // if_nametoindex / ifreq — naming the NIC for raw L2 send
 #ifdef __linux__
@@ -2282,5 +2286,192 @@ const uint8_t* ndiTestFrameData(size_t i) {
 }
 const char* ndiTestSenderName() { return ndiCapturedName_.c_str(); }
 void ndiTestClearFrames() { ndiCaptured_.clear(); }
+
+
+// --- HLS encoder (ffmpeg pipe) -----------------------------------------------------------------
+//
+// One spawned ffmpeg, stdin piped, argv from the driver (platform.h owns the contract).
+// POSIX: posix_spawn + O_NONBLOCK write end with a wall-clock completion budget. Windows
+// DEVIATION, stated honestly: WriteFile on the anonymous pipe BLOCKS until the buffer drains,
+// so the non-blocking guarantee is POSIX-only for now; the 4 MB buffer absorbs practical grid
+// sizes and the overlapped-pipe rework is a named backlog item to land with the Windows tester.
+// Test seam mirrors NdiTestMode so CI never needs an ffmpeg.
+
+namespace {
+EncoderTestMode encTestMode_ = EncoderTestMode::Off;
+constexpr int kEncTestWriteNormal = 1;   // sentinel: record normally (real results are 0/-1/len)
+int encTestWriteResult_ = kEncTestWriteNormal;
+std::vector<std::vector<uint8_t>> encCaptured_;
+std::string encCapturedArgs_;
+
+#ifdef _WIN32
+HANDLE encProcess_ = nullptr;
+HANDLE encStdin_ = nullptr;
+#else
+pid_t encPid_ = -1;
+int encStdin_ = -1;
+#endif
+}  // namespace
+
+bool encoderStart(const char* const argv[]) {
+    encoderStop();
+    if (encTestMode_ != EncoderTestMode::Off) {
+        encCapturedArgs_.clear();
+        for (const char* const* a = argv; *a; a++) {
+            if (!encCapturedArgs_.empty()) encCapturedArgs_ += ' ';
+            encCapturedArgs_ += *a;
+        }
+        return encTestMode_ == EncoderTestMode::Record;
+    }
+#ifdef _WIN32
+    // Anonymous pipe, our end non-inheritable; ffmpeg resolved via PATH by CreateProcess.
+    SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+    HANDLE readEnd = nullptr, writeEnd = nullptr;
+    if (!CreatePipe(&readEnd, &writeEnd, &sa, 4 * 1024 * 1024)) return false;
+    SetHandleInformation(writeEnd, HANDLE_FLAG_INHERIT, 0);
+    std::string cmd;
+    for (const char* const* a = argv; *a; a++) {
+        if (!cmd.empty()) cmd += ' ';
+        cmd += '"'; cmd += *a; cmd += '"';
+    }
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = readEnd;
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    PROCESS_INFORMATION pi{};
+    const BOOL ok = CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, TRUE,
+                                   CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    CloseHandle(readEnd);
+    if (!ok) { CloseHandle(writeEnd); return false; }
+    CloseHandle(pi.hThread);
+    encProcess_ = pi.hProcess;
+    encStdin_ = writeEnd;
+    return true;
+#else
+    // posix_spawn, not fork/exec: fork in a threaded process can deadlock on the allocator
+    // lock before exec, and a plain exec would leak every parent fd (the HTTP listen socket,
+    // the Art-Net/DDP ports) into a child that outlives a restart. Everything except the
+    // dup2'd stdin is closed in the child: CLOEXEC_DEFAULT on macOS, closefrom on glibc.
+    int fds[2];
+    if (::pipe(fds) != 0) return false;
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, fds[0], 0);
+    pid_t pid = -1;
+    int rc;
+#ifdef __APPLE__
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
+    rc = ::posix_spawnp(&pid, argv[0], &fa, &attr, const_cast<char* const*>(argv), environ);
+    posix_spawnattr_destroy(&attr);
+#else
+    posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+    rc = ::posix_spawnp(&pid, argv[0], &fa, nullptr, const_cast<char* const*>(argv), environ);
+#endif
+    posix_spawn_file_actions_destroy(&fa);
+    ::close(fds[0]);
+    if (rc != 0) { ::close(fds[1]); return false; }
+    ::fcntl(fds[1], F_SETFL, O_NONBLOCK);   // the render tick must never wait on the encoder
+#ifdef __linux__
+    ::fcntl(fds[1], F_SETPIPE_SZ, 1024 * 1024);   // a whole frame fits more often; best-effort
+#endif
+    ::signal(SIGPIPE, SIG_IGN);             // a dead ffmpeg surfaces as EPIPE, not a signal
+    encPid_ = pid;
+    encStdin_ = fds[1];
+    return true;
+#endif
+}
+
+int encoderWrite(const uint8_t* data, size_t len) {
+    if (encTestMode_ == EncoderTestMode::Record) {
+        if (encTestWriteResult_ != kEncTestWriteNormal) return encTestWriteResult_;
+        encCaptured_.emplace_back(data, data + len);
+        return static_cast<int>(len);
+    }
+#ifdef _WIN32
+    if (!encStdin_) return -1;
+    DWORD wrote = 0;
+    if (!WriteFile(encStdin_, data, static_cast<DWORD>(len), &wrote, nullptr)) return -1;
+    return static_cast<int>(wrote);
+#else
+    if (encStdin_ < 0) return -1;
+    // A frame is bigger than the pipe (64 KB default), so every write completes across several
+    // EAGAIN waits while ffmpeg drains. Alignment forbids abandoning mid-frame (the raw stream
+    // would tear), so completion gets a WALL-CLOCK BUDGET instead: a healthy ffmpeg drains a
+    // frame in single-digit ms, and one that cannot inside the budget is wedged, reported as -1
+    // so the caller restarts it. A refusal before the first byte is the clean would-block drop.
+    const uint32_t deadline = millis() + 50;
+    size_t off = 0;
+    while (off < len) {
+        const ssize_t n = ::write(encStdin_, data + off, len - off);
+        if (n > 0) { off += static_cast<size_t>(n); continue; }
+        if (n < 0 && errno == EINTR) continue;   // a signal is not a dead process
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            if (off == 0) return 0;
+            if (static_cast<int32_t>(millis() - deadline) >= 0) return -1;   // wedged
+            ::usleep(500);
+            continue;
+        }
+        return -1;   // EPIPE etc.: the process is gone
+    }
+    return static_cast<int>(len);
+#endif
+}
+
+bool encoderRunning() {
+    if (encTestMode_ != EncoderTestMode::Off) return encTestMode_ == EncoderTestMode::Record;
+#ifdef _WIN32
+    if (!encProcess_) return false;
+    return WaitForSingleObject(encProcess_, 0) == WAIT_TIMEOUT;
+#else
+    if (encPid_ < 0) return false;
+    int status = 0;
+    const pid_t r = ::waitpid(encPid_, &status, WNOHANG);
+    if (r == encPid_) { encPid_ = -1; return false; }   // exited: reaped
+    if (r < 0)        { encPid_ = -1; return false; }   // ECHILD: already reaped elsewhere; a
+                                                        // stale pid must never be SIGKILLed later
+    return true;
+#endif
+}
+
+void encoderStop() {
+    if (encTestMode_ != EncoderTestMode::Off) return;
+#ifdef _WIN32
+    if (encStdin_) { CloseHandle(encStdin_); encStdin_ = nullptr; }
+    if (encProcess_) {
+        if (WaitForSingleObject(encProcess_, 500) == WAIT_TIMEOUT) TerminateProcess(encProcess_, 0);
+        CloseHandle(encProcess_);
+        encProcess_ = nullptr;
+    }
+#else
+    if (encStdin_ >= 0) { ::close(encStdin_); encStdin_ = -1; }   // EOF lets ffmpeg finalize
+    if (encPid_ >= 0) {
+        for (int i = 0; i < 50; i++) {                   // up to ~500 ms of graceful drain
+            if (::waitpid(encPid_, nullptr, WNOHANG) == encPid_) { encPid_ = -1; return; }
+            ::usleep(10 * 1000);
+        }
+        ::kill(encPid_, SIGKILL);
+        ::waitpid(encPid_, nullptr, 0);
+        encPid_ = -1;
+    }
+#endif
+}
+
+void setTestEncoderMode(EncoderTestMode mode) {
+    encTestMode_ = mode;
+    encTestWriteResult_ = kEncTestWriteNormal;
+    if (mode == EncoderTestMode::Off) { encCaptured_.clear(); encCapturedArgs_.clear(); }
+}
+void setTestEncoderWriteResult(int result) { encTestWriteResult_ = result; }
+size_t encoderTestFrameCount() { return encCaptured_.size(); }
+size_t encoderTestFrameSize(size_t i) { return i < encCaptured_.size() ? encCaptured_[i].size() : 0; }
+const uint8_t* encoderTestFrameData(size_t i) {
+    return i < encCaptured_.size() ? encCaptured_[i].data() : nullptr;
+}
+const char* encoderTestArgs() { return encCapturedArgs_.c_str(); }
+void encoderTestClearFrames() { encCaptured_.clear(); }
 
 } // namespace mm::platform

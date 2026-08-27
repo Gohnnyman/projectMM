@@ -171,6 +171,24 @@ Origin: projectMM, against NewTek/Vizrt's documented NDI C API
 
 Detail: [technical](moxygen/NdiDriver.md)
 
+<a id="hls"></a>
+
+### HLS 🖥️ · video out
+
+Streams the layer as **H.264 over HLS** from the device's own HTTP server: open the `url` the card shows in VLC, a browser, or hand it to an Apple TV (VLC for tvOS, or open it in Safari and AirPlay the video, the Apple TV then pulls the stream itself). Where NDI feeds production tools, this feeds anything that plays video.
+
+**Pixel-exact**: the frame IS the grid (`physicalWidth` x `physicalHeight`, one light per pixel, output correction applied), no scaling anywhere; the display letterboxes. Latency is HLS's own: expect **2-5 seconds** glass-to-glass, so this is for watching, not for live-control feedback. Large grids trade framerate, the render loop is single-threaded: 512x512 streams smoothly, TV-native resolutions do not yet.
+
+**Desktop only**, and **you install ffmpeg yourself** (any 5.x+, on PATH), projectMM never ships or links an encoder. Without it the driver reports `ffmpeg not found` and nothing else changes. Segments live in the transient `/.hls/` directory, served at `/hls/`, excluded from config backups.
+
+- `targetFps` — encode-rate ceiling (default 30, 1–120); the render loop runs faster and extra frames are not encoded.
+- `bitrate` — H.264 target in kbit/s (default 8000).
+- read-only — `url` (the playable address), and the status line reports streaming state, dropped frames, or why the encoder stopped.
+
+Origin: projectMM; encoding by the user's ffmpeg (HLS is Apple's RFC 8216)
+
+Detail: [technical](moxygen/HlsDriver.md)
+
 <a id="preview-details"></a>
 
 ## Preview, details

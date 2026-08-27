@@ -32,6 +32,12 @@ Chrome puts the same choice behind the download entry's **`⋯`**, then **Keep**
 
 Worth knowing so it does not surprise you later: **this happens for every new build.** Reputation attaches to a file, not to a project, so a fresh `latest` build starts from nothing again. Only code signing changes that, and it is on the backlog.
 
+### If Defender quarantines it as a trojan
+
+Occasionally Defender goes a step further and removes the file outright, naming something like `Trojan:Win32/Wacatac.C!ml`. The `!ml` suffix means a **machine-learning guess**, not a match against known malware: an unsigned, zero-reputation executable that opens audio capture devices (the Audio module records from your microphone or a loopback device) fits a pattern the model weighs, and every new build is a brand-new fingerprint for it to judge. The contents are checkable rather than a matter of trust: the binary is compiled from this repository's source in public CI, and the one vendored file behind the audio support (`miniaudio.h`) is byte-identical to its upstream release.
+
+To get the file back: **Windows Security → Virus & threat protection → Protection history**, select the detection, **Actions → Restore**, then add the install folder (`%LOCALAPPDATA%\Programs\projectMM`) under **Virus & threat protection settings → Exclusions** so the next build is not removed again. Reporting the file as a false positive at [microsoft.com/wdsi/filesubmission](https://www.microsoft.com/wdsi/filesubmission) helps everyone: Microsoft typically clears these within days.
+
 ## 3. Run the setup
 
 Double-click the file you just kept, and the installer opens straight away. Keeping it in step 2 was the trust decision, so Windows does not ask a second time:

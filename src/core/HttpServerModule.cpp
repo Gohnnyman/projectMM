@@ -275,6 +275,9 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         else if (std::strcmp(path, "/api/dir") == 0) serveDirListing(conn, queryStart ? queryStart + 1 : "");
         // File Manager: GET /api/file?path=<rel> → the file's contents (text, size-capped).
         else if (std::strcmp(path, "/api/file") == 0) serveFileContents(conn, queryStart ? queryStart + 1 : "");
+        // HLS: GET /hls/<file> → the segments the HlsDriver's ffmpeg writes under /.hls/, with
+        // video MIME types and no-cache (the playlist mutates every second).
+        else if (std::strncmp(path, "/hls/", 5) == 0) serveHlsFile(conn, path + 5);
         // WLED-compatibility shim: the native WLED apps (and Home Assistant's WLED
         // integration) discover a device via mDNS `_wled._tcp` then VALIDATE it by
         // GETting /json/info and checking it's WLED-shaped. Serving a minimal
@@ -634,21 +637,18 @@ void HttpServerModule::handleRemoveEntry(platform::TcpConnection& conn, const ch
     }
 }
 
-void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const char* query) {
-    char path[160];
-    if (!parseFilePath(query, path, sizeof(path))) {
-        sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
-        return;
-    }
-    // Stream the file straight to the socket in fixed 1 KB chunks (fsReadAt) with an explicit
-    // Content-Length header — no whole-file buffer, and NUL-safe (sendResponse strlen()s its body, so
-    // it can't carry binary). Symmetric with the streamed upload: a file of any size downloads whole.
+// Stream one fs-mounted file straight to the socket in fixed 1 KB chunks (fsReadAt) with an
+// explicit Content-Length header: no whole-file buffer, and NUL-safe (sendResponse strlen()s its
+// body, so it can't carry binary). Symmetric with the streamed upload: a file of any size
+// downloads whole. `extraHeaders` carries caller-specific lines ("Cache-Control: no-cache\r\n").
+void HttpServerModule::streamFsFile(platform::TcpConnection& conn, const char* path,
+                                    const char* mime, const char* extraHeaders) {
     const long size = platform::fsSize(path);
     if (size < 0) { sendResponse(conn, 404, "application/json", "{\"error\":\"not found\"}"); return; }
-    char header[160];
+    char header[224];
     const int hn = std::snprintf(header, sizeof(header),
-        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %ld\r\n"
-        "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n", size);
+        "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n%s"
+        "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n", mime, size, extraHeaders);
     if (!conn.write(reinterpret_cast<const uint8_t*>(header), static_cast<size_t>(hn))) return;
     char chunk[1024];
     for (long offset = 0; offset < size;) {
@@ -661,6 +661,35 @@ void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const ch
         if (!conn.write(reinterpret_cast<const uint8_t*>(chunk), static_cast<size_t>(got))) return;
         offset += got;
     }
+}
+
+void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const char* query) {
+    char path[160];
+    if (!parseFilePath(query, path, sizeof(path))) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
+        return;
+    }
+    streamFsFile(conn, path, "text/plain", "");
+}
+
+// GET /hls/<name>: one HLS artifact from the segment dir the HlsDriver's ffmpeg writes into
+// (/.hls/ under the fs mount). Same streamed shape as serveFileContents, three differences the
+// format needs: real video MIME types (players refuse text/plain), Cache-Control: no-cache (the
+// playlist and the rolling segment set change every second), and a flat-name guard (no '/', no
+// '..': the name IS the file, never a path).
+void HttpServerModule::serveHlsFile(platform::TcpConnection& conn, const char* name) {
+    if (!name[0] || std::strchr(name, '/') || std::strstr(name, "..")) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"bad name\"}");
+        return;
+    }
+    char path[96];
+    std::snprintf(path, sizeof(path), "/.hls/%s", name);
+    const char* dot = std::strrchr(name, '.');
+    const char* mime = "application/octet-stream";
+    if (dot && std::strcmp(dot, ".m3u8") == 0) mime = "application/vnd.apple.mpegurl";
+    else if (dot && std::strcmp(dot, ".ts") == 0) mime = "video/mp2t";
+    else if (dot && (std::strcmp(dot, ".mp4") == 0 || std::strcmp(dot, ".m4s") == 0)) mime = "video/mp4";
+    streamFsFile(conn, path, mime, "Cache-Control: no-cache\r\n");
 }
 
 // Source state for the streamed upload: yields the body bytes already sitting in the request buffer,

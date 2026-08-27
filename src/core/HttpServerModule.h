@@ -274,6 +274,10 @@ public:
     /// Install the schema-changed hook WITHOUT opening the TCP listener (setup() does both). A unit
     /// test proving the hook fires the resync needs no socket, and binding a port under test is flaky
     /// (a busy port fails the open). release() unwires it the same way as after a real setup().
+    /// The port the live server actually serves on, 0 when none is up: the one true source for
+    /// any module that must print its own URL (HlsDriver's `url` control).
+    static uint16_t servedPort() { return instance_ ? instance_->port : 0; }
+
     void installSchemaHookForTest() {
         instance_ = this;
         MoonModule::setSchemaChangedHook(&HttpServerModule::onSchemaChanged);
@@ -435,6 +439,11 @@ private:
     // at the mount) and size-capped. A file body isn't a control value, so these are their own
     // endpoints rather than /api/control.
     void serveFileContents(platform::TcpConnection& conn, const char* query);
+    /// The one streamed-file sender both file routes share: fs path, MIME, extra header lines.
+    void streamFsFile(platform::TcpConnection& conn, const char* path, const char* mime,
+                      const char* extraHeaders);
+    /// One HLS artifact (playlist / segment) from /.hls/, video MIME + no-cache; flat names only.
+    void serveHlsFile(platform::TcpConnection& conn, const char* name);
     // Streamed atomic upload: `initialBody`/`initialLen` are the body bytes already in the request
     // buffer; `contentLen` is the declared total. Pulls any remainder off the socket → fsWriteStream,
     // so an upload of any size streams to the file (rejected if it exceeds kUploadMax or free space).
