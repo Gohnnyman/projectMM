@@ -187,7 +187,7 @@
       <ul>
         <li><strong>Already configured</strong> (Ethernet cable, or WiFi set on a previous flash) — nothing to do. The device joins on boot and appears under "Your devices" below automatically.</li>
         <li><strong>New, over WiFi</strong> — the installer's <em>Configure Wi-Fi</em> step opens right after flashing: enter SSID + password, click <strong>Connect</strong>.</li>
-        <li><strong>Skipped that step?</strong> The device boots a SoftAP <code>MM-XXXX</code> (4 hex digits from the chip MAC). Join it, open <code>http://4.3.2.1</code>, enter your WiFi credentials.</li>
+        <li><strong>Skipped that step?</strong> The device boots a SoftAP <code>MM-XXXX</code> (4 hex digits from the chip MAC). Join it, open <code>http://4.3.2.1</code>, enter your WiFi credentials, or restore a config backup there instead, which carries them (see "Back up a device's config first" below).</li>
       </ul>
     </div>
 
@@ -198,6 +198,34 @@
         browser. <em>Clear browser data</em> wipes the list.
       </p>
       <div id="devices-mount"></div>
+    </div>
+
+    <div class="card">
+      <strong>Back up a device's config first</strong>
+      <p class="note" style="margin-top: 4px">
+        Erasing or migrating a device wipes its WiFi credentials and module config, so
+        save it all first. One <code>.json</code> bundle holds everything; keep it
+        private, it contains the WiFi password. Two ways to make one:
+      </p>
+      <ul>
+        <li><strong>Current firmware</strong>: open the device's own page and press
+        <strong>Backup (⤓)</strong> in the File Manager. That is the whole story.</li>
+        <li><strong>Older firmware</strong> (no Backup button yet; any release since
+        v3.0.0, July 2026), or as a browser-side alternative: drag
+        <a id="backup-bookmarklet" href="#">Backup projectMM config</a> to your bookmarks
+        bar, open the device's own page, click the bookmark. No bookmarks bar?
+        <button id="backup-copy" type="button">Copy the snippet</button> and paste it into
+        the browser console (F12) on the device's page. Safari can't drag bookmarklets:
+        copy the snippet into a bookmark's address by hand, typing <code>javascript:</code>
+        in front of it, or use Chrome/Edge (flashing needs them anyway).</li>
+      </ul>
+      <p class="note">
+        After flashing, restore the bundle via the new firmware's File Manager (⟲). The
+        bundle carries the WiFi credentials, so you can even skip the Configure Wi-Fi
+        step: join the device's <code>MM-XXXX</code> access point, open
+        <code>http://4.3.2.1</code>, restore, take the offered restart, and the device
+        comes back on your network.
+      </p>
     </div>
 
     <div class="card">

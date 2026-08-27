@@ -28,6 +28,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>   // strtol — bounded Content-Length parse
+#include <cctype>    // tolower, case-insensitive header names (findHeaderCI)
 #include <cerrno>    // errno / ERANGE — Content-Length overflow check
 #include <cstring>
 #include <cstdint>
@@ -161,9 +162,11 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     // body still hasn't arrived within the budget, reject with 400 rather than process it.
     auto* headerEnd = std::strstr(req, "\r\n\r\n");
     int contentLen = 0;   // declared body length (0 if no Content-Length); used by the streaming route
+    bool hasContentLen = false;   // header PRESENT (an explicit 0 is a legitimate empty write)
     if (headerEnd) {
-        auto* clh = std::strstr(req, "Content-Length:");
+        auto* clh = findHeaderCI(req, "Content-Length:");
         if (clh) {
+            hasContentLen = true;
             // Bounded parse (not atoi): a malformed/negative/overflowing Content-Length must not
             // flow downstream, where it's cast to size_t — a negative int would become a huge
             // length that UploadSource/handleFirmwareUpload would treat as "gigabytes still to
@@ -240,8 +243,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     const bool isWs  = std::strcmp(path, "/ws") == 0;
     const bool isWsp = std::strcmp(path, "/wsp") == 0;
     if (std::strcmp(method, "GET") == 0 && (isWs || isWsp) &&
-        (std::strstr(req, "Upgrade: websocket") || std::strstr(req, "upgrade: websocket") ||
-         std::strstr(req, "Upgrade: WebSocket"))) {
+        findHeaderCI(req, "Upgrade: websocket")) {
         handleWebSocketUpgrade(conn, req, isWsp);
         return; // don't close — connection is now a WebSocket
     }
@@ -258,6 +260,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         else if (std::strcmp(path, "/semver.js") == 0) serveFile(conn, "semver.js", "application/javascript");
         else if (std::strcmp(path, "/preview3d.js") == 0) serveFile(conn, "preview3d.js", "application/javascript");
         else if (std::strcmp(path, "/preview-adapt.js") == 0) serveFile(conn, "preview-adapt.js", "application/javascript");
+        else if (std::strcmp(path, "/migrate.js") == 0) serveFile(conn, "migrate.js", "application/javascript");
         else if (std::strcmp(path, "/style.css") == 0) serveFile(conn, "style.css", "text/css");
         else if (std::strcmp(path, "/moonlight-logo.png") == 0) serveFile(conn, "moonlight-logo.png", "image/png");
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
@@ -320,6 +323,14 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             // and handleWriteFile pulls any remainder straight off the socket — so an upload of any
             // size streams to the file without a whole-request buffer or a strlen (binary-safe).
             const size_t initialLen = static_cast<size_t>(totalRead) - static_cast<size_t>(body - req);
+            // No declared length (a chunked client) is 411 Length Required: acting on it would
+            // commit an EMPTY file with a 200, a silent wipe (the bench found it as zeroed
+            // config). Keyed on header ABSENCE, not on whether body bytes happened to arrive in
+            // the same read as the headers; an explicit Content-Length: 0 stays a valid empty write.
+            if (!hasContentLen) {
+                sendResponse(conn, 411, "application/json", "{\"error\":\"length required\"}");
+                return;
+            }
             handleWriteFile(conn, queryStart ? queryStart + 1 : "", body, initialLen,
                             static_cast<size_t>(contentLen));
         } else if (std::strcmp(path, "/api/dir") == 0) {
@@ -487,6 +498,25 @@ static constexpr size_t kUploadMax = 256 * 1024;   // 256 KB — sanity bound on
 // WiFi password is XOR-obfuscated in what it writes. The weak-protection is `show hidden` defaulting
 // off (FileManagerModule), so `.config` isn't shown unless the operator asks. Reviewers periodically
 // flag this as a secrets-exposure — it's an accepted design, not an oversight; leave it.
+// See the header for why case-insensitive. MSVC has no strcasestr, so the loop is spelled out.
+// The textbook header scan: match only at the START of a header line, and stop at the blank line
+// ending the header section, so neither an X-Prefixed lookalike nor bytes in a buffered body
+// prefix can satisfy a header name.
+const char* HttpServerModule::findHeaderCI(const char* hay, const char* needle) {
+    const size_t n = std::strlen(needle);
+    const char* line = hay;
+    while (line && *line) {
+        if (line[0] == '\r' && line[1] == '\n') break;   // blank line: end of the header section
+        size_t i = 0;
+        while (i < n && std::tolower(static_cast<unsigned char>(line[i])) ==
+                        std::tolower(static_cast<unsigned char>(needle[i]))) i++;
+        if (i == n) return line;
+        const char* nl = std::strchr(line, '\n');
+        line = nl ? nl + 1 : nullptr;
+    }
+    return nullptr;
+}
+
 bool HttpServerModule::parseFilePath(const char* query, char* out, size_t cap) {
     const char* p = query ? std::strstr(query, "path=") : nullptr;
     if (!p) return false;
@@ -748,7 +778,13 @@ void HttpServerModule::handleWriteFile(platform::TcpConnection& conn, const char
 }
 
 // See the header for WHY this exists and why it is whole-tree. Here is only the how.
-void HttpServerModule::applyFileChanged(const char* /*path*/) {
+void HttpServerModule::applyFileChanged(const char* path) {
+    // Live reconfiguration: a written /.config/<Type>.json is a config change like any control
+    // edit, so it lands on the running tree without a reboot. Queued for the render task, never
+    // applied here: re-running a system module's setup() on this small task crashed the ESP32,
+    // and deferring also sends this response before a network-reconfiguring apply can cut the
+    // socket (the bench found both).
+    if (auto* fs = FilesystemModule::instance()) fs->requestConfigApply(path);
     if (!scheduler_) return;
     // requestPrepareTree, never prepareTree: the immediate walk runs a scripted layout's JIT'd code
     // on the CALLING task's stack (Scheduler.h:74-77), and a write arrives on the small web-server
@@ -849,6 +885,7 @@ void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* file
     else if (std::strcmp(filename, "semver.js") == 0) { data = ui::semverJs; dataLen = ui::semverJsLen; gzipped = true; }
     else if (std::strcmp(filename, "preview3d.js") == 0) { data = ui::preview3dJs; dataLen = ui::preview3dJsLen; gzipped = true; }
     else if (std::strcmp(filename, "preview-adapt.js") == 0) { data = ui::previewAdaptJs; dataLen = ui::previewAdaptJsLen; gzipped = true; }
+    else if (std::strcmp(filename, "migrate.js") == 0) { data = ui::migrateJs; dataLen = ui::migrateJsLen; gzipped = true; }
     else if (std::strcmp(filename, "style.css") == 0) { data = ui::styleCss; dataLen = ui::styleCssLen; gzipped = true; }
     else if (std::strcmp(filename, "moonlight-logo.png") == 0) { data = ui::logoPng; dataLen = ui::logoPngLen; }
 
@@ -2392,7 +2429,7 @@ void HttpServerModule::handleFirmwareUrl(platform::TcpConnection& conn, const ch
 void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, const char* req,
                                               bool previewChannel) {
     // Extract Sec-WebSocket-Key
-    const char* keyHeader = std::strstr(req, "Sec-WebSocket-Key: ");
+    const char* keyHeader = findHeaderCI(req, "Sec-WebSocket-Key: ");
     if (!keyHeader) { conn.close(); return; }
     keyHeader += 19;
     char wsKey[32] = {};

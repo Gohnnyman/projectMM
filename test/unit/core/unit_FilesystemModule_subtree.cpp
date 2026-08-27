@@ -225,3 +225,81 @@ TEST_CASE("a prefixed subtree round-trips inside a larger object") {
     CHECK(t.fs->applySubtree(t.layers, preset.c_str(), "Effects."));
     CHECK(std::strcmp(t.effectType(), "NoiseEffect") == 0);
 }
+
+// The live-reconfiguration rule extended to the file-upload path: writing /.config/<Type>.json
+// (the File Manager upload, a config restore) applies onto the RUNNING tree, no reboot. Found
+// as a real gap when the config-restore flow ended in a "reboot device" button.
+TEST_CASE("a written config file applies to the running tree without a reboot") {
+    Tree t;
+    auto* layer = t.add(t.layers, "Layer");
+    t.add(layer, "NoiseEffect");
+
+    // The bytes a restore would upload: the same tree shape but with a different effect.
+    std::string json = serialize(t.fs, t.layers);
+    const auto at = json.find("NoiseEffect");
+    REQUIRE(at != std::string::npos);
+    json.replace(at, std::strlen("NoiseEffect"), "RainbowEffect");
+    REQUIRE(mm::platform::fsWriteAtomic("/.config/Effects.json", json.data(), json.size()));
+
+    CHECK(t.fs->applyConfigFile("/.config/Effects.json"));
+    CHECK(std::strcmp(t.effectType(), "RainbowEffect") == 0);
+
+    // Not config: a preset path and an unknown type leave the tree alone and say so.
+    CHECK_FALSE(t.fs->applyConfigFile("/.config/presets/p1.json"));
+    CHECK_FALSE(t.fs->applyConfigFile("/.config/NoSuchModule.json"));
+    // Every guard rejects explicitly: null, outside /.config/, no .json, oversized stem.
+    CHECK_FALSE(t.fs->applyConfigFile(nullptr));
+    CHECK_FALSE(t.fs->applyConfigFile("/scripts/Effects.json"));
+    CHECK_FALSE(t.fs->applyConfigFile("/.config/Effects"));
+    CHECK_FALSE(t.fs->applyConfigFile(
+        "/.config/A23456789012345678901234567890123456789012345678901234567890123456789.json"));
+}
+
+// The runtime twin of boot's phase 5: a restored config can carry a value for a control that
+// only exists once prepare() has run (a MoonLive script's declared controls). The write requests
+// a values-reapply that fires right after the next prepared tick, so the saved value lands.
+TEST_CASE("a restored value for a prepare-time control lands after the next prepare") {
+    Tree t;
+    auto* layer = t.add(t.layers, "Layer");
+    auto* fx = t.add(layer, "NoiseEffect");
+
+    // A config whose subtree carries a key for a control the module does not have YET:
+    // overlayControls skips it on apply, exactly like a script control before compile.
+    std::string json = serialize(t.fs, t.layers);
+    json.insert(json.rfind('}'), ",\"0.0.laterControl\":42");
+    REQUIRE(mm::platform::fsWriteAtomic("/.config/Effects.json", json.data(), json.size()));
+    REQUIRE(t.fs->applyConfigFile("/.config/Effects.json"));
+
+    // "prepare() creates the control": it appears after the apply, default 0.
+    static uint8_t later = 0;
+    later = 0;
+    fx->controls().addControl("laterControl", later, 0, 100);
+    REQUIRE(later == 0);
+
+    // The tick that consumes the requested prepare also runs the values reapply.
+    t.scheduler.requestPrepareTree();
+    t.scheduler.tick();
+    CHECK(later == 42);
+}
+
+// The upload path queues, the render tick applies: nothing mutates the tree on the caller's
+// task (re-running a system module's setup() on the web-server task crashed the ESP32), and a
+// multi-file upload coalesces to one apply per module.
+TEST_CASE("a requested config apply lands on the next tick, not on the requesting task") {
+    Tree t;
+    auto* layer = t.add(t.layers, "Layer");
+    t.add(layer, "NoiseEffect");
+    std::string json = serialize(t.fs, t.layers);
+    const auto at = json.find("NoiseEffect");
+    json.replace(at, std::strlen("NoiseEffect"), "RainbowEffect");
+    REQUIRE(mm::platform::fsWriteAtomic("/.config/Effects.json", json.data(), json.size()));
+
+    REQUIRE(t.fs->requestConfigApply("/.config/Effects.json"));
+    CHECK(std::strcmp(t.effectType(), "NoiseEffect") == 0);   // nothing applied yet...
+    t.fs->tick20ms();
+    CHECK(std::strcmp(t.effectType(), "RainbowEffect") == 0); // ...the tick applies it
+
+    // Not config: the same refusals as the synchronous entry.
+    CHECK_FALSE(t.fs->requestConfigApply("/.config/presets/p1.json"));
+    CHECK_FALSE(t.fs->requestConfigApply("/.config/NoSuchModule.json"));
+}

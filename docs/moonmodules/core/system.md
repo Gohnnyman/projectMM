@@ -112,7 +112,9 @@ A boot-wired system tool (distinct from Filesystem, the persistence *engine*): b
 
 <img src="../../assets/core/FileManagerModule.png" width="300" alt="File Manager panel — folder tree + toolbar">
 
-- `file browser` — the panel itself: an expand/collapse folder tree with a toolbar (＋folder / ＋file / delete / refresh / upload) and an inline text editor. The module's main surface (⌄ details for the interactions).
+- `file browser`, the panel itself: an expand/collapse folder tree with a toolbar (＋folder / ＋file / upload / backup / restore / delete / refresh) and an inline text editor. The module's main surface (⌄ details for the interactions).
+- **Backup (⤓)**, download the device's files (config, scripts, presets) as one `.json` bundle: every successfully read file, byte-verified against the directory listing; an unreadable or non-text file is skipped and named, and only a verified-short read aborts the backup. **Keep the file private: it contains the WiFi password.** For a device on firmware from before this button, the [installer page](https://moonmodules.org/projectMM/install/) offers the same backup as a bookmarklet.
+- **Restore (⟲)**, upload a backup bundle (press twice: it overwrites the device's files). Known renames from [MIGRATING.md](../../MIGRATING.md) apply in the browser before upload, then a report lists everything that needs an eye: renamed and mapped entries, values to review, module types or controls this firmware no longer has (per [ADR-0013](../../adr/0013-no-migration-code-robust-persistence-plus-documented-breaks.md) the device itself never migrates). Every file applies to the running device as it lands (live reconfiguration), with two boot-only exceptions the dialog names: network settings (bring-up is not re-runnable live, so the dialog offers the restart that applies them) and the web server's own `port` (binds at boot).
 - `show hidden` — reveal dot-prefixed files/folders (e.g. `.config`); forwarded to `/api/dir` as its `hidden` filter.
 - `filesystem` — read-only usage bar (used / total bytes, from the platform).
 - `lastSaved` — read-only; how long ago config was persisted (read from the Filesystem engine).

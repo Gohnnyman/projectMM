@@ -80,6 +80,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <mutex>     // hostname store: writer (config apply) and reader (link-up events) race
 #include <unistd.h>
 
 namespace mm::platform {
@@ -472,16 +473,17 @@ static bool netifInitDone_ = false;
 // netif before its DHCP client starts (see setHostname's contract in platform.h).
 // 32 = the ESP-IDF lwIP hostname cap; empty means "leave the IDF default".
 //
-// Threading / ordering contract: setHostname() is called from the app task in
-// NetworkModule::setup(), BEFORE ethInit() / wifiStaInit() bring an interface up.
-// applyHostname() (the only reader) runs later — from the eth link-up event handler
-// or right after esp_wifi_start — so hostname_[] is fully written before any reader
-// can execute, and no lock is needed. Do NOT call setHostname() concurrently with, or
-// after, bring-up (e.g. from another task or an event callback) without adding a
-// mutex / std::atomic; the single-writer-before-readers ordering is the whole safety.
+// Threading contract: writer and reader run on DIFFERENT tasks once the system is
+// live. At boot setHostname() is called from the app task before bring-up, but a
+// config-file restore re-runs NetworkModule::setup() from the web-server task while
+// applyHostname() can fire from a link-up event handler, so both sides copy under a
+// mutex (a task-context lock; neither runs in an ISR). The reader takes a snapshot
+// first: esp_netif calls inside the lock would nest into the event loop.
 static char hostname_[32] = {};
+static std::mutex hostnameMutex_;
 
 void setHostname(const char* name) {
+    std::lock_guard<std::mutex> lock(hostnameMutex_);
     if (!name) { hostname_[0] = 0; return; }
     std::strncpy(hostname_, name, sizeof(hostname_) - 1);
     hostname_[sizeof(hostname_) - 1] = 0;
@@ -496,11 +498,16 @@ void setHostname(const char* name) {
 // fresh DISCOVER then carries option 12. Stopping an already-stopped client is a
 // benign ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED, which we ignore. No-op when unset.
 static void applyHostname(esp_netif_t* netif) {
-    if (!netif || !hostname_[0]) return;
+    char name[sizeof(hostname_)];
+    {
+        std::lock_guard<std::mutex> lock(hostnameMutex_);
+        std::memcpy(name, hostname_, sizeof(name));
+    }
+    if (!netif || !name[0]) return;
     esp_netif_dhcpc_stop(netif);    // must be stopped for set_hostname to take; ignore ALREADY_STOPPED
-    esp_err_t e = esp_netif_set_hostname(netif, hostname_);
-    if (e != ESP_OK) ESP_LOGW(NET_TAG, "set_hostname('%s') failed: %s", hostname_, esp_err_to_name(e));
-    else ESP_LOGI(NET_TAG, "DHCP hostname: %s", hostname_);
+    esp_err_t e = esp_netif_set_hostname(netif, name);
+    if (e != ESP_OK) ESP_LOGW(NET_TAG, "set_hostname('%s') failed: %s", name, esp_err_to_name(e));
+    else ESP_LOGI(NET_TAG, "DHCP hostname: %s", name);
     // Restart the DHCP client and check the result — if it fails, the interface has
     // no DHCP client and will never acquire an IP, so surface it rather than silently
     // leaving the device offline. (Don't return on stop/set failure above: we still

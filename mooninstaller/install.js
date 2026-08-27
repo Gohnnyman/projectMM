@@ -21,9 +21,39 @@ import { installer, ESPTOOL_JS_VERSION } from "./install-orchestrator.js";
 // Board catalog + chip detection — mooninstaller only, kept out of the
 // firmware-embedded install-picker.js and injected here via boardSupport.
 import * as boardSupport from "./install-picker-boards.js";
+import { BACKUP_SNIPPET } from "./backup-snippet.js";
 
 // Windows-only hints (was a separate inline <script> in <head>): reveal .windows-only
 // rows when the UA is Windows.
+// The backup card: the bookmarklet IS the snippet (a javascript: href), the copy button the
+// fallback for browsers without a draggable bookmarks bar. Wired at module top level (a module
+// script runs after the DOM is parsed), NOT inside the installer's init below: the card must
+// work even in a browser where installer init throws (Safari has no Web Serial), because
+// backing up is exactly what a non-flashing browser can still do.
+(() => {
+  const link = document.getElementById("backup-bookmarklet");
+  const copy = document.getElementById("backup-copy");
+  if (!link || !copy) return;
+  link.href = BACKUP_SNIPPET;
+  link.addEventListener("click", (ev) => ev.preventDefault());   // run on the DEVICE page, not here
+  copy.addEventListener("click", async () => {
+    const text = BACKUP_SNIPPET.slice("javascript:".length);
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; }
+    catch (_) {
+      // http-over-LAN or older Safari: no async clipboard, the selection fallback.
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { ok = document.execCommand("copy"); } catch (_) {}
+      ta.remove();
+    }
+    copy.textContent = ok ? "Copied ✓" : "Copy failed, copy the link by hand";
+  });
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   if (/Windows/i.test(navigator.userAgent)) {
     document.querySelectorAll('.windows-only').forEach(el => el.hidden = false);
@@ -1037,7 +1067,9 @@ document.addEventListener('DOMContentLoaded', () => {
       onErase: async (device) => {
         if (!confirm(
             `Erase ${device.name}? This wipes WiFi credentials and all ` +
-            `module state. You can flash a fresh firmware afterwards.`)) {
+            `module state. Back up its config first, see "Back up a ` +
+            `device's config first" on this page. You can flash a fresh ` +
+            `firmware afterwards.`)) {
           return;
         }
         // Same port-lock concern as install: release the monitor before

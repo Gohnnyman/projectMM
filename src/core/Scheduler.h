@@ -88,6 +88,12 @@ public:
     /// from any task — it sets a flag; tick() does the work.
     void requestPrepareTree() { prepareRequested_.store(true, std::memory_order_relaxed); }
 
+    /// Ask for a values-only reapply right after the NEXT requested prepareTree(): the runtime
+    /// twin of boot's phase 5: a config-file restore can carry values for controls that exist
+    /// only once prepare() has run (a MoonLive script's declared controls), so the reapply must
+    /// follow that prepare, in the same tick (before any dirty save can rewrite the file).
+    void requestValuesReapply() { valuesReapplyRequested_.store(true, std::memory_order_relaxed); }
+
     uint32_t tickTimeUs() const { return tickTimeUs_; }
     uint32_t fps() const { return tickTimeUs_ > 0 ? 1000000 / tickTimeUs_ : 0; }
     uint8_t moduleCount() const { return moduleCount_; }
@@ -150,6 +156,7 @@ private:
     LoadAllFn loadAllHook_ = nullptr;
     LoadAllFn reapplyValuesHook_ = nullptr;
     bool valuesReapplied_ = false;   // the hook fires once, after the first prepareTree()
+    std::atomic<bool> valuesReapplyRequested_{false};   // one-shot, consumed with the next requested prepare
     NoteDirtyFn noteDirtyHook_ = nullptr;
     uint32_t startTime_ = 0;
     uint32_t lastLoop20ms_ = 0;

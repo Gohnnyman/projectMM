@@ -83,7 +83,10 @@ in the UI (that's what Chapter 2 is all about).
 
 Leave **Release** and **Firmware** at their suggested values (the newest stable
 build, and the firmware that matches your device). Tick **Erase chip first** only
-if you're starting clean or switching firmware.
+if you're starting clean or switching firmware, and if the device already holds
+config you care about, back it up first ("Back up a device's config first" on the
+installer page): erasing wipes WiFi credentials and all settings, and the backup
+brings them back after the flash (its report lists anything it could not carry).
 
 ### 4. Click Install
 
@@ -98,7 +101,11 @@ it takes under a minute.
 What happens next depends on your device:
 
 - **WiFi:** enter your network name and password when prompted, then **Connect**.
-  (Click **Skip** to set WiFi up later from the device itself.)
+  (Click **Skip** to set WiFi up later from the device itself.) Restoring a config
+  backup? You can skip this step: join the device's `MM-XXXX` access point, open
+  `http://4.3.2.1`, and restore the backup in the File Manager (⟲), then take the
+  offered restart: the bundle carries the WiFi credentials, so the device joins
+  your network by itself.
 
   ![Entering WiFi credentials](assets/gettingstarted/01-09-wifi-credentials.png)
 
