@@ -77,6 +77,10 @@ def measure_loc():
     for area, prefix in AREAS.items():
         total = 0
         for f in _git_files(prefix):
+            # vendor/ holds upstream single-header code (miniaudio); its ~96k lines are not
+            # our repo's size and would drown every LOC trend they sit in.
+            if "/vendor/" in f.as_posix():
+                continue
             if f.suffix in CODE_SUFFIXES and f.is_file():
                 total += _read(f).count("\n")
         loc[area] = total
@@ -94,6 +98,8 @@ def measure_comments():
     for area, prefix in AREAS.items():
         comment_lines = code_lines = 0
         for f in _git_files(prefix):
+            if "/vendor/" in f.as_posix():
+                continue   # upstream single-header code (miniaudio): not our comments
             if f.suffix not in CODE_SUFFIXES or not f.is_file():
                 continue
             for line in _read(f).splitlines():

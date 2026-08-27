@@ -310,6 +310,7 @@ def make_app_bundle(binary: Path, version: str, dest: Path) -> Path:
   <key>CFBundleIconFile</key><string>projectMM</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>NSMicrophoneUsageDescription</key><string>Audio-reactive effects can follow a microphone or loopback input you pick in the Audio module.</string>
 </dict>
 </plist>
 """, encoding="utf-8")

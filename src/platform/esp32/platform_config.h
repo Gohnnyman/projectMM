@@ -200,6 +200,9 @@ constexpr bool hasI2sMic = true;
 constexpr bool hasI2sMic = false;
 #endif
 
+// OS capture devices are a desktop concept; boards use the pin-wired I2S mic above.
+constexpr bool hasAudioCapture = false;
+
 
 // Some boards put the mic behind an I2S audio codec configured over I2C (vs a
 // direct I2S MEMS mic). The codec type + its control pins are a fixed board

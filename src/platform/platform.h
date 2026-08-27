@@ -1327,8 +1327,24 @@ bool audioCodecInit(CodecType type, const AudioCodecPins& pins, uint32_t sampleR
 
 void audioCodecDeinit();
 
-// Opaque handle to one configured I2S RX channel (standard/Philips mode).
+// Opaque handle to one live audio input: an I2S RX channel on boards, an OS capture
+// device on desktop. Both feed the same audioMicRead contract.
 struct AudioMicHandle { void* impl = nullptr; };
+
+// One live-audio gate for AudioService: a pin-wired I2S mic (boards) or an OS capture
+// device (desktop, hasAudioCapture) both make the local analysis path run.
+constexpr bool hasAudioInput = hasI2sMic || hasAudioCapture;
+
+// OS capture devices (desktop; 0 where hasAudioCapture is false). Points optionsOut at a
+// PLATFORM-OWNED stable string array: entry 0 is always "default" (the OS default capture
+// device), entries 1..n-1 the named devices. Re-enumerated on each call, so hot-plugged
+// devices (a BlackHole-style loopback installed while running) appear on the next call.
+size_t audioCaptureDevices(const char* const** optionsOut);
+
+// Open capture device `deviceIndex` (an index into the last audioCaptureDevices list; 0 =
+// default) as mono 24-bit-left-justified samples at `sampleRate` (the backend resamples).
+// False on failure (no device, OS permission denied): degrade, never crash.
+bool audioCaptureInit(AudioMicHandle& h, uint8_t deviceIndex, uint32_t sampleRate);
 
 // Bring up an I2S RX channel reading the mic on the given pins at `sampleRate`
 // (24-bit data in a 32-bit slot, mono). `mclkPin` drives the I2S master clock —
