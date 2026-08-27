@@ -183,6 +183,7 @@ Streams the layer as **H.264 over HLS** from the device's own HTTP server: open 
 
 - `targetFps` — encode-rate ceiling (default 30, 1–120); the render loop runs faster and extra frames are not encoded.
 - `bitrate` — H.264 target in kbit/s (default 8000).
+- `encoder` — the ffmpeg video encoder (Select; default `libx264`, present in every ffmpeg build). The hardware entries offload the encode entirely and are worth picking on large grids: `h264_videotoolbox` on a Mac (~10% CPU for a 1024x1024 stream on Apple silicon), `h264_vaapi` on Linux, `h264_v4l2m2m` on a Raspberry Pi, `h264_nvenc` on NVIDIA. One your ffmpeg lacks fails the spawn and the status says so.
 - read-only — `url` (the playable address), and the status line reports streaming state, dropped frames, or why the encoder stopped.
 
 Origin: projectMM; encoding by the user's ffmpeg (HLS is Apple's RFC 8216)

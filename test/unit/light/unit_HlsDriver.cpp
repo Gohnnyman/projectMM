@@ -57,6 +57,10 @@ void setUp(mm::HlsDriver& driver, mm::Buffer& source, Wall& wall, mm::nrOfLights
     driver.correctionForTest() = correction;
     driver.applyState();
     mm::platform::encoderTestClearFrames();
+    // Virtual time from the START: prepare() stamps the warm-up deadline from millis(), and a
+    // real-clock stamp against later virtual ticks is a wraparound flake (passes in isolation,
+    // fails in the full run depending on process uptime).
+    mm::platform::setTestNowMs(1);
 }
 
 void paint(mm::Buffer& b, mm::nrOfLightsType i, uint8_t r, uint8_t g, uint8_t bl) {
@@ -100,7 +104,7 @@ TEST_CASE("HlsDriver hands ffmpeg the exact live-HLS invocation") {
     CHECK(args.find("-f rawvideo -pix_fmt rgb24 -s 6x4 -r 25 -i -") != std::string::npos);
     CHECK(args.find("-c:v libx264 -preset veryfast -tune zerolatency -g 25") != std::string::npos);
     CHECK(args.find("-b:v 4000k") != std::string::npos);
-    CHECK(args.find("-f hls -hls_time 1 -hls_list_size 6 -hls_flags delete_segments")
+    CHECK(args.find("-f hls -hls_time 1 -hls_list_size 6 -hls_flags delete_segments+temp_file")
           != std::string::npos);
     CHECK(args.find("/.hls/stream.m3u8") != std::string::npos);
 }

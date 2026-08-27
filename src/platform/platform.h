@@ -530,7 +530,7 @@ bool encoderStart(const char* const argv[]);
 
 // Write one whole frame to the encoder's stdin. Returns len when fully written, 0 when the pipe
 // refuses the first byte (the caller DROPS the frame), and -1 when the process is gone OR wedged
-// past a ~50 ms completion budget (the caller restarts it): a frame is all-or-complete, never
+// past a ~250 ms completion budget (the caller restarts it): a frame is all-or-complete, never
 // torn, so a mid-frame stall cannot be abandoned and is bounded by the budget instead.
 // Windows deviation, POSIX-only guarantee for now: WriteFile on the anonymous pipe blocks until
 // its 4 MB buffer drains (overlapped rework is backlogged to land with the Windows tester).

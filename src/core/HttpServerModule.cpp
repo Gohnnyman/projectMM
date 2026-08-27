@@ -41,7 +41,11 @@ void HttpServerModule::defineControls() {
 
 void HttpServerModule::setup() {
     instance_ = this;
-    if (!server_.open(port)) {
+    if (server_.open(port)) {
+        boundPort_ = port;   // the port actually serving, frozen until release: the `port`
+                             // control can change live but only applies at the next open
+    } else {
+        boundPort_ = 0;
         std::printf("HTTP server failed to open port %u\n", port);
     }
     // Any module's rebuildControls() (a schema change: hidden flags / option sets, from a control
@@ -73,6 +77,7 @@ void HttpServerModule::release() {
         previewClients_[i].close();
     }
     server_.close();
+    boundPort_ = 0;
     if (instance_ == this) { MoonModule::setSchemaChangedHook(nullptr); instance_ = nullptr; }
     MoonModule::release();   // chain: uniform override-and-chain (no buffers/children today, but the convention holds)
 }
@@ -678,11 +683,11 @@ void HttpServerModule::serveFileContents(platform::TcpConnection& conn, const ch
 // playlist and the rolling segment set change every second), and a flat-name guard (no '/', no
 // '..': the name IS the file, never a path).
 void HttpServerModule::serveHlsFile(platform::TcpConnection& conn, const char* name) {
-    if (!name[0] || std::strchr(name, '/') || std::strstr(name, "..")) {
+    if (!name[0] || std::strlen(name) > 80 || std::strchr(name, '/') || std::strstr(name, "..")) {
         sendResponse(conn, 400, "application/json", "{\"error\":\"bad name\"}");
         return;
     }
-    char path[96];
+    char path[96];   // "/.hls/" + <=80 name fits; the length guard above keeps snprintf exact
     std::snprintf(path, sizeof(path), "/.hls/%s", name);
     const char* dot = std::strrchr(name, '.');
     const char* mime = "application/octet-stream";

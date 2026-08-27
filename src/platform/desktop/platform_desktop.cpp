@@ -15,6 +15,7 @@
 #endif
 #include <vector>   // HostBus frame buffers — the memory-backed parallel bus
 #include <thread>
+#include <deque>     // encoder frame queue between the render tick and the writer thread
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
@@ -2298,6 +2299,17 @@ void ndiTestClearFrames() { ndiCaptured_.clear(); }
 // Test seam mirrors NdiTestMode so CI never needs an ffmpeg.
 
 namespace {
+// Threading model: encoderStart/Stop/Running are LIFECYCLE calls, made only from the render
+// task (prepare/release/tick1s), so they need no lock among themselves. encoderWrite crosses
+// threads (the encode worker) and the writer thread consumes: those three share encMutex_,
+// which guards only the queue and the dead/stop flags, never a blocking write.
+std::mutex encMutex_;
+std::condition_variable encCv_;
+std::deque<std::vector<uint8_t>> encQueue_;   // whole frames only: tearing is structurally out
+constexpr size_t kEncQueueMax = 3;            // ~3 frames of burst absorption; beyond = drop-newest
+std::thread encWriter_;
+bool encWriterStop_ = false;
+bool encWriterDead_ = false;                  // the writer saw EPIPE/error: the process is gone
 EncoderTestMode encTestMode_ = EncoderTestMode::Off;
 constexpr int kEncTestWriteNormal = 1;   // sentinel: record normally (real results are 0/-1/len)
 int encTestWriteResult_ = kEncTestWriteNormal;
@@ -2313,8 +2325,39 @@ int encStdin_ = -1;
 #endif
 }  // namespace
 
+
+// Stop the child and the writer, deadlock-free: signal stop, TERM the child FIRST (a writer
+// blocked in write() only reliably unblocks when the read side dies: EPIPE), join, then close
+// stdin and reap with a short grace before SIGKILL. Called only from the render task.
+static void stopEncoderProcess() {
+    if (encTestMode_ != EncoderTestMode::Off) return;
+    {
+        std::lock_guard<std::mutex> lk(encMutex_);
+        encWriterStop_ = true;
+        encQueue_.clear();
+        encCv_.notify_all();
+    }
+#ifdef _WIN32
+    if (encProcess_) TerminateProcess(encProcess_, 0);
+    if (encWriter_.joinable()) encWriter_.join();
+    if (encStdin_) { CloseHandle(encStdin_); encStdin_ = nullptr; }
+    if (encProcess_) { WaitForSingleObject(encProcess_, 500); CloseHandle(encProcess_); encProcess_ = nullptr; }
+#else
+    if (encPid_ >= 0) ::kill(encPid_, SIGTERM);
+    if (encWriter_.joinable()) encWriter_.join();
+    if (encStdin_ >= 0) { ::close(encStdin_); encStdin_ = -1; }
+    if (encPid_ >= 0) {
+        for (int i = 0; i < 20; i++) {                   // ~200 ms of graceful exit
+            if (::waitpid(encPid_, nullptr, WNOHANG) == encPid_) { encPid_ = -1; break; }
+            ::usleep(10 * 1000);
+        }
+        if (encPid_ >= 0) { ::kill(encPid_, SIGKILL); ::waitpid(encPid_, nullptr, 0); encPid_ = -1; }
+    }
+#endif
+}
+
 bool encoderStart(const char* const argv[]) {
-    encoderStop();
+    stopEncoderProcess();
     if (encTestMode_ != EncoderTestMode::Off) {
         encCapturedArgs_.clear();
         for (const char* const* a = argv; *a; a++) {
@@ -2348,7 +2391,6 @@ bool encoderStart(const char* const argv[]) {
     CloseHandle(pi.hThread);
     encProcess_ = pi.hProcess;
     encStdin_ = writeEnd;
-    return true;
 #else
     // posix_spawn, not fork/exec: fork in a threaded process can deadlock on the allocator
     // lock before exec, and a plain exec would leak every parent fd (the HTTP listen socket,
@@ -2374,55 +2416,75 @@ bool encoderStart(const char* const argv[]) {
     posix_spawn_file_actions_destroy(&fa);
     ::close(fds[0]);
     if (rc != 0) { ::close(fds[1]); return false; }
-    ::fcntl(fds[1], F_SETFL, O_NONBLOCK);   // the render tick must never wait on the encoder
-#ifdef __linux__
-    ::fcntl(fds[1], F_SETPIPE_SZ, 1024 * 1024);   // a whole frame fits more often; best-effort
-#endif
     ::signal(SIGPIPE, SIG_IGN);             // a dead ffmpeg surfaces as EPIPE, not a signal
     encPid_ = pid;
     encStdin_ = fds[1];
-    return true;
 #endif
+    // The writer thread does the BLOCKING writes: the render tick only ever enqueues, so an
+    // encoder that stops reading for a while (scheduler starvation under a free-running render
+    // loop stalled it >250 ms on the bench) costs queued-then-dropped frames, never a stalled
+    // tick, never a torn frame, and never a false death.
+    encWriterStop_ = false;
+    encWriterDead_ = false;
+    encQueue_.clear();
+    encWriter_ = std::thread([] {
+        for (;;) {
+            std::vector<uint8_t> frame;
+            {
+                std::unique_lock<std::mutex> lk(encMutex_);
+                encCv_.wait(lk, [] { return encWriterStop_ || !encQueue_.empty(); });
+                if (encWriterStop_) return;
+                frame = std::move(encQueue_.front());
+                encQueue_.pop_front();
+            }
+            size_t off = 0;
+            while (off < frame.size()) {
+#ifdef _WIN32
+                DWORD wrote = 0;
+                if (!WriteFile(encStdin_, frame.data() + off,
+                               static_cast<DWORD>(frame.size() - off), &wrote, nullptr)) {
+                    std::lock_guard<std::mutex> lk(encMutex_);
+                    encWriterDead_ = true;
+                    return;
+                }
+                off += wrote;
+#else
+                const ssize_t n = ::write(encStdin_, frame.data() + off, frame.size() - off);
+                if (n < 0 && errno == EINTR) continue;
+                if (n <= 0) {
+                    std::printf("encoder: pipe closed at %zu/%zu bytes\n", off, frame.size());
+                    std::lock_guard<std::mutex> lk(encMutex_);
+                    encWriterDead_ = true;   // EPIPE etc.: the process is gone
+                    return;
+                }
+                off += static_cast<size_t>(n);
+#endif
+            }
+        }
+    });
+    return true;
 }
 
 int encoderWrite(const uint8_t* data, size_t len) {
+    std::lock_guard<std::mutex> lock(encMutex_);
     if (encTestMode_ == EncoderTestMode::Record) {
         if (encTestWriteResult_ != kEncTestWriteNormal) return encTestWriteResult_;
         encCaptured_.emplace_back(data, data + len);
         return static_cast<int>(len);
     }
-#ifdef _WIN32
-    if (!encStdin_) return -1;
-    DWORD wrote = 0;
-    if (!WriteFile(encStdin_, data, static_cast<DWORD>(len), &wrote, nullptr)) return -1;
-    return static_cast<int>(wrote);
-#else
-    if (encStdin_ < 0) return -1;
-    // A frame is bigger than the pipe (64 KB default), so every write completes across several
-    // EAGAIN waits while ffmpeg drains. Alignment forbids abandoning mid-frame (the raw stream
-    // would tear), so completion gets a WALL-CLOCK BUDGET instead: a healthy ffmpeg drains a
-    // frame in single-digit ms, and one that cannot inside the budget is wedged, reported as -1
-    // so the caller restarts it. A refusal before the first byte is the clean would-block drop.
-    const uint32_t deadline = millis() + 50;
-    size_t off = 0;
-    while (off < len) {
-        const ssize_t n = ::write(encStdin_, data + off, len - off);
-        if (n > 0) { off += static_cast<size_t>(n); continue; }
-        if (n < 0 && errno == EINTR) continue;   // a signal is not a dead process
-        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            if (off == 0) return 0;
-            if (static_cast<int32_t>(millis() - deadline) >= 0) return -1;   // wedged
-            ::usleep(500);
-            continue;
-        }
-        return -1;   // EPIPE etc.: the process is gone
-    }
+    if (encWriterDead_) return -1;
+    if (encQueue_.size() >= kEncQueueMax) return 0;   // encoder behind: drop-newest, stay live
+    encQueue_.emplace_back(data, data + len);
+    encCv_.notify_one();
     return static_cast<int>(len);
-#endif
 }
 
 bool encoderRunning() {
     if (encTestMode_ != EncoderTestMode::Off) return encTestMode_ == EncoderTestMode::Record;
+    {
+        std::lock_guard<std::mutex> lock(encMutex_);
+        if (encWriterDead_) return false;
+    }
 #ifdef _WIN32
     if (!encProcess_) return false;
     return WaitForSingleObject(encProcess_, 0) == WAIT_TIMEOUT;
@@ -2430,34 +2492,19 @@ bool encoderRunning() {
     if (encPid_ < 0) return false;
     int status = 0;
     const pid_t r = ::waitpid(encPid_, &status, WNOHANG);
-    if (r == encPid_) { encPid_ = -1; return false; }   // exited: reaped
-    if (r < 0)        { encPid_ = -1; return false; }   // ECHILD: already reaped elsewhere; a
-                                                        // stale pid must never be SIGKILLed later
-    return true;
+    if (r == encPid_) {
+        std::printf("encoder: process exited (status %d)\n", status);
+        encPid_ = -1;
+        return false;
+    }
+    if (r < 0 && errno == ECHILD) { encPid_ = -1; return false; }   // reaped elsewhere: a stale
+                                                                    // pid must never be SIGKILLed
+    return true;   // running, or EINTR (a signal is not an exit)
 #endif
 }
 
 void encoderStop() {
-    if (encTestMode_ != EncoderTestMode::Off) return;
-#ifdef _WIN32
-    if (encStdin_) { CloseHandle(encStdin_); encStdin_ = nullptr; }
-    if (encProcess_) {
-        if (WaitForSingleObject(encProcess_, 500) == WAIT_TIMEOUT) TerminateProcess(encProcess_, 0);
-        CloseHandle(encProcess_);
-        encProcess_ = nullptr;
-    }
-#else
-    if (encStdin_ >= 0) { ::close(encStdin_); encStdin_ = -1; }   // EOF lets ffmpeg finalize
-    if (encPid_ >= 0) {
-        for (int i = 0; i < 50; i++) {                   // up to ~500 ms of graceful drain
-            if (::waitpid(encPid_, nullptr, WNOHANG) == encPid_) { encPid_ = -1; return; }
-            ::usleep(10 * 1000);
-        }
-        ::kill(encPid_, SIGKILL);
-        ::waitpid(encPid_, nullptr, 0);
-        encPid_ = -1;
-    }
-#endif
+    stopEncoderProcess();
 }
 
 void setTestEncoderMode(EncoderTestMode mode) {

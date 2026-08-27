@@ -33,6 +33,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 namespace mm {
 
@@ -55,6 +56,10 @@ public:
         // Bitrate is an identity-like magnitude a user types, not sweeps: a number field.
         controls_.addControl("bitrate", bitrateKbit, 500, 40000);
         controls_.setNumberField(controls_.count() - 1);
+        // The ffmpeg video encoder. libx264 exists in every ffmpeg build; the hardware entries
+        // offload the encode entirely, worth picking on large grids. One this ffmpeg lacks
+        // fails the spawn and the status says so.
+        controls_.addSelect("encoder", encoderSel_, kEncoderOptions, kEncoderOptionCount);
         // The playable address, one copy away from VLC or a Safari AirPlay hand-off.
         controls_.addReadOnly("url", urlBuf_, sizeof(urlBuf_));
     }
@@ -63,7 +68,7 @@ public:
     /// arrive through prepare() already.
     bool affectsPrepare(const char* name) const override {
         return std::strcmp(name, "targetFps") == 0 || std::strcmp(name, "bitrate") == 0 ||
-               isCorrectionControl(name);
+               std::strcmp(name, "encoder") == 0 || isCorrectionControl(name);
     }
 
     void prepare() override {
@@ -104,7 +109,14 @@ public:
     }
 
     void tick() MM_NONBLOCKING override {
-        if (!open_ || targetFps == 0 || !sourceBuffer_ || !sourceBuffer_->data()) return;
+        // encoderDied_ gates HARD: after a mid-frame failure the pipe holds a PARTIAL frame,
+        // and any further write lands shifted: the torn half-and-half image seen live on the
+        // bench. Nothing more is written until the restart hands over a clean pipe.
+        if (!open_ || encoderDied_ || targetFps == 0 || !sourceBuffer_ || !sourceBuffer_->data()) return;
+        // Warm-up: the encoder reads nothing while it initializes (VideoToolbox takes a few
+        // hundred ms), and a frame that STARTS into the pipe then cannot complete trips the
+        // wedge budget as a false death. Send nothing until the encoder is demonstrably up.
+        if (static_cast<int32_t>(platform::millis() - warmupUntilMs_) < 0) return;
 
         // targetFps is a CEILING, the NdiDriver/PreviewDriver pacing pattern: the render loop
         // runs faster, frames beyond the rate are simply not encoded.
@@ -152,7 +164,7 @@ public:
     void tick1s() MM_NONBLOCKING override {
         if (!open_) return;
         if (encoderDied_ || !platform::encoderRunning()) {
-            encoderDied_ = false;
+            encoderDied_ = true;   // stays set until a restart SUCCEEDS: the pipe is dirty
             healthySecs_ = 0;
             // Backoff doubles per attempt (1 s, 2 s, 4 s) so a crash-looping ffmpeg is not
             // respawned every second; the budget replenishes below after sustained health, so
@@ -162,6 +174,8 @@ public:
                 restartsLeft_--;
                 restartWaitS_ = static_cast<uint8_t>(1u << (kMaxRestarts - restartsLeft_));
                 if (startEncoder()) {
+                    encoderDied_ = false;   // fresh process, clean pipe: writing may resume
+                    statusStale_ = true;    // the healthy branch repaints "streaming" next second
                     setStatus("encoder restarted", Severity::Warning);
                     return;
                 }
@@ -172,7 +186,8 @@ public:
         }
         if (healthySecs_ < 60) healthySecs_++;
         else { restartsLeft_ = kMaxRestarts; restartWaitS_ = 0; }
-        if (droppedFrames_ != lastReportedDrops_) {
+        if (statusStale_ || droppedFrames_ != lastReportedDrops_) {
+            statusStale_ = false;
             lastReportedDrops_ = droppedFrames_;
             std::snprintf(statusBuf_, sizeof(statusBuf_), "streaming %ux%u, %u frames dropped",
                           static_cast<unsigned>(width_), static_cast<unsigned>(height_),
@@ -195,18 +210,24 @@ public:
         std::snprintf(gop, gopCap, "%u", static_cast<unsigned>(targetFps));
         std::snprintf(bv, bvCap, "%uk", static_cast<unsigned>(bitrateKbit));
         std::snprintf(out, outCap, "%s%s/stream.m3u8", platform::fsRootPath(), kSegmentDir);
-        const char* args[] = {
-            "ffmpeg", "-hide_banner", "-loglevel", "error",
-            "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", geo, "-r", rate, "-i", "-",
-            "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-g", gop,
-            "-b:v", bv,
-            "-f", "hls", "-hls_time", "1", "-hls_list_size", "6",
-            "-hls_flags", "delete_segments", out, nullptr,
-        };
-        const size_t count = sizeof(args) / sizeof(args[0]);
-        if (count > cap) return 0;
-        std::memcpy(argv, args, sizeof(args));
-        return count - 1;   // excluding the terminator
+        // Assembled by index so the x264-only tuning flags stay off other encoders
+        // (h264_videotoolbox rejects -tune) without duplicated slots.
+        const char* encoder = kEncoderOptions[encoderSel_ < kEncoderOptionCount ? encoderSel_ : 0];
+        const bool x264 = std::strcmp(encoder, "libx264") == 0;
+        size_t i = 0;
+        auto add = [&](const char* a) { if (i + 1 < cap) argv[i++] = a; };
+        for (const char* a : std::initializer_list<const char*>{
+                 "ffmpeg", "-hide_banner", "-loglevel", "error",
+                 "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", geo,
+                 "-r", rate, "-i", "-",
+                 "-c:v", encoder }) add(a);
+        if (x264) { add("-preset"); add("veryfast"); add("-tune"); add("zerolatency"); }
+        for (const char* a : std::initializer_list<const char*>{
+                 "-g", gop, "-b:v", bv,
+                 "-f", "hls", "-hls_time", "1", "-hls_list_size", "6",
+                 "-hls_flags", "delete_segments+temp_file", out }) add(a);   // temp_file: the playlist lands by RENAME, never served half-written
+        argv[i] = nullptr;
+        return i;
     }
 
     // Controls
@@ -214,9 +235,21 @@ public:
     uint8_t  targetFps   = 30;
     /// H.264 target bitrate in kbit/s. 8000 carries a 512x512 grid comfortably.
     uint16_t bitrateKbit = 8000;
+    /// The ffmpeg encoder pick; hardware entries offload the encode (see the control's comment).
+    uint8_t  encoderSel_ = 0;   // index into kEncoderOptions; 0 = libx264, the universal default
 
 private:
     static constexpr uint8_t kMaxRestarts = 3;
+
+    static constexpr uint32_t kWarmupMs = 750;   // encoder init headroom before the first frame
+    static constexpr const char* kEncoderOptions[] = {
+        "libx264",            // software, in every ffmpeg build: the safe default
+        "h264_videotoolbox",  // macOS media engine
+        "h264_vaapi",         // Linux VAAPI
+        "h264_v4l2m2m",       // Raspberry Pi
+        "h264_nvenc",         // NVIDIA
+    };
+    static constexpr uint8_t kEncoderOptionCount = 5;
 
     bool startEncoder() {
         const char* argv[40];
@@ -227,6 +260,7 @@ private:
             setStatus("ffmpeg not found - see the docs", Severity::Warning);
             return false;
         }
+        warmupUntilMs_ = platform::millis() + kWarmupMs;
         open_ = true;
         return true;
     }
@@ -254,10 +288,12 @@ private:
     lengthType     height_ = 0;
     bool           open_   = false;
     bool           encoderDied_ = false;
+    bool           statusStale_ = false;
     uint8_t        restartsLeft_ = kMaxRestarts;
     uint8_t        restartWaitS_ = 0;    // backoff countdown, in tick1s steps
     uint8_t        healthySecs_  = 0;    // sustained-health counter that replenishes the budget
     uint32_t       lastSendMs_ = 0;
+    uint32_t       warmupUntilMs_ = 0;
     uint32_t       droppedFrames_ = 0;
     uint32_t       lastReportedDrops_ = 0;
     ScratchBuffer<uint8_t> rgb_;          // tight RGB staging, sized in prepare()

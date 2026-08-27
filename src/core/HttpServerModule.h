@@ -274,9 +274,10 @@ public:
     /// Install the schema-changed hook WITHOUT opening the TCP listener (setup() does both). A unit
     /// test proving the hook fires the resync needs no socket, and binding a port under test is flaky
     /// (a busy port fails the open). release() unwires it the same way as after a real setup().
-    /// The port the live server actually serves on, 0 when none is up: the one true source for
-    /// any module that must print its own URL (HlsDriver's `url` control).
-    static uint16_t servedPort() { return instance_ ? instance_->port : 0; }
+    /// The port the live server actually serves on (bound at open, 0 when none is up), NOT the
+    /// mutable `port` control: the one true source for any module that must print its own URL
+    /// (HlsDriver's `url` control).
+    static uint16_t servedPort() { return instance_ ? instance_->boundPort_ : 0; }
 
     void installSchemaHookForTest() {
         instance_ = this;
@@ -419,6 +420,7 @@ private:
     // FilesystemModule::noteDirty singleton pattern — set in setup(), cleared in release().
     static void onSchemaChanged();
     static inline HttpServerModule* instance_ = nullptr;
+    uint16_t boundPort_ = 0;   // the port open() actually bound; 0 when no server is live
 
     // XOR key for Password-control obfuscation in /api/state. NOT a secret — the
     // same value lives in src/ui/app.js (PW_XOR_KEY). This only stops the

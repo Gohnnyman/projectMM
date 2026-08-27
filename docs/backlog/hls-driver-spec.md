@@ -9,9 +9,10 @@ consumer-playback path.
 ## Decision: pipe to ffmpeg
 
 The driver spawns `ffmpeg` (found on PATH; a runtime dependency like Npcap and the NDI
-runtime, never vendored) and writes raw RGB frames to its stdin; ffmpeg encodes (hardware
-encoder where the platform offers one, `libx264` otherwise) and writes HLS segments plus the
-`.m3u8` playlist into a session temp directory that HttpServerModule serves. One code path for
+runtime, never vendored) and writes raw RGB frames to its stdin; ffmpeg encodes with the
+user-picked encoder (an `encoder` Select: `libx264` default, hardware entries like
+`h264_videotoolbox` offload it) and writes HLS segments plus the `.m3u8` playlist into
+`/.hls/` under the fs mount, which HttpServerModule serves. One code path for
 all hosts, no codec in the tree, no license baggage. Rejected alternatives: per-OS encoder
 integrations (three implementations, fails the generality bar), MJPEG (no interframe
 compression: fails 4K throughput), vendored x264/openh264 (GPL / binary-patent baggage).
@@ -44,16 +45,21 @@ Light-domain driver `HlsDriver` under Drivers, desktop builds only (`platform::h
 style gate mirrors NdiDriver's). Controls:
 
 - `targetFps` (uint8, default 30): encode pacing; frames beyond it are dropped before the pipe.
-- `bitrate` (uint16 Mbit x10? keep simple: uint16 kbit, default 8000): passed to ffmpeg.
-- read-only `status`: `streaming` / `ffmpeg not found` / `error: <reason>` / `idle`.
-- read-only `url`: the playable address (`http://<host>:<port>/hls/stream.m3u8`), shown so the
-  user can copy it into VLC/TV; also advertised over mDNS (DNS-SD `_http._tcp` TXT path).
+- `bitrate` (uint16 kbit, default 8000): passed to ffmpeg as `-b:v`.
+- `encoder` (Select, default `libx264`): the ffmpeg video encoder; hardware entries offload
+  the encode, one this ffmpeg lacks fails the spawn and the status says so.
+- read-only `status`: `streaming WxH at F fps` (with a dropped-frame count when any),
+  `ffmpeg not found - see the docs`, `encoder restarted`, `encoder exited - check ffmpeg`.
+- read-only `url`: the playable address (`http://<host>:<port>/hls/stream.m3u8`, the port the
+  server actually serves), shown so the user can copy it into VLC/TV.
 
 ## Robustness and the hot path
 
-- The render tick hands a frame to the pipe with a NON-BLOCKING write: if ffmpeg falls behind
-  (pipe full), the frame is dropped and a counter increments; the render loop never blocks on
-  the encoder. Frame handoff is the only tick-path cost (one write syscall).
+- The render tick packs the frame (per-pixel correction, O(width x height)) and ENQUEUES it
+  whole; a dedicated platform writer thread does the blocking pipe writes on every OS, so the
+  tick never touches the pipe. A queue past 3 frames drops-newest with a visible counter, and
+  whole-frame handoff makes a torn frame structurally impossible. After a spawn the driver
+  waits a short warm-up before the first frame (encoder init reads nothing).
 - ffmpeg missing: status says so, nothing crashes, the driver idles until re-enabled.
 - ffmpeg exits (crash, kill): status shows the exit, restart with backoff; segments dir is
   recreated per session and cleaned on release().
