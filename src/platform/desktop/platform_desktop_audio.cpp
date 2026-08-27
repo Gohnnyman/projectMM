@@ -39,7 +39,11 @@
     #if defined(__clang__)
         #pragma GCC diagnostic ignored "-Wnullability-completeness"
         #pragma GCC diagnostic ignored "-Wnullability-extension"
-        #pragma GCC diagnostic ignored "-Wfunction-effects"
+        // Only local/newer clang knows this experimental group; CI's Apple clang errors on
+        // the unknown name under -Werror, so probe before naming it.
+        #if __has_warning("-Wfunction-effects")
+            #pragma GCC diagnostic ignored "-Wfunction-effects"
+        #endif
     #endif
 #endif
 

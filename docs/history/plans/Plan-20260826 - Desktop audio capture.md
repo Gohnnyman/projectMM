@@ -91,8 +91,9 @@ run after the merge.
   (Simulate sweep moved it), parked.
 - ESP32 zero delta: verified, -112 bytes (the pins block now compiles out where hasI2sMic is
   false). Future size checks read the repo-health delta instead of A/B builds (PO rule).
-- Still open: the fleet test (desktop send audio -> board Receive) and the Windows tester's run
-  after the merge.
+- Fleet test: verified 2026-08-27 on the bench: the desktop (Local, BlackHole, send audio on,
+  "sending") drove the S3 N8R8 at .103 ("receiving", level tracking the desktop's in lockstep).
+- Still open: the Windows tester's run after the merge.
 - Desktop bench (PO): run `build/projectMM` on macOS, pick the mic in the Audio card device
   dropdown, see AudioSpectrum/GEQ effects react; install BlackHole and see it appear + react to
   played music.
