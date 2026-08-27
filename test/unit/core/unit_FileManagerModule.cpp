@@ -215,3 +215,24 @@ TEST_CASE("FileManager: fsWriteStream discards on abort (incomplete upload)") {
     CHECK(platform::fsSize("/partial.bin") < 0);                // no file committed
     CHECK(!std::filesystem::exists(std::string(r.root) + "/partial.bin.tmp"));   // temp discarded
 }
+
+TEST_CASE("HTTP header names match case-insensitively, so any client's Content-Length counts") {
+    // The bench-found wipe: node's undici sends `content-length:` lowercase; the case-sensitive
+    // strstr read "no length declared", and an upload committed an EMPTY file with a 200, a
+    // silent config wipe. RFC 9112 makes field names case-insensitive; the finder must too.
+    const char* req = "POST /api/file?path=/x HTTP/1.1\r\ncontent-length: 831\r\n\r\nbody";
+    const char* hit = mm::HttpServerModule::findHeaderCI(req, "Content-Length:");
+    REQUIRE(hit != nullptr);
+    CHECK(std::strncmp(hit, "content-length:", 15) == 0);
+
+    // Canonical and mixed casings resolve to the same header.
+    CHECK(mm::HttpServerModule::findHeaderCI("Content-Length: 5\r\n", "content-length:") != nullptr);
+    CHECK(mm::HttpServerModule::findHeaderCI("CONTENT-LENGTH: 5\r\n", "Content-Length:") != nullptr);
+    // And a request without the header still reads as absent.
+    CHECK(mm::HttpServerModule::findHeaderCI("GET / HTTP/1.1\r\nHost: x\r\n", "Content-Length:") == nullptr);
+
+    // Anchored at line starts: an X-prefixed lookalike is NOT the header.
+    CHECK(mm::HttpServerModule::findHeaderCI("POST / HTTP/1.1\r\nX-Content-Length: 9\r\n\r\n", "Content-Length:") == nullptr);
+    // Bounded by the blank line: a header name inside the BODY is data, not a header.
+    CHECK(mm::HttpServerModule::findHeaderCI("POST / HTTP/1.1\r\nHost: x\r\n\r\nContent-Length: 4", "Content-Length:") == nullptr);
+}

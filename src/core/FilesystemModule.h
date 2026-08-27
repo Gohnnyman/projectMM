@@ -163,6 +163,13 @@ public:
     /// caller reporting success to a user needs to tell that apart from a real apply.
     bool applySubtree(MoonModule* m, const char* json, const char* prefix = "");
 
+    /// Live reconfiguration for a WRITTEN config file: a `/.config/<Type>.json` upload applies
+    /// onto the running tree through the same `applySubtree` a preset uses, the boot loader's
+    /// rule extended to the file-upload path, so a restored backup needs no reboot. One level
+    /// only: `/.config/presets/*` are apply-on-demand captures, not module files; any other path
+    /// is not config. Returns whether a module matched AND its subtree applied.
+    bool applyConfigFile(const char* path);
+
 private:
     static inline FilesystemModule* instance_ = nullptr;
     Scheduler* scheduler_ = nullptr;

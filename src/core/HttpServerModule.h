@@ -253,6 +253,12 @@ public:
     /// mkdir/delete). Public + static so it's unit-testable without a socket fixture.
     static bool parseFilePath(const char* query, char* out, size_t cap);
 
+    /// Case-insensitive substring search for a header name in a raw request (RFC 9112: field
+    /// names are case-insensitive: browsers send "Content-Length:", node's undici sends
+    /// "content-length:"; the case-sensitive strstr it replaces silently read a length of 0 and
+    /// committed EMPTY files with a 200). Public + static so it's unit-testable without a socket.
+    static const char* findHeaderCI(const char* hay, const char* needle);
+
     /// Apply a WLED `{on?, bri?}` state body onto the Drivers `on` / `brightness` controls through
     /// the shared apply-core (`on` and `bri` independent — off preserves the level). The transport-
     /// free entry the HTTP `POST /json/state`, the inbound-`/ws` path, and the unit tests all drive.

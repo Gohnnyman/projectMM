@@ -225,3 +225,26 @@ TEST_CASE("a prefixed subtree round-trips inside a larger object") {
     CHECK(t.fs->applySubtree(t.layers, preset.c_str(), "Effects."));
     CHECK(std::strcmp(t.effectType(), "NoiseEffect") == 0);
 }
+
+// The live-reconfiguration rule extended to the file-upload path: writing /.config/<Type>.json
+// (the File Manager upload, a config restore) applies onto the RUNNING tree, no reboot. Found
+// as a real gap when the config-restore flow ended in a "reboot device" button.
+TEST_CASE("a written config file applies to the running tree without a reboot") {
+    Tree t;
+    auto* layer = t.add(t.layers, "Layer");
+    t.add(layer, "NoiseEffect");
+
+    // The bytes a restore would upload: the same tree shape but with a different effect.
+    std::string json = serialize(t.fs, t.layers);
+    const auto at = json.find("NoiseEffect");
+    REQUIRE(at != std::string::npos);
+    json.replace(at, std::strlen("NoiseEffect"), "RainbowEffect");
+    REQUIRE(mm::platform::fsWriteAtomic("/.config/Effects.json", json.data(), json.size()));
+
+    CHECK(t.fs->applyConfigFile("/.config/Effects.json"));
+    CHECK(std::strcmp(t.effectType(), "RainbowEffect") == 0);
+
+    // Not config: a preset path and an unknown type leave the tree alone and say so.
+    CHECK_FALSE(t.fs->applyConfigFile("/.config/presets/p1.json"));
+    CHECK_FALSE(t.fs->applyConfigFile("/.config/NoSuchModule.json"));
+}

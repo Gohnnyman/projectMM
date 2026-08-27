@@ -4,6 +4,8 @@ The log of **breaking changes** — what changed between versions, and the actio
 
 projectMM ships **no migration code**: the persistence layer is robust by default (an absent key keeps the control's default, a stale value clamps to the new bounds, an unknown key is ignored), which absorbs almost all schema drift with zero migration-specific code. The rare change that a robust reader *cannot* absorb is **documented here instead of migrated** — see [ADR-0013](adr/0013-no-migration-code-robust-persistence-plus-documented-breaks.md) for the decision and its rationale.
 
+**The File Manager's Backup (⤓) / Restore (⟲) carries config across these breaks.** [src/ui/migrate.js](https://github.com/MoonModules/projectMM/blob/main/src/ui/migrate.js) is the **authoritative, dated log of every machine-mappable break** (file, type, control, and value renames): Restore applies it in the browser and reports what did not carry over, so entries below describe only what a map cannot express, behavior changes, semantics to re-check, and erase-flash moves. It works even on a freshly erased device: join its `MM-XXXX` SoftAP, open `http://4.3.2.1`, and restore there, the bundle carries the WiFi credentials and applies live, so the device joins your network by itself. For a device still on old firmware (no Backup button yet), the [installer page](https://moonmodules.org/projectMM/install/) offers the same backup as a bookmarklet.
+
 **Read this when upgrading a device that already holds persisted state.** Entries are newest first. Each says what changed and what to do; most need nothing at all, because the lost value re-populates on next use.
 
 **MoonLive is exempt until it launches.** Nobody is running scripts on a device yet, so a break in the script language or its storage cannot strand anyone, and an entry here would describe an upgrade path no user can take. Its breaking changes are recorded in the commit and PR record instead. This exemption ends at the first release that ships MoonLive as a supported feature; from then it follows the same rule as everything else.
@@ -102,8 +104,6 @@ The type name is the persisted filename and the preset capture key, so two thing
 
 A preset also records the ROLE it covers, and that role is now named after the container rather than after a module inside it: `"layer"` becomes `"effects"`. A preset carrying the old role still loads, but shows no tint on its pad until it is re-saved — the UI has no `layer` role to colour it by.
 
-Renaming the file on the device works if you would rather not rebuild by hand: `Layers.json` → `Effects.json`, and inside each `/.config/presets/*.json` both `"Layers"` → `"Effects"` (the captured container) and `"layer"` → `"effects"` (the role, which is what tints the pad). Nothing else in either file changes.
-
 The child `Layer` keeps its name, as does everything under it.
 
 
@@ -135,13 +135,7 @@ The `peripheral` dropdown no longer says `i80` / `MoonI80`. "i80" is the Intel 8
 
 ### The per-driver `preset` control is renamed to `lightPreset` (2026-07-23)
 
-The correction Select every driver exposes (channel order / RGBW synthesis) is renamed `preset` → `lightPreset`, so the UI label reads unambiguously next to a driver's other controls.
-
-| Old | New |
-|---|---|
-| control `preset` | `lightPreset` |
-
-**Action: nothing.** The saved value survives the rename (see the `lightPreset` [persistence contract](moonmodules/light/drivers.md#led-driver-details) for how a driver's preset reference is stored and re-resolved). Only an external script or automation that POSTs the control by name (`/api/control` with `"control":"preset"`) must switch to `lightPreset`.
+**Action: nothing** on-device (the saved value survives, see the `lightPreset` [persistence contract](moonmodules/light/drivers.md#led-driver-details)). Only an external script or automation that POSTs the control by name (`/api/control` with `"control":"preset"`) must switch to `lightPreset`.
 
 ### `AudioService`: the `sync` control becomes `mode` + `send audio`, and `simulate` is renumbered (2026-07-22)
 
@@ -194,12 +188,6 @@ This rename left `RmtLedDriver` untouched, and `ParlioLedDriver` untouched *at t
 ## Earlier
 
 These pre-date this log and were recorded in ADR-0013's Consequences list. A device that persisted state on an older build and loads a newer one loses only the noted value, which re-populates on next use.
-
-### Container config filenames (`LayoutGroup.json` → `Layouts.json`)
-
-`.config/LayoutGroup.json` → `Layouts.json`, `.config/DriverGroup.json` → `Drivers.json` (container type rename). The stale files are ignored (unknown-type config isn't loaded); they linger harmlessly on disk until a flash erase.
-
-**Action: nothing.** Lost: the container's `enabled` flag (defaults back on).
 
 ### UI last-selected module (`mm.selectedModule` → `mm_selected`)
 

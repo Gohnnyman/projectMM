@@ -6,6 +6,7 @@
 import { installPicker } from "/install-picker.js";
 import { preview } from "/preview3d.js";
 import { isNewer, parse } from "/semver.js";
+import { applyMigrations, collectFiles, restoreDirs, diffRestore } from "/migrate.js";
 
 // Sections (top to bottom):
 //   1. State + storage
@@ -4957,6 +4958,42 @@ function renderFileManager(mod, host) {
     bar.appendChild(upBtn);
     bar.appendChild(upInput);
 
+    // Backup / Restore: the bulk counterparts of the per-file download/upload. Backup walks the
+    // whole filesystem into one JSON bundle (fmBackupConfig); Restore uploads a bundle back and
+    // reports what didn't carry over (fmRestoreConfig). Restore overwrites config, so it shares
+    // the delete button's armed double-press.
+    const bakBtn = document.createElement("button");
+    bakBtn.className = "fm-tool fm-tool--icon";
+    bakBtn.textContent = "⤓";
+    bakBtn.title = "Backup device config, download every file (config, scripts, presets) as one JSON bundle. Keep it private: it contains the WiFi password.";
+    bakBtn.addEventListener("click", async () => {
+        bakBtn.disabled = true;
+        bakBtn.textContent = "…";   // the walk takes seconds; show work in progress at once
+        try { await fmBackupConfig(); }
+        catch (err) { alert("Backup failed: " + err.message); }
+        finally { bakBtn.disabled = false; bakBtn.textContent = "⤓"; }
+    });
+    bar.appendChild(bakBtn);
+
+    const restInput = document.createElement("input");
+    restInput.type = "file";
+    restInput.accept = ".json,application/json";
+    restInput.style.display = "none";
+    restInput.addEventListener("change", async () => {
+        const file = (restInput.files || [])[0];
+        restInput.value = "";
+        if (!file) return;
+        try { await fmRestoreConfig(file, () => renderFileManager(mod, host)); }
+        catch (err) { alert("Restore failed: " + err.message); }
+    });
+    const restBtn = document.createElement("button");
+    restBtn.className = "fm-tool fm-tool--icon fm-tool--danger";
+    restBtn.textContent = "⟲";
+    restBtn.title = "Restore config from a backup bundle, overwrites the device's files, then reports anything that didn't carry over";
+    armPressTwice(restBtn, () => restInput.click(), { armedText: "✓" });
+    bar.appendChild(restBtn);
+    bar.appendChild(restInput);
+
     const delBtn = document.createElement("button");
     delBtn.className = "fm-tool fm-tool--icon fm-tool--danger";
     delBtn.textContent = "🗑";
@@ -5190,6 +5227,127 @@ function fmMakeDropTarget(el, destDir, hidden, rerender, st) {
         }
     });
 }
+
+// ---- Config backup & restore (tier 1: pure browser over the existing file API) ----
+// The engine core (walk, ordering, report) lives in migrate.js so node tests cover it;
+// this is the wiring to the real endpoints plus the download / report UI. Serial requests
+// throughout: the device serves one connection at a time and closes each.
+
+async function fmBackupConfig() {
+    const fetchDir = async (path) => fmFetchDir(path, true);   // hidden=1: .config must list
+    const fetchFile = async (path) => {
+        const res = await fetch("/api/file?path=" + encodeURIComponent(path));
+        if (!res.ok) throw new Error(path + ": HTTP " + res.status);
+        return await res.text();
+    };
+    const { files, skipped } = await collectFiles(fetchDir, fetchFile);
+    // Device identity for the filename + header, straight off the live state.
+    let device = location.hostname || "device", firmware = "", build = "";
+    try {
+        const st = await (await fetch("/api/state")).json();
+        (function walk(mods) { for (const m of mods || []) {
+            for (const c of m.controls || []) {
+                if (c.name === "deviceName" && c.value) device = c.value;
+                if (c.name === "firmware") firmware = c.value || "";
+                if (c.name === "build") build = c.value || "";
+            }
+            walk(m.children);
+        }})(st.modules);
+    } catch (_) {}
+    const bundle = {
+        format: "projectMM-config-backup", version: 1,
+        capturedAt: new Date().toISOString(), origin: location.origin,
+        device, firmware, build, files,
+    };
+    // The diagnostics-download tail: Blob, objectURL, a[download], revoke late (Safari races
+    // an immediate revoke against the save dialog).
+    const blob = new Blob([JSON.stringify(bundle, null, 1)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `projectMM-config-${device}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    if (skipped.length) {
+        alert("Backed up. Skipped (not text, the bundle carries text only):\n" + skipped.join("\n"));
+    }
+}
+
+async function fmRestoreConfig(file, refresh) {
+    const bundle = JSON.parse(await file.text());
+    if (bundle.format !== "projectMM-config-backup" || !bundle.files) {
+        throw new Error("not a projectMM config backup");
+    }
+    // The rename map first: MIGRATING.md's schema breaks, applied client-side and reported.
+    const { files, report } = applyMigrations(bundle.files);
+    // Directories before files (mkdir is non-recursive); existing dirs answer 500, harmless.
+    for (const dir of restoreDirs(files)) {
+        await fetch("/api/dir?path=" + encodeURIComponent(dir), { method: "POST", body: "" }).catch(() => {});
+    }
+    const failed = [];
+    // Network config last: it applies LIVE, and joining another network mid-restore would cut
+    // off the writes still to come (the AP flow's whole point).
+    const ordered = Object.entries(files).sort(
+        ([a], [b]) => (a.endsWith("/NetworkModule.json") ? 1 : 0) - (b.endsWith("/NetworkModule.json") ? 1 : 0));
+    for (const [path, content] of ordered) {
+        const res = await fetch("/api/file?path=" + encodeURIComponent(path), {
+            method: "POST", headers: { "Content-Type": "application/octet-stream" },
+            body: new Blob([content]),
+        }).catch(() => null);
+        if (!res || !res.ok) {
+            failed.push({ kind: "control", where: path, detail: "write failed (" + (res ? res.status : "network") + ")" });
+        }
+    }
+    // The report: what this firmware no longer understands, plus everything the rename map did.
+    let live = [], typeNames = [];
+    try { live = (await (await fetch("/api/state")).json()).modules || []; } catch (_) {}
+    try { typeNames = ((await (await fetch("/api/types")).json()).types || []).map(t => t.name); } catch (_) {}
+    const entries = [...report, ...failed, ...diffRestore(files, live, typeNames)];
+    fmShowRestoreReport(entries, refresh);
+}
+
+// The report dialog. Not an alert: the list can be long and deserves reading.
+function fmShowRestoreReport(entries, refresh) {
+    const ov = document.createElement("div");
+    ov.className = "fw-overlay";
+    const box = document.createElement("div");
+    box.className = "fw-overlay-box";
+    const h = document.createElement("h2");
+    h.textContent = "Restore complete";
+    const msg = document.createElement("p");
+    msg.className = "fw-overlay-msg";
+    box.appendChild(h);
+    box.appendChild(msg);
+    if (entries.length === 0) {
+        msg.textContent = "Everything carried over.";
+    } else {
+        msg.textContent = "Carried over with notes (see MIGRATING.md for the breaking-change log):";
+        const list = document.createElement("ul");
+        list.style.cssText = "text-align:left;max-height:14rem;overflow-y:auto;font-size:.85rem";
+        for (const e of entries) {
+            const li = document.createElement("li");
+            li.textContent = `[${e.kind}] ${e.where}: ${e.detail}`;
+            list.appendChild(li);
+        }
+        box.appendChild(list);
+    }
+    // No reboot button: every written config file applied to the running tree as it landed
+    // (live reconfiguration). Network settings went last, if they moved the device to another
+    // network, it is reachable there at its usual name.
+    const note = document.createElement("p");
+    note.className = "fw-overlay-msg";
+    note.textContent = "Everything is applied live. If network settings changed, the device is now on that network at its usual name.";
+    box.appendChild(note);
+    const close = document.createElement("button");
+    close.textContent = "close";
+    close.addEventListener("click", () => { ov.remove(); if (refresh) refresh(); });
+    box.appendChild(close);
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+}
+
 
 // Upload each dropped file into destDir via /api/file. Returns the names skipped (too big / failed)
 // so the caller can report them. The File blob is sent as the body directly — the browser streams

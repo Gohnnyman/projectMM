@@ -187,22 +187,58 @@ void FilesystemModule::reapplyNode(MoonModule* m, const char* json, const char* 
 }
 
 // ---- Load ----
+
+// Read a WHOLE file into a heap buffer sized to it (caller frees), no fixed ceiling, so a large
+// saved config (many light presets, a wide fixture) loads in full instead of being truncated to a
+// fixed buffer and failing to parse. Mirrors the streaming save (saveSubtree): both sides cap-free.
+static char* readWholeFileAlloc(const char* path) {
+    const long size = platform::fsSize(path);
+    if (size <= 0) return nullptr;
+    char* buf = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
+    if (!buf) { std::printf("FilesystemModule: out of memory loading %s (%ld bytes)\n", path, size); return nullptr; }
+    const int n = platform::fsRead(path, buf, static_cast<size_t>(size) + 1);
+    if (n <= 0) { platform::free(buf); return nullptr; }
+    buf[n] = '\0';                       // parsed as a C-string
+    return buf;
+}
+
 void FilesystemModule::loadSubtree(MoonModule* m) {
     char path[MAX_PATH];
     if (!pathFor(m, path, sizeof(path))) return;
-    // Read the WHOLE file into a heap buffer sized to it — no fixed ceiling, so a large saved config
-    // (many light presets, a wide fixture) loads in full instead of being truncated to a fixed buffer
-    // and failing to parse. Mirrors the streaming save (saveSubtree): both sides are cap-free.
-    const long size = platform::fsSize(path);
-    if (size <= 0) return;
-    char* buf = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
-    if (!buf) { std::printf("FilesystemModule: out of memory loading %s (%ld bytes)\n", path, size); return; }
-    const int n = platform::fsRead(path, buf, static_cast<size_t>(size) + 1);
-    if (n > 0) {
-        buf[n] = '\0';                   // applyNode parses buf as a C-string
+    if (char* buf = readWholeFileAlloc(path)) {
         applyNode(m, buf, "");
+        platform::free(buf);
     }
-    platform::free(buf);
+}
+
+// See the header. The path names the module: the filename stem IS the top-level typeName (the same
+// contract pathFor writes with).
+bool FilesystemModule::applyConfigFile(const char* path) {
+    if (!scheduler_ || !path) return false;
+    constexpr const char* kPrefix = "/.config/";
+    constexpr size_t kPrefixLen = 9;
+    if (std::strncmp(path, kPrefix, kPrefixLen) != 0) return false;
+    const char* stem = path + kPrefixLen;
+    const size_t stemLen = std::strlen(stem);
+    constexpr size_t kExtLen = 5;   // ".json"
+    if (stemLen <= kExtLen || std::strcmp(stem + stemLen - kExtLen, ".json") != 0) return false;
+    if (std::memchr(stem, '/', stemLen) != nullptr) return false;   // one level: presets/ etc. skip
+    char type[64];
+    const size_t typeLen = stemLen - kExtLen;
+    if (typeLen >= sizeof(type)) return false;
+    std::memcpy(type, stem, typeLen);
+    type[typeLen] = '\0';
+    for (uint8_t i = 0; i < scheduler_->moduleCount(); i++) {
+        MoonModule* m = scheduler_->module(i);
+        if (m && m != this && std::strcmp(m->typeName(), type) == 0) {
+            char* buf = readWholeFileAlloc(path);
+            if (!buf) return false;
+            const bool applied = applySubtree(m, buf);
+            platform::free(buf);
+            return applied;
+        }
+    }
+    return false;   // no module of this type (a foreign file named like one): leave the tree alone
 }
 
 // Overlay every persistable control's saved value onto the module's current control list, in list order.

@@ -139,8 +139,10 @@ of code is fine; a new IDF component is the expensive kind).
   `/.config`: diagnose "is it my config or the firmware?" without erasing anything.
 - **WiFi re-provisioning**: edit the stored credentials from MoonBase's page (today it only
   *reads* them; the AP fallback plus the app's provisioning already covers most of this).
-- **Config backup / restore**: download the filesystem as an archive before a risky change,
-  upload it back after; also the migration answer for future partition-table moves.
+- **Config backup / restore, tiers 2+3**: tier 1 (browser-side bundle over the file API, with
+  the rename map and restore report) ships in the File Manager. Remaining: tier 2, a
+  single-archive device endpoint (one request instead of a walk); tier 3, restore hosted on
+  MoonBase's page, the migration answer for future partition-table moves.
 - **Firmware downgrade guard**: MoonBase installs whatever image it is given; a version display
   (read from the incoming image's app descriptor) before flashing would make an accidental
   downgrade visible.
