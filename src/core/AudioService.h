@@ -5,7 +5,7 @@
 #include "core/AudioFrame.h"
 #include "core/AudioLevel.h"
 #include "core/AudioBands.h"
-#include "core/math8.h"      // beatsin8 / sin8 — the simulated-audio oscillators
+#include "core/math8.h"      // beatsin8 / sin8, the simulated-audio oscillators
 #include "light/WLEDAudioSyncPacket.h"   // WLED audio-sync wire format (send/receive)
 #include "platform/platform.h"
 
@@ -15,8 +15,8 @@
 
 namespace mm {
 
-/// Acquires an audio source and publishes an `AudioFrame` — an overall sound
-/// **level**, a 16-band frequency **spectrum**, and the **dominant peak** — as the
+/// Acquires an audio source and publishes an `AudioFrame`: an overall sound
+/// **level**, a 16-band frequency **spectrum**, and the **dominant peak**: as the
 /// producer half of the audio-reactive pipeline
 ///
 /// The frame is available to consumers every render tick, but its analysed values
@@ -26,7 +26,7 @@ namespace mm {
 /// re-analysing. `AudioVolumeEffect` and `AudioSpectrumEffect` are the consumers,
 /// reaching the live frame through the static `latestFrame()`.
 ///
-/// **Named for what it does** — audio acquisition plus analysis, not for one
+/// **Named for what it does**: audio acquisition plus analysis, not for one
 /// source. Today the source is a digital I2S MEMS microphone (INMP441-class, the
 /// only one wired); the same source-independent analysis pipeline is built to serve
 /// other sources (line-in, USB audio, PDM mics, I2C codecs) behind the platform
@@ -34,12 +34,12 @@ namespace mm {
 /// RMS level, windowed FFT, band mapping), which is source-independent.
 ///
 /// **User-added Service.** A child of the `Services` container, registered in the
-/// factory and added through the UI when wanted, not boot-wired — auto-wiring it
+/// factory and added through the UI when wanted, not boot-wired, auto-wiring it
 /// forced an I2S init on every board, which on the classic ESP32 hung `setup()` and
 /// boot-looped a mic-less device. When added, its pins default to unset (−1, the
 /// standard Pin-control sentinel, so GPIO 0 stays a usable mic pin) and it stays
 /// idle with a status note until the user enters the real GPIOs. Chip-agnostic:
-/// gated on `platform::hasAudioInput` — a pin-wired I2S mic on boards, an OS capture
+/// gated on `platform::hasAudioInput`: a pin-wired I2S mic on boards, an OS capture
 /// device on desktop (the `device` Select: the system default mic out of the box, and
 /// loopback devices such as BlackHole when installed, so effects can follow what the
 /// machine plays). A desktop in Local mode with "send audio" on is a WLED audio-sync
@@ -49,8 +49,8 @@ namespace mm {
 /// of samples, DC-blocker high-pass, compute the level, window + FFT, map to bands.
 /// The high-pass conditions the raw block once, up front, so both the level and the
 /// spectrum see the same cleaned signal. The DSP choices are textbook defaults on
-/// purpose — a Hann window, RMS for level, a geometric band split, argmax for the
-/// peak — with deliberately no per-frequency correction table (the INMP441 is flat
+/// purpose, a Hann window, RMS for level, a geometric band split, argmax for the
+/// peak, with deliberately no per-frequency correction table (the INMP441 is flat
 /// ±3 dB across the range that matters). The level is overall RMS loudness computed
 /// independently of the FFT, not derived from the bands.
 ///
@@ -60,7 +60,7 @@ namespace mm {
 /// The bench wiring is SCK=6 (bit clock), WS=4 (word-select/LRCLK), SD=5 (serial data
 /// out). It drives the one slot its L/R select pin chooses (tie L/R to GND for the
 /// left slot); if `level` stays at the floor with sound present, the mic is filling
-/// the other slot — one wire, not firmware.
+/// the other slot, one wire, not firmware.
 ///
 /// **Platform seams.** Only the audio read and the FFT kernel are platform code
 /// (boards: `platform_esp32_i2s.cpp`, IDF's `i2s_std` driver + esp-dsp's radix-2 FFT;
@@ -79,17 +79,17 @@ namespace mm {
 /// **Prior art:** audio-reactive lighting is a long-standing idea in the LED-controller world
 /// (WLED-MM and MoonLight are the closest lineage). This is projectMM's own implementation, designed
 /// from the INMP441 datasheet (https://invensense.tdk.com/wp-content/uploads/2015/02/INMP441.pdf) and
-/// standard DSP rather than traced from any one project — studying, with credit, the thinking of
+/// standard DSP rather than traced from any one project, studying, with credit, the thinking of
 /// Frank (softhack007, WLED-MM audioreactive), Troy (troyhacks, the esp-dsp FFT + biquad pre-filters
 /// path we share), and Damian Schneider (DedeHai, the fixed-point FFT for FPU-less chips). The
-/// forward-looking analysis (source-seam extensions — line-in / PDM / analog / I²C codecs — and the
+/// forward-looking analysis (source-seam extensions, line-in / PDM / analog / I²C codecs, and the
 /// adaptive-noise-gate design that would retire the borrowed `floor` squelch) is a design study in
 /// docs/backlog/audio-dsp-roadmap.md.
 /// @card AudioService.png
 class AudioService : public MoonModule {
 public:
     /// Block size = FFT size: a power of two. 512 samples at 22050 Hz is ~23 ms of
-    /// audio per frame — fine resolution (~43 Hz/bin) at a modest per-tick cost.
+    /// audio per frame, fine resolution (~43 Hz/bin) at a modest per-tick cost.
     static constexpr size_t kBlock = 512;
     static constexpr size_t kMag = kBlock / 2;   ///< real-FFT magnitude bins
 
@@ -107,7 +107,7 @@ public:
 
     // --- controls: three I2S pins, sample rate, the two conditioning knobs, and
     // two read-only read-outs. The pins default to UNSET (-1, the standard Pin-
-    // control sentinel — so GPIO 0 stays a usable mic pin): the module is user-added
+    // control sentinel, so GPIO 0 stays a usable mic pin): the module is user-added
     // when a board has a mic, and stays idle (no I2S init) until the user enters the
     // real GPIOs, so adding it can't grab arbitrary pins or wedge a board with no
     // mic. The bench INMP441 wiring is SCK=6 / WS=4 / SD=5. Order follows the I2S
@@ -130,30 +130,30 @@ public:
     /// re-creates the channel live.
     uint8_t  sampleRateSel = 2;
     // Two knobs condition the spectrum + level:
-    uint8_t  floor = 100;        ///< noise floor (dB display floor) — bands/level
+    uint8_t  floor = 100;        ///< noise floor (dB display floor), bands/level
                                  ///< below this read as silence. Raise to keep an
                                  ///< ambient room dark, lower for a quiet room.
-    uint8_t  gain = 222;         ///< sensitivity — HIGHER = more (a narrower dB window
+    uint8_t  gain = 222;         ///< sensitivity, HIGHER = more (a narrower dB window
                                  ///< so a given sound fills more of the bar).
-    /// Simulated-audio pattern (only shown, and only used, in Simulate mode — see `mode`). The synthesized
+    /// Simulated-audio pattern (only shown, and only used, in Simulate mode, see `mode`). The synthesized
     /// signal drives audio-reactive effects with no mic or music, for a preview/demo device or a test:
-    ///   `music` — a plausible song: multi-sine bands + a swelling volume + a periodic beat + a
+    ///   `music`: a plausible song: multi-sine bands + a swelling volume + a periodic beat + a
     ///             sweeping peak. Nice for demos (bars dance, VU breathes, peaks move).
-    ///   `sweep` — a single band lit, marching bass→treble on a timer, with the peak frequency and a
-    ///             steady volume tracking it. Deterministic — the clean test pattern to check that each
+    ///   `sweep`: a single band lit, marching bass→treble on a timer, with the peak frequency and a
+    ///             steady volume tracking it. Deterministic, the clean test pattern to check that each
     ///             effect responds across the whole spectrum.
     uint8_t  simulate = 0;       ///< 0 = music, 1 = sweep (the pattern; Simulate mode only)
     /// The module's audio SOURCE, the first thing to pick (below status). Three either/or modes, each with
-    /// its own detail controls (the others hide): 0 = Local audio (its own peripheral — the on-board mic /
+    /// its own detail controls (the others hide): 0 = Local audio (its own peripheral, the on-board mic /
     /// line-in; analyze it here and optionally broadcast it, so pins, rate, floor/gain and "send audio"
     /// show). 1 = Receive network (a pure network sink: bind the sync port and let a peer's AudioFrame drive
-    /// the effects — no local peripheral). 2 = Simulate (a synthesized source for demos/tests — only the
+    /// the effects, no local peripheral). 2 = Simulate (a synthesized source for demos/tests, only the
     /// `simulate` pattern picker shows). A device is exactly one of these at a time. Changing it re-runs
     /// prepare() (acquires/releases the mic, rebinds/unbinds the socket) and re-toggles which controls
     /// show, all live.
     uint8_t  mode = 0;           ///< 0 = local audio, 1 = receive network, 2 = simulate
     /// The `mode` value that means Simulate. "receive network" (index 1) only exists where the network
-    /// does, so Simulate is index 2 with a network stack and index 1 without — the whole mode set shifts,
+    /// does, so Simulate is index 2 with a network stack and index 1 without, the whole mode set shifts,
     /// and every mode comparison uses this constant rather than a bare literal (defineControls + tick).
     static constexpr uint8_t kSimMode = platform::hasNetwork ? 2 : 1;
     /// Broadcast this device's AudioFrame over UDP (WLED v2 wire format) for WLED / MoonLight
@@ -166,10 +166,10 @@ public:
     /// Local+send → send, Local alone → off (local-only, no socket), Receive → receive, Simulate → off.
     /// `send` counts ONLY in Local mode (mode 0): a persisted send=true must not broadcast in Simulate
     /// mode, which has no captured frame worth sending. The `hasNetwork` guard on the Receive leg matters
-    /// on a no-network build: there mode 1 is Simulate (not Receive — see kSimMode), so without it a
+    /// on a no-network build: there mode 1 is Simulate (not Receive, see kSimMode), so without it a
     /// Simulate device would wrongly read as "network sink" (2).
     uint8_t  sync() const { return (platform::hasNetwork && mode == 1) ? 2 : (mode == 0 && send ? 1 : 0); }
-    /// The sync UDP port — the Send destination and the Receive listen port. Defaults
+    /// The sync UDP port, the Send destination and the Receive listen port. Defaults
     /// to WLED's 11988 (interop with WLED/MoonLight); set it the same on both ends to
     /// run a private projectMM-only sync group on a non-WLED port.
     uint16_t syncPort = WLED_SYNC_PORT;
@@ -186,7 +186,7 @@ public:
         // coding-standards rule): the gate first, the controls it gates under it, mutually-exclusive groups
         // sharing a gate grouped after it. The "receive network" option only exists where the network does
         // (Local + Simulate always; Receive added when platform::hasNetwork), so Simulate is index 1 on a
-        // no-network build and 2 with network — the class constant kSimMode carries that shift.
+        // no-network build and 2 with network, the class constant kSimMode carries that shift.
         const bool localMode = (mode == 0);
         const bool simMode = (mode == kSimMode);
         if constexpr (platform::hasNetwork) {
@@ -210,7 +210,7 @@ public:
             // The OS capture input: entry 0 "default" follows the system setting; loopback
             // devices (BlackHole and friends) appear when installed. Re-enumerated on every
             // rebuild, so a hot-plugged device shows up on the next control change. Persisted
-            // by INDEX (the Select writer's contract): if the OS reorders devices, re-pick —
+            // by INDEX (the Select writer's contract): if the OS reorders devices, re-pick,
             // "default" at 0 is order-stable and the shipped default.
             const char* const* deviceOptions = nullptr;
             const uint8_t deviceCount = static_cast<uint8_t>(platform::audioCaptureDevices(&deviceOptions));
@@ -237,7 +237,7 @@ public:
         // method (both are in affectsPrepare) so the rows toggle live. ---
         if constexpr (platform::hasNetwork) {
             const bool hasSocket = (sync() != 0);
-            // The UDP port — the Send destination and the Receive listen port. Defaults to WLED's
+            // The UDP port, the Send destination and the Receive listen port. Defaults to WLED's
             // 11988 (interop with WLED/MoonLight); change it on BOTH ends to run a private
             // projectMM-only sync group on a non-WLED port.
             controls_.addControl("syncPort", syncPort, 1, 65535);
@@ -251,7 +251,7 @@ public:
         // "level RMS" = the RMS loudness; the DISPLAYED number is its peak over the 1-second window
         // (tick1s publishes levelPeak_, the max of the per-block RMS level, then resets it), so a
         // beat that lands between samples still registers. The live frame_.level the LEDs use is the
-        // instantaneous RMS, recomputed every audio block — this read-out is the human-readable
+        // instantaneous RMS, recomputed every audio block, this read-out is the human-readable
         // summary of it, not a separate statistic.
         controls_.addReadOnly("level RMS", levelStr_, sizeof(levelStr_));
         controls_.addReadOnly("peakHz", peakStr_, sizeof(peakStr_));
@@ -270,18 +270,18 @@ public:
     }
 
     /// Pure build (see MoonModule::prepare): claim the frame election (this instance's frame_ drives the
-    /// effects in EVERY mode — a live mic, a received peer frame, or a synthesized one), then acquire only
+    /// effects in EVERY mode, a live mic, a received peer frame, or a synthesized one), then acquire only
     /// the hardware the current `mode` needs. Only Local runs a real peripheral, so only Local inits the
     /// I²S mic; Receive (a network sink) and Simulate (a synthetic source) free the I²S channel and its
     /// pins. The sync socket is rebound in every mode (syncReinit is a no-op unless there's a socket to
-    /// bind). No enabled() check — core's applyState() calls this only when effectively-enabled and routes
+    /// bind). No enabled() check, core's applyState() calls this only when effectively-enabled and routes
     /// to release() otherwise.
     void prepare() override {
         micSeat_.claim();       // first live instance wins the frame seat (claim-if-empty), any mode
         if (mode == 0) {
             reinit();           // Local only: (re)acquire the I²S mic (sets its own mic status)
         } else {
-            deinit();           // Receive / Simulate: no peripheral — free the I²S channel + its pins
+            deinit();           // Receive / Simulate: no peripheral, free the I²S channel + its pins
             clearStatus();      // the mic status is a Local-mode diagnostic; clear it so a stale
                                 // "mic: set sckPin…" doesn't linger on the status row (Receive/Simulate
                                 // report through the separate sync-status row instead)
@@ -297,7 +297,7 @@ public:
         MoonModule::release();   // chain: free any registered buffers + recurse (override-and-chain convention)
     }
 
-    /// The latest analysed frame — what effects read. Always valid (zeroed until
+    /// The latest analyzed frame, what effects read. Always valid (zeroed until
     /// the first successful read), so a consumer never dereferences null and a
     /// mic-less build just sees silence.
     const AudioFrame* audioFrame() const { return &frame_; }
@@ -314,18 +314,18 @@ public:
 
     /// Process-wide accessor for the consumers (audio effects). There is one mic,
     /// and an effect can be added/removed via the UI at any time, so it can't rely
-    /// on a boot-time setter — it asks here
+    /// on a boot-time setter, it asks here
     ///
     /// Returns the live mic's frame while one exists, else a static all-silent
     /// frame, so an effect added before/without a mic still reads valid silence
     /// instead of null. The FIRST live module claims the seat in `prepare()`, vacates
     /// it in `release()`, and any running module re-claims an empty seat in
-    /// `tick()` — so a device with two mics reads the first consistently, and
+    /// `tick()`: so a device with two mics reads the first consistently, and
     /// removing the active one lets a survivor take over. Add/remove in any order
     /// leaves a coherent answer (the robustness rule).
     static const AudioFrame* latestFrame() MM_NONBLOCKING {
         // constexpr, not a function-local static: a static needs a guard variable and a
-        // one-time lock on first use, which is a blocking operation on the render path — and
+        // one-time lock on first use, which is a blocking operation on the render path, and
         // this is called from EIGHT audio-reactive effects' tick(). constexpr is initialized at
         // compile time, so there is no guard and no lock.
         static constexpr AudioFrame kSilence{};
@@ -337,8 +337,8 @@ public:
         // Self-elect as the active mic if the seat is empty. prepare() gives it to the first live
         // module and release() vacates it, but removing the active module while a second one is still running
         // would otherwise leave the seat empty (effects go silent). A running module re-claiming an
-        // empty seat here keeps latestFrame() pointing at a live frame for ANY add/remove order — the
-        // survivor takes over on its next tick (robustness). claim() is idempotent — a no-op while the
+        // empty seat here keeps latestFrame() pointing at a live frame for ANY add/remove order, the
+        // survivor takes over on its next tick (robustness). claim() is idempotent, a no-op while the
         // seat is held, the reclaim once it's empty.
         micSeat_.claim();
 
@@ -357,12 +357,12 @@ public:
         }
 
         // Simulate mode (see `mode`): a synthesized source, driven by the `simulate` pattern (0 = music,
-        // 1 = sweep). It's a whole mode, not a mic fill-in, so it always runs and returns — the mic path
+        // 1 = sweep). It's a whole mode, not a mic fill-in, so it always runs and returns, the mic path
         // below never executes in Simulate mode.
         if (mode == kSimMode) { synthesizeFrame(simulate == 1); return; }
 
         // From here on it's Local mode. With no audio input on the platform, or before a good
-        // init, nothing is produced — the last frame is held (no synthetic fallback; that's
+        // init, nothing is produced, the last frame is held (no synthetic fallback; that's
         // Simulate mode's job). hasAudioInput covers both worlds: a pin-wired I2S mic on
         // boards, an OS capture device on desktop.
         if constexpr (!platform::hasAudioInput) {
@@ -380,7 +380,7 @@ public:
         // read delivered, and whether any were non-zero, accumulated over the 1 s window and diagnosed
         // in tick1s(). The two together isolate the two clean failure modes of a mic bring-up: samples
         // arriving proves the clocks (BCLK/WS) + DMA; a non-zero among them proves the data line (SD).
-        // All-zero samples = clocks fine, SD dead — otherwise a silent "RMS 0" with no clue which wire.
+        // All-zero samples = clocks fine, SD dead, otherwise a silent "RMS 0" with no clue which wire.
         micSamples1s_ += n;
         for (size_t i = 0; i < n; i++) if (samples_[filled_ + i] != 0) { micNonzero1s_++; break; }
         if (n == 0) return;                            // nothing ready this tick
@@ -393,7 +393,7 @@ public:
         // filter is continuous across blocks (state in dc_).
         dc_.process(samples_, kBlock);
 
-        // Level: overall loudness (RMS), independent of the FFT — it fluctuates
+        // Level: overall loudness (RMS), independent of the FFT, it fluctuates
         // with how loud the room is. Uses a gentler floor than the bands (half),
         // so the VU keeps moving with volume instead of being gated hard like the
         // per-band display.
@@ -401,7 +401,7 @@ public:
 
         // Smoothed level: a one-pole exponential moving average of the raw `level`, so effects that
         // want a calm, breathing VU (rather than the raw value's snap-to-transient) read a value that
-        // lags and rounds off sudden changes. 3/4 old + 1/4 new is the textbook light smoothing —
+        // lags and rounds off sudden changes. 3/4 old + 1/4 new is the textbook light smoothing,
         // fast enough to follow the music, slow enough to hide per-block jitter. Integer-only, one
         // block behind, off the per-light path. (WLED's `volume`/`volumeSmth` to our raw `level`.)
         frame_.levelSmoothed = static_cast<uint16_t>((frame_.levelSmoothed * 3 + frame_.level) / 4);
@@ -418,10 +418,10 @@ public:
         if (peakMag > 8) { frame_.peakHz = peakHz; frame_.peakMag = peakMag; }
 
         // Track the PEAK level across the 1 s display window. frame_.level is recomputed every
-        // ~23 ms audio block, but the UI string is snapshotted only once a second — sampling the
+        // ~23 ms audio block, but the UI string is snapshotted only once a second, sampling the
         // instantaneous value lands in the gaps between beats and reads 0 even while the LEDs (driven
         // live every render tick) move with the music. The window peak is the representative reading.
-        // Display-only — the live frame_.level the effects/LEDs use is untouched.
+        // Display-only, the live frame_.level the effects/LEDs use is untouched.
         if (frame_.level > levelPeak_) levelPeak_ = frame_.level;
     }
 
@@ -475,21 +475,23 @@ public:
         levelPeak_ = 0;   // reset for the next window
 
         // Mic-health diagnosis from the 1 s tallies (see the read path). Only for a live *direct* mic
-        // (inited, not a sync receiver, no codec) — a codec/sync/unset-pin path has its own status. The
+        // (inited, not a sync receiver, no codec), a codec/sync/unset-pin path has its own status. The
         // split turns a silent mic into a wire-specific verdict:
-        //   no samples at all  → the I2S clocks aren't running — check sckPin / wsPin.
-        //   samples, all zero  → clocks fine, data line dead — check sdPin (SD/DOUT) + power.
+        //   no samples at all  → the I2S clocks aren't running, check sckPin / wsPin.
+        //   samples, all zero  → clocks fine, data line dead, check sdPin (SD/DOUT) + power.
         //   samples, non-zero  → data is flowing; clear any prior diagnosis.
-        // Only Local mode has a real mic to diagnose — Receive and Simulate produce frame_ without one.
-        const bool directMicLive = inited_ && mode == 0
+        // Only Local mode has a real mic to diagnose, Receive and Simulate produce frame_ without one.
+        // And only a pin-wired I2S mic gets a WIRE verdict: a desktop capture device delivering
+        // silence is a quiet room or an idle loopback, not a wiring fault to alarm about.
+        const bool directMicLive = platform::hasI2sMic && inited_ && mode == 0
                                    && platform::audioCodecType == platform::CodecType::None;
         if (directMicLive) {
             if (micSamples1s_ == 0)
-                setStatus("mic: no samples — check sckPin / wsPin (I2S clocks)", Severity::Warning);
+                setStatus("mic: no samples, check sckPin / wsPin (I2S clocks)", Severity::Warning);
             else if (micNonzero1s_ == 0)
-                setStatus("mic: data line silent — check sdPin (SD/DOUT) + mic power", Severity::Warning);
+                setStatus("mic: data line silent, check sdPin (SD/DOUT) + mic power", Severity::Warning);
             else if (micStatusStale_)
-                setStatus("", Severity::Status);   // data flowing again — clear a prior diagnosis
+                setStatus("", Severity::Status);   // data flowing again, clear a prior diagnosis
             micStatusStale_ = (micSamples1s_ == 0 || micNonzero1s_ == 0);
         }
         micSamples1s_ = 0;
@@ -524,7 +526,7 @@ private:
     size_t filled_ = 0;         // samples accumulated toward the next full block
     DcBlocker dc_;              // ~40 Hz high-pass, continuous across blocks
 
-    // Fixed hot-path scratch — sized once, never reallocated. ~6 KB total
+    // Fixed hot-path scratch, sized once, never reallocated. ~6 KB total
     // (2 KB samples + 2 KB windowed + 1 KB magnitudes), DRAM-resident.
     int32_t samples_[kBlock] = {};
     float windowed_[kBlock] = {};
@@ -552,12 +554,12 @@ private:
     bool     syncOpen_ = false;      // socket opened for the current mode (lazy-open latch)
     uint32_t lastSyncOpenFailMs_ = 0;  // millis of the last failed open (0 = none); bring-up backoff
     char     syncStr_[32] = {};      // "sync status" read-out
-    static constexpr uint32_t kSyncSendIntervalMs = 25;   // ~40/s — WLED-friendly, well under a flood
+    static constexpr uint32_t kSyncSendIntervalMs = 25;   // ~40/s, WLED-friendly, well under a flood
     static constexpr uint32_t kSyncFallbackMs = 1000;     // no packet this long → resume local mic
     static constexpr uint32_t kSyncOpenRetryMs = 1000;    // pause between socket bring-up retries after a failure
     static constexpr int kSyncMaxRecvPerTick = 8;         // bounded non-blocking drain (sync is low-rate)
 
-    static constexpr const char* kInitFailMsg = "mic init failed — check pins / rate";
+    static constexpr const char* kInitFailMsg = "mic init failed, check pins / rate";
 
     /// (Re)create the I2S channel for the current pins + rate. On a codec board the
     /// I2S peripheral drives MCLK first, then the codec is configured over I2C. Any
@@ -566,11 +568,11 @@ private:
     void reinit() {
         if constexpr (platform::hasAudioCapture) {
             // Desktop: the OS capture device the `device` Select picked. Failure is a live
-            // status, not a crash — a denied OS microphone permission lands here too.
+            // status, not a crash, a denied OS microphone permission lands here too.
             deinit();
             inited_ = platform::audioCaptureInit(mic_, device, sampleRate());
             if (!inited_) {
-                setStatus("capture init failed — pick another device", Severity::Error);
+                setStatus("capture init failed, pick another device", Severity::Error);
                 return;
             }
             dc_.reset();
@@ -583,7 +585,7 @@ private:
         }
         deinit();
         // Any pin unset (-1, the default until the user wires a mic): stay idle,
-        // don't attempt an I2S init — initialising I2S on unset pins is what hung a
+        // don't attempt an I2S init: initializing I2S on unset pins is what hung a
         // mic-less board's boot. GPIO 0 IS a valid mic pin now (the sentinel is -1,
         // not 0), so the guard tests < 0, not == 0.
         if (sckPin < 0 || wsPin < 0 || sdPin < 0) {
@@ -595,7 +597,7 @@ private:
         //    codec's MCLK pin from the per-target config (platform::audioCodecPins.mclk).
         //    The codec won't even answer I2C until that clock runs, so I2S precedes the
         //    codec config below.
-        //  - No codec: the runtime `mclkPin` control — −1 for a self-clocked MEMS mic
+        //  - No codec: the runtime `mclkPin` control, −1 for a self-clocked MEMS mic
         //    (INMP441), or a real pin for an I2S ADC that needs a master clock (the
         //    MHC-WLED P4 shield's line-in ADC on GPIO3, WLED's SR_DMTYPE=4).
         const int16_t mclk = platform::audioCodecType == platform::CodecType::None
@@ -612,18 +614,18 @@ private:
         // onto the I2S bus the read above drains.
         if (!platform::audioCodecInit(platform::audioCodecType, platform::audioCodecPins,
                                       sampleRate())) {
-            deinit();   // tear the I2S channel back down — we couldn't bring the codec up
-            setStatus("mic: codec init failed — check I2C wiring", Severity::Error);
+            deinit();   // tear the I2S channel back down, we couldn't bring the codec up
+            setStatus("mic: codec init failed, check I2C wiring", Severity::Error);
             return;
         }
         dc_.reset();   // start the high-pass clean for the new stream
         // The INMP441 emits ~250 ms of power-on settling garbage after the clock
         // starts. The read is non-blocking (hot-path rule), so we can't drain a
-        // fixed sample count here at init — the DMA has barely filled. Instead the
+        // fixed sample count here at init, the DMA has barely filled. Instead the
         // settling samples flow through the first few tick() reads and the level /
         // bands self-correct within that quarter-second; no separate discard is
         // needed, and the frame stays valid (zeroed) until then.
-        // Clear any prior status now the mic is live — not just kInitFailMsg, but
+        // Clear any prior status now the mic is live, not just kInitFailMsg, but
         // also the "set wsPin / sdPin / sckPin" note from the unset-pin path, which
         // would otherwise persist and mislead after the user fills the pins in.
         clearStatus();
@@ -646,7 +648,7 @@ private:
 
     /// Reset the sync socket to the current mode. Called from setup()/prepare()
     /// so a `sync` control change applies live (no reboot). This only CLOSES the socket
-    /// and records the mode — it never opens one, because setup() runs at boot before
+    /// and records the mode, it never opens one, because setup() runs at boot before
     /// NetworkModule brings an interface up, and any lwip socket call before then asserts
     /// (the core mutex is still null). The actual open() is deferred to syncEnsureSocket(),
     /// which runs from the tick path once platform::networkReady() is true.
@@ -674,10 +676,10 @@ private:
         const uint8_t s = sync();
         if (s == 0) return false;
         if (syncOpen_) return true;
-        if (!platform::networkReady()) return false;   // interface not up yet — try again next tick
+        if (!platform::networkReady()) return false;   // interface not up yet, try again next tick
         // Back off between failed bring-ups: tick() runs every tick, so without this a
-        // persistent open/bind failure (e.g. the port is busy) would retry — one socket()
-        // syscall per tick — dozens of times a second. lastSyncOpenFailMs_ stamps the last
+        // persistent open/bind failure (e.g. the port is busy) would retry, one socket()
+        // syscall per tick, dozens of times a second. lastSyncOpenFailMs_ stamps the last
         // failure; hold off until kSyncOpenRetryMs has passed (same throttle form as syncSend).
         const uint32_t now = platform::millis();
         if (lastSyncOpenFailMs_ != 0 && now - lastSyncOpenFailMs_ < kSyncOpenRetryMs) return false;
@@ -721,7 +723,7 @@ private:
 
     /// Drain the sync socket (bounded, non-blocking) in Receive mode. A valid v2 packet
     /// overwrites frame_ and stamps lastSyncRecv_. Returns true while a peer's audio is
-    /// FRESH (within kSyncFallbackMs) so tick() skips the local mic analysis — false once
+    /// FRESH (within kSyncFallbackMs) so tick() skips the local mic analysis, false once
     /// the peer goes quiet, letting the local mic resume (auto-blend).
     bool syncReceive() {
         if constexpr (!platform::hasNetwork) return false;
@@ -735,12 +737,12 @@ private:
                 frame_ = rf;                       // received audio drives the effects
                 lastSyncRecv_ = platform::millis();
                 // Feed the peer level into the same 1 s peak window the local mic uses, so the
-                // "level RMS" read-out (tick1s → levelStr_) reflects received audio too — otherwise
+                // "level RMS" read-out (tick1s → levelStr_) reflects received audio too, otherwise
                 // it freezes at the last local value while a peer is driving the effects.
                 if (frame_.level > levelPeak_)
                     levelPeak_ = static_cast<uint8_t>(frame_.level > 255 ? 255 : frame_.level);
             }
-            // else: a v1 / foreign packet — ignore, keep draining.
+            // else: a v1 / foreign packet, ignore, keep draining.
         }
         // Fresh received audio → skip local mic. Stale (peer quiet) → fall through.
         return lastSyncRecv_ != 0

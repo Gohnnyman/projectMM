@@ -14,7 +14,7 @@
     "Drivers",
     "PreviewDriver"
   ],
-  "description": "Add / configure / remove the AudioService (a Service module) and an audio-reactive effect while the render pipeline runs, proving the robustness rule for the audio producer/consumer pair. AudioService is a Service (it sits beside the pipeline, publishing an AudioFrame), and the audio effects read it through the static AudioService::latestFrame() accessor, NOT a boot-time pointer — so add/remove can happen in any order at runtime. The checks assert the pipeline keeps RENDERING (buffer non-null, fps measurable) through each mutation: adding the mic, setting its three pins one at a time (the install fan-out's exact add-then-configure sequence — the web installer / MoonDeck / OTA picker add the AudioService then POST wsPin/sdPin/sckPin as separate control writes from a catalog entry's modules+controls), adding a consumer effect, and crucially REMOVING the mic while a consumer is still live (the consumer must fall back to a silent frame, never deref a dangling pointer — the bug the boot-loop fix and the unit lifecycle tests pin, here proven end-to-end through the Scheduler). The per-pin sequence proves the self-correcting partial-fill: the first two writes leave a pin unset so AudioService's guard makes the rebuild a no-op, the third completes the set — the pipeline never stalls through any of it. On a capture-capable host the device write triggers a REAL OS-capture reinit mid-render (silence-tolerant: a locked-down host degrades to a status line); the I2S pin path is proven on hardware. Grid is 64x64 so the tick stays above the host microsecond clock at every step.",
+  "description": "Add / configure / remove the AudioService (a Service module) and an audio-reactive effect while the render pipeline runs, proving the robustness rule for the audio producer/consumer pair. AudioService is a Service (it sits beside the pipeline, publishing an AudioFrame), and the audio effects read it through the static AudioService::latestFrame() accessor, NOT a boot-time pointer, so add/remove can happen in any order at runtime. The checks assert the pipeline keeps RENDERING (buffer non-null, fps measurable) through each mutation: adding the mic, configuring it one control write at a time (device / sampleRate / gain, the install fan-out's exact add-then-configure sequence from a catalog entry's modules+controls), adding a consumer effect, and crucially REMOVING the mic while a consumer is still live (the consumer must fall back to a silent frame, never deref a dangling pointer, the bug the boot-loop fix and the unit lifecycle tests pin, here proven end-to-end through the Scheduler). The sequential writes include a REAL live capture reinit on capture hosts; the pipeline never stalls through any of it. On a capture-capable host the device write triggers a REAL OS-capture reinit mid-render (silence-tolerant: a locked-down host degrades to a status line); the I2S pin path is proven on hardware. Grid is 64x64 so the tick stays above the host microsecond clock at every step.",
   "fixture": [
     {
       "name": "fix-system",
@@ -272,7 +272,8 @@
     },
     {
       "name": "configure-device",
-      "description": "Pick the capture device (index 0, the OS default). On a capture-capable host this triggers a REAL live reinit: the OS device opens (or fails cleanly on a locked-down host) while the pipeline renders — the desktop equivalent of the install fan-out's pin writes. The pipeline must keep rendering through it.",
+      "description": "Pick the capture device (index 0, the OS default). On a capture-capable host this triggers a REAL live reinit: the OS device opens (or fails cleanly on a locked-down host) while the pipeline renders, the desktop equivalent of the install fan-out's pin writes. The pipeline must keep rendering through it. Optional: the control exists only where hasAudioCapture is true, so board targets record a clean skip.",
+      "optional": true,
       "op": "set_control",
       "id": "Audio",
       "key": "device",
@@ -280,7 +281,7 @@
     },
     {
       "name": "configure-rate",
-      "description": "Change the sample rate (44100). Rebuilds the capture (or I2S) channel live, mid-render — the second config write of the sequence.",
+      "description": "Change the sample rate (44100). Rebuilds the capture (or I2S) channel live, mid-render, the second config write of the sequence.",
       "op": "set_control",
       "id": "Audio",
       "key": "sampleRate",
@@ -295,8 +296,8 @@
       "value": 200
     },
     {
-      "name": "measure-pins-configured",
-      "description": "Audio input configured via the sequential install-fan-out order: pipeline still renders through the full add-then-configure flow (add AudioService, then device/sampleRate/gain one write at a time — a live capture reinit among them on capture hosts).",
+      "name": "measure-capture-configured",
+      "description": "Audio input configured via the sequential install-fan-out order: pipeline still renders through the full add-then-configure flow (add AudioService, then device/sampleRate/gain one write at a time, a live capture reinit among them on capture hosts).",
       "op": "measure",
       "measure": true,
       "bounds": {

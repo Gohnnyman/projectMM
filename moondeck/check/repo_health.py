@@ -98,6 +98,8 @@ def measure_comments():
     for area, prefix in AREAS.items():
         comment_lines = code_lines = 0
         for f in _git_files(prefix):
+            if "/vendor/" in f.as_posix():
+                continue   # upstream single-header code (miniaudio): not our comments
             if f.suffix not in CODE_SUFFIXES or not f.is_file():
                 continue
             for line in _read(f).splitlines():

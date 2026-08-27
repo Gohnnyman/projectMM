@@ -2,11 +2,11 @@
 // @also WledAudioSyncPacket
 
 // Drives AudioService's WLED audio-sync socket lifecycle on the host through the public
-// tick() — the same entry the scheduler calls on-device. Covers: lazy open once per mode
+// tick(), the same entry the scheduler calls on-device. Covers: lazy open once per mode
 // (syncEnsureSocket latches), the send path reaching "sending", send throttling, and the
 // receive path over a real localhost UDP round-trip (frame replacement + the fresh→stale
 // listening fallback of the pure sink). platform::networkReady() is true on desktop, so the lazy open fires
-// on the first tick — mirroring a device once its interface is up.
+// on the first tick, mirroring a device once its interface is up.
 //
 // Time is driven deterministically with platform::setTestNowMs() (the animation-test idiom)
 // so the throttle/fallback windows are exact and the suite never sleeps a real second; only
@@ -42,11 +42,11 @@ struct FrozenClock {
 }  // namespace
 
 // Regression: the mic/capture status is a LOCAL-mode read-out. Switching to Receive network /
-// Simulate must clear it so a stale message doesn't linger on the status row — those modes report
+// Simulate must clear it so a stale message doesn't linger on the status row, those modes report
 // through the separate "sync status" row and have no input to diagnose. Before the fix,
 // prepare()'s non-Local branch deinit()'d the peripheral but left the status string set.
 // What Local mode leaves depends on the host: a capture-capable desktop usually inits cleanly
-// (no status at all — capture IS live), a locked-down one reports "capture init failed", an I2S
+// (no status at all, capture IS live), a locked-down one reports "capture init failed", an I2S
 // target with unset pins reports "mic: set sckPin / wsPin / sdPin". The rule under test is the
 // same in every case: whatever Local left, leaving Local clears it.
 TEST_CASE("AudioService: switching out of Local mode clears the mic status") {
@@ -61,7 +61,7 @@ TEST_CASE("AudioService: switching out of Local mode clears the mic status") {
     a.applyState();                  // prepare() non-Local branch must clear the stale mic status
     CHECK((a.status() == nullptr || a.status()[0] == 0));   // no lingering mic message on the status row
 
-    // And back to Simulate — same rule (no mic there either).
+    // And back to Simulate, same rule (no mic there either).
     a.mode = AudioService::kSimMode;
     a.applyState();
     CHECK((a.status() == nullptr || a.status()[0] == 0));
@@ -75,7 +75,7 @@ TEST_CASE("AudioService Local+send: lazy-opens once and reports sending") {
     a.mode = 0;
     a.send = true;   // local audio, broadcasting
     a.syncPort = kTestSyncPort;
-    a.applyState();                  // build: syncReinit() — socket NOT opened here (boot-safe)
+    a.applyState();                  // build: syncReinit(), socket NOT opened here (boot-safe)
     CHECK(std::strstr(status(a), "waiting") != nullptr);   // no tick() yet → still waiting
 
     a.tick();                        // networkReady() true on desktop → opens now
@@ -101,7 +101,7 @@ TEST_CASE("AudioService Local+send: broadcasts are throttled to ~kSyncSendInterv
     a.tick();                        // opens + first send (frameCounter bumps once)
     REQUIRE(a.syncOpenForTest());
 
-    // More ticks within the same interval must not each emit — the frame counter (bumped
+    // More ticks within the same interval must not each emit, the frame counter (bumped
     // only on an actual send) does not advance while the throttle window is open.
     const uint8_t c0 = a.syncFrameCounterForTest();
     a.tick();
@@ -117,9 +117,9 @@ TEST_CASE("AudioService Local+send: broadcasts are throttled to ~kSyncSendInterv
 }
 
 // The fleet-source contract: a desktop in Local mode with "send audio" on captures its own
-// audio AND broadcasts — send fires from the same tick() that runs the capture path, so the
+// audio AND broadcasts, send fires from the same tick() that runs the capture path, so the
 // capture gate no longer starves the sender (the pre-capture desktop returned from tick()
-// before ever sending in Local mode was impossible: sends ran first — this pins that the two
+// before ever sending in Local mode was impossible: sends ran first, this pins that the two
 // paths now COEXIST on a capture host: capture may be live, and sends still fire throttled).
 TEST_CASE("AudioService Local+send on a capture host: capture and broadcast coexist") {
     if constexpr (!platform::hasAudioCapture) return;
@@ -128,7 +128,7 @@ TEST_CASE("AudioService Local+send on a capture host: capture and broadcast coex
     a.mode = 0;
     a.send = true;
     a.syncPort = kTestSyncPort;
-    a.applyState();   // may or may not bring capture up (host permission dependent) — both fine
+    a.applyState();   // may or may not bring capture up (host permission dependent), both fine
     a.tick();         // opens the socket + first send, then runs the local capture path
     REQUIRE(a.syncOpenForTest());
     CHECK(std::strcmp(status(a), "sending") == 0);
@@ -161,7 +161,7 @@ TEST_CASE("AudioService Receive: a localhost WLED packet drives frame_, then hol
     REQUIRE(tx.connect("127.0.0.1", kTestSyncPort));
     REQUIRE(tx.sendTo(pkt, WLED_SYNC_PACKET_SIZE));
 
-    // Loopback delivery is async in real time — poll tick() until the peer frame lands
+    // Loopback delivery is async in real time, poll tick() until the peer frame lands
     // (bounded, ≤100 iterations). Virtual time stays frozen, so the frame counts as fresh.
     bool landed = false;
     for (int i = 0; i < 100 && !landed; i++) {
@@ -174,7 +174,7 @@ TEST_CASE("AudioService Receive: a localhost WLED packet drives frame_, then hol
     CHECK(std::strcmp(status(a), "receiving") == 0);   // fresh peer audio
 
     // Receive is a pure network sink: advance virtual time past the fallback window with no new
-    // packet — the peer goes stale and the status falls back to "listening" (bound, no fresh peer).
+    // packet, the peer goes stale and the status falls back to "listening" (bound, no fresh peer).
     // The last frame is held; the local mic never runs in this mode. Deterministic: no real sleep.
     clk.advance(AudioService::syncFallbackMsForTest() + 20);
     a.tick();
@@ -186,11 +186,11 @@ TEST_CASE("AudioService Receive: a localhost WLED packet drives frame_, then hol
 
 TEST_CASE("AudioService Receive: a failed bind backs off instead of retrying every tick") {
     FrozenClock clk(1);
-    // Force the bind to fail deterministically. The obvious approach — hog the port with a second
-    // socket — is NOT portable: on Linux, SO_REUSEADDR on a UDP socket bound to INADDR_ANY permits
+    // Force the bind to fail deterministically. The obvious approach, hog the port with a second
+    // socket, is NOT portable: on Linux, SO_REUSEADDR on a UDP socket bound to INADDR_ANY permits
     // the overlapping bind, so the hog succeeds and the failure never happens. (That silently broke
     // this test on Linux for as long as it existed; nothing caught it because CI did not compile the
-    // C++ tests until the sanitizer job.) A privileged port is no better — modern macOS lets a
+    // C++ tests until the sanitizer job.) A privileged port is no better, modern macOS lets a
     // non-root process bind port 80.
     platform::setTestBindFails(true);
 
@@ -202,7 +202,7 @@ TEST_CASE("AudioService Receive: a failed bind backs off instead of retrying eve
     CHECK_FALSE(a.syncOpenForTest());
     CHECK(std::strcmp(status(a), "receive: bind failed") == 0);
 
-    // Within the backoff window, further ticks must NOT retry — the socket stays closed and
+    // Within the backoff window, further ticks must NOT retry, the socket stays closed and
     // the status is unchanged (no per-tick socket() churn). tick1s() only reasserts the
     // baseline while syncOpen_ is false, so the string staying put is the observable proof.
     a.tick();
@@ -210,7 +210,7 @@ TEST_CASE("AudioService Receive: a failed bind backs off instead of retrying eve
     CHECK_FALSE(a.syncOpenForTest());
     CHECK(std::strcmp(a.syncStatusForTest(), "receive: bind failed") == 0);
 
-    // Let the bind succeed and advance past the backoff — the next tick retries and succeeds.
+    // Let the bind succeed and advance past the backoff, the next tick retries and succeeds.
     platform::setTestBindFails(false);
     clk.advance(AudioService::syncOpenRetryMsForTest() + 5);
     a.tick();
@@ -231,7 +231,7 @@ TEST_CASE("AudioService Local (not sending): no socket, reports off") {
     a.release();
 }
 
-// Regression: a persisted `send` must NOT broadcast once the module switches to Simulate mode — Simulate
+// Regression: a persisted `send` must NOT broadcast once the module switches to Simulate mode, Simulate
 // has no captured frame worth sending, so sync() (and thus the socket) must go quiet. Pins the mode==0
 // guard on the send leg of sync().
 TEST_CASE("AudioService Local+send → Simulate: send stops, no socket") {
@@ -247,7 +247,7 @@ TEST_CASE("AudioService Local+send → Simulate: send stops, no socket") {
     a.mode = AudioService::kSimMode;
     a.applyState();              // re-prepare: syncReinit closes the socket for the new (no-socket) mode
     a.tick();
-    CHECK_FALSE(a.syncOpenForTest());          // socket closed — nothing broadcasting
+    CHECK_FALSE(a.syncOpenForTest());          // socket closed, nothing broadcasting
     CHECK(std::strcmp(status(a), "off") == 0); // sync status quiet in Simulate
     a.release();
 }

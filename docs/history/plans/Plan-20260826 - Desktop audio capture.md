@@ -100,6 +100,18 @@ run after the merge.
   board effects follow the desktop's captured audio.
 - ESP32: KPI/footprint confirms ~0 flash delta; the three-variant gate builds.
 
+## Pre-merge notes
+
+- The Reviewer's 8 findings were fixed on the branch (the I2S wire-diagnosis gate had silently
+  missed the file in an earlier edit and is now in with a pinning test; the ESP32 capture stubs
+  moved outside the SOC_I2S split; the scenario's device step is optional for board targets;
+  check_prose gained the vendor exemption; em-dash sweep; SpscRing comment corrected; the
+  roadmap's dated shipped line deleted).
+- scenario_peripheral_grid_sweep's desktop tick bound widened 34 to 50 us: the scenario runner
+  re-records its observation envelope during gate runs, and those ran beside parallel cold GCC
+  builds on this host; a contended-host measurement, not an audio-branch regression (the
+  scenario contains no Audio module, and miniaudio is inert until a device opens).
+
 ## Risks
 
 1. macOS TCC mic permission: needs the Info.plist key in packaging; denied permission must degrade

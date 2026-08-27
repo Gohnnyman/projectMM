@@ -29,7 +29,7 @@ TEST_CASE("SpscRing delivers strict FIFO order across index wrap") {
 }
 
 // A full ring drops the NEWEST data: push reports how much was accepted and what was already
-// queued is untouched — the consumer never sees a gap in the middle, only a truncated tail.
+// queued is untouched, the consumer never sees a gap in the middle, only a truncated tail.
 TEST_CASE("SpscRing overflow drops newest, reports the accepted count, and keeps queued data intact") {
     mm::SpscRing<uint32_t, 16> ring;   // 15 usable slots
     uint32_t in[20];
@@ -44,7 +44,7 @@ TEST_CASE("SpscRing overflow drops newest, reports the accepted count, and keeps
 }
 
 // Two real threads, producer faster than consumer at times and vice versa: every value that
-// push() accepted arrives exactly once, in order — the acquire/release pairing at work.
+// push() accepted arrives exactly once, in order, the acquire/release pairing at work.
 TEST_CASE("SpscRing hands an unbroken in-order sequence across two threads") {
     mm::SpscRing<uint32_t, 256> ring;
     constexpr uint32_t kTotal = 200000;
@@ -61,14 +61,31 @@ TEST_CASE("SpscRing hands an unbroken in-order sequence across two threads") {
     });
 
     uint32_t expect = 0;
-    while (expect < kTotal) {
+    bool ordered = true;
+    while (expect < kTotal && ordered) {
         uint32_t out[61];
         const size_t got = ring.pop(out, 61);
-        for (size_t i = 0; i < got; i++) {
-            REQUIRE(out[i] == expect);
+        for (size_t i = 0; i < got && ordered; i++) {
+            // Recorded rather than REQUIREd inside the loop: an aborting assertion here would
+            // skip producer.join() and take the whole test binary down with the thread.
+            ordered = (out[i] == expect);
             expect++;
         }
     }
+    if (!ordered) { uint32_t drain[61]; while (ring.pop(drain, 61)) {} }   // unblock the producer
     producer.join();
+    CHECK(ordered);
     CHECK(expect == kTotal);
+}
+
+// Null buffers degrade to zero-count no-ops (the never-crash floor for a core construct).
+TEST_CASE("SpscRing treats null buffers as empty operations") {
+    mm::SpscRing<uint32_t, 16> ring;
+    CHECK(ring.push(nullptr, 8) == 0);
+    uint32_t v = 7;
+    CHECK(ring.push(&v, 1) == 1);
+    CHECK(ring.pop(nullptr, 8) == 0);
+    uint32_t out = 0;
+    CHECK(ring.pop(&out, 1) == 1);
+    CHECK(out == 7);
 }

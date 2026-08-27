@@ -13,3 +13,7 @@ name: "projectMM CodeQL config"
 # standalone analysis target; the dismissal is what actually silences it.
 paths-ignore:
   - test/doctest.h
+  # miniaudio: the vendored desktop audio-capture backend (same rule and same caveat as
+  # doctest.h above; its 16 unsigned-overflow-pattern alerts were dismissed in the Security
+  # tab as vendored third-party code).
+  - src/platform/desktop/vendor/miniaudio.h

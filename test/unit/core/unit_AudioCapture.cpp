@@ -5,9 +5,10 @@
 // host, init failing cleanly is correct behavior (miniaudio's null backend makes success the CI
 // norm, delivering silence), so the lifecycle cases assert no-crash coherence around whichever
 // outcome the host gives. First local run on macOS triggers the OS microphone permission prompt
-// for the invoking terminal — expected, once.
+// for the invoking terminal, expected, once.
 
 #include "doctest.h"
+#include "core/AudioService.h"
 #include "platform/platform.h"
 
 #include <cstring>
@@ -51,6 +52,24 @@ TEST_CASE("audio capture refuses an out-of-range device index") {
     mm::platform::AudioMicHandle h;
     CHECK_FALSE(mm::platform::audioCaptureInit(h, 200, 22050));
     mm::platform::audioMicDeinit(h);
+}
+
+// A capture device delivering silence must not raise the I2S wire diagnosis: on desktop
+// there are no pins to check, and silence is a quiet room or an idle loopback (the flagship
+// BlackHole case between songs). The verdict is compile-time-gated to hasI2sMic.
+TEST_CASE("a silent capture device raises no I2S wire status") {
+    static_assert(!mm::platform::hasI2sMic,
+                  "this desktop-only case pins the desktop side of the gate");
+    mm::AudioService a;
+    a.mode = 0;   // Local
+    a.applyState();
+    for (int i = 0; i < 3; i++) { a.tick(); a.tick1s(); }   // three diagnosis windows
+    const char* st = a.status();
+    if (st != nullptr) {
+        CHECK(std::strstr(st, "sdPin") == nullptr);
+        CHECK(std::strstr(st, "sckPin") == nullptr);
+    }
+    a.release();
 }
 
 #endif

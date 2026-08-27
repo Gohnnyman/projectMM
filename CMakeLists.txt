@@ -165,7 +165,7 @@ target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 # Npcap is deliberately NOT linked: platform_desktop.cpp resolves wpcap.dll at run time so the
 # build needs no SDK and the binary runs without it.
 # `dl` on Linux: miniaudio (platform_desktop_audio.cpp) runtime-links ALSA/PulseAudio via
-# dlopen, so no audio SDK is a build requirement — the same no-SDK rule as Npcap above.
+# dlopen, so no audio SDK is a build requirement, the same no-SDK rule as Npcap above.
 target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32> $<$<PLATFORM_ID:Windows>:iphlpapi>
                                           $<$<PLATFORM_ID:Linux>:dl> $<$<PLATFORM_ID:Linux>:pthread>)
 

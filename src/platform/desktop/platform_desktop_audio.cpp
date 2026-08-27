@@ -70,7 +70,7 @@ namespace mm::platform {
 namespace {
 
 // One capture pipeline at a time (AudioService is a single active seat; a second concurrent
-// device would race one ring). 4096 samples ≈ 186 ms at 22050 Hz — comfortably above one
+// device would race one ring). 4096 samples ≈ 186 ms at 22050 Hz, comfortably above one
 // render tick's consumption, small enough to bound latency.
 SpscRing<int32_t, 4096> ring_;
 

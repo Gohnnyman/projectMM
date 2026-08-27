@@ -1343,7 +1343,7 @@ size_t audioCaptureDevices(const char* const** optionsOut);
 
 // Open capture device `deviceIndex` (an index into the last audioCaptureDevices list; 0 =
 // default) as mono 24-bit-left-justified samples at `sampleRate` (the backend resamples).
-// False on failure (no device, OS permission denied) — degrade, never crash.
+// False on failure (no device, OS permission denied): degrade, never crash.
 bool audioCaptureInit(AudioMicHandle& h, uint8_t deviceIndex, uint32_t sampleRate);
 
 // Bring up an I2S RX channel reading the mic on the given pins at `sampleRate`

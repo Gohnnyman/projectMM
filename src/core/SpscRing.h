@@ -10,15 +10,15 @@ namespace mm {
 /// one thread calls push(), one thread calls pop(), never the same thread for both roles.
 /// Head and tail are each written by exactly ONE side; the release store on the writer's
 /// index paired with the acquire load on the reader's side is what makes the element data
-/// visible before the index move — the whole correctness argument, and why neither side
+/// visible before the index move, the whole correctness argument, and why neither side
 /// ever locks or waits.
 ///
 /// Overflow policy is DROP-NEWEST: push() accepts what fits and reports how much. The
-/// alternative (drop-oldest) requires the producer to advance the consumer's index — a
+/// alternative (drop-oldest) requires the producer to advance the consumer's index, a
 /// second writer on `tail`, which breaks the single-writer invariant the lock-freedom
-/// rests on. For the audio-capture use the trade is right anyway: overflow only happens
-/// when the consumer stalled (nothing is rendering), and the backlog self-drains once it
-/// resumes.
+/// rests on. For the audio-capture use the trade is right anyway: overflow happens when the
+/// consumer stalls or renders below one block per ring-fill (latency then pins at the ring
+/// depth and the newest samples drop), and the backlog self-drains once it catches up.
 ///
 /// N must be a power of two (indices wrap by masking); one slot is sacrificed so a full
 /// ring is distinguishable from an empty one without a separate count.
@@ -28,8 +28,9 @@ class SpscRing {
 
 public:
     /// Producer side. Copies up to `count` elements from `src`; returns how many were
-    /// accepted (fewer than `count` when the ring is near full — drop-newest).
+    /// accepted (fewer than `count` when the ring is near full, drop-newest).
     size_t push(const T* src, size_t count) {
+        if (src == nullptr) return 0;
         const uint32_t head = head_.load(std::memory_order_relaxed);
         const uint32_t tail = tail_.load(std::memory_order_acquire);
         const uint32_t free = N - 1 - (head - tail);
@@ -41,6 +42,7 @@ public:
 
     /// Consumer side. Copies up to `max` elements into `dst`; returns how many were read.
     size_t pop(T* dst, size_t max) {
+        if (dst == nullptr) return 0;
         const uint32_t tail = tail_.load(std::memory_order_relaxed);
         const uint32_t head = head_.load(std::memory_order_acquire);
         const uint32_t avail = head - tail;

@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
-#include <bit>       // std::countr_zero — the radix-2 audioFft's bit-reversal
+#include <bit>       // std::countr_zero, the radix-2 audioFft's bit-reversal
 #include <cmath>     // cos/sin/sqrt for audioFft's twiddles and magnitudes
 #include <numbers>   // std::numbers::pi_v, same kernel
 #include <cstdio>
@@ -2022,7 +2022,7 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*l
 // Audio codec + capture live in platform_desktop_audio.cpp (the miniaudio TU): codec is a
 // succeed-no-op (nothing to bring up), the mic seam reads the OS capture device.
 
-// FFT kernel — iterative radix-2 Cooley-Tukey (the textbook in-place decimation-in-time
+// FFT kernel: iterative radix-2 Cooley-Tukey (the textbook in-place decimation-in-time
 // form), the production desktop kernel now that live capture runs 512-point blocks ~43x/s
 // on the render tick (the previous naive O(n^2) DFT was, per its own comment, only fast
 // enough for host tests). Identical contract: n a power of two, outMag[0..n/2) filled with

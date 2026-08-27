@@ -187,8 +187,15 @@ void audioMicDeinit(AudioMicHandle&) {}
 void audioFft(const float*, size_t, float*) {}
 
 
-// OS capture devices are a desktop concept (hasAudioCapture == false here); the stubs exist
-// because the discarded if-constexpr branches in shared code still compile them.
+}  // namespace mm::platform
+
+#endif  // SOC_I2S_SUPPORTED
+
+// OS capture devices are a desktop concept (hasAudioCapture == false on every ESP32 target).
+// Deliberately OUTSIDE the SOC_I2S_SUPPORTED split: shared code references these from
+// discarded `if constexpr (hasAudioCapture)` branches, which still require a definition to
+// link (ODR) on I2S and I2S-less chips alike.
+namespace mm::platform {
 size_t audioCaptureDevices(const char* const** optionsOut) {
     if (optionsOut) *optionsOut = nullptr;
     return 0;
@@ -196,7 +203,4 @@ size_t audioCaptureDevices(const char* const** optionsOut) {
 bool audioCaptureInit(AudioMicHandle& /*h*/, uint8_t /*deviceIndex*/, uint32_t /*sampleRate*/) {
     return false;
 }
-
 }  // namespace mm::platform
-
-#endif  // SOC_I2S_SUPPORTED
