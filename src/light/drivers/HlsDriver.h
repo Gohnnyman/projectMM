@@ -31,6 +31,7 @@
 #include "light/drivers/DriverBase.h"
 #include "platform/platform.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
@@ -60,6 +61,9 @@ public:
         // offload the encode entirely, worth picking on large grids. One this ffmpeg lacks
         // fails the spawn and the status says so.
         controls_.addSelect("encoder", encoderSel_, kEncoderOptions, kEncoderOptionCount);
+        // Persisted by LABEL: ffmpeg encoder names are stable identities, and editing the
+        // option list (vaapi's removal) must never silently remap an index-persisted pick.
+        controls_.setPersistLabel(controls_.count() - 1);
         // The playable address, one copy away from VLC or a Safari AirPlay hand-off.
         controls_.addReadOnly("url", urlBuf_, sizeof(urlBuf_));
     }
@@ -242,14 +246,17 @@ private:
     static constexpr uint8_t kMaxRestarts = 3;
 
     static constexpr uint32_t kWarmupMs = 750;   // encoder init headroom before the first frame
+    // vaapi is deliberately absent: it needs -vaapi_device + hwupload filter plumbing this
+    // argv does not build, so the row would be a guaranteed dead end; Linux uses libx264
+    // (or nvenc) until that plumbing is its own change. The listed hardware encoders accept
+    // system-memory frames, ffmpeg auto-inserting the pixel-format conversion.
     static constexpr const char* kEncoderOptions[] = {
-        "libx264",            // software, in every ffmpeg build: the safe default
+        "libx264",            // software; practically every ffmpeg distribution ships it
         "h264_videotoolbox",  // macOS media engine
-        "h264_vaapi",         // Linux VAAPI
         "h264_v4l2m2m",       // Raspberry Pi
         "h264_nvenc",         // NVIDIA
     };
-    static constexpr uint8_t kEncoderOptionCount = 5;
+    static constexpr uint8_t kEncoderOptionCount = 4;
 
     bool startEncoder() {
         const char* argv[40];
@@ -286,16 +293,18 @@ private:
     Buffer*        sourceBuffer_ = nullptr;
     lengthType     width_  = 0;
     lengthType     height_ = 0;
-    bool           open_   = false;
-    bool           encoderDied_ = false;
-    bool           statusStale_ = false;
+    // tick() runs on the encode worker while tick1s() runs on the render task: the fields both
+    // touch are atomics (each an independent flag/counter; the default ordering is plenty).
+    std::atomic<bool>     open_{false};
+    std::atomic<bool>     encoderDied_{false};
+    bool           statusStale_ = false;   // tick1s-only
     uint8_t        restartsLeft_ = kMaxRestarts;
     uint8_t        restartWaitS_ = 0;    // backoff countdown, in tick1s steps
     uint8_t        healthySecs_  = 0;    // sustained-health counter that replenishes the budget
-    uint32_t       lastSendMs_ = 0;
-    uint32_t       warmupUntilMs_ = 0;
-    uint32_t       droppedFrames_ = 0;
-    uint32_t       lastReportedDrops_ = 0;
+    uint32_t       lastSendMs_ = 0;        // tick-only
+    std::atomic<uint32_t> warmupUntilMs_{0};
+    std::atomic<uint32_t> droppedFrames_{0};
+    uint32_t       lastReportedDrops_ = 0; // tick1s-only
     ScratchBuffer<uint8_t> rgb_;          // tight RGB staging, sized in prepare()
     ScratchBuffer<uint8_t> corrScratch_;  // one corrected light, when the wiring is wider than RGB
     char           urlBuf_[64]{};

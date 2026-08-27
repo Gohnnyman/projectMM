@@ -213,3 +213,24 @@ TEST_CASE("HlsDriver releases and re-prepares cleanly") {
     driver.tick();
     CHECK(mm::platform::encoderTestFrameCount() == 1);
 }
+
+// The restart budget is finite: an encoder that dies on every attempt (an encoder name this
+// ffmpeg's build lacks exits immediately after every spawn) ends at the visible give-up
+// status, not an endless respawn loop. encoderStart() can only verify ffmpeg launches, so
+// this status IS how an unavailable encoder surfaces.
+TEST_CASE("HlsDriver gives up visibly when the encoder dies on every restart") {
+    EncSeamGuard seam{mm::platform::EncoderTestMode::Record};
+    mm::Buffer source;
+    mm::HlsDriver driver;
+    Wall wall(4, 2);
+    setUp(driver, source, wall, 8);
+    driver.prepare();
+
+    mm::platform::setTestEncoderWriteResult(-1);      // every write says: process gone
+    for (uint32_t t = 1000; t <= 20000; t += 1000) {  // tick1s through all restarts + backoff
+        mm::platform::setTestNowMs(t);
+        driver.tick();
+        driver.tick1s();
+    }
+    CHECK(std::string(driver.status()).find("encoder exited") != std::string::npos);
+}

@@ -139,9 +139,9 @@ of code is fine; a new IDF component is the expensive kind).
   `/.config`: diagnose "is it my config or the firmware?" without erasing anything.
 - **WiFi re-provisioning**: edit the stored credentials from MoonBase's page (today it only
   *reads* them; the AP fallback plus the app's provisioning already covers most of this).
-- **Windows encoder pipe: overlapped writes**: encoderWrite's non-blocking guarantee is
-  POSIX-only; on Windows WriteFile blocks until the 4 MB anonymous-pipe buffer drains. The
-  rework is an overlapped named pipe, to land with the Windows tester.
+- **Publish SHA-256 sums with release assets**: the Defender false-positive guidance can only
+  say "re-download over HTTPS" today; a checksums file per release lets a user verify a
+  quarantined installer before restoring it. One sha256sum step in the release staging.
 - **Streamed HTTP responses drain across ticks**: serveFileContents/serveHlsFile block the
   render tick for the whole transfer (a slow player fetching a ~1 MB HLS segment every second
   can hold it for hundreds of ms), and fsReadAt reopens the file per 1 KB chunk. The named fix

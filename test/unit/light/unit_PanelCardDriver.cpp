@@ -533,3 +533,59 @@ TEST_CASE("PanelCardDriver counts send failures by cause") {
     mm::platform::ethSendFailCounts(linkDown, after);
     CHECK(after == ringFull);  // a success does not erase the history
 }
+
+// The `interface` Select lists the DETECTED host NICs (none-first) and persists by label, the
+// fix for the Windows index-mismatch trap: whatever the OS or Npcap renumbers, the name the
+// user picked keeps meaning that adapter. Enumeration is faked through the test seam.
+TEST_CASE("the interface Select lists detected NICs, none first, bind names behind the rows") {
+    static const char* kFake[] = {"en-test0", "en-test1"};
+    mm::platform::setTestRawInterfaces(kFake, 2);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+
+    // Find the control and pin its shape: 3 rows (none + 2 NICs), label persistence on.
+    bool found = false;
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        found = true;
+        CHECK(cs[i].max == 3);
+        CHECK(cs[i].persistLabel);
+        auto* options = reinterpret_cast<const char* const*>(cs[i].aux);
+        REQUIRE(options != nullptr);
+        CHECK(std::strcmp(options[0], "none (capture only)") == 0);
+        CHECK(std::strcmp(options[1], "en-test0") == 0);
+    }
+    CHECK(found);
+
+    // The bind name behind each row: none maps to capture (nullptr), rows map to their NIC.
+    CHECK(mm::platform::rawInterfaceName(0) == nullptr);
+    CHECK(std::strcmp(mm::platform::rawInterfaceName(1), "en-test0") == 0);
+    CHECK(std::strcmp(mm::platform::rawInterfaceName(2), "en-test1") == 0);
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);   // restore real enumeration
+}
+
+// A persisted adapter NAME whose NIC is gone must degrade to capture-only without crashing:
+// the label no longer matches any option, the Select stays at row 0 (none), and prepare()'s
+// nullptr bind is today's blank-interface capture path.
+TEST_CASE("a vanished persisted NIC degrades to capture-only, never a crash") {
+    static const char* kFake[] = {"en-test0"};
+    mm::platform::setTestRawInterfaces(kFake, 1);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        // The config remembers an adapter this machine no longer has.
+        const auto r = mm::applyControlValue(cs[i], "{\"interface\":\"en-vanished\"}",
+                                             "interface", mm::ApplyPolicy::Clamp);
+        CHECK(r == mm::ApplyResult::Ok);   // Lenient-shaped: the tree is left alone, no error
+        CHECK(*static_cast<uint8_t*>(cs[i].ptr) == 0);   // still row 0: none (capture only)
+    }
+    CHECK(mm::platform::rawInterfaceName(0) == nullptr);   // and row 0 binds nothing
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+}

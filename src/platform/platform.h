@@ -461,6 +461,21 @@ uint16_t ethLinkSpeedMbps() MM_NONBLOCKING;
 // nullptr or "" to return to capture mode.
 bool ethBindRawInterface(const char* ifName);
 
+// Enumerate the host NICs raw sending could bind, for the panel-card driver's `interface`
+// Select: display labels out (Windows: Npcap's friendly descriptions; POSIX: interface names),
+// entry 0 always "none (capture only)". Rebuilt on every call so a hot-plugged NIC appears on
+// the next schema rebuild. rawInterfaceName(i) is the BIND name behind row i (the pcap device
+// name on Windows differs from its label; on POSIX they are the same); nullptr for row 0.
+// The Select persists by LABEL (see Control::persistLabel): a NIC keeps its identity across
+// reboots and Npcap reinstalls, the index-mismatch trap this exists to close.
+size_t rawInterfaces(const char* const** optionsOut);
+const char* rawInterfaceName(size_t i);
+#ifndef ESP_PLATFORM
+// Test seam: replace the enumeration with a fixed list (label = bind name), so the control's
+// behavior is pinnable without real NICs. nullptr count 0 restores the real enumeration.
+void setTestRawInterfaces(const char* const* names, size_t count);
+#endif
+
 // --- NDI video output -------------------------------------------------------------------------
 //
 // projectMM as an NDI source: the rendered frame reaches OBS, Resolume, TouchDesigner or any other
@@ -528,12 +543,11 @@ void ndiTestClearFrames();
 // false when ffmpeg is absent or the spawn fails (not an error: the driver reports a status).
 bool encoderStart(const char* const argv[]);
 
-// Write one whole frame to the encoder's stdin. Returns len when fully written, 0 when the pipe
-// refuses the first byte (the caller DROPS the frame), and -1 when the process is gone OR wedged
-// past a ~250 ms completion budget (the caller restarts it): a frame is all-or-complete, never
-// torn, so a mid-frame stall cannot be abandoned and is bounded by the budget instead.
-// Windows deviation, POSIX-only guarantee for now: WriteFile on the anonymous pipe blocks until
-// its 4 MB buffer drains (overlapped rework is backlogged to land with the Windows tester).
+// Hand one whole frame to the encoder. The frame is COPIED into a bounded queue and a platform
+// writer thread does the blocking pipe writes, so this never blocks the caller and a frame is
+// always written whole (tearing is structurally impossible). Returns len when queued, 0 when
+// the queue is full (the encoder is behind: the caller DROPS the frame and stays live), and -1
+// when the writer saw the process die (EPIPE et al.; the caller restarts it).
 int encoderWrite(const uint8_t* data, size_t len);
 
 // Is the spawned encoder still alive? Reaps the child when it exited.

@@ -84,6 +84,7 @@ Contrast with signed distance fields below: same shapes, opposite approach, diff
 | `draw::bar` | A run of cells growing from an origin along one axis, colored per cell — the audio-meter staple | AudioSpectrum, GEQ, Spectrum | — |
 | `draw::fillCircle` | A filled disc (midpoint algorithm), colored per row | Echo | — |
 | `draw::text` | Draws a string, returning its pixel width (`glyph` is reached through it, not called directly) | DemoReel, Text | — |
+| `draw::sprite` | Blits one frame of a small palette-indexed bitmap (index 0 = transparent key), clipped at every edge — the multi-color sibling of `glyph`; movement belongs to the particle pool, never to the sprite | FlyingToasters | — |
 | `draw::circle` | A circle outline on integer coordinates, exact and symmetric | *(no caller yet)* | — |
 | `draw::rect`, `fillRect` | An axis-aligned rectangle, outlined or filled | *(no caller yet)* | — |
 | `draw::lineAA` | An anti-aliased line (Wu 1991) that splits its light between the two cells straddling the true path | *(no caller yet)* | — |

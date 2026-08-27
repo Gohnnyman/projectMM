@@ -47,7 +47,10 @@ style gate mirrors NdiDriver's). Controls:
 - `targetFps` (uint8, default 30): encode pacing; frames beyond it are dropped before the pipe.
 - `bitrate` (uint16 kbit, default 8000): passed to ffmpeg as `-b:v`.
 - `encoder` (Select, default `libx264`): the ffmpeg video encoder; hardware entries offload
-  the encode, one this ffmpeg lacks fails the spawn and the status says so.
+  the encode. Availability depends on the ffmpeg BUILD (libx264 needs --enable-libx264, which
+  practically every distribution ships): an encoder this ffmpeg lacks starts and exits
+  immediately, surfacing through the restart path as `encoder exited - check ffmpeg`, since
+  encoderStart() can only verify that ffmpeg itself launches.
 - read-only `status`: `streaming WxH at F fps` (with a dropped-frame count when any),
   `ffmpeg not found - see the docs`, `encoder restarted`, `encoder exited - check ffmpeg`.
 - read-only `url`: the playable address (`http://<host>:<port>/hls/stream.m3u8`, the port the

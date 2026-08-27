@@ -385,6 +385,17 @@ let previewWanted = false;              // does the pane currently want frames?
 const WSP_RETRY_MIN_MS = 1000, WSP_RETRY_MAX_MS = 15000;
 let wspRetryMs = WSP_RETRY_MIN_MS;
 
+// A Select's value is normally the option INDEX, but a label-persisted Select (a NIC list, an
+// audio device list) sends the option STRING; resolve either to the index both render paths
+// need. Unknown label -> 0, so a vanished option shows the first row rather than a blank box.
+function selectIndex(ctrl) {
+    if (typeof ctrl.value === "string") {
+        const i = (ctrl.options || []).indexOf(ctrl.value);
+        return i >= 0 ? i : 0;
+    }
+    return ctrl.value ?? 0;
+}
+
 function connectPreview() {
     if (wsPreview && (wsPreview.readyState === WebSocket.OPEN ||
                       wsPreview.readyState === WebSocket.CONNECTING)) return;
@@ -2466,7 +2477,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 const o = document.createElement("option");
                 o.value = i;
                 o.textContent = opt;
-                if (i === ctrl.value) o.selected = true;
+                if (i === selectIndex(ctrl)) o.selected = true;
                 sel.appendChild(o);
             });
             // Protect the dropdown while the user has it open. A native <select>
@@ -3954,7 +3965,8 @@ function updateModuleControls(mod) {
                             sel.appendChild(o);
                         });
                     }
-                    if (Number(sel.value) !== Number(ctrl.value)) sel.value = ctrl.value;
+                    const want = selectIndex(ctrl);
+                    if (Number(sel.value) !== want) sel.value = want;
                 }
                 break;
             }

@@ -136,6 +136,13 @@ encode-worker-stalled latch. A page refresh reportedly did NOT revive it; toggli
 wake-up re-request, or per-driver lease state that only prepare() resets. Needs a reproduction
 with the WS uplink logged before it can be fixed.
 
+### Sprite follow-ups (draw::sprite + FlyingToasters shipped; [spec + plan](../history/plans/Plan-20260827%20-%20Sprites%20and%20flying%20toasters.md))
+
+Deliberately deferred when sprites landed: P4 PPA acceleration behind the same `draw::sprite`
+signature (the 2D-DMA blitter the WLED-MM-P4 world uses via LovyanGFX; ours would sit in the
+platform layer, no vendored GFX library), Porter-Duff alpha when a real consumer arrives, and
+MoonLive sprite data (needs the stage-3 builtin table + arrays).
+
 ### projectMM as a video source — NDI first, Spout/Syphon only if proven (open)
 
 Users asked for projectMM's rendered output to feed *their* tools, not the other way round. One runs OBS → Spout → his own VLAN-tagged card driver; he asked whether projectMM could be a Spout source. Input is not the gap: `NetworkReceiveEffect` already binds Art-Net, E1.31/sACN and DDP at once and answers ArtPoll, so any controller can already drive projectMM.

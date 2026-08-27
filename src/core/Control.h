@@ -304,6 +304,11 @@ struct ControlDescriptor {
     bool hidden = false;    // UI visibility flag. Set via ControlList::setHidden() after addX().
                             // Persistence ignores this — hidden controls are still saved/loaded
                             // so toggling visibility doesn't lose state.
+    bool persistLabel = false;  // Select-only: persistence writes the option LABEL instead of the
+                            // index. For Selects whose options come from live enumeration (a NIC
+                            // list, an audio device list) where the index is unstable across boots
+                            // but the name is what the user chose. The apply path already accepts
+                            // labels (Control.cpp Select apply), so both forms always load.
     bool readonly = false;  // UI editability flag, INDEPENDENT of ControlType. The Text/Password/etc
                             // types are persistable but normally editable; this flag asks the UI
                             // to render the control as display-only (no input affordance). Used for
@@ -619,6 +624,12 @@ public:
     // Typical use: addControl() then setNumberField(count() - 1). See the descriptor's field.
     void setNumberField(uint8_t i, bool numberField = true) {
         if (i < count_) controls_[i].numberField = numberField;
+    }
+
+    // Persist this Select by option LABEL (see Control::persistLabel). Typical use: call
+    // addSelect() over enumerated options, then setPersistLabel(count() - 1).
+    void setPersistLabel(uint8_t i, bool persistLabel = true) {
+        if (i < count_) controls_[i].persistLabel = persistLabel;
     }
 
     /// Render this numeric control as a VERTICAL fader rather than a horizontal slider. Presentation

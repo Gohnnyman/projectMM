@@ -267,6 +267,21 @@ Physics is driven by elapsed time, not frame count, so the same settings behave 
 
 Origin: projectMM original, on the WLED Particle System's firework family by Damian Schneider / [@DedeHai](https://github.com/DedeHai)
 
+<a id="flyingtoasters"></a>
+
+### Flying Toasters 🔬 · 2D
+
+The classic screensaver on a light wall: chrome toasters with flapping wings and slices of toast drift diagonally across the dark, forever. Each flier is a particle-pool entry with constant velocity (respawning off the upper-right when it leaves the lower-left), rendered through the `draw::sprite` power function; the wing flap runs on a shared BeatPhase with a per-toaster offset so the flock never syncs.
+
+- `toasters` — how many fly (1–12).
+- `toast` — how many slices trail along (0–8).
+- `speed` — drift rate in sprite-widths, so flight reads the same on any grid; each flier varies ±25% around it.
+- `spriteSize` — integer magnification for toasters AND toast (crisp nearest-neighbor); 0 = auto, scaling with the grid so a toaster reads as a toaster on a big wall.
+
+The sprites carry their own colors (chrome, wing, crust), so the global palette does not apply. Needs a grid at least the toaster's size (12×9).
+
+Origin: projectMM original; inspired by After Dark's Flying Toasters (Berkeley Systems, 1989), suggested by Frank ([softhack007](https://github.com/softhack007)) — the pixel art here is drawn fresh for this effect
+
 <a id="ballpit"></a>
 
 ### Ballpit 🔬 · 2D
