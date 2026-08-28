@@ -20,6 +20,7 @@
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/WaveEffect.h"
 #include "light/effects/NoiseEffect.h"
+#include "light/effects/PacmanEffect.h"
 #include "light/effects/PlasmaEffect.h"
 #include "light/effects/MetaballsEffect.h"
 #include "light/effects/FireEffect.h"
@@ -50,6 +51,7 @@
 #include "light/effects/SpectrumEffect.h"
 #include "light/effects/FireworksEffect.h"
 #include "light/effects/BallpitEffect.h"
+#include "light/effects/FishTankEffect.h"
 #include "light/effects/FlyingToastersEffect.h"
 #include "light/effects/TruchetEffect.h"
 #include "light/effects/VectorBallsEffect.h"
@@ -234,6 +236,8 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::DissolveEffect>("DissolveEffect", "light/effects.md#dissolve");
     mm::ModuleFactory::registerType<mm::SpectrumEffect>("SpectrumEffect", "light/effects.md#spectrum");
     mm::ModuleFactory::registerType<mm::FireworksEffect>("FireworksEffect", "light/effects.md#fireworks");
+    mm::ModuleFactory::registerType<mm::FishTankEffect>("FishTankEffect", "light/effects.md#fishtank");
+    mm::ModuleFactory::registerType<mm::PacmanEffect>("PacmanEffect", "light/effects.md#pacman");
     mm::ModuleFactory::registerType<mm::FlyingToastersEffect>("FlyingToastersEffect", "light/effects.md#flyingtoasters");
     mm::ModuleFactory::registerType<mm::BallpitEffect>("BallpitEffect", "light/effects.md#ballpit");
     mm::ModuleFactory::registerType<mm::TruchetEffect>("TruchetEffect", "light/effects.md#truchet");

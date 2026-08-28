@@ -267,6 +267,23 @@ Physics is driven by elapsed time, not frame count, so the same settings behave 
 
 Origin: projectMM original, on the WLED Particle System's firework family by Damian Schneider / [@DedeHai](https://github.com/DedeHai)
 
+<a id="fishtank"></a>
+
+### Fish Tank 🐙 · 2D
+
+An aquarium on a light wall: fish of three shapes swim across a dark tank, each in its own color from the active palette, tails beating. Movement is a particle-pool entry per fish with constant velocity, respawning at the far edge when it swims off; the shape is drawn through the `draw::sprite` power function. Unlike the other sprite effects, the art carries shade ROLES (body, outline, highlight, fin, eye, band) rather than fixed colors, and each fish fills them from its own place on the palette, so one drawing yields as many colorways as there are fish.
+
+- `fish` — how many broad tropical fish (0-8).
+- `slim` — how many slender fish (0-8).
+- `school` — how many tiny schooling fish (0-8).
+- `speed` — swim rate in body-lengths, so motion reads the same on any grid; each fish varies around it, and the smaller shapes drift slower, which reads as depth.
+- `spriteSize` — integer magnification (crisp nearest-neighbor); 0 = auto, scaling with the grid so a fish reads as a fish on a 16x16 matrix and on a 768-wide desktop grid alike.
+- `soundReactive` — move to the music: each sprite follows its own frequency band, so the scene breathes rather than surging as one block, and silence stands it still. Without an audio source the sprites keep moving normally.
+
+Uses the global palette: every fish takes a body color from it, with its band a paler version of that same color rather than a second pick, which would read as two fish fused together.
+
+Origin: projectMM original; inspired by the aquarium screensavers of the After Dark era, the pixel art drawn fresh for this effect
+
 <a id="flyingtoasters"></a>
 
 ### Flying Toasters 🔬 · 2D
@@ -277,10 +294,29 @@ The classic screensaver on a light wall: chrome toasters with flapping wings and
 - `toast` — how many slices trail along (0–8).
 - `speed` — drift rate in sprite-widths, so flight reads the same on any grid; each flier varies ±25% around it.
 - `spriteSize` — integer magnification for toasters AND toast (crisp nearest-neighbor); 0 = auto, scaling with the grid so a toaster reads as a toaster on a big wall.
+- `soundReactive` — move to the music: each sprite follows its own frequency band, so the scene breathes rather than surging as one block, and silence stands it still. Without an audio source the sprites keep moving normally.
 
 The sprites carry their own colors (chrome, wing, crust), so the global palette does not apply. Needs a grid at least the toaster's size (12×9).
 
 Origin: projectMM original; inspired by After Dark's Flying Toasters (Berkeley Systems, 1989), suggested by Frank ([softhack007](https://github.com/softhack007)) — the pixel art here is drawn fresh for this effect
+
+<a id="pacman"></a>
+
+### Pacman 🔬 · 2D
+
+The arcade cast crossing a light wall: Pacman chomps his way along while the four ghosts drift past, each in its own color, wrapping around the edges forever. Movement is a particle-pool entry per character and the shapes go through the `draw::sprite` power function; one ghost drawing serves all four colors because the art carries palette slots rather than fixed colors, and a single drawing serves both travel directions because `draw::sprite` can mirror it.
+
+In this first iteration the characters travel independently and do not notice each other. The maze, the pellets and the chase are the next step, built on the shapes and the movement grid this one establishes.
+
+- `pacmen` — how many Pacmen (0-4).
+- `ghosts` — how many ghosts (0-8); the arcade cast is four.
+- `speed` — travel rate in sprite-widths, so motion reads the same on any grid; Pacman runs slightly ahead of the ghosts, as in the original.
+- `spriteSize` — integer magnification (crisp nearest-neighbor); 0 = auto, scaling with the grid so the characters read on a 16x16 matrix and on a 768-wide desktop grid alike.
+- `soundReactive` — move to the music: each sprite follows its own frequency band, so the scene breathes rather than surging as one block, and silence stands it still. Without an audio source the sprites keep moving normally.
+
+Pacman is always his own yellow; the ghosts take their body colors from the active palette, so they stay four distinguishable characters whatever palette is loaded.
+
+Origin: projectMM original; inspired by Namco's Pac-Man (1980), the pixel art drawn fresh for this effect
 
 <a id="ballpit"></a>
 

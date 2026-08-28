@@ -94,22 +94,6 @@
             "n": 1,
             "samples": [3]
           },
-          "free_heap": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 1,
-            "samples": [0]
-          },
-          "max_alloc_block": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 1,
-            "samples": [0]
-          },
           "last_updated": "2026-08-08"
         }
       }
@@ -194,22 +178,6 @@
             "n": 1,
             "samples": [3]
           },
-          "free_heap": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 1,
-            "samples": [0]
-          },
-          "max_alloc_block": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 1,
-            "samples": [0]
-          },
           "last_updated": "2026-08-08"
         }
       }
@@ -293,22 +261,6 @@
             "max": 3,
             "n": 1,
             "samples": [3]
-          },
-          "free_heap": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 1,
-            "samples": [0]
-          },
-          "max_alloc_block": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 1,
-            "samples": [0]
           },
           "last_updated": "2026-08-08"
         }

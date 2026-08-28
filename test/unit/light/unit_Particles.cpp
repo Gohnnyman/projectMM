@@ -551,7 +551,7 @@ TEST_CASE("a particle can outlive the old 8-bit ceiling") {
     CHECK(t.ttl[0] == 2000);
 }
 
-// Wrapping is the third wall behaviour beside bounce and killOutside, and the one an endless field
+// Wrapping is the third wall behavior beside bounce and killOutside, and the one an endless field
 // needs: snow, rain and marquees want to re-enter, not rattle in a box or fall off a cliff.
 TEST_CASE("a particle leaving one edge re-enters the opposite one") {
     TestPool<4> t;
@@ -673,4 +673,74 @@ TEST_CASE("one second of motion is the same amount of motion however fast the de
         CHECK(refFrames > 59.0);
         CHECK(refFrames < 62.0);
     }
+}
+
+// Slots map onto DISTINCT lanes at any count. Effects assign slots by species or role, and
+// species differ in speed, so a straight stride sorts the scene and the fast ones bunch at one
+// edge; the interleave exists to mix them. Its step must be coprime with the count, or the
+// mapping collapses: `(i * 5) % 5` is zero for every i, which stacked a five-character cast on
+// one row (bench, PacmanEffect).
+TEST_CASE("spreadLane gives every slot its own lane, for any count") {
+    // The extent is a multiple of every count tested, so each lane lands on its own exact
+    // position and two slots sharing a lane is a real collision rather than a rounding artifact.
+    constexpr mm::lengthType kExtent = 27720;   // lcm(1..12), divisible by every count below
+    for (uint16_t slots = 1; slots <= 12; slots++) {
+        bool seen[16] = {};
+        uint16_t distinct = 0;
+        for (uint16_t i = 0; i < slots; i++) {
+            const mm::lengthType lane = mm::particles::spreadLane(i, slots, kExtent);
+            REQUIRE(lane >= 0);
+            REQUIRE(lane < kExtent);
+            const int idx = lane / (kExtent / slots);
+            if (!seen[idx]) { seen[idx] = true; distinct++; }
+        }
+        CHECK(distinct == slots);          // a collision means two sprites on the same lane
+    }
+}
+
+// The interleave is the point: consecutive slots must not land on adjacent lanes, or assigning
+// slots by species puts every fast one together regardless of the lanes being distinct.
+TEST_CASE("spreadLane interleaves rather than striding in order") {
+    constexpr mm::lengthType kExtent = 240;
+    const uint16_t slots = 8;
+    bool anyNonAdjacent = false;
+    for (uint16_t i = 1; i < slots; i++) {
+        const int a = mm::particles::spreadLane(static_cast<uint16_t>(i - 1), slots, kExtent);
+        const int b = mm::particles::spreadLane(i, slots, kExtent);
+        if (b != a + kExtent / slots) anyNonAdjacent = true;
+    }
+    CHECK(anyNonAdjacent);
+}
+
+// Sound-reactive sprites: the behavior a viewer judges is "it moves with the music, and it stops
+// when the music stops". Both halves are pinned here because both were explicit requirements.
+TEST_CASE("Silence stands the sprites still") {
+    mm::AudioFrame quiet;                       // levelSmoothed 0: no music playing
+    for (uint16_t i = 0; i < 8; i++) CHECK(mm::particles::audioDrive(&quiet, i, 8) == 0);
+}
+
+TEST_CASE("Without an audio source the sprites keep moving normally") {
+    // A device with no microphone must not end up with a frozen scene.
+    CHECK(mm::particles::audioDrive(nullptr, 0, 8) == mm::particles::FrameTime::kOne);
+}
+
+TEST_CASE("Loud music moves the sprites faster than quiet music") {
+    mm::AudioFrame quiet, loud;
+    quiet.levelSmoothed = 40;
+    loud.levelSmoothed  = 200;
+    for (uint8_t b = 0; b < 16; b++) { quiet.bands[b] = 20; loud.bands[b] = 240; }
+    CHECK(mm::particles::audioDrive(&loud, 0, 8) > mm::particles::audioDrive(&quiet, 0, 8));
+}
+
+// The point of a per-sprite band rather than one overall volume: a bass-heavy moment moves the
+// bass sprites and leaves the treble ones alone, so the scene never surges as a single block.
+TEST_CASE("Each sprite follows its own frequency band") {
+    mm::AudioFrame f;
+    f.levelSmoothed = 128;
+    for (uint8_t b = 0; b < 16; b++) f.bands[b] = 0;
+    f.bands[0] = 255;                            // bass only
+    const uint32_t bass   = mm::particles::audioDrive(&f, 0, 8);
+    const uint32_t treble = mm::particles::audioDrive(&f, 7, 8);
+    CHECK(bass > treble);
+    CHECK(treble > 0);                           // a quiet band drifts, it does not freeze mid-air
 }

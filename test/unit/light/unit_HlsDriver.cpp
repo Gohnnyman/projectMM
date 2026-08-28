@@ -14,6 +14,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -420,4 +421,35 @@ TEST_CASE("HlsDriver accepts a scaled frame that exactly meets the encoder's lim
     driver.prepare();
 
     CHECK(std::string(mm::platform::encoderTestArgs()).find("-s 1920x1440") != std::string::npos);
+}
+
+// A long stall resyncs the schedule rather than firing a burst to catch up. The frame sent AT
+// the resync is the new schedule's frame 0, so the next is due a full period later. Counting it
+// as frame 0 instead made the following tick recompute its due time back to that same instant
+// and fire again one millisecond later, which is a duplicate frame in the stream.
+TEST_CASE("HlsDriver resyncs after a stall without sending a duplicate frame") {
+    EncSeamGuard seam{mm::platform::EncoderTestMode::Record};
+    mm::Buffer source;
+    mm::HlsDriver driver;
+    Wall wall(4, 2);
+    setUp(driver, source, wall, 8);
+    driver.targetFps = 10;                            // a 100 ms grid
+    driver.scale = 1;
+    driver.prepare();
+
+    // Tick every millisecond across the warm-up and well past it. The warm-up itself leaves the
+    // schedule far enough behind to trip the resync, which is exactly when the duplicate showed.
+    std::vector<uint32_t> sentAt;
+    size_t seen = 0;
+    for (uint32_t t = 1; t <= 1200; t++) {
+        mm::platform::setTestNowMs(t);
+        driver.tick();
+        const size_t n = mm::platform::encoderTestFrameCount();
+        if (n != seen) { sentAt.push_back(t); seen = n; }
+    }
+
+    REQUIRE(sentAt.size() >= 2);
+    // No two frames closer than one period: a resync must not emit back-to-back frames.
+    for (size_t i = 1; i < sentAt.size(); i++)
+        CHECK(sentAt[i] - sentAt[i - 1] >= 100u);
 }

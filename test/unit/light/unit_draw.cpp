@@ -267,3 +267,28 @@ TEST_CASE("draw::sprite clips at every edge and survives bad frame and palette i
     draw::sprite(cv, sBad, 0, 1, 1);
     CHECK(isBlack(at(buf, dims, 1, 1, 0)));
 }
+
+// Art that faces one way serves both: flipX mirrors the sprite's READ, so the blit still lands
+// at the same (x, y) with the same footprint rather than needing a mirrored copy of every frame.
+TEST_CASE("draw::sprite mirrors horizontally without moving the sprite") {
+    Buffer buf;
+    Coord3D dims{4, 2, 1};
+    REQUIRE(buf.allocate(static_cast<nrOfLightsType>(dims.x) * dims.y, 3));
+    buf.clear();
+    const draw::Canvas cv = draw::Canvas::of(buf, dims.x, dims.y, 1);
+
+    // Asymmetric on purpose: one lit pixel at the LEFT of the top row.
+    static constexpr RGB pal[] = {{0, 0, 0}, {10, 20, 30}};
+    static constexpr uint8_t px[] = {1, 0, 0, 0,
+                                     0, 0, 0, 0};
+    constexpr draw::sprites::Sprite s{px, pal, 4, 2, 1, 2};
+
+    draw::sprite(cv, s, 0, 0, 0, 1, /*flipX=*/false);
+    CHECK(at(buf, dims, 0, 0, 0).r == 10);       // unflipped: leftmost column
+    CHECK(isBlack(at(buf, dims, 3, 0, 0)));
+
+    buf.clear();
+    draw::sprite(cv, s, 0, 0, 0, 1, /*flipX=*/true);
+    CHECK(isBlack(at(buf, dims, 0, 0, 0)));      // flipped: the same footprint, mirrored
+    CHECK(at(buf, dims, 3, 0, 0).r == 10);
+}

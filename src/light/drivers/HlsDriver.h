@@ -112,8 +112,20 @@ public:
         // sane while their product need not be: lengthType is int16_t, so an 821x4 wall at
         // scale 80 wraps to 144x320, the frame buffer is sized from the wrapped number, and the
         // pixel loop then walks the REAL 821x4 source straight past the end of it.
-        const uint32_t scaledW = static_cast<uint32_t>(srcWidth_)  * scale_;
-        const uint32_t scaledH = static_cast<uint32_t>(srcHeight_) * scale_;
+        uint32_t scaledW = static_cast<uint32_t>(srcWidth_)  * scale_;
+        uint32_t scaledH = static_cast<uint32_t>(srcHeight_) * scale_;
+        // 4:2:0 chroma is sampled in 2x2 blocks, so the P4's encoder takes even dimensions only
+        // and an odd wall (21x15, say) would be refused with nothing but a generic start failure
+        // to explain it. Doubling the scale is the fix that keeps the picture: every source pixel
+        // still maps to a whole square block, so the result is even on both axes and the aspect
+        // ratio is untouched. Desktop ffmpeg accepts odd sizes, so it keeps the scale it asked for.
+        if constexpr (!platform::hasEncoderChoice) {
+            if ((scaledW & 1u) || (scaledH & 1u)) {
+                scale_  = static_cast<uint8_t>(scale_ * 2);
+                scaledW *= 2;
+                scaledH *= 2;
+            }
+        }
         if (scaledW > kMaxEncodeWidth || scaledH > kMaxEncodeHeight) {
             std::snprintf(statusBuf_, sizeof(statusBuf_),
                           "%ux%u at scale %u exceeds the encoder's %ux%u",
@@ -206,7 +218,10 @@ public:
             // period out, NOT immediately -- resyncing to `now` makes the very next tick due and
             // sends a second frame straight away (caught by the rate-ceiling test).
             sendEpochMs_ = now;
-            frameIndex_  = 0;
+            // ONE, not zero: this tick's frame is the schedule's frame 0, so the next one is
+            // frame 1. Leaving it at 0 made the following tick recompute its due time back to
+            // this instant, firing a second frame with a 0 ms gap.
+            frameIndex_  = 1;
             nextSendMs_  = now + periodMs;
         }
 

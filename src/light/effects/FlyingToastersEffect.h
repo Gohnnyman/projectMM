@@ -112,12 +112,14 @@ public:
     uint8_t toast    = 3;
     uint8_t speed    = 96;
     uint8_t spriteSize = 0;   // 0 = auto: scale with the grid; both toasters and toast use it
+    bool soundReactive = false;  // move to the music: each sprite on its own band, still in silence
 
     void defineControls() override {
         controls_.addControl("toasters", toasters, 1, 12);
         controls_.addControl("toast", toast, 0, 8);
         controls_.addControl("speed", speed, 1, 255);
         controls_.addControl("spriteSize", spriteSize, 0, 12);
+        controls_.addControl("soundReactive", soundReactive);
     }
 
     void prepare() override {
@@ -158,7 +160,18 @@ public:
         draw::fill(cv, RGB{0, 0, 0});
 
         const uint32_t scale = time_.advance(elapsed());
-        if (scale > 0) pool_.step(scale);
+        if (scale > 0) {
+            if (soundReactive) {
+                // Each sprite rides its own frequency band, so the scene breathes with the music
+                // rather than surging as one block, and silence stands it still. The rule is
+                // shared with the other sprite effects (particles::audioDrive).
+                const AudioFrame* f = AudioService::latestFrame();
+                const uint16_t n = pool_.count;
+                pool_.stepEach(scale, [f, n](uint16_t i) { return particles::audioDrive(f, i, n); });
+            } else {
+                pool_.step(scale);
+            }
+        }
 
         // The wing flap: one shared BeatPhase, offset per toaster so the flock never syncs.
         flap_.advance(elapsed(), 180);   // ~3 flaps per second across the 4-frame cycle

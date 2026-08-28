@@ -57,6 +57,17 @@ from __future__ import annotations
 
 _FIELDS = ("tick_us", "free_heap", "max_alloc_block")
 
+# 0 is never a measurement, in any field, so it never enters a window.
+#
+# A tick of 0 us means the step ran below the host clock's resolution, not that it was free; a
+# window holding those reports a median of 0, a step that looks infinitely fast. A free_heap or
+# max_alloc_block of 0 is the desktop platform saying "no meaningful ceiling", which is a
+# CONSTANT: the value never varies (verified across every scenario file: desktop has exactly one
+# distinct value, 0), so a 32-sample window of it is 32 copies of a fact that could not change.
+# Recording nothing leaves n=0, which the report already renders as "not measured here" -- the
+# honest answer for a target that has no such limit. Every ESP32 target reports real varying
+# numbers and is untouched by this.
+
 # Samples kept per field. Enough for a p95 to mean something (the 95th percentile of 32
 # samples is the second-worst, which a one-off cannot reach), small enough that the JSON
 # stays readable and a stale measurement ages out within a few dozen runs.
@@ -136,8 +147,11 @@ def widen(existing: dict | None, sample: dict, today: str) -> tuple[dict, bool]:
     for f in _FIELDS:
         if f not in sample:
             continue
+        value = int(sample[f])
+        if value == 0:
+            continue          # not a measurement: see the note above _FIELDS
         window = _window_of(block, f)
-        window.append(int(sample[f]))
+        window.append(value)
         if len(window) > kWindow:
             window = window[-kWindow:]          # drop the oldest, keep arrival order
         block[f] = _stats(window)
@@ -153,7 +167,8 @@ def widen(existing: dict | None, sample: dict, today: str) -> tuple[dict, bool]:
 def reset(sample: dict, today: str) -> dict:
     """Build a fresh observed block from a single measurement -- called when the contract
     is renegotiated and the previous window described the PREVIOUS contract."""
-    block = {f: _stats([int(sample[f])]) for f in _FIELDS if f in sample}
+    block = {f: _stats([] if int(sample[f]) == 0 else [int(sample[f])])
+             for f in _FIELDS if f in sample}
     block["last_updated"] = today
     return block
 

@@ -141,6 +141,11 @@ def _fps_range_from_observed_range(v) -> str:
     if pair is None:
         return NO_VALUE
     lo_us, hi_us = pair
+    # BOTH endpoints must convert: _fps_from_us returns the missing-value dash for a
+    # non-positive tick, and pairing that with a real number renders a range with a dash on one
+    # end, which reads as a measurement rather than as absent data.
+    if lo_us <= 0 or hi_us <= 0:
+        return NO_VALUE
     # Higher FPS comes from the LOWER tick, so the pair inverts.
     hi_fps, lo_fps = _fps_from_us(lo_us), _fps_from_us(hi_us)
     return lo_fps if lo_fps == hi_fps else f"{lo_fps}-{hi_fps}"
