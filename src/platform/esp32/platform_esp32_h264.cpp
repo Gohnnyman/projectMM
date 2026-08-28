@@ -16,7 +16,7 @@
 
 #if defined(CONFIG_MM_HLS)
 
-#include "MpegTs.h"
+#include "light/MpegTs.h"
 
 #include "esp_h264_enc_single_hw.h"
 #include "esp_heap_caps.h"
@@ -80,6 +80,19 @@ std::atomic<bool> dead_{false};   // the encoder failed: writes are refused unti
 // overruns its deadline (platform_esp32_worker.cpp), so its return does not prove the worker is
 // gone; freeing the buffers on that path would pull them out from under a live encode.
 std::atomic<bool> workerExited_{false};
+
+// Which worker generation is the live one. stopPinnedTask DETACHES a worker that overruns its
+// join deadline rather than freeing it (platform_esp32_worker.cpp), so an orphan can still be
+// parked in waitNotify when the next encoderStart runs. `running_` alone cannot gate it: that
+// start sets running_ back to true, and the orphan would resume as a SECOND producer on the one
+// encoder handle and scratch buffer. Each worker captures the generation it was spawned for and
+// exits as soon as it is no longer current.
+std::atomic<uint32_t> generation_{0};
+
+// Set when a segment was closed early (a frame that did not fit), so the fresh one is still
+// waiting for its first keyframe. Without it the next P-frame would open the segment and a
+// player seeking there would have no reference frame to decode against.
+bool needKeyframe_ = false;
 
 esp_h264_enc_handle_t enc_ = nullptr;
 uint8_t*  yuv_    = nullptr;      // one converted frame, the encoder's input
@@ -180,6 +193,10 @@ void encodeOne(const uint8_t* rgb, size_t rgbLen) {
     if (keyframe && seg.len > 0) {
         rotateSegment();
     }
+    // A segment opened by an overflow rotate holds nothing until a keyframe arrives: dropping
+    // these few P-frames costs a fraction of a second, where admitting them costs the segment.
+    if (needKeyframe_ && !keyframe) return;
+    needKeyframe_ = false;
     Segment& dst = segments_[segWrite_];
     if (!dst.data) return;
 
@@ -192,19 +209,20 @@ void encodeOne(const uint8_t* rgb, size_t rgbLen) {
     w.writeAccessUnit(nal_, out.length, pts90, keyframe);
     if (w.overflowed()) {
         cc_ = ccBefore;
-        // The frame did not fit: close the segment here rather than emit a torn one. The next
-        // keyframe starts a fresh one.
+        // The frame did not fit: close the segment here rather than emit a torn one, and hold
+        // the fresh one empty until a keyframe can open it (needKeyframe_).
         if (dst.len > 0) rotateSegment();
+        needKeyframe_ = true;
         return;
     }
     dst.len += w.size();
     dst.frames++;
 }
 
-void workerFn(void*) {
-    workerExited_ = false;
+void workerFn(void* arg) {
+    const uint32_t myGen = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(arg));
     taskWdtSubscribe();
-    while (running_) {
+    while (running_ && generation_.load() == myGen) {
         taskWdtReset();
         const uint8_t* frame = nullptr;
         size_t len = 0;
@@ -291,15 +309,24 @@ bool encoderStart(const EncoderConfig& cfg) {
     segWrite_ = 0;
     nextSeq_  = 1;
     cc_       = mm::ts::Continuity{};
+    needKeyframe_ = false;
     dead_     = false;
     running_  = true;
+    // A new generation retires any orphan the previous stop had to detach.
+    const uint32_t myGen = generation_.fetch_add(1) + 1;
+    // Clear HERE, not in the worker: the worker's first instruction runs only once the scheduler
+    // reaches it, and a stop landing in that window would read the previous stop's `true` and
+    // free the buffers the worker is about to encode from.
+    workerExited_ = false;
     // Core 1: core 0 runs the network stack, and starving it stalls the HTTP server that serves
     // these very segments (the LC16 lesson).
     // 16 KB, not the 8 KB this started with: the hardware-encoder call chain plus our muxer
     // overflowed that and jumped into libm with a corrupted pointer (an "Illegal instruction"
     // panic loop on the bench). Espressif's own esp_h264 example runs its encode from a 10 KB
     // task, and the muxer's frame loop sits on top of that.
-    if (!spawnPinnedTask(task_, "mmH264", workerFn, nullptr, 16 * 1024, 5, 1)) {
+    if (!spawnPinnedTask(task_, "mmH264", workerFn,
+                         reinterpret_cast<void*>(static_cast<uintptr_t>(myGen)),
+                         16 * 1024, 5, 1)) {
         running_ = false;
         freeAll();
         return false;

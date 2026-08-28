@@ -706,15 +706,14 @@ void HttpServerModule::serveHlsFile(platform::TcpConnection& conn, const char* n
             "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
             "Cache-Control: no-cache\r\nConnection: close\r\n"
             "Access-Control-Allow-Origin: *\r\n\r\n", mime, ramLen);
-        // Chunked and error-checked like streamFsFile: a stalled client must end the send, not
-        // burn the render thread's deadline on every remaining byte. Every exit releases the
-        // segment, which the platform holds reserved until then.
-        if (conn.write(reinterpret_cast<const uint8_t*>(header), static_cast<size_t>(hn))) {
-            for (size_t off = 0; off < ramLen;) {
-                const size_t want = ramLen - off < 1024 ? ramLen - off : 1024;
-                if (!conn.write(ram + off, want)) break;
-                off += want;
-            }
+        // One write for the body, not streamFsFile's 1 KB loop: that loop exists because it
+        // reads a KB at a time from the filesystem, and conn.write already sends all bytes
+        // (platform.h). The segment is a resident RAM buffer, so chunking it would only give
+        // each piece a fresh deadline. Release on every exit; the platform holds the segment
+        // reserved until then, and a truncated snprintf must not skip that.
+        if (hn > 0 && hn < static_cast<int>(sizeof(header)) &&
+            conn.write(reinterpret_cast<const uint8_t*>(header), static_cast<size_t>(hn))) {
+            conn.write(ram, ramLen);
         }
         platform::hlsSegmentRelease();
         return;

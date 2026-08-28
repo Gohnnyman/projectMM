@@ -24,6 +24,10 @@ menu "projectMM"
 
     config MM_HLS
         bool "HLS streaming via the hardware H.264 encoder (ESP32-P4 only)"
+        # The title says P4-only; this makes it so. Without it a fragment or menuconfig could
+        # set the symbol on another target, which would pull esp_h264 and compile a call to
+        # esp_h264_enc_hw_new on silicon that has no encoder.
+        depends on IDF_TARGET_ESP32P4
         default y if IDF_TARGET_ESP32P4
         default n
         help

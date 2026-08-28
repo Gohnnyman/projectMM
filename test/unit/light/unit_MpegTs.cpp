@@ -6,7 +6,7 @@
 // has to accept is pinned here, on the host, rather than only by watching a TV.
 
 #include "doctest.h"
-#include "platform/esp32/MpegTs.h"
+#include "light/MpegTs.h"
 
 #include <cstring>   // std::memcmp: declared here, not borrowed from MpegTs.h
 #include <vector>

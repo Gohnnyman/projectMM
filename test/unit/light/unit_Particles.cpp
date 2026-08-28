@@ -701,15 +701,21 @@ TEST_CASE("spreadLane gives every slot its own lane, for any count") {
 // The interleave is the point: consecutive slots must not land on adjacent lanes, or assigning
 // slots by species puts every fast one together regardless of the lanes being distinct.
 TEST_CASE("spreadLane interleaves rather than striding in order") {
-    constexpr mm::lengthType kExtent = 240;
-    const uint16_t slots = 8;
-    bool anyNonAdjacent = false;
-    for (uint16_t i = 1; i < slots; i++) {
-        const int a = mm::particles::spreadLane(static_cast<uint16_t>(i - 1), slots, kExtent);
-        const int b = mm::particles::spreadLane(i, slots, kExtent);
-        if (b != a + kExtent / slots) anyNonAdjacent = true;
+    // EVERY consecutive pair must be non-adjacent, not merely one of them. The weaker form of
+    // this test passed against a stride of `slots - 1`, which is coprime but congruent to -1, so
+    // consecutive slots walked DOWN neighbouring lanes and nothing was interleaved at all.
+    constexpr mm::lengthType kExtent = 27720;      // lcm(1..12): every count below divides it
+    for (uint16_t slots = 5; slots <= 12; slots++) {
+        if (slots == 6) continue;   // 6 has no coprime near 3 (2 and 3 both share a factor)
+        const mm::lengthType lane = kExtent / slots;
+        for (uint16_t i = 1; i < slots; i++) {
+            const int a = mm::particles::spreadLane(static_cast<uint16_t>(i - 1), slots, kExtent);
+            const int b = mm::particles::spreadLane(i, slots, kExtent);
+            CHECK(a != b);                          // never the same lane
+            CHECK(b - a != lane);                   // never the next lane up
+            CHECK(a - b != lane);                   // nor the next lane down
+        }
     }
-    CHECK(anyNonAdjacent);
 }
 
 // Sound-reactive sprites: the behavior a viewer judges is "it moves with the music, and it stops
@@ -743,4 +749,41 @@ TEST_CASE("Each sprite follows its own frequency band") {
     const uint32_t treble = mm::particles::audioDrive(&f, 7, 8);
     CHECK(bass > treble);
     CHECK(treble > 0);                           // a quiet band drifts, it does not freeze mid-air
+}
+
+// The bands must be spread over the sprites that EXIST, not over the pool's capacity. Passing
+// the capacity (a Pool is allocated for the maximum, then partly filled) crowds every live sprite
+// into the low bands and leaves the treble driving nothing at all: with 5 sprites in a pool of 12,
+// `i * 16 / 12` yields bands 0,1,2,4,5 - all bass. Caught in review after shipping; the earlier
+// tests missed it because they all passed the live count as `slots`.
+TEST_CASE("The spectrum is spread over the live sprites, not the pool capacity") {
+    AudioFrame f;
+    f.levelSmoothed = 128;
+    for (uint8_t b = 0; b < 16; b++) f.bands[b] = 0;
+
+    // Five live sprites in a pool sized for twelve. Spread over the LIVE count they take bands
+    // 0, 3, 6, 9, 12; spread over the capacity they would take 0, 1, 2, 4, 5 - the bottom third.
+    const uint16_t live = 5, capacity = 12;
+    f.bands[12] = 255;                     // energy where only the live-count spread reaches
+
+    CHECK(particles::audioDrive(&f, live - 1, live) >
+          particles::audioDrive(&f, 0, live));            // the top sprite hears it
+    CHECK(particles::audioDrive(&f, live - 1, capacity) ==
+          particles::audioDrive(&f, 0, capacity));        // spread over capacity: nobody hears it
+}
+
+// Pool::stepDriven is the shared entry point the sprite effects use, so the rules ride on it too.
+TEST_CASE("Sound-reactive stepping moves sprites by their own band, and not at all in silence") {
+    draw::pos_t x[4] = {0, 0, 0, 0}, y[4] = {0, 0, 0, 0};
+    draw::pos_t vx[4] = {256, 256, 256, 256}, vy[4] = {0, 0, 0, 0};
+    uint16_t ttl[4] = {1, 1, 1, 1};
+    uint8_t hue[4] = {0, 0, 0, 0};
+    particles::Pool p;
+    p.x = x; p.y = y; p.vx = vx; p.vy = vy; p.ttl = ttl; p.hue = hue; p.count = 4;
+
+    // soundReactive off: the pool steps together, unaffected by whatever the microphone hears.
+    p.stepDriven(particles::FrameTime::kOne, /*soundReactive=*/false, 4);
+    CHECK(x[0] > 0);
+    const draw::pos_t moved = x[0];
+    for (int i = 1; i < 4; i++) CHECK(x[i] == moved);   // one scale for the whole pool
 }

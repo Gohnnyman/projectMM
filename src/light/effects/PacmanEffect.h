@@ -123,7 +123,7 @@ class PacmanEffect : public EffectBase {
 public:
     static constexpr uint8_t kPool = 12;
 
-    const char* tags() const override { return "🔬"; }
+    const char* tags() const override { return "🔬📊"; }  // audio-reactive when soundReactive is set
     Dim dimensions() const override { return Dim::D2; }
 
     /// How many of each, and how fast they travel.
@@ -176,18 +176,7 @@ public:
         draw::fill(cv, RGB{0, 0, 0});
 
         const uint32_t scale = time_.advance(elapsed());
-        if (scale > 0) {
-            if (soundReactive) {
-                // Each sprite rides its own frequency band, so the scene breathes with the music
-                // rather than surging as one block, and silence stands it still. The rule is
-                // shared with the other sprite effects (particles::audioDrive).
-                const AudioFrame* f = AudioService::latestFrame();
-                const uint16_t n = pool_.count;
-                pool_.stepEach(scale, [f, n](uint16_t i) { return particles::audioDrive(f, i, n); });
-            } else {
-                pool_.step(scale);
-            }
-        }
+        if (scale > 0) pool_.stepDriven(scale, soundReactive, wanted());
 
         // One clock for the chomp AND the ghosts' shuffle: in the arcade they run at the same
         // rate, and a single phase keeps them in step without a second accumulator.
@@ -265,6 +254,19 @@ private:
             if (!pool_.ttl[i]) { launch(i, /*anywhere=*/true); alive++; }
         for (uint16_t i = pool_.count; i-- > 0 && alive > want;)
             if (pool_.ttl[i]) { pool_.ttl[i] = 0; alive--; }
+
+        // Trading ghosts for Pacmen leaves the TOTAL unchanged, so nothing above respawns and the
+        // slots keep the roles they launched with: the controls would say three Pacmen while the
+        // wall still showed one. Re-role the live slots that sit on the wrong side of the moved
+        // boundary, and only those, so the rest keep their positions and momentum.
+        for (uint16_t i = 0; i < pool_.count; i++)
+            if (pool_.ttl[i] && pool_.hue[i] != roleFor(i)) launch(i, /*anywhere=*/true);
+    }
+
+    /// The role slot `i` should hold: slots are positional, so the first `pacmen` are Pacman and
+    /// the rest cycle through the four ghost colors. One home for the rule launch() applies.
+    uint8_t roleFor(uint16_t i) const {
+        return (i < pacmen) ? 0 : static_cast<uint8_t>(1 + ((i - pacmen) & 0x03));
     }
 
     /// Put character `i` on the wall. Slots are positional: the first `pacmen` are Pacman, the
@@ -273,7 +275,7 @@ private:
         const lengthType w = width(), h = height();
         const uint8_t sc = spriteScale();
 
-        const uint8_t role = (i < pacmen) ? 0 : static_cast<uint8_t>(1 + ((i - pacmen) & 0x03));
+        const uint8_t role = roleFor(i);
         pool_.hue[i] = role;
 
         // Speed scales with the sprite so travel READS the same on any grid, and Pacman is a

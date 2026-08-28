@@ -121,7 +121,7 @@ class FishTankEffect : public EffectBase {
 public:
     static constexpr uint8_t kPool = 24;   // the control maxima, summed
 
-    const char* tags() const override { return "🐙"; }
+    const char* tags() const override { return "📊"; }  // audio-reactive when soundReactive is set
     Dim dimensions() const override { return Dim::D2; }
 
     /// How many of each swim, and how fast.
@@ -179,18 +179,7 @@ public:
         draw::fill(cv, RGB{0, 0, 0});
 
         const uint32_t scale = time_.advance(elapsed());
-        if (scale > 0) {
-            if (soundReactive) {
-                // Each sprite rides its own frequency band, so the scene breathes with the music
-                // rather than surging as one block, and silence stands it still. The rule is
-                // shared with the other sprite effects (particles::audioDrive).
-                const AudioFrame* f = AudioService::latestFrame();
-                const uint16_t n = pool_.count;
-                pool_.stepEach(scale, [f, n](uint16_t i) { return particles::audioDrive(f, i, n); });
-            } else {
-                pool_.step(scale);
-            }
-        }
+        if (scale > 0) pool_.stepDriven(scale, soundReactive, wanted());
 
         // One shared tail-beat clock, offset per fish so the tank never pulses in unison.
         beat_.advance(elapsed(), 200);
@@ -267,6 +256,21 @@ private:
             if (!pool_.ttl[i]) { launch(i, /*anywhere=*/true); alive++; }
         for (uint16_t i = pool_.count; i-- > 0 && alive > want;)
             if (pool_.ttl[i]) { pool_.ttl[i] = 0; alive--; }
+
+        // Trading one species for another leaves the TOTAL unchanged, so nothing above respawns
+        // and the slots keep the species they launched with: the controls would say four slim
+        // fish while the tank still swam four broad ones. Restock only the slots whose species no
+        // longer matches the moved boundary; the rest keep their positions and momentum.
+        for (uint16_t i = 0; i < pool_.count; i++)
+            if (pool_.ttl[i] && pool_.hue[i] != speciesFor(i)) launch(i, /*anywhere=*/true);
+    }
+
+    /// The species slot `i` should hold: the first `fish` slots are broad, the next `slim`
+    /// slender, the rest the school. One home for the rule launch() applies.
+    uint8_t speciesFor(uint16_t i) const {
+        if (i < fish) return kBroad;
+        if (i < static_cast<uint16_t>(fish) + slim) return kSlim;
+        return kTiny;
     }
 
     /// Put fish `i` into the tank: a species by slot order, a palette entry of its own, a speed
@@ -278,10 +282,7 @@ private:
         // Species by slot: the first `fish` slots are broad, the next `slim` slender, the rest
         // the school. Keeping it positional means a count change moves one boundary, and the
         // fish already in the tank keep their identity.
-        uint8_t species = kTiny;
-        if (i < fish) species = kBroad;
-        else if (i < static_cast<uint16_t>(fish) + slim) species = kSlim;
-
+        const uint8_t species = speciesFor(i);
         pool_.hue[i] = species;
         entry_[i] = rng_.next8();        // its own place on the palette, full 8-bit spread
 

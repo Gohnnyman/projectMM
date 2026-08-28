@@ -104,7 +104,7 @@ class FlyingToastersEffect : public EffectBase {
 public:
     static constexpr uint8_t kPool = 20;   // 12 toasters + 8 toast, the control maxima
 
-    const char* tags() const override { return "🔬"; }
+    const char* tags() const override { return "🔬📊"; }  // audio-reactive when soundReactive is set
     Dim dimensions() const override { return Dim::D2; }
 
     /// How many of each fly, and how fast the flock drifts.
@@ -160,18 +160,7 @@ public:
         draw::fill(cv, RGB{0, 0, 0});
 
         const uint32_t scale = time_.advance(elapsed());
-        if (scale > 0) {
-            if (soundReactive) {
-                // Each sprite rides its own frequency band, so the scene breathes with the music
-                // rather than surging as one block, and silence stands it still. The rule is
-                // shared with the other sprite effects (particles::audioDrive).
-                const AudioFrame* f = AudioService::latestFrame();
-                const uint16_t n = pool_.count;
-                pool_.stepEach(scale, [f, n](uint16_t i) { return particles::audioDrive(f, i, n); });
-            } else {
-                pool_.step(scale);
-            }
-        }
+        if (scale > 0) pool_.stepDriven(scale, soundReactive, wanted());
 
         // The wing flap: one shared BeatPhase, offset per toaster so the flock never syncs.
         flap_.advance(elapsed(), 180);   // ~3 flaps per second across the 4-frame cycle

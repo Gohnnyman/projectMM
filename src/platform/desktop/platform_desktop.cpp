@@ -2542,6 +2542,11 @@ bool encoderStart(const EncoderConfig& cfg) {
     // width*height*3 (tight RGB, the driver's packing); a failure here fails the start, where
     // the driver already reports it, rather than throwing from a later write.
     const size_t frameBytes = static_cast<size_t>(cfg.width) * cfg.height * 3;
+    // Stop FIRST, then resize. The previous writer thread reads a slot's data pointer in its
+    // blocking write loop WITHOUT encMutex_ held, so reserving under it is both a data race and,
+    // once a geometry or scale change grows frameBytes, a reallocation that frees the buffer the
+    // writer is still reading. spawnEncoderProcess stops again below; that call is then a no-op.
+    stopEncoderProcess();
     try {
         for (auto& slot : encSlots_) slot.reserve(frameBytes);
     } catch (const std::bad_alloc&) {

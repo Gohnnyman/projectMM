@@ -445,6 +445,10 @@ TEST_CASE("HlsDriver resyncs after a stall without sending a duplicate frame") {
         mm::platform::setTestNowMs(t);
         driver.tick();
         const size_t n = mm::platform::encoderTestFrameCount();
+        // At most ONE frame per tick. A catch-up burst is the very failure this test exists to
+        // catch, and recording a single timestamp for a multi-frame tick would hide it behind
+        // the interval check below.
+        REQUIRE(n - seen <= 1);
         if (n != seen) { sentAt.push_back(t); seen = n; }
     }
 

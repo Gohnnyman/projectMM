@@ -269,7 +269,7 @@ Origin: projectMM original, on the WLED Particle System's firework family by Dam
 
 <a id="fishtank"></a>
 
-### Fish Tank 🐙 · 2D
+### Fish Tank 📊 · 2D
 
 An aquarium on a light wall: fish of three shapes swim across a dark tank, each in its own color from the active palette, tails beating. Movement is a particle-pool entry per fish with constant velocity, respawning at the far edge when it swims off; the shape is drawn through the `draw::sprite` power function. Unlike the other sprite effects, the art carries shade ROLES (body, outline, highlight, fin, eye, band) rather than fixed colors, and each fish fills them from its own place on the palette, so one drawing yields as many colorways as there are fish.
 
@@ -286,7 +286,7 @@ Origin: projectMM original; inspired by the aquarium screensavers of the After D
 
 <a id="flyingtoasters"></a>
 
-### Flying Toasters 🔬 · 2D
+### Flying Toasters 🔬📊 · 2D
 
 The classic screensaver on a light wall: chrome toasters with flapping wings and slices of toast drift diagonally across the dark, forever. Each flier is a particle-pool entry with constant velocity (respawning off the upper-right when it leaves the lower-left), rendered through the `draw::sprite` power function; the wing flap runs on a shared BeatPhase with a per-toaster offset so the flock never syncs.
 
@@ -302,7 +302,7 @@ Origin: projectMM original; inspired by After Dark's Flying Toasters (Berkeley S
 
 <a id="pacman"></a>
 
-### Pacman 🔬 · 2D
+### Pacman 🔬📊 · 2D
 
 The arcade cast crossing a light wall: Pacman chomps his way along while the four ghosts drift past, each in its own color, wrapping around the edges forever. Movement is a particle-pool entry per character and the shapes go through the `draw::sprite` power function; one ghost drawing serves all four colors because the art carries palette slots rather than fixed colors, and a single drawing serves both travel directions because `draw::sprite` can mirror it.
 

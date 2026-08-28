@@ -2,6 +2,7 @@
 
 #include "core/math16.h"      // sin16/cos16 for angleEmit, hashInt for spray, isqrt for attract
 #include "core/AudioFrame.h"   // AudioFrame: the spectrum audioDrive() reads
+#include "core/AudioService.h" // latestFrame(): the live spectrum stepDriven() consumes
 #include "light/draw.h"       // pos_t, splat, Canvas — particles render through the sub-pixel writer
 #include "light/Palette.h"    // colorFromPalette
 
@@ -141,15 +142,26 @@ enum class RenderStyle : uint8_t {
 /// line). Stepping by a value chosen coprime to the count keeps the lanes distinct at any count.
 inline lengthType spreadLane(uint16_t i, uint16_t slots, lengthType extent) {
     if (slots == 0) return 0;
-    // The largest odd step below `slots` that shares no factor with it. Walking down from
-    // slots-1 finds one in a couple of iterations for every practical count, and 1 (a plain
-    // stride) is always coprime, so the loop always terminates.
-    uint16_t step = slots > 2 ? static_cast<uint16_t>(slots - 1) : 1;
-    while (step > 1) {
-        uint16_t a = step, b = slots;
-        while (b) { const uint16_t t = a % b; a = b; b = t; }
-        if (a == 1) break;          // gcd(step, slots) == 1
-        step--;
+    // A step coprime with `slots`, chosen as near HALF of it as possible. Coprimality alone only
+    // guarantees the lanes are distinct: `slots - 1` is always coprime, but it is congruent to
+    // -1, so consecutive slots land on ADJACENT lanes (descending) and the species this is meant
+    // to interleave still bunch together. A step near half the count puts the widest gap between
+    // consecutive slots, which is the actual goal. Searching outward from the midpoint always
+    // terminates: 1 is coprime with everything and ends the walk.
+    uint16_t step = 1;
+    if (slots > 2) {
+        for (uint16_t d = 0; d < slots / 2; d++) {
+            const uint16_t lo = static_cast<uint16_t>(slots / 2 - d);
+            const uint16_t hi = static_cast<uint16_t>(slots / 2 + d);
+            uint16_t pick = 0;
+            for (uint16_t c : {hi, lo}) {
+                if (c <= 1 || c >= slots) continue;
+                uint16_t a = c, b = slots;
+                while (b) { const uint16_t t = a % b; a = b; b = t; }
+                if (a == 1) { pick = c; break; }     // gcd(c, slots) == 1
+            }
+            if (pick) { step = pick; break; }
+        }
     }
     const uint16_t lane = static_cast<uint16_t>((static_cast<uint32_t>(i) * step) % slots);
     return static_cast<lengthType>((static_cast<int32_t>(extent) * lane) / slots);
@@ -369,6 +381,20 @@ struct Pool {
     /// FrameTime::kOne. Sound-reactive sprite effects use it to move each sprite on its own audio
     /// band (see audioDrive) - the whole point being that the sprites do NOT move as one block.
     /// The frame scale still multiplies in, so speed stays frame-rate independent either way.
+    /// step(), optionally driven by the music: with `soundReactive` set, each of the `live`
+    /// sprites moves on its own frequency band and the scene stands still in silence; otherwise
+    /// the whole pool steps together. The one place the sound-reactive rule lives, so the sprite
+    /// effects share it rather than each carrying a copy of the branch.
+    ///
+    /// `live` is the number of sprites actually in play, NOT the pool capacity: the bands are
+    /// spread across the sprites that exist, so passing the capacity would crowd every sprite
+    /// into the low bands and leave the treble driving nothing.
+    void stepDriven(uint32_t scale, bool soundReactive, uint16_t live) {
+        if (!soundReactive) { step(scale); return; }
+        const AudioFrame* f = AudioService::latestFrame();
+        stepEach(scale, [f, live](uint16_t i) { return audioDrive(f, i, live); });
+    }
+
     template <typename Drive>
     void stepEach(uint32_t scale, Drive drive) {
         for (uint16_t i = 0; i < count; i++)

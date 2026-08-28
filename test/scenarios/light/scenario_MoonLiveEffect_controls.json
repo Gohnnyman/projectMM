@@ -69,12 +69,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 0,
-            "samples": []
+            "p50": 11,
+            "p95": 11,
+            "min": 11,
+            "max": 11,
+            "n": 1,
+            "samples": [11]
           },
           "last_updated": "2026-08-28"
         },
@@ -160,12 +160,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 0,
-            "samples": []
+            "p50": 1,
+            "p95": 1,
+            "min": 1,
+            "max": 1,
+            "n": 1,
+            "samples": [1]
           },
           "last_updated": "2026-08-28"
         },
@@ -236,12 +236,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 0,
-            "samples": []
+            "p50": 1,
+            "p95": 1,
+            "min": 1,
+            "max": 1,
+            "n": 1,
+            "samples": [1]
           },
           "last_updated": "2026-08-28"
         },
@@ -319,12 +319,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 0,
-            "samples": []
+            "p50": 1,
+            "p95": 1,
+            "min": 1,
+            "max": 1,
+            "n": 1,
+            "samples": [1]
           },
           "last_updated": "2026-08-28"
         },
@@ -402,12 +402,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 0,
-            "samples": []
+            "p50": 1,
+            "p95": 1,
+            "min": 1,
+            "max": 1,
+            "n": 1,
+            "samples": [1]
           },
           "last_updated": "2026-08-28"
         },
@@ -485,12 +485,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 0,
-            "samples": []
+            "p50": 1,
+            "p95": 2,
+            "min": 1,
+            "max": 2,
+            "n": 2,
+            "samples": [2, 1]
           },
           "last_updated": "2026-08-28"
         },
@@ -568,12 +568,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 0,
-            "samples": []
+            "p50": 2,
+            "p95": 2,
+            "min": 2,
+            "max": 2,
+            "n": 1,
+            "samples": [2]
           },
           "last_updated": "2026-08-28"
         },
@@ -726,12 +726,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 0,
-            "p95": 0,
-            "min": 0,
-            "max": 0,
-            "n": 0,
-            "samples": []
+            "p50": 1,
+            "p95": 2,
+            "min": 1,
+            "max": 2,
+            "n": 2,
+            "samples": [1, 2]
           },
           "last_updated": "2026-08-28"
         }
