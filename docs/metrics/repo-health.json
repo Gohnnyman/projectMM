@@ -1,78 +1,79 @@
 {
-  "commit": "fc680586",
+  "commit": "93055e63",
   "flash": {
-    "esp32s3-n16r8": 1851120,
-    "desktop": 1578968,
-    "esp32": 1799040,
+    "esp32s3-n16r8": 1852000,
+    "desktop": 1579288,
+    "esp32": 1809456,
     "esp32p4rev1-eth": 1675216,
-    "esp32p4rev1-eth-wifi": 1933472,
+    "esp32p4rev1-eth-wifi": 2019392,
     "esp32s3-n8r8": 1833248,
     "esp32s31": 2105072,
-    "esp32-16mb": 1714608,
+    "esp32-16mb": 1809472,
     "esp32-eth": 1397456,
     "esp32-wrover": 1843760,
     "qemu": 1383648,
-    "esp32p4rev3-eth": 1643760
+    "esp32p4rev3-eth": 1643760,
+    "esp32s3-zero": 1788624
   },
   "perf": {
     "desktop": {
-      "tick_us": 142,
-      "fps": 7042
+      "tick_us": 180,
+      "fps": 5555
     },
     "esp32": {
-      "tick_us": 8389,
+      "tick_us": 8347,
       "fps": 119
     }
   },
   "loc": {
-    "core": 20712,
-    "light": 26689,
-    "platform": 16257,
-    "ui": 8171,
-    "test": 48239,
-    "moondeck": 22130
+    "core": 20761,
+    "light": 26877,
+    "platform": 17131,
+    "ui": 8207,
+    "test": 48912,
+    "moondeck": 22456
   },
   "comments": {
     "core": {
-      "lines": 8175,
+      "lines": 8192,
       "ratio": 0.427
     },
     "light": {
-      "lines": 10445,
-      "ratio": 0.432
+      "lines": 10540,
+      "ratio": 0.433
     },
     "platform": {
-      "lines": 5656,
-      "ratio": 0.382
+      "lines": 5899,
+      "ratio": 0.378
     },
     "ui": {
-      "lines": 2163,
-      "ratio": 0.28
+      "lines": 2175,
+      "ratio": 0.281
     },
     "test": {
-      "lines": 8874,
+      "lines": 8985,
       "ratio": 0.211
     },
     "moondeck": {
-      "lines": 3577,
+      "lines": 3623,
       "ratio": 0.185
     }
   },
   "tests": {
-    "cases": 1614,
+    "cases": 1640,
     "scenarios": 23
   },
   "docs": {
     "md_files": 203,
-    "md_lines": 30045,
-    "plans_files": 108,
-    "backlog_lines": 4672,
+    "md_lines": 30167,
+    "plans_files": 109,
+    "backlog_lines": 4654,
     "lessons_lines": 622,
-    "claude_md_lines": 136
+    "claude_md_lines": 140
   },
   "complexity": {
-    "functions": 2833,
-    "over_threshold": 180,
+    "functions": 2868,
+    "over_threshold": 188,
     "worst_ccn": 108
   }
 }

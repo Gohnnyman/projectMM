@@ -116,6 +116,53 @@ def measure_comments():
     return out
 
 
+# Firmwares whose binary was actually measured this run, as opposed to carried forward from the
+# previous one. Without this the report cannot tell "built, and unchanged" from "not built", and a
+# carried-forward row reads as a result: exactly the false reassurance the freshness rule exists
+# to prevent, moved one step later.
+MEASURED_THIS_RUN = set()
+
+
+def app_partition_bytes(firmware):
+    """The app slot's size for `firmware`, from the partition CSV its build actually used.
+
+    The ceiling a firmware is measured against is not a constant: the variants use different
+    tables (4 MB classic, 8 MB S3, 16 MB OTA), so a raw KB number says nothing about how close
+    to full a target is. Read from the GENERATED sdkconfig rather than the defaults fragments,
+    because that is what the build resolved after layering them. Returns 0 when it cannot be
+    determined, and the caller then simply omits the capacity rather than guessing one.
+    """
+    cfg = ROOT / "build" / f"esp32-{firmware}" / "sdkconfig"
+    if not cfg.exists():
+        return 0
+    name = ""
+    for line in cfg.read_text(errors="ignore").splitlines():
+        if line.startswith("CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="):
+            name = line.split("=", 1)[1].strip().strip('"')
+            break
+    csv = ROOT / "esp32" / name if name else None
+    if not csv or not csv.exists():
+        return 0
+    # The OTA slot, not merely the first app row: the MoonBase tables put a small `factory`
+    # recovery image first (896 KB), and measuring the firmware against THAT reports a target
+    # as 196% full when it is comfortably inside its real 2496 KB slot. The ota_0 slot is where
+    # the firmware actually lands, and ota_1 equals it by construction.
+    factory = 0
+    for line in csv.read_text(errors="ignore").splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        parts = [c.strip() for c in line.split(",")]
+        if len(parts) >= 5 and parts[1] == "app":
+            try:
+                size = int(parts[4], 0)
+            except ValueError:
+                continue
+            if parts[2].startswith("ota_"):
+                return size
+            factory = factory or size
+    return factory   # a single-app table has no ota_ slot; its factory slot IS the ceiling
+
+
 def measure_flash():
     """Built firmware size per variant, in bytes — STALE BINARIES EXCLUDED.
 
@@ -152,6 +199,7 @@ def measure_flash():
         if st.st_mtime <= newest:
             continue
         flash[firmware] = st.st_size
+        MEASURED_THIS_RUN.add(firmware)
     # The desktop binary, located by build_desktop.desktop_binary() so this and collect_kpi.py
     # cannot name different files in the same run. A bare build/projectMM matched nothing off
     # macOS, so this metric silently carried a foreign machine's number forward while reading as
@@ -166,6 +214,7 @@ def measure_flash():
         _, newest = newest_source()
         if st.st_mtime > newest:
             flash["desktop"] = st.st_size
+            MEASURED_THIS_RUN.add("desktop")   # same rule as the firmwares: measured, so say so
     return flash
 
 
@@ -410,10 +459,22 @@ def render_markdown(new, old):
          "growth visible, the judgment stays human.", ""]
 
     if new.get("flash"):
-        L += ["## Firmware size", "", "| Target | Flash |", "|---|---:|"]
+        # "Built" is its own column because a carried-forward number is indistinguishable from a
+        # genuinely unchanged one, and reads as "no growth" when it may mean "not measured".
+        # "Capacity" is the app slot from that firmware's partition table: KB alone does not say
+        # whether a target is comfortable or nearly full, and the variants differ (4/8/16 MB).
+        L += ["## Firmware size", "",
+              "| Target | Flash | Capacity | Used | Built |", "|---|---:|---:|---:|:--:|"]
         for k, v in sorted(new["flash"].items()):
-            L.append(f"| {k} | {_arrow(v, o.get('flash'), k, _kb)} |")
-        L.append("")
+            cap = app_partition_bytes(k) if k.startswith("esp32") else 0
+            cap_s = _kb(cap) if cap else "-"
+            used = f"{(100.0 * v / cap):.0f}%" if cap else "-"
+            built = "yes" if k in MEASURED_THIS_RUN else "carried"
+            L.append(f"| {k} | {_arrow(v, o.get('flash'), k, _kb)} | {cap_s} | {used} | {built} |")
+        L += ["",
+              ("`Built: carried` means that firmware was NOT rebuilt this run and its number is "
+               "the previous one, so an absent delta says nothing about the change. `Used` is "
+               "against the app slot in the firmware's own partition table."), ""]
 
     if new.get("perf"):
         L += ["## Render performance", "", "| Target | Tick | FPS |", "|---|---:|---:|"]

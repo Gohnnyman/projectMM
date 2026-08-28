@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core/math16.h"      // sin16/cos16 for angleEmit, hashInt for spray, isqrt for attract
+#include "core/AudioFrame.h"   // AudioFrame: the spectrum audioDrive() reads
+#include "core/AudioService.h" // latestFrame(): the live spectrum stepDriven() consumes
 #include "light/draw.h"       // pos_t, splat, Canvas — particles render through the sub-pixel writer
 #include "light/Palette.h"    // colorFromPalette
 
@@ -12,14 +14,14 @@ namespace mm::particles {
 // matter — sparks, rain, snow, smoke, confetti, a fountain, a swarm, debris from an impact, an
 // audio band throwing off embers — is the same handful of forces over the same state, and the part
 // that differs between them is which forces are applied and how particles are emitted, not the
-// physics. Handing an effect writer a working integrator, wall behaviour and emitter means a new
+// physics. Handing an effect writer a working integrator, wall behavior and emitter means a new
 // look is a few lines of composition rather than a re-derivation of Euler integration.
 //
 // Retrofitting the effects that already hand-roll this is a real second benefit — several carry
 // their own representation (structs with floats, parallel arrays, a private 12.4 pair) and each
 // re-derived the same integration and the same wall bounce — but it is a consequence of the kernel
 // being right, not the reason to build it. The kernel is designed for what comes next; existing
-// effects move onto it when their behaviour is judged on the bench, one at a time.
+// effects move onto it when their behavior is judged on the bench, one at a time.
 //
 // **Structure of arrays, not array of structs.** Each field is its own contiguous run, so a pass
 // that touches only velocity walks only velocity. On a chip with a small cache and no prefetcher
@@ -130,6 +132,72 @@ enum class RenderStyle : uint8_t {
 ///
 /// `ttl` is the unit of life: a particle with ttl 0 is dead and is skipped by every pass. Effects
 /// that want immortal particles simply never decrement it.
+/// Map slot `i` of `slots` onto a distinct lane in [0, extent), interleaved so that consecutive
+/// slots are NOT adjacent lanes.
+///
+/// Effects assign slots by species or role, and species differ in speed, so a straight stride
+/// sorts the scene: the fast ones bunch at one edge within seconds. Interleaving mixes them.
+/// The step must be COPRIME with `slots` or the mapping collapses: `(i * 5) % 5` is zero for
+/// every i, which stacked an entire cast on one row (bench: five Pacman characters in a single
+/// line). Stepping by a value chosen coprime to the count keeps the lanes distinct at any count.
+inline lengthType spreadLane(uint16_t i, uint16_t slots, lengthType extent) {
+    if (slots == 0) return 0;
+    // A step coprime with `slots`, chosen as near HALF of it as possible. Coprimality alone only
+    // guarantees the lanes are distinct: `slots - 1` is always coprime, but it is congruent to
+    // -1, so consecutive slots land on ADJACENT lanes (descending) and the species this is meant
+    // to interleave still bunch together. A step near half the count puts the widest gap between
+    // consecutive slots, which is the actual goal. Searching outward from the midpoint always
+    // terminates: 1 is coprime with everything and ends the walk.
+    uint16_t step = 1;
+    if (slots > 2) {
+        for (uint16_t d = 0; d < slots / 2; d++) {
+            const uint16_t lo = static_cast<uint16_t>(slots / 2 - d);
+            const uint16_t hi = static_cast<uint16_t>(slots / 2 + d);
+            uint16_t pick = 0;
+            for (uint16_t c : {hi, lo}) {
+                if (c <= 1 || c >= slots) continue;
+                uint16_t a = c, b = slots;
+                while (b) { const uint16_t t = a % b; a = b; b = t; }
+                if (a == 1) { pick = c; break; }     // gcd(c, slots) == 1
+            }
+            if (pick) { step = pick; break; }
+        }
+    }
+    const uint16_t lane = static_cast<uint16_t>((static_cast<uint32_t>(i) * step) % slots);
+    return static_cast<lengthType>((static_cast<int32_t>(extent) * lane) / slots);
+}
+
+/// Per-sprite audio drive: how fast sprite `i` of `slots` should move for the sound playing now,
+/// as a multiplier of FrameTime::kOne (so 0 = frozen, kOne = its normal speed).
+///
+/// Shared by every sprite effect with a `soundReactive` checkbox (FlyingToasters, FishTank,
+/// Pacman): the behavior a viewer expects is identical in all three, so it is written once.
+///
+/// Each sprite gets its OWN band, spread across the 16 the FFT produces, so a scene breathes with
+/// the music instead of surging as one block: the bass sprites lurch on the kick while the treble
+/// ones flutter on the hats. The overall level gates it, so SILENCE STANDS THE SCENE STILL - the
+/// requirement that makes the mode read as sound-reactive rather than merely speed-varying, since
+/// a per-band value alone still drifts on noise between tracks.
+///
+/// Returns kOne unchanged when there is no audio at all (no microphone, service not running), so
+/// an effect never freezes on a device that simply cannot hear.
+inline uint32_t audioDrive(const AudioFrame* frame, uint16_t i, uint16_t slots) {
+    if (!frame) return FrameTime::kOne;       // no audio source: move normally, never freeze
+
+    // Below this the input is room noise or a gap between tracks, not music. The scene stands
+    // still rather than creeping, which is what "if no music they should stand still" asks for.
+    constexpr uint16_t kSilence = 8;
+    if (frame->levelSmoothed < kSilence) return 0;
+
+    const uint8_t band = slots ? static_cast<uint8_t>((static_cast<uint32_t>(i) * 16u) / slots) : 0;
+    const uint32_t mag = frame->bands[band > 15 ? 15 : band];
+
+    // A floor under the band keeps a sprite whose own band is quiet drifting slowly rather than
+    // frozen mid-air while the music plays; the rest scales with that band, and a loud band runs
+    // the sprite at about twice its normal speed.
+    return FrameTime::kOne / 4 + (mag * FrameTime::kOne * 7) / (255 * 4);
+}
+
 struct Pool {
     draw::pos_t* x = nullptr;
     draw::pos_t* y = nullptr;
@@ -309,6 +377,34 @@ struct Pool {
             }
     }
 
+    /// step() with a PER-PARTICLE time scale: `drive(i)` returns particle i's own multiplier of
+    /// FrameTime::kOne. Sound-reactive sprite effects use it to move each sprite on its own audio
+    /// band (see audioDrive) - the whole point being that the sprites do NOT move as one block.
+    /// The frame scale still multiplies in, so speed stays frame-rate independent either way.
+    /// step(), optionally driven by the music: with `soundReactive` set, each of the `live`
+    /// sprites moves on its own frequency band and the scene stands still in silence; otherwise
+    /// the whole pool steps together. The one place the sound-reactive rule lives, so the sprite
+    /// effects share it rather than each carrying a copy of the branch.
+    ///
+    /// `live` is the number of sprites actually in play, NOT the pool capacity: the bands are
+    /// spread across the sprites that exist, so passing the capacity would crowd every sprite
+    /// into the low bands and leave the treble driving nothing.
+    void stepDriven(uint32_t scale, bool soundReactive, uint16_t live) {
+        if (!soundReactive) { step(scale); return; }
+        const AudioFrame* f = AudioService::latestFrame();
+        stepEach(scale, [f, live](uint16_t i) { return audioDrive(f, i, live); });
+    }
+
+    template <typename Drive>
+    void stepEach(uint32_t scale, Drive drive) {
+        for (uint16_t i = 0; i < count; i++)
+            if (ttl[i]) {
+                const uint32_t s = (scale * drive(i)) / FrameTime::kOne;
+                x[i] = static_cast<draw::pos_t>(x[i] + scaleSigned(vx[i], static_cast<int32_t>(s), FrameTime::kOne));
+                y[i] = static_cast<draw::pos_t>(y[i] + scaleSigned(vy[i], static_cast<int32_t>(s), FrameTime::kOne));
+            }
+    }
+
     /// Count down every particle's life; a particle reaching zero is dead and its slot is reusable.
     /// `rate` of 0 makes the pool immortal.
     void age(uint16_t rate = 1, uint32_t scale = FrameTime::kOne) {
@@ -367,7 +463,7 @@ struct Pool {
 
     /// Wrap particles around the grid edges: a particle leaving one side re-enters the other.
     ///
-    /// The third wall behaviour, alongside `bounce` and `killOutside`, and the one snow, rain and
+    /// The third wall behavior, alongside `bounce` and `killOutside`, and the one snow, rain and
     /// marquee effects need — those want an endless field, not a box to rattle inside or a cliff to
     /// fall off. Per axis, so a snowfall can wrap horizontally while still dying at the floor.
     void wrap(draw::pos_t w, draw::pos_t h, bool wrapX = true, bool wrapY = true) {

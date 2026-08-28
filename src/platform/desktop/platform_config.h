@@ -112,6 +112,13 @@ constexpr bool hasNdi = true;
 // ffmpeg found on PATH (a runtime dependency of the user's, like the NDI runtime and Npcap).
 // True on desktop and the Pi; the encoder process seam lives in the platform layer.
 constexpr bool hasHls = true;
+// hasEncoderChoice: ffmpeg offers several H.264 encoders (software and per-vendor hardware), so
+// the pick is the user's. False where the platform has exactly one encoder, which hides the
+// control rather than offering a choice of one.
+constexpr bool hasEncoderChoice = true;
+// hasFsSegments: ffmpeg writes the playlist and segments to disk, so the driver manages that
+// directory and the HTTP server serves it as files. False where segments live in RAM (the P4).
+constexpr bool hasFsSegments = true;
 // Some-IP-stack flag (WiFi OR Ethernet) — mirrors the esp32 config so shared code
 // (WLED audio sync, UDP interop) gates on "has network" uniformly. True on desktop
 // via the WiFi stubs (UdpSocket has a desktop implementation).

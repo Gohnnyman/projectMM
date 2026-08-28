@@ -78,6 +78,7 @@ add_executable(mm_tests
     unit/light/unit_NetworkSendDriver_packet.cpp
     unit/light/unit_NdiDriver.cpp
     unit/light/unit_HlsDriver.cpp
+    unit/light/unit_MpegTs.cpp
     unit/light/unit_PanelCardDriver.cpp
     unit/light/unit_PanelCardDriver_packet.cpp
     unit/light/unit_WledAudioSyncPacket.cpp
@@ -90,6 +91,7 @@ add_executable(mm_tests
     unit/light/unit_effects_render.cpp
     unit/light/unit_Effects_gridsweep.cpp
     unit/light/unit_Effects_golden.cpp
+    unit/light/unit_SpritePopulation.cpp
     unit/light/unit_Canvas.cpp
     unit/light/unit_Splat.cpp
     unit/light/unit_Sdf.cpp

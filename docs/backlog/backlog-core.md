@@ -126,7 +126,7 @@ Full design + the reasoned transport split: [Plan-20260629 — UDP device discov
 
 ## MoonBase follow-ups
 
-MoonBase v1 ([architecture.md § MoonBase](../architecture.md#moonbase-the-second-boot-image-4-mb-boards))
+MoonBase v1 ([architecture.md § MoonBase](../architecture.md#moonbase-the-second-boot-image))
 ships exactly one action: install firmware (upload + URL). The name is deliberately broader than
 "recovery", these are the candidate next actions, each solving something only a separate boot
 image can solve. The budget rule from the partition table applies to all of them: the 896 KB slot
@@ -918,6 +918,53 @@ The P4 build runs at **360 MHz** because IDF's `Kconfig.cpu` caps a `SELECTS_REV
 - **A runtime bump** — keep the 360 build (boots everywhere) and, at `app_main`, read `esp_chip_info().revision` and if ≥ 300 call `rtc_clk_cpu_freq_mhz_to_config(400)` + `rtc_clk_cpu_freq_set_config`. One binary, self-selecting. Riskier: a runtime CPU-PLL change on the P4 couples to the flash/PSRAM clock trees configured for 360, so it needs validation on real rev-3 hardware before shipping.
 
 Neither ships until a rev-3 P4 can prove 400 runs clean — no untested clock config, per the same rule the S31/320 and this P4/400 bootloop both taught.
+
+## ESP32-P4: the esp-dsp assembly FFT faults once a second task runs (workaround shipped)
+
+**Found:** bench, 2026-08-28, bringing up HLS on the P4.
+
+**Symptom:** a crash loop the moment the HLS encode task exists alongside the render loop —
+`Guru Meditation Error: ... (Illegal instruction)` or `(Load access fault)`, the type varying
+between boots, always faulting on the twiddle-table load in `dsps_fft2r_fc32_arp4.S:52`
+(`flw fa0, 0(t3)`) reached from `platform::audioFft`. The LED output freezes after a few frames
+and the board reboots. Present only with audio analysis running AND a second task; either alone
+is stable, which is why it never surfaced before HLS.
+
+**Cause:** the P4's hardware-loop unit has a documented silicon erratum, declared by Espressif's
+own `soc_caps.h`: `SOC_CPU_HAS_HWLOOP_STATE_BUG` — "HWLOOP state doesn't go to DIRTY after
+executing the last instruction of a loop". FreeRTOS saves the HWLP registers lazily and keys that
+save on the DIRTY flag, so a context switch out of the FFT concludes there is nothing to save and
+the loop state is lost; the resumed kernel then reads its table through a stale register. The
+esp-dsp `_arp4` kernel uses `esp.lp.setup` (the hardware-loop instruction), which is why the FFT
+is where it lands. IDF v6.1-rc1 carries workarounds for this erratum at two sites in
+`portasm.S` (lines 217 and 795, gated `ESP32P4_REV_MIN_FULL <= 1`, which our `REV_MIN_FULL=0`
+build satisfies) — **both on the RESTORE side**. The **save** site (~line 676) reads
+`CSR_HWLP_STATE_REG`, skips saving unless it equals `HWLP_DIRTY_STATE`, and carries no erratum
+guard at all. That is precisely what the erratum breaks: a task switched out after a loop's last
+instruction reports non-DIRTY, so its hardware-loop registers are never saved, and the resumed
+FFT reads its twiddle table through a stale register. Restore is patched; save is not.
+
+**Workaround shipped:** `CONFIG_DSP_ANSI=y` in `sdkconfig.defaults.esp32p4rev1-eth`, which swaps
+esp-dsp's hand-written assembly kernels for portable C. Measured cost on the bench P4: the Audio
+module's tick goes from ~615 us to ~658 us, about 40 us (7%) against 3.3 ms of tick headroom.
+Stability confirmed over a soak with HLS streaming: zero crashes, zero corrupt packets.
+
+**Reported upstream:** [esp-idf#19025](https://github.com/espressif/esp-idf/issues/19025)
+(2026-08-28), which names the unguarded save path. Espressif already had the symptom on file from
+another reporter: [esp-dsp#119](https://github.com/espressif/esp-dsp/issues/119) hits the same
+fault at the same instruction on IDF v5.5-beta1 and settles on the same `CONFIG_DSP_ANSI=y`
+workaround at the same ~7% cost, and [esp-dsp#102](https://github.com/espressif/esp-dsp/issues/102)
+tracks P4 hardware loops in general. So the bug is real, reproducible by others, and spans at
+least v5.5-beta1 to v6.1-rc1 - but it is unfixed, and the workaround stays until it is answered.
+
+**What is NOT proven:** the save-path gap is read from the source and matches every symptom, but
+it has not been confirmed by instrumenting the switch itself (logging `CSR_HWLP_STATE_REG` on a
+switch out of the FFT), nor reduced to a minimal project. Offered upstream if triage wants it. Ruled out on the bench, so nobody re-treads them: worker stack size (8K -> 16K),
+core placement (worker on core 1 vs core 0), heap corruption (comprehensive heap poisoning reports
+nothing), an unpinned task migrating with coprocessor state (our main task is pinned to core 0),
+an FFT size mismatch (512 <= 1024 <= 4096), and a cross-task race on the single `audioFft` call
+site. **To report upstream** (esp-dsp and/or esp-idf) with the repro above; the workaround stands
+until it is answered, and reverting it needs a bench soak with audio + HLS together.
 
 ## Flaky unit tests: the AudioService sync suite contends on a fixed UDP port
 

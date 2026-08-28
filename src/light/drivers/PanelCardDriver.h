@@ -148,6 +148,9 @@ public:
     /// configs that stored a typed name load unchanged: the Select apply path matches labels.
     /// Not built on ESP32, which has one MAC and nothing to pick.
     uint8_t interfaceSel_ = 0;
+    /// The LABEL behind interfaceSel_, so a re-enumeration that reorders the list can restore the
+    /// same NIC rather than whatever now sits at that index. Sized to the enumeration's own cap.
+    char chosenIf_[64] = {};
     /// Send-rate ceiling (Hz); tick() rate-limits so a fast render tick doesn't saturate the link.
     uint8_t fps = 40;
 
@@ -161,6 +164,34 @@ public:
         if constexpr (platform::hasNamedNetInterfaces) {
             const char* const* ifOptions = nullptr;
             const size_t n = platform::rawInterfaces(&ifOptions);
+            // The list is re-enumerated on every rebuild, and the OS does not promise a stable
+            // order: a hot-plugged NIC can shift the rest. The INDEX is therefore meaningless
+            // across rebuilds, so re-point it at the label the user actually picked before the
+            // Select binds to it. Persisting by label (below) covers reboots; this covers the
+            // same list changing under a running session, which would otherwise silently send
+            // panel data out of a different adapter.
+            if (chosenIf_[0] && ifOptions) {
+                // Compare the STABLE HEAD, the part before ", ": a label may carry the adapter's
+                // live link speed after it ("Realtek PCIe GbE, 1 Gb"), and a renegotiated link
+                // would otherwise read as a different NIC and drop the selection to row 0.
+                const char* mySep = std::strstr(chosenIf_, ", ");
+                const size_t mine = mySep ? static_cast<size_t>(mySep - chosenIf_)
+                                          : std::strlen(chosenIf_);
+                // Back to capture-only FIRST: if the remembered adapter is gone, the old index
+                // now points at whatever took its place, and the driver would send panel data
+                // out of a NIC the user never chose. No match means no NIC, explicitly.
+                interfaceSel_ = 0;
+                for (size_t i = 0; i < n && i < 255; i++) {
+                    if (!ifOptions[i]) continue;
+                    const char* sep = std::strstr(ifOptions[i], ", ");
+                    const size_t head = sep ? static_cast<size_t>(sep - ifOptions[i])
+                                            : std::strlen(ifOptions[i]);
+                    if (head == mine && std::strncmp(ifOptions[i], chosenIf_, head) == 0) {
+                        interfaceSel_ = static_cast<uint8_t>(i);
+                        break;
+                    }
+                }
+            }
             controls_.addSelect("interface", interfaceSel_, ifOptions,
                                 static_cast<uint8_t>(n < 255 ? n : 255));
             controls_.setPersistLabel(controls_.count() - 1);
@@ -206,8 +237,15 @@ public:
         // failure is a Warning rather than an Error: the driver still runs and still records frames,
         // which is what a test or a dry run wants — it just is not driving panels.
         const char* ifName = nullptr;
-        if constexpr (platform::hasNamedNetInterfaces)
+        if constexpr (platform::hasNamedNetInterfaces) {
+            // Remember the adapter behind the current row, so a later rebuild that re-enumerates
+            // in a different order can find this same NIC again rather than trusting the index.
+            const char* const* ifOptions = nullptr;
+            const size_t n = platform::rawInterfaces(&ifOptions);
+            if (ifOptions && interfaceSel_ < n && ifOptions[interfaceSel_])
+                std::snprintf(chosenIf_, sizeof(chosenIf_), "%s", ifOptions[interfaceSel_]);
             ifName = platform::rawInterfaceName(interfaceSel_);
+        }
         if (!platform::ethBindRawInterface(ifName)) {
             // Two very different causes reach here and the fixes are opposite: a name that matches
             // no adapter (a typo, or an OS naming the NIC differently) versus the privilege raw L2

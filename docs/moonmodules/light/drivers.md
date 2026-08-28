@@ -175,20 +175,34 @@ Detail: [technical](moxygen/NdiDriver.md)
 
 ### HLS 🖥️ · video out
 
-Streams the layer as **H.264 over HLS** from the device's own HTTP server: open the `url` the card shows in VLC, a browser, or hand it to an Apple TV (VLC for tvOS, or open it in Safari and AirPlay the video, the Apple TV then pulls the stream itself). Where NDI feeds production tools, this feeds anything that plays video.
+Streams the layer as **H.264 over HLS** from the device's own HTTP server: open the `url` the card shows in VLC, a browser, or hand it to an Apple TV (VLC for tvOS, or open it in Safari and AirPlay the video). Where NDI feeds production tools, this feeds anything that plays video.
 
-**Pixel-exact**: the frame IS the grid (`physicalWidth` x `physicalHeight`, one light per pixel, output correction applied), no scaling anywhere; the display letterboxes. Latency is HLS's own: expect **2-5 seconds** glass-to-glass, so this is for watching, not for live-control feedback. Large grids trade framerate, the render loop is single-threaded: 512x512 streams smoothly, TV-native resolutions do not yet.
+The grid becomes the frame, output correction applied, so a viewer sees what the wall sees. Latency is HLS's own: expect **2-5 seconds** glass-to-glass, so this is for watching, not for live-control feedback.
 
-**Desktop only**, and **you install ffmpeg yourself** (any 5.x+, on PATH), projectMM never ships or links an encoder: `brew install ffmpeg` (macOS), `winget install ffmpeg` (Windows), `sudo apt install ffmpeg` (Debian/Ubuntu/Raspberry Pi OS). Without it the driver reports `ffmpeg not found` and nothing else changes. Segments live in the transient `/.hls/` directory, served at `/hls/`, excluded from config backups.
+Runs on **desktop** (where **you install ffmpeg yourself**) and on the **ESP32-P4** (which encodes in hardware, no ffmpeg). See [§ HLS, details](#hls-details).
 
-- `targetFps` — encode-rate ceiling (default 30, 1–120); the render loop runs faster and extra frames are not encoded.
-- `bitrate` — H.264 target in kbit/s (default 8000).
-- `encoder` — the ffmpeg video encoder (Select; default `libx264`, which practically every ffmpeg distribution ships — a build without `--enable-libx264` is the exception). The hardware entries offload the encode entirely and are worth picking on large grids: `h264_videotoolbox` on a Mac (~10% CPU for a 1024x1024 stream on Apple silicon), `h264_v4l2m2m` on a Raspberry Pi, `h264_nvenc` on NVIDIA. An encoder your ffmpeg lacks starts and exits immediately; the status shows `encoder exited - check ffmpeg`.
+- `targetFps` — encode-rate ceiling (default 30, 1–120); the render loop runs faster and extra frames are not encoded. This is also the bandwidth knob: the bitrate is derived, not a setting.
+- `scale` — video pixels per light (default 0 = auto, which enlarges a small wall just enough to be watchable). Each light becomes a solid square block, never an interpolated blur.
+- `encoder` — which ffmpeg encoder to use (desktop only; the P4 has just the one).
 - read-only — `url` (the playable address), and the status line reports streaming state, dropped frames, or why the encoder stopped.
 
-Origin: projectMM; encoding by the user's ffmpeg (HLS is Apple's RFC 8216)
+Origin: projectMM; encoding by the user's ffmpeg on desktop, the P4's H.264 block on device (HLS is Apple's RFC 8216)
 
 Detail: [technical](moxygen/HlsDriver.md)
+
+<a id="hls-details"></a>
+
+## HLS, details
+
+**On desktop you install ffmpeg yourself** (any 5.x+, on PATH), projectMM never ships or links an encoder: `brew install ffmpeg` (macOS), `winget install ffmpeg` (Windows), `sudo apt install ffmpeg` (Debian/Ubuntu/Raspberry Pi OS). Without it the driver reports `ffmpeg not found` and nothing else changes. The `encoder` control picks which one ffmpeg uses: `libx264` (the default, in practically every build) is software, while `h264_videotoolbox` on a Mac (~10% CPU for a 1024x1024 stream on Apple Silicon), `h264_v4l2m2m` on a Raspberry Pi and `h264_nvenc` on NVIDIA offload it to hardware and are worth picking on large grids. An encoder your ffmpeg lacks starts and exits immediately; the status then reads `encoder exited - check ffmpeg`.
+
+**On the ESP32-P4** there is no ffmpeg and no filesystem in the path: the chip's own H.264 block encodes, projectMM packages the MPEG-TS itself, and segments are served from a RAM ring rather than written to flash, which at one segment per second would wear it for nothing. The `encoder` control is absent, since the hardware offers only one.
+
+**Sizing the picture.** The P4's encoder takes only EVEN dimensions between 80x80 and 1920x2032; an odd wall has its scale doubled so both axes come out even, and a wall whose scaled size exceeds the maximum is refused with a status saying so rather than streaming something the hardware cannot encode. Desktop ffmpeg has none of these limits. The floor is what the auto scale exists for: the P4 will not accept a frame smaller than 80x80, and a small wall streamed 1:1 arrives as a postage stamp in the player. `scale` at 0 (the default) therefore picks the smallest whole factor that lifts *both* axes to 80: a 20x10 wall streams as 160x80 rather than being refused, and a wall already past 80 stays 1:1. One factor serves both axes, so the aspect ratio is preserved and each light stays a square block. Raising `scale` by hand on an already-large wall costs real time (a 128x128 wall at scale 4 measures about 60 ms per frame against 1 ms at 1:1) and buys nothing a player's own zoom does not.
+
+**The bitrate is derived, not a setting.** It follows from the grid size and `targetFps` at about 0.1 bits per pixel per frame, which puts a 512x512 wall at 30 fps near 800 kbit; a 128x128 lands under the 500 kbit floor the derivation clamps to. `targetFps` is the knob for bandwidth, and the better trade for LED content: fewer frames rather than a blockier picture.
+
+**Where the segments live.** On desktop, the transient `/.hls/` directory, served at `/hls/` and excluded from config backups. Large grids trade framerate, the render loop being single-threaded: 512x512 streams smoothly, TV-native resolutions do not yet.
 
 <a id="preview-details"></a>
 

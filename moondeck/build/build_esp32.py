@@ -165,11 +165,12 @@ FIRMWARES: dict[str, dict] = {
     "esp32-16mb": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.16mb",
-                      "sdkconfig.defaults.eth"],
+                      "sdkconfig.defaults.eth", "sdkconfig.defaults.moonbase-16mb"],
+        "moonbase": True,   # MoonBase + ONE app slot; the freed 4 MB goes to the filesystem
         "eth_only": False,
         "description": "ESP32 classic with 16 MB flash — WiFi + Ethernet. Same silicon "
-                       "as `esp32`; this variant uses the extra flash for bigger OTA "
-                       "slots + filesystem (Serg boards, QuinLED Dig-Octa).",
+                       "as `esp32`; this variant uses the extra flash for a big app slot "
+                       "+ an 11 MB filesystem (Serg boards, QuinLED Dig-Octa).",
         "ships": True,
     },
     "esp32-wrover": {
@@ -221,6 +222,23 @@ FIRMWARES: dict[str, dict] = {
         # Enabled anyway: the S3 is the board most people already own, and a small panel is a
         # real way to try this before buying an S31.
         "panel_cards": True,
+    },
+    "esp32s3-zero": {
+        "chip": "esp32s3",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s3-zero",
+                      "sdkconfig.defaults.moonbase-4mb"],
+        "moonbase": True,   # 4 MB: factory MoonBase + one big app slot (see moonbase/)
+        "eth_only": False,
+        "description": "ESP32-S3-Zero (N4R2: 4 MB embedded flash, 2 MB embedded QUAD "
+                       "PSRAM) - WiFi only, no Ethernet. Its own variant because neither "
+                       "other S3 image can boot here: both assume 8/16 MB flash and set "
+                       "SPIRAM_MODE_OCT, and octal mode fails PSRAM init on this board's "
+                       "quad part. A thumbnail-sized board for small installations.",
+        "ships": True,
+        # No Ethernet fragment: the Zero breaks out no SPI header for a W5500, and its
+        # appeal is the size, so a variant carrying an unusable PHY would only cost flash
+        # on a part that has 48 KB to spare.
+        "panel_cards": False,
     },
     "esp32p4rev1-eth": {
         "chip": "esp32p4",

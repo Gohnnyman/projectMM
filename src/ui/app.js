@@ -1,8 +1,8 @@
-// projectMM Web UI — all logic in one hand-maintained file per CLAUDE.md.
+// projectMM Web UI: all logic in one hand-maintained file per CLAUDE.md.
 // Loaded as <script type="module"> so it can import the shared install-picker
 // component used by both the device UI (here, OTA flash) and the GitHub Pages
 // installer (first flash via Web Serial). Module loading is deferred by
-// default; entry-point is the WS init at the bottom — no ordering surprises.
+// default; entry-point is the WS init at the bottom: no ordering surprises.
 import { installPicker } from "/install-picker.js";
 import { preview } from "/preview3d.js";
 import { isNewer, parse } from "/semver.js";
@@ -16,7 +16,7 @@ import { applyMigrations, collectFiles, restoreDirs, diffRestore } from "/migrat
 //   5. State patching (no-rebuild contract): updateValues() + updateModuleControls()
 //   6. Type picker
 //   7. Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile)
-//   (3D WebGL preview lives in preview3d.js — imported as `preview`)
+//   (3D WebGL preview lives in preview3d.js: imported as `preview`)
 //   8. Status bar wiring (device name, sys stats, theme, reboot)
 //   9. Boot
 //
@@ -24,7 +24,7 @@ import { applyMigrations, collectFiles, restoreDirs, diffRestore } from "/migrat
 //   - dragTs[mid:key] cooldown: ignore WS pushes for a control the user has touched
 //     in the last 1s. Prevents slider snap-back during drag.
 //   - ctrl.hidden: skip rendering hidden controls (plan-10 feature). Persistence still
-//     loads them — toggling visibility doesn't lose state.
+//     loads them: toggling visibility doesn't lose state.
 //   - No-rebuild contract: WS state updates patch values in place via querySelector.
 //     We only rebuild the DOM on structural changes (add/delete/move) and explicit
 //     select-driven defineControls rebuilds.
@@ -41,14 +41,14 @@ const WS_RETRY_MIN_MS = 200;     // first reconnect is quick so a dropped initia
                                  // whose first attempt can lose a contended socket) comes back near-instantly
 let wsRetryMs = WS_RETRY_MIN_MS; // exponential backoff: 200 → 400 → 800 → … → 5000 ceiling
 let wsHeartbeat = null;
-let wsReconnectTimer = null;     // the pending reconnect setTimeout — tracked so pagehide can cancel it
+let wsReconnectTimer = null;     // the pending reconnect setTimeout: tracked so pagehide can cancel it
 let wsPaused = false;            // gated by document.visibilityState
-let wsUnloading = false;         // true once the page starts unloading (refresh/navigate) — suppresses the
+let wsUnloading = false;         // true once the page starts unloading (refresh/navigate): suppresses the
                                  // reconnect on the closing socket so the departing page doesn't error-log
 
 const dragTimers = {};           // per-control debounce timers (clearTimeout handles)
-const dragTs = {};               // per-control last-touched timestamp (ms) — a short post-interaction cooldown
-// Control types whose value the user can edit — updateModuleControls suppresses a
+const dragTs = {};               // per-control last-touched timestamp (ms): a short post-interaction cooldown
+// Control types whose value the user can edit: updateModuleControls suppresses a
 // WS state push for one of these while the user is mid-edit. The read-only types
 // (display/display-int/time/progress) and the composite `list` are absent on
 // purpose: they always reflect the latest push.
@@ -61,16 +61,16 @@ const TIMING_MODES = ["fps", "ms"];
 const LS_SELECTED  = "mm_selectedRoot";
 const LS_THEME     = "mm_theme";
 const LS_TIMING    = "mm_timing_mode";
-const LS_TABS      = "mm_selectedTabs";   // { [containerName]: childName } — the open tab per container
-const LS_EXPANDED  = "mm_expanded";       // [moduleName, …] — modules whose "controls" <details> is open
-const LS_TA_SIZE   = "mm_textareaSizes";  // { "<module>:<control>": heightPx } — user-dragged textarea heights
-const LS_CARDS_W   = "mm_cardsWidth";     // px — dragged width of the docked card column (right side)
+const LS_TABS      = "mm_selectedTabs";   // { [containerName]: childName }: the open tab per container
+const LS_EXPANDED  = "mm_expanded";       // [moduleName, …]: modules whose "controls" <details> is open
+const LS_TA_SIZE   = "mm_textareaSizes";  // { "<module>:<control>": heightPx }: user-dragged textarea heights
+const LS_CARDS_W   = "mm_cardsWidth";     // px: dragged width of the docked card column (right side)
 
 // The open tab per container, persisted so a reload doesn't dump you back on the first child.
 let selectedTabs = {};
 try { selectedTabs = JSON.parse(lsRead(LS_TABS, "{}")) || {}; } catch { selectedTabs = {}; }
 
-// Which modules have their "controls" disclosure open — VIEW-ONLY state the backend knows nothing about, so
+// Which modules have their "controls" disclosure open: VIEW-ONLY state the backend knows nothing about, so
 // it lives here (like selectedTabs), NOT in the module state. Persisting it means a full-state rebuild (or a
 // page reload) restores the open/closed expander instead of snapping it shut. Value/structure/picker state
 // all come from the backend, so those need no client persistence.
@@ -78,14 +78,14 @@ let expandedSet = new Set();
 try { expandedSet = new Set(JSON.parse(lsRead(LS_EXPANDED, "[]")) || []); } catch { expandedSet = new Set(); }
 function saveExpanded() { localStorage.setItem(LS_EXPANDED, JSON.stringify([...expandedSet])); }
 
-// The height a user dragged each textarea to — again VIEW-ONLY state the backend doesn't own (like the tab
+// The height a user dragged each textarea to: again VIEW-ONLY state the backend doesn't own (like the tab
 // and expander state above), keyed by "<module>:<control>". Persisting it means a resized script/config box
 // keeps its size across a full-state rebuild and a page reload instead of snapping back to the 2-row default.
 let textareaSizes = {};
 try { textareaSizes = JSON.parse(lsRead(LS_TA_SIZE, "{}")) || {}; } catch { textareaSizes = {}; }
 function saveTextareaSize(key, heightPx) { textareaSizes[key] = heightPx; localStorage.setItem(LS_TA_SIZE, JSON.stringify(textareaSizes)); }
 
-// The width the user dragged the docked card column to — VIEW-ONLY state (like the tab/expander/textarea
+// The width the user dragged the docked card column to: VIEW-ONLY state (like the tab/expander/textarea
 // state above). Applied as the --cards-width CSS custom property (the #main flex-basis reads it, clamped in
 // CSS so it can't crowd out the preview or vanish); restored on boot. Only meaningful in docked mode, where
 // the cards sit beside the preview; PiP/narrow mode makes them full-width and hides the handle.
@@ -124,7 +124,7 @@ function setupCardsResize() {
     };
     const onPointerMove = (e) => { if (dragging) onMove(e.clientX); };
     handle.addEventListener("pointerdown", (e) => {
-        // Only resize in docked mode — the handle is CSS-hidden otherwise, but guard anyway.
+        // Only resize in docked mode: the handle is CSS-hidden otherwise, but guard anyway.
         if (!document.querySelector(".workspace")?.classList.contains("mode-docked")) return;
         e.preventDefault();
         dragging = true;
@@ -163,10 +163,10 @@ function connectWs() {
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
-        if (sock !== ws) return;   // a newer socket already took over — ignore this stale open
+        if (sock !== ws) return;   // a newer socket already took over: ignore this stale open
         wsRetryMs = WS_RETRY_MIN_MS;                        // reset backoff
         setWsDot(true);
-        // Keepalive ping every 25s — Safari kills idle WebSockets otherwise
+        // Keepalive ping every 25s: Safari kills idle WebSockets otherwise
         clearInterval(wsHeartbeat);
         wsHeartbeat = setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) ws.send("ping");
@@ -186,8 +186,8 @@ function connectWs() {
             const data = JSON.parse(e.data);
             if (!data) return;
             // The device sends a FULL {modules:[...]} state on connect / after a structural change,
-            // then a {patch:[...]} of only-changed leaves each second (diff-on-the-wire — the whole
-            // module tree is ~34 KB of mostly-unchanging metadata that must NOT be re-serialised every
+            // then a {patch:[...]} of only-changed leaves each second (diff-on-the-wire: the whole
+            // module tree is ~34 KB of mostly-unchanging metadata that must NOT be re-serialized every
             // second on the render thread; see HttpServerModule buildStatePatch). Apply a patch onto
             // the existing `state` in place, then refresh the DOM. A patch before any full state is
             // ignored (we have nothing to patch); the device resyncs on connect so this self-corrects.
@@ -203,7 +203,7 @@ function connectWs() {
                 return;
             }
             // The same /ws also carries WLED-compatibility {state,info} frames for the native WLED app
-            // (see HttpServerModule's WLED shim). Those aren't our module-state shape — ignore anything
+            // (see HttpServerModule's WLED shim). Those aren't our module-state shape: ignore anything
             // without a `modules` array, or it would clobber `state` and blank the module view.
             if (!Array.isArray(data.modules)) return;
             state = data;
@@ -212,7 +212,7 @@ function connectWs() {
             // already stored above, so updateValues() below still shows fresh values; the structural
             // render happens on the next full state once the interaction ends.
             if (userIsEditing()) { updateValues(); preview.setTargetFps(previewTargetFps(state)); return; }
-            renderCards();     // a full state may add/remove/reshape cards (structural resync) — full render
+            renderCards();     // a full state may add/remove/reshape cards (structural resync): full render
             // The nav is built from the same tree, so a structural change (a module added or removed)
             // must rebuild it too, or the sidebar keeps entries the state no longer has. AFTER
             // renderCards, because its fallback may reassign selectedModule and the nav highlights it.
@@ -225,7 +225,7 @@ function connectWs() {
     };
 
     ws.onclose = () => {
-        if (sock !== ws) return;   // a stale socket closing after we already moved on — leave the live one alone
+        if (sock !== ws) return;   // a stale socket closing after we already moved on: leave the live one alone
         clearInterval(wsHeartbeat);
         wsHeartbeat = null;
         if (wsUnloading) return;   // the page is going away, don't reconnect (and don't touch the DOM)
@@ -282,7 +282,7 @@ window.addEventListener("pageshow", (e) => {
     if (e.persisted) {
         // Safari restored from bfcache: re-establish state
         wsPaused = false;
-        wsUnloading = false;   // a bfcache-restored page is live again — allow reconnects
+        wsUnloading = false;   // a bfcache-restored page is live again: allow reconnects
         if (!ws || ws.readyState !== WebSocket.OPEN) connectWs();
     }
 });
@@ -308,11 +308,11 @@ async function init() {
     setupUpdateBadge();
     setupCardsResize();
     // Open the WebSocket FIRST, before any HTTP fetch. The device pushes a full {modules} state on connect
-    // (handleWebSocketUpgrade → requestFullResync), so the WS is the primary state source — the /api/state
+    // (handleWebSocketUpgrade → requestFullResync), so the WS is the primary state source: the /api/state
     // fetch below is only a first-paint shortcut. Connecting first matters most on Safari: it opens more
     // parallel connections up front and is quicker to give up on a contended one, so if the WS is opened
     // LAST (after several awaited fetches + the page's file loads) it lands in the most-saturated moment of
-    // the device's small socket pool and Safari abandons it — the "basic UI shows but the WS never goes
+    // the device's small socket pool and Safari abandons it: the "basic UI shows but the WS never goes
     // live" symptom. Opening it first lets it grab an uncontended slot; Chrome tolerated the old order, so
     // this fixes Safari without regressing Chrome.
     connectWs();
@@ -333,9 +333,9 @@ async function init() {
     });
     // First-paint shortcut: render from a one-shot /api/state so the cards appear immediately instead of
     // waiting for the WS's first full-state push. The WS then keeps everything live. If this fetch fails
-    // (a contended slot), it's non-fatal — the WS full state fills in the moment it lands. Since the WS is
+    // (a contended slot), it's non-fatal: the WS full state fills in the moment it lands. Since the WS is
     // opened FIRST, its full-state push can beat this await; when it has (state already set), DON'T let the
-    // REST snapshot overwrite the newer, live WS state — just skip the commit.
+    // REST snapshot overwrite the newer, live WS state: just skip the commit.
     try {
         const resp = await fetch("/api/state");
         if (resp.status === 404 && await moonbaseHandoff()) return;
@@ -346,7 +346,7 @@ async function init() {
                 const savedSel = lsRead(LS_SELECTED, null);
                 if (state.modules.length > 0) {
                     const exists = savedSel && state.modules.some(m => m.name === savedSel);
-                    // Default to the first root AS LISTED, not as scheduled — otherwise a
+                    // Default to the first root AS LISTED, not as scheduled: otherwise a
                     // device with no saved selection opens on a card that is not the one the
                     // nav highlights at the top.
                     selectedModule = exists ? savedSel : navRoots(state.modules)[0].name;
@@ -356,9 +356,9 @@ async function init() {
                 updateStatusBar();
             }
         }
-    } catch { /* non-fatal — the WS full state renders the UI when it arrives */ }
+    } catch { /* non-fatal: the WS full state renders the UI when it arrives */ }
     // /api/types arrived in plan-11; fetch in parallel. When it arrives, the reset-to-default buttons (whose
-    // defaults come from this payload) need to appear — but a full renderCards() rebuilds the DOM, which
+    // defaults come from this payload) need to appear: but a full renderCards() rebuilds the DOM, which
     // would blow away a control the user is mid-edit (this fires ~1 s after first paint, so that's rare but
     // possible). Skip the re-render while an editable field is focused / a native select is open; the reset
     // buttons then appear on the next structural render instead of interrupting the edit.
@@ -492,16 +492,16 @@ async function errorMessage(res) {
     try {
         const j = await res.json();
         if (j && j.error) return j.error;
-    } catch (_) { /* non-JSON error body — fall through to the status code */ }
+    } catch (_) { /* non-JSON error body: fall through to the status code */ }
     return `HTTP ${res.status}`;
 }
 
 async function sendControl(moduleName, controlName, value) {
-    // Optimistically update the local `state` to what we just sent — the standard controlled-input
+    // Eagerly update the local `state` to what we just sent: the standard controlled-input
     // pattern. Without this, `state` keeps the OLD value until the device echoes the change back in a
     // value patch (up to a tick1s later, or folded into a full resync for a control that triggers a
     // rebuild like a driver's ledsPerPin). In that gap, an unrelated WS frame runs updateModuleControls,
-    // and once the dragTs edit-guard expires (>1s after the last keystroke — trivial if the user pauses)
+    // and once the dragTs edit-guard expires (>1s after the last keystroke: trivial if the user pauses)
     // it writes the stale `state` value straight back into the field the user just changed (the value
     // "reverses"; a manual refresh shows the correct value because it refetches). The client knows what
     // it sent, so update `state` now; any later echo just confirms it.
@@ -510,10 +510,10 @@ async function sendControl(moduleName, controlName, value) {
         const ctrl = mod && Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
         if (ctrl) ctrl.value = value;
     }
-    // Toggling expert mode changes which controls RENDER (the `advanced` ones), not just a value — so
+    // Toggling expert mode changes which controls RENDER (the `advanced` ones), not just a value: so
     // re-render the cards. Structural change, same as an add/remove; the value write above already landed.
     if (moduleName === "System" && controlName === "expertMode") renderCards();
-    // Best-effort by design — failures are not retried here. Non-ok responses +
+    // Best-effort by design: failures are not retried here. Non-ok responses +
     // network errors are logged to console so a user with devtools open can see
     // what went wrong (e.g. a control value the device-side validator rejected).
     try {
@@ -596,9 +596,9 @@ async function listSetField(moduleName, ctrlName, id, field, value) {
         if (!res.ok) { console.warn(`[list] set ${moduleName}.${ctrlName}#${id}.${field} failed (status=${res.status})`); return false; }
         // A FIELD edit does NOT refetch: the value is already applied server-side and the WS push
         // reconciles it, so rebuilding here would collapse the open row and snap an in-progress edit
-        // back (a `channels` change also reshapes the row's fields — that structural update rides the
+        // back (a `channels` change also reshapes the row's fields: that structural update rides the
         // WS push, guarded by the dragTs cooldown, not a rebuild-on-every-keystroke). Structural ops
-        // (add/delete/move) DO refetch — they change the row set. Return true so the caller can decide.
+        // (add/delete/move) DO refetch: they change the row set. Return true so the caller can decide.
         return true;
     } catch (e) {
         console.warn(`[list] set ${moduleName}.${ctrlName}#${id}.${field} failed (error=${e && e.message ? e.message : e})`);
@@ -635,13 +635,13 @@ async function addModule(type, parentName) {
 function focusModule(name) {
     const card = document.querySelector(`.card[data-module="${cssEscape(name)}"]`);
     if (!card) return;
-    // A child card can wrap its controls in a collapsed <details> (.card-controls-collapse) — open it
+    // A child card can wrap its controls in a collapsed <details> (.card-controls-collapse): open it
     // FIRST so the card is at its expanded height, THEN scroll: scrolling a still-collapsed card lands
     // on its pre-expansion geometry and the focused control ends up mispositioned.
     const collapse = card.querySelector("details.card-controls-collapse");
     if (collapse) collapse.open = true;
     card.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    // Focus the first real control input, NOT the tab strip / header buttons — and NOT the status row,
+    // Focus the first real control input, NOT the tab strip / header buttons: and NOT the status row,
     // which is a `.control-row` with only spans (a freshly added driver leads with a status, so picking
     // the first `.control-row` would find no input and focus nothing). Query for the input directly
     // inside any control row so the status row is skipped.
@@ -665,7 +665,7 @@ async function moveModuleTo(name, toIndex) {
 }
 
 // swap a module for another type at the same position. The replacement starts
-// with its own default control values — a clean swap, not a value carry-over.
+// with its own default control values: a clean swap, not a value carry-over.
 async function replaceModule(name, newType) {
     if (!newType) return;
     await fetch("/api/modules/" + encodeURIComponent(name) + "/replace", {
@@ -679,7 +679,7 @@ async function replaceModule(name, newType) {
 async function rebootDevice() {
     try {
         await fetch("/api/reboot", {method: "POST"});
-    } catch { /* connection may drop mid-response — that's the device restarting */ }
+    } catch { /* connection may drop mid-response: that's the device restarting */ }
     // WS will reconnect on its own via onclose backoff
 }
 
@@ -689,15 +689,15 @@ async function rebootDevice() {
 
 // The order roots are LISTED in, which is deliberately not the order they RUN in.
 //
-// main.cpp orders by dependency — Filesystem before anything that writes a file, System before the
-// modules that read its identity — and that order is load-bearing, so it cannot be reshuffled to
+// main.cpp orders by dependency: Filesystem before anything that writes a file, System before the
+// modules that read its identity: and that order is load-bearing, so it cannot be reshuffled to
 // suit a menu. But it reads as an implementation detail to someone using the device: the first
 // thing they see is System, and the lights are at the bottom.
 //
 // So the nav states its own order, grouped by what a user is looking for: the thing they reach for
-// most (Control), then the light pipeline in pipeline order (where the lights are → what colour →
+// most (Control), then the light pipeline in pipeline order (where the lights are → what color →
 // how it gets out), then the device itself. A root NOT named here still appears, after these, in
-// scheduler order — so adding a module never makes it invisible, it just lands at the end until
+// scheduler order: so adding a module never makes it invisible, it just lands at the end until
 // someone decides where it belongs.
 // GROUPS, not one flat list: the nav draws a rule between them, so the grouping has to be the
 // data rather than an index the renderer counts to.
@@ -719,7 +719,7 @@ function navGroups(modules) {
     return groups.filter(g => g.length);
 }
 
-/// Flat nav order — the same modules navGroups returns, ungrouped. Used where only the ORDER
+/// Flat nav order: the same modules navGroups returns, ungrouped. Used where only the ORDER
 /// matters (picking the default selection), so the two can never disagree about what comes first.
 function navRoots(modules) {
     return navGroups(modules).flat();
@@ -730,7 +730,7 @@ function renderNav() {
     if (!nav || !state) return;
     nav.innerHTML = "";
 
-    // One entry per root module. Clicking selects that root — only the selected
+    // One entry per root module. Clicking selects that root: only the selected
     // root's card subtree is rendered (one root visible at a time).
     const list = document.createElement("div");
     list.className = "nav-list";
@@ -788,7 +788,7 @@ function buildNavFooter() {
     footer.appendChild(links);
 
     // Diagnostic bundle download. Fetches /api/state + /api/system from
-    // the *same* origin we're on (the device itself) — sidesteps Chrome's
+    // the *same* origin we're on (the device itself): sidesteps Chrome's
     // mixed-content blocker that prevents the install page (HTTPS Pages)
     // from doing the same fetch against the device (HTTP LAN). Output is
     // a single JSON blob the user can attach to a bug report.
@@ -901,13 +901,13 @@ function renderCards() {
 }
 
 // ============================================================================
-// Surface demo sweep — REMOVABLE BLOCK
+// Surface demo sweep: REMOVABLE BLOCK
 //
 // A hardware control desk sweeps its motorised faders and rings when it powers up, both to show it
 // is alive and to show what it has. This does the same for three seconds after the surface appears.
 //
 // It is deliberately isolated so it can be deleted whole: this block, plus the single
-// `startSurfaceDemo()` call at the end of renderCards(). It is a VIEW-ONLY animation — it never
+// `startSurfaceDemo()` call at the end of renderCards(). It is a VIEW-ONLY animation: it never
 // calls sendControl, so it cannot write a swept value to the device, and the first WebSocket patch
 // after it finishes restores whatever the device actually holds.
 // ============================================================================
@@ -915,7 +915,7 @@ const SURFACE_DEMO_MS = 1000;
 let surfaceDemoUntil = 0;
 /// The module the sweep last ran for. renderCards() fires on every state push and every mutation (a
 /// pad click refetches and re-renders), so "the surface was rendered" is NOT "the surface was
-/// opened" — without this the sweep replayed on every button press.
+/// opened": without this the sweep replayed on every button press.
 let surfaceDemoShownFor = null;
 
 function startSurfaceDemo(root, moduleName) {
@@ -929,7 +929,7 @@ function startSurfaceDemo(root, moduleName) {
     const q = (sel) => [...root.querySelectorAll(sel)];
     // Every bank is re-queried each frame, for the same reason the pads are: a state push mid-sweep
     // re-renders the card and replaces these nodes. A list captured once would keep writing values to
-    // detached elements while the visible controls sat frozen — which is what stopped the knobs and
+    // detached elements while the visible controls sat frozen: which is what stopped the knobs and
     // faders a few hundred ms into a refresh, while the (live-queried) pads ran the full period.
     const liveInputs = () => [
         ...q(".control-encoder .encoder-input"),
@@ -939,7 +939,7 @@ function startSurfaceDemo(root, moduleName) {
     const faders = q(".control-fader .fader-input");
     // Pads are looked up LIVE each frame rather than captured: a state push mid-sweep re-renders the
     // card and replaces these nodes, and a captured list would spend the rest of the run toggling
-    // classes on detached elements — which is why the chase stopped partway through.
+    // classes on detached elements: which is why the chase stopped partway through.
     const livePads = () => q(".list-pad:not(.list-pad-empty)");
     if (!knobs.length && !faders.length && !livePads().length) return;
     surfaceDemoShownFor = moduleName;
@@ -995,10 +995,10 @@ function renderModuleTree(mod, parentEl, depth) {
 
     // One rule: a TOP-LEVEL module shows its children one at a time behind a tab strip, so its card
     // stays short however many children it has. Deeper levels stack as before. The tabs are derived
-    // from mod.children on every render, so adding a layer adds its tab — there is no tab registry
+    // from mod.children on every render, so adding a layer adds its tab: there is no tab registry
     // to keep in sync, which is the whole of the "dynamic" requirement.
     if (depth === 0) {
-        // The "+" tab takes over the add affordance, so hide the footer's duplicate button — but keep
+        // The "+" tab takes over the add affordance, so hide the footer's duplicate button: but keep
         // the footer element itself, because openTypePicker renders the picker into it.
         const addBtn = card.querySelector(".card-footer > .add-btn");
         if (addBtn) addBtn.style.display = "none";
@@ -1010,7 +1010,7 @@ function renderModuleTree(mod, parentEl, depth) {
     }
 }
 
-// Drag a tab onto another to reorder — the tab strip IS the child list, so reordering tabs reorders
+// Drag a tab onto another to reorder: the tab strip IS the child list, so reordering tabs reorders
 // the modules. Deliberately the same insert-semantics + moveModuleTo() call the card drag uses
 // (attachDragHandlers): one reorder path, so a tab drag and a card drag can't drift apart.
 function attachTabDragHandlers(tab, child, parent) {
@@ -1029,7 +1029,7 @@ function attachTabDragHandlers(tab, child, parent) {
     tab.addEventListener("dragover", (e) => {
         const src = document.querySelector(".tab.dragging");
         if (!src || src === tab) return;
-        if (src.parentElement !== tab.parentElement) return;   // same strip only — not another container's
+        if (src.parentElement !== tab.parentElement) return;   // same strip only: not another container's
         e.preventDefault();
         tab.classList.add("drag-over");
     });
@@ -1061,7 +1061,7 @@ function applyTabDot(tab, mod) {
 }
 
 // Patch-path twin of applyTabDot + the disabled greying: the tab strip is built in renderCards(), which the
-// WS value patch deliberately never re-runs — so without this, a fault (or an enable/disable) on a background
+// WS value patch deliberately never re-runs: so without this, a fault (or an enable/disable) on a background
 // tab would stay invisible until the next full render. (The UI has two render paths; a rule must live in both.)
 function updateTabDot(mod) {
     const tab = document.querySelector(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`);
@@ -1084,14 +1084,14 @@ function renderChildTabs(mod, childrenEl, depth) {
     for (const child of mod.children) {
         const tab = document.createElement("button");
         // Grey a disabled child's tab title (mirrors the card's card--disabled), so it reads as inactive
-        // from the strip without opening it. Derived purely from child.enabled — no backend round-trip.
+        // from the strip without opening it. Derived purely from child.enabled: no backend round-trip.
         tab.className = "tab" + (child.name === active ? " tab-active" : "")
                               + (child.enabled === false ? " tab--disabled" : "");
         tab.type = "button";
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", child.name === active ? "true" : "false");
         // Name + the module's own status dot, so a driver erroring on a background tab is still
-        // visible without opening it — a tab that can hide a fault is worse than no tab.
+        // visible without opening it: a tab that can hide a fault is worse than no tab.
         tab.dataset.tabMid = child.name;   // so updateTabDot can find it on the WS patch path
         tab.textContent = child.name;
         applyTabDot(tab, child);
@@ -1104,7 +1104,7 @@ function renderChildTabs(mod, childrenEl, depth) {
         strip.appendChild(tab);
     }
 
-    // "+" lives at the END OF THE STRIP, where a new tab appears — not in the card footer below the
+    // "+" lives at the END OF THE STRIP, where a new tab appears: not in the card footer below the
     // panel, which would read as "add something to the open driver" rather than "add a driver".
     // createCard still renders the footer button for non-tabbed containers; here we hide it and put
     // the affordance where the tabs are.
@@ -1115,7 +1115,7 @@ function renderChildTabs(mod, childrenEl, depth) {
         addTab.textContent = "+";
         addTab.title = "add " + rolesAcceptedBy(mod).join(" / ");
         addTab.addEventListener("click", () => {
-            // THIS card's own footer — a plain querySelector would match the first .card-footer in the
+            // THIS card's own footer: a plain querySelector would match the first .card-footer in the
             // subtree, which belongs to a nested child's card (Effects would then offer the Layer's
             // effects instead of another layer). Scope to direct children of this card.
             const card = childrenEl.parentElement;
@@ -1354,7 +1354,7 @@ function createCard(mod, depth) {
     const title = document.createElement("div");
     title.className = "card-title";
 
-    // The enabled toggle is built here but appended later — it joins the
+    // The enabled toggle is built here but appended later: it joins the
     // right-hand action cluster (next to ✎ × ?) rather than sitting at the start
     // of the row, for visual grouping with the other per-card controls.
     // Rendered as a <button> styled as a 26×26 rounded box (matching .card-btn);
@@ -1374,7 +1374,7 @@ function createCard(mod, depth) {
         enabled.classList.toggle("module-enabled--off", !on);
         enabled.setAttribute("aria-pressed", on ? "true" : "false");
         card.classList.toggle("card--disabled", !on);
-        // Grey this module's TAB in the same click, alongside its card — so the tab title dims INSTANTLY
+        // Grey this module's TAB in the same click, alongside its card: so the tab title dims INSTANTLY
         // instead of waiting ~1s for the server's full-state round-trip. (updateTabDot still syncs it on the
         // patch path, idempotently, so this just makes the on/off button the immediate driver.) The tab
         // lives in the parent's strip, found by the same data-tab-mid updateTabDot uses.
@@ -1398,7 +1398,7 @@ function createCard(mod, depth) {
     name.textContent = mod.name;
     title.appendChild(name);
 
-    // Emoji tags (role + curated) shown after the name — same set used by the
+    // Emoji tags (role + curated) shown after the name: same set used by the
     // type picker's chip filter, so visual identity is consistent across views.
     const emoji = emojiTagsForMod(mod);
     if (emoji) {
@@ -1413,7 +1413,7 @@ function createCard(mod, depth) {
     spacer.className = "card-spacer";
     title.appendChild(spacer);
 
-    // fps/ms toggle on the stats line — global mode, single click cycles all cards
+    // fps/ms toggle on the stats line: global mode, single click cycles all cards
     const stats = document.createElement("span");
     stats.className = "card-stats";
     stats.dataset.mid = mod.name;
@@ -1424,7 +1424,7 @@ function createCard(mod, depth) {
         const idx = TIMING_MODES.indexOf(timingMode);
         timingMode = TIMING_MODES[(idx + 1) % TIMING_MODES.length];
         localStorage.setItem(LS_TIMING, timingMode);
-        // Refresh every card's stats line in place — no full re-render needed
+        // Refresh every card's stats line in place: no full re-render needed
         document.querySelectorAll(".card-stats[data-mid]").forEach(s => {
             const m = findModule(s.dataset.mid);
             if (m) { s.textContent = formatStats(m); s.title = formatStatsTitle(m); }
@@ -1489,14 +1489,14 @@ function createCard(mod, depth) {
     // Child-hosting modules deeper in the tree (Effects, Layer, Drivers, Layouts)
     // collapse their own controls so the children are the focus by default.
     // Modules that merely host a code-wired child (Network → Improv) keep their
-    // controls expanded — the parent's settings are the main point, the code-wired
+    // controls expanded: the parent's settings are the main point, the code-wired
     // child is informational. Leaf modules render controls inline (no wrapper).
-    // EXCEPTION: a top-level module (depth 0 — the selected root, e.g. System,
+    // EXCEPTION: a top-level module (depth 0: the selected root, e.g. System,
     // Network, or a container like Services/Drivers) never collapses its own
     // controls, even when it accepts children. It's the card the user is looking
     // at, so its settings should be visible, not hidden behind a "controls" disclosure.
     // Use the SAME predicate the row loop renders by (controlRendersGenerically), not a bare
-    // !c.hidden — else the disclosure could open for a module whose only "visible" controls render
+    // !c.hidden: else the disclosure could open for a module whose only "visible" controls render
     // elsewhere (e.g. FileManager's filesystem/lastSaved render inside its own panel, not generically).
     const hasVisibleControls = mod.controls && mod.controls.some(c => controlRendersGenerically(mod, c));
     const wrapInDetails = depth > 0 && acceptsNewChildren(mod) && hasVisibleControls;
@@ -1504,7 +1504,7 @@ function createCard(mod, depth) {
         const d = document.createElement("details");
         d.className = "card-controls-collapse";
         // Restore the open/closed state from localStorage, so a full-state rebuild (or a page reload) keeps
-        // the expander as the user left it instead of snapping shut. Persist it on toggle — same pattern as
+        // the expander as the user left it instead of snapping shut. Persist it on toggle: same pattern as
         // the selected tab (LS_TABS). VIEW-only state; nothing to do with the module's backend state.
         d.open = expandedSet.has(mod.name);
         d.addEventListener("toggle", () => {
@@ -1551,16 +1551,16 @@ function createCard(mod, depth) {
     // FirmwareUpdate card hosts the shared install picker. Mount once per
     // card-build. The picker reads SystemModule.firmware (already in
     // /api/state) to filter to OTA-compatible releases. On install, the
-    // device fetches the binary via /api/firmware/url — no browser CORS in
+    // device fetches the binary via /api/firmware/url: no browser CORS in
     // the data path. See docs/architecture.md § Firmware vs board.
     if (mod.type === "FirmwareUpdateModule") {
         // Opening the Firmware card forces a fresh update check (the badge otherwise refreshes
-        // only on the 1 h cache cadence) — so the badge agrees with the picker the user is about
+        // only on the 1 h cache cadence): so the badge agrees with the picker the user is about
         // to use. Fire-and-forget; best-effort.
         checkFirmwareUpdate(true);
         const ownFirmwareKey = (() => {
             // The `firmware` variant key is this module's own control now (moved here from
-            // SystemModule), so read it straight off mod — no cross-module lookup.
+            // SystemModule), so read it straight off mod: no cross-module lookup.
             const fwCtrl = (mod.controls || []).find(c => c.name === "firmware");
             return fwCtrl && fwCtrl.value ? fwCtrl.value : null;
         })();
@@ -1570,7 +1570,7 @@ function createCard(mod, depth) {
         installPicker.init({
             container: mount,
             ownFirmwareKey,
-            // Device already knows its deviceModel (SystemModule) — picker is for
+            // Device already knows its deviceModel (SystemModule): picker is for
             // releases + firmware compatibility only. Showing a board picker
             // here would invite the user to mis-narrow the firmware list.
             enableBoardPicker: false,
@@ -1603,7 +1603,7 @@ function createCard(mod, depth) {
         });
 
         // Install-from-file: pick a locally-built .bin and stream its bytes to /api/firmware/upload,
-        // which feeds platform::otaWriteStream (esp_ota_write). Complements the release picker above —
+        // which feeds platform::otaWriteStream (esp_ota_write). Complements the release picker above -
         // the release path has the device fetch a URL; this path has the browser push the body, so a
         // dev build that isn't a published release can be flashed straight over the network. The device
         // reboots on success (no response body), so a completed POST that closes mid-flight is success.
@@ -1612,7 +1612,7 @@ function createCard(mod, depth) {
         const upBtn = document.createElement("button");
         upBtn.className = "fm-tool fm-tool--icon";
         upBtn.textContent = "↥";   // same upload glyph as the file-manager toolbar
-        upBtn.title = "Install from file — flash a firmware .bin from your computer over the network (OTA)";
+        upBtn.title = "Install from file: flash a firmware .bin from your computer over the network (OTA)";
         const upStatus = document.createElement("span");
         upStatus.className = "fw-upload-status";
         const upInput = document.createElement("input");
@@ -1634,9 +1634,9 @@ function createCard(mod, depth) {
                 const res = await fetch("/api/firmware/upload", {
                     method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
                 });
-                // The device sends a 200 once the image is committed, THEN reboots — so res.ok is the
+                // The device sends a 200 once the image is committed, THEN reboots: so res.ok is the
                 // real success signal. A 4xx/5xx carries the device's ota error in the JSON body.
-                if (res.ok) upStatus.textContent = "flashed — device rebooting";
+                if (res.ok) upStatus.textContent = "flashed: device rebooting";
                 else throw new Error(await errorMessage(res));
             } catch (err) {
                 // A network error mid-upload is a genuine failure now (the device answers before it
@@ -1673,7 +1673,7 @@ function createCard(mod, depth) {
     // -- Children block + footer --
     // The .card-children wrapper lives inside this card so the parent's border
     // encloses its children; renderModuleTree recurses into it. The "+ add module"
-    // footer only appears on parents that accept user-created children — a parent
+    // footer only appears on parents that accept user-created children: a parent
     // hosting only code-wired children (e.g. Network → Improv) renders the
     // children block but no add button.
     let childrenEl = null;
@@ -1721,7 +1721,7 @@ function createCard(mod, depth) {
 // Wire a button as a press-twice confirm: the first click arms it (adds the
 // `armed` class, optional armed label/title), a second click runs `onConfirm`.
 // Disarms after 3s or when the pointer leaves. Used by the delete and reboot
-// buttons — no browser confirm() popup. `armedText` is optional (delete swaps
+// buttons: no browser confirm() popup. `armedText` is optional (delete swaps
 // × → ✓; reboot keeps its glyph). The pre-arm title is captured live so a
 // title updated elsewhere (e.g. reboot's crashed-state text) restores correctly.
 function armPressTwice(btn, onConfirm, opts = {}) {
@@ -1730,7 +1730,7 @@ function armPressTwice(btn, onConfirm, opts = {}) {
     let savedText = "";
     let savedTitle = "";
     const disarm = () => {
-        // Only restore label/title if we actually armed — otherwise a mouseleave before the first
+        // Only restore label/title if we actually armed: otherwise a mouseleave before the first
         // click would write the initial empty savedText/savedTitle over the button, collapsing a
         // text-sized button (e.g. "🗑 delete") to an empty sliver.
         if (!armed) return;
@@ -1755,7 +1755,7 @@ function armPressTwice(btn, onConfirm, opts = {}) {
     btn.addEventListener("mouseleave", disarm);
 }
 
-// Compact byte formatter — "B" under 1 KB, "KB" otherwise (one decimal under 10 KB).
+// Compact byte formatter: "B" under 1 KB, "KB" otherwise (one decimal under 10 KB).
 function fmtBytes(n) {
     if (n < 1024) return n + "B";
     const k = n / 1024;
@@ -1780,7 +1780,7 @@ function formatStats(mod) {
     const dyn = mod.dynamicBytes || 0;
     const mem = "🧠 " + fmtBytes(stat) + (dyn > 0 ? " + " + fmtBytes(dyn) : "");
     // Status chip: emitted by the engine when a module has something to say.
-    // Severity picks the emoji — ℹ️ neutral (Eth: 192.168.1.210), ⚠️ degraded
+    // Severity picks the emoji: ℹ️ neutral (Eth: 192.168.1.210), ⚠️ degraded
     // (buffer reduced), ❌ error (No network). Tooltip carries the full text.
     const sev = mod.severity || "status";
     const sevEmoji = sev === "error" ? "❌" : sev === "warning" ? "⚠️" : "ℹ️";
@@ -1812,7 +1812,7 @@ function createActionButtons(mod) {
     });
     wrap.appendChild(replaceBtn);
 
-    // Delete: press × once to arm, again to confirm — see armPressTwice.
+    // Delete: press × once to arm, again to confirm: see armPressTwice.
     const delBtn = document.createElement("button");
     delBtn.className = "card-btn card-btn-del";
     delBtn.textContent = "×";
@@ -1849,7 +1849,7 @@ function hasNestedChildren(mod) {
 }
 
 // Roles this parent accepts as user-added children, from the device's
-// `acceptsChildRoles` (per-type in /api/types — e.g. Layer → "effect,modifier").
+// `acceptsChildRoles` (per-type in /api/types: e.g. Layer → "effect,modifier").
 // Domain-neutral: the UI no longer hardcodes which module types are containers;
 // the device declares it via MoonModule::acceptsChildRoles(). "" → [] (accepts
 // none), which is also the default for modules whose type isn't loaded yet.
@@ -1859,17 +1859,17 @@ function rolesAcceptedBy(parentMod) {
     return csv ? csv.split(",") : [];
 }
 
-// Whether the "+ add module" affordance applies — derived from acceptsChildRoles
+// Whether the "+ add module" affordance applies: derived from acceptsChildRoles
 // being non-empty, so there's a single source of truth (no separate list).
 function acceptsNewChildren(mod) {
     return rolesAcceptedBy(mod).length > 0;
 }
 
-// The set of child roles ANY loaded type accepts — the union of every type's
+// The set of child roles ANY loaded type accepts: the union of every type's
 // acceptsChildRoles. A module is "user-managed as a child" iff its role is in
 // this set, which is how the UI decides to show delete/replace/drag without
 // hardcoding role names. Code-wired children (ImprovProvisioning,
-// — roles no container declares) correctly fall outside it.
+//: roles no container declares) correctly fall outside it.
 function allAcceptedChildRoles() {
     const roles = new Set();
     for (const t of availableTypes) {
@@ -1882,13 +1882,13 @@ function allAcceptedChildRoles() {
 // Whether the UI shows delete / replace / drag for this module. True when it's
 // a nested module (depth > 0) whose role is one some container accepts AND it
 // hasn't opted out via the device's userEditable=false (e.g. PreviewDriver).
-// Replaces the old hardcoded `role === "effect" || "modifier"` gate — now any
+// Replaces the old hardcoded `role === "effect" || "modifier"` gate: now any
 // add-accepted role (driver, layout, …) is editable, and the child itself can
 // veto via userEditable.
 //
 // We test mod.role against the UNION of all containers' acceptsChildRoles, not
 // against this module's specific parent. That's exact while the role→container
-// mapping is 1:1 (effect→Layer, driver→Drivers, layout→Layouts, layer→Effects) —
+// mapping is 1:1 (effect→Layer, driver→Drivers, layout→Layouts, layer→Effects) -
 // a child of an add-accepted role is always under the one container that
 // accepts it. If a role ever becomes accepted by more than one container, this
 // would need the parent threaded in to scope the check to the actual parent.
@@ -1924,7 +1924,7 @@ function docPathForType(moduleType) {
     return (t && t.docPath) ? t.docPath : "";
 }
 
-// Curated emoji string for a live module — its role emoji plus the type's
+// Curated emoji string for a live module: its role emoji plus the type's
 // `tags` from /api/types, deduplicated, in role-first order. "" if the type
 // isn't loaded yet. Used on the card title and in the type picker.
 function emojiTagsForMod(mod) {
@@ -1933,7 +1933,7 @@ function emojiTagsForMod(mod) {
     return emojiTagsFor(t).join("");
 }
 
-// Whether a control appears in the generic control list — false for controls the module marked
+// Whether a control appears in the generic control list: false for controls the module marked
 // `hidden`. A module that renders a control in its own panel instead (e.g. the File Manager's
 // `filesystem` usage bar + `lastSaved` readout, drawn by renderFileManager) sets the hidden flag on
 // the C++ side, so the generic list skips it and the value never shows twice. Used by BOTH render
@@ -1947,7 +1947,7 @@ function controlRendersGenerically(mod, ctrl) {
 function createControl(moduleName, moduleType, ctrl) {
     const row = document.createElement("div");
     row.className = "control-row";
-    // Expert-only controls (only reachable here when expert mode is on — see controlRendersGenerically)
+    // Expert-only controls (only reachable here when expert mode is on: see controlRendersGenerically)
     // get a distinct treatment so they read as a different tier: a left accent stripe + muted label.
     if (ctrl.advanced) row.classList.add("control-advanced");
     row.dataset.key = ctrl.name;
@@ -1955,7 +1955,7 @@ function createControl(moduleName, moduleType, ctrl) {
     const label = document.createElement("label");
     label.className = "control-label";
     // The expertMode toggle itself carries the wrench glyph (via CSS ::before), so it reads as the switch
-    // that governs the 🔧 controls — the toggle is never `advanced` (it must always be reachable), so key
+    // that governs the 🔧 controls: the toggle is never `advanced` (it must always be reachable), so key
     // it by name rather than the flag.
     if (moduleName === "System" && ctrl.name === "expertMode") label.classList.add("control-label--expert");
     label.textContent = ctrl.name;
@@ -1965,7 +1965,7 @@ function createControl(moduleName, moduleType, ctrl) {
     const def = defaultFor(moduleType, ctrl.name, ctrl);
 
     // numberField: a numeric control that opted out of the slider (server sets it for a value where each
-    // integer is a discrete identity, not a magnitude — a PHY/I2C address, a channel). Render a plain
+    // integer is a discrete identity, not a magnitude: a PHY/I2C address, a channel). Render a plain
     // number input, same shape as the `pin` case, whatever the underlying numeric type. The WS-patch path
     // (updateModuleControls) reads the input by [data-mid][data-key] the same way, so no extra patch case.
     const isNumericType = ctrl.type === "uint8" || ctrl.type === "uint16" || ctrl.type === "int16" ||
@@ -2005,11 +2005,11 @@ function createControl(moduleName, moduleType, ctrl) {
             const input = document.createElement("input");
             input.type = "range";
             // A fader is the same range input stood on end (CSS `writing-mode: vertical-lr`), so the
-            // value, the range and the WS live-update path are untouched — only the orientation and
+            // value, the range and the WS live-update path are untouched: only the orientation and
             // the row's layout change. Consecutive faders sit side by side as one bank.
             // An encoder is the same range input drawn as a KNOB: the input itself is hidden and an
             // SVG dial sits on top, so the value, the range, the WS update path and keyboard access
-            // are the range input's — only the appearance changes. Dragging vertically turns it,
+            // are the range input's: only the appearance changes. Dragging vertically turns it,
             // which is the gesture a real encoder takes.
             if (ctrl.encoder) {
                 input.classList.add("encoder-input");
@@ -2022,7 +2022,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 input.classList.add("fader-input");
                 row.classList.add("control-fader");
                 row.appendChild(buildSevenSeg(input));
-                // Right-click a fader to see (and later choose) what it drives — the same
+                // Right-click a fader to see (and later choose) what it drives: the same
                 // configure-on-the-control rule the pads follow.
                 attachTargetPopup(row, input, ctrl);
             }
@@ -2147,7 +2147,7 @@ function createControl(moduleName, moduleType, ctrl) {
             // spanning the full type is useless to drag.
             //
             // An int32 does NOT: its range is what the script declared, and narrowing an
-            // unbounded one to -100..200 hid every value outside that window — a control
+            // unbounded one to -100..200 hid every value outside that window: a control
             // declared 0..1000 sitting at 900 rendered as a slider pinned to its top with the
             // real value unreachable. A bounded int32 keeps its bounds; an unbounded one spans
             // the type, which the number input beside the slider makes usable.
@@ -2222,7 +2222,7 @@ function createControl(moduleName, moduleType, ctrl) {
             input.value = ctrl.value ?? "";
             input.dataset.mid = moduleName;
             input.dataset.key = ctrl.name;
-            // ctrl.readonly is a UI hint (the server still accepts writes — the
+            // ctrl.readonly is a UI hint (the server still accepts writes: the
             // flag exists for values pushed by tooling like MoonDeck or the
             // web installer, where editing in the device UI is by-convention
             // disallowed). `readOnly` lets the user select/copy the text but
@@ -2256,7 +2256,7 @@ function createControl(moduleName, moduleType, ctrl) {
             // event, so a ResizeObserver is the standard way to observe it; store the pixel height keyed by
             // "<module>:<control>". Use the observed height (not the inline style, which the initial observe
             // fire and a layout-driven change wouldn't set), track the last saved value, and write only on a
-            // real change — so the initial fire and idle re-observations don't thrash localStorage. rAF-
+            // real change: so the initial fire and idle re-observations don't thrash localStorage. rAF-
             // coalesced so a drag saves once per frame at most.
             let taRaf = 0, taPrevH = Math.round(savedH > 0 ? savedH : 0);
             const taObserver = new ResizeObserver((entries) => {
@@ -2441,7 +2441,7 @@ function createControl(moduleName, moduleType, ctrl) {
         case "password": {
             // ctrl.value arrives XOR-obfuscated + base64-encoded (see
             // HttpServerModule PASSWORD_XOR_KEY). Decode it so the input holds
-            // the real stored password — masked by the password input, revealed
+            // the real stored password: masked by the password input, revealed
             // by hold-to-peek. The obfuscation is trivially reversible by design.
             const input = document.createElement("input");
             input.type = "password";
@@ -2453,7 +2453,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, input.value));
             });
             row.appendChild(input);
-            // Hold-to-peek button — reveals the stored password.
+            // Hold-to-peek button: reveals the stored password.
             const peek = document.createElement("button");
             peek.className = "peek-btn";
             peek.type = "button";
@@ -2484,7 +2484,7 @@ function createControl(moduleName, moduleType, ctrl) {
             // popup stays open for several frames (seconds, if deliberating) while
             // a continuously-refreshed module keeps pushing state over the WS; an
             // unguarded `sel.value = ctrl.value` patch during that window snaps the
-            // menu back to the old option and visibly closes it — the user never
+            // menu back to the old option and visibly closes it: the user never
             // gets to pick. We mark the select "open" on pointerdown (fires BEFORE
             // the popup opens, unlike focus, which some browsers delay or skip) and
             // clear it on change/blur; updateModuleControls skips any select marked
@@ -2502,7 +2502,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 // No refetch/re-render here: blendMode/opacity-style selects don't
                 // change the control SET, and a control that does (a hidden-flag
                 // flip) is reconciled in place by syncVisibleControls on the next
-                // WS push — so the card (and its expanded state) is preserved.
+                // WS push: so the card (and its expanded state) is preserved.
                 // A full refetchState() rebuilt the DOM and collapsed the card.
             });
             row.appendChild(sel);
@@ -2510,7 +2510,7 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         case "palette": {
-            // A color-palette dropdown where EVERY option shows its own gradient — so the colors
+            // A color-palette dropdown where EVERY option shows its own gradient: so the colors
             // are visible before selecting, not just after. A native <select> can't do this
             // (browsers ignore a gradient background on <option>, and the macOS popup is OS-drawn),
             // so this is a custom dropdown: a trigger button (selected swatch + name + caret) that
@@ -2613,7 +2613,22 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         case "display": {
-            // Read-only string. Updates via WS push.
+            // Read-only string. Updates via WS push. A value that IS a url renders as a LINK:
+            // the only reason to show one is to open or copy it. Device-relative ("/hls/...") on
+            // purpose: the anchor resolves it against the page's own origin, so the link works
+            // and copies correctly whatever address the device was reached on, and cannot go
+            // stale when its IP changes.
+            if (isUrlValue(ctrl.value)) {
+                const a = document.createElement("a");
+                a.className = "display control-url";
+                a.dataset.mid = moduleName;
+                a.dataset.key = ctrl.name;
+                a.target = "_blank";
+                a.rel = "noopener";
+                setUrlDisplay(a, ctrl.value);
+                row.appendChild(a);
+                break;
+            }
             const span = document.createElement("span");
             span.className = "display";
             span.dataset.mid = moduleName;
@@ -2637,7 +2652,7 @@ function createControl(moduleName, moduleType, ctrl) {
         }
         case "ipv4": {
             // Editable dotted-quad. Wire format is the same string the user
-            // types — the device parses + validates server-side and rejects
+            // types: the device parses + validates server-side and rejects
             // malformed values with 400. Inline validation on the client is
             // a future enhancement; today an invalid value goes to the
             // server and the response surfaces the rejection.
@@ -2701,7 +2716,7 @@ function createControl(moduleName, moduleType, ctrl) {
             // summary objects; ctrl.detail = parallel array of detail objects (same
             // order). Render one clickable row per summary; clicking toggles a detail
             // panel below it. Self rows (summary.self === true) get a marker. Fully
-            // generic — the engine decides the fields; the UI just renders objects.
+            // generic: the engine decides the fields; the UI just renders objects.
             row.classList.add("control-list-row");
             const rows = Array.isArray(ctrl.value) ? ctrl.value : [];
             const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
@@ -2720,7 +2735,7 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         default:
-            // Unknown control type — skip silently. New types may be added engine-side
+            // Unknown control type: skip silently. New types may be added engine-side
             // without breaking the UI; they just don't render until handled here.
             return null;
     }
@@ -2730,7 +2745,7 @@ function createControl(moduleName, moduleType, ctrl) {
 
 // Rebuild a List control's entries inside `container` from `rows` (summary objects)
 // and `details` (parallel detail objects). `openSet` is a Set<string> of summary
-// texts whose detail panels start expanded — pass `new Set()` for a fresh build, or
+// texts whose detail panels start expanded: pass `new Set()` for a fresh build, or
 // the currently-open set on a live re-render so an expanded row stays open. Shared by
 // createControl (initial) and updateModuleControls (WS live patch) so the two can't drift.
 //
@@ -2740,16 +2755,16 @@ function createControl(moduleName, moduleType, ctrl) {
 // descriptors. When editable is falsy the render is exactly the read-only path (unchanged).
 // Stable key for the open-detail set. An editable row carries a durable `id` (survives
 // field edits: renaming a preset or changing its channel count doesn't change the id), so
-// key on it — otherwise changing a field that shows in the summary label would fold the
+// key on it: otherwise changing a field that shows in the summary label would fold the
 // open row shut (the label-text key no longer matches after the rebuild). A read-only row
 // (e.g. a discovered device) has no `id`; fall back to the summary label, which is stable
-// enough there (identity by display text, the previous behaviour, unchanged for devices).
+// enough there (identity by display text, the previous behavior, unchanged for devices).
 function listRowKey(item, labelText) {
     return (item && item.id != null) ? "#" + item.id : labelText;
 }
 
 // A grid of uniform pads, one per row: the presentation a `pads` list asks for. Rows are unchanged
-// — this is the same data the stacked list renders, laid out for triggering rather than reading.
+//: this is the same data the stacked list renders, laid out for triggering rather than reading.
 // Uniform size on purpose: sizing each pad to its label (as MoonLight does) makes a ragged grid that
 // is harder to scan and to hit; a fixed pad with a truncated label is what a MIDI deck looks like.
 // Long-press as the touch equivalent of a right-click: a touch device has no second button, so the
@@ -2811,9 +2826,9 @@ function openSurfacePopup(anchorEl, title, build) {
 
 // The edit form behind a right-click on a pad: rename, choose what it captures, save over it, or
 // delete. These are the SAME operations the card's bottom controls performed, moved onto the thing
-// they act on — a form at the bottom of the card cannot say which pad it means.
+// they act on: a form at the bottom of the card cannot say which pad it means.
 // What a preset captures: exactly ONE of the four top-level subtrees. A radio group rather than four
-// checkboxes, so "a look" and "a geometry" are the only things expressible — the combinations that
+// checkboxes, so "a look" and "a geometry" are the only things expressible: the combinations that
 // used to be possible were the hard part to explain and the hard part to display.
 function buildCaptureToggles(body, moduleName) {
     const mod = findModule(moduleName);
@@ -2922,16 +2937,16 @@ function openPadEditor(anchorEl, moduleName, ctrlName, item, slot) {
     });
 }
 
-// A rotary knob driving a range input. The input stays in the DOM (hidden) so every other path —
-// the WS live patch, defaults, keyboard — keeps working against it unchanged; this only draws the
+// A rotary knob driving a range input. The input stays in the DOM (hidden) so every other path -
+// the WS live patch, defaults, keyboard: keeps working against it unchanged; this only draws the
 // value and turns drags into value changes.
-/// "What does this strip drive?" — the same popup for an encoder and a fader, since the question and
+/// "What does this strip drive?": the same popup for an encoder and a fader, since the question and
 /// the answer are identical for both. Right-click on a pointer, long-press on touch.
 function attachTargetPopup(row, input, ctrl) {
     const show = () => openSurfacePopup(input, ctrl.name, (body) => {
         const line = document.createElement("div");
         line.className = "surface-popup-row";
-        line.textContent = ctrl.target ? `drives ${ctrl.target}` : "unassigned — no target yet";
+        line.textContent = ctrl.target ? `drives ${ctrl.target}` : "unassigned: no target yet";
         body.appendChild(line);
     });
     row.addEventListener("contextmenu", (e) => { e.preventDefault(); show(); });
@@ -2950,7 +2965,7 @@ function buildKnob(input, ctrl) {
     const NS = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(NS, "svg");
     svg.setAttribute("viewBox", "0 0 40 40");
-    // The arc runs from 7 o'clock to 5 o'clock — the 270° sweep a real encoder cap shows, with the
+    // The arc runs from 7 o'clock to 5 o'clock: the 270° sweep a real encoder cap shows, with the
     // gap at the bottom so the pointer never sits in an ambiguous place.
     const track = document.createElementNS(NS, "circle");
     track.setAttribute("cx", "20"); track.setAttribute("cy", "20"); track.setAttribute("r", "15");
@@ -2983,7 +2998,7 @@ function buildKnob(input, ctrl) {
         pointer.setAttribute("y2", String(20 + 13 * Math.sin(ang)));
     };
     draw();
-    // Redraw when the value changes from anywhere — a drag here, or a WS push patching the input.
+    // Redraw when the value changes from anywhere: a drag here, or a WS push patching the input.
     input.addEventListener("input", draw);
     input.addEventListener("change", draw);
     wrap._redraw = draw;
@@ -3077,7 +3092,7 @@ function buildSevenSeg(input) {
     }
     wrap.appendChild(svg);
     const draw = () => {
-        // Right-aligned, blank-padded: "  7", " 42", "255" — how a 3-digit module displays.
+        // Right-aligned, blank-padded: "  7", " 42", "255": how a 3-digit module displays.
         const txt = String(Math.round(Number(input.value))).padStart(3, " ").slice(-3);
         digits.forEach((map, i) => {
             const on = SEG7[txt[i]] ?? "";
@@ -3132,7 +3147,7 @@ function buildListPads(container, rows, opts) {
             const hole = document.createElement("button");
             hole.type = "button";
             hole.className = "list-pad list-pad-empty";
-            hole.title = `pad ${i + 1} (empty) — click to save the current state here`;
+            hole.title = `pad ${i + 1} (empty): click to save the current state here`;
             hole.addEventListener("click", () => openPadEditor(hole, moduleName, ctrlName, null, i));
             hole.addEventListener("dragover", (e) => {
                 e.preventDefault();
@@ -3248,14 +3263,14 @@ function buildListEntries(container, rows, details, openSet, opts) {
     }
     // Rows live in their own scroll box so a long list (e.g. the seeded fixture presets) caps its
     // height (~5 rows, see .list-scroll in the CSS) and scrolls, instead of eating the whole card.
-    // The "+ Add" button stays OUTSIDE this box, pinned below the scroll area — the standard
+    // The "+ Add" button stays OUTSIDE this box, pinned below the scroll area: the standard
     // scrollable-list-with-fixed-footer pattern.
     const scroll = document.createElement("div");
     scroll.className = "list-scroll";
     container.appendChild(scroll);
     rows.forEach((item, i) => {
         const entry = document.createElement("div");
-        // Row classes: the `self` marker + a generic `severity` marker (rowSeverityClass) — both are
+        // Row classes: the `self` marker + a generic `severity` marker (rowSeverityClass): both are
         // field-name conventions the engine opts into, no per-module UI code.
         const sevClass = rowSeverityClass(item);
         entry.className = "list-entry" + (item && item.self ? " list-self" : "") +
@@ -3265,7 +3280,7 @@ function buildListEntries(container, rows, details, openSet, opts) {
         summary.tabIndex = 0;
         summary.setAttribute("role", "button");
         // Freshness dot (always-visible age at a glance) when the row carries a `*Sec`
-        // duration; colored by ageBucketClass. Generic — no device knowledge here.
+        // duration; colored by ageBucketClass. Generic: no device knowledge here.
         // The age fields (`ageSec`/`cached`) live in the DETAIL object, not the summary,
         // so read the detail for the dot (it also carries `self`); fall back to the
         // summary item when a list has no separate detail.
@@ -3282,17 +3297,17 @@ function buildListEntries(container, rows, details, openSet, opts) {
         summary.appendChild(label);
         const detailPanel = document.createElement("div");
         detailPanel.className = "list-detail";
-        // Keyed via listRowKey (stable `id` for editable rows, else the label text — see the
+        // Keyed via listRowKey (stable `id` for editable rows, else the label text: see the
         // helper) so an expanded row stays expanded across a live re-render, even when the field
         // that changed is shown in the summary label (e.g. a preset's channel count).
         detailPanel.hidden = !openSet.has(listRowKey(item, label.textContent));
         summary.setAttribute("aria-expanded", String(!detailPanel.hidden));
         const locked = !!(item && item.locked);
         if (editable) {
-            // Right-side row actions: delete (✕) then a `⠿` drag-to-reorder handle, in that order —
+            // Right-side row actions: delete (✕) then a `⠿` drag-to-reorder handle, in that order -
             // handles on the RIGHT, after delete, keep every row's controls aligned in one column
             // (the common data-grid layout). A `locked` (seeded) row isn't draggable and has no
-            // delete — the server refuses both, so the UI shows neither, and locked rows have an
+            // delete: the server refuses both, so the UI shows neither, and locked rows have an
             // empty actions area that still aligns. The buttons stop click propagation so they don't
             // toggle the detail panel. entry carries the row id so a drop knows what moved where.
             entry.dataset.rowId = item.id;
@@ -3316,7 +3331,7 @@ function buildListEntries(container, rows, details, openSet, opts) {
                 handle.addEventListener("click", (e) => e.stopPropagation());
                 // The entry is draggable, gated by the SAME mechanism the module-card drag uses
                 // (attachDragHandlers): a capture-phase MOUSEDOWN handler sets `draggable` based on where
-                // the grab landed. HTML5 drag initiates from mousedown, so the flag must be set there —
+                // the grab landed. HTML5 drag initiates from mousedown, so the flag must be set there -
                 // a pointerdown handler runs too late (the browser has already read draggable at
                 // mousedown) and dragstart never fires. Here the row drags ONLY when the grab is on the
                 // handle (a click elsewhere expands the row); the touchstart mirror arms mobile drag.
@@ -3379,7 +3394,7 @@ function buildListEntries(container, rows, details, openSet, opts) {
 
 // Render an editable row's detail: each descriptor in `detail.fields[]` becomes an inline
 // control (text→<input>, uint8→<input type=number>, select→<select>). On change we call
-// listSetField(...) and let the normal refresh reflect the persisted state — no optimistic
+// listSetField(...) and let the normal refresh reflect the persisted state: no eager local
 // local mutation. A field with `readonly:true` renders as a plain read-only value (same look
 // as fillListDetail). Fields carry a dragTs cooldown so a WS state push mid-edit can't revert
 // what's being typed/picked, mirroring the select/text guards in createControl.
@@ -3403,7 +3418,7 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
         } else if (f.type === "button") {
             // A row ACTION rather than a value: the click PATCHes the field like any edit, and the
             // source reads the arrival as "do this to this row" (ControlModule's preset `apply`).
-            // Generic on purpose — a row button is a primitive the list has lacked, not a
+            // Generic on purpose: a row button is a primitive the list has lacked, not a
             // preset-specific affordance. Refetches, because an action typically changes the row set
             // or the wider tree, unlike a field edit which the WS push reconciles.
             const btn = document.createElement("button");
@@ -3421,7 +3436,7 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
             sel.className = "list-field-input";
             sel.dataset.dragkey = dragKey;
             // Options come from the field's inline `options`, or (the common case for a repeated select
-            // like the channel-role pickers) from the list's shared `optionSets` via `optionsRef` — so
+            // like the channel-role pickers) from the list's shared `optionSets` via `optionsRef`: so
             // the option array is sent once per list, not re-inlined in every row (see writeListOptionSets).
             const fieldOptions = f.options || (f.optionsRef ? optionSets[f.optionsRef] : null) || [];
             fieldOptions.forEach((opt, idx) => {
@@ -3451,7 +3466,7 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
             inp.addEventListener("change", () => {
                 dragTs[dragKey] = Date.now();
                 // Guard against empty/invalid entry (parseInt → NaN) and clamp to the control's
-                // range — the HTML min/max attributes don't enforce a hand-typed value, so a stray
+                // range: the HTML min/max attributes don't enforce a hand-typed value, so a stray
                 // "" or out-of-range number would otherwise reach the device as NaN / an overflow.
                 let v = parseInt(inp.value, 10);
                 if (!Number.isFinite(v)) v = f.min ?? 0;
@@ -3479,8 +3494,8 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
     }
 }
 
-// Join a list row's scalar fields into a one-line summary (skips marker fields — `self`, `severity`
-// — that render as row styling rather than text, and any nested objects). Generic: the engine names
+// Join a list row's scalar fields into a one-line summary (skips marker fields: `self`, `severity`
+//: that render as row styling rather than text, and any nested objects). Generic: the engine names
 // the fields.
 function listSummaryText(item) {
     if (!item || typeof item !== "object") return String(item ?? "");
@@ -3493,7 +3508,7 @@ function listSummaryText(item) {
 // Render a list row's detail object as read-only key/value rows. Scalars print as-is;
 // an array of scalars (e.g. a device's `speaks:["http"]` or `via:["mdns","scan"]`)
 // renders as small chips so multi-valued fields like the discovery source are visible
-// at a glance. Nested objects are still skipped (no use case yet). Generic — the engine
+// at a glance. Nested objects are still skipped (no use case yet). Generic: the engine
 // names the fields, so a new array field shows up with no UI change here.
 function fillListDetail(panel, detail) {
     panel.replaceChildren();
@@ -3505,13 +3520,13 @@ function fillListDetail(panel, detail) {
         // exactly one (mutually exclusive in DevicesModule), but skip ageSec when a
         // `cached` key is also present so any other source can't produce two conflicting
         // "last seen" rows. Match the cached branch's render condition, which fires on
-        // key EXISTENCE (`k === "cached"`), not truthiness — so gate on the key being
+        // key EXISTENCE (`k === "cached"`), not truthiness: so gate on the key being
         // present, not on its value. (Robust-to-any-input, generic.)
         if (k === "ageSec" && "cached" in detail) continue;
         const r = document.createElement("div");
         r.className = "list-detail-row";
         const kEl = document.createElement("span");
-        // A `*Sec` field is a duration in seconds (e.g. a device's `ageSec`) — show it
+        // A `*Sec` field is a duration in seconds (e.g. a device's `ageSec`): show it
         // under a plainer label ("last seen") and as a relative time, not a bare count.
         // `cached` is the sibling: a restored device not yet re-seen live → "last seen:
         // cached" rather than a fake recent time.
@@ -3536,7 +3551,7 @@ function fillListDetail(panel, detail) {
             if (ageClass) vEl.classList.add(ageClass);
         } else if (typeof v === "string" && /^https?:\/\//.test(v)) {
             // A value that is an http(s) URL (e.g. a device's `url`) renders as a link that
-            // opens in a new tab — generic, any ListSource detail can surface one. rel
+            // opens in a new tab: generic, any ListSource detail can surface one. rel
             // guards the opened page from reaching back via window.opener.
             const a = document.createElement("a");
             a.href = v;
@@ -3554,9 +3569,9 @@ function fillListDetail(panel, detail) {
 }
 
 // Freshness bucket for a duration-in-seconds (a `*Sec` field): green < 1 min, orange
-// < 1 hour, red beyond. Generic — any duration field a ListSource emits gets the same
+// < 1 hour, red beyond. Generic: any duration field a ListSource emits gets the same
 // scale; nothing device-specific here. (DevicesModule's ageSec is the first user: a
-// device unseen > 24h is aged out of the list entirely, so "red" spans 1h–24h.)
+// device unseen > 24h is aged out of the list entirely, so "red" spans 1h-24h.)
 function ageBucketClass(sec) {
     if (!Number.isFinite(sec) || sec < 0) return "";
     if (sec < 60) return "age-fresh";
@@ -3579,8 +3594,8 @@ function rowAgeClass(item) {
 
 // Severity CSS class from a row's `severity` field ("error"/"warn"), or "" if none/absent. Generic
 // over the field name, exactly like rowAgeClass over `*Sec`: any ListSource that emits a `severity`
-// string gets the same visual (a colored row marker). PinsModule is the first user — it flags a GPIO
-// claim on a reserved/strap/input-only pin — but nothing here is pins-specific; a task in a bad state
+// string gets the same visual (a colored row marker). PinsModule is the first user: it flags a GPIO
+// claim on a reserved/strap/input-only pin: but nothing here is pins-specific; a task in a bad state
 // or a device with an error could emit `severity` and light up the same way.
 function rowSeverityClass(item) {
     if (!item || typeof item !== "object") return "";
@@ -3590,10 +3605,10 @@ function rowSeverityClass(item) {
 }
 
 // Render a seconds-ago count as a short relative time ("just now", "2m ago", "3h ago",
-// "5d ago"). Snapshot at state-push time — it refreshes when the list re-renders, not
+// "5d ago"). Snapshot at state-push time: it refreshes when the list re-renders, not
 // per second. Mirrors the device-side ageSec (now - lastSeenMs); kept simple on purpose.
 function relativeAge(sec) {
-    if (!Number.isFinite(sec) || sec < 0) return "—";
+    if (!Number.isFinite(sec) || sec < 0) return "-";
     if (sec < 10) return "just now";
     if (sec < 60) return `${sec}s ago`;
     if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
@@ -3630,7 +3645,7 @@ function debounceSend(key, ms, fn) {
 
 // Password controls arrive XOR-obfuscated + base64-encoded (see
 // HttpServerModule PASSWORD_XOR_KEY). This reverses it. The XOR key is a fixed
-// shared constant, not a secret — this is obfuscation so the password is not
+// shared constant, not a secret: this is obfuscation so the password is not
 // plainly readable in a raw /api/state response, not real encryption.
 const PW_XOR_KEY = 0x5A;
 function decodePassword(encoded) {
@@ -3669,14 +3684,31 @@ function fmtProgressLabel(ctrl) {
     return Math.round(v / 1024) + "KB / " + Math.round(t / 1024) + "KB";
 }
 
-// "<value> <unit>" — treats null / undefined / 0 as "unavailable" so the
+// "<value> <unit>": treats null / undefined / 0 as "unavailable" so the
 // UI doesn't render bogus "0 dBm" when the device is in a state where the
 // metric isn't meaningful. The device's updateMetrics() writes 0 to rssi /
 // txPower in non-WiFi states; the control is hidden in those states, but
 // if anyone toggles hidden off (DevTools, future code path) the unit-with-
 // zero rendering would still mislead. Real metric values are never zero
-// in practice — RSSI is negative, TX power is 0..127 dBm (zero only on
-// driver-uninitialised reads).
+// in practice: RSSI is negative, TX power is 0..127 dBm (zero only on
+// driver-uninitialized reads).
+// Is a display control's value a url? One predicate, because BOTH render paths (renderCards and
+// updateModuleControls) have to agree on which values become links: a rule applied in only one
+// of them shows a link that the next state push replaces with plain text.
+function isUrlValue(v) {
+    return typeof v === "string" && (v.startsWith("/") || /^https?:\/\//.test(v));
+}
+
+// Point a link at `value` and show it ABSOLUTE. The stored value is device-relative, but a user
+// reading the card wants the address they could paste into a player, and `a.href` resolves that
+// against the current origin for us.
+function setUrlDisplay(a, value) {
+    const v = value ?? "";
+    if (a.getAttribute("href") === v) return;   // unchanged: leave the DOM alone
+    a.setAttribute("href", v);
+    a.textContent = a.href;
+}
+
 function fmtDisplayInt(ctrl) {
     const v = ctrl.value;
     const u = ctrl.unit || "";
@@ -3690,11 +3722,11 @@ function fmtDisplayInt(ctrl) {
 
 // Apply a diff-on-the-wire patch onto the in-memory `state`. Each entry is {path,value} where path is
 // "<module>/<control>" for a control value, or "<module>/@<field>" for a live module-header field
-// (tickTimeUs / dynamicBytes — shown per card). Module names are unique tree-wide (the device dedups
+// (tickTimeUs / dynamicBytes: shown per card). Module names are unique tree-wide (the device dedups
 // them), so the first path segment identifies the module. Mutates `state` in place; the caller then
 // calls updateValues() to refresh the DOM without a rebuild. An unknown path is skipped (a resync will
 // reconcile). List controls: the value is the full summary array (the device sends a changed list's
-// whole value — see the plan), so we replace it wholesale, which updateModuleControls/renderCards read.
+// whole value: see the plan), so we replace it wholesale, which updateModuleControls/renderCards read.
 function applyStatePatch(patch) {
     const byName = new Map(allModules().map(m => [m.name, m]));
     for (const entry of patch) {
@@ -3716,7 +3748,7 @@ function applyStatePatch(patch) {
 
 /// Refresh the decorations drawn ON TOP of a range input (the knob dial, the seven-segment readout).
 ///
-/// A WebSocket patch assigns `input.value` directly, which fires NEITHER `input` NOR `change` — those
+/// A WebSocket patch assigns `input.value` directly, which fires NEITHER `input` NOR `change`: those
 /// only fire for user gestures. Anything listening for them therefore keeps showing the value it was
 /// built with, which is why the readouts read 880/50 while the knobs pointed elsewhere. Call this
 /// wherever a range input's value is set programmatically.
@@ -3736,11 +3768,11 @@ function updateValues() {
         // refresh the stats line for this module if visible
         const statsEl = document.querySelector(`.card-stats[data-mid="${cssEscape(mod.name)}"]`);
         if (statsEl) { statsEl.textContent = formatStats(mod); statsEl.title = formatStatsTitle(mod); }
-        // refresh status row — insert it if status appeared after card build
+        // refresh status row: insert it if status appeared after card build
         let statusRow = document.querySelector(`[data-status-mid="${cssEscape(mod.name)}"]`);
         if (mod.status) {
             if (!statusRow) {
-                // Card exists but had no status at build time — insert now before first control.
+                // Card exists but had no status at build time: insert now before first control.
                 const card = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
                 const host = card && (card.querySelector(".card-controls-collapse") || card);
                 if (host) {
@@ -3805,29 +3837,29 @@ function allModules() {
 // changed the DOM. No-op (returns false) on the common frame where nothing moved.
 //
 // Position-stable by design: it inserts each newly-visible row at its correct
-// index among the existing control rows and removes rows that became hidden —
+// index among the existing control rows and removes rows that became hidden -
 // it does NOT tear down and re-append every row (that would land them after the
 // card's child-module block / install-picker mount, never converge, and re-fire
-// every WS tick — a render loop that wedges the UI).
+// every WS tick: a render loop that wedges the UI).
 function syncVisibleControls(mod) {
     const card = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
     if (!card) return false;
-    // The controls host is THIS card's own collapse wrapper — must be a DIRECT
+    // The controls host is THIS card's own collapse wrapper: must be a DIRECT
     // child (`:scope >`), not any descendant: a container card (e.g. Effects) nests
     // its child cards (Layer) inside .card-children, and a plain
     // `card.querySelector(".card-controls-collapse")` would reach down and match
     // the CHILD's wrapper. That made Effects adopt Layer's control rows as its own,
     // so both cards saw a control-set mismatch every WS frame and rebuilt each
-    // other's rows in a loop — tearing down (and closing) any open <select>.
+    // other's rows in a loop: tearing down (and closing) any open <select>.
     const host = card.querySelector(":scope > .card-controls-collapse") || card;
 
     const wantNames = mod.controls.filter(c => controlRendersGenerically(mod, c)).map(c => c.name);
     const haveRows = [...host.querySelectorAll(":scope > .control-row[data-key]")];
     const haveNames = haveRows.map(r => r.dataset.key);
     if (wantNames.length === haveNames.length && wantNames.every((n, i) => n === haveNames[i])) {
-        return false;  // unchanged — the common case, so an idle WS push rebuilds nothing
+        return false;  // unchanged: the common case, so an idle WS push rebuilds nothing
     }
-    // The visible-control set genuinely drifted (a hidden flag flipped — e.g. whiteMode appearing when
+    // The visible-control set genuinely drifted (a hidden flag flipped: e.g. whiteMode appearing when
     // the preset changes). Rebuild to reflect it; latest state wins. We don't defer for an in-progress
     // edit: the drift is a consequence of a real change, and suppressing it would hide that change.
 
@@ -3870,11 +3902,11 @@ function updateModuleControls(mod) {
     // Conditional controls: a module can flip a control's `hidden` flag at runtime
     // (e.g. RmtLedDriver reveals loopbackRxPin while the test is on, NetworkModule
     // reveals static-IP fields). The value-patch loop below only updates controls
-    // already in the DOM — it can't add or remove one. So first detect whether the
+    // already in the DOM: it can't add or remove one. So first detect whether the
     // set of VISIBLE controls drifted from what's rendered, and if so re-render
     // this card's control rows. Cheap: only fires on the rare frame where a hidden
     // flag actually changed.
-    if (syncVisibleControls(mod)) return;  // re-rendered — values are fresh, skip patch
+    if (syncVisibleControls(mod)) return;  // re-rendered: values are fresh, skip patch
 
     for (const ctrl of mod.controls) {
         const mid = cssEscape(mod.name);
@@ -3887,7 +3919,7 @@ function updateModuleControls(mod) {
         // keystroke / drag within the last second, tracked by dragTs), don't let a
         // WS state push overwrite the field with the value it had before the edit
         // landed. The read-only types (display/display-int/time/progress) and the
-        // composite `list` aren't in this set — they always reflect the latest push.
+        // composite `list` aren't in this set: they always reflect the latest push.
         if (userActive && EDITABLE_CONTROL_TYPES.has(ctrl.type)) continue;
 
         switch (ctrl.type) {
@@ -3945,7 +3977,7 @@ function updateModuleControls(mod) {
                 const sel = document.querySelector(`select[data-mid="${mid}"][data-key="${k}"]`);
                 // Never overwrite a select the user currently has OPEN (popup
                 // showing) or focused. data-open is set on pointerdown/focus and
-                // cleared on change/blur — more reliable than document.activeElement,
+                // cleared on change/blur: more reliable than document.activeElement,
                 // which is ambiguous while a native popup is up (the popup is a
                 // separate OS layer on macOS). The 1s dragTs cooldown is the
                 // additional fallback for the frames right after the popup closes.
@@ -3990,6 +4022,10 @@ function updateModuleControls(mod) {
                 break;
             }
             case "display": {
+                // A url-valued display is an <a>, not a <span> (see renderControl), so this path
+                // has to know both shapes or the link goes stale on the next push.
+                const link = document.querySelector(`a.control-url[data-mid="${mid}"][data-key="${k}"]`);
+                if (link) { setUrlDisplay(link, ctrl.value); break; }
                 const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
                 if (span) span.textContent = ctrl.value ?? "";
                 break;
@@ -4032,14 +4068,14 @@ function updateModuleControls(mod) {
                 const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
                 // ONLY REBUILD IF THE LIST ACTUALLY CHANGED. The device pushes full state ~1/sec, so an
                 // unconditional rebuild destroyed + recreated every row (and its inline dropdowns / drag
-                // handlers) every second — collapsing an open dropdown and breaking a drag. Compare the
+                // handlers) every second: collapsing an open dropdown and breaking a drag. Compare the
                 // incoming rows+details against the last rendered snapshot cached on the element; if
                 // identical, do nothing (the common case, and the whole fix). Only a GENUINE change
-                // (someone edited the list) rebuilds — latest state wins, no attempt to protect a stale
+                // (someone edited the list) rebuilds: latest state wins, no attempt to protect a stale
                 // in-progress view (that would suppress the user's own edit from re-rendering). A
                 // rebuild on a real change is momentary and a direct consequence of that change.
                 const sig = JSON.stringify([rows, details]);
-                if (list.dataset.sig === sig) break;   // unchanged — leave the DOM (and any open edit) alone
+                if (list.dataset.sig === sig) break;   // unchanged: leave the DOM (and any open edit) alone
                 list.dataset.sig = sig;
                 // Preserve which detail panels are open across the rebuild. Capture the SAME key
                 // listRowKey emits: the row's stable `id` (on entry.dataset.rowId for editable
@@ -4100,8 +4136,8 @@ function cssEscape(s) {
 // Role → emoji. The role part of the MoonLight emoji-key system
 // (https://moonmodules.org/MoonLight/moonlight/overview/#emoji-key):
 // 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver · 🥞 layer (projectMM
-// addition — every Layer instance, child of the Effects container). The role
-// tag is derived here, not duplicated in every module's tags() string — one
+// addition: every Layer instance, child of the Effects container). The role
+// tag is derived here, not duplicated in every module's tags() string: one
 // source of truth in the UI saves repeating the same character in ~30 module
 // headers and a few bytes per type in /api/types. Each module's tags() then
 // only carries its categorical origin (🐙 WLED · 💫 MoonLight · ⚡️ FastLED)
@@ -4208,7 +4244,7 @@ function openPicker(anchorEl, opts) {
     document.querySelectorAll(".type-picker").forEach(p => p.remove());
 
     // Alphabetical by display name so the picker list is scannable regardless of registration
-    // order (localeCompare — case-insensitive, locale-aware).
+    // order (localeCompare: case-insensitive, locale-aware).
     const filtered = availableTypes
         .filter(t => opts.roles.includes(t.role))
         .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
@@ -4222,7 +4258,7 @@ function openPicker(anchorEl, opts) {
     search.className = "type-picker-search";
     picker.appendChild(search);
 
-    // Emoji chip filter row — every distinct emoji across the role-filtered types.
+    // Emoji chip filter row: every distinct emoji across the role-filtered types.
     // Toggling chips narrows the list (AND: a type must carry all active chips).
     const activeChips = new Set();
     const chipRow = document.createElement("div");
@@ -4381,7 +4417,7 @@ function attachDragHandlers(card, mod) {
 
     // Why we toggle `draggable` on mousedown instead of vetoing in dragstart:
     // HTML5 dragstart's `e.target` is always the draggable element (the card),
-    // not the deepest element under the mouse — so closest(".control-row")
+    // not the deepest element under the mouse: so closest(".control-row")
     // never matches. The reliable signal is the *mousedown* target. Disable
     // drag at mousedown when the grab landed on a control, re-enable on
     // mouseup so the next click on the card body can still drag.
@@ -4392,7 +4428,7 @@ function attachDragHandlers(card, mod) {
     card.addEventListener("touchstart", gate, {capture: true, passive: true});
 
     card.addEventListener("dragstart", (e) => {
-        // Innermost card wins — without stopPropagation a nested child's
+        // Innermost card wins: without stopPropagation a nested child's
         // dragstart would bubble to the parent and the parent's listener
         // would overwrite dataTransfer with its own name.
         e.stopPropagation();
@@ -4405,7 +4441,7 @@ function attachDragHandlers(card, mod) {
         document.querySelectorAll(".drag-over").forEach(c => c.classList.remove("drag-over"));
     });
     card.addEventListener("dragover", (e) => {
-        // Only allow drop on a true sibling — same .card-children container.
+        // Only allow drop on a true sibling: same .card-children container.
         // Cards now nest, so equal data-depth is no longer enough: two effects
         // under different Effects share a depth but aren't siblings.
         const src = document.querySelector(".card.dragging");
@@ -4422,7 +4458,7 @@ function attachDragHandlers(card, mod) {
     });
     card.addEventListener("drop", (e) => {
         e.preventDefault();
-        // Innermost card wins — without stopPropagation the drop bubbles to every
+        // Innermost card wins: without stopPropagation the drop bubbles to every
         // ancestor card that also has a drop handler, firing a SECOND move onto
         // the grandparent's child list (e.g. dropping onto Mirror also dropped
         // onto the Layer card → move into Effects, index 0 → undoing the first
@@ -4432,14 +4468,14 @@ function attachDragHandlers(card, mod) {
         const srcName = e.dataTransfer.getData("text/plain");
         if (!srcName || srcName === mod.name) return;
         // Insert semantics (not swap): the dropped item takes the target row's
-        // slot and the others shift to fill — the standard reorderable-list
-        // behaviour (Finder, Trello, VS Code, SortableJS). Because we drop ONTO a
+        // slot and the others shift to fill: the standard reorderable-list
+        // behavior (Finder, Trello, VS Code, SortableJS). Because we drop ONTO a
         // row (not into a between-rows gap), the landing is the target's absolute
         // index: dragging down lands after the target, dragging up lands before
         // it. That's consistent ("take the target's slot"), just not always-before.
         //
         // Compute target absolute index within parent's children. Identify the
-        // drop-target by name, not by object identity — state is replaced on
+        // drop-target by name, not by object identity: state is replaced on
         // every WS push, so `mod` captured at render time is stale within ~1s.
         const parent = findParent(mod.name);
         if (!parent) return;
@@ -4458,7 +4494,7 @@ function setupStatusBarButtons() {
         preview.resetCamera();
     });
 
-    // Reboot: press once to arm, again to confirm — see armPressTwice. The glyph
+    // Reboot: press once to arm, again to confirm: see armPressTwice. The glyph
     // stays (no armedText); only the title changes.
     const rebootBtn = document.getElementById("reboot-btn");
     if (rebootBtn) {
@@ -4468,7 +4504,7 @@ function setupStatusBarButtons() {
         theme = (theme === "dark") ? "light" : "dark";
         localStorage.setItem(LS_THEME, theme);
         applyTheme(theme);
-        // Repaint the preview to the new theme's background — a live preview would
+        // Repaint the preview to the new theme's background: a live preview would
         // pick it up on its next frame, but an idle one (no incoming frames) needs
         // a nudge so the canvas doesn't keep the previous theme's clear color.
         preview.redraw();
@@ -4510,8 +4546,8 @@ function updateStatusBar() {
     const nameSpan = document.getElementById("device-name");
     if (nameCtrl && nameSpan && nameCtrl.value) {
         nameSpan.textContent = nameCtrl.value;
-        if (document.title !== "projectMM — " + nameCtrl.value) {
-            document.title = "projectMM — " + nameCtrl.value;
+        if (document.title !== "projectMM: " + nameCtrl.value) {
+            document.title = "projectMM: " + nameCtrl.value;
         }
     }
 
@@ -4532,7 +4568,7 @@ function updateStatusBar() {
             parts.push("🧠 " + freeKb + "K");
         }
         // Skip on desktop, where the platform stub reports "0KB" (no real
-        // block measurement / unlimited heap) — same reason heap free above
+        // block measurement / unlimited heap): same reason heap free above
         // only shows when the heap progress control is present.
         if (blockCtrl && blockCtrl.value && blockCtrl.value !== "0KB") {
             parts.push("🧱 " + blockCtrl.value);
@@ -4540,7 +4576,7 @@ function updateStatusBar() {
         statsEl.textContent = parts.join(" · ");
     }
 
-    // Hide reboot button on desktop builds — platform::reboot() just exits the process,
+    // Hide reboot button on desktop builds: platform::reboot() just exits the process,
     // which is not useful from the UI and can be mistaken for a crash.
     const chipCtrl = ctrls.find(c => c.name === "chip");
     const rebootBtn = document.getElementById("reboot-btn");
@@ -4558,7 +4594,7 @@ function updateStatusBar() {
     }
 
     // Cache-first update check: instant from the localStorage cache, background-fetches only
-    // when stale (>1 h). Fire-and-forget — best-effort, never blocks the status-bar render.
+    // when stale (>1 h). Fire-and-forget: best-effort, never blocks the status-bar render.
     checkFirmwareUpdate(false);
 }
 
@@ -4566,7 +4602,7 @@ function updateStatusBar() {
 // 8b. Firmware-update badge
 // ---------------------------------------------------------------------------
 // Browser-side "a newer firmware is out" check, modelled on ESP32-sveltekit's
-// UpdateIndicator (the upstream firmware lineage) — our own code. The device fetches
+// UpdateIndicator (the upstream firmware lineage): our own code. The device fetches
 // nothing; the browser compares the running version (FirmwareUpdateModule.version, pure
 // semver) against GitHub releases and, when newer AND a compatible .bin exists, shows the
 // status-bar badge. Two channels:
@@ -4581,7 +4617,7 @@ function updateStatusBar() {
 // failure hides the badge, never throws.
 
 const RELEASES_API = "https://api.github.com/repos/MoonModules/projectMM/releases";
-const UPDATE_TTL_MS = 60 * 60 * 1000;                     // 1 h — best-effort, well under GitHub's rate limit
+const UPDATE_TTL_MS = 60 * 60 * 1000;                     // 1 h: best-effort, well under GitHub's rate limit
 const PICKER_RELEASE_KEY = "projectMM.picker.releaseTag"; // install-picker restores from this on init
 
 function safeLocalGet(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
@@ -4616,7 +4652,7 @@ async function cachedJson(url, key, force) {
         } catch (e) {
             // console.debug, not warn: an update check failing is routine and not
             // actionable (the device may simply be offline, or GitHub rate-limited),
-            // so keep it out of the default console — debug is hidden unless the user
+            // so keep it out of the default console: debug is hidden unless the user
             // opts into verbose. Both callers hit api.github.com, which sends
             // Access-Control-Allow-Origin and so reads fine from the device origin;
             // the failure path here is for the no-network / rate-limit case.
@@ -4626,7 +4662,7 @@ async function cachedJson(url, key, force) {
                 try {
                     const obj = JSON.parse(raw);
                     // Refresh the timestamp so the per-tick check doesn't re-attempt a
-                    // failing fetch every second — back off until the next TTL window.
+                    // failing fetch every second: back off until the next TTL window.
                     safeLocalSet(key, JSON.stringify({ ts: Date.now(), data: obj.data }));
                     return obj.data;
                 } catch (_) { /* none */ }
@@ -4634,7 +4670,7 @@ async function cachedJson(url, key, force) {
             // No stale entry to serve: NEGATIVE-CACHE the failure (data:null) with a
             // fresh timestamp so the TTL guard above suppresses the next attempt for
             // the back-off window. Without this, every status-bar render (≈4×/s on
-            // each WS push) re-runs the failing fetch — an error storm in the console
+            // each WS push) re-runs the failing fetch: an error storm in the console
             // whenever the device is offline. A null cache hit returns "no update".
             safeLocalSet(key, JSON.stringify({ ts: Date.now(), data: null }));
             return null;
@@ -4708,7 +4744,7 @@ async function stableUpdate(dev, force) {
 // For a device already on a -dev build: is the moving `latest` release newer? Returns its
 // version string (e.g. "2.1.0-dev.7") or null. The latest release's tag is "latest"; its
 // version is published as the release `name` (release.yml), which the GitHub API exposes
-// CORS-readably — unlike the manifest-*.json asset, whose release-asset URL redirects to
+// CORS-readably: unlike the manifest-*.json asset, whose release-asset URL redirects to
 // release-assets.githubusercontent.com (no CORS header), so the device-hosted UI can't read it.
 // We also require the matching firmware .bin asset so the badge never points at a build the
 // device can't install.
@@ -4791,7 +4827,7 @@ async function fmFetchDir(absPath, hidden) {
 }
 
 // Render the File Manager panel: a lazy expand/collapse folder tree (the standard VS Code / Explorer
-// shape — an expanded folder's children are loaded from /api/dir), plus a toolbar (show
+// shape: an expanded folder's children are loaded from /api/dir), plus a toolbar (show
 // hidden, new folder, delete on the selected node). Filesystem ops go through the module's controls
 // (path/new folder/delete); browsing is pure UI over /api/dir, so the module stays minimal.
 function renderFileManager(mod, host) {
@@ -4804,7 +4840,7 @@ function renderFileManager(mod, host) {
     const hidden = st.showHidden;
 
     // Render into a single stable panel that we REPLACE on every re-render (expand / collapse /
-    // select / op) — reusing it in place rather than appending, so the tree updates inline instead
+    // select / op): reusing it in place rather than appending, so the tree updates inline instead
     // of stacking a fresh copy below the old one.
     let panel = host.querySelector(":scope > .fm-panel");
     if (panel) panel.replaceChildren();
@@ -4835,14 +4871,14 @@ function renderFileManager(mod, host) {
     panel.appendChild(hiddenRow);
 
     // Select a path level (from a breadcrumb crumb): update the selection, tidy the tree to just the
-    // path, and re-render. "Reveal and collapse siblings" — keep the ancestor chain root→…→crumb
+    // path, and re-render. "Reveal and collapse siblings": keep the ancestor chain root→…→crumb
     // open, fold every other branch AND the clicked node's own descendants. Selecting a directory
     // drives where ＋ folder/＋ file create and what delete targets.
     const selectPath = (absPath, isDir) => {
         st.selected = absPath;
         st.selectedIsDir = isDir;
         // Rebuild `expanded` as the ancestor chain root→…→crumb, plus the clicked node itself when
-        // it's a directory (so you see one level into it) — every other branch and anything deeper
+        // it's a directory (so you see one level into it): every other branch and anything deeper
         // folds. Root is always expanded (the tree shows its children).
         const segs = absPath.split("/").filter(Boolean);   // "/.config/foo" → [".config","foo"]
         st.expanded = new Set(["/"]);
@@ -4855,7 +4891,7 @@ function renderFileManager(mod, host) {
     };
 
     // Breadcrumb of the selected path, on its OWN row above the toolbar (a deep path wraps freely
-    // without crowding the buttons — key on narrow displays). Click a crumb to jump there; `root`
+    // without crowding the buttons: key on narrow displays). Click a crumb to jump there; `root`
     // deselects back to /.
     const crumbs = document.createElement("div");
     crumbs.className = "fm-crumbs";
@@ -4866,11 +4902,11 @@ function renderFileManager(mod, host) {
         b.addEventListener("click", () => selectPath(absPath, isDir));
         return b;
     };
-    // (Re)build the breadcrumb from the current selection, into the stable `crumbs` element — called
+    // (Re)build the breadcrumb from the current selection, into the stable `crumbs` element: called
     // on first render and by refreshSelectionControls() when a file click updates the selection in place.
     const rebuildCrumbs = () => {
         crumbs.replaceChildren();
-        crumbs.appendChild(mkCrumb("root", "/", true));   // always present — the way back to /
+        crumbs.appendChild(mkCrumb("root", "/", true));   // always present: the way back to /
         const segs = st.selected.split("/").filter(Boolean);   // "/.config/foo" → [".config","foo"]
         segs.forEach((s, i) => {
             crumbs.appendChild(document.createTextNode(" / "));
@@ -4895,7 +4931,7 @@ function renderFileManager(mod, host) {
     const bar = document.createElement("div");
     bar.className = "fm-bar";
 
-    // A filesystem op is an HTTP call on /api/dir?path= (POST=mkdir, DELETE=remove) — the path
+    // A filesystem op is an HTTP call on /api/dir?path= (POST=mkdir, DELETE=remove): the path
     // rides the query, so nothing is stored/persisted on the device. On failure, surface the
     // server's error; on success, re-render the tree from disk.
     const runOp = async (op, targetPath) => {
@@ -4914,11 +4950,11 @@ function renderFileManager(mod, host) {
     const createBase = () => (st.selectedIsDir ? st.selected : fmParent(st.selected));
 
     // Icon-only toolbar: each button shows a glyph; the `title` carries the word for the tooltip +
-    // screen readers (the standard icon-button pattern — an icon with an accessible label).
+    // screen readers (the standard icon-button pattern: an icon with an accessible label).
     const newBtn = document.createElement("button");
     newBtn.className = "fm-tool fm-tool--icon";
     newBtn.textContent = "📁";
-    newBtn.title = "New folder — create a folder inside the selected folder";
+    newBtn.title = "New folder: create a folder inside the selected folder";
     newBtn.addEventListener("click", async () => {
         const base = createBase();
         const name = (prompt("New folder name in " + base + ":") || "").trim();
@@ -4928,12 +4964,12 @@ function renderFileManager(mod, host) {
     });
     bar.appendChild(newBtn);
 
-    // New file: no module op needed — the /api/file POST creates a file at a path (empty body), the
+    // New file: no module op needed: the /api/file POST creates a file at a path (empty body), the
     // same endpoint the editor saves through. Then re-render the tree from disk.
     const newFileBtn = document.createElement("button");
     newFileBtn.className = "fm-tool fm-tool--icon";
     newFileBtn.textContent = "📝";
-    newFileBtn.title = "New file — create an empty file inside the selected folder";
+    newFileBtn.title = "New file: create an empty file inside the selected folder";
     newFileBtn.addEventListener("click", async () => {
         const base = createBase();
         const name = (prompt("New file name in " + base + ":") || "").trim();
@@ -4946,12 +4982,12 @@ function renderFileManager(mod, host) {
     bar.appendChild(newFileBtn);
 
     // Upload: pick desktop files and stream them into the selected folder via the same /api/file
-    // POST the drag-drop path uses (fmDropUpload) — a button for people who don't drag. A hidden
+    // POST the drag-drop path uses (fmDropUpload): a button for people who don't drag. A hidden
     // <input type=file multiple> is the recognizable browser file-picker; clicking the button opens it.
     const upBtn = document.createElement("button");
     upBtn.className = "fm-tool fm-tool--icon";
     upBtn.textContent = "↥";   // pairs with the per-row ↓ download glyph
-    upBtn.title = "Upload — upload files from your computer into the selected folder";
+    upBtn.title = "Upload: upload files from your computer into the selected folder";
     const upInput = document.createElement("input");
     upInput.type = "file";
     upInput.multiple = true;
@@ -5009,7 +5045,7 @@ function renderFileManager(mod, host) {
     const delBtn = document.createElement("button");
     delBtn.className = "fm-tool fm-tool--icon fm-tool--danger";
     delBtn.textContent = "🗑";
-    delBtn.title = "Delete — delete the selected file or empty folder";
+    delBtn.title = "Delete: delete the selected file or empty folder";
     delBtn.disabled = st.selected === "/";   // never delete the root
     armPressTwice(delBtn, () => runOp("delete", st.selected), { armedText: "✓" });
     bar.appendChild(delBtn);
@@ -5049,7 +5085,7 @@ function renderFileManager(mod, host) {
             container.appendChild(e);
             return;
         }
-        // Folders first, then files; each alphabetical — the conventional file-manager sort.
+        // Folders first, then files; each alphabetical: the conventional file-manager sort.
         rows.sort((a, b) => (b.isDir - a.isDir) || a.name.localeCompare(b.name));
         for (const entry of rows) {
             const childPath = joinFsPath(dirPath, entry.name);
@@ -5081,7 +5117,7 @@ function renderFileManager(mod, host) {
             rowEl.appendChild(size);
 
             // Per-file download (device → desktop): a plain <a download> on /api/file forces a save
-            // with the right name, every browser, any file type — the portable counterpart to the
+            // with the right name, every browser, any file type: the portable counterpart to the
             // drag-drop upload (a true drag-*out* has no cross-browser API). Folders get no ⤓;
             // folder-as-zip is backlogged (needs a bundled zip lib + recursion).
             if (!entry.isDir) {
@@ -5096,7 +5132,7 @@ function renderFileManager(mod, host) {
             }
 
             // Single-click SELECTS (highlights, sets the op target for delete); a folder also
-            // toggles expand. DOUBLE-click OPENS a file in the editor — the VS Code / Finder /
+            // toggles expand. DOUBLE-click OPENS a file in the editor: the VS Code / Finder /
             // Explorer norm, and it keeps a distinct "selected but not opened" state for future
             // rename / multi-select / context-menu features.
             rowEl.addEventListener("click", (ev) => {
@@ -5104,13 +5140,13 @@ function renderFileManager(mod, host) {
                 st.selected = childPath;
                 st.selectedIsDir = entry.isDir;
                 if (entry.isDir) {
-                    // A folder click also expands/collapses — rows appear/disappear, so a full
+                    // A folder click also expands/collapses: rows appear/disappear, so a full
                     // re-render is needed.
                     if (isOpen) st.expanded.delete(childPath);
                     else st.expanded.add(childPath);
                     renderFileManager(mod, host);
                 } else {
-                    // A file click only moves the selection — update the highlight IN PLACE, never
+                    // A file click only moves the selection: update the highlight IN PLACE, never
                     // re-render. A re-render here would destroy this row mid-gesture, so the dblclick
                     // that follows a double-click would land on a fresh element and openFileEditor
                     // might not fire. Move the --sel class + refresh the selection-dependent controls.
@@ -5127,7 +5163,7 @@ function renderFileManager(mod, host) {
             }
 
             // Drag-drop upload target: dropping desktop files onto a FOLDER row uploads them into
-            // that folder (tier 1: text/config ≤8KB — see fmDropUpload).
+            // that folder (tier 1: text/config ≤8KB: see fmDropUpload).
             if (entry.isDir) fmMakeDropTarget(rowEl, childPath, hidden, () => renderFileManager(mod, host), st);
             container.appendChild(rowEl);
 
@@ -5143,7 +5179,7 @@ function renderFileManager(mod, host) {
 
     renderChildren("/", tree, 0);
 
-    // Filesystem usage bar below the tree — the File Manager's own `filesystem` control (used /
+    // Filesystem usage bar below the tree: the File Manager's own `filesystem` control (used /
     // total bytes from the platform). Absent (e.g. desktop fs total 0) → nothing shown.
     const fsCtrl = fmFilesystemUsage(mod);
     if (fsCtrl) {
@@ -5164,7 +5200,7 @@ function renderFileManager(mod, host) {
         panel.appendChild(usage);
     }
 
-    // "last saved" readout below the usage bar — how long ago config was persisted. The value is
+    // "last saved" readout below the usage bar: how long ago config was persisted. The value is
     // owned by the FilesystemModule engine (non-UI); the File Manager displays it because this is
     // where filesystem state is topical (same reasoning as the usage bar).
     const savedCtrl = (mod?.controls || []).find(c => c.name === "lastSaved");
@@ -5186,7 +5222,7 @@ function fmFilesystemUsage(mod) {
 // Format a file's text for the editor, by extension. JSON is re-indented (2 spaces) so the persisted
 // config files are readable; anything that doesn't parse is shown verbatim rather than erroring.
 // Extension seam for later: MoonLive `.ml` source wants syntax *highlighting* (a color layer over
-// the textarea), not reformatting — that's a bigger editor change, added when MoonLive `.ml` files
+// the textarea), not reformatting: that's a bigger editor change, added when MoonLive `.ml` files
 // land on disk.
 function fmPrettify(text, relPath) {
     if (relPath.endsWith(".json")) {
@@ -5387,7 +5423,7 @@ function fmShowRestoreReport(entries, refresh, offerRestart) {
 
 
 // Upload each dropped file into destDir via /api/file. Returns the names skipped (too big / failed)
-// so the caller can report them. The File blob is sent as the body directly — the browser streams
+// so the caller can report them. The File blob is sent as the body directly: the browser streams
 // its raw bytes (binary-safe), matching the device's streamed, byte-exact write.
 async function fmDropUpload(destDir, files) {
     const skipped = [];
@@ -5422,21 +5458,21 @@ async function fmLoadInto(textarea, relPath, expectedSize, signal) {
         const text = await res.text();
         // Truncation guard: serveFileContents streams the whole file but stops short on a read error
         // (a filesystem fault mid-stream). Saving a short read back would overwrite the file with a
-        // truncated copy — so if the received byte count is under the size the listing reported, load
+        // truncated copy: so if the received byte count is under the size the listing reported, load
         // read-only. TextEncoder gives the byte length (text.length is chars, not bytes).
         if (typeof expectedSize === "number" &&
             new TextEncoder().encode(text).length < expectedSize) {
             textarea.value = text;
-            return { readOnly: true, message: "truncated read — read-only (save would corrupt the file)" };
+            return { readOnly: true, message: "truncated read: read-only (save would corrupt the file)" };
         }
         // The editor is text/config only: a <textarea> can't faithfully round-trip non-text bytes,
-        // so a re-save would corrupt the file. Treat it as binary — read-only — if it has a NUL OR
+        // so a re-save would corrupt the file. Treat it as binary: read-only: if it has a NUL OR
         // if res.text()'s UTF-8 decode left a replacement char (U+FFFD), which means the bytes
         // weren't valid UTF-8 and are already lossy in the textarea. Use the per-row ⤓ to download
         // such files intact.
         if (text.indexOf("\0") !== -1 || text.indexOf("\uFFFD") !== -1) {
             textarea.value = text;
-            return { readOnly: true, message: "binary / non-text file — read-only" };
+            return { readOnly: true, message: "binary / non-text file: read-only" };
         }
         textarea.value = fmPrettify(text, relPath);
         return { readOnly: false, message: "" };
@@ -5540,7 +5576,7 @@ function fmMountEditor(host, relPath, opts = {}) {
     taObserver.observe(body);
 
     // Blur, Cmd+S and the Save button all call save(), and a blur fires when the button takes
-    // focus — so without this guard one edit issues overlapping POSTs of the same file. `dirty`
+    // focus: so without this guard one edit issues overlapping POSTs of the same file. `dirty`
     // cannot serve as the guard: it is only cleared after the await, so a second trigger passes
     // the check while the first request is still in flight. Saves are serialized rather than
     // dropped, because the second trigger may carry newer keystrokes than the first.
@@ -5557,7 +5593,7 @@ function fmMountEditor(host, relPath, opts = {}) {
             // its status line; a host that supplied its own hidden one gets an alert, because the
             // work is still unsaved and the dot alone does not say why.
             if (!r.ok && statusEl && statusEl.hidden) alert(r.message);
-            // Only clear dirty if the body still holds what we just wrote — typing during the
+            // Only clear dirty if the body still holds what we just wrote: typing during the
             // request means there are newer bytes on screen that nobody has saved yet.
             if (r.ok && body.value === saved) { setDirty(false); if (onSaved) onSaved(path); }
         });
@@ -5573,7 +5609,7 @@ function fmMountEditor(host, relPath, opts = {}) {
 
     // Picking a second file before the first finishes loading must not paint the first file's
     // contents over it. The in-flight request is ABORTED rather than merely ignored, because
-    // fmLoadInto writes the textarea itself — a late response would overwrite the newer file's
+    // fmLoadInto writes the textarea itself: a late response would overwrite the newer file's
     // contents before any check here could run.
     let loadAbort = null;
     const load = async (p, size) => {

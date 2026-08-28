@@ -31,8 +31,11 @@
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "soc/gpio_num.h"
+#include "soc/soc_caps.h"   // SOC_EMAC_SUPPORTED: the S3 and other WiFi-only parts have no EMAC
 #include "esp_eth.h"
-#include "esp_eth_mac_esp.h"
+#if SOC_EMAC_SUPPORTED
+#include "esp_eth_mac_esp.h"   // esp_eth_mac_new_esp32: only exists on a chip with an EMAC
+#endif
 #include "esp_eth_netif_glue.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -210,6 +213,12 @@ esp_eth_handle_t ethHandle_ = nullptr;
 esp_netif_t* ethNetif_ = nullptr;
 
 bool ethStart() {
+#if !SOC_EMAC_SUPPORTED
+    // No internal EMAC on this chip (the S3 and other WiFi-only parts). MoonBase's job is to
+    // get a recovery UI onto the network, and on such a board that is WiFi; the RMII path below
+    // would not link, and its esp_eth_mac_new_esp32 does not even exist there.
+    return false;
+#else
     if (ethCfg_.type != 1) return false;   // 1 = LAN8720/RMII in the app's ethType vocabulary
 
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
@@ -253,6 +262,7 @@ bool ethStart() {
     ethHandle_ = handle;
     ethNetif_ = netif;
     return true;
+#endif  // SOC_EMAC_SUPPORTED
 }
 
 // Tear Ethernet down again when no lease arrived in its window: like the app, MoonBase runs

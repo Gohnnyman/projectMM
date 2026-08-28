@@ -60,3 +60,16 @@ CONFIG_ETH_DMA_TX_BUFFER_NUM=10
 # (Same rationale as sdkconfig.defaults.esp32s3-n16r8.)
 CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=n
 CONFIG_HEAP_HAS_EXEC_HEAP=y
+
+# esp-dsp's PORTABLE C kernels instead of its hand-written P4 assembly. The assembly FFT uses the
+# P4's hardware-loop instruction (esp.lp.setup), and that unit carries a documented erratum -
+# Espressif's own soc_caps: SOC_CPU_HAS_HWLOOP_STATE_BUG, "HWLOOP state doesn't go to DIRTY after
+# executing the last instruction of a loop". FreeRTOS saves those registers lazily, keyed on that
+# DIRTY flag, so a task switched out of the FFT has its loop state silently dropped and faults on
+# resume (bench: a crash loop the moment HLS added a second task, Illegal instruction / Load
+# access fault inside dsps_fft2r_fc32_arp4.S). IDF patches the erratum on the coprocessor RESTORE
+# paths but not on SAVE. Measured cost of the portable kernels: audio tick ~615 us -> ~658 us.
+# A WORKAROUND, not a fix: esp-idf#19025 (ours, naming the unguarded save path) and esp-dsp#119
+# (the same fault from another reporter, on IDF v5.5-beta1). Remove once upstream answers.
+# Lives in the board fragment because every P4 image (rev1/rev3, eth/eth-wifi) layers on it.
+CONFIG_DSP_ANSI=y

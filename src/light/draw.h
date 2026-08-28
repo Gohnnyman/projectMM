@@ -760,16 +760,23 @@ struct Sprite {
 /// (transparent), an out-of-range palette index renders nothing (visible degrade, never UB),
 /// `frame` clamps to the last one. `scale` is nearest-neighbor integer magnification (each
 /// sprite pixel becomes a scale x scale block), which keeps pixel art crisp on a big grid.
+/// `flipX` mirrors the sprite horizontally, so art drawn facing one way serves both directions
+/// without a second copy of every frame.
 /// Every write goes through draw::pixel, so clipping at all four edges is offsetOf's sentinel,
 /// exactly as glyph clips.
 inline void sprite(const Canvas& cv, const sprites::Sprite& s, uint8_t frame,
-                   lengthType x, lengthType y, uint8_t scale = 1) {
+                   lengthType x, lengthType y, uint8_t scale = 1, bool flipX = false) {
     if (!s.pixels || !s.palette || s.w == 0 || s.h == 0 || s.frames == 0 || scale == 0) return;
     if (frame >= s.frames) frame = static_cast<uint8_t>(s.frames - 1);
     const uint8_t* rows = s.pixels + static_cast<size_t>(frame) * s.w * s.h;
     for (uint8_t ry = 0; ry < s.h; ry++) {
         for (uint8_t rx = 0; rx < s.w; rx++) {
-            const uint8_t idx = rows[static_cast<size_t>(ry) * s.w + rx];
+            // flipX mirrors the READ, not the write, so the sprite still lands at (x, y) with the
+            // same footprint. Art that faces one way (a fish, a car, a walking figure) otherwise
+            // needs a second copy of every frame purely to face the other, which doubles the art
+            // and its maintenance for a transform this costs one subtraction.
+            const uint8_t sx0 = flipX ? static_cast<uint8_t>(s.w - 1 - rx) : rx;
+            const uint8_t idx = rows[static_cast<size_t>(ry) * s.w + sx0];
             if (idx == 0 || idx >= s.paletteCount) continue;
             const RGB c = s.palette[idx];
             for (uint8_t sy = 0; sy < scale; sy++)

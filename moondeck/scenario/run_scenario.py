@@ -219,12 +219,11 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
         name = step.get("name")
         if name not in observations:
             continue
-        # observed.<target> stores a rolling [min, max] range per scalar that
-        # only widens when a fresh measurement falls outside the current bounds
-        # — drops JSON churn on routine runs to near-zero while preserving full
-        # drift visibility. When --update-contract was passed, reset the range
-        # to the current single point (the historical range was for the
-        # previous contract). See moondeck/scenario/_observed.py.
+        # observed.<target> keeps a rolling window of samples per scalar and reports
+        # p50/p95/min/max/n over it: the median is what the step normally costs and p95
+        # is its tail, neither of which a single contended run can move far. When
+        # --update-contract was passed, reset to the current single point (the window
+        # described the PREVIOUS contract). See moondeck/scenario/_observed.py.
         existing_obs = step.get("observed", {}).get(target)
         if update_contract:
             new_obs = _observed.reset(observations[name], today)
@@ -264,9 +263,12 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
             touched_contract += 1
 
     if touched_observed or touched_contract:
+        # Serialize, then put each sample window back on one line: a 32-element array
+        # spread over 32 lines hides the statistics it belongs to (_observed.py).
+        text = _observed.compact_samples(
+            json.dumps(scenario, indent=2, ensure_ascii=False))
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(scenario, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+            f.write(text + "\n")
         what = []
         if touched_observed:
             what.append(f"observed[{target}] × {touched_observed}")

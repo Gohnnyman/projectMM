@@ -98,7 +98,7 @@ Over-the-air firmware flashing — the one operation that swaps the binary and n
   devices, where the update overlay carries the progress instead), and on 4 MB
   boards `moonbase`: the second boot image is present, so installs run through the
   reboot-into-MoonBase cycle behind one "updating firmware" overlay, and a **MoonBase** button
-  opens the maintenance image directly ([architecture.md § MoonBase](../../architecture.md#moonbase-the-second-boot-image-4-mb-boards)).
+  opens the maintenance image directly ([architecture.md § MoonBase](../../architecture.md#moonbase-the-second-boot-image)).
 
 Detail: [technical](moxygen/FirmwareUpdateModule.md)
 

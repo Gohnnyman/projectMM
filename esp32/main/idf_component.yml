@@ -35,6 +35,13 @@ dependencies:
   # (dsps_fft2r_fc32) for the microphone spectrum. Float (not fixed-point) because
   # every mic-capable target here has an FPU, where float is faster. Referenced
   # only from platform_esp32_i2s.cpp's audioFft.
+  # H.264 hardware encoder wrapper for the P4's encoder silicon (HLS streaming). Gated on
+  # MM_HLS, not the target: a bare target rule would land it in every P4 image; the Kconfig
+  # gate keeps it out wherever HLS is off. $CONFIG{NAME} syntax per the esp_wifi_remote note.
+  espressif/esp_h264:
+    version: "^1.0.0"
+    rules:
+      - if: "$CONFIG{MM_HLS} == True"
   espressif/esp-dsp:
     version: "^1.5.0"
   # esp_codec_dev — Espressif's audio-codec driver library; we use its ES8311 part

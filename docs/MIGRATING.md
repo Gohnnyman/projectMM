@@ -24,13 +24,29 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### esp32-16mb moves to the MoonBase partition table (2026-08-28)
+
+**Action: erase flash** (USB re-flash). Back up first (File Manager, or the installer's
+bookmarklet on older firmware); restore after the install brings WiFi, config and scripts back.
+
+`esp32-16mb` replaces its dual-OTA layout with
+[MoonBase](architecture.md#moonbase-the-second-boot-image), the same trade the 4 MB variants
+made in the entry below, taken here by choice rather than necessity: the second app slot was
+idle except during an update, so the filesystem grows 7168 to 11264 KB and the device gains
+MoonBase's stronger recovery story (a power cut mid-install boots MoonBase and the user retries
+over the network). One app slot remains, at its full 4096 KB.
+
+Every partition moves, so the existing filesystem volume is not where the new table looks:
+without a backup, WiFi credentials, module config and scripts all re-enter through provisioning.
+A partition table only changes over USB, so an OTA update leaves a device on the old layout.
+
 ### 4 MB boards move to the MoonBase partition table (2026-08-26)
 
 **Action: erase flash** (USB re-flash). Back up first (File Manager ⤓, or the installer's
 bookmarklet on older firmware); restore after the install brings WiFi, config and scripts back.
 
 The 4 MB variants (`esp32`, `esp32-wrover`, `esp32-eth`) replace the dual-OTA layout with
-[MoonBase](architecture.md#moonbase-the-second-boot-image-4-mb-boards): the app slot grows
+[MoonBase](architecture.md#moonbase-the-second-boot-image): the app slot grows
 1856 → 2496 KB and the filesystem 256 → 548 KB, but the filesystem moves (0x3B0000 → 0x360000),
 so the existing volume is not where the new table looks; without a backup, WiFi credentials,
 module config and scripts all re-enter through provisioning. A partition table only changes over USB: a device

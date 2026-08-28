@@ -104,7 +104,7 @@ class FlyingToastersEffect : public EffectBase {
 public:
     static constexpr uint8_t kPool = 20;   // 12 toasters + 8 toast, the control maxima
 
-    const char* tags() const override { return "🔬"; }
+    const char* tags() const override { return "🔬📊"; }  // audio-reactive when soundReactive is set
     Dim dimensions() const override { return Dim::D2; }
 
     /// How many of each fly, and how fast the flock drifts.
@@ -112,12 +112,14 @@ public:
     uint8_t toast    = 3;
     uint8_t speed    = 96;
     uint8_t spriteSize = 0;   // 0 = auto: scale with the grid; both toasters and toast use it
+    bool soundReactive = false;  // move to the music: each sprite on its own band, still in silence
 
     void defineControls() override {
         controls_.addControl("toasters", toasters, 1, 12);
         controls_.addControl("toast", toast, 0, 8);
         controls_.addControl("speed", speed, 1, 255);
         controls_.addControl("spriteSize", spriteSize, 0, 12);
+        controls_.addControl("soundReactive", soundReactive);
     }
 
     void prepare() override {
@@ -158,7 +160,7 @@ public:
         draw::fill(cv, RGB{0, 0, 0});
 
         const uint32_t scale = time_.advance(elapsed());
-        if (scale > 0) pool_.step(scale);
+        if (scale > 0) pool_.stepDriven(scale, soundReactive, wanted());
 
         // The wing flap: one shared BeatPhase, offset per toaster so the flock never syncs.
         flap_.advance(elapsed(), 180);   // ~3 flaps per second across the 4-frame cycle
@@ -200,7 +202,11 @@ private:
         // per second, more pixels per second on a big wall).
         const int32_t base = static_cast<int32_t>(speed) * 2 * sc;
         const int32_t vary = base / 4;
-        const int32_t v = base - vary + rng_.below(static_cast<uint8_t>(vary * 2 > 255 ? 255 : vary * 2));
+        // next16, not below(uint8_t): the span is base/2, which passes 255 at any real sprite
+        // scale, and an 8-bit draw would silently clamp it: every large toaster flying at
+        // almost exactly the same speed instead of the documented +-25%.
+        const uint32_t span = static_cast<uint32_t>(vary) * 2;
+        const int32_t v = base - vary + (span > 0 ? static_cast<int32_t>(rng_.next16() % span) : 0);
         draw::pos_t px, py;
         if (anywhere) {
             px = draw::toSub(static_cast<lengthType>(rng_.next16() % (w > 0 ? w : 1)));

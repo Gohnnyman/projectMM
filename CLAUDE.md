@@ -62,6 +62,8 @@ New behavior is pinned before it ships: a unit test for module logic, a scenario
 
 Docs land with the code, not at merge time: the module's spec and catalog card describe what actually shipped ([coding-standards § Documentation model](docs/coding-standards.md#documentation-model)); a breaking change gets its entry in [docs/MIGRATING.md](docs/MIGRATING.md); a shipped backlog item or spec draft is deleted. The merge gate only verifies this happened.
 
+**How the writing looks: American spelling, no em-dashes.** `color`, `serialize`, `behavior`, `analyze`; a comma, colon or full stop where an em-dash wants to go. In comments, docs, commit messages and chat replies alike. Both rules are enforced mechanically by `check_prose.py` (a write-time hook, and again at the commit gate), because they are exactly the kind of habit an author does not notice in their own prose. Full rationale: [coding-standards § Writing](docs/coding-standards.md).
+
 ### Commit
 
 Git only with the PO in the loop: staging, committing, and pushing happen only when the PO explicitly triggers them. **The PO verifies EVERY changed file before it is committed.** That is the rule the others serve: nothing reaches history unseen. Two things follow, and both have been broken. **The trigger is the words "commit now", never a task instruction** — "fix it", "do step 4", "the build is broken", even "hotfix it on main" say what to change and nothing about recording it; finishing the work is not a prompt to commit it. And **a "commit now" covers only the files the PO has actually looked at** — touch one more, anything at all, and the tree again holds something unverified, so the go-ahead is void until they see it. Stop at a clean tree, say exactly which files changed, and wait. On main exactly as on a branch; a one-line fix exactly as a feature. What and when to commit or merge is 100% the product owner's call — never ask or propose commit timing. One combined commit per cycle (no partial commits; hygiene changes fold into the next one). Branches and commits may bundle multiple topics: not every small change gets its own commit — the pre-commit and pre-merge checks would be too much overhead.
@@ -107,7 +109,9 @@ Agents never commit. **Delegate the mechanical roles**: parallelizable or substa
 
 **Sanity-check every request.** Hold it against README, this file, and architecture.md. If it conflicts, push back briefly with the specific reference; the product owner can still overrule.
 
-**Anti-stalling.** If a build error or test failure survives 2 fix attempts: STOP. Ask, or roll back and re-approach.
+**Never revert without asking.** Undoing work already done is the product owner's call, whatever prompted it: a doc that seems to contradict it, a reviewer finding, a failing check, or the agent's own second thoughts. Deleting a file, dropping a config, or backing out a change costs the thinking that went into it and may reverse a decision the PO made deliberately. State the case and wait; a written statement is a status, not a law, and only the PO knows which.
+
+**Anti-stalling.** If a build error or test failure survives 2 fix attempts: STOP. Ask, or roll back and re-approach (rolling back is itself a revert: ask).
 
 **Bench boards are free test rigs.** Build and flash freely to verify work; re-probe ports first. A *rigorous* change (anything that could brick, boot-loop, or wipe a board: flash erases, boot/partition/build-config changes, a first flash of an untested board) gets a one-sentence heads-up and a go-ahead first — the test is reversibility.
 
