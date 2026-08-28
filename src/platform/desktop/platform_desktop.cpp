@@ -2363,7 +2363,9 @@ static void stopEncoderProcess() {
 #endif
 }
 
-bool encoderStart(const char* const argv[]) {
+// Spawn `argv` (argv[0] resolved via PATH) with its stdin piped from us. The ffmpeg command line
+// is assembled by encoderStart below; this half is pure process plumbing.
+static bool spawnEncoderProcess(const char* const argv[]) {
     stopEncoderProcess();
     if (encTestMode_ != EncoderTestMode::Off) {
         encCapturedArgs_.clear();
@@ -2480,6 +2482,55 @@ bool encoderStart(const char* const argv[]) {
     return true;
 }
 
+// The ffmpeg invocation IS the desktop encode contract: raw RGB in at the grid size and rate,
+// zerolatency x264 out, 1 s segments on a short rolling playlist (the live tuning that puts
+// glass-to-glass at 2-5 s), segments deleted as they fall off it.
+bool encoderStart(const EncoderConfig& cfg) {
+    char geo[16], rate[8], gop[8], bv[12], out[192];
+    std::snprintf(geo, sizeof(geo), "%ux%u", static_cast<unsigned>(cfg.width),
+                  static_cast<unsigned>(cfg.height));
+    std::snprintf(rate, sizeof(rate), "%u", static_cast<unsigned>(cfg.fps));
+    std::snprintf(gop, sizeof(gop), "%u", static_cast<unsigned>(cfg.fps));
+    std::snprintf(bv, sizeof(bv), "%uk", static_cast<unsigned>(cfg.bitrateKbit));
+    std::snprintf(out, sizeof(out), "%s/stream.m3u8", cfg.outDir);
+
+    // Assembled by index so the x264-only tuning flags stay off other encoders
+    // (h264_videotoolbox rejects -tune) without duplicated slots.
+    // Size the frame slots HERE, off the render tick: encoderWrite's assign() would otherwise
+    // allocate on its first lap, and the tick path must not allocate at all. A frame is
+    // width*height*3 (tight RGB, the driver's packing); a failure here fails the start, where
+    // the driver already reports it, rather than throwing from a later write.
+    const size_t frameBytes = static_cast<size_t>(cfg.width) * cfg.height * 3;
+    try {
+        for (auto& slot : encSlots_) slot.reserve(frameBytes);
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+
+    const char* encoder = cfg.encoderName ? cfg.encoderName : "libx264";
+    const bool x264 = std::strcmp(encoder, "libx264") == 0;
+    const char* argv[40];
+    size_t i = 0;
+    auto add = [&](const char* a) { if (i + 1 < sizeof(argv) / sizeof(argv[0])) argv[i++] = a; };
+    for (const char* a : std::initializer_list<const char*>{
+             "ffmpeg", "-hide_banner", "-loglevel", "error",
+             "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", geo,
+             "-r", rate, "-i", "-",
+             "-c:v", encoder }) add(a);
+    if (x264) { add("-preset"); add("veryfast"); add("-tune"); add("zerolatency"); }
+    for (const char* a : std::initializer_list<const char*>{
+             "-g", gop, "-b:v", bv,
+             "-f", "hls", "-hls_time", "1", "-hls_list_size", "6",
+             "-hls_flags", "delete_segments+temp_file", out }) add(a);   // temp_file: the playlist lands by RENAME, never served half-written
+    argv[i] = nullptr;
+    return spawnEncoderProcess(argv);
+}
+
+// ffmpeg writes the playlist and segments to disk itself, so there is nothing in RAM to serve and
+// the HTTP server uses its normal file path.
+bool hlsSegment(const char*, const uint8_t**, size_t*) { return false; }
+void hlsSegmentRelease() {}
+
 int encoderWrite(const uint8_t* data, size_t len) {
     std::lock_guard<std::mutex> lock(encMutex_);
     if (encTestMode_ == EncoderTestMode::Record) {
@@ -2489,8 +2540,8 @@ int encoderWrite(const uint8_t* data, size_t len) {
     }
     if (encWriterDead_) return -1;
     if (encCount_ >= kEncQueueMax) return 0;   // encoder behind: drop-newest, stay live
-    // assign() into the reused slot: after the first lap each slot holds its capacity, so the
-    // steady-state hot path copies without allocating.
+    // assign() into the reused slot. The capacity was reserved by encoderStart, so this copies
+    // without allocating -- including the first lap, which is why the reserve is there.
     encSlots_[(encHead_ + encCount_) % kEncQueueMax].assign(data, data + len);
     encCount_++;
     encCv_.notify_one();
@@ -2569,6 +2620,9 @@ void rawIfPush(const char* label, const char* name) {
 }  // namespace
 
 void setTestRawInterfaces(const char* const* names, size_t count) {
+    // The documented reset is (nullptr, 0), and `names + count` on a null pointer is undefined
+    // even when count is zero, so the reset is its own path rather than a degenerate range.
+    if (!names || count == 0) { rawIfTest_.clear(); return; }
     rawIfTest_.assign(names, names + count);
 }
 

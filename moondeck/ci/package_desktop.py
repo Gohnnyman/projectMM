@@ -64,7 +64,9 @@ def configure_and_build_macos(version: str = "") -> Path:
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_OSX_ARCHITECTURES=arm64",
     ] + version_args(version))
-    run(["cmake", "--build", bdir, "--config", "Release", "-j"])
+    # --target projectMM: packaging ships one binary; the test suite builds and runs in the
+    # test workflow, and compiling its ~200 files here roughly doubled the packaging build.
+    run(["cmake", "--build", bdir, "--config", "Release", "-j", "--target", "projectMM"])
     binary = BUILD_DIR_MACOS / "projectMM"
     if not binary.exists():
         print(f"package_desktop: expected binary not found at {binary}")
@@ -76,7 +78,7 @@ def configure_and_build_linux(version: str = "") -> Path:
     """Configure + build for Linux x86-64. Returns the built binary path."""
     bdir = str(BUILD_DIR_LINUX.relative_to(ROOT))
     run(["cmake", "-B", bdir, "-DCMAKE_BUILD_TYPE=Release"] + version_args(version))
-    run(["cmake", "--build", bdir, "--config", "Release", "-j"])
+    run(["cmake", "--build", bdir, "--config", "Release", "-j", "--target", "projectMM"])
     binary = BUILD_DIR_LINUX / "projectMM"
     if not binary.exists():
         print(f"package_desktop: expected binary not found at {binary}")
@@ -182,7 +184,7 @@ def configure_and_build_windows(version: str = "") -> Path:
         "cmake", "-B", bdir,
         "-DCMAKE_BUILD_TYPE=Release",
     ] + version_args(version))
-    run(["cmake", "--build", bdir, "--config", "Release"])
+    run(["cmake", "--build", bdir, "--config", "Release", "--target", "projectMM"])
     # MSVC multi-config places binaries under <build-dir>/Release/.
     binary = BUILD_DIR_WIN / "Release" / "projectMM.exe"
     if not binary.exists():

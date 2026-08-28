@@ -22,4 +22,14 @@ menu "projectMM"
             path on an eth-only build (link up but no IP). Only the WiFi build
             (esp32p4-eth-wifi) sets this, via sdkconfig.defaults.esp32p4-eth-wifi.
 
+    config MM_HLS
+        bool "HLS streaming via the hardware H.264 encoder (ESP32-P4 only)"
+        default y if IDF_TARGET_ESP32P4
+        default n
+        help
+            Pulls the esp_h264 managed component and compiles the platform HLS
+            encoder (hardware H.264 + MPEG-TS muxer + PSRAM segment ring) behind
+            the same HlsDriver the desktop uses. Only the P4 has the encoder
+            silicon; other chips keep this off and build nothing.
+
 endmenu

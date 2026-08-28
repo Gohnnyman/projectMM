@@ -1157,6 +1157,19 @@ body.cards-resizing {
     font-size: 13px;
 }
 
+/* A read-only url control: rendered as a link rather than a text box, since the reason to show
+   one is to open or copy it. Sits on the same baseline as an input's text so a card mixing the
+   two does not look ragged. */
+.control-row .control-url {
+    flex: 1;
+    color: var(--accent, #7aa2f7);
+    padding: 4px 0;
+    font-size: 13px;
+    text-decoration: none;
+    overflow-wrap: anywhere;   /* a long url wraps rather than widening the card */
+}
+.control-row .control-url:hover { text-decoration: underline; }
+
 /* Palette control: a custom dropdown whose every option shows its gradient (a native <option> can't
    render a gradient). A trigger button + an absolutely-positioned list of gradient rows. */
 .palette-control {

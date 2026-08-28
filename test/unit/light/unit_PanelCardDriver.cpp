@@ -14,6 +14,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/PanelsLayout.h"
+#include "core/JsonSink.h"   // writeControlMetadata: the schema the UI parses
 #include <string>   // status() substring checks
 
 namespace {
@@ -588,4 +589,78 @@ TEST_CASE("a vanished persisted NIC degrades to capture-only, never a crash") {
     CHECK(mm::platform::rawInterfaceName(0) == nullptr);   // and row 0 binds nothing
 
     mm::platform::setTestRawInterfaces(nullptr, 0);
+}
+
+// The NIC list is re-enumerated on every rebuild and the OS does not promise a stable order.
+// The selection must follow the ADAPTER, not the row it happened to occupy: a NIC appearing
+// ahead of the chosen one would otherwise silently move panel output to a different adapter.
+TEST_CASE("a reordered NIC list keeps the selected adapter, not its old row") {
+    static const char* kFirst[]  = {"en-alpha", "en-beta"};
+    mm::platform::setTestRawInterfaces(kFirst, 2);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+    {
+        auto& cs = driver.controls();
+        for (uint8_t i = 0; i < cs.count(); i++) {
+            if (std::strcmp(cs[i].name, "interface") != 0) continue;
+            const auto r = mm::applyControlValue(cs[i], "{\"interface\":\"en-beta\"}",
+                                                 "interface", mm::ApplyPolicy::Clamp);
+            CHECK(r == mm::ApplyResult::Ok);
+        }
+    }
+    driver.prepare();   // picking an interface re-prepares, which is what records the choice
+
+    // A NIC is hot-plugged AHEAD of the chosen one, so every later row shifts down.
+    static const char* kAfter[] = {"en-new", "en-alpha", "en-beta"};
+    mm::platform::setTestRawInterfaces(kAfter, 3);
+    driver.defineControls();   // the rebuild that re-enumerates
+
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        const uint8_t sel = *static_cast<uint8_t*>(cs[i].ptr);
+        const char* bound = mm::platform::rawInterfaceName(sel);
+        // Row 0 is "none (capture only)" and binds nothing, so landing there is the failure
+        // this guards against, not a reason to crash the run.
+        REQUIRE(bound != nullptr);
+        CHECK(std::strcmp(bound, "en-beta") == 0);
+    }
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+}
+
+// Interface labels come from the OS, and on Windows they are free-form descriptions. One
+// containing a quote or a backslash must not be able to break the JSON the whole UI loads from.
+TEST_CASE("an interface label with JSON metacharacters keeps the schema parseable") {
+    static const char* kOdd[] = {"Realtek \"Gaming\" 2.5GbE", "Intel\\Wi-Fi 6"};
+    mm::platform::setTestRawInterfaces(kOdd, 2);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        char buf[512];
+        mm::JsonSink sink(buf, sizeof(buf));
+        mm::writeControlMetadata(sink, cs[i]);
+        const std::string json(buf);
+        // Every quote and backslash inside a label must arrive escaped.
+        CHECK(json.find("\\\"Gaming\\\"") != std::string::npos);
+        CHECK(json.find("Intel\\\\Wi-Fi") != std::string::npos);
+    }
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+}
+
+// The documented reset for the test seam is (nullptr, 0); it must clear the override rather
+// than form a range from a null pointer.
+TEST_CASE("resetting the interface test seam with nullptr restores real enumeration") {
+    static const char* kFake[] = {"en-test0"};
+    mm::platform::setTestRawInterfaces(kFake, 1);
+    const char* const* opts = nullptr;
+    CHECK(mm::platform::rawInterfaces(&opts) == 2);   // row 0 + the fake
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+    CHECK(mm::platform::rawInterfaces(&opts) >= 1);   // back to the host's own list
 }

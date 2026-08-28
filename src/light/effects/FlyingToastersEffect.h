@@ -200,7 +200,11 @@ private:
         // per second, more pixels per second on a big wall).
         const int32_t base = static_cast<int32_t>(speed) * 2 * sc;
         const int32_t vary = base / 4;
-        const int32_t v = base - vary + rng_.below(static_cast<uint8_t>(vary * 2 > 255 ? 255 : vary * 2));
+        // next16, not below(uint8_t): the span is base/2, which passes 255 at any real sprite
+        // scale, and an 8-bit draw would silently clamp it: every large toaster flying at
+        // almost exactly the same speed instead of the documented +-25%.
+        const uint32_t span = static_cast<uint32_t>(vary) * 2;
+        const int32_t v = base - vary + (span > 0 ? static_cast<int32_t>(rng_.next16() % span) : 0);
         draw::pos_t px, py;
         if (anywhere) {
             px = draw::toSub(static_cast<lengthType>(rng_.next16() % (w > 0 ? w : 1)));

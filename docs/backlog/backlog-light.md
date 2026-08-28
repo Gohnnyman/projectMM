@@ -136,6 +136,25 @@ encode-worker-stalled latch. A page refresh reportedly did NOT revive it; toggli
 wake-up re-request, or per-driver lease state that only prepare() resets. Needs a reproduction
 with the WS uplink logged before it can be fixed.
 
+### HLS upscaling is cache-hostile on large walls (measured, 2026-08-28)
+
+`HlsDriver`'s `scale` control replicates each light into a scale x scale block. Measured on the
+bench P4 at 128x128: **~1 ms per frame at 1:1, ~60 ms at scale 4** (a 512x512 output). The frame
+is 16x larger, so ~16 ms would be the honest cost; the extra 4x is the access pattern. The loop
+walks LIGHTS and writes each block as `scale` separate short rows scattered across a 786 KB
+buffer, so consecutive lights touch distant addresses and every write misses cache, where the
+1:1 path writes straight through sequentially.
+
+**Not urgent, because the default path never hits it:** auto-scale only engages on walls below
+the encoder's 80-pixel floor, where the output is small by construction (a 20x10 wall becomes
+160x80, 38 KB). The expensive case is a manual scale on an already-large wall, which is also
+where upscaling has the least to offer.
+
+**The fix when it earns its place:** iterate the OUTPUT rows rather than the input lights, so
+writes are sequential: for each output row, walk its source row once and emit `scale` copies of
+each light's colour, then `memcpy` that finished row to the remaining `scale - 1` rows of the
+block. Same output, one pass through the destination in address order.
+
 ### Sprite follow-ups (draw::sprite + FlyingToasters shipped; [spec + plan](../history/plans/Plan-20260827%20-%20Sprites%20and%20flying%20toasters.md))
 
 Deliberately deferred when sprites landed: P4 PPA acceleration behind the same `draw::sprite`
@@ -154,6 +173,24 @@ Users asked for projectMM's rendered output to feed *their* tools, not the other
 That is the arrangement `platform_desktop.cpp` uses for Npcap today: resolve the library with `LoadLibrary`/`dlopen` rather than linking it, declare the handful of functions with the library's own signatures rather than including its headers (so the SDK never becomes a build requirement for CI or contributors), and report the feature unavailable when it is absent instead of failing to link. Two independent installs that talk to each other, like Resolume on the same desktop.
 
 Also note projectMM renders into a CPU buffer, so a Spout/Syphon path would upload to the GPU purely to hand off, spending the zero-copy advantage it was chosen for.
+
+### M5Stack Tab5 as a display target — MIPI-DSI, not the H.264 path (open)
+
+The Tab5 is an ESP32-P4 with a 1280x720 MIPI-DSI panel, and a P4 is already a supported target, so
+the question is what its *screen* would show. The P4's H.264 block does not answer it: that encoder
+exists to compress an incoming MIPI-CSI camera feed, and the P4 has no hardware H.264 **decoder**
+at all (Espressif's own FAQ points at software decode, which will not hold 720p). Driving the panel
+is the **MIPI-DSI** peripheral plus the PPA / 2D-DMA blitter, which take raw pixels and never touch
+a codec. So the three things a Tab5 could be are separate pieces of work, and only the first is free:
+
+- **An HLS source**, like any other P4: it encodes its own rendered grid and streams to a TV. Its
+  panel is incidental, and this needs nothing beyond the P4 HLS work itself.
+- **A local wall preview or touch console** — the interesting one, and the real ask: a `platform::`
+  MIPI-DSI display seam plus a UI on the panel. Related to the PPA acceleration noted under sprite
+  follow-ups above (same 2D-DMA block), and it is a display *output* seam projectMM does not have
+  today; the nearest prior art is the WLED-MM-P4 world's LovyanGFX usage, which we would not vendor.
+- **An HLS/video player**, showing another device's stream: blocked on the missing hardware decoder,
+  so not worth planning.
 
 ### Multi-card walls — does a daisy chain work today? (open, ask before building)
 

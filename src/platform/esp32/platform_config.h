@@ -1,6 +1,6 @@
 #pragma once
 
-// ESP32 platform configuration — PSRAM detected via sdkconfig
+// ESP32 platform configuration: PSRAM detected via sdkconfig
 
 #include "sdkconfig.h"
 
@@ -18,7 +18,7 @@
 #include "hal/rmt_ll.h"
 #endif
 
-// MM_RAMFUNC — "this function executes from RAM, not flash" (the __ramfunc concept from STM32/Zephyr,
+// MM_RAMFUNC: "this function executes from RAM, not flash" (the __ramfunc concept from STM32/Zephyr,
 // spelled IRAM_ATTR in ESP-IDF). For code an ISR runs on a tight deadline: flash-resident code shares
 // one instruction cache between both cores, so a hot render loop evicts an ISR's code path between
 // invocations and every firing pays flash-refetch latency. A macro (not if constexpr) because it is a
@@ -39,7 +39,7 @@ constexpr bool hasPsram = false;
 // family, so most new chips work untouched without a per-chip flag. Only two chips
 // earn an `is<Chip>` flag, for seams that aren't SOC-derived: isEsp32P4 (its
 // Ethernet pin defaults in `ethConfigDefault` + co-processor WiFi via
-// hasWifiCoprocessor) and isEsp32S3 (its W5500-SPI Ethernet default — see below).
+// hasWifiCoprocessor) and isEsp32S3 (its W5500-SPI Ethernet default: see below).
 // Keyed off the IDF target macro; false on desktop.
 #ifdef CONFIG_IDF_TARGET_ESP32P4
 constexpr bool isEsp32P4 = true;
@@ -48,7 +48,7 @@ constexpr bool isEsp32P4 = false;
 #endif
 
 // isEsp32S3 earns its place the same way isEsp32P4 does: a chip-specific seam not
-// derivable from a SOC flag — the S3 has no internal EMAC, so its Ethernet default
+// derivable from a SOC flag: the S3 has no internal EMAC, so its Ethernet default
 // is W5500-over-SPI (where classic/P4 default to RMII). Used only for ethConfigDefault.
 #ifdef CONFIG_IDF_TARGET_ESP32S3
 constexpr bool isEsp32S3 = true;
@@ -57,7 +57,7 @@ constexpr bool isEsp32S3 = false;
 #endif
 
 // isEsp32S31: the S31 is the only target whose EMAC is RGMII / 1 Gb (SOC_EMAC_SUPPORT_1000M),
-// where classic/P4 are RMII — so its Ethernet default is a distinct RGMII PHY (YT8531) with a
+// where classic/P4 are RMII: so its Ethernet default is a distinct RGMII PHY (YT8531) with a
 // different pin set. Not derivable from a SOC flag (the RGMII data pins are board wiring, not a
 // chip property). Used by ethConfigDefault and ethInitEmac's RGMII branch/log.
 #ifdef CONFIG_IDF_TARGET_ESP32S31
@@ -123,7 +123,7 @@ constexpr uint8_t ethFixedPadCount = 0;
 #endif
 
 // RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3 / P4 / S31,
-// straight from the RMT HAL — `RMT_LL_TX_CANDIDATES_PER_INST`, included above).
+// straight from the RMT HAL: `RMT_LL_TX_CANDIDATES_PER_INST`, included above).
 // Doubles as the RMT capability flag: the RMT LED driver and its main.cpp
 // registration guard on `rmtTxChannels > 0` instead of a chip-family flag, so a
 // new RMT-bearing target works untouched.
@@ -135,7 +135,7 @@ constexpr uint8_t rmtTxChannels = 0;
 
 // Parallel WS2812 lanes over the LCD_CAM i80 bus (ESP32-S3 / P4). The peripheral
 // does 16 data lines and the driver uses all of them: it derives the actual bus
-// width (8 or 16 — power-of-two only) from the configured pin count, so this is
+// width (8 or 16: power-of-two only) from the configured pin count, so this is
 // the ceiling, not a self-imposed cap. SOC-derived like rmtTxChannels so a future
 // LCD_CAM-bearing chip works untouched.
 //
@@ -146,7 +146,7 @@ constexpr uint8_t rmtTxChannels = 0;
 // doesn't have. SOC_LCDCAM_I80_LCD_SUPPORTED is defined only on chips with the
 // real LCD_CAM (S3/P4/S31), which is what esp_lcd's i80 driver actually needs.
 // The LCD_CAM i80 bus does 16 data lines. The driver derives the actual bus width
-// (8 or 16 — power-of-two only) from the configured pin count; this is the MAX it
+// (8 or 16: power-of-two only) from the configured pin count; this is the MAX it
 // may reach. LCD requires exactly 8 or 16 real pins (i80 rejects an NC data line).
 #ifdef CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED
 constexpr uint8_t lcdLanes = 16;
@@ -154,12 +154,12 @@ constexpr uint8_t lcdLanes = 16;
 constexpr uint8_t lcdLanes = 0;
 #endif
 
-// hasLcdCam — is this LCD_CAM silicon (S3/P4/S31)? Separate from the lane COUNT because the host
+// hasLcdCam: is this LCD_CAM silicon (S3/P4/S31)? Separate from the lane COUNT because the host
 // sets a non-zero count so the parallel driver RUNS there against a memory bus, while having no
 // LCD_CAM at all. On a real chip the two coincide; the pin expander keys off the capability.
 constexpr bool hasLcdCam = (lcdLanes > 0);
 
-// Parallel WS2812 lanes over the Parlio (Parallel IO) TX peripheral — the
+// Parallel WS2812 lanes over the Parlio (Parallel IO) TX peripheral: the
 // ESP32-P4's scale path. The unit does 16 data lines; the driver derives the bus
 // width (8 or 16) from the pin count. SOC-derived like the others, so a future
 // Parlio-bearing chip works untouched. Unlike i80, Parlio takes the data GPIOs
@@ -171,14 +171,14 @@ constexpr uint8_t parlioLanes = 16;
 constexpr uint8_t parlioLanes = 0;
 #endif
 
-// Parallel WS2812 lanes over the classic ESP32's I2S peripheral in LCD/i80 mode — the
+// Parallel WS2812 lanes over the classic ESP32's I2S peripheral in LCD/i80 mode: the
 // classic chip's ONLY >8-lane route (it has neither LCD_CAM nor Parlio). IDF's esp_lcd
 // component backs the SAME esp_lcd i80 API (esp_lcd_new_i80_bus / tx_color, 8-or-16 bus
 // width, WR/DC) with the I2S peripheral on the classic ESP32 (esp_lcd_panel_io_i2s.c),
-// using WHOLE-FRAME chained DMA — so MultiPinLedDriver reuses the MultiPinLedDriver code path and
+// using WHOLE-FRAME chained DMA: so MultiPinLedDriver reuses the MultiPinLedDriver code path and
 // the i80Ws2812* seam, not a bespoke ISR ring. Gate CLASSIC-ONLY: SOC_LCD_I80_SUPPORTED
 // is set on the classic chip (I2S backend) AND the LCD_CAM chips (S3/P4/S31, LCD_CAM backend), so
-// exclude the LCD_CAM chips — otherwise both this and lcdLanes would be non-zero on those chips and
+// exclude the LCD_CAM chips: otherwise both this and lcdLanes would be non-zero on those chips and
 // the chip would register both drivers. The `defined(A) && !defined(B)` shape mirrors
 // hasEthW5500 below. The i80 bus does 16 data lines; the driver derives 8 or 16 from the
 // pin count and requires exactly that many real pins (i80 rejects an NC data line).
@@ -207,7 +207,7 @@ constexpr bool hasAudioCapture = false;
 // Some boards put the mic behind an I2S audio codec configured over I2C (vs a
 // direct I2S MEMS mic). The codec type + its control pins are a fixed board
 // property, so they live here per-target (like ethConfigDefault), not as
-// AudioService controls — the I2S data pins (ws/sd/sck) stay user controls.
+// AudioService controls: the I2S data pins (ws/sd/sck) stay user controls.
 // `audioCodecInit` (platform.h) consumes these; CodecType is neutral so a second
 // codec is just another enum value + a backend branch.
 enum class CodecType : uint8_t { None = 0, Es8311 = 1 };
@@ -219,7 +219,7 @@ struct AudioCodecPins {
 };
 
 // Default None; the ESP32-S31 Function-CoreBoard has an ES8311 (addr 0x18, I2C
-// SDA on GPIO51 / SCL on GPIO50, MCLK on GPIO52 — bench-confirmed by I2C scan; the
+// SDA on GPIO51 / SCL on GPIO50, MCLK on GPIO52: bench-confirmed by I2C scan; the
 // schematic net labels read SDA/SCL the other way round. See
 // docs/reference/esp32-s31-coreboard.md.).
 #ifdef CONFIG_IDF_TARGET_ESP32S31
@@ -241,16 +241,16 @@ constexpr bool hasWiFi = true;
 
 // The P4 has no native radio; when it has WiFi at all (the esp32p4-eth-wifi build),
 // that WiFi runs on the on-board ESP32-C6 over SDIO via esp_wifi_remote / esp_hosted.
-// The esp_wifi_* API is identical to native and esp_hosted self-initialises at boot,
+// The esp_wifi_* API is identical to native and esp_hosted self-initializes at boot,
 // so the WiFi *path* needs no branch. This flag exists only so the co-processor
 // firmware read-out (SystemModule's `wifiCoproc` control + platform::coprocessorWifi)
-// compiles in ONLY on a build that actually has a co-processor — on every other
+// compiles in ONLY on a build that actually has a co-processor: on every other
 // target the buffer, the calls, and the control vanish (if constexpr), keeping the
 // flash/RAM cost off boards that can't use it.
 constexpr bool hasWifiCoprocessor = isEsp32P4 && hasWiFi;
 
 // Ethernet is only available on firmware variants whose sdkconfig fragment
-// enables the ESP32 EMAC (sdkconfig.defaults.eth — the default LAN8720 RMII pin map). Other
+// enables the ESP32 EMAC (sdkconfig.defaults.eth: the default LAN8720 RMII pin map). Other
 // firmwares (plain ESP32 WiFi-only, ESP32-S3 with no EMAC) define MM_NO_ETH
 // and get stubbed-out platform::eth* functions, mirroring the desktop layer.
 #ifdef MM_NO_ETH
@@ -259,10 +259,10 @@ constexpr bool hasEthernet = false;
 constexpr bool hasEthernet = true;
 #endif
 
-// True when the firmware carries an IP stack at all — WiFi OR Ethernet. UdpSocket
+// True when the firmware carries an IP stack at all: WiFi OR Ethernet. UdpSocket
 // (lwIP BSD sockets) is present whenever either is, so features that only need
 // "some network" (WLED audio sync, any UDP interop) gate on this rather than
-// hasWiFi — an Ethernet-only board (the MHC-WLED P4 shield) still has UDP.
+// hasWiFi: an Ethernet-only board (the MHC-WLED P4 shield) still has UDP.
 constexpr bool hasNetwork = hasWiFi || hasEthernet;
 
 // ethPhyIsFixed, true where the interface is a property of the PLATFORM rather than of the board,
@@ -278,7 +278,7 @@ constexpr bool ethPhyIsFixed = true;
 constexpr bool ethPhyIsFixed = false;
 #endif
 
-// Enough compute headroom for a per-pixel FLOAT algorithm — a raymarcher, a fractal, a feedback
+// Enough compute headroom for a per-pixel FLOAT algorithm: a raymarcher, a fractal, a feedback
 // loop that iterates per light. This is the ONE exception to the integer-only render-path rule in
 // coding-standards, and it is gated rather than assumed: an effect behind this constant is not
 // compiled at all where it is false, so no ESP32 firmware carries the float code and the rule is
@@ -289,9 +289,9 @@ constexpr bool ethPhyIsFixed = false;
 // a large one, and the effect's own controls are what trade quality for cost. The classic ESP32 has
 // no FPU at all, so it stays out; the S3 and P4 have single-precision hardware.
 // Derived from the SoC capability, not a hand-kept chip list: every ESP32 variant IDF supports
-// declares SOC_CPU_HAS_FPU (checked S3, P4, S31 and the classic ESP32 — all 1), so a new target
+// declares SOC_CPU_HAS_FPU (checked S3, P4, S31 and the classic ESP32: all 1), so a new target
 // inherits the right answer without an edit here. What separates them is SPEED and clock, which
-// the effect's own `steps` control and the fixture size decide — not whether the code exists.
+// the effect's own `steps` control and the fixture size decide: not whether the code exists.
 constexpr bool hasHeavyCompute = SOC_CPU_HAS_FPU;
 
 // Preprocessor mirror of the flag above: a whole effect can be compiled out only by
@@ -300,25 +300,38 @@ constexpr bool hasHeavyCompute = SOC_CPU_HAS_FPU;
 
 // Which Ethernet PHY *drivers* this firmware actually carries. The W5500 SPI
 // driver is compiled in only on chips with no internal EMAC and the SPI-eth
-// fragment (the S3 — CONFIG_ETH_USE_SPI_ETHERNET set, CONFIG_ETH_USE_ESP32_EMAC
+// fragment (the S3: CONFIG_ETH_USE_SPI_ETHERNET set, CONFIG_ETH_USE_ESP32_EMAC
 // not). NetworkModule gates the *live* W5500 reconfigure on this: on a classic /
 // P4 board (RMII only) ethInit() can't bring up W5500, so the live path must not
 // tear down the working RMII interface for a type it can't init. Mirrors the
 // MM_ETH_W5500 marker in platform_esp32.cpp; false on desktop (no SPI-eth there).
-// hasNamedNetInterfaces — false on every ESP32: one MAC per chip, so a raw sender has nothing to
+// hasNamedNetInterfaces: false on every ESP32: one MAC per chip, so a raw sender has nothing to
 // choose between and a NIC-name control would do nothing. See the desktop config for the true case.
 constexpr bool hasNamedNetInterfaces = false;
 
-// hasNdi — false on every ESP32, and not by choice: the NDI runtime is a closed binary that
+// hasNdi: false on every ESP32, and not by choice: the NDI runtime is a closed binary that
 // Vizrt builds only for Intel and ARM, with a documented floor of SSSE3 / NEON SIMD. Neither
 // Xtensa nor ESP32 RISC-V has either, and there is no source to port. NDI's own embedded answer
 // is an FPGA reference design, not an MCU. An ESP32 reaches the same tools over Art-Net, sACN and
-// DDP instead — open protocols, our own implementations, send and receive. Desktop config: true.
+// DDP instead: open protocols, our own implementations, send and receive. Desktop config: true.
 constexpr bool hasNdi = false;
 
-// hasHls: false on every ESP32: H.264 encoding needs a hardware encoder or a desktop-class
-// CPU, and there is no process to spawn. The HLS driver registers only where this is true.
+// hasHls: true only where the chip has a hardware H.264 encoder, which on the ESP32 line means
+// the P4 alone (soc_caps SOC_H264_SUPPORTED). Everywhere else the encode has no hardware and
+// there is no process to spawn. Mirrors the MM_HLS Kconfig symbol, which is what actually pulls
+// in the esp_h264 component, so the flag and the dependency can never disagree.
+#if defined(CONFIG_MM_HLS)
+constexpr bool hasHls = true;
+#else
 constexpr bool hasHls = false;
+#endif
+// hasEncoderChoice: false on the P4: one hardware encoder, so there is nothing to choose and
+// the control is hidden. Desktop config: true (ffmpeg offers several).
+constexpr bool hasEncoderChoice = false;
+// hasFsSegments: false: segments live in a PSRAM ring, not on LittleFS. At one segment per
+// second the flash wear buys nothing, since a live segment is stale within seconds; the HTTP
+// server serves them through the hlsSegment seam instead. Desktop config: true.
+constexpr bool hasFsSegments = false;
 
 #if defined(CONFIG_ETH_USE_SPI_ETHERNET) && !defined(CONFIG_ETH_USE_ESP32_EMAC)
 constexpr bool hasEthW5500 = true;
@@ -327,22 +340,22 @@ constexpr bool hasEthW5500 = false;
 #endif
 
 // Ethernet PHY type. The DRIVER for each type is compiled into the firmware per
-// chip (RMII EMAC on classic/P4, W5500 SPI on the S3 — see the sdkconfig
+// chip (RMII EMAC on classic/P4, W5500 SPI on the S3: see the sdkconfig
 // fragments); WHICH type a given board uses, and its pins, are runtime config
 // (deviceModels.json → NetworkModule → platform::setEthConfig). Plain int values keep
 // this header free of esp_eth includes; ethInit() maps them to the IDF ctors.
 enum EthPhyType {
-    ethNone    = 0,  // no Ethernet on this board (the default — WiFi only)
+    ethNone    = 0,  // no Ethernet on this board (the default: WiFi only)
     ethLan8720 = 1,  // RMII, generic PHY (Olimex Gateway, QuinLED Dig-Octa)
     ethIp101   = 2,  // RMII, IP101 PHY (Waveshare P4-NANO; managed component, P4-only)
-    ethW5500   = 3,  // SPI, external W5500 module (ESP32-S3 boards — SE16, LightCrafter)
+    ethW5500   = 3,  // SPI, external W5500 module (ESP32-S3 boards: SE16, LightCrafter)
     ethYt8531  = 4,  // RGMII, YT8531 PHY (ESP32-S31 CoreBoard; on-chip 1 Gb EMAC, S31-only)
     ethOpeneth = 5,  // QEMU's emulated OpenCores MAC, no silicon, only ever selected under emulation.
                      // It is what gives an emulated device a real IP stack, and therefore the REST API
                      // and the web UI: without it a QEMU run can only be watched on the serial console.
 };
 
-// Per-board Ethernet pin/PHY map — runtime-configurable (no longer a fixed
+// Per-board Ethernet pin/PHY map: runtime-configurable (no longer a fixed
 // compile-time constant). RMII fields apply to LAN8720/IP101; the spi* fields to
 // W5500. ethInit() reads the runtime `ethConfig` (set from deviceModels.json via
 // platform::setEthConfig); the per-chip `ethConfigDefault` below seeds it so an
@@ -375,10 +388,10 @@ struct EthPinConfig {
 //    RMII clock OUT on GPIO17, MDC/MDIO at IDF defaults (e.g. Olimex ESP32-Gateway).
 //  - S3 → no built-in EMAC, so the default is W5500 SPI but with no pins set
 //    (phyType ethW5500, pins -1): a W5500 S3 board MUST provide its SPI pins via
-//    deviceModels.json — there's no universal S3 default to guess.
+//    deviceModels.json: there's no universal S3 default to guess.
 //  - S31 → Function-CoreBoard-1: RGMII YT8531, MDC/MDIO 5/6, reset 7. The RGMII
 //    *data* pins (TX_CTL/TXD0-3, RX_CTL/RXD0-3, clocks) are board-fixed and live in
-//    ethInitEmac()'s S31 branch, not this struct (same reason RMII data pins don't —
+//    ethInitEmac()'s S31 branch, not this struct (same reason RMII data pins don't -
 //    see above); rmiiClock* are unused for RGMII (clocks are set there too). See
 //    docs/reference/esp32-s31-coreboard.md for the schematic pin map.
 constexpr EthPinConfig ethConfigDefault =
@@ -409,7 +422,7 @@ constexpr EthPinConfig ethConfigDefault =
                                 /*miso*/ -1, /*mosi*/ -1, /*sck*/ -1, /*cs*/ -1, /*irq*/ -1 };
 #endif  // CONFIG_ETH_USE_OPENETH
 
-// OTA (esp_https_ota) is available on every ESP32 build — the OTA partition
+// OTA (esp_https_ota) is available on every ESP32 build: the OTA partition
 // layout in partitions/*.csv reserves app0/app1 unconditionally, and esp_https_ota
 // is in baseline ESP-IDF. FirmwareUpdateModule + the /api/firmware/url route
 // `if constexpr` on this so desktop builds get a 501-returning stub instead.
@@ -417,8 +430,8 @@ constexpr bool hasOta = true;
 
 // Improv-serial is the device's serial RPC channel (UART0 + native USB-Serial-JTAG):
 // the WiFi-provisioning RPCs (WIFI_SETTINGS, GET_WIFI_NETWORKS) AND the vendor RPCs
-// (SET_DEVICE_MODEL, SET_TX_POWER, APPLY_OP — "Improv = REST over serial"). The
-// transport is always available on ESP32, so the listener runs everywhere — including
+// (SET_DEVICE_MODEL, SET_TX_POWER, APPLY_OP: "Improv = REST over serial"). The
+// transport is always available on ESP32, so the listener runs everywhere: including
 // Ethernet-only builds (`--firmware esp32-eth*`), where the WiFi-only RPCs are compiled
 // out (the `esp_wifi_*` calls aren't linked) but the vendor RPCs still work, so the web
 // installer can push a device-model's config over serial to an eth device just as it
@@ -428,13 +441,13 @@ constexpr bool hasImprov = true;
 
 } // namespace mm::platform
 
-// MM_MOONLIVE_HAS_HOST_JIT — always 0 on ESP32. The unit tests that consume this macro run on
+// MM_MOONLIVE_HAS_HOST_JIT: always 0 on ESP32. The unit tests that consume this macro run on
 // the *desktop* host binary; on-device MoonLive uses its own per-ISA backends (Xtensa / RISC-V
 // in src/platform/esp32/moonlive_emit.cpp), validated by the live hardware run, not host tests.
 // Kept in platform_config.h so the core header stays free of architecture #ifs.
 #define MM_MOONLIVE_HAS_HOST_JIT 0
 
-// MM_LINKS_ALL_LED_DRIVERS — 0 on ESP32: a board links only the drivers its silicon can run, so
+// MM_LINKS_ALL_LED_DRIVERS: 0 on ESP32: a board links only the drivers its silicon can run, so
 // the type picker stays honest and the binary lean. See the desktop config for why the host is
 // the other way round.
 #define MM_LINKS_ALL_LED_DRIVERS 0

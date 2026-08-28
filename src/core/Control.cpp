@@ -202,7 +202,11 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
             // counter cannot wrap.
             // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
             for (uint8_t o = 0; o < c.max; o++) {
-                sink.appendf("%s\"%s\"", o > 0 ? "," : "", options[o]);
+                if (o > 0) sink.append(",");
+                // Escaped, not a raw %s: most option lists are our own literals, but the panel-card
+                // interface Select carries OS-supplied adapter descriptions, and one containing a
+                // quote or a backslash would make all of /api/state invalid and blank the UI.
+                sink.writeJsonString(options[o] ? options[o] : "");
             }
             sink.append("]");
             return;
