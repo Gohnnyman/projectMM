@@ -101,7 +101,13 @@ public:
 
         srcWidth_  = layer_->physicalWidth()  > 0 ? layer_->physicalWidth()  : 1;
         srcHeight_ = layer_->physicalHeight() > 0 ? layer_->physicalHeight() : 1;
-        scale_     = scale ? scale : autoScale();
+        // An explicit scale is honoured, EXCEPT where the platform's encoder has a minimum frame
+        // it will not go below: scale 1 on a 20x10 wall asks the P4's hardware block for a 20x10
+        // frame, which it refuses outright, so the setting would produce no stream at all. The
+        // floor is raised to autoScale() there and only there. A desktop ffmpeg has no such
+        // limit, so a small 1:1 stream stays exactly that.
+        const uint8_t floorScale = platform::hasEncoderChoice ? 1 : autoScale();
+        scale_     = scale ? (scale > floorScale ? scale : floorScale) : autoScale();
         // Widen BEFORE multiplying, and reject before narrowing. Both operands are individually
         // sane while their product need not be: lengthType is int16_t, so an 821x4 wall at
         // scale 80 wraps to 144x320, the frame buffer is sized from the wrapped number, and the
@@ -204,9 +210,12 @@ public:
             nextSendMs_  = now + periodMs;
         }
 
-        const nrOfLightsType lights = static_cast<nrOfLightsType>(srcWidth_) * srcHeight_;
-        const nrOfLightsType have   = sourceBuffer_->count();
-        const nrOfLightsType n      = lights < have ? lights : have;
+        // size_t, not nrOfLightsType: that type is uint16_t on a board without PSRAM, and the
+        // product overflows it above 65535 lights (a 640x480 grid is 307200), which would
+        // silently truncate the frame to its low 16 bits.
+        const size_t lights = static_cast<size_t>(srcWidth_) * srcHeight_;
+        const size_t have   = sourceBuffer_->count();
+        const size_t n      = lights < have ? lights : have;
         const size_t frameBytes = static_cast<size_t>(width_) * height_ * 3;
         if (n == 0 || rgb_.count() < frameBytes) return;
 
@@ -359,9 +368,9 @@ private:
     /// follows from what the picture costs (bits-per-pixel-per-frame x pixels x fps), and the one
     /// knob a user actually wants for bandwidth is `targetFps`, which is the more meaningful trade
     /// for LED content. 0.1 bpp is the usual working figure for H.264 on this kind of material
-    /// (flat regions, strong temporal correlation): a 128x128 grid at 30 fps lands near 500 kbit,
-    /// a 512x512 near 8 Mbit. Clamped so a tiny grid still looks clean and a huge one cannot ask
-    /// for more than an encoder accepts.
+    /// (flat regions, strong temporal correlation): a 512x512 grid at 30 fps lands near 800 kbit,
+    /// and a 128x128 under the 500 kbit floor. Clamped so a tiny grid still looks clean and a
+    /// huge one cannot ask for more than an encoder accepts.
     uint16_t autoBitrateKbit() const {
         const uint64_t pixels = static_cast<uint64_t>(width_) * height_;
         const uint64_t kbit = (pixels * targetFps) / 10000u;   // 0.1 bpp, expressed in kbit

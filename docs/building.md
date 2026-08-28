@@ -137,7 +137,7 @@ uv run moondeck/run/monitor_esp32.py --port /dev/tty.usbserial-XXXX
 ```
 
 On the 4 MB variants (`esp32`, `esp32-wrover`, `esp32-eth`, `qemu`) the build also produces
-**MoonBase**, the second boot image ([architecture.md § MoonBase](architecture.md#moonbase-the-second-boot-image-4-mb-boards)),
+**MoonBase**, the second boot image ([architecture.md § MoonBase](architecture.md#moonbase-the-second-boot-image)),
 and `flash_esp32.py` writes the corrected layout in one pass: app in the big `ota_0` slot,
 MoonBase in `factory`, and an otadata that boots the app directly. A device on the older
 dual-OTA table adopts this layout only through such a full serial flash, OTA never rewrites

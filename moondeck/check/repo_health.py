@@ -214,6 +214,7 @@ def measure_flash():
         _, newest = newest_source()
         if st.st_mtime > newest:
             flash["desktop"] = st.st_size
+            MEASURED_THIS_RUN.add("desktop")   # same rule as the firmwares: measured, so say so
     return flash
 
 
@@ -468,12 +469,12 @@ def render_markdown(new, old):
             cap = app_partition_bytes(k) if k.startswith("esp32") else 0
             cap_s = _kb(cap) if cap else "-"
             used = f"{(100.0 * v / cap):.0f}%" if cap else "-"
-            built = "yes" if (k in MEASURED_THIS_RUN or k == "desktop") else "carried"
+            built = "yes" if k in MEASURED_THIS_RUN else "carried"
             L.append(f"| {k} | {_arrow(v, o.get('flash'), k, _kb)} | {cap_s} | {used} | {built} |")
         L += ["",
-              "`Built: carried` means that firmware was NOT rebuilt this run and its number is "
-              "the previous one, so an absent delta says nothing about the change. `Used` is "
-              "against the app slot in the firmware's own partition table.", ""]
+              ("`Built: carried` means that firmware was NOT rebuilt this run and its number is "
+               "the previous one, so an absent delta says nothing about the change. `Used` is "
+               "against the app slot in the firmware's own partition table."), ""]
 
     if new.get("perf"):
         L += ["## Render performance", "", "| Target | Tick | FPS |", "|---|---:|---:|"]

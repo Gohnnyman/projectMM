@@ -49,6 +49,7 @@ extern char** environ;   // posix_spawnp wants the environment explicitly
 #include <net/ethernet.h>       // ETH_P_ALL
 #endif
 #ifdef __APPLE__
+#include <net/if_media.h>   // SIOCGIFMEDIA: the negotiated link rate, for the interface labels
 #include <pthread.h>    // pthread_jit_write_protect_np — macOS arm64 W^X JIT toggle
 #include <sys/ioctl.h>  // BIOCSETIF — binding a BPF device to an interface (ethSendRaw)
 #include <net/bpf.h>
@@ -58,6 +59,32 @@ extern char** environ;   // posix_spawnp wants the environment explicitly
 namespace mm::platform {
 
 namespace {
+/// Append ", <speed>" to an interface label, in the one format every OS's list uses.
+///
+/// The speed LOOKUP is necessarily per-OS (MIB_IF_TABLE2 on Windows, sysfs on Linux, SIOCGIFMEDIA
+/// on macOS: three APIs, three units), which is what the platform layer is for. The RENDERING is
+/// not, so it lives here once: the label shape is a contract the apply path and the driver's remap
+/// both parse (they split on ", " to recover the adapter's stable identity), and two copies of it
+/// would be two chances to drift out of that agreement.
+///
+/// `mbps` of 0 means the OS would not state a speed (a virtual adapter, a link that is down, or
+/// macOS Wi-Fi reporting only "autoselect"). That appends nothing, rather than a fabricated
+/// "0 Mb". Appends only if the whole suffix fits: a truncated speed reads worse than none, and
+/// the label is what the Select persists by.
+void appendLinkSpeed(char* out, size_t cap, unsigned mbps) {
+    if (!out || mbps == 0) return;
+    const size_t n = std::strlen(out);
+    char speed[24];
+    if (mbps >= 1000 && mbps % 1000 == 0)
+        std::snprintf(speed, sizeof(speed), ", %u Gb", mbps / 1000);
+    else if (mbps >= 1000)
+        std::snprintf(speed, sizeof(speed), ", %u.%u Gb", mbps / 1000, (mbps % 1000) / 100);
+    else
+        std::snprintf(speed, sizeof(speed), ", %u Mb", mbps);
+    if (n + std::strlen(speed) + 1 <= cap) std::snprintf(out + n, cap - n, "%s", speed);
+}
+
+
 // Tiny portability shims so each call site reads as plain code, not `#ifdef` noise.
 // POSIX uses int FDs + errno + read/write/close; Winsock uses SOCKET handles +
 // WSAGetLastError + recv/send/closesocket. Map to a small common surface.
@@ -942,9 +969,16 @@ void guidToString(const GUID& g, char* out, size_t cap) {
                   g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
 }
 
-/// The description WINDOWS shows for a pcap device, found through the interface table by GUID.
+/// The description WINDOWS shows for a pcap device, found through the interface table by GUID,
+/// with the adapter's LINK SPEED appended when Windows states one ("Realtek PCIe GbE, 1 Gb").
 /// This exists because pcap's own description can be absent: without it such an adapter is
 /// unnameable, since the only text left to match is a 49-character device path.
+///
+/// The speed rides in the label because the name alone does not say what a picker needs to know:
+/// a panel wall wants the 1 Gb NIC, and a list of plausible-looking names hides which entries are
+/// a 2.5 Gb USB dongle, a Wi-Fi radio, or a Hyper-V virtual switch. Windows reports 0 or ~0 for
+/// an adapter whose speed it will not state (typically one that is down), and those get no suffix
+/// rather than a fabricated "0 Mb".
 bool winDescForPcapName(const MIB_IF_TABLE2* table, const char* pcapName, char* out, size_t cap) {
     if (!table || !out || cap == 0) return false;
     char want[40];
@@ -959,7 +993,14 @@ bool winDescForPcapName(const MIB_IF_TABLE2* table, const char* pcapName, char* 
             out[n] = static_cast<char>(table->Table[i].Description[n]);
         }
         out[n] = '\0';
-        return n > 0;
+        if (n == 0) return false;
+
+        // Same source and the same unknown-speed guard as ethLinkSpeedMbps (winAdapterLink);
+        // converted to Mbit here so the shared formatter takes one unit from every OS.
+        const unsigned long long bps = table->Table[i].TransmitLinkSpeed;
+        if (bps == 0 || bps == ~0ULL) return true;
+        appendLinkSpeed(out, cap, static_cast<unsigned>(bps / 1000000ULL));
+        return true;
     }
     return false;
 }
@@ -2670,6 +2711,50 @@ size_t rawInterfaces(const char* const** optionsOut) {
             "lo", "utun", "awdl", "llw", "anpi", "bridge", "gif", "stf", "ap", "pktap",
             "veth", "docker", "br-", "virbr",
         };
+            // The adapter's negotiated link speed in Mbit, or 0 when the OS will not state one
+            // (a virtual interface, a link that is down, Wi-Fi on macOS which reports only
+            // "autoselect"). Rides in the label for the same reason as the Windows branch: the
+            // name alone does not say which entry is the 1 Gb NIC and which is a tunnel.
+            auto linkMbps = [](const char* ifname) -> unsigned {
+#ifdef __linux__
+                // sysfs states it directly, in Mbit. Absent or -1 for a virtual or down link.
+                char path[128];
+                std::snprintf(path, sizeof(path), "/sys/class/net/%s/speed", ifname);
+                FILE* f = std::fopen(path, "r");
+                if (!f) return 0;
+                long v = 0;
+                const bool ok = std::fscanf(f, "%ld", &v) == 1;
+                std::fclose(f);
+                return (ok && v > 0) ? static_cast<unsigned>(v) : 0;
+#elif defined(__APPLE__)
+                // macOS has no speed field: the negotiated rate is encoded as the media
+                // SUBTYPE, so map the ones that name a rate. Wi-Fi and "autoselect" report no
+                // subtype we can turn into a number, which is exactly when 0 is the honest
+                // answer rather than a guess.
+                const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+                if (fd < 0) return 0;
+                ifmediareq req{};
+                std::snprintf(req.ifm_name, sizeof(req.ifm_name), "%s", ifname);
+                unsigned mbps = 0;
+                if (::ioctl(fd, SIOCGIFMEDIA, &req) == 0 && (req.ifm_status & IFM_ACTIVE)) {
+                    switch (IFM_SUBTYPE(req.ifm_active)) {
+                        case IFM_10_T:   mbps = 10;    break;
+                        case IFM_100_TX: mbps = 100;   break;
+                        case IFM_1000_T: mbps = 1000;  break;
+                        case IFM_2500_T: mbps = 2500;  break;
+                        case IFM_5000_T: mbps = 5000;  break;
+                        case IFM_10G_T:  mbps = 10000; break;
+                        default: break;
+                    }
+                }
+                ::close(fd);
+                return mbps;
+#else
+                (void)ifname;
+                return 0;
+#endif
+            };
+
         auto isVirtual = [](const char* n) {
             for (const char* p : kVirtualPrefixes) {
                 const size_t l = std::strlen(p);
@@ -2687,7 +2772,13 @@ size_t rawInterfaces(const char* const** optionsOut) {
                 for (size_t i = 1; i < rawIfCount_; i++)
                     if (std::strcmp(rawIfNames_[i], a->ifa_name) == 0) { seen = true; break; }
                 if (seen) continue;   // getifaddrs lists one row per address family
-                rawIfPush(a->ifa_name, a->ifa_name);
+                // Label carries the speed, bind name does not: the name is the adapter's
+                // identity and the speed changes when a link renegotiates (platform.h § raw
+                // interfaces). Same "NAME, N Gb" shape as the Windows branch.
+                char label[64];
+                std::snprintf(label, sizeof(label), "%s", a->ifa_name);
+                appendLinkSpeed(label, sizeof(label), linkMbps(a->ifa_name));
+                rawIfPush(label, a->ifa_name);
             }
             ::freeifaddrs(addrs);
         }

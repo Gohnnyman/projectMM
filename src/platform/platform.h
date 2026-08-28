@@ -466,6 +466,13 @@ bool ethBindRawInterface(const char* ifName);
 // entry 0 always "none (capture only)". Rebuilt on every call so a hot-plugged NIC appears on
 // the next schema rebuild. rawInterfaceName(i) is the BIND name behind row i (the pcap device
 // name on Windows differs from its label; on POSIX they are the same); nullptr for row 0.
+// A label may carry a live DETAIL after ", " -- Windows appends the adapter's link speed
+// ("Realtek PCIe GbE Family Controller, 1 Gb") -- because the name alone does not tell a picker
+// which entry is the 1 Gb NIC and which is a Wi-Fi radio or a Hyper-V virtual switch. Only the
+// part BEFORE that separator is the adapter's identity: the speed changes when a link
+// renegotiates, and both the apply path (Control.cpp) and the driver's own remap compare on the
+// stable head so a changed speed does not read as a different NIC.
+//
 // The Select persists by LABEL (see Control::persistLabel): a NIC keeps its identity across
 // reboots and Npcap reinstalls, the index-mismatch trap this exists to close.
 size_t rawInterfaces(const char* const** optionsOut);
@@ -530,8 +537,9 @@ void ndiTestClearFrames();
 
 // --- HLS video output -------------------------------------------------------------------------
 //
-// projectMM as an HLS source: the rendered frame, pixel-exact, reaches a TV, VLC or a browser as
-// H.264 over HLS. Gated by `hasHls`.
+// projectMM as an HLS source: the rendered grid, output correction applied and any integer
+// upscaling done (see HlsDriver's `scale`), reaches a TV, VLC or a browser as H.264 over HLS.
+// Gated by `hasHls`.
 //
 // **The seam carries NUMBERS, not an encoder command line.** The driver states the frame geometry,
 // the rate and the bitrate; how those become H.264 is entirely the platform's business, because

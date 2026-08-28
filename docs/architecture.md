@@ -263,14 +263,20 @@ Three distinct things, kept distinct in the vocabulary:
 
 A deviceModel can run multiple firmwares (the Olimex Gateway runs both `esp32-eth` and the default `esp32`); a firmware can run on multiple deviceModels (`esp32` runs on any classic ESP32 dev kit). The `esp32s3-n16r8` firmware is S3-only and does not run on the Olimex Gateway or other classic-ESP32 hardware. The codebase reserves "deviceModel" exclusively for the physical product and "firmware" exclusively for the compiled binary.
 
-### MoonBase: the second boot image (4 MB boards)
+### MoonBase: the second boot image
 
-A 4 MB board has room for one application, not two, so the dual-OTA layout (half the chip spent
-on a second copy of the firmware) is replaced on those boards by **MoonBase**: a small,
-rarely-changing image in the partition table's `factory` slot that owns the device while the
-application is being replaced, a board cannot rewrite the partition it is executing from. The
-app slot grows by a third in exchange. 8/16 MB boards keep dual-OTA and are untouched by any of
-this.
+Dual-OTA spends half the app area on a second copy of the firmware that is idle except during an
+update. **MoonBase** replaces it: a small, rarely-changing image in the partition table's
+`factory` slot that owns the device while the application is being replaced, since a board
+cannot rewrite the partition it is executing from. One app slot then suffices, and the flash the
+second slot held goes elsewhere.
+
+A 4 MB board has no choice, having room for one application and not two; its app slot grows by a
+third in exchange. On a **16 MB** board the choice is deliberate rather than forced, and the
+freed 4 MB goes to the filesystem (11 MB rather than 7). Which boards use MoonBase is a
+per-variant decision recorded in `moondeck/build/build_esp32.py`, not a property of flash size:
+today the 4 MB classic, the S3-Zero and `esp32-16mb` do, and it may become the default
+everywhere.
 
 The update cycle: the app stages the install URL in NVS (or nothing, for a browser upload),
 points the bootloader at MoonBase and reboots; MoonBase joins the network with the app's stored
@@ -285,7 +291,7 @@ MoonBase, visibly, rather than silently reverting to the old app; the way back i
 
 MoonBase is a standalone ESP-IDF project (`moonbase/`, ~750 KB against an 896 KB slot) sharing
 no sources with the app, the deliberate trade for an image that must stay small and, once
-working, hardly change. `moondeck/build/build_esp32.py` builds it alongside the 4 MB variants
+working, hardly change. `moondeck/build/build_esp32.py` builds it alongside every variant that opts in
 and owns the flash-layout helpers every consumer uses (serial flash, mooninstaller manifests,
 release preview, the QEMU image): IDF's own `flasher_args.json` knows nothing of the two-image
 scheme and stages the app at the factory offset, so each of those paths applies the same

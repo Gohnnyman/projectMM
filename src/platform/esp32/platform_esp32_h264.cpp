@@ -105,7 +105,7 @@ void rgbToEncoderFormat(const uint8_t* rgb, uint8_t* out, uint16_t w, uint16_t h
     for (uint16_t y = 0; y < h; y++) {
         uint8_t* dst = out + static_cast<size_t>(y) * lineBytes;
         const uint8_t* src = rgb + static_cast<size_t>(y) * w * 3;
-        const bool oddLine = (y & 1) == 0;   // first line carries U
+        const bool evenRow = (y & 1) == 0;   // rows 0, 2, 4...: these carry U, the others V
         for (uint16_t x = 0; x < w; x += 2) {
             const uint8_t* p0 = src + static_cast<size_t>(x) * 3;
             const uint8_t* p1 = (x + 1 < w) ? p0 + 3 : p0;
@@ -117,7 +117,7 @@ void rgbToEncoderFormat(const uint8_t* rgb, uint8_t* out, uint16_t w, uint16_t h
             // Chroma is subsampled 2x2; averaging the pair costs nothing and avoids the crawl a
             // nearest-sample pick gives on hard edges.
             const int rA = (r0 + r1) >> 1, gA = (g0 + g1) >> 1, bA = (b0 + b1) >> 1;
-            const int c = oddLine ? (((-43 * rA - 84 * gA + 128 * bA) >> 8) + 128)    // U
+            const int c = evenRow ? (((-43 * rA - 84 * gA + 128 * bA) >> 8) + 128)    // U
                                   : (((128 * rA - 107 * gA - 21 * bA) >> 8) + 128);   // V
 
             *dst++ = static_cast<uint8_t>(c < 0 ? 0 : (c > 255 ? 255 : c));
@@ -308,6 +308,7 @@ bool encoderStart(const EncoderConfig& cfg) {
 }
 
 int encoderWrite(const uint8_t* data, size_t len) {
+    if (!data || len == 0) return -1;   // invalid input, distinct from the queue-full drop (0)
     if (!running_ || dead_) return -1;
     Lock lk;
     if (count_ >= kSlots) return 0;             // encoder behind: drop-newest, stay live
@@ -382,8 +383,12 @@ bool hlsSegment(const char* name, const uint8_t** data, size_t* len) {
                                static_cast<unsigned>(milli / 1000u),
                                static_cast<unsigned>(milli % 1000u), static_cast<unsigned>(q));
         }
+        // Clamp: snprintf reports the length it WOULD have written, so an accumulated n can
+        // exceed the buffer and hand the caller bytes past its end.
+        if (n < 0) return false;
+        if (n > static_cast<int>(sizeof(playlist)) - 1) n = static_cast<int>(sizeof(playlist)) - 1;
         *data = reinterpret_cast<const uint8_t*>(playlist);
-        *len  = n > 0 ? static_cast<size_t>(n) : 0;
+        *len  = static_cast<size_t>(n);
         return *len > 0;
     }
 
@@ -414,6 +419,13 @@ void hlsSegmentRelease() { serving_ = kNoSeg; }
 namespace mm::platform {
 bool hlsSegment(const char*, const uint8_t**, size_t*) { return false; }
 void hlsSegmentRelease() {}
+// The whole encoder seam, not just the segment half: platform.h declares these for every target,
+// so a build that reaches them without CONFIG_MM_HLS must link rather than fail. Starting fails,
+// which is what the driver reports; the rest are inert.
+bool encoderStart(const EncoderConfig&) { return false; }
+int  encoderWrite(const uint8_t*, size_t) { return -1; }
+bool encoderRunning() { return false; }
+void encoderStop() {}
 }  // namespace mm::platform
 
 #endif  // CONFIG_MM_HLS

@@ -8,6 +8,7 @@
 #include "doctest.h"
 #include "platform/esp32/MpegTs.h"
 
+#include <cstring>   // std::memcmp: declared here, not borrowed from MpegTs.h
 #include <vector>
 
 namespace {

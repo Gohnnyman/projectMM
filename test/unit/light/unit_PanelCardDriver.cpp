@@ -664,3 +664,100 @@ TEST_CASE("resetting the interface test seam with nullptr restores real enumerat
     mm::platform::setTestRawInterfaces(nullptr, 0);
     CHECK(mm::platform::rawInterfaces(&opts) >= 1);   // back to the host's own list
 }
+
+// An interface label carries the adapter's live link speed ("Realtek PCIe GbE, 1 Gb") so a user
+// can tell a 1 Gb NIC from a Wi-Fi radio or a virtual switch. That detail CHANGES: a renegotiated
+// link, or the same cable at 100 Mb, rewrites the label. The selection must survive it, or the
+// driver silently falls back to capture-only the first time a link renegotiates.
+TEST_CASE("a NIC whose link speed changed is still the same NIC") {
+    static const char* kFast[] = {"en-alpha, 1 Gb", "en-beta, 2.5 Gb"};
+    mm::platform::setTestRawInterfaces(kFast, 2);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+    {
+        auto& cs = driver.controls();
+        for (uint8_t i = 0; i < cs.count(); i++) {
+            if (std::strcmp(cs[i].name, "interface") != 0) continue;
+            const auto r = mm::applyControlValue(cs[i], "{\"interface\":\"en-beta, 2.5 Gb\"}",
+                                                 "interface", mm::ApplyPolicy::Clamp);
+            CHECK(r == mm::ApplyResult::Ok);
+        }
+    }
+    driver.prepare();
+
+    // The link renegotiates: same adapter, different speed in its label.
+    static const char* kSlow[] = {"en-alpha, 1 Gb", "en-beta, 100 Mb"};
+    mm::platform::setTestRawInterfaces(kSlow, 2);
+    driver.defineControls();
+
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        const uint8_t sel = *static_cast<uint8_t*>(cs[i].ptr);
+        const char* bound = mm::platform::rawInterfaceName(sel);
+        REQUIRE(bound != nullptr);                    // row 0 binds nothing: the failure case
+        CHECK(std::strncmp(bound, "en-beta", 7) == 0);
+    }
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+}
+
+// The same rule on the APPLY path: a persisted label whose speed has since changed still selects
+// its adapter, so a config restored onto a machine whose link renegotiated keeps working.
+TEST_CASE("a persisted interface label matches its adapter despite a changed speed") {
+    static const char* kNow[] = {"en-alpha, 100 Mb"};
+    mm::platform::setTestRawInterfaces(kNow, 1);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        // The config was written when the link was up at 1 Gb.
+        const auto r = mm::applyControlValue(cs[i], "{\"interface\":\"en-alpha, 1 Gb\"}",
+                                             "interface", mm::ApplyPolicy::Clamp);
+        CHECK(r == mm::ApplyResult::Ok);
+        CHECK(*static_cast<uint8_t*>(cs[i].ptr) == 1);   // row 1, not the capture-only row 0
+    }
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+}
+
+// An adapter that DISAPPEARS between rebuilds (unplugged USB NIC, a driver uninstall) must not
+// leave the selection pointing at whatever now occupies that row: the driver would send panel
+// data out of a NIC the user never chose. No match means capture-only, explicitly.
+TEST_CASE("a NIC that disappeared falls back to capture-only, not to whoever took its row") {
+    static const char* kBefore[] = {"en-alpha", "en-beta"};
+    mm::platform::setTestRawInterfaces(kBefore, 2);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+    {
+        auto& cs = driver.controls();
+        for (uint8_t i = 0; i < cs.count(); i++) {
+            if (std::strcmp(cs[i].name, "interface") != 0) continue;
+            const auto r = mm::applyControlValue(cs[i], "{\"interface\":\"en-beta\"}",
+                                                 "interface", mm::ApplyPolicy::Clamp);
+            CHECK(r == mm::ApplyResult::Ok);
+        }
+    }
+    driver.prepare();   // records en-beta as the chosen adapter
+
+    // en-beta is gone; en-gamma now sits at the row en-beta used to occupy.
+    static const char* kAfter[] = {"en-alpha", "en-gamma"};
+    mm::platform::setTestRawInterfaces(kAfter, 2);
+    driver.defineControls();
+
+    bool sawInterface = false;
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        sawInterface = true;
+        CHECK(*static_cast<uint8_t*>(cs[i].ptr) == 0);            // row 0: none (capture only)
+        CHECK(mm::platform::rawInterfaceName(0) == nullptr);      // and it binds nothing
+    }
+    CHECK(sawInterface);
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+}

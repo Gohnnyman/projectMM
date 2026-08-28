@@ -126,7 +126,7 @@ Full design + the reasoned transport split: [Plan-20260629 — UDP device discov
 
 ## MoonBase follow-ups
 
-MoonBase v1 ([architecture.md § MoonBase](../architecture.md#moonbase-the-second-boot-image-4-mb-boards))
+MoonBase v1 ([architecture.md § MoonBase](../architecture.md#moonbase-the-second-boot-image))
 ships exactly one action: install firmware (upload + URL). The name is deliberately broader than
 "recovery", these are the candidate next actions, each solving something only a separate boot
 image can solve. The budget rule from the partition table applies to all of them: the 896 KB slot

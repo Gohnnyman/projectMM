@@ -171,11 +171,26 @@ public:
             // same list changing under a running session, which would otherwise silently send
             // panel data out of a different adapter.
             if (chosenIf_[0] && ifOptions) {
-                for (size_t i = 0; i < n && i < 255; i++)
-                    if (ifOptions[i] && std::strcmp(ifOptions[i], chosenIf_) == 0) {
+                // Compare the STABLE HEAD, the part before ", ": a label may carry the adapter's
+                // live link speed after it ("Realtek PCIe GbE, 1 Gb"), and a renegotiated link
+                // would otherwise read as a different NIC and drop the selection to row 0.
+                const char* mySep = std::strstr(chosenIf_, ", ");
+                const size_t mine = mySep ? static_cast<size_t>(mySep - chosenIf_)
+                                          : std::strlen(chosenIf_);
+                // Back to capture-only FIRST: if the remembered adapter is gone, the old index
+                // now points at whatever took its place, and the driver would send panel data
+                // out of a NIC the user never chose. No match means no NIC, explicitly.
+                interfaceSel_ = 0;
+                for (size_t i = 0; i < n && i < 255; i++) {
+                    if (!ifOptions[i]) continue;
+                    const char* sep = std::strstr(ifOptions[i], ", ");
+                    const size_t head = sep ? static_cast<size_t>(sep - ifOptions[i])
+                                            : std::strlen(ifOptions[i]);
+                    if (head == mine && std::strncmp(ifOptions[i], chosenIf_, head) == 0) {
                         interfaceSel_ = static_cast<uint8_t>(i);
                         break;
                     }
+                }
             }
             controls_.addSelect("interface", interfaceSel_, ifOptions,
                                 static_cast<uint8_t>(n < 255 ? n : 255));

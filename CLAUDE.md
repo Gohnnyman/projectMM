@@ -109,7 +109,9 @@ Agents never commit. **Delegate the mechanical roles**: parallelizable or substa
 
 **Sanity-check every request.** Hold it against README, this file, and architecture.md. If it conflicts, push back briefly with the specific reference; the product owner can still overrule.
 
-**Anti-stalling.** If a build error or test failure survives 2 fix attempts: STOP. Ask, or roll back and re-approach.
+**Never revert without asking.** Undoing work already done is the product owner's call, whatever prompted it: a doc that seems to contradict it, a reviewer finding, a failing check, or the agent's own second thoughts. Deleting a file, dropping a config, or backing out a change costs the thinking that went into it and may reverse a decision the PO made deliberately. State the case and wait; a written statement is a status, not a law, and only the PO knows which.
+
+**Anti-stalling.** If a build error or test failure survives 2 fix attempts: STOP. Ask, or roll back and re-approach (rolling back is itself a revert: ask).
 
 **Bench boards are free test rigs.** Build and flash freely to verify work; re-probe ports first. A *rigorous* change (anything that could brick, boot-loop, or wipe a board: flash erases, boot/partition/build-config changes, a first flash of an untested board) gets a one-sentence heads-up and a go-ahead first — the test is reversibility.
 

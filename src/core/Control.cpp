@@ -397,12 +397,32 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             const bool overlong = std::strlen(label) >= sizeof(label) - 1;
             if (label[0]) {
                 auto* options = reinterpret_cast<const char* const*>(c.aux);
-                if (options && !overlong)
+                if (options && !overlong) {
                     for (int i = 0; i <= hi; i++)
                         if (options[i] && std::strcmp(options[i], label) == 0)
                             return clampInto(static_cast<uint8_t*>(c.ptr), i, 0, hi);
+                    // Then on the STABLE HEAD of the label, the part before ", ". An option may
+                    // carry a live detail after that separator (the panel-card NIC list appends a
+                    // link speed, "Realtek PCIe GbE, 1 Gb"), and matching the whole string would
+                    // lose the user's pick the moment that detail changed: a renegotiated link, or
+                    // the same NIC at 100 Mb instead of 1 Gb, would silently fall back to row 0.
+                    // BOTH sides are cut at the separator: the persisted label carries the
+                    // detail it was written with, and the option carries the current one, so
+                    // comparing a whole label against a head never matches.
+                    const char* lsep = std::strstr(label, ", ");
+                    const size_t lhead = lsep ? static_cast<size_t>(lsep - label)
+                                              : std::strlen(label);
+                    for (int i = 0; i <= hi; i++) {
+                        if (!options[i]) continue;
+                        const char* sep = std::strstr(options[i], ", ");
+                        const size_t head = sep ? static_cast<size_t>(sep - options[i])
+                                                : std::strlen(options[i]);
+                        if (head == lhead && std::strncmp(options[i], label, head) == 0)
+                            return clampInto(static_cast<uint8_t*>(c.ptr), i, 0, hi);
+                    }
+                }
                 // A label that names no current option (a peripheral this board can't run, or one too long
-                // to be any real option) is not an error in Lenient policy — the driver keeps its default;
+                // to be any real option) is not an error in Lenient policy: the driver keeps its default;
                 // Strict rejects it.
                 if (policy == ApplyPolicy::Strict) return ApplyResult::OutOfRange;
                 return ApplyResult::Ok;

@@ -1346,5 +1346,52 @@
         }
       }
     ]
+  },
+  {
+    "name": "ESP32-S3-Zero (N4R2)",
+    "chip": "ESP32-S3",
+    "firmwares": [
+      "esp32s3-zero"
+    ],
+    "image": "assets/deviceModels/esp32-s3-zero-pinout.png",
+    "url": "https://www.waveshare.com/wiki/ESP32-S3-Zero",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [],
+    "modules": [
+      {
+        "type": "System",
+        "id": "System",
+        "controls": {
+          "deviceModel": "ESP32-S3-Zero (N4R2)"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "21",
+          "count": 1
+        }
+      },
+      {
+        "type": "ParallelLedDriver",
+        "id": "ParallelLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "2"
+        }
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {
+          "txPowerSetting": 8
+        }
+      }
+    ]
   }
 ]
