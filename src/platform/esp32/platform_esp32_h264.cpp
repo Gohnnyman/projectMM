@@ -16,6 +16,15 @@
 
 #if defined(CONFIG_MM_HLS)
 
+// The Kconfig symbol cannot enforce this itself: `depends on IDF_TARGET_ESP32P4` would hide
+// MM_HLS from the component solver, which reads it to gate the esp_h264 dependency, and every
+// non-P4 build then fails at cmake. Catch it here instead, where the message names the cause
+// rather than surfacing as a link error against a missing hardware encoder.
+#include "soc/soc_caps.h"
+#if !defined(SOC_H264_ENCODER_SUPPORTED) || !SOC_H264_ENCODER_SUPPORTED
+#error "CONFIG_MM_HLS is set on a chip with no hardware H.264 encoder (P4 only)."
+#endif
+
 #include "light/MpegTs.h"
 
 #include "esp_h264_enc_single_hw.h"

@@ -24,10 +24,11 @@ menu "projectMM"
 
     config MM_HLS
         bool "HLS streaming via the hardware H.264 encoder (ESP32-P4 only)"
-        # The title says P4-only; this makes it so. Without it a fragment or menuconfig could
-        # set the symbol on another target, which would pull esp_h264 and compile a call to
-        # esp_h264_enc_hw_new on silicon that has no encoder.
-        depends on IDF_TARGET_ESP32P4
+        # Constrain the VALUE, not the visibility. `depends on IDF_TARGET_ESP32P4` would hide the
+        # symbol on every other target, and idf_component.yml gates the esp_h264 dependency on
+        # $CONFIG{MM_HLS}: the solver cannot read a symbol that is not visible, so every non-P4
+        # build failed with "MM_HLS ... not found in any Kconfig file". A range-style guard keeps
+        # the symbol readable everywhere while making y impossible off the P4.
         default y if IDF_TARGET_ESP32P4
         default n
         help
