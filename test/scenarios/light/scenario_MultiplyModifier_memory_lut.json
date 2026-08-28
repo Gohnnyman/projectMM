@@ -88,40 +88,58 @@
       },
       "observed": {
         "desktop-macos": {
-          "tick_us": [
-            1,
-            301
-          ],
-          "free_heap": [
-            0,
-            0
-          ],
-          "max_alloc_block": [
-            0,
-            0
-          ],
-          "at": [
-            "2026-06-02",
-            "2026-06-05"
-          ]
+          "tick_us": {
+            "p50": 3,
+            "p95": 4,
+            "min": 1,
+            "max": 4,
+            "n": 12,
+            "samples": [1, 3, 3, 3, 3, 3, 4, 3, 3, 3, 3, 3]
+          },
+          "free_heap": {
+            "p50": 0,
+            "p95": 0,
+            "min": 0,
+            "max": 0,
+            "n": 12,
+            "samples": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "max_alloc_block": {
+            "p50": 0,
+            "p95": 0,
+            "min": 0,
+            "max": 0,
+            "n": 12,
+            "samples": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "last_updated": "2026-08-28"
         },
         "desktop-windows": {
-          "tick_us": [
-            3,
-            14
-          ],
-          "free_heap": [
-            0,
-            0
-          ],
-          "max_alloc_block": [
-            0,
-            0
-          ],
-          "at": [
-            "2026-06-07",
-            "2026-08-23"
-          ]
+          "tick_us": {
+            "p50": 3,
+            "p95": 3,
+            "min": 3,
+            "max": 3,
+            "n": 1,
+            "samples": [3]
+          },
+          "free_heap": {
+            "p50": 0,
+            "p95": 0,
+            "min": 0,
+            "max": 0,
+            "n": 1,
+            "samples": [0]
+          },
+          "max_alloc_block": {
+            "p50": 0,
+            "p95": 0,
+            "min": 0,
+            "max": 0,
+            "n": 1,
+            "samples": [0]
+          },
+          "last_updated": "2026-08-23"
         }
       }
     }

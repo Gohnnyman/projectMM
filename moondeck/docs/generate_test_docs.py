@@ -86,13 +86,20 @@ def _fmt_us(us: int) -> str:
     return f"{us}µs"
 
 
+# What a cell shows when there is nothing to show. An em-dash is the typographic
+# convention for "no value" in a table, and the coding standards exempt a literal one in
+# a UI string from the no-em-dashes prose rule. Named once so the six cell renderers agree
+# and so the character appears in exactly one place.
+NO_VALUE = "\u2014"
+
+
 def _fps_from_us(us: int) -> str:
     """Convert tick_us → frames-per-second string (no decimals for ≥100 FPS,
     one decimal below; for headline display). Shared core of both
     `_fps_floor_from_contract` (single scalar → '≥ N FPS') and
     `_fps_range_from_observed_range` ([min, max] tick → 'lo-hi FPS')."""
     if us <= 0:
-        return "—"
+        return NO_VALUE
     fps = 1_000_000 / us
     if fps >= 100:
         return f"{int(round(fps)):,}"
@@ -113,25 +120,30 @@ def _fps_floor_from_contract(tick_us) -> str:
     but render FPS as the headline number (project convention; see README §
     Performance)."""
     if tick_us in (None, 0):
-        return "—"
+        return NO_VALUE
     return f"≥ {_fps_from_us(int(tick_us))}"
 
 
 def _fps_range_from_observed_range(v) -> str:
-    """Observed tick range [min_us, max_us] → FPS range, inverted (slow tick
-    = low FPS). Collapses when the formatted endpoints would render the same.
-    Returns "—" when the input is missing."""
+    """Observed tick → FPS range, inverted (slow tick = low FPS). Collapses when the
+    formatted endpoints would render the same. Returns the missing-value dash when there is
+    nothing to show.
+
+    Reads the current observation shape (a dict of statistics over a rolling sample
+    window, moondeck/scenario/_observed.py) and renders p50 to p95: the typical cost and
+    the tail. NOT min to max, which spans one lucky run to the worst excursion ever
+    recorded and reads as a much wider performance envelope than the code actually has.
+    The older [min, max] list is still accepted so a file written before the change
+    renders rather than raising."""
     if v is None:
-        return "—"
-    if isinstance(v, list) and len(v) == 2:
-        lo_us, hi_us = int(v[0]), int(v[1])
-        # Higher FPS comes from the lower tick.
-        hi_fps = _fps_from_us(lo_us)
-        lo_fps = _fps_from_us(hi_us)
-        if lo_fps == hi_fps:
-            return lo_fps
-        return f"{lo_fps}-{hi_fps}"
-    return _fps_from_us(int(v))
+        return NO_VALUE
+    pair = _observed_pair(v)
+    if pair is None:
+        return NO_VALUE
+    lo_us, hi_us = pair
+    # Higher FPS comes from the LOWER tick, so the pair inverts.
+    hi_fps, lo_fps = _fps_from_us(lo_us), _fps_from_us(hi_us)
+    return lo_fps if lo_fps == hi_fps else f"{lo_fps}-{hi_fps}"
 
 
 def _heap_contract_cell(v) -> str:
@@ -139,26 +151,49 @@ def _heap_contract_cell(v) -> str:
     (the desktop platform reports free_heap=0 / max_alloc_block=0 to mean
     "no meaningful ceiling"; rendering them as missing was misleading)."""
     if v is None:
-        return "—"
+        return NO_VALUE
     if v == 0:
         return "unlimited"
     return f"≥ {_fmt_heap(int(v))}"
 
 
-def _heap_observed_cell(v) -> str:
-    """Observed heap/block range → 'N KB' or 'N-M KB'. None → '—'. 0 →
-    'unlimited' (matches the contract-cell semantics — desktop reports 0
-    for "no meaningful value", which should display as 'unlimited' rather
-    than be silently dropped)."""
+def _observed_pair(v):
+    """Any observation shape → the (low, high) pair the cell renderers display, or None.
+
+    ONE place knows the stored shape. Observations are a dict of statistics over a
+    rolling sample window (moondeck/scenario/_observed.py); a file written before that
+    change holds a [min, max] list, and an older one a bare scalar. Each renderer used to
+    re-derive this, so the shape change broke them one at a time.
+
+    For the dict, the pair is p50 to p95: the typical value and its tail. Min to max
+    would span one lucky run to the worst excursion ever recorded, which reads as a far
+    wider envelope than the code actually has. n=0 (never measured on this target, e.g.
+    another OS) returns None, so the cell shows a dash rather than a fabricated zero.
+    """
     if v is None:
-        return "—"
+        return None
+    if isinstance(v, dict):
+        if not v.get("n"):
+            return None
+        return int(v.get("p50", 0)), int(v.get("p95", 0))
     if isinstance(v, list) and len(v) == 2:
-        if int(v[0]) == 0 and int(v[1]) == 0:
-            return "unlimited"
-        return _fmt_heap_range(v)
-    if int(v) == 0:
+        return int(v[0]), int(v[1])
+    if isinstance(v, (int, float)):
+        return int(v), int(v)
+    return None
+
+
+def _heap_observed_cell(v) -> str:
+    """Observed heap/block as 'N KB' or 'N-M KB'; the missing-value dash when absent; and
+    'unlimited' for 0, matching the contract cell (desktop reports 0 to mean "no
+    meaningful value", which should display as unlimited rather than be dropped)."""
+    pair = _observed_pair(v)
+    if pair is None:
+        return NO_VALUE
+    lo, hi = pair
+    if lo == 0 and hi == 0:
         return "unlimited"
-    return _fmt_heap(int(v))
+    return _fmt_heap(lo) if lo == hi else _fmt_heap_range([lo, hi])
 
 
 def _format_perf_table(step: dict) -> list[str]:
@@ -196,7 +231,7 @@ def _format_perf_table(step: dict) -> list[str]:
             sb = c.get("set_by") or "?"
             rs = f' "{c["reason"]}"' if c.get("reason") else ""
             bits.append(f"contract set {sb}{rs}")
-        at = o.get("at")
+        at = o.get("last_updated", o.get("at"))
         if at:
             bits.append(f"observed {_fmt_at_range(at)}")
         if bits:
@@ -234,10 +269,12 @@ def _fmt_heap_range(v) -> str:
 
 
 def _fmt_at_range(at) -> str:
-    """`at` is `[first_seen, last_updated]`; collapse when equal."""
+    """The date this observation last took a sample (`last_updated`). The older `at` key
+    and its two-element [first_seen, last_updated] form are still accepted so a file
+    written before the change renders; only the last element is shown, the first having
+    described samples that had long aged out of the window."""
     if isinstance(at, list) and len(at) == 2:
-        first, last = at[0], at[1]
-        return f"{first}" if first == last else f"{first} → {last}"
+        return str(at[1])
     return str(at)
 
 
