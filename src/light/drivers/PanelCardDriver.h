@@ -151,6 +151,11 @@ public:
     /// The LABEL behind interfaceSel_, so a re-enumeration that reorders the list can restore the
     /// same NIC rather than whatever now sits at that index. Sized to the enumeration's own cap.
     char chosenIf_[64] = {};
+    /// The row the last rebuild settled on. Its only job is to distinguish a user's pick (the
+    /// index moved) from an OS re-enumeration (the index did not), which decides whether the
+    /// label above may overrule the index. Starts equal to interfaceSel_, so the first rebuild
+    /// reads as "nothing picked yet".
+    uint8_t lastResolvedSel_ = 0;
     /// Send-rate ceiling (Hz); tick() rate-limits so a fast render tick doesn't saturate the link.
     uint8_t fps = 40;
 
@@ -165,12 +170,20 @@ public:
             const char* const* ifOptions = nullptr;
             const size_t n = platform::rawInterfaces(&ifOptions);
             // The list is re-enumerated on every rebuild, and the OS does not promise a stable
-            // order: a hot-plugged NIC can shift the rest. The INDEX is therefore meaningless
-            // across rebuilds, so re-point it at the label the user actually picked before the
-            // Select binds to it. Persisting by label (below) covers reboots; this covers the
-            // same list changing under a running session, which would otherwise silently send
-            // panel data out of a different adapter.
-            if (chosenIf_[0] && ifOptions) {
+            // order: a hot-plugged NIC can shift the rest. So the remembered LABEL re-points the
+            // index before the Select binds to it. Persisting by label (below) covers reboots;
+            // this covers the same list changing under a running session, which would otherwise
+            // silently send panel data out of a different adapter.
+            //
+            // But only ONE of those two things can have moved, and restoring in the wrong case is
+            // destructive rather than merely useless. Which moved is knowable: the index changing
+            // since we last resolved one means the USER picked a row, while the index standing
+            // still means the list did. Without this test the restore reverted every pick to the
+            // previously remembered adapter, prepare() then rewrote the label from that, and the
+            // wrong value became self-sustaining. Measured on a Windows bench: no selection could
+            // be made at all, the field springing back to "none (capture only)" every time.
+            const bool userPicked = (interfaceSel_ != lastResolvedSel_);
+            if (!userPicked && chosenIf_[0] && ifOptions) {
                 // Compare the STABLE HEAD, the part before ", ": a label may carry the adapter's
                 // live link speed after it ("Realtek PCIe GbE, 1 Gb"), and a renegotiated link
                 // would otherwise read as a different NIC and drop the selection to row 0.
@@ -192,6 +205,13 @@ public:
                     }
                 }
             }
+            // Record what this rebuild settled on, so the next one can tell a pick from a
+            // re-enumeration, and keep the remembered label in step with it. prepare() writes the
+            // same label; doing it here too means a rebuild that never reaches prepare (a pick on
+            // a disabled driver) still leaves the two agreeing.
+            lastResolvedSel_ = interfaceSel_;
+            if (ifOptions && interfaceSel_ < n && ifOptions[interfaceSel_])
+                std::snprintf(chosenIf_, sizeof(chosenIf_), "%s", ifOptions[interfaceSel_]);
             controls_.addSelect("interface", interfaceSel_, ifOptions,
                                 static_cast<uint8_t>(n < 255 ? n : 255));
             controls_.setPersistLabel(controls_.count() - 1);
@@ -242,6 +262,12 @@ public:
             // in a different order can find this same NIC again rather than trusting the index.
             const char* const* ifOptions = nullptr;
             const size_t n = platform::rawInterfaces(&ifOptions);
+            // chosenIf_ and lastResolvedSel_ are a PAIR: together they say "this row, by this
+            // name, is what we last settled on". Writing one without the other is what makes a
+            // later rebuild misread a re-enumeration as a fresh pick, or the reverse. A pick
+            // re-prepares (affectsPrepare) without necessarily rebuilding the controls, so this
+            // is a place the pair has to be kept in step, not only defineDriverControls().
+            lastResolvedSel_ = interfaceSel_;
             if (ifOptions && interfaceSel_ < n && ifOptions[interfaceSel_])
                 std::snprintf(chosenIf_, sizeof(chosenIf_), "%s", ifOptions[interfaceSel_]);
             ifName = platform::rawInterfaceName(interfaceSel_);
