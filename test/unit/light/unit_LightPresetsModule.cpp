@@ -19,7 +19,7 @@ using mm::Correction;
 namespace {
 // The count of seeded read-only built-ins (see LightPresetsModule::seedBuiltins). Referenced by
 // name so adding a built-in updates one constant, not a scatter of magic numbers across the cases.
-constexpr int kBuiltinCount = 13;   // RGB,GRB,BGR,RGBW,GRBW,WRGB,GRB6,RGBWYP,RGBCCT,IRGB + 3 moving heads
+constexpr int kBuiltinCount = 14;   // RGB,GRB,BGR,RGBW,GRBW,WRGB,GRB6,RGBWYP,RGBCCT,IRGB + 4 moving heads
 
 // Serialize the presets List value (the persisted form) to a string.
 std::string presetsJson(LightPresetsModule& m) {

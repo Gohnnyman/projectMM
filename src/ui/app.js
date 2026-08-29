@@ -473,16 +473,25 @@ function previewTargetFps(st) {
     return v;
 }
 
-// Is the user mid-interaction with a control? A full renderCards() rebuilds the DOM, so it destroys
-// an open native select or a field being typed into, the control vanishes from under the cursor.
+// Is the user mid-interaction with the page? A full renderCards() rebuilds the DOM, so it destroys
+// an open native select, a field being typed into, or TEXT THE USER HAS SELECTED, the control or
+// the selection vanishes from under the cursor.
 // ONE home for the test, because both re-render triggers need it: the /api/types arrival above and
 // the WebSocket full state. The WS case is the one users hit: a full state is sent on every connect,
 // so a browser that drops and reconnects (a big layout on modest hardware) re-renders repeatedly,
 // and a dropdown can become impossible to click before it disappears.
+//
+// A selection counts because copying a value out of the UI (a device name, an IP, a measurement)
+// is a normal thing to do and rebuilding under it collapses the highlight mid-drag, which reads as
+// the page fighting the user. It is deliberately narrow: a COLLAPSED selection (a plain caret, or
+// the empty range a click leaves behind) is not an interaction and must not park the UI on stale
+// structure. Live VALUES keep flowing either way, since updateValues() patches in place.
 function userIsEditing() {
     const el = document.activeElement;
-    return !!(el && (el.matches("input, textarea") || el.closest("select")
-                     || document.querySelector('select[data-open="true"]')));
+    if (el && (el.matches("input, textarea") || el.closest("select")
+               || document.querySelector('select[data-open="true"]'))) return true;
+    const sel = window.getSelection();
+    return !!(sel && !sel.isCollapsed && sel.rangeCount > 0 && String(sel).length > 0);
 }
 
 // The message for a failed fetch Response: the server's own `{"error": …}` body (JSON, e.g.
@@ -1052,11 +1061,18 @@ function attachTabDragHandlers(tab, child, parent) {
 // A tab carries its module's fault severity as a dot, because a tab that can HIDE an error is worse
 // than no tab: a driver failing on a background tab must still be visible from the strip.
 function applyTabDot(tab, mod) {
+    // Touch the DOM only when the dot actually changes. This runs for every module on every
+    // state patch (updateTabDot), and removing or inserting a node inside the tab collapses any
+    // selection the user is holding in that card, so an unconditional remove-and-recreate made
+    // text impossible to select and copy: the same rule setText follows for text nodes.
+    const want = (mod.severity === "error" || mod.severity === "warning") ? mod.severity : null;
     const old = tab.querySelector(".tab-dot");
+    const have = old ? old.className.replace("tab-dot tab-dot-", "") : null;
+    if (have === want) return;                  // nothing to do: leave the DOM alone
     if (old) old.remove();
-    if (mod.severity !== "error" && mod.severity !== "warning") return;
+    if (!want) return;
     const dot = document.createElement("span");
-    dot.className = "tab-dot tab-dot-" + mod.severity;
+    dot.className = "tab-dot tab-dot-" + want;
     tab.appendChild(dot);
 }
 
@@ -3759,6 +3775,14 @@ function redrawRangeDecorations(input) {
     }
 }
 
+// Write text only when it actually changed. Assigning textContent REPLACES the text node, which
+// collapses any selection inside it, so an unconditional write once a second makes a value
+// impossible to select and copy: the highlight dies under the cursor. It is also wasted DOM work,
+// since most of these strings are identical from one second to the next.
+function setText(el, text) {
+    if (el && el.textContent !== text) el.textContent = text;
+}
+
 function updateValues() {
     if (!state || !state.modules) return;
     // Patch each visible card's controls and stats line; never rebuild the DOM here.
@@ -3767,7 +3791,11 @@ function updateValues() {
         updateModuleControls(mod);
         // refresh the stats line for this module if visible
         const statsEl = document.querySelector(`.card-stats[data-mid="${cssEscape(mod.name)}"]`);
-        if (statsEl) { statsEl.textContent = formatStats(mod); statsEl.title = formatStatsTitle(mod); }
+        if (statsEl) {
+            setText(statsEl, formatStats(mod));
+            const t = formatStatsTitle(mod);
+            if (statsEl.title !== t) statsEl.title = t;
+        }
         // refresh status row: insert it if status appeared after card build
         let statusRow = document.querySelector(`[data-status-mid="${cssEscape(mod.name)}"]`);
         if (mod.status) {
@@ -3795,7 +3823,11 @@ function updateValues() {
             } else {
                 statusRow.style.display = "";
                 const val = statusRow.querySelector(".status-value");
-                if (val) { val.textContent = mod.status; val.dataset.sev = mod.severity || "status"; }
+                if (val) {
+                    setText(val, mod.status);
+                    const sev = mod.severity || "status";
+                    if (val.dataset.sev !== sev) val.dataset.sev = sev;
+                }
             }
         } else if (statusRow) {
             statusRow.style.display = "none";
@@ -3807,7 +3839,7 @@ function updateValues() {
             if (Date.now() - ts > 1000) {
                 const on = (mod.enabled === undefined) ? true : !!mod.enabled;
                 enabledEl.dataset.checked = on ? "true" : "false";
-                enabledEl.textContent = "⏻";
+                setText(enabledEl, "\u23FB");
                 enabledEl.classList.toggle("module-enabled--off", !on);
                 enabledEl.setAttribute("aria-pressed", on ? "true" : "false");
                 const cardEl = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
@@ -4014,7 +4046,7 @@ function updateModuleControls(mod) {
                     const triSwatch = wrap.querySelector(".palette-trigger .palette-swatch");
                     if (triSwatch) triSwatch.style.background = grad;
                     const triName = wrap.querySelector(".palette-trigger .palette-name");
-                    if (triName) triName.textContent = ((ctrl.options || [])[ctrl.value] || {}).name || String(ctrl.value);
+                    if (triName) setText(triName, ((ctrl.options || [])[ctrl.value] || {}).name || String(ctrl.value));
                     wrap.querySelectorAll(".palette-item.selected").forEach(x => x.classList.remove("selected"));
                     const row = wrap.querySelector(`.palette-item[data-idx="${ctrl.value}"]`);
                     if (row) row.classList.add("selected");
@@ -4027,7 +4059,7 @@ function updateModuleControls(mod) {
                 const link = document.querySelector(`a.control-url[data-mid="${mid}"][data-key="${k}"]`);
                 if (link) { setUrlDisplay(link, ctrl.value); break; }
                 const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
-                if (span) span.textContent = ctrl.value ?? "";
+                if (span) setText(span, String(ctrl.value ?? ""));
                 break;
             }
             case "display-int": {
@@ -4036,7 +4068,7 @@ function updateModuleControls(mod) {
                     // Re-cache the unit in case the device changed it (it
                     // shouldn't, but the WS path is the authority).
                     span.dataset.unit = ctrl.unit ?? span.dataset.unit ?? "";
-                    span.textContent = fmtDisplayInt(ctrl);
+                    setText(span, fmtDisplayInt(ctrl));
                 }
                 break;
             }
@@ -4048,7 +4080,7 @@ function updateModuleControls(mod) {
             }
             case "time": {
                 const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
-                if (span) span.textContent = fmtTime(ctrl.value ?? 0);
+                if (span) setText(span, fmtTime(ctrl.value ?? 0));
                 break;
             }
             case "progress": {
@@ -4058,7 +4090,7 @@ function updateModuleControls(mod) {
                     bar.max = ctrl.total ?? 100;
                 }
                 const lbl = document.querySelector(`span.control-value[data-mid="${mid}"][data-key="${k}.label"]`);
-                if (lbl) lbl.textContent = fmtProgressLabel(ctrl);
+                if (lbl) setText(lbl, fmtProgressLabel(ctrl));
                 break;
             }
             case "list": {
@@ -4545,7 +4577,7 @@ function updateStatusBar() {
     const nameCtrl = ctrls.find(c => c.name === "deviceName");
     const nameSpan = document.getElementById("device-name");
     if (nameCtrl && nameSpan && nameCtrl.value) {
-        nameSpan.textContent = nameCtrl.value;
+        setText(nameSpan, String(nameCtrl.value ?? ""));
         if (document.title !== "projectMM: " + nameCtrl.value) {
             document.title = "projectMM: " + nameCtrl.value;
         }
@@ -4573,7 +4605,7 @@ function updateStatusBar() {
         if (blockCtrl && blockCtrl.value && blockCtrl.value !== "0KB") {
             parts.push("🧱 " + blockCtrl.value);
         }
-        statsEl.textContent = parts.join(" · ");
+        setText(statsEl, parts.join(" · "));
     }
 
     // Hide reboot button on desktop builds: platform::reboot() just exits the process,

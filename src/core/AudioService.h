@@ -306,9 +306,9 @@ public:
     // Read-only views of the sync socket lifecycle so unit_AudioService_sync can assert it
     // through the public tick() without befriending the class or exposing internals broadly.
     bool syncOpenForTest() const { return syncOpen_; }
-    uint8_t syncFrameCounterForTest() const { return syncFrameCounter_; }
     const char* syncStatusForTest() const { return syncStr_; }
     static constexpr uint32_t syncSendIntervalMsForTest() { return kSyncSendIntervalMs; }
+    uint32_t syncSendCountForTest() const { return syncSendCount_; }
     static constexpr uint32_t syncFallbackMsForTest() { return kSyncFallbackMs; }
     static constexpr uint32_t syncOpenRetryMsForTest() { return kSyncOpenRetryMs; }
 
@@ -416,6 +416,17 @@ public:
         // Peak frequency: the exact-Hz FFT bin, held when there's no real signal so
         // it doesn't wander in silence.
         if (peakMag > 8) { frame_.peakHz = peakHz; frame_.peakMag = peakMag; }
+
+        // Latch a beat for the audio-sync packet: raw level notably above the smoothed average,
+        // at most one per refractory window. Analysis runs faster than the send, so latching here
+        // (rather than testing at send time) reports each beat exactly once, which is what WLED's
+        // udpSamplePeak does.
+        const uint32_t nowMs = platform::millis();
+        if (frame_.level > frame_.levelSmoothed + kSyncPeakMargin &&
+            nowMs - lastPeakMs_ >= kSyncPeakRefractoryMs) {
+            syncPeakLatched_ = true;
+            lastPeakMs_ = nowMs;
+        }
 
         // Track the PEAK level across the 1 s display window. frame_.level is recomputed every
         // ~23 ms audio block, but the UI string is snapshotted only once a second, sampling the
@@ -548,9 +559,12 @@ private:
 
     // WLED audio sync (light/WLEDAudioSyncPacket.h). One socket, bound only in Send/Receive.
     platform::UdpSocket syncSock_;
-    uint32_t lastSyncSend_ = 0;      // millis of the last broadcast (send throttle)
+    uint32_t lastSyncSend_ = 0;      // millis of the last send (send throttle)
+    uint32_t syncSendCount_ = 0;         // sends made; test-visible so the throttle can be observed
+                                         // (NOT a wire field: byte 17 is WLED's reserved2)
+    bool     syncPeakLatched_ = false;   // a beat seen since the last transmit (WLED's udpSamplePeak)
+    uint32_t lastPeakMs_ = 0;            // when that beat was, for the refractory window
     uint32_t lastSyncRecv_ = 0;      // millis of the last received packet (receive auto-blend)
-    uint8_t  syncFrameCounter_ = 0;  // increments per send (the packet's dup/reorder field)
     bool     syncOpen_ = false;      // socket opened for the current mode (lazy-open latch)
     uint32_t lastSyncOpenFailMs_ = 0;  // millis of the last failed open (0 = none); bring-up backoff
     char     syncStr_[32] = {};      // "sync status" read-out
@@ -668,9 +682,10 @@ private:
     /// Lazily open the sync socket for the current mode, once the network stack is up.
     /// Idempotent: opens exactly once per mode (syncOpen_ latch), re-armed by syncReinit()
     /// on a mode change. Returns true when the socket is ready to use this tick. Off is a
-    /// no-op (socket stays closed, zero overhead). Send connects to the LAN broadcast;
-    /// Receive binds the port. Mirrors NetworkSendDriver/NetworkReceiveEffect, but deferred
-    /// past boot so a boot-present AudioService can't touch lwip before it exists.
+    /// no-op (socket stays closed, zero overhead). Send connects to the WLED multicast group;
+    /// Receive binds the port and joins that group. Mirrors NetworkSendDriver/
+    /// NetworkReceiveEffect, but deferred past boot so a boot-present AudioService can't touch
+    /// lwip before it exists.
     bool syncEnsureSocket() {
         if constexpr (!platform::hasNetwork) return false;
         const uint8_t s = sync();
@@ -683,17 +698,20 @@ private:
         // failure; hold off until kSyncOpenRetryMs has passed (same throttle form as syncSend).
         const uint32_t now = platform::millis();
         if (lastSyncOpenFailMs_ != 0 && now - lastSyncOpenFailMs_ < kSyncOpenRetryMs) return false;
-        if (s == 1) {                      // send → broadcast destination (configurable port)
-            char bcast[16]; formatDottedQuad(bcast, kBroadcast_);
-            if (syncSock_.open() && syncSock_.connect(bcast, syncPort)) {
+        if (s == 1) {                      // send → the WLED multicast group (configurable port)
+            char grp[16]; formatDottedQuad(grp, kSyncMulticastAddr_);
+            if (syncSock_.open() && syncSock_.connect(grp, syncPort)) {
                 syncOpen_ = true;
                 std::snprintf(syncStr_, sizeof(syncStr_), "sending");
             } else {
                 syncSock_.close();
                 std::snprintf(syncStr_, sizeof(syncStr_), "send: socket failed");
             }
-        } else {                           // receive → bind the port (WLED 11988, or a custom group)
-            if (syncSock_.open() && syncSock_.bind(syncPort)) {
+        } else {                           // receive → bind the port, then JOIN the group
+            // The join is what makes a multicast datagram reach this socket at all: binding the
+            // right port is not enough, the stack drops the group's traffic without a membership.
+            char grp[16]; formatDottedQuad(grp, kSyncMulticastAddr_);
+            if (syncSock_.open() && syncSock_.bind(syncPort) && syncSock_.joinMulticast(grp)) {
                 syncOpen_ = true;
                 std::snprintf(syncStr_, sizeof(syncStr_), "listening");
             } else {
@@ -714,11 +732,17 @@ private:
         const uint32_t now = platform::millis();
         if (now - lastSyncSend_ < kSyncSendIntervalMs) return;
         lastSyncSend_ = now;
-        // samplePeak hint: a beat is a raw level notably above the smoothed average.
-        const bool peak = frame_.level > frame_.levelSmoothed + kSyncPeakMargin;
+        // samplePeak is a LATCHED beat flag, the way WLED sends it: a beat seen between two
+        // transmits is reported once and then cleared, with a refractory window so one loud
+        // passage cannot set it on every packet. Testing the level per packet instead (what this
+        // did) flagged ~24% of packets where WLED flags ~4%, so a receiver's beat-driven effect
+        // fired continuously.
+        const bool peak = syncPeakLatched_;
+        syncPeakLatched_ = false;
         uint8_t pkt[WLED_SYNC_PACKET_SIZE];
-        buildWledAudioSync(pkt, frame_, syncFrameCounter_++, peak);
+        buildWledAudioSync(pkt, frame_, peak);
         syncSock_.sendTo(pkt, WLED_SYNC_PACKET_SIZE);
+        syncSendCount_++;
     }
 
     /// Drain the sync socket (bounded, non-blocking) in Receive mode. A valid v2 packet
@@ -750,7 +774,18 @@ private:
     }
 
     static constexpr uint16_t kSyncPeakMargin = 8;   // level over smoothed = a beat (samplePeak hint)
-    static constexpr uint8_t kBroadcast_[4] = {255, 255, 255, 255};   // LAN broadcast for send
+    // WLED gates its own peak detection on `millis() - timeOfPeak > 80`, so one loud passage
+    // reports a few beats rather than a continuous run of them.
+    static constexpr uint32_t kSyncPeakRefractoryMs = 80;
+    // The IP MULTICAST ADDRESS WLED audio sync uses: a network-layer destination, NOT a "sync
+    // group" in the WLED-feature sense and unrelated to any device grouping projectMM adds later
+    // (that is free to work however it likes: this only decides where the datagrams are sent).
+    // WLED's usermod both sends and receives on this address
+    // (audio_reactive.cpp: beginMulticast(IPAddress(239,0,0,1), port) + beginMulticastPacket),
+    // never on broadcast, so a broadcast sender is inaudible to WLED and a plain bound receiver
+    // never hears WLED. Multicast is also the better neighbour: only members are woken, where a
+    // broadcast at ~40/s makes every device on the LAN parse and discard a packet.
+    static constexpr uint8_t kSyncMulticastAddr_[4] = {239, 0, 0, 1};
 };
 
 } // namespace mm

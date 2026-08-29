@@ -20,6 +20,7 @@
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/WaveEffect.h"
 #include "light/effects/NoiseEffect.h"
+#include "light/effects/MovingHeadEffect.h"
 #include "light/effects/PacmanEffect.h"
 #include "light/effects/PlasmaEffect.h"
 #include "light/effects/MetaballsEffect.h"
@@ -238,6 +239,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::FireworksEffect>("FireworksEffect", "light/effects.md#fireworks");
     mm::ModuleFactory::registerType<mm::FishTankEffect>("FishTankEffect", "light/effects.md#fishtank");
     mm::ModuleFactory::registerType<mm::PacmanEffect>("PacmanEffect", "light/effects.md#pacman");
+    mm::ModuleFactory::registerType<mm::MovingHeadEffect>("MovingHeadEffect", "light/effects.md#movinghead");
     mm::ModuleFactory::registerType<mm::FlyingToastersEffect>("FlyingToastersEffect", "light/effects.md#flyingtoasters");
     mm::ModuleFactory::registerType<mm::BallpitEffect>("BallpitEffect", "light/effects.md#ballpit");
     mm::ModuleFactory::registerType<mm::TruchetEffect>("TruchetEffect", "light/effects.md#truchet");

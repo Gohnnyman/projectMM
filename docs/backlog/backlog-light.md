@@ -93,6 +93,90 @@ The shipped render↔encode split (Step 2a, `multicore` control) uses one `Drive
 
 MoonLight targets a fixed 60 fps; projectMM deliberately does not (settled with the PO 2026-07-12). The architecture is *render-uncapped + time-aware effects* (`beatsin8`/`millis()`-driven, a CLAUDE.md hard rule), so a whole-engine fps cap is redundant with that rule and would only *reduce* quality below the hardware ceiling; the LED wire rate already paces render physically (30 µs/light), and UI/WiFi responsiveness comes from the per-tick `vTaskDelay(1)` yield, not frame-rate control. Parked as a ~15-line opt-in (`targetFps=0` = unlimited default) *only if* a genuinely CPU-starved device ever appears.
 
+### Brightness belongs on a fixture's DIMMER channel, not only in the color values (WANTED)
+
+`Correction::apply()` holds a preset's `Dimmer` channel wide open at 255 and puts brightness into
+the R/G/B/W values through `briLut`. That is correct output and it is the only rule that serves
+every fixture (an addressable strip has no dimmer channel), but it is not how a lighting console
+drives a fixture that HAS one, and it costs real quality:
+
+- **Resolution.** At 10% brightness the colors are driven at 0-25, about 25 usable levels instead
+  of 255. A slow fade to black steps visibly; the dimmer channel exists so colors keep full 8-bit
+  range while intensity varies.
+- **Dimming quality.** A moving head's dimmer is often 16-bit or curve-corrected for the LED's
+  response. Linear scaling of 8-bit color values is the crudest dimming there is, and it is worst
+  at the low end where the eye is most sensitive.
+- **Matching.** A PAR with a real dimmer and a strip without one, both at 20%, do not read as the
+  same brightness: one dims in the LED driver, the other in integer arithmetic.
+
+**The rule to implement:** when a preset declares a `Dimmer` role, route the driver's brightness to
+that channel and drive the colors at full saturation; keep today's behavior (scale the colors)
+only where the fixture has no dimmer. The per-light color values still carry the effect's own
+shading, so an effect that paints one light dark stays dark. Watch the one case where fixture and
+light are not 1:1: several light cells behind ONE master dimmer cannot express per-cell brightness
+through it, so those keep the color-scaling path.
+
+Found on the bench 2026-08-28 wiring the first moving head. Note the dimmer was not written AT ALL
+before that day (the shipped `IRGB` preset could never light a fixture); writing it at 255 is the
+fix that made a fixture light, not the finished design.
+
+### Layer width settles one rebuild late, so a motion rig does not move until reconfigured (WANTED)
+
+`Layer::allocateBuffer` widens the light to fit the rig's motion channels, but it reads offsets
+`Drivers` only resolves from the light preset AFTER the layer has prepared. On a cold boot the
+layer therefore allocates at 3 channels, an effect's `setPan()` falls outside the light and is
+dropped, and the fixture holds still. Anything that triggers a second rebuild (a grid change, a
+preset change) fixes it for the session. Bench-observed 2026-08-29: 12 bytes for 4 lights on boot,
+24 bytes and moving after one grid nudge.
+
+**The fix is an ordering one**, not more code: the fixture layout has to be known before the layer
+allocates. Either resolve the preset's roles ahead of `Layer::prepare` (Drivers already reads the
+preset library, which does not depend on the layer), or have the layer re-prepare when the fixture
+channels change. Widening after the buffer exists is NOT an option: resizing it under a holder
+segfaults, which is how this landed where it is.
+
+### Blending adds motion channels, which is meaningless for aim (WANTED)
+
+`blendMap` treats a light as `n` opaque bytes, so ADDITIVE blending sums pan and tilt across
+layers. Two layers driving one moving head aim it at neither position, and saturate to hard-over
+as soon as both are moderately positioned.
+
+Only additive is wrong. **Opacity blending on motion is a feature and must be kept**: it is an
+interpolation, so a layer fading in sweeps the head smoothly from the old aim to the new one,
+which is what a console does and better than a snap. The rule (architecture.md) is that
+interpolating ops are valid on every channel while accumulating ops are valid only on emissive
+ones, so the fix is narrow: in the additive path, ASSIGN motion channels (topmost writer wins)
+instead of summing them, leaving the opacity path alone.
+
+Not yet reachable in a harmful way: it needs two enabled layers on a fixture carrying motion
+channels, and the single-layer path is a memcpy. Worth doing with the motion-writer work, since
+both need `FixtureChannels`' offsets on the blend path.
+
+### Pan/tilt/zoom/gobo have no writer — motion roles are declared but never driven (WANTED)
+
+`ChannelRole` carries `Pan`, `Tilt`, `Zoom`, `Rotate` and `Gobo`, and a preset can map them, but
+nothing writes them: `Correction::apply()` deliberately touches only color roles (and now Dimmer),
+leaving motion "for their own writers". Those writers do not exist, so every motion channel sits at
+0 forever: a moving head points wherever 0/0 puts it and never moves.
+
+This is the other half of driving a moving head, and it is a domain question, not a plumbing one: a
+light is a point with a color, while a moving head is a fixture that emits a BEAM in a direction it
+controls live. The backlog's fixture-model item ("moving heads, beams", per-emitter targets) is
+where the model belongs; this entry records the concrete gap in the meantime. Bench fixture and its
+channel map: [light fixtures reference](../reference/light-fixtures.md).
+
+### Built-in light presets never reach a device that has a saved config (WANTED)
+
+`LightPresetsModule` seeds its built-ins only when the preset list is empty
+(`if (count_ == 0) seedBuiltins()`), and the persisted list replaces them wholesale. So a newly
+shipped built-in preset appears only on a device that has never saved one: every existing device
+keeps the older set forever. Adding the mini moving head's preset on 2026-08-28 needed a hand-patch
+of the bench device's `Drivers.json`, which does not scale past one board.
+
+**The fix:** merge by name at boot, seeding any built-in the saved list does not already carry, so
+shipping a fixture preset reaches existing devices on their next update. A user's own presets and
+their edits to a built-in must survive that merge untouched.
+
 ### ArtPoll discovery — know which tubes are alive (next increment on NetworkSendDriver)
 
 `NetworkSendDriver` now unicasts to a list of receivers (`ips` + `lightsPerIp`), which is the Art-Net-4-conformant model. What it cannot do is **tell whether a receiver is actually there**: UDP is fire-and-forget, so a dead tube is invisible to the sender. The spec's own answer is discovery — *"The transmitting device must regularly ArtPoll the network to detect any change in devices which are subscribed"* — and it is the natural next increment.

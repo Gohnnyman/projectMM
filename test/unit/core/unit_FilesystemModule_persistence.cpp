@@ -464,7 +464,7 @@ TEST_CASE("FilesystemModule round-trips a config larger than the old 2 KB cap") 
         scheduler.addModule(lp);
         scheduler.setup();
 
-        CHECK(lp->listRowCount() == 28);   // 13 built-ins + 15 custom, all restored
+        CHECK(lp->listRowCount() == 29);   // 14 built-ins + 15 custom, all restored
         mm::Correction c;
         REQUIRE(lp->deriveCorrection(markerId, 255, c));   // the marker preset resolves after reload
         CHECK(c.outChannels == 24);                        // its 24-channel width survived

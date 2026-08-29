@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "light/ChannelRole.h"
+#include "light/FixtureChannels.h"   // kMotionBase + forEachMotionSlot: the layer-slot packing
 
 namespace mm {
 
@@ -79,6 +80,22 @@ struct Correction {
     // achromatic extraction, subtraction-aware); Yellow/UV are targetable emitters an effect should
     // drive DIRECTLY via the fixture model, not synthesize from RGB. See backlog-light § fixture model.
     uint8_t offWarmWhite = kAbsent;
+    // A fixture's MASTER DIMMER channel (moving heads, and any "intensity + RGB" light). Held
+    // fully open, because the per-light brightness is already in the color values via briLut:
+    // dimming twice would darken the fixture as the square of the setting. It must be WRITTEN
+    // though, since a linear dimmer left at 0 means the fixture emits nothing at all however
+    // correct its color channels are (bench: a moving head stayed dark with a perfect RGB map).
+    uint8_t offDimmer = kAbsent;
+    // The FIXTURE's motion channels (pan/tilt/zoom/rotate/gobo), which are not where the layer
+    // keeps them: apply() maps the layer's packed slots onto these. Never scaled by briLut, since
+    // brightness is a light-output setting and scaling pan by it would swing a moving head toward
+    // 0/0 as the rig dims. They come from the effect (setPan and friends) rather than being
+    // synthesized from color, which is the whole point of a wide light: one buffer carries aim too.
+    uint8_t offPan = kAbsent, offTilt = kAbsent, offZoom = kAbsent;
+    uint8_t offRotate = kAbsent, offGobo = kAbsent;
+    // "This fixture has at least one motion channel", resolved once at rebuild so the hot path
+    // never scans the five offsets to discover they are all absent.
+    bool hasMotion = false;
     uint8_t offYellow = kAbsent;
     uint8_t offUV = kAbsent;
     uint8_t outChannels = 3;        // bytes emitted per light (= channelsPerLight of the wiring)
@@ -100,7 +117,9 @@ struct Correction {
     void rebuild(uint8_t brightness, const ChannelRole* roles, uint8_t nChannels) {
         rebuildBrightness(brightness);
         offRed = offGreen = offBlue = offWhite = kAbsent;
-        offWarmWhite = offYellow = offUV = kAbsent;
+        offWarmWhite = offYellow = offUV = offDimmer = kAbsent;
+        offPan = offTilt = offZoom = offRotate = offGobo = kAbsent;
+        hasMotion = false;
         for (uint8_t i = 0; i < nChannels; i++) {
             switch (roles[i]) {
                 case ChannelRole::Red:       offRed = i;       break;
@@ -110,9 +129,17 @@ struct Correction {
                 case ChannelRole::WarmWhite: offWarmWhite = i; break;
                 case ChannelRole::Yellow:    offYellow = i;    break;
                 case ChannelRole::UV:        offUV = i;        break;
-                default: break;   // None or a fixture motion role (pan/tilt/…) — apply() ignores it
+                case ChannelRole::Dimmer:    offDimmer = i;    break;
+                case ChannelRole::Pan:       offPan = i;       break;
+                case ChannelRole::Tilt:      offTilt = i;      break;
+                case ChannelRole::Zoom:      offZoom = i;      break;
+                case ChannelRole::Rotate:    offRotate = i;    break;
+                case ChannelRole::Gobo:      offGobo = i;      break;
+                default: break;   // ChannelRole::None: a channel this fixture does not use
             }
         }
+        hasMotion = offPan != kAbsent || offTilt != kAbsent || offZoom != kAbsent ||
+                    offRotate != kAbsent || offGobo != kAbsent;
         outChannels = nChannels;
     }
 
@@ -122,7 +149,42 @@ struct Correction {
     // A color role the light doesn't carry (offset == kAbsent) is simply not written — so
     // a wiring that omits, say, red just doesn't emit it. Channels holding non-color roles
     // (pan/tilt) are left for their own writers; apply() never touches them.
-    inline void apply(const uint8_t* src, uint8_t* out) const {
+    /// Color only: motion is NOT carried. For a sink that has no motion to express (an LED
+    /// strand, an RGB preview). Named rather than defaulted so a new driver has to say which it
+    /// wants, instead of silently dropping a fixture's aim by taking the shorter overload.
+    inline void applyColorOnly(const uint8_t* src, uint8_t* out) const { apply(src, out, 0); }
+
+    /// `srcChannels` is the SOURCE light's width, and passing it enables the motion mapping.
+    ///
+    /// This is a REMAP, not a copy: motion is read from the LAYER's packed slots (kMotionBase
+    /// onward, in pan/tilt/zoom/rotate/gobo order) and written to the FIXTURE's own offsets, which
+    /// are usually different. On the mini moving head the fixture's pan is CH1 while the layer
+    /// keeps it at slot 4, because a layer light always begins with RGB(W) and CH1 there is the
+    /// red byte. Two layouts, mapped here. 0 means an RGB(W)-only source: no motion to carry.
+    inline void apply(const uint8_t* src, uint8_t* out, uint8_t srcChannels) const {
+        // Master dimmer wide open: brightness lives in the color values below, and a fixture whose
+        // dimmer sits at 0 is simply dark. Written every frame like any other role, so a preset
+        // that declares one cannot be silently unlit.
+        if (offDimmer != kAbsent) out[offDimmer] = 255;
+        // Motion passes through UNSCALED and by ASSIGNMENT, never additively. Two rules, both
+        // borrowed from MoonLight's compositeTo ("additive semantics don't apply to positional
+        // signals"): brightness must not touch these, or dimming the rig would drag every head
+        // toward 0/0; and adding two layers' pan values would aim at neither of them.
+        // hasMotion is precomputed at rebuild, so a fixture WITHOUT motion channels (every LED
+        // strip and PAR) pays exactly one predictable branch here, not a five-slot scan per light
+        // per frame. Motion support must cost nothing on the rigs that do not use it.
+        if (hasMotion && srcChannels != 0) {
+            // Read the LAYER slot, write the FIXTURE channel. The layer packs motion after RGBW in
+            // a fixed order (FixtureChannels::kMotionBase); the fixture puts it wherever its preset
+            // says. Two layouts, mapped here, which is what keeps an effect's pan write off the red
+            // byte it would otherwise share.
+            const bool present[5] = {offPan != kAbsent, offTilt != kAbsent, offZoom != kAbsent,
+                                     offRotate != kAbsent, offGobo != kAbsent};
+            const uint8_t chan[5] = {offPan, offTilt, offZoom, offRotate, offGobo};
+            FixtureChannels::forEachMotionSlot(present, [&](uint8_t role, uint8_t slot) {
+                if (slot < srcChannels) out[chan[role]] = src[slot];
+            });
+        }
         uint8_t r = briLut[src[0]];
         uint8_t g = briLut[src[1]];
         uint8_t b = briLut[src[2]];

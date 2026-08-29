@@ -267,7 +267,8 @@ public:
             uint8_t* dst = corrected_.data();
             for (nrOfLightsType i = 0; i < nLights; i++) {
                 // Read the windowed light (slice starts at winStart); pack densely.
-                correction_.apply(src + (winStart + i) * srcCh, dst + i * outCh);
+                // srcCh lets a wide light hand its motion channels through (pan/tilt/...).
+                correction_.apply(src + (winStart + i) * srcCh, dst + i * outCh, srcCh);
             }
             data = dst;
             totalBytes = static_cast<size_t>(nLights) * outCh;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "light/FixtureChannels.h"   // motion-channel offsets an effect writes through
 #include "light/layers/Buffer.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/EffectBase.h"
@@ -81,6 +82,12 @@ public:
     /// it is rejected here rather than defended against downstream. Enforcing the invariant at the
     /// one entry point is what lets effects and draw primitives assume `cpl >= 1`.
     void setChannelsPerLight(uint8_t cpl) { if (cpl > 0) channelsPerLight_ = cpl; }
+
+    /// Where this layer's fixtures keep their motion channels (pan/tilt/zoom/...). Set by whoever
+    /// knows the fixture profile; every offset is absent by default, so an effect's setPan() is a
+    /// harmless no-op on a plain LED strip.
+    void setFixtureChannels(const FixtureChannels& fc) { fixture_ = fc; }
+    const FixtureChannels& fixtureChannels() const { return fixture_; }
 
     void prepare() override {
         // Restart discards the elapsed gap. Without this the first tick after a re-prepare sees the
@@ -634,6 +641,7 @@ private:
     Buffer buffer_;
     MappingLUT lut_;
     uint8_t channelsPerLight_ = 3;
+    FixtureChannels fixture_;
     bool lutSkipped_ = false;
     lengthType physicalWidth_ = 0;
     lengthType physicalHeight_ = 0;
@@ -661,7 +669,24 @@ private:
         return budget >= bytesNeeded && platform::maxAllocBlock() >= bytesNeeded;
     }
 
+    /// The channel count this layer's fixtures need: RGBW plus one byte per motion role, or 0 when
+    /// nothing in the rig moves. Read from the offsets Drivers derived from the light preset.
+    uint8_t requiredChannels() const {
+        const FixtureChannels& f = fixture_;
+        uint8_t top = 0;
+        for (uint8_t o : {f.pan, f.tilt, f.zoom, f.rotate, f.gobo})
+            if (o != FixtureChannels::kAbsent && o + 1 > top) top = static_cast<uint8_t>(o + 1);
+        return top;
+    }
+
     void allocateBuffer(nrOfLightsType count) {
+        // A light must be wide enough to hold the motion channels the rig's fixtures carry, or an
+        // effect's setPan() writes past the end of the light and is silently dropped. Widening
+        // HERE (cold path, before the allocation) rather than from Drivers is deliberate: changing
+        // the width after the buffer exists resizes it under whoever is holding it, which segfaults.
+        // A rig with no motion is untouched, so a plain LED strip keeps its 3 or 4 bytes per light.
+        if (const uint8_t need = requiredChannels(); need > channelsPerLight_) channelsPerLight_ = need;
+
         // Try to allocate buffer, halve dimensions if needed
         bool reduced = false;
         while (count > 0) {
@@ -704,6 +729,29 @@ inline lengthType EffectBase::width() const { return layer()->width(); }
 inline lengthType EffectBase::height() const { return layer()->height(); }
 inline lengthType EffectBase::depth() const { return layer()->depth(); }
 inline uint8_t EffectBase::channelsPerLight() const { return layer()->channelsPerLight(); }
+
+/// Write one non-color channel of light `index`. Silently does nothing when the fixture has no
+/// such channel (offset absent) or the write would fall outside the light, which is what makes a
+/// moving-head effect harmless on an LED strip. Never scaled by brightness: see architecture.md.
+inline void effectSetChannel(Layer* l, nrOfLightsType index, uint8_t offset, uint8_t value) {
+    if (offset == FixtureChannels::kAbsent || !l) return;
+    const uint8_t cpl = l->channelsPerLight();
+    if (offset >= cpl) return;
+    Buffer& b = l->buffer();
+    if (index >= b.count() || !b.data()) return;
+    b.data()[static_cast<size_t>(index) * cpl + offset] = value;
+}
+
+inline void EffectBase::setPan(nrOfLightsType index, uint8_t value) {
+    effectSetChannel(layer(), index, layer()->fixtureChannels().pan, value);
+}
+inline void EffectBase::setTilt(nrOfLightsType index, uint8_t value) {
+    effectSetChannel(layer(), index, layer()->fixtureChannels().tilt, value);
+}
+inline void EffectBase::setZoom(nrOfLightsType index, uint8_t value) {
+    effectSetChannel(layer(), index, layer()->fixtureChannels().zoom, value);
+}
+inline bool EffectBase::movable() const { return layer()->fixtureChannels().movable(); }
 inline nrOfLightsType EffectBase::nrOfLights() const { return layer()->buffer().count(); }
 inline uint32_t EffectBase::elapsed() const { return layer()->elapsed(); }
 inline draw::Canvas EffectBase::canvas() {

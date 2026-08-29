@@ -868,6 +868,12 @@ public:
     // unconnected receive socket (e.g. ArtPollReply to the poller). connect()ed
     // send sockets keep using sendTo().
     bool sendToAddr(const uint8_t ip[4], uint16_t port, const uint8_t* data, size_t len);
+    // Join an IPv4 multicast group on a bound socket, so datagrams sent to that group are
+    // delivered here. Required for WLED audio sync, which multicasts to 239.0.0.1 rather than
+    // broadcasting: without the membership the OS never hands those datagrams to the socket,
+    // however correct the port and the packet are. Call AFTER bind(). False = the join failed
+    // (no route yet, no interface); the caller retries rather than treating it as fatal.
+    bool joinMulticast(const char* group);
     void close();
 
 private:

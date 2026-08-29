@@ -189,6 +189,10 @@ public:
     /// point the encoder/packet tests use in place of the removed shared-pointer setter.
     Correction& correctionForTest() { return correction_; }
 
+    /// The resolved correction, so the light domain can learn where this fixture keeps its motion
+    /// channels. Read-only: the driver owns it and rebuilds it when the preset or sliders change.
+    const Correction& correction() const { return correction_; }
+
 protected:
     Layer* layer_ = nullptr;
 

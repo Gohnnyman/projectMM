@@ -300,6 +300,27 @@ The sprites carry their own colors (chrome, wing, crust), so the global palette 
 
 Origin: projectMM original; inspired by After Dark's Flying Toasters (Berkeley Systems, 1989), suggested by Frank ([softhack007](https://github.com/softhack007)) — the pixel art here is drawn fresh for this effect
 
+<a id="movinghead"></a>
+
+### MovingHead 🔬 · 1D
+
+Sweeps a moving head's pan and tilt along two sine waves at different rates, so the beam traces a
+slow path rather than a straight line. The first effect that AIMS a fixture instead of only
+coloring it: it writes pan and tilt through the role setters, which do nothing on a light that
+carries no such channel, so the same effect on an LED strip simply paints the color sweep and
+moves nothing.
+
+- `panBpm` / `tiltBpm` — sweep rates (60 = one full sweep a second). Different rates are what turn
+  two sines into a path instead of a diagonal.
+- `panRange` / `tiltRange` — how much of the fixture's travel to use. A head at full pan spends
+  much of its sweep pointing away from the audience, so the default is a band around center.
+- `panCenter` / `tiltCenter` — where the sweep is centered (128 = the fixture's middle).
+
+Several fixtures on one chain are spread along the wave rather than moving in unison, so a row of
+heads reads as a travelling sweep. Uses the global palette for color.
+
+Origin: projectMM original
+
 <a id="pacman"></a>
 
 ### Pacman 🔬📊 · 2D

@@ -568,14 +568,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 2,
+            "p50": 1,
             "p95": 2,
-            "min": 2,
+            "min": 1,
             "max": 2,
-            "n": 1,
-            "samples": [2]
+            "n": 2,
+            "samples": [2, 1]
           },
-          "last_updated": "2026-08-28"
+          "last_updated": "2026-08-29"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -726,14 +726,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 1,
-            "p95": 2,
+            "p50": 2,
+            "p95": 3,
             "min": 1,
-            "max": 2,
-            "n": 2,
-            "samples": [1, 2]
+            "max": 3,
+            "n": 3,
+            "samples": [1, 2, 3]
           },
-          "last_updated": "2026-08-28"
+          "last_updated": "2026-08-29"
         }
       }
     }

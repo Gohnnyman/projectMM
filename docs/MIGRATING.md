@@ -24,6 +24,21 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### A light preset's Dimmer channel is now driven
+
+A preset that declares a `Dimmer` role previously left that channel at 0, because nothing ever
+wrote it: `Correction` resolved only the color roles. A fixture on such a preset therefore emitted
+nothing at all, whatever its color channels said. The shipped `IRGB` preset ("CH1 master
+intensity") could never light a fixture.
+
+The dimmer is now held open (255) every frame, with per-light brightness staying in the color
+values as before. **If you drive a fixture on `IRGB` or another dimmer-carrying preset, it will
+light up where it previously stayed dark.** Nothing to change; the previous behavior was a defect.
+
+Routing brightness to the dimmer channel rather than holding it open is the better model and is
+[backlogged](backlog/backlog-light.md), so this value will change again.
+
+
 ### esp32-16mb moves to the MoonBase partition table (2026-08-28)
 
 **Action: erase flash** (USB re-flash). Back up first (File Manager, or the installer's
