@@ -9,9 +9,11 @@
 
 #include "doctest.h"
 #include "core/AudioService.h"
+#include "core/JsonSink.h"   // the device-Select persistence case writes a control value out
 #include "platform/platform.h"
 
 #include <cstring>
+#include <string>
 
 #if defined(MM_PLATFORM_DESKTOP) || !defined(ESP_PLATFORM)
 
@@ -26,6 +28,50 @@ TEST_CASE("audio capture enumeration offers 'default' first, from platform-owned
     const char* const* again = nullptr;
     mm::platform::audioCaptureDevices(&again);
     CHECK(again == options);
+}
+
+// The capture device someone picks survives the device list changing under it. A loopback like
+// BlackHole is deliberate routing, set up once, and the OS list it lives in is LIVE: unplug a
+// webcam or let a Continuity Camera drop off and everything below it shifts up a slot, so a
+// config that stored the INDEX silently starts naming a different device. Reported from the
+// desktop bench 2026-08-29 ("I entered blackhole 2ch a few times but later I saw it was changed").
+TEST_CASE("a picked audio device is remembered by name, not by its position in the list") {
+    // The list as it was when the user picked: BlackHole sits at index 3.
+    static constexpr const char* kBefore[] = {"default", "HD Pro Webcam C920", "NDI Audio",
+                                              "BlackHole 2ch", "MacBook Air Microphone"};
+    uint8_t device = 3;
+    mm::ControlList controls;
+    controls.addSelect("device", device, kBefore, 5);
+    controls.setPersistLabel(controls.count() - 1);
+
+    mm::JsonSink sink;
+    sink.append("{\"device\":");
+    mm::writeControlValue(sink, controls[0]);
+    sink.append("}");
+    const std::string saved(sink.data(), sink.size());
+    CHECK(saved.find("\"BlackHole 2ch\"") != std::string::npos);   // the name, not "3"
+
+    // The webcam is unplugged: BlackHole is now index 2, and index 3 would be the built-in mic.
+    static constexpr const char* kAfter[] = {"default", "NDI Audio", "BlackHole 2ch",
+                                             "MacBook Air Microphone"};
+    uint8_t reloaded = 0;
+    mm::ControlList after;
+    after.addSelect("device", reloaded, kAfter, 4);
+    after.setPersistLabel(after.count() - 1);
+    CHECK(mm::applyControlValue(after[0], saved.c_str(), "device",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(reloaded == 2);                                  // followed BlackHole to its new slot
+    CHECK(std::strcmp(kAfter[reloaded], "BlackHole 2ch") == 0);
+
+    // And when the device is genuinely gone (BlackHole uninstalled), it falls back rather than
+    // silently grabbing whatever now sits at that index.
+    static constexpr const char* kGone[] = {"default", "NDI Audio", "MacBook Air Microphone"};
+    uint8_t missing = 0;
+    mm::ControlList gone;
+    gone.addSelect("device", missing, kGone, 3);
+    gone.setPersistLabel(gone.count() - 1);
+    mm::applyControlValue(gone[0], saved.c_str(), "device", mm::ApplyPolicy::Clamp);
+    CHECK(std::strcmp(kGone[missing], "BlackHole 2ch") != 0);
 }
 
 // The full lifecycle neither crashes nor wedges, whatever the host's audio situation: a

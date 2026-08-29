@@ -25,16 +25,21 @@ const _cam = (() => {
     } catch { /* corrupt value — ignore, use defaults */ }
     return null;
 })();
-// Camera-distance clamp. The scene is normalised to ~[-0.5, 0.5] (box-centred), so CAM_MIN
+// Camera-distance clamp. The scene is normalized to ~[-0.5, 0.5] (box-centered), so CAM_MIN
 // well below the scene radius lets you zoom DEEP into a dense grid — close enough that a
 // single 128²-grid cell fills the view and its sequence number fits the bulb (the projection
 // near plane is lowered to match, so the scene doesn't clip as you approach). CAM_MAX frames
 // the whole volume with headroom.
 const CAM_MIN = 0.03, CAM_MAX = 10;
+
+// Beam length as a fraction of the scene. Shared: drawBeams builds the cones from it, and the
+// camera auto-fit needs it to frame and PIVOT on the lit volume rather than on the fixtures
+// alone (a rig of beams is mostly beam).
+const BEAM_LEN = 0.42;
 let camTheta    = _cam ? _cam.t : Math.PI;
 let camPhi      = _cam ? _cam.p : 0.4;
 let camDist     = _cam ? _cam.d : 2.5;
-// The point the camera orbits + looks at. Origin by default (the scene is box-centred);
+// The point the camera orbits + looks at. Origin by default (the scene is box-centered);
 // cursor-anchored zoom pans it so the world point under the pointer stays put (Google-Maps
 // style). Persisted with the angles/distance so a reload keeps the framing.
 let camTgtX     = _cam ? (_cam.tx || 0) : 0;
@@ -42,13 +47,66 @@ let camTgtY     = _cam ? (_cam.ty || 0) : 0;
 let camTgtZ     = _cam ? (_cam.tz || 0) : 0;
 let camAutoFit  = !_cam;   // fit on first frame when no saved position
 function saveCam() { localStorage.setItem("mm_cam", JSON.stringify({t: camTheta, p: camPhi, d: camDist, tx: camTgtX, ty: camTgtY, tz: camTgtZ})); }
+
+// Vertical field of view, shared by the projection and by every gesture that converts screen
+// pixels to world units (cursor-zoom, pan). One value, one home.
+const fov = 0.8;
+
+// Slide the orbit target across the view plane: `dR` world units along the camera's right axis,
+// `dU` along its up axis. Both the cursor-zoom and the pan gesture move the target, so the basis
+// derivation lives here once rather than in each handler.
+function moveTarget(dR, dU) {
+    // The same basis buildMVP derives: right = forward x worldUp, up = right x forward.
+    const fx = -Math.cos(camPhi) * Math.sin(camTheta);
+    const fy = -Math.sin(camPhi);
+    const fz = -Math.cos(camPhi) * Math.cos(camTheta);
+    let rx = fz, rz = -fx; const rl = Math.hypot(rx, 0, rz) || 1; rx /= rl; rz /= rl;   // ry = 0
+    const ux = (-rz) * fy - 0, uy = rz * fx - rx * fz, uz = 0 - (-rx) * fy;
+    camTgtX += dR * rx + dU * ux;
+    camTgtY += dR * 0  + dU * uy;
+    camTgtZ += dR * rz + dU * uz;
+
+    // Keep the pivot on a leash around the scene. Moving the target is how BOTH gestures work
+    // (pan slides it deliberately; cursor-zoom shifts it so the pointed-at world point stays
+    // put), but only pan is aimed: an off-center scroll nudges the target a little each time,
+    // and the result is SAVED, so it compounds across sessions until the camera orbits a point
+    // clearly off the rig. Reported from the bench as a rotation center that sits far behind the
+    // fixtures, after nothing more than some zooming. The scene is normalized to about
+    // [-0.5, 0.5], so one
+    // scene-width lets a pan frame any corner while the pivot can never wander into empty space.
+    const LEASH = 1.0;
+    camTgtX = Math.max(-LEASH, Math.min(LEASH, camTgtX));
+    camTgtY = Math.max(-LEASH, Math.min(LEASH, camTgtY));
+    camTgtZ = Math.max(-LEASH, Math.min(LEASH, camTgtZ));
+}
+
+// Put the pivot back on the rig, keeping the current viewing angle and zoom. Bound to a
+// double-click, the gesture 3D tools use for "frame this": the cheapest possible answer to a
+// pivot that has drifted, without resetting the dot size, numbers and layout the way ⌖ does.
+function recenterPivot() {
+    camTgtX = camTgtY = camTgtZ = 0;   // the coordinate table is already box-centered on the rig
+    redrawCached();
+    saveCam();
+}
 let lastVerts = null;        // cached vertex array for orbit-without-server-frame
 let lastVertCount = 0;
 let lastMaxDim = 1;
 let vertsBuf = null;         // reused worst-case Float32Array; grows but never shrinks
 // True-shape preview geometry, set from the 0x03 coordinate table and reused
 // across 0x02 color frames (positions change only on a layout/LUT rebuild).
-let previewCoords_ = null;   // Float32Array[count*3], normalised + box-centred positions
+let previewCoords_ = null;   // Float32Array[count*3], normalized + box-centered positions
+// Aim, from the 0x04 message: two bytes (pan, tilt) per light, in the coord table's order.
+// Null for every rig whose fixtures carry no pan/tilt, which is most of them: the device does
+// not send the message at all then, so nothing here allocates or draws.
+let previewAim_ = null;
+// Color frames seen since the last aim message. The device alternates the two, so anything above
+// a couple means it has stopped sending aim and the beams must go (see renderPreviewFrame).
+let framesSinceAim_ = 0;
+const kAimStaleFrames = 4;
+let beamVerts_ = null;       // reused Float32Array of beam vertices (x,y,z,intensity), grows only
+let beamProgram = null, beamLocs = null, beamBuffer = null;
+let previewRgb_ = null;      // last 0x02 frame's RGB, so beams take their fixture's color
+let bgLuma_ = 0.07;          // background brightness, so a ghost beam stays visible per theme
 let previewCoordCount_ = 0;
 let previewMaxDim_ = 1;
 let previewStride_ = 1;      // device's adaptive downscale factor (1 = full res); for the status line
@@ -173,31 +231,86 @@ function initWebGL() {
     };
     lineBuffer = gl.createBuffer();
 
-    // Orbit controls (mouse + touch)
-    let dragging = false, lastX = 0, lastY = 0;
-    canvas.addEventListener("mousedown", (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+    // A third program for moving-head BEAMS. Separate from the box lines because a beam carries a
+    // per-vertex intensity: it is bright at the fixture and fades along its length and toward its
+    // edges, which is what makes a solid cone read as light in the air rather than a plastic cone.
+    // The technique is the one stage visualizers use for a cheap beam: solid tapered geometry,
+    // additive blending, no depth WRITE, and a very low base alpha.
+    const bvs = `attribute vec3 aPos; attribute float aI; attribute vec3 aColor;
+                 uniform mat4 uMVP; varying float vI; varying vec3 vColor;
+                 void main(){ vI = aI; vColor = aColor; gl_Position = uMVP * vec4(aPos,1.0); }`;
+    // The core desaturates toward white as it gets hot, which is what a real beam does: the
+    // saturated color reads in the cone's body while the center blows out, so a deep blue beam
+    // still shows a bright core instead of going muddy.
+    const bfs = `precision mediump float; varying float vI; varying vec3 vColor;
+                 void main(){ vec3 c = mix(vColor, vec3(1.0), vI * vI * 0.5);
+                              gl_FragColor = vec4(c * vI, vI); }`;
+    const bv = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(bv, bvs); gl.compileShader(bv);
+    const bf = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(bf, bfs); gl.compileShader(bf);
+    beamProgram = gl.createProgram();
+    gl.attachShader(beamProgram, bv); gl.attachShader(beamProgram, bf);
+    gl.linkProgram(beamProgram);
+    beamLocs = {
+        aPos:   gl.getAttribLocation(beamProgram, "aPos"),
+        aI:     gl.getAttribLocation(beamProgram, "aI"),
+        aColor: gl.getAttribLocation(beamProgram, "aColor"),
+        uMVP:   gl.getUniformLocation(beamProgram, "uMVP"),
+    };
+    beamBuffer = gl.createBuffer();
+
+    // Orbit controls (mouse + touch).
+    //
+    // The gesture set every 3D tool shares (Blender, Maya, CAD, three.js OrbitControls): DRAG
+    // orbits, SHIFT-drag or a right/middle drag PANS, and the wheel zooms. Orbit alone cannot
+    // reach an off-center rig, which is what "I can tilt it but not rotate" reports: the camera
+    // was already turning, but with the target pinned to the origin it never felt like moving
+    // AROUND something. Pan is the missing half, and it needs no new state (camTgt already
+    // exists for cursor-zoom).
+    //
+    // Deliberately NOT a roll control: an orbit camera keeps world-up on screen, and every tool
+    // above does the same. Roll is a flying camera's gesture, and it mostly leaves users lost.
+    let dragging = false, panning = false, lastX = 0, lastY = 0;
+    canvas.addEventListener("mousedown", (e) => {
+        // button 0 = left (orbit, or pan with shift), 1 = middle, 2 = right (pan).
+        panning = e.button === 1 || e.button === 2 || e.shiftKey;
+        dragging = true;
+        lastX = e.clientX; lastY = e.clientY;
+        if (panning) e.preventDefault();   // a middle-drag would otherwise autoscroll
+    });
+    // Right-drag is a pan, so the context menu must not eat it.
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    // Double-click recenters the pivot on the rig (see recenterPivot).
+    canvas.addEventListener("dblclick", recenterPivot);
     canvas.addEventListener("mousemove", (e) => {
         if (!dragging) return;
-        camTheta += (e.clientX - lastX) * 0.01;
-        camPhi = Math.max(-1.5, Math.min(1.5, camPhi - (e.clientY - lastY) * 0.01));
+        const dx = e.clientX - lastX, dy = e.clientY - lastY;
+        if (panning) {
+            // Screen pixels to world units at the target plane, so the scene tracks the cursor
+            // 1:1 whatever the zoom: the same extent the cursor-zoom math uses.
+            const halfH = camDist * Math.tan(fov / 2);
+            const perPx = (2 * halfH) / Math.max(1, canvas.height);
+            moveTarget(-dx * perPx, dy * perPx);
+        } else {
+            camTheta += dx * 0.01;
+            camPhi = Math.max(-1.5, Math.min(1.5, camPhi - dy * 0.01));
+        }
         lastX = e.clientX; lastY = e.clientY;
         redrawCached();
     });
-    canvas.addEventListener("mouseup",    () => { dragging = false; saveCam(); });
-    canvas.addEventListener("mouseleave", () => { dragging = false; saveCam(); });
+    canvas.addEventListener("mouseup",    () => { dragging = false; panning = false; saveCam(); });
+    canvas.addEventListener("mouseleave", () => { dragging = false; panning = false; saveCam(); });
     canvas.addEventListener("wheel", (e) => {
         e.preventDefault();
         // Cursor-anchored zoom (Google-Maps style): keep the world point under the pointer
         // fixed on screen while zooming. The orbit camera looks at camTgt from camDist; the
         // view half-extent at the target plane is camDist*tan(fov/2). The cursor's offset
-        // from canvas centre, in that world scale along the camera's right/up axes, is where
+        // from canvas center, in that world scale along the camera's right/up axes, is where
         // the pointer is in the target plane. Scaling camDist by k scales that plane's extent
         // by k, so shifting camTgt by (1-k)*cursorOffset keeps the pointed-at point put.
         const r = canvas.getBoundingClientRect();
         const ndcX = ((e.clientX - r.left) / r.width) * 2 - 1;
         const ndcY = 1 - ((e.clientY - r.top) / r.height) * 2;   // y-up
         const aspect = r.width / Math.max(1, r.height);
-        const fov = 0.8;
         const halfH = camDist * Math.tan(fov / 2);
         const offU = ndcY * halfH;             // world units along camera up at target plane
         const offR = ndcX * halfH * aspect;    // along camera right
@@ -206,17 +319,8 @@ function initWebGL() {
         camDist = Math.max(CAM_MIN, Math.min(CAM_MAX, camDist * Math.exp(e.deltaY * 0.0015)));
         const k = camDist / oldDist;           // <1 zooming in, >1 zooming out
 
-        // Camera right/up axes (same basis buildMVP derives: right = forward×worldUp, etc.).
-        const fx = -Math.cos(camPhi) * Math.sin(camTheta);
-        const fy = -Math.sin(camPhi);
-        const fz = -Math.cos(camPhi) * Math.cos(camTheta);
-        let rx = fz, rz = -fx; const rl = Math.hypot(rx, 0, rz) || 1; rx /= rl; rz /= rl;  // ry=0
-        const ux = (-rz)*fy - 0, uy = rz*fx - rx*fz, uz = 0 - (-rx)*fy;  // up = right×forward
         // Shift the target so the cursor-pointed world point stays fixed as the extent scales.
-        const s = (1 - k);
-        camTgtX += s * (offR * rx + offU * ux);
-        camTgtY += s * (offR * 0  + offU * uy);
-        camTgtZ += s * (offR * rz + offU * uz);
+        moveTarget(offR * (1 - k), offU * (1 - k));
 
         redrawCached();
         saveCam();
@@ -434,7 +538,7 @@ function setupLayout() {
 // True-shape preview: two binary message types on the preview WebSocket.
 //   0x03 coordinate table (answered on a [0x52] request; cached per (epoch, stride)):
 //        [0x03][count:u32][bx:u8][by:u8][bz:u8][stride:u16][epoch:u8][(x,y,z):u8×3 × count]
-//        Stores the real lights' normalised positions in previewCoords_ (the
+//        Stores the real lights' normalized positions in previewCoords_ (the
 //        geometry); per-frame 0x02 messages then just recolor those points.
 //   0x02 per-frame channels: [0x02][count:u32][stride:u16][epoch:u8][drops:u8][(r,g,b) × count]
 //        Color for light i sits at position previewCoords_[i].
@@ -468,9 +572,23 @@ function renderPreviewBinary(buf) {
     const type = view.getUint8(0);
     if (type === 0x03) { parsePreviewCoords(view, buf); return; }
     if (type === 0x02) { renderPreviewFrame(view, buf); return; }
+    if (type === 0x04) { parsePreviewAim(view, buf); return; }
 }
 
-// Parse + cache the coordinate table: normalised (x,y,z) per point, centred on
+// Parse the per-frame AIM message: [0x04][count:u32][stride:u16][epoch][reserved][(pan,tilt) x n].
+// Kept raw (0..255 per axis) and turned into a direction at draw time, so the browser owns how a
+// moving head is DRAWN and the wire only says where it points. A richer visual later (a cone with
+// falloff rather than a line) is then a change here alone.
+function parsePreviewAim(view, buf) {
+    if (buf.byteLength < 9) return;
+    const count = view.getUint32(1, true);
+    const bytes = buf.byteLength - 9;
+    if (count === 0 || bytes < count * 2) { previewAim_ = null; return; }
+    previewAim_ = new Uint8Array(buf, 9, count * 2);
+    framesSinceAim_ = 0;
+}
+
+// Parse + cache the coordinate table: normalized (x,y,z) per point, centered on
 // the bounding box so the cloud sits around the origin like the old grid did.
 function parsePreviewCoords(view, buf) {
     // Header: [0x03][count:u32][bx][by][bz][stride:u16][epoch] = 11 bytes.
@@ -555,6 +673,16 @@ function renderPreviewFrame(view, buf) {
     }
     if (count !== previewCoordCount_) return;   // mid-rebuild mismatch: the next table realigns
     const rgb = new Uint8Array(buf, 9);
+    // Kept for drawBeams: a moving head's beam is the color the fixture is EMITTING, so the beam
+    // pass needs the same frame the dots were drawn from. Held as a view on the message buffer
+    // (no copy); drawBeams bounds-checks it against the coordinate count.
+    previewRgb_ = rgb;
+    // Beams are only real while the device is still SENDING aim. It stops the moment the rig
+    // stops carrying motion channels (PreviewDriver gates on fixtureChannels().movable()), but a
+    // cached previewAim_ would go on drawing the last aim forever: selecting a plain effect then
+    // showed beams on every light. The device alternates aim and color frames, so a couple of
+    // color frames with no aim between them means the aim stream has ended.
+    if (previewAim_ && ++framesSinceAim_ > kAimStaleFrames) previewAim_ = null;
     drawLights(rgb);
     measureFrameRate();
 }
@@ -610,10 +738,18 @@ function drawLights(rgb) {
     if (camAutoFit && previewBox_) {
         camAutoFit = false;
         const canvas = document.getElementById("preview");
-        const fov = 0.8;
-        const aspect = canvas ? canvas.clientWidth / Math.max(1, canvas.clientHeight) : 1;
+            const aspect = canvas ? canvas.clientWidth / Math.max(1, canvas.clientHeight) : 1;
         const bx = previewBox_.x, by = previewBox_.y, bz = previewBox_.z;
-        const halfExtent = 0.5 * Math.sqrt(bx * bx + by * by + bz * bz) / previewMaxDim_;
+        let halfExtent = 0.5 * Math.sqrt(bx * bx + by * by + bz * bz) / previewMaxDim_;
+        // With moving heads the BEAMS are most of what is on screen, and they all start at the
+        // fixtures and run outward, so the lit volume sits well to one side of the fixture
+        // centroid. Orbiting around that centroid then feels like orbiting a point behind the
+        // rig. Pivot on the middle of the beams instead, and widen the fit to include them.
+        // The pivot stays on the FIXTURES (the coordinate table is already box-centered on them,
+        // so that is the origin). Deliberately not the beams' midpoint: beams swing as the rig
+        // moves, and a pivot that drifted with them would make the scene wander under a drag.
+        // The fit still widens for the beams so they stay in frame.
+        if (previewAim_) halfExtent += BEAM_LEN / 2;
         const fitDist = halfExtent / Math.tan(fov / 2) * (aspect < 1 ? 1 / aspect : 1) * 1.1;
         camDist = Math.max(0.5, Math.min(10, fitDist));
     }
@@ -635,7 +771,7 @@ function resetCamera() {
     localStorage.removeItem("mm_cam");
     camTheta = Math.PI;
     camPhi = 0.4;
-    camTgtX = camTgtY = camTgtZ = 0;   // recentre the pan target (cursor-zoom resets too)
+    camTgtX = camTgtY = camTgtZ = 0;   // recenter the pan target (cursor-zoom resets too)
     camAutoFit = true;
 
     // Dot size: back to the auto "filled-panel" base (1×); sync the slider control.
@@ -689,7 +825,13 @@ function drawVerts() {
     // see the dark :root default and never the light override.
     const bg = getComputedStyle(document.body).getPropertyValue("--bg-0").trim();
     const m = bg.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-    if (m) gl.clearColor(parseInt(m[1],16)/255, parseInt(m[2],16)/255, parseInt(m[3],16)/255, 1.0);
+    if (m) {
+        const cr = parseInt(m[1],16)/255, cg = parseInt(m[2],16)/255, cb = parseInt(m[3],16)/255;
+        gl.clearColor(cr, cg, cb, 1.0);
+        // Kept for drawBeams: an ADDITIVE ghost beam can only brighten, so on a light theme it
+        // has to be drawn a different way to be seen at all (see drawBeams).
+        bgLuma_ = 0.2126 * cr + 0.7152 * cg + 0.0722 * cb;
+    }
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, glBuffer);
@@ -743,13 +885,203 @@ function drawVerts() {
     gl.depthFunc(gl.LESS);
 
     drawBoundingBox(mvp);
+    drawBeams(mvp);
     drawSeqLabels(mvp, canvas, pointSize);
 }
 
 // Faint wireframe cuboid around the light volume. Rebuilt only when the box extent
 // changes (cached by boxKey). Half-extents are box/2/maxDim — matching the same
 // normalisation the point coords use (pos/maxDim - 0.5*box/maxDim), so the cuboid's
-// faces pass through the outermost LED centres.
+// faces pass through the outermost LED centers.
+// Draw each moving head's beam: a short 3D ray from the fixture in the direction it is aimed.
+//
+// Returns immediately when the rig has no aim data, which is every LED strip and panel: the device
+// does not send the 0x04 message for those, so previewAim_ stays null and this is one test.
+//
+// Pan/tilt arrive as the fixture's own 0..255 bytes, and are turned into a direction HERE rather
+// than on the device: the wire says where the head points, the browser decides what that looks
+// like. Drawing it as a line rather than a cone is deliberate for now, since beam width and throw
+// distance are fixture attributes the fixture model does not carry yet, and a cone would mean
+// inventing them.
+// The unit direction head `i` points, from its raw (pan, tilt) bytes.
+//
+// A fixture's pan sweeps horizontally and its tilt vertically, both centered at 128, mapped onto
+// the fixture's real travel: 540 degrees of pan, 180 of tilt on a typical head.
+//
+// A rest beam points along -Z, OUT of the layout toward the viewer. Z is the scene's depth axis
+// (architecture.md: 2D is the (x,y) face and 3D adds slices across Z), so X and Y are where the
+// fixtures are ARRANGED and Z is the only axis free to shine along. Aiming down -Y instead would
+// send each head along the axis its neighbours occupy, which is what a 1 x N chain of heads made
+// obvious: every beam ran through the next fixture.
+//
+// Pan then sweeps in the (x,z) plane and tilt lifts toward +Y, so a centered head points straight
+// out and the controls read the way they do on a real fixture. Written as sin/cos of the same
+// angle so the direction is UNIT length: the cone's cross-axes are only unit (and the cone only
+// round) when it is.
+function beamDirection(i) {
+    const pan  = ((previewAim_[i * 2 + 0] - 128) / 128) * Math.PI * 1.5;   // +-270 degrees
+    const tilt = ((previewAim_[i * 2 + 1] - 128) / 128) * (Math.PI / 2);   // +-90 degrees
+    const st = Math.sin(tilt), ctd = Math.cos(tilt);
+    return {dx: Math.sin(pan) * ctd, dy: st, dz: -Math.cos(pan) * ctd};
+}
+
+function drawBeams(mvp) {
+    if (!previewAim_ || !previewCoords_ || !beamProgram) return;
+    const n = Math.min(previewAim_.length >> 1, previewCoords_.length / 3);
+    if (n === 0) return;
+
+    // The technique stage visualizers use for a cheap beam, and the reason each part is here:
+    //   SOLID tapered geometry, radius 0 at the fixture widening to the far end, so it reads as a
+    //     beam rather than an outline;
+    //   ADDITIVE blending, so two beams crossing brighten where they overlap, which is what light
+    //     in air actually does and is the cue that sells it;
+    //   depth WRITE off, so beams never occlude each other or the lights behind them (they are
+    //     participating media, not surfaces), while still being depth-TESTED against the scene;
+    //   a very low alpha, faded along the length and toward the edge, so it glows rather than
+    //     looking like a plastic cone.
+    const SEG  = 12;           // radial segments: round enough at this size, cheap enough for a rig
+    const LEN  = BEAM_LEN;     // beam length as a fraction of the scene, so it reads at any rig size
+    const RAD  = 0.10;         // end-face radius: a stage beam, not a floodlight
+    const HEAD_I = 0.85;       // intensity at the fixture
+    const GHOST_I = 0.10;      // a dark head's aim indicator: visible, never mistakable for output
+    // Two triangles per segment (a quad from the apex ring to the end ring), 3 verts each, 7
+    // floats per vert (x, y, z, intensity, r, g, b).
+    const FPV = 7;
+    const FLOATS_PER_BEAM = SEG * 6 * FPV;
+    const need = n * FLOATS_PER_BEAM;
+    if (!beamVerts_ || beamVerts_.length < need) beamVerts_ = new Float32Array(need);
+
+    // Lit beams and ghosts need DIFFERENT blending (see the draw calls below), so they are built
+    // into one buffer in two runs: lit first, ghosts after, and each is drawn with its own mode.
+    // Two passes over the heads, no second allocation.
+    let k = 0;
+    let ghostStart = 0;
+    for (let pass = 0; pass < 2; pass++) {
+    const wantGhost = pass === 1;
+    if (wantGhost) ghostStart = k;
+    for (let i = 0; i < n; i++) {
+        const x = previewCoords_[i * 3 + 0];
+        const y = previewCoords_[i * 3 + 1];
+        const z = previewCoords_[i * 3 + 2];
+
+        const {dx, dy, dz} = beamDirection(i);
+
+        // Two axes across the beam. u = d x world, picking the world axis the beam is LEAST
+        // aligned to so the cross never collapses: a head at rest points straight along -Z,
+        // exactly where a fixed up-vector aligned to Z would degenerate to zero.
+        const wy = Math.abs(dy) < 0.9 ? 1 : 0;
+        const wz = wy ? 0 : 1;
+        let ux = dy * wz - dz * wy;
+        let uy = dz * 0  - dx * wz;
+        let uz = dx * wy - dy * 0;
+        const ul = Math.hypot(ux, uy, uz) || 1;
+        ux /= ul; uy /= ul; uz /= ul;
+        const vx = dy * uz - dz * uy, vy = dz * ux - dx * uz, vz = dx * uy - dy * ux;
+
+        const cx = x + dx * LEN, cy = y + dy * LEN, cz = z + dz * LEN;   // end-face center
+
+        // The beam takes the color the FIXTURE is emitting, which is how a visualizer reads as
+        // a lighting plot rather than a diagram: a rig of blue beams with one amber head shows
+        // the amber head at a glance. Normalized to the brightest channel so a dim fixture still
+        // shows its HUE (a beam at 10% is a dim beam of the same color, not a grey one); the
+        // per-vertex intensity above already carries the brightness falloff.
+        //
+        // Whole cone, not just a core: an air beam is one volume of scattered light, so tinting
+        // only the center would read as two separate objects. The shader instead desaturates the
+        // hot core toward white, which is the real effect that "colored edges, white middle"
+        // describes.
+        let br = 1.0, bg = 0.93, bb = 0.75;   // warm white until a color frame arrives
+        let headI = HEAD_I;
+        const haveColor = previewRgb_ && i * 3 + 2 < previewRgb_.length;
+        if (!haveColor && wantGhost) continue;   // no frame yet: a normal warm-white beam, pass 0
+        if (haveColor) {
+            const r8 = previewRgb_[i * 3], g8 = previewRgb_[i * 3 + 1], b8 = previewRgb_[i * 3 + 2];
+            const peak = Math.max(r8, g8, b8);
+            if ((peak === 0) !== wantGhost) continue;   // this head belongs to the other pass
+            if (peak > 0) {
+                br = r8 / peak; bg = g8 / peak; bb = b8 / peak;
+            } else {
+                // A blacked-out head keeps a GHOST beam: it still has an aim, and where a dark
+                // head points is exactly what someone watches while programming a move. Drawn
+                // faint and neutral so it never reads as emitted light (the rig's real state
+                // stays honest), but bright enough to show the direction, the same trick
+                // drawLights uses when it draws an off light as a placeholder ring.
+                br = bg = bb = 1.0;
+                headI = GHOST_I;
+            }
+        }
+
+        for (let sgi = 0; sgi < SEG; sgi++) {
+            const a0 = (sgi / SEG) * Math.PI * 2, a1 = ((sgi + 1) / SEG) * Math.PI * 2;
+            const c0 = Math.cos(a0) * RAD, s0 = Math.sin(a0) * RAD;
+            const c1 = Math.cos(a1) * RAD, s1 = Math.sin(a1) * RAD;
+            const e0x = cx + ux * c0 + vx * s0, e0y = cy + uy * c0 + vy * s0, e0z = cz + uz * c0 + vz * s0;
+            const e1x = cx + ux * c1 + vx * s1, e1y = cy + uy * c1 + vy * s1, e1z = cz + uz * c1 + vz * s1;
+
+            // Apex is a point, so both triangles share it; the far ring fades to nothing, which is
+            // the length falloff. Edge falloff comes free: the cone is thinnest (least overlapping
+            // geometry) at its silhouette.
+            const vert = (vx_, vy_, vz_, vi_) => {
+                beamVerts_[k++] = vx_; beamVerts_[k++] = vy_; beamVerts_[k++] = vz_;
+                beamVerts_[k++] = vi_;
+                beamVerts_[k++] = br;  beamVerts_[k++] = bg;  beamVerts_[k++] = bb;
+            };
+            vert(x, y, z, headI);
+            vert(e0x, e0y, e0z, 0);
+            vert(e1x, e1y, e1z, 0);
+
+            // A second, narrower inner triangle brightens the core, so the beam has a hot center
+            // and soft edges rather than a flat wash.
+            vert(x, y, z, headI);
+            const coreI = 0.25 * (headI / HEAD_I);   // the core scales with the head, so a ghost stays faint
+            vert(cx + (e0x - cx) * 0.35, cy + (e0y - cy) * 0.35, cz + (e0z - cz) * 0.35, coreI);
+            vert(cx + (e1x - cx) * 0.35, cy + (e1y - cy) * 0.35, cz + (e1z - cz) * 0.35, coreI);
+        }
+    }
+    }
+
+    if (k === 0) return;
+    const verts = k / FPV;
+    const litVerts = ghostStart / FPV;
+    gl.useProgram(beamProgram);
+    gl.bindBuffer(gl.ARRAY_BUFFER, beamBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, beamVerts_.subarray(0, k), gl.DYNAMIC_DRAW);
+    const STRIDE = FPV * 4;
+    gl.enableVertexAttribArray(beamLocs.aPos);
+    gl.vertexAttribPointer(beamLocs.aPos, 3, gl.FLOAT, false, STRIDE, 0);
+    gl.enableVertexAttribArray(beamLocs.aI);
+    gl.vertexAttribPointer(beamLocs.aI, 1, gl.FLOAT, false, STRIDE, 12);
+    gl.enableVertexAttribArray(beamLocs.aColor);
+    gl.vertexAttribPointer(beamLocs.aColor, 3, gl.FLOAT, false, STRIDE, 16);
+    gl.uniformMatrix4fv(beamLocs.uMVP, false, mvp);
+
+    gl.depthMask(false);                  // media, not surfaces: never occlude what is behind
+
+    // Lit beams: ADDITIVE, so crossing beams brighten where they overlap, which is what light in
+    // air does and is the cue that sells it.
+    if (litVerts > 0) {
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        gl.drawArrays(gl.TRIANGLES, 0, litVerts);
+    }
+
+    // Ghost beams (a dark head's aim) cannot use the same blend on a LIGHT theme: additive only
+    // ever brightens, and nothing brightens visibly against a near-white background. So a ghost
+    // darkens there instead, which is the only direction with contrast to spare. On a dark theme
+    // it stays additive like everything else.
+    if (verts > litVerts) {
+        if (bgLuma_ > 0.5) gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);   // darken toward the bg
+        else               gl.blendFunc(gl.SRC_ALPHA, gl.ONE);              // brighten as usual
+        gl.drawArrays(gl.TRIANGLES, litVerts, verts - litVerts);
+    }
+
+    gl.depthMask(true);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);   // restore for the rest of the scene
+
+    gl.disableVertexAttribArray(beamLocs.aI);
+    gl.disableVertexAttribArray(beamLocs.aColor);
+    gl.useProgram(glProgram);   // restore the points program, as drawBoundingBox does
+}
+
 function drawBoundingBox(mvp) {
     if (!lineProgram || !previewBox_ || !previewMaxDim_) return;
     const md = previewMaxDim_;

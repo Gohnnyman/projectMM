@@ -1,11 +1,17 @@
 // @module Correction
 
 #include "doctest.h"
+#include "light/effects/MovingHeadEffect.h"
+#include "light/layers/Layer.h"
+#include "light/layouts/GridLayout.h"
+#include "light/layouts/Layouts.h"
 #include "light/FixtureChannels.h"
+#include "platform/platform.h"   // setTestNowMs: the sweep needs the clock to move
 #include "light/drivers/Correction.h"
 #include "correction_presets.h"
 
 #include <cstdint>
+#include <vector>
 
 // Pins the per-driver output correction: brightness LUT, channel reorder, and RGBW
 // white derivation. The Drivers container owns a Correction, rebuilds it on a
@@ -406,4 +412,64 @@ TEST_CASE("A motion preset widens the light enough to carry pan and tilt") {
     CHECK(fc.pan == mm::FixtureChannels::kMotionBase);
     CHECK(fc.tilt == mm::FixtureChannels::kMotionBase + 1);
     CHECK(fc.movable());
+}
+
+// The formations are the point of the moving-head effect: the same sweep, different relationships
+// between the heads. A formation that produced identical aim for every head would be `unison`
+// wearing another name, so each one is pinned by what makes it distinguishable on a real rig.
+TEST_CASE("Each moving-head formation aims the rig differently") {
+    mm::Layouts layouts;
+    mm::GridLayout grid;
+    // A 1D layout is width 1 by height N: a rig of 4 heads is 1x4, not 4x1. Extrude duplicates
+    // the x=0 column, so the other way round would copy head 0 over every head.
+    grid.width = 1; grid.height = 4; grid.depth = 1;   // a 4-head chain
+    layouts.addChild(&grid);
+
+    mm::Layer layer;
+    layer.setLayouts(&layouts);
+    layer.setChannelsPerLight(6);                      // RGBW + pan + tilt
+    mm::FixtureChannels fc;
+    fc.pan = mm::FixtureChannels::kMotionBase;
+    fc.tilt = mm::FixtureChannels::kMotionBase + 1;
+    layer.setFixtureChannels(fc);
+
+    mm::MovingHeadEffect fx;
+    layer.addChild(&fx);
+
+    auto aimOf = [&](uint8_t formation) {
+        fx.formation = formation;
+        layer.applyState();
+        // BeatPhase's first advance only establishes the time base, and it accumulates from
+        // elapsed() rather than frame count, so the clock has to MOVE or every head sits at
+        // sin(0) = center and the formations are indistinguishable.
+        mm::platform::setTestNowMs(1);
+        layer.tick();
+        for (int f = 1; f <= 12; f++) { mm::platform::setTestNowMs(1 + f * 400u); layer.tick(); }
+        std::vector<uint8_t> pans;
+        const auto& b = layer.buffer();
+        for (mm::nrOfLightsType i = 0; i < b.count(); i++)
+            pans.push_back(b.data()[i * b.channelsPerLight() + fc.pan]);
+        return pans;
+    };
+
+    // Unison is the reference: every head on the same aim.
+    const auto unison = aimOf(mm::MovingHeadEffect::kUnison);
+    REQUIRE(unison.size() == 4);
+    for (size_t i = 1; i < unison.size(); i++) CHECK(unison[i] == unison[0]);
+
+    // Chase delays each head along the sweep, so neighbours differ.
+    const auto chase = aimOf(mm::MovingHeadEffect::kChase);
+    bool chaseVaries = false;
+    for (size_t i = 1; i < chase.size(); i++) if (chase[i] != chase[0]) chaseVaries = true;
+    CHECK(chaseVaries);
+
+    // Cross opposes alternate heads: 0 and 1 sit on opposite sides of center.
+    const auto cross = aimOf(mm::MovingHeadEffect::kCross);
+    CHECK(cross[0] != cross[1]);
+
+    // Mirror splits the rig in half, so the first and last head oppose.
+    const auto mirror = aimOf(mm::MovingHeadEffect::kMirror);
+    CHECK(mirror[0] != mirror[3]);
+
+    mm::platform::setTestNowMs(0);   // back to the real clock for every later test
 }

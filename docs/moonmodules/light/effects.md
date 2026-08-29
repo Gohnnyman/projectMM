@@ -302,24 +302,38 @@ Origin: projectMM original; inspired by After Dark's Flying Toasters (Berkeley S
 
 <a id="movinghead"></a>
 
-### MovingHead 🔬 · 1D
+### MovingHead 🔬📊 · 1D
 
-Sweeps a moving head's pan and tilt along two sine waves at different rates, so the beam traces a
-slow path rather than a straight line. The first effect that AIMS a fixture instead of only
-coloring it: it writes pan and tilt through the role setters, which do nothing on a light that
-carries no such channel, so the same effect on an LED strip simply paints the color sweep and
-moves nothing.
+Aims a rig of moving heads as one instrument. Pan and tilt sweep on two sine waves at different
+rates, so a beam traces a path rather than a line, and `formation` decides how the heads relate to
+each other, which is what turns a row of fixtures into a show rather than several fixtures doing
+the same thing.
 
-- `panBpm` / `tiltBpm` — sweep rates (60 = one full sweep a second). Different rates are what turn
-  two sines into a path instead of a diagonal.
+The first effect that AIMS a fixture rather than only coloring it. It writes pan and tilt through
+the role setters, which do nothing on a light that carries no such channel, so the same effect on
+an LED strip paints the color pattern and moves nothing.
+
+- `formation` — how the heads relate:
+    - **fan** — neighbours differ by a fraction of the sweep, so the beams open and close like a hand.
+    - **mirror** — the halves face each other; the classic look, best on an even-numbered rig.
+    - **chase** — a wave travelling down the row, the same sweep delayed head by head.
+    - **cross** — alternate heads oppose, a tight scissoring that looks fast at a low BPM.
+    - **unison** — every head as one, the reference the others read against.
+- `panBpm` / `tiltBpm` — sweep rates (60 = one sweep a second). Different rates are what turn two
+  sines into a path instead of a diagonal.
 - `panRange` / `tiltRange` — how much of the fixture's travel to use. A head at full pan spends
   much of its sweep pointing away from the audience, so the default is a band around center.
 - `panCenter` / `tiltCenter` — where the sweep is centered (128 = the fixture's middle).
+- `soundReactive` — move and light with the music: the beam swings wider as the room gets louder,
+  each head takes its brightness from its own frequency band so the rig ripples rather than pulsing
+  as one block, and a beat widens the sweep and flares the color with a short decay so a kick is
+  visible rather than a one-frame flicker. Silence holds the rig still, which is what makes it read
+  as reactive rather than merely animated.
 
-Several fixtures on one chain are spread along the wave rather than moving in unison, so a row of
-heads reads as a travelling sweep. Uses the global palette for color.
+A fixture chain is one-dimensional, so lay the rig out as a **1 x N** grid (width 1, height N):
+extrude duplicates the x=0 column, so N x 1 would copy the first head's aim over every head.
 
-Origin: projectMM original
+Uses the global palette. Origin: projectMM original
 
 <a id="pacman"></a>
 

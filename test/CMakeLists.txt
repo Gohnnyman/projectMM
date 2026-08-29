@@ -105,6 +105,7 @@ add_executable(mm_tests
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
+    unit/light/unit_MovingHeadEffect.cpp
     unit/light/unit_Drivers_container.cpp
     unit/light/unit_Drivers_rendersplit.cpp
     unit/light/unit_LightPresetsModule.cpp

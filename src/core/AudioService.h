@@ -209,12 +209,19 @@ public:
         if constexpr (platform::hasAudioCapture) {
             // The OS capture input: entry 0 "default" follows the system setting; loopback
             // devices (BlackHole and friends) appear when installed. Re-enumerated on every
-            // rebuild, so a hot-plugged device shows up on the next control change. Persisted
-            // by INDEX (the Select writer's contract): if the OS reorders devices, re-pick,
-            // "default" at 0 is order-stable and the shipped default.
+            // rebuild, so a hot-plugged device shows up on the next control change.
+            //
+            // Persisted by LABEL (setPersistLabel, as the NIC and HLS Selects do), because this
+            // list is LIVE ENUMERATION and its indices are not stable: unplug a webcam or let a
+            // Continuity Camera drop off and every device below it shifts up a slot, so a saved
+            // index silently starts naming a different device. That matters most for exactly the
+            // case someone sets up deliberately, a loopback like BlackHole, which is routing meant
+            // to stay put rather than a mic one would re-pick. Matching by name survives it; a
+            // device that is genuinely gone falls back to "default" at 0.
             const char* const* deviceOptions = nullptr;
             const uint8_t deviceCount = static_cast<uint8_t>(platform::audioCaptureDevices(&deviceOptions));
             controls_.addSelect("device", device, deviceOptions, deviceCount);
+            controls_.setPersistLabel(controls_.count() - 1);
             controls_.setHidden(controls_.count() - 1, !localMode);
         }
         static constexpr const char* kRateOptions[] = {"8000", "16000", "22050", "44100"};

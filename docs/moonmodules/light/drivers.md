@@ -153,6 +153,19 @@ It streams on its **own WebSocket channel** (`/wsp`), so a large frame never del
 
 - `targetFps`, the frame rate the preview aims for (default 24, 1–60). The device never sends faster; when the connection cannot keep up, the browser trades detail to get closer: **lower it for full detail at a slower rate, raise it for a smoother but coarser preview**.
 
+**Moving heads show their beam.** When the rig's fixtures carry pan and tilt, the preview also
+streams each head's aim, and the browser draws a short 3D ray from the fixture in the direction it
+points. A rig without moving heads never sends that message and pays nothing for the feature.
+
+The wire carries where a head POINTS, never a rendered look, so a richer visual later (a cone with
+falloff rather than a ray) is a browser change and not a protocol one. The beam is a ray today
+because beam angle and throw distance are fixture attributes the
+[fixture model](../../backlog/backlog-light.md) does not carry yet, and drawing a cone would mean
+inventing them.
+
+Color and aim alternate frame by frame, since the transport keeps one send in flight: a head
+sweeps far slower than a pixel changes, so half rate each is not visible on the beam.
+
 Origin: projectMM, on [MoonLight](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h)'s PhysicalLayer model
 
 [Tests](../../tests/unit-tests.md#previewdriver)

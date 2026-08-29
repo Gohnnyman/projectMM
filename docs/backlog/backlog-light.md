@@ -150,6 +150,40 @@ controls live. The backlog's fixture-model item ("moving heads, beams", per-emit
 where the model belongs; this entry records the concrete gap in the meantime. Bench fixture and its
 channel map: [light fixtures reference](../reference/light-fixtures.md).
 
+### Pan/tilt travel is hardcoded, and positioning is 8-bit (WANTED)
+
+Two fidelity gaps in how an aim becomes a real beam, both found on the bench 2026-08-29 reviewing
+the preview's beam cones.
+
+**Travel is assumed, not declared.** `EffectBase` and the preview both hardcode *540 degrees of
+pan, 180 of tilt*, which is the common mid-size convention and happens to match the bench fixture.
+Real heads vary: 630 pan on larger bodies, 360 or 530 on compact ones, 270 tilt on beam fixtures.
+Nothing declares which fixture is plugged in, so the preview draws every rig with the bench head's
+travel and silently lies about where a beam points. Zero point varies too (some fixtures put
+mechanical zero at DMX 0 rather than centering at 128), and the axis direction is a setting on the
+fixture's own display (`rPAN` / `rTIL` on the bench head), so even one fixture has no fixed mapping.
+
+**The DMX byte is already the right abstraction, and it is why nothing can over-rotate.** An effect
+never emits an angle: `MovingHeadEffect::axis()` maps its sweep onto a 0..255 byte and clamps, so
+0 and 255 *are* the mechanical stops whatever they are in degrees, and the head cannot be asked
+past its travel. A sweep that reaches a stop flattens there (the beam parks) rather than wrapping,
+which is what the fixture itself does. Degrees exist only for DRAWING.
+
+So the fix is scoped to the preview, and the open question is where travel is declared:
+
+- **`PreviewDriver` controls** (`panTravel`, `tiltTravel` in degrees, sent in the aim message) —
+  small, live-reconfigurable like every other setting, and honest that travel is a property of the
+  fixture someone plugged in. The leanest thing that stops the lie.
+- **The light preset** — correct once two different heads run at once, but a preset is a
+  *channel-role* layout today, and carrying physical travel widens what a preset means. Belongs
+  with the [fixture model](#fixture-model--moving-heads-beams-long-term), not before it.
+
+**Positioning is 8-bit while the fixture offers 16.** The bench head has a fine channel for each
+axis ([light fixtures reference](../reference/light-fixtures.md)); both sit unused, so pan resolves
+to 540/256 = about 2.1 degrees per step. Across a room that is a visible jump on a slow sweep, and
+it is the bigger fidelity win of the two. Needs a 16-bit path from the effect's sweep through
+`FixtureChannels` to the preset's fine-channel roles, so it is the larger job.
+
 ### Built-in light presets never reach a device that has a saved config (WANTED)
 
 `LightPresetsModule` seeds its built-ins only when the preset list is empty
