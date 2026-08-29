@@ -979,30 +979,49 @@ void guidToString(const GUID& g, char* out, size_t cap) {
 /// a 2.5 Gb USB dongle, a Wi-Fi radio, or a Hyper-V virtual switch. Windows reports 0 or ~0 for
 /// an adapter whose speed it will not state (typically one that is down), and those get no suffix
 /// rather than a fabricated "0 Mb".
-bool winDescForPcapName(const MIB_IF_TABLE2* table, const char* pcapName, char* out, size_t cap) {
-    if (!table || !out || cap == 0) return false;
+/// The interface-table row behind a pcap device, matched on the GUID in its device name. One home
+/// for the walk, because the label and the is-this-a-real-NIC test both need the same row.
+const MIB_IF_ROW2* winRowForPcapName(const MIB_IF_TABLE2* table, const char* pcapName) {
+    if (!table) return nullptr;
     char want[40];
-    if (!guidFromPcapName(pcapName, want, sizeof(want))) return false;
+    if (!guidFromPcapName(pcapName, want, sizeof(want))) return nullptr;
     for (ULONG i = 0; i < table->NumEntries; i++) {
         char have[40];
         guidToString(table->Table[i].InterfaceGuid, have, sizeof(have));
-        if (!equalsNoCase(have, want)) continue;
-        // Narrow the wide description as we copy: an adapter description is ASCII.
-        size_t n = 0;
-        for (; n + 1 < cap && table->Table[i].Description[n]; n++) {
-            out[n] = static_cast<char>(table->Table[i].Description[n]);
-        }
-        out[n] = '\0';
-        if (n == 0) return false;
-
-        // Same source and the same unknown-speed guard as ethLinkSpeedMbps (winAdapterLink);
-        // converted to Mbit here so the shared formatter takes one unit from every OS.
-        const unsigned long long bps = table->Table[i].TransmitLinkSpeed;
-        if (bps == 0 || bps == ~0ULL) return true;
-        appendLinkSpeed(out, cap, static_cast<unsigned>(bps / 1000000ULL));
-        return true;
+        if (equalsNoCase(have, want)) return &table->Table[i];
     }
-    return false;
+    return nullptr;
+}
+
+/// Can this adapter carry panel frames? Only physical Ethernet can.
+///
+/// IF_TYPE_ETHERNET_CSMACD on its own is not the test: measured on a Windows bench, the Hyper-V
+/// vSwitch ports, every WAN miniport, the network bridge and Bluetooth PAN all report that type
+/// too. HardwareInterface is what separates them from a NIC with a socket on it. Wi-Fi fails the
+/// type test instead (IF_TYPE_IEEE80211), which is the right answer for a card that needs a wire.
+bool winIsPanelCapableNic(const MIB_IF_ROW2* row) {
+    return row && row->Type == IF_TYPE_ETHERNET_CSMACD
+        && row->InterfaceAndOperStatusFlags.HardwareInterface;
+}
+
+bool winDescForPcapName(const MIB_IF_TABLE2* table, const char* pcapName, char* out, size_t cap) {
+    if (!out || cap == 0) return false;
+    const MIB_IF_ROW2* row = winRowForPcapName(table, pcapName);
+    if (!row) return false;
+    // Narrow the wide description as we copy: an adapter description is ASCII.
+    size_t n = 0;
+    for (; n + 1 < cap && row->Description[n]; n++) {
+        out[n] = static_cast<char>(row->Description[n]);
+    }
+    out[n] = '\0';
+    if (n == 0) return false;
+
+    // Same source and the same unknown-speed guard as ethLinkSpeedMbps (winAdapterLink);
+    // converted to Mbit here so the shared formatter takes one unit from every OS.
+    const unsigned long long bps = row->TransmitLinkSpeed;
+    if (bps == 0 || bps == ~0ULL) return true;
+    appendLinkSpeed(out, cap, static_cast<unsigned>(bps / 1000000ULL));
+    return true;
 }
 #endif  // _WIN32
 }  // namespace
@@ -2698,6 +2717,12 @@ size_t rawInterfaces(const char* const** optionsOut) {
                 MIB_IF_TABLE2* table = nullptr;
                 if (::GetIfTable2(&table) != NO_ERROR) table = nullptr;
                 for (const PcapIf* d = devs; d; d = d->next) {
+                    // Show only what could carry panel frames. The POSIX branch below does the
+                    // same job with a virtual-name blocklist; Windows names tell you nothing, so
+                    // the interface table answers it instead. Skipped ONLY when the table was
+                    // read: without it every row would be filtered out and the picker would be
+                    // an empty dead end on a machine whose NICs are perfectly usable.
+                    if (table && !winIsPanelCapableNic(winRowForPcapName(table, d->name))) continue;
                     char desc[256] = {};
                     const char* label = nullptr;
                     if (winDescForPcapName(table, d->name, desc, sizeof(desc))) label = desc;
