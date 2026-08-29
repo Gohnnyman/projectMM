@@ -123,6 +123,50 @@ public:
     /// Reach the live Drivers (the one that owns the encode worker) to quiesce it around a mutation.
     static Drivers* active() { return ActiveInstance<Drivers>::active(); }
 
+    /// Where this rig's fixtures keep their motion channels, as LAYER slots.
+    ///
+    /// Callable BEFORE Drivers has prepared, which is the point: a Layer allocates its buffer in
+    /// its own prepare, and modules prepare in registration order with Effects ahead of Drivers.
+    /// Without this the layer would size itself for color only, an effect's setPan() would fall
+    /// outside the light, and a fixture would not move until some later rebuild widened it.
+    /// Each driver resolves its preset on demand (rebuildCorrection is idempotent and cold-path).
+    /// Hand the fixture layout to every Layer that could render into this rig, so an effect's
+    /// setPan() lands on the right byte and the layer can size its light to hold it.
+    void publishFixtureChannels() {
+        const FixtureChannels fc = fixtureChannels();
+        if (effects_) {
+            for (uint8_t i = 0; i < effects_->childCount(); i++)
+                if (effects_->child(i)->role() == ModuleRole::Layer)
+                    static_cast<Layer*>(effects_->child(i))->setFixtureChannels(fc);
+        } else if (layer_) {
+            layer_->setFixtureChannels(fc);
+        }
+    }
+
+    FixtureChannels fixtureChannels() {
+        FixtureChannels fc;   // every offset absent: a rig with no motion, the common case
+        for (uint8_t i = 0; i < childCount(); i++) {
+            if (child(i)->role() != ModuleRole::Driver || !child(i)->enabled()) continue;
+            auto* d = static_cast<DriverBase*>(child(i));
+            d->rebuildCorrection(brightness);        // resolve the preset if it has not been yet
+            const Correction& c = d->correction();
+            if (!c.hasMotion) continue;
+            // Layer slots, not the fixture's channel numbers: packed after RGBW in a fixed order,
+            // so an effect's pan write can never collide with the color bytes. forEachMotionSlot
+            // is the one definition of that order; Correction::apply reads it back.
+            const bool present[5] = {c.offPan    != Correction::kAbsent,
+                                     c.offTilt   != Correction::kAbsent,
+                                     c.offZoom   != Correction::kAbsent,
+                                     c.offRotate != Correction::kAbsent,
+                                     c.offGobo   != Correction::kAbsent};
+            uint8_t* const dst[5] = {&fc.pan, &fc.tilt, &fc.zoom, &fc.rotate, &fc.gobo};
+            FixtureChannels::forEachMotionSlot(present,
+                [&](uint8_t role, uint8_t slot) { *dst[role] = slot; });
+            break;   // a chain is homogeneous (architecture.md), so one layout describes it
+        }
+        return fc;
+    }
+
     /// Global brightness (0–255). Scales every channel through a 256-entry LUT
     /// (`(v × brightness) / 255`); changing it rebuilds only the LUT on the cheap
     /// `onControlChanged` tier — no pipeline realloc, so the slider is fluent. Gamma /
@@ -278,6 +322,12 @@ public:
         Palettes::setActive(palette);   // seed the global active palette from the persisted index
         MoonModule::setup();
         passBufferToDrivers();           // seeds each driver's correction via rebuildCorrection()
+        // Tell the layers where this rig's fixtures keep their motion channels, HERE rather than in
+        // prepare(): every module's setup() runs before any module's prepare(), and a Layer sizes
+        // its buffer in prepare. Pushed later, a layer would size itself for color on a cold boot,
+        // an effect's setPan() would fall outside the light, and a fixture would not move until
+        // some later rebuild widened it.
+        publishFixtureChannels();
     }
 
     void prepare() override {
@@ -314,34 +364,7 @@ public:
         // a half-split state (no task is spawned, so there is no cross-core wait to deadlock on).
         // A source with ZERO lights (every layout toggled off) is not a buffer to claim — allocate(0)
         // fails and would print a spurious DEGRADE, so gate on a real light count.
-        // Tell the layer where this rig's fixtures keep their motion channels, so an effect's
-        // setPan()/setTilt() land on the right bytes. Taken from the first driver that resolved a
-        // preset carrying them: a chain is homogeneous (architecture.md), so one layout describes
-        // it. Absent on a plain LED rig, which is what makes those setters harmless no-ops there.
-        if (out) {
-            FixtureChannels fc;   // all absent
-            for (uint8_t i = 0; i < childCount(); i++) {
-                // role() + static_cast, not dynamic_cast: ESP32 builds with -fno-rtti, and this
-                // is how every other driver walk in this file identifies its children.
-                if (child(i)->role() != ModuleRole::Driver || !child(i)->enabled()) continue;
-                auto* d = static_cast<DriverBase*>(child(i));
-                const Correction& c = d->correction();
-                if (!c.hasMotion) continue;   // same test apply() gates on, so the two agree
-                // Layer slots, not the fixture's channel numbers: packed after RGBW in a fixed
-                // order, so an effect's pan write can never collide with the color bytes.
-                // forEachMotionSlot is the one definition of that order; apply() reads it back.
-                const bool present[5] = {c.offPan    != Correction::kAbsent,
-                                         c.offTilt   != Correction::kAbsent,
-                                         c.offZoom   != Correction::kAbsent,
-                                         c.offRotate != Correction::kAbsent,
-                                         c.offGobo   != Correction::kAbsent};
-                uint8_t* const dst[5] = {&fc.pan, &fc.tilt, &fc.zoom, &fc.rotate, &fc.gobo};
-                FixtureChannels::forEachMotionSlot(present,
-                    [&](uint8_t role, uint8_t slot) { *dst[role] = slot; });
-                break;
-            }
-            out->setFixtureChannels(fc);
-        }
+        publishFixtureChannels();
 
         const bool haveLights = out && out->physicalLightCount() > 0;
         const bool splitWanted = multicore && anyDriver() && haveLights;

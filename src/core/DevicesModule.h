@@ -178,8 +178,27 @@ public:
         return ok;      // false on a malformed/missing file (list left empty)
     }
 
+    /// Announce ourselves on WLED's broadcast address as well as the multicast group.
+    ///
+    /// OFF (the default) announces on the multicast group alone, which is the better neighbour:
+    /// a broadcast wakes every phone, printer and laptop on the LAN to parse a packet none of them
+    /// want, where multicast reaches only the devices that joined (and a switch with IGMP snooping
+    /// does not even forward it to the other ports). ON adds the broadcast copy that WLED apps and
+    /// devices need, since they browse this port on BROADCAST: turn it on to appear in them.
+    ///
+    /// Not automatic, for the same reason the sACN multicast option is opt-in: without IGMP
+    /// snooping a switch floods multicast exactly like broadcast, and on WiFi it goes out at the
+    /// lowest basic rate to every station. Firmware cannot tell which kind of network it is on.
+    ///
+    /// **Devices need not agree on this.** Presence ALWAYS goes to the group and every device
+    /// ALWAYS joins it, so projectMM peers find each other whatever each has chosen; the flag
+    /// only adds the broadcast copy WLED needs. A fleet can therefore be mixed, and turning it
+    /// off on one device never hides it from another.
+    bool wledCompatible = false;
+
     void defineControls() override {
         MoonModule::defineControls();
+        controls_.addControl("wledCompatible", wledCompatible);
         controls_.addList("devices", *this);   // this module is the ListSource
     }
 
@@ -377,6 +396,10 @@ private:
     // so one socket receives + broadcasts; the assert pins that invariant. A future plugin
     // on a DIFFERENT port is the trigger to grow this to one socket per distinct port (the
     // shape is already a loop over plugins everywhere else).
+    /// The projectMM discovery group. 239.255.x.x is the IPv4 organization-local scope (RFC 2365):
+    /// site-local, never routed off the network, and the same block sACN uses. .77 is ours.
+    static constexpr uint8_t kDiscoveryGroup[4] = {239, 255, 77, 77};
+
     void ensureListener() {
         if (listenerBound_) return;
         const uint16_t port = plugins_[0]->discoveryPort();
@@ -385,6 +408,13 @@ private:
         if (!listener_.open()) return;
         if (listener_.bind(port)) {
             listenerBound_ = true;
+            // Join the projectMM discovery group so a peer's multicast presence reaches us even
+            // when it has WLED compatibility off. Best-effort: a stack without multicast still
+            // hears the broadcast half, so discovery degrades rather than breaking.
+            char grp[16];
+            std::snprintf(grp, sizeof(grp), "%u.%u.%u.%u", kDiscoveryGroup[0], kDiscoveryGroup[1],
+                          kDiscoveryGroup[2], kDiscoveryGroup[3]);
+            listener_.joinMulticast(grp);
         } else {
             // bind failed (port busy this tick) — CLOSE the just-opened socket before
             // returning, or each retry would open() a fresh fd and leak one per tick1s
@@ -401,8 +431,16 @@ private:
         const char* n = (selfName_ && selfName_[0]) ? selfName_ : "projectMM";
         WledPacket::build(pkt, ip, n, boardTypeByte(), /*lightsOn=*/true);
         WledPacket::stampMmMarker(pkt);
-        const uint8_t bcast[4] = {255, 255, 255, 255};
-        listener_.sendToAddr(bcast, WledPacket::kPort, pkt, sizeof(pkt));
+        // The multicast group always: peer projectMM devices listen there, and it costs the rest
+        // of the LAN nothing. The broadcast additionally, unless the user turned WLED compatibility
+        // off: WLED apps and devices browse this port on BROADCAST, so dropping it makes projectMM
+        // invisible to them. The protocol's owner decides the transport, and this control is where
+        // a projectMM-only network gets to stop paying for WLED's choice.
+        listener_.sendToAddr(kDiscoveryGroup, WledPacket::kPort, pkt, sizeof(pkt));
+        if (wledCompatible) {
+            const uint8_t bcast[4] = {255, 255, 255, 255};
+            listener_.sendToAddr(bcast, WledPacket::kPort, pkt, sizeof(pkt));
+        }
     }
 
     // WLED's board-type byte (low 7 bits): 32=ESP32, 33=S2, 34=S3, 35=C3, 36=P4. Best-effort

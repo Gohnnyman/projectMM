@@ -24,6 +24,21 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### projectMM no longer appears in WLED apps by default
+
+Device discovery now announces on the multicast group `239.255.77.77` and, by default, **not** on
+the broadcast address WLED apps and devices browse. A projectMM device therefore stops showing up
+in them until you turn on `wledCompatible` in the Devices module.
+
+projectMM devices still find each other either way: presence always goes to the group and every
+device always joins it, so a fleet can mix the setting freely.
+
+The reason for the default: a broadcast at discovery cadence makes every phone, printer and laptop
+on the LAN take an interrupt and parse a packet none of them want. Multicast reaches only the
+devices that joined the group. See
+[multicast and IGMP snooping](architecture.md#multicast-and-igmp-snooping) for when that saving is
+real (a switch that snoops) and when it is not.
+
 ### A light preset's Dimmer channel is now driven
 
 A preset that declares a `Dimmer` role previously left that channel at 0, because nothing ever

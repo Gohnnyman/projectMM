@@ -381,3 +381,29 @@ TEST_CASE("A plain RGB fixture reports no motion channels") {
     c.rebuild(255, head, 5);
     CHECK(c.hasMotion);
 }
+
+// The layer must be wide enough to hold the motion slots BEFORE it allocates, or an effect's
+// setPan() falls outside the light and the fixture never moves. Modules prepare in registration
+// order with Effects ahead of Drivers, so this only works because Drivers publishes the fixture
+// layout in setup(), which runs for every module before any module's prepare(). Bench-observed
+// before the fix: 12 bytes for 4 lights on a cold boot, and a motionless head until a rebuild.
+TEST_CASE("A motion preset widens the light enough to carry pan and tilt") {
+    using R = mm::ChannelRole;
+    const R roles[] = {R::Pan, R::None, R::Tilt, R::None, R::None, R::Dimmer,
+                       R::None, R::Red, R::Green, R::Blue, R::White};
+    mm::Correction c;
+    c.rebuild(255, roles, 11);
+    REQUIRE(c.hasMotion);
+
+    // Two motion roles, so the layer needs kMotionBase + 2 channels per light.
+    mm::FixtureChannels fc;
+    const bool present[5] = {c.offPan != mm::Correction::kAbsent,
+                             c.offTilt != mm::Correction::kAbsent, false, false, false};
+    uint8_t* const dst[5] = {&fc.pan, &fc.tilt, &fc.zoom, &fc.rotate, &fc.gobo};
+    mm::FixtureChannels::forEachMotionSlot(present,
+        [&](uint8_t role, uint8_t slot) { *dst[role] = slot; });
+
+    CHECK(fc.pan == mm::FixtureChannels::kMotionBase);
+    CHECK(fc.tilt == mm::FixtureChannels::kMotionBase + 1);
+    CHECK(fc.movable());
+}

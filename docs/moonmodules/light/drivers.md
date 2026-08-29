@@ -73,7 +73,12 @@ Detail: [RMT](moxygen/RmtLedDriver.md) · [Parallel](moxygen/ParallelLedDriver.m
 
 Streams the buffer over UDP as **Art-Net**, **E1.31 / sACN**, or **DDP** — one burst per frame, compatible with Falcon/Advatek controllers, xLights, and LedFx. Feeds **one or more receivers** from a single driver: each gets its own slice of the window, unicast to its own address.
 
-- `protocol` — Art-Net / E1.31 / DDP (default Art-Net); the destination port follows automatically.
+- `protocol` — Art-Net / E1.31 / DDP / E1.31 multicast (default Art-Net); the destination port
+  follows automatically. **E1.31 multicast** sends to sACN's own per-universe group
+  (`239.255.{universe_hi}.{universe_lo}`) rather than the configured address, so one send
+  reaches every receiver that joined that universe. It is opt-in rather than the default for
+  E1.31: the saving only materialises on a switch that does IGMP snooping, and firmware cannot
+  tell. See [multicast and IGMP snooping](../../architecture.md#multicast-and-igmp-snooping).
 - `ips` — the receivers. **Blank by default — the driver idles until set**, so it never sends uninvited traffic. Type the full address once, then a range or a list: `192.168.1.70-74` (five tubes, ends inclusive) or `192.168.1.60,61,62,65`; both mix, and a further full address switches subnet.
 - `lightsPerIp` — lights per receiver, same idiom as an LED driver's `ledsPerPin`: **blank** = split the window evenly; **one number** = that many each; **a list** `150,100,50` = one per receiver by position.
 - `universe_start` — first universe for Art-Net / E1.31 (DDP ignores it). Restarts per receiver — each is an independent node addressing its own strip.

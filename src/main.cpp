@@ -139,6 +139,7 @@
 #include "core/ControlModule.h"
 #include "core/Services.h"
 #include "core/AudioService.h"
+#include "core/OscModule.h"
 #include "core/I2cScanModule.h"
 #include "core/TasksModule.h"
 #include "core/PinsModule.h"
@@ -301,6 +302,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::ControlModule>("ControlModule", "core/control.md#control");
     mm::ModuleFactory::registerType<mm::Services>("Services", "core/services.md#services");
     mm::ModuleFactory::registerType<mm::AudioService>("AudioService", "core/services.md#audio");
+    mm::ModuleFactory::registerType<mm::OscModule>("OscModule", "core/services.md#osc");
     mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/system.md#i2c-scan");
     mm::ModuleFactory::registerType<mm::TasksModule>("TasksModule", "core/system.md#tasks");
     mm::ModuleFactory::registerType<mm::PinsModule>("PinsModule", "core/system.md#pins");

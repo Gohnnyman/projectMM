@@ -33,12 +33,21 @@ A Service (added by the user, not auto-wired): the audio source that feeds the F
 
 #### WLED audio sync: what is on the wire
 
-Sending and receiving both use the **multicast address 239.0.0.1**, port 11988, which is what
-WLED's own usermod does (`beginMulticast` on both ends). It never uses broadcast, so a broadcast
-sender is inaudible to WLED and a receiver that only binds the port never hears WLED. Multicast is
-also the better neighbour on a LED network: only the devices that joined the group are woken,
-where a broadcast at ~40 packets a second makes every phone and laptop on the LAN parse and
-discard one. This is a network-layer address, unrelated to any device grouping.
+Sending and receiving both use the **multicast address 239.0.0.1**, which is what WLED's own
+usermod does (`beginMulticast` on both ends). It never uses broadcast, so a broadcast sender is
+inaudible to WLED and a receiver that only binds the port never hears WLED. This is a
+network-layer address, unrelated to any device grouping.
+
+**Port 11988 is the WLED contract**, and `syncPort` defaults to it. The port is configurable for
+projectMM peers that want a private stream, but a custom port is no longer WLED-compatible: the
+endpoint WLED speaks is 239.0.0.1:11988 specifically.
+
+Multicast is also the better neighbour, with a caveat worth knowing: a switch or access point that
+does **IGMP snooping** forwards the group only to the ports that joined it, so the other hosts
+never see the traffic at all. Without snooping the switch floods it exactly like broadcast, and on
+WiFi it goes out at the lowest basic rate to every station. So multicast can reduce how many hosts
+have to process ~40 packets a second, but it does not guarantee it. See
+[multicast and IGMP snooping](../../architecture.md#multicast-and-igmp-snooping).
 
 The 44-byte v2 packet is byte-compatible with WLED, with one field that is not yet equivalent:
 
@@ -76,6 +85,41 @@ Prior art: the WLED-MM audio-reactive usermod by **Frank ([@softhack007](https:/
 Detail: [technical](moxygen/AudioService.md)
 
 [Tests](../../tests/unit-tests.md#audioservice)
+
+<a id="osc"></a>
+
+### OSC
+
+Receives [OSC](https://opensoundcontrol.stanford.edu/) over UDP and writes it onto this device's
+controls, so a fader in Resolume, TouchDesigner, TouchOSC or a DIY Arduino-over-Ethernet rig drives
+projectMM directly. It owns no surface of its own: everything lands in the same control writes the
+HTTP API and the UI use, so every validator still runs.
+
+- `listen` — receive OSC (default **off**). This opens an unauthenticated UDP port that writes
+  controls, on the same LAN-trust basis as the Art-Net and audio-sync receivers, so it is a
+  capability you turn on rather than one every device carries.
+- `port` — the UDP port (default 9000, what TouchOSC uses). Applies live.
+- `status` — listening, off, or why the port could not be opened.
+
+**Addresses.** These are a public contract: a TouchOSC layout built against them keeps working, so
+they stay small and boring.
+
+| address | argument | drives |
+|---|---|---|
+| `/mm/fader/1` .. `/mm/fader/8` | float 0..1 or int 0..255 | the Control surface's faders |
+| `/mm/enc/1` .. `/mm/enc/8` | float 0..1 or int 0..255 | its rotary encoders |
+| `/mm/control/<Module>/<control>` | float 0..1 or int 0..255 | any control directly |
+
+Both argument forms are accepted because controllers disagree: apps send a float in 0..1, hardware
+bridges send an int in the target's range. Out-of-range values are clamped rather than ignored, so
+a controller sending 0..127 does something sensible instead of appearing dead.
+
+Send one from the bench with `uv run moondeck/check/send_osc.py <ip> /mm/fader/1 0.75`.
+
+**It does not reach a Mackie desk.** The X-Touch and QCon Pro G2 speak Mackie Control over MIDI,
+not OSC: see [control surfaces](../../reference/control-surfaces.md) for what would.
+
+Origin: projectMM original
 
 <a id="ir"></a>
 

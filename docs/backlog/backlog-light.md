@@ -120,21 +120,6 @@ Found on the bench 2026-08-28 wiring the first moving head. Note the dimmer was 
 before that day (the shipped `IRGB` preset could never light a fixture); writing it at 255 is the
 fix that made a fixture light, not the finished design.
 
-### Layer width settles one rebuild late, so a motion rig does not move until reconfigured (WANTED)
-
-`Layer::allocateBuffer` widens the light to fit the rig's motion channels, but it reads offsets
-`Drivers` only resolves from the light preset AFTER the layer has prepared. On a cold boot the
-layer therefore allocates at 3 channels, an effect's `setPan()` falls outside the light and is
-dropped, and the fixture holds still. Anything that triggers a second rebuild (a grid change, a
-preset change) fixes it for the session. Bench-observed 2026-08-29: 12 bytes for 4 lights on boot,
-24 bytes and moving after one grid nudge.
-
-**The fix is an ordering one**, not more code: the fixture layout has to be known before the layer
-allocates. Either resolve the preset's roles ahead of `Layer::prepare` (Drivers already reads the
-preset library, which does not depend on the layer), or have the layer re-prepare when the fixture
-channels change. Widening after the buffer exists is NOT an option: resizing it under a holder
-segfaults, which is how this landed where it is.
-
 ### Blending adds motion channels, which is meaningless for aim (WANTED)
 
 `blendMap` treats a light as `n` opaque bytes, so ADDITIVE blending sums pan and tilt across
@@ -152,12 +137,12 @@ Not yet reachable in a harmful way: it needs two enabled layers on a fixture car
 channels, and the single-layer path is a memcpy. Worth doing with the motion-writer work, since
 both need `FixtureChannels`' offsets on the blend path.
 
-### Pan/tilt/zoom/gobo have no writer — motion roles are declared but never driven (WANTED)
+### Zoom, rotate and gobo have no writer (WANTED)
 
-`ChannelRole` carries `Pan`, `Tilt`, `Zoom`, `Rotate` and `Gobo`, and a preset can map them, but
-nothing writes them: `Correction::apply()` deliberately touches only color roles (and now Dimmer),
-leaving motion "for their own writers". Those writers do not exist, so every motion channel sits at
-0 forever: a moving head points wherever 0/0 puts it and never moves.
+Pan and tilt now have a writer: an effect sets them through `EffectBase::setPan`/`setTilt` and
+`Correction::apply()` maps the layer slots onto the fixture's channels (`MovingHeadEffect` is the
+worked example, bench-driven). **`Zoom`, `Rotate` and `Gobo` still have none**: a preset can map
+them and `Correction` carries their offsets, but no effect writes them, so they sit at 0.
 
 This is the other half of driving a moving head, and it is a domain question, not a plumbing one: a
 light is a point with a color, while a moving head is a fixture that emits a BEAM in a direction it
