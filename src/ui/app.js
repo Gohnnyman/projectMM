@@ -4745,7 +4745,9 @@ function deviceFirmwareInfo() {
 // Light the badge for an available update. `tag` is the release the picker should pre-select
 // (a vX.Y.Z stable tag, or "latest"); `label` is what the badge shows.
 function showUpdateBadge(badge, tag, label, isDesktop) {
-    badge.textContent = `⬆ ${label}`;
+    // setText, not a raw write: this runs on every state patch, and rewriting identical text
+    // still destroys a selection inside the element.
+    setText(badge, `⬆ ${label}`);
     // A desktop cannot install from the Firmware card: it has no OTA, and updating means
     // downloading an archive and replacing the binary. So the badge sends it to the release page
     // instead of a card that would offer it nothing.

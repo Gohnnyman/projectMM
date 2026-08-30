@@ -411,6 +411,10 @@ public:
         } else if (!shouldSplit && renderSplitActive_) {
             stopEncodeTask();                  // drains core 1 before we leave split mode
             renderSplitActive_ = false;
+            // Turning multicore OFF is a choice, not a fault: a stall warning from the old split
+            // must not outlive it (the card showed "encode worker stalled" beside a multicore
+            // toggle that was already off).
+            if (encodeStalled_) { encodeStalled_ = false; setStatus("", Severity::Status); }
         }
         // Publish the light-pipeline summary for the domain-neutral core consumers (the WLED
         // /json shim, MQTT) via the static latestSummary() pull. `out` is the composite extent;
@@ -554,7 +558,8 @@ private:
     std::atomic<bool> encodeStop_{false};  // stop flag the worker fn observes via a woken waitNotify
                                            // (atomic, not volatile: volatile is not a thread primitive
                                            // in C++ — a cross-thread flag is a data race without it)
-    bool renderSplitActive_ = false;       // the split is engaged (task spawned, boundary in effect)
+    bool renderSplitActive_ = false;   // the split is engaged (task spawned, boundary in effect)
+    bool encodeStalled_ = false;       // a stall warning is showing, so recovery can clear it
     uint32_t renderWaitUs_ = 0;                 // last frame's core-0 wait at the boundary (the tick-line KPI)
     uint32_t renderWaitPeakUs_ = 0;             // worst wait in the current 1 s window (what the control shows)
     char renderWaitStr_[32] = {};               // the `renderWait` read-only control's text (refreshed in tick1s)
@@ -601,11 +606,20 @@ private:
         const uint32_t deadline = platform::millis() + kQuiesceTimeoutMs;
         while (!encodeDone_.load(std::memory_order_acquire)) {
             if (platform::millis() > deadline) {
-                setStatus("encode worker stalled — running single-core", Severity::Warning);
+                setStatus("encode worker stalled - running single-core", Severity::Warning);
+                encodeStalled_ = true;        // remember, so recovery can clear the warning
                 renderSplitActive_ = false;   // stop notifying it; drivers tick inline from here
                 return false;
             }
             platform::yield();
+        }
+        // The worker answered. Clear a previous stall warning, which is otherwise STICKY: it was
+        // set once and never lifted, so a card kept reporting "stalled" long after the split was
+        // healthy, and even after multicore was switched off. A status that cannot go away tells
+        // the user nothing about now.
+        if (encodeStalled_) {
+            encodeStalled_ = false;
+            setStatus("", Severity::Status);
         }
         return true;
     }

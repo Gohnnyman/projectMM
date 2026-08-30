@@ -637,7 +637,10 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
         uint32_t now = mm::platform::millis();
         if (now - lastLog >= 1000) {
             lastLog = now;
-            if (scheduler.tickTimeUs() == 0) continue; // no measurement yet
+            // `goto`, not `continue`: the loop's pacing lives at its TAIL, so a continue here
+            // skips the yield and spins the core for this pass. Jumping to the pacing point keeps
+            // "skip the logging" from meaning "skip the sleep".
+            if (scheduler.tickTimeUs() == 0) goto paced; // no measurement yet
 
             // The KPI tick line is a plain stdout printf, not an ESP_LOG, so the platform log level
             // doesn't suppress it — we gate it here on the same level. At Info or above it prints; at
@@ -648,7 +651,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
             // ~49.7 days at the millis() wrap). Real ESP_LOGW/ESP_LOGE warnings and errors are a
             // separate stream that setLogLevel governs independently, so they still surface at Warn.
             const bool inBootWindow = !mmIpWindowClosed && (now - bootMillis < 60000);
-            if (systemModule->logLevel() < mm::platform::LogLevel::Info && !inBootWindow) continue;
+            if (systemModule->logLevel() < mm::platform::LogLevel::Info && !inBootWindow) goto paced;
 
             heap = mm::platform::freeHeap();
             std::printf("tick: %uus (FPS: %u)", static_cast<unsigned>(scheduler.tickTimeUs()),
@@ -710,7 +713,16 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
             std::fflush(stdout);
         }
 
+    paced:
+        // Pace the loop instead of spinning. yield() only offers the CPU to another RUNNABLE
+        // thread, so with nothing else to run it returns immediately and this loop burns a whole
+        // core: reported from a Linux bench as "slowly eating more cpu cycles ... maxed out one
+        // core". A sub-millisecond sleep parks the thread instead, which costs no frame rate (the
+        // render tick is tens to hundreds of microseconds and the scheduler paces itself) and lets
+        // the machine idle. yield() stays for the multicore split, whose frame boundary polls it
+        // while waiting on the encode worker and must NOT sleep there.
         mm::platform::yield();
+        mm::platform::pauseLoop();
     }
 
     std::printf("\nShutting down.\n");

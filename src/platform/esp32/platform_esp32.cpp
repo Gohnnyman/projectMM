@@ -201,6 +201,11 @@ void delayMs(uint32_t ms) {
     vTaskDelay(pdMS_TO_TICKS(ms));
 }
 
+void pauseLoop() {
+    // Nothing: yield() here is vTaskDelay(1), which already yields to the idle task for a tick.
+    // A further sleep would come straight out of the render budget.
+}
+
 void delayUs(uint32_t us) {
     // Busy-wait — fine for the few-hundred-µs protocol gaps this exists for
     // (e.g. the WS2812 inter-frame latch), off any latency-critical context.

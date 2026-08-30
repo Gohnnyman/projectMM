@@ -17,6 +17,7 @@
 #include "light/layouts/GridLayout.h"
 
 #include <atomic>
+#include <cstring>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -458,5 +459,38 @@ TEST_CASE("render-split: a wedged worker degrades to single-core instead of hang
 
     slow->letGo();                            // let the parked worker unwind
     r.drivers.release();                      // joins it
+    delete slow;
+}
+
+// A degraded state must be able to END. The stall warning above was set once and never lifted, so a
+// card kept reporting "encode worker stalled" long after the split was healthy again, and even
+// beside a multicore toggle the user had since switched OFF. A status that cannot clear stops
+// describing the device and starts describing its history. Reported from a Linux bench, whose
+// screenshot showed exactly that pair.
+TEST_CASE("render-split: the stall warning clears once the worker is healthy again") {
+    Rig r(64);
+    auto* slow = new SlowDriver();
+    r.drivers.addChild(slow);
+    r.drivers.setup();
+    r.drivers.prepare();
+    REQUIRE(r.drivers.renderSplitActive());
+
+    r.drivers.tick();
+    REQUIRE(slow->waitEntered());
+    REQUIRE_FALSE(r.drivers.quiesceEncodeForTest());   // stall: the warning goes up
+    REQUIRE(std::strlen(r.drivers.status()) > 0);
+
+    // Recovery: with the slow driver released, the worker answers again on the next frame, and the
+    // warning must LIFT rather than linger.
+    slow->letGo();
+    r.drivers.removeChild(slow);
+    MockDriver quick;
+    r.drivers.addChild(&quick);
+    r.drivers.prepare();                               // re-engages the split on a healthy rig
+    r.drivers.tick();
+    CHECK(r.drivers.quiesceEncodeForTest());           // the worker answers
+    CHECK(std::strlen(r.drivers.status()) == 0);       // and the card stops crying stall
+
+    r.drivers.release();
     delete slow;
 }

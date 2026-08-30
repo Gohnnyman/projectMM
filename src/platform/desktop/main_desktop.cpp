@@ -148,6 +148,8 @@ int main(int argc, char** argv) {
     signal(SIGSEGV, crashHandler);
     signal(SIGFPE,  crashHandler);
     signal(SIGABRT, crashHandler);
+    // signal() is one-shot on Windows, so the handler is already reset after the first Ctrl+C and
+    // a second one force-quits: the same escalation SA_RESETHAND gives the POSIX branch below.
     signal(SIGINT,  [](int) { running = false; });
 #else
     struct sigaction sa{};
@@ -159,9 +161,20 @@ int main(int argc, char** argv) {
     sigaction(SIGBUS,  &sa, nullptr);
     sigaction(SIGABRT, &sa, nullptr);
 
+    // SA_RESETHAND: the FIRST Ctrl+C asks for a clean stop, and restores the default handler so a
+    // SECOND one kills the process outright. Without it a shutdown that wedges (a driver teardown
+    // waiting on a socket, say) leaves Ctrl+C doing nothing at all, however many times it is
+    // pressed, and the only way out is another terminal. Reported from a Linux bench: "it didn't
+    // shut down fully and was slowly eating more cpu cycles ... it got SIGTERM'd".
     struct sigaction saInt{};
-    saInt.sa_handler = [](int) { running = false; };
+    saInt.sa_handler = [](int) {
+        running = false;
+        // Say so, because the first press otherwise looks ignored while teardown runs. safeWrite,
+        // not printf: only async-signal-safe calls are legal in a handler.
+        safeWrite("\nStopping. Press Ctrl+C again to force quit.\n");
+    };
     sigemptyset(&saInt.sa_mask);
+    saInt.sa_flags = SA_RESETHAND;
     sigaction(SIGINT, &saInt, nullptr);
 
     // Ignore SIGPIPE — write() on a closed TCP connection delivers it by default,

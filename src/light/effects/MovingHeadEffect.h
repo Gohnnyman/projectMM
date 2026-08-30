@@ -182,7 +182,11 @@ private:
                 // The halves face each other: the left of the rig sweeps toward the right. Split
                 // on X (the widest axis of a truss), falling back to Y for a 1 x N chain, so the
                 // classic look survives on a single column.
-                return {0, (w > 1 ? (x < w / 2) : (y < h / 2)) ? 1 : -1};
+                // Split on the axis the rig actually RUNS along: X for a truss, Y for a 1 x N
+                // chain, Z for a rig stacked in depth. A fixed fallback to Y would make a
+                // 1 x 1 x N rig mirror on h = 1, where every head lands in the same half and the
+                // formation collapses to unison.
+                return {0, (w > 1 ? (x < w / 2) : h > 1 ? (y < h / 2) : (z < d / 2)) ? 1 : -1};
             case kChase:
                 // A wave travelling across the rig: the same sweep, delayed head by head.
                 return {spread, 1};

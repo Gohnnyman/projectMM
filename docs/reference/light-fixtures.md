@@ -39,7 +39,7 @@ strobe channel. Trust the printed manual; the tables below come from it.
 | 2 | 0-255 | X-axis fine tuning | (none) |
 | 3 | 0-255 | Y-axis (tilt), move | `Tilt` |
 | 4 | 0-255 | Y-axis fine tuning | (none) |
-| 5 | 0-255 | axis speed, slow to fast | (none) |
+| 5 | 0-255 | axis speed, fast to slow (0 = fastest) | (none) |
 | 6 | 0-255 | total dimmer, linear, dark to bright | `Dimmer` |
 | 7 | 0-255 | strobe, slow to fast | (none) |
 | 8 | 0-255 | red, 0 = closed | `R` |

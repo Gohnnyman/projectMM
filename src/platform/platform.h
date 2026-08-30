@@ -115,6 +115,12 @@ uint8_t currentCore();
 // per-CPU-data pattern: one slice per core, no hot-path locking). A cap, not the exact count:
 // single-core parts and desktop simply leave slice 1 unused.
 inline constexpr uint8_t kMaxCores = 2;
+// Pace the main render loop for one pass. The desktop parks the thread briefly; ESP32's yield()
+// is already vTaskDelay(1), which lets the idle task run, so there it does nothing. Named for the
+// job rather than for a duration so the two platforms can answer it differently: an unpaced loop
+// spins a whole core on a desktop (reported from a Linux bench), while a sleep on ESP32 would come
+// out of the render budget.
+void pauseLoop();
 void delayMs(uint32_t ms);  // blocking sleep; only use outside the hot path
 void delayUs(uint32_t us);  // blocking busy-wait for sub-ms protocol gaps (e.g.
                             // the WS2812 inter-frame latch); fine for a few

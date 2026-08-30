@@ -71,7 +71,11 @@ TEST_CASE("a picked audio device is remembered by name, not by its position in t
     gone.addSelect("device", missing, kGone, 3);
     gone.setPersistLabel(gone.count() - 1);
     mm::applyControlValue(gone[0], saved.c_str(), "device", mm::ApplyPolicy::Clamp);
-    CHECK(std::strcmp(kGone[missing], "BlackHole 2ch") != 0);
+    // Index 0 is "default", the shipped fallback: a device that is simply GONE must land there,
+    // not merely somewhere other than BlackHole. Asserting the exact row is what makes this catch
+    // a silent shift onto whatever now occupies the old index.
+    CHECK(missing == 0);
+    CHECK(std::strcmp(kGone[missing], "default") == 0);
 }
 
 // The full lifecycle neither crashes nor wedges, whatever the host's audio situation: a

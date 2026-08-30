@@ -102,6 +102,11 @@ let previewAim_ = null;
 // Color frames seen since the last aim message. The device alternates the two, so anything above
 // a couple means it has stopped sending aim and the beams must go (see renderPreviewFrame).
 let framesSinceAim_ = 0;
+// The (epoch, stride) the cached aim was gathered against; beams are drawn only while these still
+// match the active coordinate table (see parsePreviewAim).
+let previewAimEpoch_ = -1;
+let previewAimStride_ = 0;
+let sawAim_ = false;         // the auto-fit has already been re-armed for beams
 const kAimStaleFrames = 4;
 let beamVerts_ = null;       // reused Float32Array of beam vertices (x,y,z,intensity), grows only
 let beamProgram = null, beamLocs = null, beamBuffer = null;
@@ -585,6 +590,12 @@ function parsePreviewAim(view, buf) {
     const bytes = buf.byteLength - 9;
     if (count === 0 || bytes < count * 2) { previewAim_ = null; return; }
     previewAim_ = new Uint8Array(buf, 9, count * 2);
+    // Tag the aim with the table it was gathered against. aim[k] means "the k-th light of THAT
+    // table", so after a geometry change (new epoch) or a downscale change (new stride) the same
+    // index names a different fixture and the beams would point from the wrong heads until the
+    // next aim frame. Cheap to carry, and drawBeams simply ignores a mismatch.
+    previewAimEpoch_ = view.getUint8(7);
+    previewAimStride_ = view.getUint16(5, true) || 1;
     framesSinceAim_ = 0;
 }
 
@@ -677,6 +688,10 @@ function renderPreviewFrame(view, buf) {
     // pass needs the same frame the dots were drawn from. Held as a view on the message buffer
     // (no copy); drawBeams bounds-checks it against the coordinate count.
     previewRgb_ = rgb;
+    // The first aim frame changes what the scene CONTAINS: beams extend well past the fixtures,
+    // and a fit measured before they existed frames only the heads. Re-arm the auto-fit once so
+    // the next one accounts for them; `sawAim_` keeps it to once, not once per aim frame.
+    if (previewAim_ && !sawAim_) { sawAim_ = true; camAutoFit = true; }
     // Beams are only real while the device is still SENDING aim. It stops the moment the rig
     // stops carrying motion channels (PreviewDriver gates on fixtureChannels().movable()), but a
     // cached previewAim_ would go on drawing the last aim forever: selecting a plain effect then
@@ -927,6 +942,9 @@ function beamDirection(i) {
 
 function drawBeams(mvp) {
     if (!previewAim_ || !previewCoords_ || !beamProgram) return;
+    // Stale aim: gathered against a table that is no longer active, so its indices name other
+    // fixtures now. Skip until the next aim frame rather than draw beams from the wrong heads.
+    if (previewAimEpoch_ !== lastEpoch_ || previewAimStride_ !== previewStride_) return;
     const n = Math.min(previewAim_.length >> 1, previewCoords_.length / 3);
     if (n === 0) return;
 

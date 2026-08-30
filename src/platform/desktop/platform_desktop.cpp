@@ -283,6 +283,24 @@ void delayUs(uint32_t us) {
     std::this_thread::sleep_for(std::chrono::microseconds(us));
 }
 
+void pauseLoop() {
+    // yield() alone only offers the CPU to another RUNNABLE thread, so on an otherwise idle
+    // machine it returns at once and the caller spins a core flat out (reported from a Linux
+    // bench as the process "slowly eating more cpu cycles ... maxed out one core").
+    //
+    // Sleep to a frame BUDGET rather than a fixed nap. Nothing consumes a desktop render faster
+    // than a display or a driver's own fps limit, so a loop free-running at 2000+ FPS is spending
+    // a core to compute frames no one reads. 4 ms is 250 FPS: far above any output rate we drive,
+    // while leaving the CPU idle in between. A tick that legitimately takes longer than the budget
+    // simply gets no sleep, so a heavy grid still runs as fast as it can.
+    static constexpr auto kFrameBudget = std::chrono::microseconds(4000);
+    static auto lastWake = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    const auto spent = now - lastWake;
+    if (spent < kFrameBudget) std::this_thread::sleep_for(kFrameBudget - spent);
+    lastWake = std::chrono::steady_clock::now();
+}
+
 size_t freeHeap() {
     return 0; // Not meaningful on desktop (0 = unlimited)
 }

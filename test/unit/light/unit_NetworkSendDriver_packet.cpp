@@ -291,6 +291,11 @@ TEST_CASE("sACN multicast puts the universe number in the destination address") 
 TEST_CASE("A DMX universe carries whole fixtures, never a split one") {
     constexpr size_t kUniverse = 512;
     // The rounding the driver applies: floor the universe to a whole number of fixtures.
+    //
+    // A RESTATEMENT of NetworkSendDriver's arithmetic, not a call into it: the real rounding is
+    // inline in the send path (NetworkSendDriver.h, the `whole` line), which has no seam a unit
+    // test can reach without a socket. So this pins the RULE and would not catch the driver
+    // drifting away from it. Driving the real path needs a capture harness around the send seam.
     auto wholeFixtures = [](size_t chunk, uint8_t bytesPerLight) {
         const size_t whole = (chunk / bytesPerLight) * bytesPerLight;
         return whole > 0 ? whole : chunk;

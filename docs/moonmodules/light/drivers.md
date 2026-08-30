@@ -86,6 +86,23 @@ Streams the buffer over UDP as **Art-Net**, **E1.31 / sACN**, or **DDP** — one
 
 Unicast is the default because Art-Net 4 requires it and because broadcast makes *every* host on the LAN parse *every* packet; a broadcast address still works if you type one. The full addressing rationale (and the one case where broadcast is the better tool) is on the [detail page](moxygen/NetworkSendDriver.md).
 
+**A DMX chain of MIXED fixtures: one driver per fixture type.** `lightsPerIp` splits a window between receivers that all share one preset, so it cannot describe a chain where the fixtures *differ*. Add a driver per type instead, each reading its own `start`/`count` slice of the same buffer with its own `lightPreset`. Two moving-head types followed by RGBW pars is three drivers:
+
+| driver | start | count | lightPreset | fixtures |
+|---|---|---|---|---|
+| A | 0 | 2 | pan/tilt/zoom head | the two big heads |
+| B | 2 | 4 | pan/tilt head | four smaller heads |
+| C | 6 | 10 | RGBW par | ten pars |
+
+Each driver maps its slice onto that fixture's real channels, so differing channel counts and orders are fine, and each carries its own `universe_start` for where the group sits in the DMX address space. The layout must hold every light (16 here), since the windows are slices of one shared buffer.
+
+Two consequences of motion channels being a property of the LAYER rather than of a driver:
+
+- **Order matters when the motion ROLES differ**, which is why the table puts the pan/tilt/zoom heads first. The layer's motion slots come from the first enabled driver whose preset carries motion, so the richest fixture has to lead: every role then gets a slot, and the simpler heads ignore the zoom they do not map. Swap A and B and the zoom has no slot at all, so those heads never zoom. Fixtures that differ only in channel count or order are unaffected, so two pan/tilt heads of different makes need no particular order.
+- **Every light carries the motion bytes**, used or not, so a mixed rig's buffer is as wide as its widest fixture. Memory, not correctness: a par's `Correction` discards the aim.
+
+An effect writes `setPan` for every light in its layer, so a formation spanning the window treats the pars as rig positions too. Use separate **Layers** when the heads should move independently of the rest.
+
 Origin: MoonLight D_NetworkOut; Art-Net 4 / E1.31 / DDP specs
 
 [Tests](../../tests/unit-tests.md#networksenddriver)

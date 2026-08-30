@@ -459,21 +459,46 @@ public:
         header[7] = epoch_;
         header[8] = 0;   // reserved: keeps the header the same width as 0x02's
 
-        // Gather the kept lights' aim in the coord table's order, so aim[k] belongs to the light
-        // color frame k colors. A fixture missing an axis sends center (128) for it rather than
-        // 0, which would aim every such head hard over.
-        const uint8_t panOff  = fc.pan;
-        const uint8_t tiltOff = fc.tilt;
-        nrOfLightsType kept = 0;
-        for (nrOfLightsType i = 0; i < n && kept < coordCount_; i += previewStride_, kept++) {
-            const size_t base = static_cast<size_t>(i) * cpl;
-            staging_[kept * 2 + 0] =
-                (panOff  != FixtureChannels::kAbsent && panOff  < cpl) ? src[base + panOff]  : 128;
-            staging_[kept * 2 + 1] =
-                (tiltOff != FixtureChannels::kAbsent && tiltOff < cpl) ? src[base + tiltOff] : 128;
+        // Gather in the COORD TABLE's order, so aim[k] belongs to the same light color[k] colors.
+        // This must walk the lattice exactly as sendFrame does: a flat `i += stride` agrees only
+        // on a dense 1D buffer, and on a mapped or sparse layout it silently pairs each beam with
+        // a different fixture's aim. A missing axis sends center (128), not 0, which would aim
+        // every such head hard over.
+        const size_t bodyBytes = static_cast<size_t>(coordCount_) * 2;
+        if (!staging_ || stagingCap_ < bodyBytes) return false;   // alloc miss: skip, lossy channel
+        const nrOfLightsType s = previewStride_;
+        struct AimCtx {
+            uint8_t* out; size_t at; const uint8_t* src; nrOfLightsType n; uint8_t cpl;
+            uint8_t panOff, tiltOff;
+            void emit(nrOfLightsType idx) {
+                const uint8_t* px = (idx < n) ? src + static_cast<size_t>(idx) * cpl : nullptr;
+                out[at++] = (px && panOff  != FixtureChannels::kAbsent && panOff  < cpl)
+                                ? px[panOff]  : 128;
+                out[at++] = (px && tiltOff != FixtureChannels::kAbsent && tiltOff < cpl)
+                                ? px[tiltOff] : 128;
+            }
+        };
+        AimCtx aim{staging_, 0, src, n, cpl, fc.pan, fc.tilt};
+        if (denseGrid()) {
+            const lengthType W = layer_->physicalWidth(), H = layer_->physicalHeight();
+            const lengthType az = layer_->physicalDepth() > 0 ? layer_->physicalDepth() : 1;
+            const lengthType ay = H > 0 ? H : 1, ax = W > 0 ? W : 1;
+            for (lengthType z = 0; z < az; z += s)
+                for (lengthType y = 0; y < ay; y += s)
+                    for (lengthType x = 0; x < ax; x += s)
+                        aim.emit(static_cast<nrOfLightsType>(static_cast<size_t>(z) * H * W
+                                                             + static_cast<size_t>(y) * W + x));
+        } else if (keptIdx_ && keptCount_ == coordCount_) {
+            for (nrOfLightsType k = 0; k < keptCount_; k++) aim.emit(keptIdx_[k]);
+        } else {
+            struct Skip { AimCtx* aim; nrOfLightsType s; } sk{&aim, s};
+            layer_->layouts()->placeLights(CoordSink{[](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
+                auto* p = static_cast<Skip*>(c);
+                if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
+                p->aim->emit(idx);
+            }, nullptr, &sk});
         }
-        return broadcaster_->sendBufferedFrame(header, sizeof(header), staging_,
-                                               static_cast<size_t>(kept) * 2);
+        return broadcaster_->sendBufferedFrame(header, sizeof(header), staging_, aim.at);
     }
 
     bool sendFrame() {
