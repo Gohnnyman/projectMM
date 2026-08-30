@@ -3,7 +3,7 @@
 ## Context
 
 projectMM has a control surface but no way for a physical desk to reach it. `ControlModule` is
-already shaped like one: an 8x8 pad grid, `enc1`..`enc8`, `fader1`..`fader8`, and a `driveFader()`
+already shaped like one: an 8x8 pad grid, `encoder1`..`encoder8`, `fader1`..`fader8`, and a `driveFader()`
 that routes a fader to whatever it targets via `Scheduler::setControl`. What is missing is the
 transport that turns a knob move on someone's desk into one of those control writes.
 
@@ -52,7 +52,7 @@ namespace stays projectMM's:
 
 ```
 /mm/fader/1   f 0.0..1.0     ->  ControlModule fader1   (or i 0..255)
-/mm/enc/3     f 0.0..1.0     ->  ControlModule enc3
+/mm/encoder/3     f 0.0..1.0     ->  ControlModule encoder3
 /mm/pad/12    i 1            ->  apply preset in slot 12 (nonzero = press)
 ```
 

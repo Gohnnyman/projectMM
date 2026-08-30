@@ -1026,6 +1026,27 @@ Art-Net gains the same way (4800 lights 3/6 → 6/6; 1350 pkt/s 2/6 → 4/6) —
 
 Related: WLED is smooth on the same stream because it receives via `AsyncUDP` — packets are consumed in a callback from the lwIP task the instant they arrive, rather than polled once per render tick. Moving to that model is the structural fix, and it needs `staging_` synchronized against the render thread.
 
+## OSC pads and the Open Stage Control session's labels (2026-08-30)
+
+Two gaps found wiring a real control surface to the [OSC module](../moonmodules/core/services.md).
+
+**`/mm/pad/N` has no handler.** The [OSC plan](../history/plans/Plan-20260829%20-%20OSC%20control%20ingest.md)
+lists it (`i 1 -> apply preset in slot 12`), and `OscModule::handle` routes `/mm/fader/`,
+`/mm/encoder/`, `/mm/switch/` and `/mm/control/` but not pads. So a surface can drive every
+continuous control and every switch, but cannot fire a preset, which is the one thing a pad grid
+exists for. The route is small; what needs deciding is what a pad press means when the slot is
+empty, and whether a nonzero value is a press or a press-and-hold.
+
+**The shipped Open Stage Control session renders no labels, and its pad matrix draws nothing.**
+[`docs/reference/examples/open-stage-control.json`](../reference/examples/open-stage-control.json)
+works for every fader, encoder and switch, but the widget names never appear and the `matrix` of
+pads is an empty box. Five attempts at the label property failed (`@{}`, `JS{}`, `#{}` with `unit`,
+an explicit string, omitting it so `"auto"` applies), and notably a session SAVED by Open Stage
+Control itself carries no `label` key on a fader at all, so the name is drawn from something else.
+The session was written by reading a minified app's bundled HTML docs; the reliable fix is to build
+one widget of each kind by hand in its editor, save, and copy the shape it produces. Cosmetic: the
+control path works, only the labels and the pad grid are missing.
+
 ## POST /api/file reports success while writing an empty file (no Content-Length)
 
 **Found:** 2026-08-20, on MM-testbench-S3, while uploading an edited MoonLive script. The upload

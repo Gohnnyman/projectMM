@@ -1226,6 +1226,7 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
         // An editable List (the CRUD primitive) tells the UI to show add/delete/reorder + inline
         // row editors; a plain List stays read-only. The row objects carry a stable "id" the
         // /api/list/* ops address, and each editable row's detail carries its field descriptors.
+        if (c.switchRow) sink.append(",\"switchRow\":true");
         if (c.fader || c.encoder) {
             sink.append(c.fader ? ",\"fader\":true" : ",\"encoder\":true");
             if (c.faderTarget) { sink.append(",\"target\":"); sink.writeJsonString(c.faderTarget); }

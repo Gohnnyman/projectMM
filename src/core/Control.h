@@ -335,6 +335,7 @@ struct ControlDescriptor {
     // below are positional, so this field's place in the order is load-bearing.
     bool fader = false;     // Render as a vertical fader (see ControlList::setFader). Presentation only.
     bool encoder = false;   // Render as a rotary encoder (see ControlList::setEncoder).
+    bool switchRow = false; // Render in the horizontal switch strip (see ControlList::setSwitchRow).
     const char* faderTarget = nullptr;   // What the fader/encoder drives ("Drivers.brightness"), or null.
     // Optional per-control input validator (Text/Password only; nullptr = accept anything
     // that fits the buffer). applyControlValue calls it on the incoming string BEFORE the
@@ -648,6 +649,14 @@ public:
     /// are untouched. `target` names what it drives, or null when nothing yet.
     void setEncoder(uint8_t i, bool encoder = true, const char* target = nullptr) {
         if (i < count_) { controls_[i].encoder = encoder; controls_[i].faderTarget = target; }
+    }
+
+    /// Render this boolean control in the horizontal SWITCH STRIP: a desk's channel buttons, sitting
+    /// in the same columns as the encoders and faders below them. Presentation only, like setFader
+    /// and setEncoder. Without it eight switches stack as eight ordinary rows, which is both tall
+    /// and unreadable as a surface: the point of a strip is that column N is one channel.
+    void setSwitchRow(uint8_t i, bool switchRow = true, const char* target = nullptr) {
+        if (i < count_) { controls_[i].switchRow = switchRow; controls_[i].faderTarget = target; }
     }
 
 private:

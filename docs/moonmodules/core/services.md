@@ -90,6 +90,8 @@ Detail: [technical](moxygen/AudioService.md)
 
 ### OSC
 
+<img src="../../assets/core/OscModule.png" width="300" alt="OSC module controls: listen, port, status">
+
 Receives [OSC](https://opensoundcontrol.stanford.edu/) over UDP and writes it onto this device's
 controls, so a fader in Resolume, TouchDesigner, TouchOSC or a DIY Arduino-over-Ethernet rig drives
 projectMM directly. It owns no surface of its own: everything lands in the same control writes the
@@ -107,7 +109,9 @@ they stay small and boring.
 | address | argument | drives |
 |---|---|---|
 | `/mm/fader/1` .. `/mm/fader/8` | float 0..1 or int 0..255 | the Control surface's faders |
-| `/mm/enc/1` .. `/mm/enc/8` | float 0..1 or int 0..255 | its rotary encoders |
+| `/mm/encoder/1` .. `/mm/encoder/8` | float 0..1 or int 0..255 | its rotary encoders |
+| `/mm/switch/1` .. `/mm/switch/8` | float 0..1 or int 0..255 | its on/off switch row (nonzero = on) |
+| `/mm/hello` | anything, or nothing | resend every value to the sender |
 | `/mm/control/<Module>/<control>` | float 0..1 or int 0..255 | any control directly |
 
 Both argument forms are accepted because controllers disagree: apps send a float in 0..1, hardware
@@ -115,6 +119,82 @@ bridges send an int in the target's range. Out-of-range values are clamped rathe
 a controller sending 0..127 does something sensible instead of appearing dead.
 
 Send one from the bench with `uv run moondeck/check/send_osc.py <ip> /mm/fader/1 0.75`.
+
+**Feedback: the device answers.** With `feedback` on, a control that changes anywhere (the web UI, a
+preset recall, an audio-reactive effect) is mirrored back to the surface, which is what keeps a
+client honest and what moves a motorised fader. `feedbackTo` names the receiver, or is left empty to
+answer whoever last wrote to us; `feedbackPort` is where that client LISTENS, which is not the port
+we listen on (Open Stage Control calls its own `osc-port`).
+
+A client learns the current state three ways: when it first writes to us from a new address, when
+its address changes, and whenever it sends **`/mm/hello`**. The last one exists because a client
+restarting on the SAME address is invisible to the other two, and most controllers send nothing of
+their own on load, so every widget would show its layout file's defaults until the user moved one.
+The shipped session has a `sync from device` button for exactly this.
+
+**Without the repo or any tooling**, which is the usual case for someone who just owns a device:
+
+1. Install [Open Stage Control](https://openstagecontrol.ammd.net/) (free, macOS / Windows / Linux).
+   macOS quarantines the unsigned download, so the first launch needs a right-click Open, once.
+2. Download **`projectMM-control-surface.json`** from the
+   [latest release](https://github.com/MoonModules/projectMM/releases/latest), beside the firmware.
+3. Start Open Stage Control and fill in three fields on its launcher:
+   `send` = `<device-ip>:9000`, `osc-port` = `9001`, `load` = the file you downloaded.
+4. On the device, turn the OSC module's `listen` and `feedback` on, and leave `feedbackPort` at 9001.
+
+The session asks the device for its state whenever the page loads, so the widgets are right
+immediately and stay right through a refresh. It sends to whatever `send` names, so nothing in the
+file needs editing for a device on another machine.
+
+**One command to a working surface** (with the repo checked out). Install
+[Open Stage Control](https://openstagecontrol.ammd.net/) (free, macOS / Windows / Linux), then:
+
+```sh
+uv run moondeck/run/run_open_stage_control.py                   # device on this machine
+uv run moondeck/run/run_open_stage_control.py --host 192.168.1.42
+```
+
+Open **http://127.0.0.1:8088** and the surface is there. On the device, turn `listen` and `feedback`
+on; nothing else needs configuring, because the launcher passes the session, the send address, the
+listen port and the custom module as arguments rather than leaving them to be typed into a settings
+panel. The module sends `/mm/hello` when it starts, so every widget shows the device's real values
+straight away instead of its layout file's defaults.
+
+It runs **headless**: a web server rather than a desktop window. That is deliberate. The surface is
+then reachable from a phone or another laptop on the same network (the launcher prints those URLs),
+and on macOS it sidesteps the quarantine dialog an unsigned download otherwise raises.
+
+| | |
+|---|---|
+| `--host` / `--port` | the device and its OSC `port` (default `127.0.0.1:9000`) |
+| `--listen` | where we receive feedback, the device's `feedbackPort` (default 9001) |
+| `--ui-port` | the surface's web UI (default 8088; 8080 is projectMM's own) |
+| `--app` | the Open Stage Control binary, when it is not on PATH or in the usual place |
+
+The launcher looks on PATH first, then in each platform's default install location. **Windows and
+Linux are untested**: the paths are the ones those installers use, but only macOS has been run. If
+it cannot find the app, `--app` takes the full path and that always works.
+
+**A ready-made control surface.** [Open Stage Control](https://openstagecontrol.ammd.net/) is free
+and runs on macOS, Windows, Linux and any phone browser, which makes it the quickest way to drive a
+device by hand. A session of the switches, encoders and faders ships as a release asset
+(`projectMM-control-surface.json`), and lives in the repo at
+[`docs/reference/examples/open-stage-control.json`](../../reference/examples/open-stage-control.json):
+point its `load` option at that file, set `send` to `<device-ip>:9000`, and give its own `port`
+something other than 8080, which the projectMM UI already uses. macOS quarantines the unsigned
+download, so the first launch needs a right-click Open rather than a double-click, and `read-only`
+in its launcher must be off to edit the layout.
+
+<img src="../../assets/core/OscModule-open-stage-control.png" width="600" alt="The shipped Open Stage Control session beside projectMM's own Control card: eight switches, eight encoders and eight faders in both">
+
+Driving the device from that session, beside the Control card it mirrors.
+
+It binds only to `/mm/fader/N` and `/mm/encoder/N` on purpose. A surface should address the SURFACE, and
+[Control](control.md) decides what each fader drives, so one layout keeps working as assignments
+change and a hardware desk lands on the same bindings. Reaching past it to
+`/mm/control/<Module>/<control>` also works and is the right answer for a one-off, but it hard-codes
+into the layout a mapping that belongs on the device. Only fader 1 has a target today
+(`Drivers.brightness`); the rest wait for a target picker.
 
 **It does not reach a Mackie desk.** The X-Touch and QCon Pro G2 speak Mackie Control over MIDI,
 not OSC: see [control surfaces](../../reference/control-surfaces.md) for what would.

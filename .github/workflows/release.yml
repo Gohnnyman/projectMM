@@ -450,6 +450,16 @@ jobs:
           find artifacts -type f -exec mv {} dist/ \;
           ls -la dist/
 
+      # The Open Stage Control surface, so someone who owns a device can download it beside the
+      # firmware instead of being sent to a path inside the repo. It is a plain session file with
+      # no build step: copied, not generated.
+      - name: Stage the control-surface session
+        run: |
+          set -euo pipefail
+          cp docs/reference/examples/open-stage-control.json \
+             dist/projectMM-control-surface.json
+          ls -la dist/projectMM-control-surface.json
+
       - name: Resolve effective tag
         id: tag
         env:
@@ -573,6 +583,7 @@ jobs:
             dist/manifest-*.json
             dist/projectMM-*.tar.gz
             dist/projectMM-*.zip
+            dist/projectMM-control-surface.json
             dist/projectMM-*.dmg
             dist/projectMM-*-setup.exe
             dist/projectmm_*.deb
