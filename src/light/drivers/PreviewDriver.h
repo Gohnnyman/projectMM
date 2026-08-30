@@ -32,6 +32,14 @@ namespace mm {
 ///        at the source since the last delivered one, the congestion signal the client's
 ///        controller adapts on.
 ///
+///   0x04 per-frame AIM, sent only for a rig whose fixtures carry pan/tilt (a moving-head rig);
+///        a plain LED wall never emits it and costs nothing for it:
+///        [0x04][count:u32][stride:u16][epoch:u8][reserved:u8][(pan,tilt):u8x2 x count]
+///        Same order and same (epoch, stride) key as 0x02, so aim[k] belongs to the light the
+///        color frame's k-th entry colors. The BROWSER decides how to draw it (today a beam
+///        line from the fixture): the wire carries where a head points, never a rendered look,
+///        so a richer visual later is a shader change and not a protocol change.
+///
 ///   Client requests (masked WS frames, unmasked by core, interpreted only here):
 ///        [0x51][stride][fps]  standing frame request (most conservative across viewers wins;
 ///                             the targetFps control is the ceiling)
@@ -245,7 +253,17 @@ public:
         // the next frame's header so the client adapts on the sender's own congestion signal
         // instead of probing. Rate self-limits to what the link drains; nothing waits, ever.
         if (idle) {
-            if (!sendFrame() && dropsSinceLast_ < 255) dropsSinceLast_++;
+            // Color and aim ALTERNATE rather than both going out per tick: the transport keeps one
+            // send in flight and drops a second, so calling them back to back meant every aim frame
+            // was rejected and the beams never moved. Alternating halves each stream's rate, which
+            // a fixture rig can afford (a head sweeps far slower than a pixel changes) and a rig
+            // with no motion never pays, since sendAim declines before claiming a turn.
+            if (aimTurn_ && sendAim()) {
+                aimTurn_ = false;
+            } else {
+                if (!sendFrame() && dropsSinceLast_ < 255) dropsSinceLast_++;
+                aimTurn_ = true;
+            }
         } else if (dropsSinceLast_ < 255) {
             dropsSinceLast_++;
         }
@@ -265,9 +283,9 @@ public:
 
         // Box EXTENT = the maximum coordinate the positions reach, which is (size − 1): placeLights
         // emits x in [0, width−1], so an 8-wide grid spans 0..7 and its extent is 7, NOT 8. The
-        // header carries these extents and the browser centres the cloud by dividing by the largest,
+        // header carries these extents and the browser centers the cloud by dividing by the largest,
         // so they must match the packed coordinates' span exactly — using the size (8) instead drew
-        // the wireframe box one cell too large and shifted the lights off-centre.
+        // the wireframe box one cell too large and shifted the lights off-center.
         auto extent = [](lengthType size) -> lengthType { return size > 0 ? size - 1 : 0; };
         const lengthType ex = extent(layer_->physicalWidth());
         const lengthType ey = extent(layer_->physicalHeight());
@@ -408,6 +426,84 @@ public:
     /// Stream one per-frame `0x02` RGB message straight from the producer buffer — no
     /// intermediate copy. Returns whether every client got it (false → tick() drives
     /// adaptive downscaling). Public so tests can drive it without tick()'s rate-limit.
+    /// Stream one per-frame `0x04` AIM message, so the preview can draw where each moving head
+    /// points. Returns false when there is nothing to send, which is the ordinary case.
+    ///
+    /// COSTS NOTHING ON A RIG WITHOUT MOTION: the first line is a flag test resolved when the
+    /// fixture layout was published, so an LED wall never builds a payload, never allocates and
+    /// never touches the socket. That is the requirement this feature had to meet, since most
+    /// rigs are strips and panels.
+    bool sendAim() {
+        Layer* l = layer();
+        if (!l) return false;
+        const FixtureChannels& fc = l->fixtureChannels();
+        if (!fc.movable()) return false;                 // the common case: one branch, then out
+        if (!broadcaster_ || !sourceBuffer_ || !sourceBuffer_->data() || coordCount_ == 0) return false;
+
+        const uint8_t* src = sourceBuffer_->data();
+        const uint8_t cpl = sourceBuffer_->channelsPerLight();
+        const nrOfLightsType n = sourceBuffer_->count();
+        if (cpl == 0 || n == 0) return false;
+        // The staging buffer is sized for RGB (3 bytes/light) at the coord-table build, and aim
+        // needs 2, so it always fits. Bail rather than overrun if that ever stops being true.
+        uint8_t header[9];
+        header[0] = 0x04;
+        header[1] = static_cast<uint8_t>(coordCount_ & 0xFF);
+        header[2] = static_cast<uint8_t>((coordCount_ >> 8) & 0xFF);
+        header[3] = static_cast<uint8_t>((coordCount_ >> 16) & 0xFF);
+        header[4] = static_cast<uint8_t>((coordCount_ >> 24) & 0xFF);
+        header[5] = static_cast<uint8_t>(previewStride_ & 0xFF);
+        header[6] = static_cast<uint8_t>(previewStride_ >> 8);
+        header[7] = epoch_;
+        header[8] = 0;   // reserved: keeps the header the same width as 0x02's
+
+        // Gather in the COORD TABLE's order, so aim[k] belongs to the same light color[k] colors.
+        // This must walk the lattice exactly as sendFrame does: a flat `i += stride` agrees only
+        // on a dense 1D buffer, and on a mapped or sparse layout it silently pairs each beam with
+        // a different fixture's aim. A missing axis sends center (128), not 0, which would aim
+        // every such head hard over.
+        // staging_ is sized for RGB (3 bytes/light) and an aim pair needs 2, so this normally fits;
+        // the check is for the alloc-miss case, where skipping a frame is right on a lossy channel.
+        // It also SHARES the buffer the coordinate table is built in, which is safe only because
+        // tick() gates every path on `idle` and sendCoordTable rebuilds immediately before
+        // sending: the table's bytes are live only straight after its build.
+        const size_t bodyBytes = static_cast<size_t>(coordCount_) * 2;
+        if (!staging_ || stagingCap_ < bodyBytes) return false;
+        const nrOfLightsType s = previewStride_;
+        struct AimCtx {
+            uint8_t* out; size_t at; const uint8_t* src; nrOfLightsType n; uint8_t cpl;
+            uint8_t panOff, tiltOff;
+            void emit(nrOfLightsType idx) {
+                const uint8_t* px = (idx < n) ? src + static_cast<size_t>(idx) * cpl : nullptr;
+                out[at++] = (px && panOff  != FixtureChannels::kAbsent && panOff  < cpl)
+                                ? px[panOff]  : 128;
+                out[at++] = (px && tiltOff != FixtureChannels::kAbsent && tiltOff < cpl)
+                                ? px[tiltOff] : 128;
+            }
+        };
+        AimCtx aim{staging_, 0, src, n, cpl, fc.pan, fc.tilt};
+        if (denseGrid()) {
+            const lengthType W = layer_->physicalWidth(), H = layer_->physicalHeight();
+            const lengthType az = layer_->physicalDepth() > 0 ? layer_->physicalDepth() : 1;
+            const lengthType ay = H > 0 ? H : 1, ax = W > 0 ? W : 1;
+            for (lengthType z = 0; z < az; z += s)
+                for (lengthType y = 0; y < ay; y += s)
+                    for (lengthType x = 0; x < ax; x += s)
+                        aim.emit(static_cast<nrOfLightsType>(static_cast<size_t>(z) * H * W
+                                                             + static_cast<size_t>(y) * W + x));
+        } else if (keptIdx_ && keptCount_ == coordCount_) {
+            for (nrOfLightsType k = 0; k < keptCount_; k++) aim.emit(keptIdx_[k]);
+        } else {
+            struct Skip { AimCtx* aim; nrOfLightsType s; } sk{&aim, s};
+            layer_->layouts()->placeLights(CoordSink{[](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
+                auto* p = static_cast<Skip*>(c);
+                if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
+                p->aim->emit(idx);
+            }, nullptr, &sk});
+        }
+        return broadcaster_->sendBufferedFrame(header, sizeof(header), staging_, aim.at);
+    }
+
     bool sendFrame() {
         if (!broadcaster_ || !sourceBuffer_ || !sourceBuffer_->data() || coordCount_ == 0) return false;
         const uint8_t* src = sourceBuffer_->data();
@@ -616,6 +712,7 @@ private:
 
     Buffer* sourceBuffer_ = nullptr;
     BinaryBroadcaster* broadcaster_ = nullptr;
+    bool aimTurn_ = false;          // alternates color/aim so each gets its own send slot
     uint8_t* staging_ = nullptr;           // stable body for table + gathered frames (see ensureStaging)
     size_t stagingCap_ = 0;
     nrOfLightsType coordCount_ = 0;        // lights the lattice keeps = the streamed 0x03/0x02 count

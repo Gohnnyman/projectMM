@@ -24,6 +24,36 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### projectMM no longer appears in WLED apps by default
+
+Device discovery now announces on the multicast group `239.255.77.77` and, by default, **not** on
+the broadcast address WLED apps and devices browse. A projectMM device therefore stops showing up
+in them until you turn on `wledCompatible` in the Devices module.
+
+projectMM devices still find each other either way: presence always goes to the group and every
+device always joins it, so a fleet can mix the setting freely.
+
+The reason for the default: a broadcast at discovery cadence makes every phone, printer and laptop
+on the LAN take an interrupt and parse a packet none of them want. Multicast reaches only the
+devices that joined the group. See
+[multicast and IGMP snooping](architecture.md#multicast-and-igmp-snooping) for when that saving is
+real (a switch that snoops) and when it is not.
+
+### A light preset's Dimmer channel is now driven
+
+A preset that declares a `Dimmer` role previously left that channel at 0, because nothing ever
+wrote it: `Correction` resolved only the color roles. A fixture on such a preset therefore emitted
+nothing at all, whatever its color channels said. The shipped `IRGB` preset ("CH1 master
+intensity") could never light a fixture.
+
+The dimmer is now held open (255) every frame, with per-light brightness staying in the color
+values as before. **If you drive a fixture on `IRGB` or another dimmer-carrying preset, it will
+light up where it previously stayed dark.** Nothing to change; the previous behavior was a defect.
+
+Routing brightness to the dimmer channel rather than holding it open is the better model and is
+[backlogged](backlog/backlog-light.md), so this value will change again.
+
+
 ### esp32-16mb moves to the MoonBase partition table (2026-08-28)
 
 **Action: erase flash** (USB re-flash). Back up first (File Manager, or the installer's

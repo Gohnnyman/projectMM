@@ -563,6 +563,37 @@ Each driver child reads from the Drivers container's output buffer. Everything b
 
 **Output correction** turns logical RGB into the physical signal: **brightness** scaling, channel **reorder** (RGB→GRB via a *light preset*), and **white** derivation for RGBW. The Drivers container owns the global `brightness`; each driver picks its own light preset (its `preset` control) and applies the correction per-light into its own buffer/packet, so two strips on one device can be wired differently. Preview is exempt (it shows the raw logical buffer). The brightness LUT rebuilds on the cheap `onControlChanged` tier ([§ Event triggering](#event-triggering-between-modules)), so the slider stays fluent.
 
+**An effect drives a fixture's non-color channels through role setters.** A light is as wide as its fixture ([§ Buffer types](#buffer-types)), with color at offset 0 and the fixture's other roles wherever its light preset puts them. `setPan()` / `setTilt()` / `setZoom()` write those, and each is a **no-op when the fixture has no such channel**, so one effect is valid on a moving head and on a strip alike: on the strip the pan write does not land and the effect just paints color.
+
+Two rules separate those channels from color, and both matter:
+
+- **Brightness never scales them.** Brightness is a light-output setting; scaling pan by it would swing a moving head toward 0/0 as the rig dims.
+- **They interpolate but never accumulate** (the rule; the additive half is NOT yet implemented, see below). A blend op that INTERPOLATES (opacity, a crossfade) is meaningful on any channel, and on pan it is a genuine feature: the head sweeps smoothly from the old aim to the new one as a layer fades in. A blend op that ACCUMULATES (additive) is meaningful only on emissive channels, where summing two lights models two sources lighting one surface. Summing two aims models nothing, since it points at neither and saturates at hard-over as soon as both layers are positioned, so an accumulating op should fall back to assignment on a motion channel with the topmost writer winning. **Today `blendMap` treats a light as opaque bytes and adds motion channels along with color**; it only bites with two enabled layers on a fixture that carries motion, and the fix is [backlogged](backlog/backlog-light.md).
+
+**DMX fixtures are addressed as a daisy chain of IDENTICAL fixtures**, the same model addressable LEDs already impose: a strip is N identical pixels at a fixed stride, and a DMX run is treated as N identical fixtures at a fixed stride. One light preset describes one fixture, its channel count is the stride, and fixture *n* starts at `start + n x channelCount`. Twenty-five channels per fixture puts them at DMX 1, 26, 51, and so on, and the driver's `count` says how many are on the chain.
+
+This is what makes a moving head reachable by the same pipeline as a pixel: the light domain produces one logical light per fixture, and the driver expands each into that fixture's channel block through the preset. It is also the cheapest thing to configure, since only the start address and the fixture type are needed, never a per-fixture address table.
+
+The trade is deliberate: **a chain must be homogeneous**. Mixing fixture types on one universe, or leaving gaps between fixtures, has no expression in this model, and neither does a fixture whose address does not sit on the stride. Those need a per-fixture address map, which is the fixture-model work ([backlog](backlog/backlog-light.md)); until then, a mixed rig is served by giving each fixture type its own driver instance with its own preset, start address and count.
+
+### Multicast and IGMP snooping
+
+Three things projectMM sends to more than one listener, and they do not all use the same transport, because the protocol's owner decides it and not us:
+
+| | transport | why |
+|---|---|---|
+| WLED audio sync | multicast `239.0.0.1` | WLED's usermod both sends and receives there, never on broadcast |
+| Device discovery | multicast `239.255.77.77`, plus broadcast when `wledCompatible` | WLED apps browse the discovery port on broadcast |
+| E1.31 / sACN output | unicast by default, multicast opt-in | multicast is the spec's native mode, but see below |
+
+**Broadcast** reaches every device on the subnet. Each one takes the interrupt, walks up the stack, finds nothing listening on the port and discards the packet. At LED frame rates that is real work imposed on every phone, laptop and printer on the LAN.
+
+**Multicast** is addressed to a group, and only the devices that joined it (via IGMP) accept the packet. The rest never see it, which is what makes it the better neighbour in principle.
+
+**In principle**, because the win depends on the switch. A switch with **IGMP snooping** watches those join messages and learns which of its ports actually want the group, then forwards the traffic only there: the saving is real and happens in hardware. A switch **without** snooping cannot know, so it does the safe thing and floods the group out of every port, exactly like broadcast. WiFi is worse than that: multicast and broadcast alike go out at the lowest basic rate so every station can hear them, which is far slower than a unicast frame to one associated station.
+
+Firmware cannot detect which kind of network it is on. That is why **multicast is never an automatic upgrade here**: sACN multicast and dropping the discovery broadcast are both opt-in choices for someone who knows their switch, and unicast (or broadcast, where a protocol demands it) stays the portable default.
+
 Network-based drivers (ArtNet, E1.31, DDP) pace their output with a **non-blocking elapsed-time gate**, never a blocking wait (no `delay`/`vTaskDelay` — that would stall the single-threaded tick, the hot-path rule). The gate is the `lastSendTime`/`millis()` pattern: `if (now − lastSendTime < interval) return;` early-exits the tick so every other module's loop keeps running, exactly how FPS limiting works (`NetworkSendDriver`, `fps` control). **Frame-rate pacing is required** and implemented this way. **Inter-packet pacing** (spacing the universes within one frame) uses the same non-blocking gate *if* a receiver drops packets under a burst — it is not needed by default (the bench ArtNet matrix test runs clean bursting the universes), so it is added only when a target requires it, never as a busy-wait between packets.
 
 ## Memory strategy

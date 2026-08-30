@@ -22,7 +22,7 @@ public:
                                // strip layout where the strip snakes back and forth row to row.
 
     void defineControls() override {
-        // Width/height are typed dimensions, not swept magnitudes: number fields, bounded at
+        // All three axes are typed dimensions, not swept magnitudes: number fields, bounded at
         // 4K (a desktop grid streamed pixel-exact to a TV). Large grids trade framerate, the
         // render loop is single-threaded; the card documents the expectation.
         controls_.addControl("width",  width,  1, 3840);
@@ -30,6 +30,7 @@ public:
         controls_.addControl("height", height, 1, 2160);
         controls_.setNumberField(controls_.count() - 1);
         controls_.addControl("depth",  depth,  1, 512);
+        controls_.setNumberField(controls_.count() - 1);
         controls_.addControl("serpentine", serpentine);
     }
 

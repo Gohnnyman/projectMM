@@ -17,8 +17,15 @@ static volatile bool running = true;
 static bool cleanExit = false;
 
 // Write s to stderr without stdio — safe inside a signal handler.
-static void safeWrite(const char* s) {
-    size_t len = std::strlen(s);
+// Write a string LITERAL to stderr from a signal handler: the length comes from the array bound,
+// so it is a compile-time constant and can never drift from the text.
+template <size_t N>
+static void safeWrite(const char (&s)[N]);
+
+// Write to stderr from a signal handler. `len` is passed in rather than measured: strlen is not
+// on POSIX's async-signal-safe list, and while a literal makes it harmless in practice, taking the
+// length at the call site (where it is a compile-time constant) makes the guarantee real.
+static void safeWrite(const char* s, size_t len) {
     while (len > 0) {
 #ifdef _WIN32
         int n = ::_write(2 /* stderr fd */, s, static_cast<unsigned int>(len));
@@ -30,16 +37,21 @@ static void safeWrite(const char* s) {
     }
 }
 
+template <size_t N>
+static void safeWrite(const char (&s)[N]) { safeWrite(s, N - 1); }   // N-1: drop the NUL
+
 static void crashHandler(int sig) {
-    const char* name = sig == SIGSEGV ? "SIGSEGV"
-                     : sig == SIGABRT ? "SIGABRT"
-                     : sig == SIGFPE  ? "SIGFPE"
+    // Name and length together: safeWrite takes an explicit length (strlen is not
+    // async-signal-safe), and these names are not all the same width.
+    const char* name = "SIGNAL"; size_t nameLen = 6;
+    if (sig == SIGSEGV)      { name = "SIGSEGV"; nameLen = 7; }
+    else if (sig == SIGABRT) { name = "SIGABRT"; nameLen = 7; }
+    else if (sig == SIGFPE)  { name = "SIGFPE";  nameLen = 6; }
 #ifdef SIGBUS
-                     : sig == SIGBUS  ? "SIGBUS"
+    else if (sig == SIGBUS)  { name = "SIGBUS";  nameLen = 6; }
 #endif
-                                      : "SIGNAL";
     safeWrite("\n*** CRASH: ");
-    safeWrite(name);
+    safeWrite(name, nameLen);
     safeWrite(" ***\n");
     // SA_RESETHAND (POSIX) or signal() one-shot semantics (Windows) already
     // restored SIG_DFL; re-raise for OS coredump.
@@ -148,6 +160,8 @@ int main(int argc, char** argv) {
     signal(SIGSEGV, crashHandler);
     signal(SIGFPE,  crashHandler);
     signal(SIGABRT, crashHandler);
+    // signal() is one-shot on Windows, so the handler is already reset after the first Ctrl+C and
+    // a second one force-quits: the same escalation SA_RESETHAND gives the POSIX branch below.
     signal(SIGINT,  [](int) { running = false; });
 #else
     struct sigaction sa{};
@@ -159,9 +173,20 @@ int main(int argc, char** argv) {
     sigaction(SIGBUS,  &sa, nullptr);
     sigaction(SIGABRT, &sa, nullptr);
 
+    // SA_RESETHAND: the FIRST Ctrl+C asks for a clean stop, and restores the default handler so a
+    // SECOND one kills the process outright. Without it a shutdown that wedges (a driver teardown
+    // waiting on a socket, say) leaves Ctrl+C doing nothing at all, however many times it is
+    // pressed, and the only way out is another terminal. Reported from a Linux bench: "it didn't
+    // shut down fully and was slowly eating more cpu cycles ... it got SIGTERM'd".
     struct sigaction saInt{};
-    saInt.sa_handler = [](int) { running = false; };
+    saInt.sa_handler = [](int) {
+        running = false;
+        // Say so, because the first press otherwise looks ignored while teardown runs. safeWrite,
+        // not printf: only async-signal-safe calls are legal in a handler.
+        safeWrite("\nStopping. Press Ctrl+C again to force quit.\n");
+    };
     sigemptyset(&saInt.sa_mask);
+    saInt.sa_flags = SA_RESETHAND;
     sigaction(SIGINT, &saInt, nullptr);
 
     // Ignore SIGPIPE — write() on a closed TCP connection delivers it by default,

@@ -98,20 +98,20 @@ TEST_CASE("AudioService Local+send: broadcasts are throttled to ~kSyncSendInterv
     a.send = true;   // local audio, broadcasting
     a.syncPort = kTestSyncPort;
     a.applyState();
-    a.tick();                        // opens + first send (frameCounter bumps once)
+    a.tick();                        // opens + first send
     REQUIRE(a.syncOpenForTest());
 
-    // More ticks within the same interval must not each emit, the frame counter (bumped
-    // only on an actual send) does not advance while the throttle window is open.
-    const uint8_t c0 = a.syncFrameCounterForTest();
+    // More ticks within the same interval must not each emit: the send count does not advance
+    // while the throttle window is open.
+    const uint32_t c0 = a.syncSendCountForTest();
     a.tick();
     a.tick();
-    CHECK(a.syncFrameCounterForTest() == c0);   // throttled: no send per tick
+    CHECK(a.syncSendCountForTest() == c0);   // throttled: no send per tick
 
     // After the interval elapses, exactly one more send is allowed.
     clk.advance(AudioService::syncSendIntervalMsForTest() + 5);
     a.tick();
-    CHECK((uint8_t)(a.syncFrameCounterForTest() - c0) == 1);
+    CHECK(a.syncSendCountForTest() - c0 == 1);
 
     a.release();
 }
@@ -132,10 +132,10 @@ TEST_CASE("AudioService Local+send on a capture host: capture and broadcast coex
     a.tick();         // opens the socket + first send, then runs the local capture path
     REQUIRE(a.syncOpenForTest());
     CHECK(std::strcmp(status(a), "sending") == 0);
-    const uint8_t c0 = a.syncFrameCounterForTest();
+    const uint8_t c0 = a.syncSendCountForTest();
     clk.advance(AudioService::syncSendIntervalMsForTest() + 5);
     a.tick();         // capture read + throttled send in one tick, no early return
-    CHECK((uint8_t)(a.syncFrameCounterForTest() - c0) == 1);
+    CHECK(a.syncSendCountForTest() - c0 == 1);
     a.release();
 }
 
@@ -154,7 +154,7 @@ TEST_CASE("AudioService Receive: a localhost WLED packet drives frame_, then hol
     peer.level = 222; peer.levelSmoothed = 111; peer.peakHz = 660; peer.peakMag = 55;
     for (int i = 0; i < 16; i++) peer.bands[i] = static_cast<uint8_t>(i * 8);
     uint8_t pkt[WLED_SYNC_PACKET_SIZE];
-    buildWledAudioSync(pkt, peer, /*frameCounter=*/1, /*peak=*/false);
+    buildWledAudioSync(pkt, peer, /*peak=*/false);
 
     platform::UdpSocket tx;
     REQUIRE(tx.open());

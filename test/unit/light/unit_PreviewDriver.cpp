@@ -529,3 +529,51 @@ TEST_CASE("a wedged link never blocks a tick, never closes a client, and resumes
 
     mm::platform::setTestNowMs(0);
 }
+
+// A moving head's AIM reaches the preview, so the browser can draw where the beam points. The
+// wire carries pan/tilt, never a rendered look, so a richer visual later is a client change alone.
+TEST_CASE("PreviewDriver streams aim for a rig whose fixtures move") {
+    mm::GridLayout grid;
+    grid.width = 1; grid.height = 4; grid.depth = 1;      // a 1D chain of 4 heads
+    PreviewRig rig(&grid, /*cpl=*/6);                      // RGBW + pan + tilt
+
+    mm::FixtureChannels fc;
+    fc.pan  = mm::FixtureChannels::kMotionBase;
+    fc.tilt = mm::FixtureChannels::kMotionBase + 1;
+    rig.layer.setFixtureChannels(fc);
+
+    // Aim each head differently, so a message that collapsed them would be visible.
+    auto& buf = rig.layer.buffer();
+    REQUIRE(buf.data());
+    for (mm::nrOfLightsType i = 0; i < buf.count(); i++) {
+        buf.data()[i * buf.channelsPerLight() + fc.pan]  = static_cast<uint8_t>(10 + i * 20);
+        buf.data()[i * buf.channelsPerLight() + fc.tilt] = static_cast<uint8_t>(200 - i * 20);
+    }
+
+    rig.preview->buildCoordTable();
+    rig.cap.lastFrame.clear();
+    CHECK(rig.preview->sendAim());
+
+    const auto& f = rig.cap.lastFrame;
+    REQUIRE(f.size() >= 9);
+    CHECK(f[0] == 0x04);                                   // the aim opcode
+    REQUIRE(f.size() == 9 + static_cast<size_t>(buf.count()) * 2);
+    for (mm::nrOfLightsType i = 0; i < buf.count(); i++) {
+        CHECK(f[9 + i * 2 + 0] == static_cast<uint8_t>(10 + i * 20));    // pan, per head
+        CHECK(f[9 + i * 2 + 1] == static_cast<uint8_t>(200 - i * 20));   // tilt
+    }
+}
+
+// The requirement this feature had to meet: a rig WITHOUT motion pays nothing for it. Most rigs
+// are strips and panels, and they must not gain a per-frame message, a gather, or an allocation
+// because moving heads exist.
+TEST_CASE("A rig with no moving heads sends no aim message at all") {
+    mm::GridLayout grid;
+    grid.width = 4; grid.height = 4; grid.depth = 1;
+    PreviewRig rig(&grid);                                 // plain RGB, no fixture channels set
+
+    rig.preview->buildCoordTable();
+    rig.cap.lastFrame.clear();
+    CHECK_FALSE(rig.preview->sendAim());                   // declines before doing any work
+    CHECK(rig.cap.lastFrame.empty());                      // and nothing reached the wire
+}

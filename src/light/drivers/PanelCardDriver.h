@@ -338,7 +338,8 @@ public:
             const uint8_t srcCh = sourceBuffer_->channelsPerLight();
             uint8_t* dst = corrected_.data();
             for (nrOfLightsType i = 0; i < nLights; i++) {
-                correction_.apply(src + (winStart + i) * srcCh, dst + i * outCh);
+                // srcCh carries a wide light's motion channels through, as NetworkSendDriver does.
+                correction_.apply(src + (winStart + i) * srcCh, dst + i * outCh, srcCh);
             }
             data = dst;
             stride = outCh;

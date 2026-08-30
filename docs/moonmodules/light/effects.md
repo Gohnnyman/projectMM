@@ -300,6 +300,41 @@ The sprites carry their own colors (chrome, wing, crust), so the global palette 
 
 Origin: projectMM original; inspired by After Dark's Flying Toasters (Berkeley Systems, 1989), suggested by Frank ([softhack007](https://github.com/softhack007)) — the pixel art here is drawn fresh for this effect
 
+<a id="movinghead"></a>
+
+### MovingHead 🔬📊 · 1D
+
+Aims a rig of moving heads as one instrument. Pan and tilt sweep on two sine waves at different
+rates, so a beam traces a path rather than a line, and `formation` decides how the heads relate to
+each other, which is what turns a row of fixtures into a show rather than several fixtures doing
+the same thing.
+
+The first effect that AIMS a fixture rather than only coloring it. It writes pan and tilt through
+the role setters, which do nothing on a light that carries no such channel, so the same effect on
+an LED strip paints the color pattern and moves nothing.
+
+- `formation` — how the heads relate:
+    - **fan** — neighbours differ by a fraction of the sweep, so the beams open and close like a hand.
+    - **mirror** — the halves face each other; the classic look, best on an even-numbered rig.
+    - **chase** — a wave travelling down the row, the same sweep delayed head by head.
+    - **cross** — alternate heads oppose, a tight scissoring that looks fast at a low BPM.
+    - **unison** — every head as one, the reference the others read against.
+- `panBpm` / `tiltBpm` — sweep rates (60 = one sweep a second). Different rates are what turn two
+  sines into a path instead of a diagonal.
+- `panRange` / `tiltRange` — how much of the fixture's travel to use. A head at full pan spends
+  much of its sweep pointing away from the audience, so the default is a band around center.
+- `panCenter` / `tiltCenter` — where the sweep is centered (128 = the fixture's middle).
+- `soundReactive` — move and light with the music: the beam swings wider as the room gets louder,
+  each head takes its brightness from its own frequency band so the rig ripples rather than pulsing
+  as one block, and a beat widens the sweep and flares the color with a short decay so a kick is
+  visible rather than a one-frame flicker. Silence holds the rig still, which is what makes it read
+  as reactive rather than merely animated.
+
+A fixture chain is one-dimensional, so lay the rig out as a **1 x N** grid (width 1, height N):
+extrude duplicates the x=0 column, so N x 1 would copy the first head's aim over every head.
+
+Uses the global palette. Origin: projectMM original
+
 <a id="pacman"></a>
 
 ### Pacman 🔬📊 · 2D

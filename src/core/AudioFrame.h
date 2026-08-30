@@ -25,7 +25,14 @@ struct AudioFrame {
                                 // instead of twitching. Use this for calm/glowing effects that
                                 // should swell, not flash. (WLED calls this `volume`/`volumeSmth`.)
     uint16_t peakHz = 0;        // dominant frequency this frame, in Hz (0 = none)
-    uint16_t peakMag = 0;       // magnitude of that peak (gates the peakHz update)
+    uint16_t peakMag = 0;       // magnitude of that peak (gates the peakHz update), 0..255.
+                                // NOT WLED's scale, and the one audio-sync field that is not
+                                // interoperable: WLED sends a raw FFT magnitude reaching ~4096
+                                // (its own comment: "Want end result to be scaled linear and
+                                // ~4096 max"), and its effects divide by 4 or 16 before use, so
+                                // their thresholds sit around 48..144 AFTER a /16. A 0..255 value
+                                // arrives below the squelch floor and reads as near-silence.
+                                // See services.md (Audio) for the trade and the open decision.
     uint8_t  bands[16] = {};    // 16 log-spaced frequency-band magnitudes, 0..255
                                 // (bass = bands[0], treble = bands[15])
 };

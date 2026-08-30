@@ -1000,7 +1000,8 @@ public:
                 // winStart_ shifts this driver's whole slice; laneStart_ is the per-lane offset within it.
                 // The source (snapshot or live) holds RAW srcCh bytes, so correction runs here per light —
                 // one pass, whether the frame was snapshotted (immutable copy) or read live.
-                correction_.apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
+                // Color only: an addressable LED strand has no motion channels.
+                correction_.applyColorOnly(src + (winStart_ + laneStart_[lane] + row) * srcCh,
                                    wire + lane * stride);
             }
             const uint64_t mask = maskLo32 | (static_cast<uint64_t>(maskHi32) << 32);   // constant shift: cheap

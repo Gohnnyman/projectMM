@@ -201,6 +201,11 @@ void delayMs(uint32_t ms) {
     vTaskDelay(pdMS_TO_TICKS(ms));
 }
 
+void pauseLoop() {
+    // Nothing: yield() here is vTaskDelay(1), which already yields to the idle task for a tick.
+    // A further sleep would come straight out of the render budget.
+}
+
 void delayUs(uint32_t us) {
     // Busy-wait — fine for the few-hundred-µs protocol gaps this exists for
     // (e.g. the WS2812 inter-frame latch), off any latency-critical context.
@@ -1989,6 +1994,17 @@ int UdpSocket::recvFrom(uint8_t* buf, size_t maxLen, uint8_t srcIp[4]) {
     if (n <= 0) return -1;
     if (srcIp) std::memcpy(srcIp, &src.sin_addr.s_addr, 4);   // network order = octets
     return static_cast<int>(n);
+}
+
+// Join an IPv4 multicast group so the bound socket receives datagrams sent to it. WLED audio
+// sync multicasts to 239.0.0.1; without this membership the datagrams never reach the socket.
+// INADDR_ANY as the interface lets lwip pick the default route's netif.
+bool UdpSocket::joinMulticast(const char* group) {
+    if (fd_ < 0 || !group) return false;
+    ip_mreq mreq{};
+    if (inet_pton(AF_INET, group, &mreq.imr_multiaddr) != 1) return false;
+    mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+    return setsockopt(fd_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) == 0;
 }
 
 bool UdpSocket::sendToAddr(const uint8_t ip[4], uint16_t port,

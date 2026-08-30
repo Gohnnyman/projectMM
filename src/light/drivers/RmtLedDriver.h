@@ -14,7 +14,7 @@ namespace mm {
 /// peripheral — one GPIO and one RMT TX channel per strand, fed consecutive slices of the source
 /// buffer (8-bit, GRB). The default LED driver for classic-ESP32 and S3 board entries, and the
 /// readable EXAMPLE future LED drivers copy: a sibling of NetworkSendDriver (same DriverBase hooks,
-/// same per-light `correction_.apply()` guard, same once-allocated owned buffer sized off the hot
+/// same per-light `correction_.applyColorOnly()` guard, same once-allocated owned buffer sized off the hot
 /// path); only the emit differs — this fuses the correction + WS2812 symbol-encode into one pass
 /// (the encode is `RmtSymbol.h`, host-tested) then hands per-pin slices to the platform.
 ///
@@ -262,7 +262,8 @@ public:
         for (nrOfLightsType i = 0; i < n; i++) {
             // Read the windowed light: this driver's slice starts at winStart_. wire_ is sized to
             // outChannels off the hot path (resizeSymbols), so apply() can't overflow it.
-            correction_.apply(src + (winStart_ + i) * srcCh, wire_);
+            // Color only: an addressable LED strand has no motion channels.
+            correction_.applyColorOnly(src + (winStart_ + i) * srcCh, wire_);
             encodeWs2812Symbols(wire_, outCh, t0h, t1h, period, symbols_ + s);
             s += static_cast<size_t>(outCh) * 8;
         }
@@ -312,7 +313,7 @@ public:
 
 private:
     // Source frame. The output correction (channel order + white + brightness) lives on
-    // DriverBase, applied per-light via correction_.apply(); same shape as NetworkSendDriver.
+    // DriverBase, applied per-light via correction_.applyColorOnly(); same shape as NetworkSendDriver.
     Buffer* sourceBuffer_ = nullptr;
 
     LedDriverConfig cfg_;
@@ -327,7 +328,7 @@ private:
     bool inited_ = false;                      // all-or-nothing across the pins
     uint32_t* symbols_ = nullptr;   // owned; one word per WS2812 data bit
     size_t symbolCap_ = 0;          // words allocated
-    // Per-light scratch for correction_.apply(): `outChannels` bytes, one light at a time. Heap, sized
+    // Per-light scratch for correction_.applyColorOnly(): `outChannels` bytes, one light at a time. Heap, sized
     // to the channel count (no fixed cap — a light may carry any number of channels, RGB=3, RGBW=4,
     // RGBCCT=5, or an N-channel fixture; the only limit is memory). Allocated off the hot path in
     // resizeSymbols(), reused every tick (tick() never allocates). A fixed stack array here overflowed

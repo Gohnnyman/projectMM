@@ -9,7 +9,7 @@ namespace mm {
 
 // WLED audio-sync wire format — the one place the packet layout lives (the
 // ArtNetPacket.h / DdpPacket.h convention). AudioService builds it to broadcast
-// its analysed audio, and parses it to drive effects from a peer's audio; a unit
+// its analyzed audio, and parses it to drive effects from a peer's audio; a unit
 // test round-trips build↔parse against a golden byte vector so we can never drift
 // from WLED. The contract is fixed by netmindz/WLED-sync (the header MoonModules'
 // MoonLight receives with, D_WLEDAudio.h), so the bytes must be exact.
@@ -27,10 +27,13 @@ namespace mm {
 //   8-11  sampleRaw     float  — AudioFrame.level         (WLED volumeRaw)
 //   12-15 sampleSmth    float  — AudioFrame.levelSmoothed (WLED volume/volumeSmth)
 //   16    samplePeak    u8     — 1 = beat/peak this frame, else 0
-//   17    frameCounter  u8     — increments per send, for dup/reorder detection
-//   18-33 fftResult[16] u8×16  — AudioFrame.bands[16]     (the 16 GEQ channels)
+//   17    reserved2     u8     : WLED: "for future extensions - not used yet". ZERO on the wire:
+//                                 WLED sends 0 here and may claim the byte later, so a counter of
+//                                 ours would be a private meaning in a field that is not ours.
+//   18-33 fftResult[16] u8×16  : AudioFrame.bands[16], clamped to 254 (WLED's own send does
+//                                 constrain(fftResult[i], 0, 254), so 255 never appears)
 //   34-35 gap2 (zero)
-//   36-39 FFT_Magnitude float  — AudioFrame.peakMag
+//   36-39 FFT_Magnitude float  : AudioFrame.peakMag x kWledMagScale (see below)
 //   40-43 FFT_MajorPeak float  — AudioFrame.peakHz
 
 constexpr uint16_t WLED_SYNC_PORT = 11988;
@@ -38,6 +41,18 @@ constexpr size_t   WLED_SYNC_PACKET_SIZE = 44;
 // 6 chars incl NUL: "00002". v1 packets use "00001" (83 bytes) — legacy, ignored.
 constexpr char     WLED_SYNC_HEADER[6] = "00002";
 constexpr size_t   WLED_SYNC_NUM_BANDS = 16;   // == AudioFrame bands + WLED NUM_GEQ_CHANNELS
+
+// WLED's FFT_Magnitude is the raw magnitude of its dominant FFT bin, scaled so "the end result is
+// linear and ~4096 max" (its own comment, where it divides the input samples by 16). Its effects
+// then divide that by 16 and use it as a byte, which is why their thresholds read `< 48` squelch
+// and `> 144` full brightness. AudioFrame::peakMag is byte-scaled 0..255 instead, conditioned by
+// the same noise floor and gain as the 16 bands so one pair of knobs governs the whole spectrum.
+//
+// So the wire carries WLED's units and the AudioFrame keeps ours, converting at this boundary.
+// x16 is not a fudge factor: it is exactly the divisor WLED's own effects apply, so a byte of ours
+// lands on the same brightness a native WLED source would produce. Nothing internal changes, and
+// the conversion costs one multiply per packet (~40/s), never per light.
+inline constexpr float kWledMagScale = 16.0f;
 
 // Little-endian IEEE-754 store/load. Every projectMM target (Xtensa/RISC-V ESP32,
 // desktop x86/arm64) is little-endian, and so is WLED's source MCU — so the raw
@@ -57,18 +72,21 @@ inline uint16_t wledFloatToU16(float v) {
 }
 
 // Build a v2 audio-sync packet from an AudioFrame into out (>= 44 bytes).
-// `frameCounter` and `peak` are the two fields not carried by AudioFrame (the
-// caller owns the send counter and the beat flag). Returns the packet size (44).
+// `peak` is the one field not carried by AudioFrame (the caller owns the beat
+// flag). Returns the packet size (44).
 inline size_t buildWledAudioSync(uint8_t out[WLED_SYNC_PACKET_SIZE], const AudioFrame& f,
-                                 uint8_t frameCounter, bool peak) {
+                                 bool peak) {
     std::memset(out, 0, WLED_SYNC_PACKET_SIZE);        // zeroes header pad + both gaps
     std::memcpy(out, WLED_SYNC_HEADER, 6);             // "00002\0"
     wledPutFloatLE(out + 8,  static_cast<float>(f.level));          // sampleRaw
     wledPutFloatLE(out + 12, static_cast<float>(f.levelSmoothed));  // sampleSmth
     out[16] = peak ? 1 : 0;                            // samplePeak
-    out[17] = frameCounter;                            // frameCounter
-    std::memcpy(out + 18, f.bands, WLED_SYNC_NUM_BANDS);            // fftResult[16]
-    wledPutFloatLE(out + 36, static_cast<float>(f.peakMag));        // FFT_Magnitude
+    // out[17] stays 0: reserved2 in WLED's struct, and WLED transmits zero there.
+    // Bands clamp to 254, matching WLED's own constrain(fftResult[i], 0, 254): a receiver
+    // written against WLED may treat 255 as a sentinel it never expects to see in real data.
+    for (size_t i = 0; i < WLED_SYNC_NUM_BANDS; i++)
+        out[18 + i] = f.bands[i] > 254 ? 254 : f.bands[i];           // fftResult[16]
+    wledPutFloatLE(out + 36, static_cast<float>(f.peakMag) * kWledMagScale);   // FFT_Magnitude
     wledPutFloatLE(out + 40, static_cast<float>(f.peakHz));         // FFT_MajorPeak
     return WLED_SYNC_PACKET_SIZE;
 }
@@ -86,9 +104,14 @@ inline bool parseWledAudioSync(const uint8_t* pkt, size_t len, AudioFrame& out) 
     if (std::memcmp(pkt, WLED_SYNC_HEADER, 6) != 0) return false;
     out.level         = wledFloatToU16(wledGetFloatLE(pkt + 8));
     out.levelSmoothed = wledFloatToU16(wledGetFloatLE(pkt + 12));
-    // pkt[16] samplePeak and pkt[17] frameCounter are hints the AudioFrame doesn't carry.
+    // pkt[16] samplePeak is a hint the AudioFrame doesn't carry; pkt[17] is WLED's reserved2.
     std::memcpy(out.bands, pkt + 18, WLED_SYNC_NUM_BANDS);
-    out.peakMag = wledFloatToU16(wledGetFloatLE(pkt + 36));
+    // Back into our 0..255 units, and CLAMPED there: a WLED sender's magnitude can run well past
+    // 255 after the divide, and letting it through would make a received frame drive effects
+    // harder than a locally analyzed one ever could.
+    const float mag = wledGetFloatLE(pkt + 36) / kWledMagScale;
+    const uint16_t magU16 = wledFloatToU16(mag);
+    out.peakMag = magU16 > 255 ? 255 : magU16;
     out.peakHz  = wledFloatToU16(wledGetFloatLE(pkt + 40));
     return true;
 }

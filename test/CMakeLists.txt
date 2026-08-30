@@ -90,6 +90,7 @@ add_executable(mm_tests
     unit/light/unit_Coord3D.cpp
     unit/light/unit_effects_render.cpp
     unit/light/unit_Effects_gridsweep.cpp
+    unit/core/unit_OscPacket.cpp
     unit/light/unit_Effects_golden.cpp
     unit/light/unit_SpritePopulation.cpp
     unit/light/unit_Canvas.cpp
@@ -104,6 +105,7 @@ add_executable(mm_tests
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
+    unit/light/unit_MovingHeadEffect.cpp
     unit/light/unit_Drivers_container.cpp
     unit/light/unit_Drivers_rendersplit.cpp
     unit/light/unit_LightPresetsModule.cpp

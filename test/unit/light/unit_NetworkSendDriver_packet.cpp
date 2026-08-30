@@ -265,3 +265,49 @@ TEST_CASE("NetworkSendDriver: a lightsPerIp list that doesn't match the tube cou
         CHECK(d.lightsAt(2) == 70);
     }
 }
+
+// sACN's native addressing: the universe is IN the destination group, 239.255.{hi}.{lo}
+// (E1.31 section 9.3.1). That is what lets a switch with IGMP snooping filter per universe in
+// hardware, so a node's NIC sees only the universes it joined. Unicast E1.31 stays the default
+// because multicast floods exactly like broadcast on a switch that does NOT snoop.
+TEST_CASE("sACN multicast puts the universe number in the destination address") {
+    uint8_t addr[4];
+    mm::NetworkSendDriver::e131MulticastAddr(1, addr);
+    CHECK(addr[0] == 239); CHECK(addr[1] == 255); CHECK(addr[2] == 0); CHECK(addr[3] == 1);
+
+    mm::NetworkSendDriver::e131MulticastAddr(2, addr);
+    CHECK(addr[3] == 2);                       // a different universe is a different group
+
+    // The high byte carries universes past 255, which is where a big rig lives.
+    mm::NetworkSendDriver::e131MulticastAddr(300, addr);
+    CHECK(addr[2] == 1); CHECK(addr[3] == 44);  // 300 = 0x012C
+}
+
+// A fixture must not straddle two DMX universes. At 512 channels per universe an 11-channel
+// moving head divides 46 times with 6 bytes left over, so an unrounded chunk would put fixture 47
+// half in one packet and half in the next, and that fixture would read a neighbour's channels as
+// its own pan and tilt. Harmless on a 3-channel strip (a partial pixel is just a pixel), which is
+// why it only surfaced once fixtures had more than color in them.
+TEST_CASE("A DMX universe carries whole fixtures, never a split one") {
+    constexpr size_t kUniverse = 512;
+    // The rounding the driver applies: floor the universe to a whole number of fixtures.
+    //
+    // A RESTATEMENT of NetworkSendDriver's arithmetic, not a call into it: the real rounding is
+    // inline in the send path (NetworkSendDriver.h, the `whole` line), which has no seam a unit
+    // test can reach without a socket. So this pins the RULE and would not catch the driver
+    // drifting away from it. Driving the real path needs a capture harness around the send seam.
+    auto wholeFixtures = [](size_t chunk, uint8_t bytesPerLight) {
+        const size_t whole = (chunk / bytesPerLight) * bytesPerLight;
+        return whole > 0 ? whole : chunk;
+    };
+
+    CHECK(wholeFixtures(kUniverse, 11) == 506);   // 46 fixtures x 11, not 512
+    CHECK(wholeFixtures(kUniverse, 11) % 11 == 0);
+    CHECK(wholeFixtures(kUniverse, 3) == 510);    // 170 pixels x 3
+    CHECK(wholeFixtures(kUniverse, 4) == 512);    // divides exactly: unchanged
+    CHECK(wholeFixtures(kUniverse, 1) == 512);
+
+    // A fixture wider than a universe cannot be served: keep the full universe rather than
+    // sending zero bytes forever, so it fails visibly instead of going silently dead.
+    CHECK(wholeFixtures(kUniverse, 255) == 510);
+}

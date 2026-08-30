@@ -62,6 +62,15 @@ Discovers and lists other projectMM devices on the LAN (the `devices` List contr
 <img src="../../assets/core/DevicesModule.png" width="300" alt="Devices module — discovered LAN devices">
 
 - `devices` — a List control of discovered devices; each row expands to a detail panel. Persistable.
+- `wledCompatible` — announce on WLED's broadcast address as well as the multicast group
+  (**default off**). WLED apps and devices browse the discovery port on **broadcast**, so a
+  projectMM device does not appear in them until this is turned on. Off is the better neighbour
+  on the network: a broadcast wakes every phone, printer and laptop on the LAN to parse a packet
+  none of them want. See [multicast and IGMP snooping](../../architecture.md#multicast-and-igmp-snooping)
+  for when that actually saves traffic.
+
+Presence always goes to the projectMM group `239.255.77.77`, so peers find each other however
+this control is set; `wledCompatible` only adds the broadcast copy.
 
 Detail: [technical](moxygen/DevicesModule.md)
 

@@ -283,6 +283,24 @@ void delayUs(uint32_t us) {
     std::this_thread::sleep_for(std::chrono::microseconds(us));
 }
 
+void pauseLoop() {
+    // yield() alone only offers the CPU to another RUNNABLE thread, so on an otherwise idle
+    // machine it returns at once and the caller spins a core flat out (reported from a Linux
+    // bench as the process "slowly eating more cpu cycles ... maxed out one core").
+    //
+    // Sleep to a frame BUDGET rather than a fixed nap. Nothing consumes a desktop render faster
+    // than a display or a driver's own fps limit, so a loop free-running at 2000+ FPS is spending
+    // a core to compute frames no one reads. 4 ms is 250 FPS: far above any output rate we drive,
+    // while leaving the CPU idle in between. A tick that legitimately takes longer than the budget
+    // simply gets no sleep, so a heavy grid still runs as fast as it can.
+    static constexpr auto kFrameBudget = std::chrono::microseconds(4000);
+    static auto lastWake = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    const auto spent = now - lastWake;
+    if (spent < kFrameBudget) std::this_thread::sleep_for(kFrameBudget - spent);
+    lastWake = std::chrono::steady_clock::now();
+}
+
 size_t freeHeap() {
     return 0; // Not meaningful on desktop (0 = unlimited)
 }
@@ -1644,6 +1662,18 @@ int UdpSocket::recvFrom(uint8_t* buf, size_t maxLen, uint8_t srcIp[4]) {
     if (n <= 0) return -1;
     if (srcIp) std::memcpy(srcIp, &src.sin_addr.s_addr, 4);   // network order = octets
     return static_cast<int>(n);
+}
+
+// Join an IPv4 multicast group so the bound socket receives datagrams sent to it. WLED audio
+// sync multicasts to 239.0.0.1; without this membership the datagrams never reach the socket.
+// INADDR_ANY as the interface lets the stack pick, which is what a single-homed device wants.
+bool UdpSocket::joinMulticast(const char* group) {
+    if (fd_ < 0 || !group) return false;
+    ip_mreq mreq{};
+    if (::inet_pton(AF_INET, group, &mreq.imr_multiaddr) != 1) return false;
+    mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+    return ::setsockopt(sock(fd_), IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                        reinterpret_cast<const char*>(&mreq), sizeof(mreq)) == 0;
 }
 
 bool UdpSocket::sendToAddr(const uint8_t ip[4], uint16_t port,

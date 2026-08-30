@@ -132,10 +132,11 @@ public:
             const uint8_t* s = src + static_cast<size_t>(i) * srcCh;
             uint8_t* d = dst + static_cast<size_t>(i) * 3;
             if (outCh == 3) {
-                correction_.apply(s, d);
+                // Color only: NDI is a video picture: motion is not part of it.
+                correction_.applyColorOnly(s, d);
             } else if (wide) {
                 uint8_t* c = &corrScratch_[0];
-                correction_.apply(s, c);
+                correction_.applyColorOnly(s, c);
                 d[0] = c[0]; d[1] = c[1]; d[2] = c[2];
             } else {
                 d[0] = s[0]; d[1] = s[1]; d[2] = s[2];   // passthrough, same fallback as NetworkSend

@@ -73,13 +73,35 @@ Detail: [RMT](moxygen/RmtLedDriver.md) · [Parallel](moxygen/ParallelLedDriver.m
 
 Streams the buffer over UDP as **Art-Net**, **E1.31 / sACN**, or **DDP** — one burst per frame, compatible with Falcon/Advatek controllers, xLights, and LedFx. Feeds **one or more receivers** from a single driver: each gets its own slice of the window, unicast to its own address.
 
-- `protocol` — Art-Net / E1.31 / DDP (default Art-Net); the destination port follows automatically.
+- `protocol` — Art-Net / E1.31 / DDP / E1.31 multicast (default Art-Net); the destination port
+  follows automatically. **E1.31 multicast** sends to sACN's own per-universe group
+  (`239.255.{universe_hi}.{universe_lo}`) rather than the configured address, so one send
+  reaches every receiver that joined that universe. It is opt-in rather than the default for
+  E1.31: the saving only materialises on a switch that does IGMP snooping, and firmware cannot
+  tell. See [multicast and IGMP snooping](../../architecture.md#multicast-and-igmp-snooping).
 - `ips` — the receivers. **Blank by default — the driver idles until set**, so it never sends uninvited traffic. Type the full address once, then a range or a list: `192.168.1.70-74` (five tubes, ends inclusive) or `192.168.1.60,61,62,65`; both mix, and a further full address switches subnet.
 - `lightsPerIp` — lights per receiver, same idiom as an LED driver's `ledsPerPin`: **blank** = split the window evenly; **one number** = that many each; **a list** `150,100,50` = one per receiver by position.
 - `universe_start` — first universe for Art-Net / E1.31 (DDP ignores it). Restarts per receiver — each is an independent node addressing its own strip.
 - `fps` — frame-rate limit (default 50, 1–120).
 
 Unicast is the default because Art-Net 4 requires it and because broadcast makes *every* host on the LAN parse *every* packet; a broadcast address still works if you type one. The full addressing rationale (and the one case where broadcast is the better tool) is on the [detail page](moxygen/NetworkSendDriver.md).
+
+**A DMX chain of MIXED fixtures: one driver per fixture type.** `lightsPerIp` splits a window between receivers that all share one preset, so it cannot describe a chain where the fixtures *differ*. Add a driver per type instead, each reading its own `start`/`count` slice of the same buffer with its own `lightPreset`. Two moving-head types followed by RGBW pars is three drivers:
+
+| driver | start | count | lightPreset | fixtures |
+|---|---|---|---|---|
+| A | 0 | 2 | pan/tilt/zoom head | the two big heads |
+| B | 2 | 4 | pan/tilt head | four smaller heads |
+| C | 6 | 10 | RGBW par | ten pars |
+
+Each driver maps its slice onto that fixture's real channels, so differing channel counts and orders are fine, and each carries its own `universe_start` for where the group sits in the DMX address space. The layout must hold every light (16 here), since the windows are slices of one shared buffer.
+
+Two consequences of motion channels being a property of the LAYER rather than of a driver:
+
+- **Order matters when the motion ROLES differ**, which is why the table puts the pan/tilt/zoom heads first. The layer's motion slots come from the first enabled driver whose preset carries motion, so the richest fixture has to lead: every role then gets a slot, and the simpler heads ignore the zoom they do not map. Swap A and B and the zoom has no slot at all, so those heads never zoom. Fixtures that differ only in channel count or order are unaffected, so two pan/tilt heads of different makes need no particular order.
+- **Every light carries the motion bytes**, used or not, so a mixed rig's buffer is as wide as its widest fixture. Memory, not correctness: a par's `Correction` discards the aim.
+
+An effect writes `setPan` for every light in its layer, so a formation spanning the window treats the pars as rig positions too. Use separate **Layers** when the heads should move independently of the rest.
 
 Origin: MoonLight D_NetworkOut; Art-Net 4 / E1.31 / DDP specs
 
@@ -147,6 +169,19 @@ Streams a true-shape 3D preview to the web UI as a **point list**, only the real
 It streams on its **own WebSocket channel** (`/wsp`), so a large frame never delays the control plane, and it runs only while a viewer requests it: dismissing the preview or leaving the tab stops the work at the source entirely. The device reports dropped frames in each frame it sends; your browser trades detail for rate on that signal, so a fast connection previews finer than a slow one. See [§ Preview, details](#preview-details).
 
 - `targetFps`, the frame rate the preview aims for (default 24, 1–60). The device never sends faster; when the connection cannot keep up, the browser trades detail to get closer: **lower it for full detail at a slower rate, raise it for a smoother but coarser preview**.
+
+**Moving heads show their beam.** When the rig's fixtures carry pan and tilt, the preview also
+streams each head's aim, and the browser draws a short 3D ray from the fixture in the direction it
+points. A rig without moving heads never sends that message and pays nothing for the feature.
+
+The wire carries where a head POINTS, never a rendered look, so a richer visual later (a cone with
+falloff rather than a ray) is a browser change and not a protocol one. The beam is a ray today
+because beam angle and throw distance are fixture attributes the
+[fixture model](../../backlog/backlog-light.md) does not carry yet, and drawing a cone would mean
+inventing them.
+
+Color and aim alternate frame by frame, since the transport keeps one send in flight: a head
+sweeps far slower than a pixel changes, so half rate each is not visible on the beam.
 
 Origin: projectMM, on [MoonLight](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h)'s PhysicalLayer model
 

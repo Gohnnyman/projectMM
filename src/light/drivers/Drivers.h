@@ -123,6 +123,50 @@ public:
     /// Reach the live Drivers (the one that owns the encode worker) to quiesce it around a mutation.
     static Drivers* active() { return ActiveInstance<Drivers>::active(); }
 
+    /// Where this rig's fixtures keep their motion channels, as LAYER slots.
+    ///
+    /// Callable BEFORE Drivers has prepared, which is the point: a Layer allocates its buffer in
+    /// its own prepare, and modules prepare in registration order with Effects ahead of Drivers.
+    /// Without this the layer would size itself for color only, an effect's setPan() would fall
+    /// outside the light, and a fixture would not move until some later rebuild widened it.
+    /// Each driver resolves its preset on demand (rebuildCorrection is idempotent and cold-path).
+    /// Hand the fixture layout to every Layer that could render into this rig, so an effect's
+    /// setPan() lands on the right byte and the layer can size its light to hold it.
+    void publishFixtureChannels() {
+        const FixtureChannels fc = fixtureChannels();
+        if (effects_) {
+            for (uint8_t i = 0; i < effects_->childCount(); i++)
+                if (effects_->child(i)->role() == ModuleRole::Layer)
+                    static_cast<Layer*>(effects_->child(i))->setFixtureChannels(fc);
+        } else if (layer_) {
+            layer_->setFixtureChannels(fc);
+        }
+    }
+
+    FixtureChannels fixtureChannels() {
+        FixtureChannels fc;   // every offset absent: a rig with no motion, the common case
+        for (uint8_t i = 0; i < childCount(); i++) {
+            if (child(i)->role() != ModuleRole::Driver || !child(i)->enabled()) continue;
+            auto* d = static_cast<DriverBase*>(child(i));
+            d->rebuildCorrection(brightness);        // resolve the preset if it has not been yet
+            const Correction& c = d->correction();
+            if (!c.hasMotion) continue;
+            // Layer slots, not the fixture's channel numbers: packed after RGBW in a fixed order,
+            // so an effect's pan write can never collide with the color bytes. forEachMotionSlot
+            // is the one definition of that order; Correction::apply reads it back.
+            const bool present[5] = {c.offPan    != Correction::kAbsent,
+                                     c.offTilt   != Correction::kAbsent,
+                                     c.offZoom   != Correction::kAbsent,
+                                     c.offRotate != Correction::kAbsent,
+                                     c.offGobo   != Correction::kAbsent};
+            uint8_t* const dst[5] = {&fc.pan, &fc.tilt, &fc.zoom, &fc.rotate, &fc.gobo};
+            FixtureChannels::forEachMotionSlot(present,
+                [&](uint8_t role, uint8_t slot) { *dst[role] = slot; });
+            break;   // a chain is homogeneous (architecture.md), so one layout describes it
+        }
+        return fc;
+    }
+
     /// Global brightness (0–255). Scales every channel through a 256-entry LUT
     /// (`(v × brightness) / 255`); changing it rebuilds only the LUT on the cheap
     /// `onControlChanged` tier — no pipeline realloc, so the slider is fluent. Gamma /
@@ -278,6 +322,12 @@ public:
         Palettes::setActive(palette);   // seed the global active palette from the persisted index
         MoonModule::setup();
         passBufferToDrivers();           // seeds each driver's correction via rebuildCorrection()
+        // Tell the layers where this rig's fixtures keep their motion channels, HERE rather than in
+        // prepare(): every module's setup() runs before any module's prepare(), and a Layer sizes
+        // its buffer in prepare. Pushed later, a layer would size itself for color on a cold boot,
+        // an effect's setPan() would fall outside the light, and a fixture would not move until
+        // some later rebuild widened it.
+        publishFixtureChannels();
     }
 
     void prepare() override {
@@ -314,6 +364,8 @@ public:
         // a half-split state (no task is spawned, so there is no cross-core wait to deadlock on).
         // A source with ZERO lights (every layout toggled off) is not a buffer to claim — allocate(0)
         // fails and would print a spurious DEGRADE, so gate on a real light count.
+        publishFixtureChannels();
+
         const bool haveLights = out && out->physicalLightCount() > 0;
         const bool splitWanted = multicore && anyDriver() && haveLights;
         const bool wantOutput = (needOutput && haveLights) || splitWanted;
@@ -359,6 +411,10 @@ public:
         } else if (!shouldSplit && renderSplitActive_) {
             stopEncodeTask();                  // drains core 1 before we leave split mode
             renderSplitActive_ = false;
+            // Turning multicore OFF is a choice, not a fault: a stall warning from the old split
+            // must not outlive it (the card showed "encode worker stalled" beside a multicore
+            // toggle that was already off).
+            if (encodeStalled_) { encodeStalled_ = false; setStatus("", Severity::Status); }
         }
         // Publish the light-pipeline summary for the domain-neutral core consumers (the WLED
         // /json shim, MQTT) via the static latestSummary() pull. `out` is the composite extent;
@@ -502,7 +558,8 @@ private:
     std::atomic<bool> encodeStop_{false};  // stop flag the worker fn observes via a woken waitNotify
                                            // (atomic, not volatile: volatile is not a thread primitive
                                            // in C++ — a cross-thread flag is a data race without it)
-    bool renderSplitActive_ = false;       // the split is engaged (task spawned, boundary in effect)
+    bool renderSplitActive_ = false;   // the split is engaged (task spawned, boundary in effect)
+    bool encodeStalled_ = false;       // a stall warning is showing, so recovery can clear it
     uint32_t renderWaitUs_ = 0;                 // last frame's core-0 wait at the boundary (the tick-line KPI)
     uint32_t renderWaitPeakUs_ = 0;             // worst wait in the current 1 s window (what the control shows)
     char renderWaitStr_[32] = {};               // the `renderWait` read-only control's text (refreshed in tick1s)
@@ -549,11 +606,20 @@ private:
         const uint32_t deadline = platform::millis() + kQuiesceTimeoutMs;
         while (!encodeDone_.load(std::memory_order_acquire)) {
             if (platform::millis() > deadline) {
-                setStatus("encode worker stalled — running single-core", Severity::Warning);
+                setStatus("encode worker stalled - running single-core", Severity::Warning);
+                encodeStalled_ = true;        // remember, so recovery can clear the warning
                 renderSplitActive_ = false;   // stop notifying it; drivers tick inline from here
                 return false;
             }
             platform::yield();
+        }
+        // The worker answered. Clear a previous stall warning, which is otherwise STICKY: it was
+        // set once and never lifted, so a card kept reporting "stalled" long after the split was
+        // healthy, and even after multicore was switched off. A status that cannot go away tells
+        // the user nothing about now.
+        if (encodeStalled_) {
+            encodeStalled_ = false;
+            setStatus("", Severity::Status);
         }
         return true;
     }

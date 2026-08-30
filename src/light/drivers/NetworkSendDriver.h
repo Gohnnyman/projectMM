@@ -72,8 +72,10 @@ namespace mm {
 /// others) rather than pretending to detect it. Real detection is ArtPoll/ArtPollReply discovery —
 /// the spec's own mechanism, and the next increment (backlog).
 ///
-/// NOT multicast (no IGMP join yet — backlogged; it is sACN's native mode and the best answer on a
-/// switch with IGMP snooping, but degrades to a flood without it). E1.31 framing: CID stable per
+/// "E1.31 multicast" sends to sACN's native per-universe group (239.255.{hi}.{lo}) instead of the
+/// configured host: opt-in, because a switch WITHOUT IGMP snooping floods it exactly like
+/// broadcast (and on WiFi it goes out at the lowest basic rate to every station), and firmware
+/// cannot detect which kind of switch it is on. Unicast stays the portable default. E1.31 framing: CID stable per
 /// device (from the MAC), source name `projectMM`, priority 100, one frame-level sequence per frame.
 class NetworkSendDriver : public DriverBase {
 public:
@@ -85,8 +87,20 @@ public:
 
     /// Protocol names, index-aligned with the constants used in tick()'s switch (0 = ArtNet,
     /// 1 = E1.31, 2 = DDP). The destination port follows the protocol (6454 / 5568 / 4048).
-    static constexpr const char* kProtocolOptions[] = {"ArtNet", "E1.31", "DDP"};
-    static constexpr uint8_t kProtocolCount = 3;
+    static constexpr const char* kProtocolOptions[] = {"ArtNet", "E1.31", "DDP",
+                                                       "E1.31 multicast"};
+    static constexpr uint8_t kProtocolCount = 4;
+    static constexpr uint8_t kProtoE131Multicast = 3;
+
+    /// sACN's own group for a universe: 239.255.{universe_hi}.{universe_lo} (E1.31 section
+    /// 9.3.1). The universe is IN the address, which is what lets a switch with IGMP snooping
+    /// filter per universe in hardware: each node then sees only the universes it joined.
+    static void e131MulticastAddr(uint16_t universe, uint8_t out[4]) {
+        out[0] = 239; out[1] = 255;
+        out[2] = static_cast<uint8_t>(universe >> 8);
+        out[3] = static_cast<uint8_t>(universe & 0xFF);
+    }
+
 
     /// The receivers. A range (`192.168.1.70-74`, ends inclusive) or a list
     /// (`192.168.1.60,61,62,65`); both mix, and a further full address switches subnet. Blank = no
@@ -267,7 +281,8 @@ public:
             uint8_t* dst = corrected_.data();
             for (nrOfLightsType i = 0; i < nLights; i++) {
                 // Read the windowed light (slice starts at winStart); pack densely.
-                correction_.apply(src + (winStart + i) * srcCh, dst + i * outCh);
+                // srcCh lets a wide light hand its motion channels through (pan/tilt/...).
+                correction_.apply(src + (winStart + i) * srcCh, dst + i * outCh, srcCh);
             }
             data = dst;
             totalBytes = static_cast<size_t>(nLights) * outCh;
@@ -289,12 +304,25 @@ public:
         // Universes RESTART at universeStart for each destination: each tube is an independent node
         // addressing its own strip from its own first universe, which is what a per-node controller
         // expects and what one-driver-per-node would have produced.
-        const size_t chunk = (protocol == 2) ? DDP_MAX_PAYLOAD : MAX_CHANNELS_PER_UNIVERSE;
+        // DDP is byte-addressed, so it chunks by bytes. ArtNet and E1.31 carry DMX UNIVERSES, and
+        // a fixture must not straddle two of them: an 11-channel moving head at 512 bytes per
+        // universe would put fixture 47 half in one packet and half in the next, so it would read
+        // a neighbour's channels as its own. Round the universe payload DOWN to whole fixtures.
+        // (Harmless for a 3-channel strip, where the partial pixel is just a pixel; corrupting for
+        // a fixture, which is why this only surfaced with moving heads.)
+        size_t chunk = (protocol == 2) ? DDP_MAX_PAYLOAD : MAX_CHANNELS_PER_UNIVERSE;
         uint8_t packet[DDP_HEADER_SIZE + DDP_MAX_PAYLOAD];  // 1450 B covers all three
         const uint16_t port = protocolPort(protocol);
         const uint8_t bytesPerLight = (data == corrected_.data() && correction_.outChannels)
                                           ? correction_.outChannels
                                           : sourceBuffer_->channelsPerLight();
+        if (protocol != 2 && bytesPerLight > 1) {
+            const size_t whole = (chunk / bytesPerLight) * bytesPerLight;
+            // A fixture WIDER than a universe cannot be served at all: keep the full universe
+            // rather than sending zero bytes forever, so the failure is a visibly wrong fixture
+            // instead of a silent dead output.
+            if (whole > 0) chunk = whole;
+        }
 
         size_t offset = 0;   // byte cursor into `data`, walking destination by destination
         for (uint8_t d = 0; d < nDest_ && offset < totalBytes; d++) {
@@ -310,6 +338,7 @@ public:
                 const uint8_t* src = data + offset + sent;
                 size_t packetLen;
                 switch (protocol) {
+                    case kProtoE131Multicast:   // same packet as E1.31, only the destination differs
                     case 1:
                         packetLen = buildE131Packet(packet, universe, sequence_, cid_,
                                                     src, static_cast<uint16_t>(n));
@@ -330,7 +359,14 @@ public:
                 // full tx buffer, an unreachable host) drops that packet and the loop continues:
                 // one dark tube must not stall the others, and UDP gives us no delivery signal to
                 // act on anyway. A never-answering host costs only lwIP's slow background ARP retry.
-                socket_.sendToAddr(dest_[d], port, packet, packetLen);
+                // sACN addresses the UNIVERSE, not the node: the group carries the universe
+                // number, so one send reaches every receiver that joined it and a switch with
+                // IGMP snooping filters the rest out in hardware. Unicast E1.31 keeps using
+                // the configured destination, which stays the portable default.
+                uint8_t grp[4];
+                const uint8_t* to = dest_[d];
+                if (protocol == kProtoE131Multicast) { e131MulticastAddr(universe, grp); to = grp; }
+                socket_.sendToAddr(to, port, packet, packetLen);
                 sent += n;
                 universe++;
             }
@@ -380,7 +416,8 @@ private:
 
     /// The UDP port for a protocol index — each wire format has its own registered port.
     static uint16_t protocolPort(uint8_t p) {
-        return p == 1 ? E131_PORT : p == 2 ? DDP_PORT : ARTNET_PORT;
+        return (p == 1 || p == kProtoE131Multicast) ? E131_PORT
+             : p == 2 ? DDP_PORT : ARTNET_PORT;
     }
 
     /// Size `corrected_` for the current source and this driver's correction. Called only off the
