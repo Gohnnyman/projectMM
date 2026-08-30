@@ -107,7 +107,12 @@ inline bool parse(const uint8_t* pkt, size_t len, Message& out) {
             // Skipped types: step over their payload and keep looking for a number.
             case 's': {
                 const size_t n = stringLen(arg, argAvail);
-                if (n == 0) return false;
+                // `> argAvail` as well as `== 0`: stringLen returns the PADDED length, which
+                // overshoots whenever the NUL sits in the last 1-3 bytes of the buffer (avail 3,
+                // NUL at 2, pad4(3) = 4). Subtracting that from a size_t wraps argAvail to a huge
+                // number, every later `argAvail < 4` guard then passes, and the next numeric
+                // argument is read off the end of the datagram. One malformed packet on the LAN.
+                if (n == 0 || n > argAvail) return false;
                 arg += n; argAvail -= n;
                 break;
             }

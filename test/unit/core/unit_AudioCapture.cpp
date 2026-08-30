@@ -66,16 +66,19 @@ TEST_CASE("a picked audio device is remembered by name, not by its position in t
     // And when the device is genuinely gone (BlackHole uninstalled), it falls back rather than
     // silently grabbing whatever now sits at that index.
     static constexpr const char* kGone[] = {"default", "NDI Audio", "MacBook Air Microphone"};
-    uint8_t missing = 0;
+    // Start at a NON-default row, so "unchanged" is distinguishable from "reset to 0": with
+    // `missing` at 0 this case would pass even if apply did nothing at all.
+    uint8_t missing = 2;
     mm::ControlList gone;
     gone.addSelect("device", missing, kGone, 3);
     gone.setPersistLabel(gone.count() - 1);
-    mm::applyControlValue(gone[0], saved.c_str(), "device", mm::ApplyPolicy::Clamp);
-    // Index 0 is "default", the shipped fallback: a device that is simply GONE must land there,
-    // not merely somewhere other than BlackHole. Asserting the exact row is what makes this catch
-    // a silent shift onto whatever now occupies the old index.
-    CHECK(missing == 0);
-    CHECK(std::strcmp(kGone[missing], "default") == 0);
+    // A label naming no current option LEAVES THE CONTROL ALONE (Control.cpp: "the driver keeps
+    // its default"), which is the contract that matters here: the saved pick must never be
+    // silently re-pointed at whatever now occupies its old index. Not an error under Clamp.
+    CHECK(mm::applyControlValue(gone[0], saved.c_str(), "device",
+                                mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(missing == 2);                                        // untouched, not re-pointed
+    CHECK(std::strcmp(kGone[missing], "BlackHole 2ch") != 0);   // and certainly not the gone device
 }
 
 // The full lifecycle neither crashes nor wedges, whatever the host's audio situation: a

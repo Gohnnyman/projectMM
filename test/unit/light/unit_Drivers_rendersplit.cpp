@@ -480,17 +480,22 @@ TEST_CASE("render-split: the stall warning clears once the worker is healthy aga
     REQUIRE_FALSE(r.drivers.quiesceEncodeForTest());   // stall: the warning goes up
     REQUIRE(std::strlen(r.drivers.status()) > 0);
 
-    // Recovery: with the slow driver released, the worker answers again on the next frame, and the
-    // warning must LIFT rather than linger.
+    // Recovery. The worker must be STOPPED AND JOINED before the child list is touched: the
+    // timed-out quiesce above already cleared renderSplitActive_, so removeChild's own quiesce()
+    // returns immediately without waiting, and the still-running worker would be walking
+    // childCount() as we mutate it. TSan caught exactly that race in CI. release() joins.
     slow->letGo();
+    r.drivers.release();
     r.drivers.removeChild(slow);
+    delete slow;
+
+    // A healthy rig, and the split engaged again: the warning must be GONE, not merely stale.
     MockDriver quick;
     r.drivers.addChild(&quick);
-    r.drivers.prepare();                               // re-engages the split on a healthy rig
+    r.drivers.setup();
+    r.drivers.prepare();
     r.drivers.tick();
     CHECK(r.drivers.quiesceEncodeForTest());           // the worker answers
     CHECK(std::strlen(r.drivers.status()) == 0);       // and the card stops crying stall
-
     r.drivers.release();
-    delete slow;
 }

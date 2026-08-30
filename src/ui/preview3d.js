@@ -589,7 +589,10 @@ function parsePreviewAim(view, buf) {
     const count = view.getUint32(1, true);
     const bytes = buf.byteLength - 9;
     if (count === 0 || bytes < count * 2) { previewAim_ = null; return; }
-    previewAim_ = new Uint8Array(buf, 9, count * 2);
+    // A COPY, not a view: previewAim_ outlives this message (drawBeams reads it on every orbit
+    // redraw), and a view onto a recycled receive buffer would render beams from whatever arrived
+    // next. parsePreviewCoords copies for the same reason; 2 bytes/light on a cold path.
+    previewAim_ = new Uint8Array(new Uint8Array(buf, 9, count * 2));
     // Tag the aim with the table it was gathered against. aim[k] means "the k-th light of THAT
     // table", so after a geometry change (new epoch) or a downscale change (new stride) the same
     // index names a different fixture and the beams would point from the wrong heads until the
@@ -685,9 +688,10 @@ function renderPreviewFrame(view, buf) {
     if (count !== previewCoordCount_) return;   // mid-rebuild mismatch: the next table realigns
     const rgb = new Uint8Array(buf, 9);
     // Kept for drawBeams: a moving head's beam is the color the fixture is EMITTING, so the beam
-    // pass needs the same frame the dots were drawn from. Held as a view on the message buffer
-    // (no copy); drawBeams bounds-checks it against the coordinate count.
-    previewRgb_ = rgb;
+    // pass needs the same frame the dots were drawn from. A COPY, because this outlives the
+    // message: drawBeams reads it on every orbit redraw, and a view onto a recycled receive
+    // buffer would color beams from whatever arrived next.
+    previewRgb_ = new Uint8Array(rgb);
     // The first aim frame changes what the scene CONTAINS: beams extend well past the fixtures,
     // and a fit measured before they existed frames only the heads. Re-arm the auto-fit once so
     // the next one accounts for them; `sawAim_` keeps it to once, not once per aim frame.
@@ -697,7 +701,7 @@ function renderPreviewFrame(view, buf) {
     // cached previewAim_ would go on drawing the last aim forever: selecting a plain effect then
     // showed beams on every light. The device alternates aim and color frames, so a couple of
     // color frames with no aim between them means the aim stream has ended.
-    if (previewAim_ && ++framesSinceAim_ > kAimStaleFrames) previewAim_ = null;
+    if (previewAim_ && ++framesSinceAim_ > kAimStaleFrames) { previewAim_ = null; sawAim_ = false; }
     drawLights(rgb);
     measureFrameRate();
 }
@@ -753,7 +757,7 @@ function drawLights(rgb) {
     if (camAutoFit && previewBox_) {
         camAutoFit = false;
         const canvas = document.getElementById("preview");
-            const aspect = canvas ? canvas.clientWidth / Math.max(1, canvas.clientHeight) : 1;
+        const aspect = canvas ? canvas.clientWidth / Math.max(1, canvas.clientHeight) : 1;
         const bx = previewBox_.x, by = previewBox_.y, bz = previewBox_.z;
         let halfExtent = 0.5 * Math.sqrt(bx * bx + by * by + bz * bz) / previewMaxDim_;
         // With moving heads the BEAMS are most of what is on screen, and they all start at the

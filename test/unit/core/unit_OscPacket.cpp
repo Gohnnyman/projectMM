@@ -186,3 +186,34 @@ TEST_CASE("The address contract: what a controller can send") {
         CHECK(static_cast<int>(osc::toByte(m)) == c.expectByte);
     }
 }
+
+// A string argument whose NUL lands 1-3 bytes short of a 4-byte boundary AT THE END of the
+// datagram. stringLen returns the PADDED length, which then exceeds the bytes actually available:
+// subtracting it from a size_t wrapped argAvail to a huge number, every later `argAvail < 4` guard
+// passed, and the next numeric argument was read off the end of the buffer. One unauthenticated
+// UDP packet, reproduced under AddressSanitizer as a heap-buffer-overflow in beFloat32.
+//
+// Every other fixture in this file pads its arguments, which is exactly why none of them could
+// catch it: the bug lives in the UNpadded tail a real attacker controls.
+TEST_CASE("A string argument with an unpadded tail is rejected, not read past") {
+    // "/a\0\0"  ",sf\0"  "xy\0"  -- 11 bytes, and the last element is 3 bytes where 4 are implied.
+    const std::vector<uint8_t> pkt = {
+        '/', 'a', 0, 0,
+        ',', 's', 'f', 0,
+        'x', 'y', 0,
+    };
+    osc::Message m;
+    CHECK_FALSE(osc::parse(pkt.data(), pkt.size(), m));   // refused rather than overread
+    CHECK_FALSE(m.hasValue);
+
+    // The same message with the string PROPERLY padded is still short of its float, and must also
+    // be refused: the fix must not turn an overread into a bogus value.
+    const std::vector<uint8_t> padded = {
+        '/', 'a', 0, 0,
+        ',', 's', 'f', 0,
+        'x', 'y', 0, 0,
+    };
+    osc::Message m2;
+    CHECK_FALSE(osc::parse(padded.data(), padded.size(), m2));
+    CHECK_FALSE(m2.hasValue);
+}

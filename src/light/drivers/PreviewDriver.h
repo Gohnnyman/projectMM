@@ -446,8 +446,6 @@ public:
         if (cpl == 0 || n == 0) return false;
         // The staging buffer is sized for RGB (3 bytes/light) at the coord-table build, and aim
         // needs 2, so it always fits. Bail rather than overrun if that ever stops being true.
-        if (!staging_ || static_cast<size_t>(coordCount_) * 2 > stagingCap_) return false;
-
         uint8_t header[9];
         header[0] = 0x04;
         header[1] = static_cast<uint8_t>(coordCount_ & 0xFF);
@@ -464,8 +462,13 @@ public:
         // on a dense 1D buffer, and on a mapped or sparse layout it silently pairs each beam with
         // a different fixture's aim. A missing axis sends center (128), not 0, which would aim
         // every such head hard over.
+        // staging_ is sized for RGB (3 bytes/light) and an aim pair needs 2, so this normally fits;
+        // the check is for the alloc-miss case, where skipping a frame is right on a lossy channel.
+        // It also SHARES the buffer the coordinate table is built in, which is safe only because
+        // tick() gates every path on `idle` and sendCoordTable rebuilds immediately before
+        // sending: the table's bytes are live only straight after its build.
         const size_t bodyBytes = static_cast<size_t>(coordCount_) * 2;
-        if (!staging_ || stagingCap_ < bodyBytes) return false;   // alloc miss: skip, lossy channel
+        if (!staging_ || stagingCap_ < bodyBytes) return false;
         const nrOfLightsType s = previewStride_;
         struct AimCtx {
             uint8_t* out; size_t at; const uint8_t* src; nrOfLightsType n; uint8_t cpl;
