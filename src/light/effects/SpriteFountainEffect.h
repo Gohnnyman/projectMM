@@ -155,9 +155,9 @@ private:
 
     /// The reactive fountain: ONE SPRITE PER BAND, thrown when that band is loud.
     ///
-    /// The 16 bands map onto the 7 sprite kinds in order, so a species belongs to a part of the
-    /// spectrum: bass throws toasters, treble throws tiny fish, and the plume's makeup tells you
-    /// what the music is doing. A band also throws HARDER when it is louder, so a kick launches
+    /// The 16 bands map onto the 10 sprite kinds in order, so a species belongs to a part of the
+    /// spectrum: the bass bands throw fish, the treble bands throw invaders, and the plume's
+    /// makeup tells you what the music is doing. A band also throws HARDER when it is louder, so a kick launches
     /// its sprite over the top of the panel while a quiet passage lobs one just clear of the
     /// nozzle. Silence throws nothing at all.
     void emitByBand(const AudioFrame& audio, draw::pos_t ox, draw::pos_t oy,

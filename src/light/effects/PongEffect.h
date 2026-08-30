@@ -74,13 +74,25 @@ public:
         // in the same wall-clock time on both, rather than 20x faster on the quick one.
         rally_.advance(elapsed(), rallyBpm);
         const uint32_t travel = rally_.phase(kCourtScale);
+        // The two modes keep two different clocks: free-running counts elapsed time, reactive
+        // counts beats. Switching between them mid-rally would hand step() a jump between the two
+        // -- the ball teleporting across the court one way, and an unsigned underflow to a
+        // four-billion step the other. Rebase both to the current position instead, so the toggle
+        // is seamless and the ball carries on from where it is.
+        if (soundReactive != wasReactive_) {
+            wasReactive_ = soundReactive;
+            lastTravel_ = travelAt_;
+        }
         if (soundReactive) {
             // On the beat the ball JUMPS a slice of the court and then waits. Silence holds it
             // still, which is what makes the mode read as reactive rather than merely animated.
             if (beat) travelAt_ += kCourtScale / kBeatSteps;
         } else {
-            travelAt_ = travel;
+            // Free-running: adopt the elapsed-time clock by moving the baseline with it, so the
+            // difference step() sees is this frame's travel and not the whole history.
+            travelAt_ += travel - lastFreeTravel_;
         }
+        lastFreeTravel_ = travel;
         step();
         render(cv);
     }
@@ -200,7 +212,7 @@ private:
             const lengthType px = p == 0 ? 0 : static_cast<lengthType>(w - 1);
             const int32_t cy = py_[p] * courtH / kCourtScale;
             for (int32_t y = cy - half; y <= cy + half; y++)
-                if (y >= 0 && y < courtH + 1) draw::pixel(cv, {px, static_cast<lengthType>(y), 0}, fg);
+                if (y >= 0 && y < h) draw::pixel(cv, {px, static_cast<lengthType>(y), 0}, fg);
         }
 
         const lengthType bxp = static_cast<lengthType>(bx_ * courtW / kCourtScale);
@@ -228,8 +240,10 @@ private:
     static constexpr uint16_t kBeatMargin = 24;     ///< a transient this far over the average is a beat
 
     BeatPhase rally_;
-    uint32_t  travelAt_ = 0;     ///< how far the rally has travelled, the reactive mode's own clock
+    uint32_t  travelAt_ = 0;     ///< how far the rally has travelled, in court units
     uint32_t  lastTravel_ = 0;
+    uint32_t  lastFreeTravel_ = 0;   ///< last free-running reading, so a toggle costs no distance
+    bool      wasReactive_ = false;  ///< which clock ran last frame; a change rebases the baseline
     int32_t   bx_ = kCourtScale / 2, by_ = kCourtScale / 2;
     int8_t    dirX_ = 1;
     int16_t   driftY_ = 90;

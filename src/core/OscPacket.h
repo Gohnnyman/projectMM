@@ -175,6 +175,14 @@ inline size_t encodeFloat(uint8_t* out, size_t cap, const char* address, float v
 /// send an int in the target's own range. Both are accepted, and CLAMPED rather than rejected: a
 /// controller sending 0..127 must not appear dead, and a float slightly past 1.0 is a rounding
 /// artifact, not an error.
+/// Is this message ON? For a BOOLEAN destination, where any nonzero means on. Separate from
+/// toByte because scaling to a byte rounds a small float to zero: 0.001 is not off, it is a
+/// controller that sends a range where a switch wanted a flag.
+inline bool isTruthy(const Message& m) {
+    if (!m.hasValue) return false;
+    return m.wasFloat ? (m.f != 0.0f) : (m.i != 0);
+}
+
 inline uint8_t toByte(const Message& m) {
     if (!m.hasValue) return 0;
     if (m.wasFloat) {

@@ -1,5 +1,5 @@
 {
-  "commit": "214c77f6",
+  "commit": "e4b9b801",
   "flash": {
     "esp32s3-n16r8": 1880912,
     "desktop": 1673512,
@@ -17,8 +17,8 @@
   },
   "perf": {
     "desktop": {
-      "tick_us": 2597,
-      "fps": 385,
+      "tick_us": 282,
+      "fps": 3546,
       "scenario_p50": {
         "Layer_base_pipeline": {
           "p50": 75,

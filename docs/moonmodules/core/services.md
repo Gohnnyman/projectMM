@@ -190,12 +190,17 @@ in its launcher must be off to edit the layout.
 
 Driving the device from that session, beside the Control card it mirrors.
 
-It binds only to `/mm/switch/N`, `/mm/encoder/N` and `/mm/fader/N` on purpose. A surface should
+It binds only to `/mm/switch/N`, `/mm/encoder/N` and `/mm/fader/N`, N being 1 to 8, on purpose. A surface should
 address the SURFACE, and [Control](control.md) decides what each one drives, so one layout keeps
 working as assignments change and a hardware desk lands on the same bindings. Reaching past it to
 `/mm/control/<Module>/<control>` also works and is the right answer for a one-off, but it hard-codes
 into the layout a mapping that belongs on the device. Two have targets today, `switch1`
 (`Drivers.on`) and `fader1` (`Drivers.brightness`); the rest wait for a target picker.
+
+The session also carries a **pad grid**, and those pads are inert: `/mm/pad/N` has no route in the
+OSC module yet, so pressing one sends a message nothing reads. It ships anyway because the grid is
+the layout a preset launcher wants and the addresses are the ones it will use; treat it as a
+placeholder rather than as part of the contract above.
 
 **It does not reach a Mackie desk.** The X-Touch and QCon Pro G2 speak Mackie Control over MIDI,
 not OSC: see [control surfaces](../../reference/control-surfaces.md) for what would.

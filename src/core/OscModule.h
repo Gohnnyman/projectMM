@@ -197,7 +197,10 @@ private:
         if (idx < 1 || idx > kSurfaceWidth) return;  // the surface is 8 wide; anything else is not ours
         char control[16];
         std::snprintf(control, sizeof(control), "%s%ld", prefix, idx);
-        if (asBool) setBool("Control", control, osc::toByte(m) != 0);
+        // A switch reads the RAW value, not the scaled byte: toByte rounds a float of 0.001 to 0,
+        // so a controller sending a small positive value would turn the switch off while saying on.
+        // Any nonzero is on, which is what a pad, a toggle and a MIDI note-on all mean.
+        if (asBool) setBool("Control", control, osc::isTruthy(m));
         else        setValue("Control", control, osc::toByte(m));
     }
 

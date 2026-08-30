@@ -1328,7 +1328,7 @@ body.cards-resizing {
     border-radius: 50%;
     background: var(--fg);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    transition: transform 0.15s;
+    transition: left 0.15s, right 0.15s;   /* the checked rule moves the thumb by its insets */
 }
 .switch:has(input:checked) .switch-track {
     /* Light accent tint, not flooded — matches the slider's filled-portion look. */
@@ -1336,10 +1336,13 @@ body.cards-resizing {
     border-color: var(--accent);
 }
 .switch:has(input:checked) .switch-track::after {
-    /* Travel is the track's own width minus the thumb and both insets, not a constant: the pill is
-       40px in a normal row but narrows to --surface-col (26px) inside a switch strip, where a fixed
-       24px slid the thumb past the right edge. 100% here is the track, which is inset: 0. */
-    transform: translateX(calc(100% - 12px - 2px - 2px));
+    /* Park the thumb against the RIGHT inset rather than translating it a fixed distance. The pill
+       is 40px in a normal row but narrows to --surface-col (26px) inside a switch strip, so any
+       constant travel is wrong at one of the two sizes; a percentage is no better, because on a
+       ::after it resolves against the thumb, not the track. Letting layout place it works at both. */
+    left: auto;
+    right: 2px;
+    transform: none;
 }
 .switch:hover .switch-track { border-color: var(--accent); }
 .control-row progress {

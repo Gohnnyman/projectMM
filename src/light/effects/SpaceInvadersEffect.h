@@ -189,6 +189,11 @@ private:
         oy_ = 0;
         dir_ = 1;
         frame_ = 0;
+        // The march latch belongs with the clock it tracks: prepare() zeroes formation_, and a
+        // latch left at the old phase disagrees with it, so the first step after a reset fires
+        // immediately instead of waiting out a beat.
+        lastPhase_ = 0;
+        cannonX_ = 0;
         for (uint8_t i = 0; i < kShots; i++) shotTtl_[i] = 0;
     }
 
@@ -300,7 +305,10 @@ private:
         pal[invart::kDark]  = RGB{20, 120, 30};
         pal[invart::kEye]   = RGB{200, 255, 200};
         const uint8_t sc = scale();
-        const lengthType py = static_cast<lengthType>(height() - invart::GH * sc);
+        // Clamped: on a panel shorter than the scaled cannon this goes negative and the cannon is
+        // drawn off the top edge instead of standing on the floor.
+        const int32_t top = static_cast<int32_t>(height()) - invart::GH * sc;
+        const lengthType py = static_cast<lengthType>(top < 0 ? 0 : top);
         const draw::sprites::Sprite s{invart::kCannon, pal, invart::GW, invart::GH,
                                       invart::GF, invart::kPaletteCount};
         draw::sprite(cv, s, 0, static_cast<lengthType>(cannonX_), py, sc);

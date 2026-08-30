@@ -382,7 +382,7 @@ Physics run on elapsed time, not per frame, so the plume looks the same on a 60 
 - `rate` — sprites launched per beat of the emit clock.
 - `emitBpm` — launches per minute, so the plume's density is a choice rather than a side effect of how fast the device runs.
 - `size` — integer magnification per art pixel.
-- `soundReactive` — one sprite per frequency band, thrown when that band is loud, so the cast maps onto the spectrum: bass throws toasters, treble throws tiny fish. Silence throws nothing.
+- `soundReactive` — one sprite per frequency band, thrown when that band is loud, so the cast maps onto the spectrum in order: the bass bands throw fish, the treble bands throw invaders. Silence throws nothing.
 
 Colors come from the active palette, one entry per sprite, held for its whole flight. Origin: projectMM original
 

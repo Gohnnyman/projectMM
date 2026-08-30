@@ -108,6 +108,29 @@ TEST_CASE("A float 0 to 1 and an int 0 to 255 mean the same control value") {
     i.i = -5;   CHECK(osc::toByte(i) == 0);
 }
 
+// A SWITCH is a flag, not a level, so it reads the raw value rather than the scaled byte. Scaling
+// first rounds a small float to zero, which would turn a switch off while its controller says on.
+TEST_CASE("a switch reads any nonzero value as on, however small") {
+    osc::Message f{};
+    f.hasValue = true; f.wasFloat = true;
+
+    f.f = 0.0f;   CHECK(osc::isTruthy(f) == false);
+    f.f = 1.0f;   CHECK(osc::isTruthy(f) == true);
+    // Under half a byte-step: toByte rounds this to 0, and reading THAT as the switch is the bug.
+    f.f = 0.001f; CHECK(osc::toByte(f) == 0);
+    CHECK(osc::isTruthy(f) == true);
+    f.f = -0.5f;  CHECK(osc::isTruthy(f) == true);   // a value present at all is not "off"
+
+    osc::Message i{};
+    i.hasValue = true; i.wasFloat = false;
+    i.i = 0;   CHECK(osc::isTruthy(i) == false);
+    i.i = 1;   CHECK(osc::isTruthy(i) == true);
+    i.i = 127; CHECK(osc::isTruthy(i) == true);      // a MIDI note-on velocity
+
+    osc::Message none{};                             // no argument at all: nothing was said
+    CHECK(osc::isTruthy(none) == false);
+}
+
 // The parse reads an unauthenticated datagram off the LAN, so a malformed one must be refused
 // rather than read past. Every case here would be an out-of-bounds read in a naive parser.
 TEST_CASE("A malformed datagram is refused, never read past its end") {
