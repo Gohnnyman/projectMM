@@ -50,6 +50,16 @@ export const TYPE_RENAMES = {
 // the bench: a blanket fps → targetFps corrupted NetworkSendDriver's own `fps`). `review` marks
 // a value-semantics change: the name maps, the value needs the user's eye.
 export const CONTROL_RENAMES = {
+    // ControlModule's encoders spell the word out: the interface uses the industry term, the UI
+    // abbreviates it to `enc` for the strip. Scoped, because `enc1` is a plausible name anywhere.
+    "enc1": { name: "encoder1", date: "2026-08-30", onTypes: ["ControlModule"] },
+    "enc2": { name: "encoder2", date: "2026-08-30", onTypes: ["ControlModule"] },
+    "enc3": { name: "encoder3", date: "2026-08-30", onTypes: ["ControlModule"] },
+    "enc4": { name: "encoder4", date: "2026-08-30", onTypes: ["ControlModule"] },
+    "enc5": { name: "encoder5", date: "2026-08-30", onTypes: ["ControlModule"] },
+    "enc6": { name: "encoder6", date: "2026-08-30", onTypes: ["ControlModule"] },
+    "enc7": { name: "encoder7", date: "2026-08-30", onTypes: ["ControlModule"] },
+    "enc8": { name: "encoder8", date: "2026-08-30", onTypes: ["ControlModule"] },
     // PreviewDriver's fps → targetFps (now trades resolution for rate). Other drivers keep `fps`.
     "fps": { name: "targetFps", date: "2026-08-25", onTypes: ["PreviewDriver"] },
     // The correction Select every LED driver inherits from DriverBase.

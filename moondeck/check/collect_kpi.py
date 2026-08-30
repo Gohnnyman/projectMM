@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -82,6 +83,66 @@ def _pick_first_existing(*paths):
     return None
 
 
+
+# Headline scenarios: a fixed, MODULE-ISOLATED set whose numbers stay comparable across commits.
+#
+# The KPI's old single figure was the max over every MEASURE step of every scenario, so it moved
+# whenever a scenario was added or a heavier one joined the set, and it sampled the worst outlier
+# of the worst scenario. Measured at 626 us and 167 us on trees whose tick path was identical.
+#
+# These two build a bare pipeline and instantiate none of the optional modules (no OSC, NDI, HLS
+# or Preview), so they measure the same thing before and after a cycle that adds modules. New
+# modules belong in the advanced scenarios, which keep their own numbers.
+HEADLINE_SCENARIOS = ("scenario_Layer_base_pipeline", "scenario_Layer_memory_1to1")
+
+
+def scenario_observed(target: str) -> dict:
+    """p50/p95 tick per headline scenario, read from the scenario files' own `observed` blocks.
+
+    Those blocks already hold a 32-sample rolling window per measure step per target, with order
+    statistics derived from real samples (moondeck/scenario/_observed.py). Reading them beats
+    re-deriving a number from one run's stdout: a p50 over 32 runs is reproducible where a single
+    max is whatever the host was doing that second.
+
+    `target` names the platform ("desktop-macos"), because a tick from macOS, CI Linux and an
+    ESP32 are three different measurements and averaging them would mean nothing.
+    """
+    out: dict = {}
+    for name, per in _scenario_matrix().items():
+        if ("scenario_" + name) not in HEADLINE_SCENARIOS:
+            continue
+        if target in per:
+            out[name] = per[target]
+    return out
+
+
+def _scenario_matrix() -> dict:
+    """Every scenario's worst measure step, per target: {scenario: {target: {p50, p95, n}}}.
+
+    The worst step by p50, not the mean of all steps: a scenario's cost is what its heaviest
+    moment costs, and averaging a cheap setup step against a 128x128 render hides the number
+    that matters.
+    """
+    out: dict = {}
+    for d in sorted((ROOT / "test" / "scenarios").glob("*/*.json")):
+        try:
+            doc = json.loads(d.read_text())
+        except (OSError, ValueError):
+            continue
+        per: dict = {}
+        for step in doc.get("steps", []):
+            for tgt, ob in (step.get("observed") or {}).items():
+                tick = (ob or {}).get("tick_us") or {}
+                if not tick.get("n"):
+                    continue
+                if tick.get("p50", 0) > per.get(tgt, {}).get("p50", -1):
+                    per[tgt] = {"p50": tick.get("p50", 0), "p95": tick.get("p95", 0),
+                                "n": tick.get("n", 0), "last": ob.get("last_updated", "")}
+        if per:
+            out[d.stem.replace("scenario_", "")] = per
+    return out
+
+
 def collect_desktop():
     kpi = {}
 
@@ -151,6 +212,15 @@ def collect_desktop():
         if per_scenario_max:
             kpi["tick_us"] = per_scenario_max
             kpi["fps"] = [1000000 // t if t > 0 else 0 for t in per_scenario_max]
+        # Named, module-isolated p50s beside the raw series: what repo-health tracks per commit.
+        obs = scenario_observed("desktop-" + ("macos" if sys.platform == "darwin"
+                                              else "windows" if os.name == "nt" else "linux"))
+        if obs:
+            kpi["scenario_p50"] = obs
+        # The whole matrix, every scenario x every target, for the repo-health table.
+        matrix = _scenario_matrix()
+        if matrix:
+            kpi["scenario_matrix"] = matrix
         if buffer_lights:
             kpi["lights"] = max(buffer_lights)
 
@@ -493,6 +563,12 @@ def main():
         if desktop.get("tick_us"):
             perf["desktop"] = {"tick_us": desktop["tick_us"][0],
                                "fps": desktop.get("fps", [None])[0]}
+            # The isolated-scenario p50s ride along, so repo-health can report a figure that
+            # compares across commits beside the run's own summary tick.
+            if desktop.get("scenario_p50"):
+                perf["desktop"]["scenario_p50"] = desktop["scenario_p50"]
+        if desktop.get("scenario_matrix"):
+            perf["scenario_matrix"] = desktop["scenario_matrix"]
         if esp32.get("tick_us"):
             perf["esp32"] = {"tick_us": esp32["tick_us"], "fps": esp32.get("fps")}
         repo_health.write(perf)

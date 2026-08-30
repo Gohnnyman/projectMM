@@ -66,6 +66,30 @@ Re-running is idempotent: any existing `projectMM` instance is stopped first, th
 
 While the app is running, MoonDeck shows the button as **Stop** (a 5-second poll on `/api/running` detects the live process via `process_name`). Pressing Stop terminates the app; pressing Run again restarts it. From the CLI: `pkill -f build/<host>/projectMM` (or `pkill projectMM` if you don't have multiple host builds active).
 
+### run_open_stage_control
+
+Launch [Open Stage Control](https://openstagecontrol.ammd.net/) as a control surface for the running
+device: eight faders, eight encoders and eight switches, wired to the
+[OSC module](../docs/moonmodules/core/services.md) in both directions.
+
+```bash
+uv run moondeck/run/run_open_stage_control.py                   # device on this machine
+uv run moondeck/run/run_open_stage_control.py --host 192.168.1.42
+```
+
+Then open **http://127.0.0.1:8088**. Nothing needs typing into Open Stage Control's settings panel:
+the session, the send address and the listen port are all command-line arguments, and the session's
+own `autosync` widget asks the device for its current state on every page load, so the widgets are
+correct immediately rather than showing the layout file's defaults.
+
+On the device, the OSC module needs `listen` and `feedback` on.
+
+It runs headless (a web server, no desktop window), which is what makes the surface reachable from a
+phone or another laptop on the same network. Options: `--host` / `--port` for the device,
+`--listen` for where feedback arrives (the device's `feedbackPort`), `--ui-port` for the surface
+itself, and `--app` when the binary is not on PATH or in the usual place. Install Open Stage Control
+first; it is a free download.
+
 ### preview_installer
 
 ![Installer](../docs/assets/ui/installer.png)

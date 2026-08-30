@@ -1360,6 +1360,21 @@ async function moonbaseUpdateFlow(opts) {
     }
 }
 
+// Which surface bank a control belongs to, or null for an ordinary row. A surface strip is
+// inline-flex, so consecutive strips pack onto one line and a wide card would run the switches
+// straight into the encoders; a break closes a bank where the kind changes. BOTH render paths use
+// this (createCard builds a card from scratch, syncVisibleControls rebuilds it live when a hidden
+// flag flips), because a render rule that lives in only one of them is right until the other runs.
+function surfaceBank(ctrl) {
+    return ctrl.switchRow ? "switch" : ctrl.encoder ? "encoder" : ctrl.fader ? "fader" : null;
+}
+
+function surfaceBreak() {
+    const br = document.createElement("div");
+    br.className = "surface-break";
+    return br;
+}
+
 function createCard(mod, depth) {
     const card = document.createElement("div");
     card.className = "card";
@@ -1550,8 +1565,12 @@ function createCard(mod, depth) {
     }
 
     if (mod.controls) {
+        let bank = null;
         for (const ctrl of mod.controls) {
             if (!controlRendersGenerically(mod, ctrl)) continue;
+            const kind = surfaceBank(ctrl);
+            if (bank && kind !== bank) controlsHost.appendChild(surfaceBreak());
+            bank = kind;
             const row = createControl(mod.name, mod.type, ctrl);
             if (row) controlsHost.appendChild(row);
         }
@@ -1966,6 +1985,9 @@ function createControl(moduleName, moduleType, ctrl) {
     // Expert-only controls (only reachable here when expert mode is on: see controlRendersGenerically)
     // get a distinct treatment so they read as a different tier: a left accent stripe + muted label.
     if (ctrl.advanced) row.classList.add("control-advanced");
+    // A switch-row control renders as a strip like an encoder or fader, so switch N sits in the
+    // same column as encoder N and fader N: a surface reads down a channel, not across a list.
+    if (ctrl.switchRow) row.classList.add("control-switch");
     row.dataset.key = ctrl.name;
 
     const label = document.createElement("label");
@@ -1974,7 +1996,7 @@ function createControl(moduleName, moduleType, ctrl) {
     // that governs the 🔧 controls: the toggle is never `advanced` (it must always be reachable), so key
     // it by name rather than the flag.
     if (moduleName === "System" && ctrl.name === "expertMode") label.classList.add("control-label--expert");
-    label.textContent = ctrl.name;
+    label.textContent = displayName(ctrl.name);
     row.appendChild(label);
 
     const key = moduleName + ":" + ctrl.name;
@@ -3779,6 +3801,16 @@ function redrawRangeDecorations(input) {
 // collapses any selection inside it, so an unconditional write once a second makes a value
 // impossible to select and copy: the highlight dies under the cursor. It is also wasted DOM work,
 // since most of these strings are identical from one second to the next.
+// A control's DISPLAY label. The name itself stays the industry-standard word, because it is the
+// API key, the persisted key and the OSC address (`/mm/fader/1`), and a surface built against a
+// standard name is portable where an invented abbreviation is not. But eight of them side by side
+// in a strip have no room for it, so the shortening lives here, in the one place a label is drawn.
+const kShortLabels = {fader: "fad", encoder: "enc", switch: "sw"};
+function displayName(name) {
+    const m = /^([a-z]+)(\d+)$/.exec(name);
+    return m && kShortLabels[m[1]] ? kShortLabels[m[1]] + m[2] : name;
+}
+
 function setText(el, text) {
     if (el && el.textContent !== text) el.textContent = text;
 }
@@ -3924,6 +3956,19 @@ function syncVisibleControls(mod) {
                   || host.querySelector(":scope > .card-footer");
         }
         host.insertBefore(row, anchor);
+    }
+    // Rebuild the bank breaks. This path inserts rows one at a time, so it cannot know where a bank
+    // ends while it works; doing it once at the end, from the same predicate createCard uses, is
+    // what keeps the two paths agreeing. Stale breaks are dropped first: a rebuild that left them
+    // in place would wrap the strips at last render's boundaries.
+    for (const br of host.querySelectorAll(":scope > .surface-break")) br.remove();
+    let bank = null;
+    for (const c of visibleControls) {
+        const kind = surfaceBank(c);
+        const row = host.querySelector(`:scope > .control-row[data-key="${cssEscape(c.name)}"]`);
+        if (!row) continue;
+        if (bank && kind !== bank) host.insertBefore(surfaceBreak(), row);
+        bank = kind;
     }
     return true;
 }

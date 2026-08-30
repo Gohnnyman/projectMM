@@ -445,6 +445,13 @@ def _arrow(new, old, key, fmt=str, lower_is_better=True):
     return f"{fmt(new)} ({sign}{fmt(abs(diff))}){mark}"
 
 
+# Columns of the scenario matrix, in fleet order. A fixed list rather than whatever the data
+# happens to carry: a new target should be a deliberate addition, and "unknown" (a scenario run
+# before targets were named) is a data defect, not a device.
+MATRIX_TARGETS = ("desktop-macos", "desktop-windows", "esp32", "esp32s3-n16r8",
+                  "esp32p4rev1-eth", "esp32s31", "esp32-eth", "esp32-eth-wifi")
+
+
 def render_markdown(new, old):
     """The snapshot as a table, with units and per-metric deltas against the last commit."""
     o = old or {}
@@ -479,11 +486,80 @@ def render_markdown(new, old):
     if new.get("perf"):
         L += ["## Render performance", "", "| Target | Tick | FPS |", "|---|---:|---:|"]
         for k, v in sorted(new["perf"].items()):
+            # `scenario_matrix` rides in the perf block but is the matrix's own data, not a target:
+            # rendering it as a row printed a "0 µs" device that does not exist.
+            if k == "scenario_matrix" or not isinstance(v, dict) or "tick_us" not in v:
+                continue
             prev = (o.get("perf") or {}).get(k, {})
             tick = _arrow(v.get("tick_us", 0), prev, "tick_us", lambda n: f"{n:,} µs")
             fps = _arrow(v.get("fps") or 0, prev, "fps", lambda n: f"{n:,}", lower_is_better=False)
             L.append(f"| {k} | {tick} | {fps} |")
         L.append("")
+
+        # The full matrix: every scenario's worst step, per target, as p50. One row per scenario,
+        # one column per device, so a board's cost for a given pipeline is readable across the
+        # fleet and a regression on one target stands out from a change that moved all of them.
+        matrix = (new.get("perf") or {}).get("scenario_matrix") or {}
+        if matrix and any(matrix.values()):
+            # MATRIX_TARGETS fixes the column ORDER (desktop first, then the boards); a target it
+            # does not name still gets a column, appended, rather than being dropped without a
+            # word -- a new board on the bench must show up here the day it first reports.
+            seen = {c for per in matrix.values() for c in per}
+            cols = ([c for c in MATRIX_TARGETS if c in seen]
+                    + sorted(c for c in seen if c not in MATRIX_TARGETS))
+            prevm = ((o.get("perf") or {}).get("scenario_matrix") or {})
+            L += ["### Scenario tick by target (p50 of each sample window)", "",
+                  "| Scenario | " + " | ".join(cols) + " |",
+                  "|---" * (len(cols) + 1) + "|"]
+            for name in sorted(matrix):
+                cells = []
+                for c in cols:
+                    st = matrix[name].get(c)
+                    if not st:
+                        cells.append("-")
+                        continue
+                    # A single sample is not a percentile ("n=1 is a first impression, not a
+                    # baseline" -- _observed.py), so mark it rather than print it as measured.
+                    mark = "" if st.get("n", 0) >= 4 else " ?"
+                    prev = (prevm.get(name) or {}).get(c) or {}
+                    cells.append(_arrow(st.get("p50", 0), prev, "p50",
+                                        lambda n: f"{n:,}") + mark)
+                L.append(f"| {name} | " + " | ".join(cells) + " |")
+            cells = max(1, len(matrix) * len(cols))  # max(): the percentages below divide by it
+            have = sum(1 for per in matrix.values() for c in cols if c in per)
+            solid = sum(1 for per in matrix.values() for c in cols
+                        if (per.get(c) or {}).get("n", 0) >= 4)
+            L += ["", ("Microseconds. `?` marks a cell backed by fewer than 4 samples, which is a "
+                       "first impression rather than a percentile; several are months old and "
+                       "were captured during a network reconfigure, so they read as whole "
+                       "milliseconds. `-` means that target has never run that scenario."), "",
+                  (f"**Coverage: {have}/{cells} cells measured ({100 * have // cells}%), "
+                   f"{solid} of them with 4+ samples ({100 * solid // cells}%).** The blanks are "
+                   "the point: a target that has never run a scenario cannot regress in it, and "
+                   "cannot be compared against the others. Filling the matrix means running the "
+                   "scenario suite on each bench board, which is a standing task rather than a "
+                   "one-off."), ""]
+
+        # Named scenarios beside the summary figure. The Tick column above is the max over every
+        # measure step of every scenario, so it moves when a scenario is added or a heavier one
+        # joins the set: useful as a ceiling, useless for comparing one commit to the next. These
+        # are a fixed pair that instantiate none of the optional modules, reported as the p50 of
+        # each one's own 32-sample window, so the same pipeline is compared each time.
+        for k, v in sorted(new["perf"].items()):
+            if not isinstance(v, dict):
+                continue
+            per = v.get("scenario_p50") or {}
+            if not per:
+                continue
+            prevper = ((o.get("perf") or {}).get(k, {}) or {}).get("scenario_p50") or {}
+            L += [f"### {k}: isolated scenarios (p50 of the sample window)", "",
+                  "| Scenario | p50 | p95 | n |", "|---|---:|---:|---:|"]
+            for name, st in sorted(per.items()):
+                p50 = _arrow(st.get("p50", 0), prevper.get(name, {}), "p50", lambda n: f"{n:,} µs")
+                L.append(f"| {name} | {p50} | {st.get('p95', 0):,} µs | {st.get('n', 0)} |")
+            L += ["", ("These build a bare pipeline with no optional modules, so a change here is "
+                       "a change in the pipeline itself rather than in what was measured. A new "
+                       "module belongs in an advanced scenario, which keeps its own numbers."), ""]
 
     L += ["## Code", "", "| Area | Lines | Comments | Comment share |", "|---|---:|---:|---:|"]
     for area in new.get("loc", {}):

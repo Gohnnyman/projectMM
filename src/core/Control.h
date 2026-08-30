@@ -335,7 +335,11 @@ struct ControlDescriptor {
     // below are positional, so this field's place in the order is load-bearing.
     bool fader = false;     // Render as a vertical fader (see ControlList::setFader). Presentation only.
     bool encoder = false;   // Render as a rotary encoder (see ControlList::setEncoder).
-    const char* faderTarget = nullptr;   // What the fader/encoder drives ("Drivers.brightness"), or null.
+    bool switchRow = false; // Render in the horizontal switch strip (see ControlList::setSwitchRow).
+    // What this surface control drives ("Drivers.brightness"), or null. ONE field for all three
+    // kinds: a switch, an encoder and a fader each drive exactly one thing, and three fields would
+    // be three ways to say it with two always null.
+    const char* surfaceTarget = nullptr;
     // Optional per-control input validator (Text/Password only; nullptr = accept anything
     // that fits the buffer). applyControlValue calls it on the incoming string BEFORE the
     // write and returns ApplyResult::Malformed on reject, so the check covers EVERY write
@@ -639,7 +643,7 @@ public:
     /// `target` names what the fader drives ("Drivers.brightness"), or null when nothing yet. A
     /// borrowed pointer, like every other name here.
     void setFader(uint8_t i, bool fader = true, const char* target = nullptr) {
-        if (i < count_) { controls_[i].fader = fader; controls_[i].faderTarget = target; }
+        if (i < count_) { controls_[i].fader = fader; controls_[i].surfaceTarget = target; }
     }
 
     /// Render this numeric control as a ROTARY ENCODER: a knob, dragged vertically to turn. The
@@ -647,7 +651,15 @@ public:
     /// put above their strips. Presentation only, same as setFader — value, range and persistence
     /// are untouched. `target` names what it drives, or null when nothing yet.
     void setEncoder(uint8_t i, bool encoder = true, const char* target = nullptr) {
-        if (i < count_) { controls_[i].encoder = encoder; controls_[i].faderTarget = target; }
+        if (i < count_) { controls_[i].encoder = encoder; controls_[i].surfaceTarget = target; }
+    }
+
+    /// Render this boolean control in the horizontal SWITCH STRIP: a desk's channel buttons, sitting
+    /// in the same columns as the encoders and faders below them. Presentation only, like setFader
+    /// and setEncoder. Without it eight switches stack as eight ordinary rows, which is both tall
+    /// and unreadable as a surface: the point of a strip is that column N is one channel.
+    void setSwitchRow(uint8_t i, bool switchRow = true, const char* target = nullptr) {
+        if (i < count_) { controls_[i].switchRow = switchRow; controls_[i].surfaceTarget = target; }
     }
 
 private:

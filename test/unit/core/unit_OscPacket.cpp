@@ -108,6 +108,29 @@ TEST_CASE("A float 0 to 1 and an int 0 to 255 mean the same control value") {
     i.i = -5;   CHECK(osc::toByte(i) == 0);
 }
 
+// A SWITCH is a flag, not a level, so it reads the raw value rather than the scaled byte. Scaling
+// first rounds a small float to zero, which would turn a switch off while its controller says on.
+TEST_CASE("a switch reads any nonzero value as on, however small") {
+    osc::Message f{};
+    f.hasValue = true; f.wasFloat = true;
+
+    f.f = 0.0f;   CHECK(osc::isTruthy(f) == false);
+    f.f = 1.0f;   CHECK(osc::isTruthy(f) == true);
+    // Under half a byte-step: toByte rounds this to 0, and reading THAT as the switch is the bug.
+    f.f = 0.001f; CHECK(osc::toByte(f) == 0);
+    CHECK(osc::isTruthy(f) == true);
+    f.f = -0.5f;  CHECK(osc::isTruthy(f) == true);   // a value present at all is not "off"
+
+    osc::Message i{};
+    i.hasValue = true; i.wasFloat = false;
+    i.i = 0;   CHECK(osc::isTruthy(i) == false);
+    i.i = 1;   CHECK(osc::isTruthy(i) == true);
+    i.i = 127; CHECK(osc::isTruthy(i) == true);      // a MIDI note-on velocity
+
+    osc::Message none{};                             // no argument at all: nothing was said
+    CHECK(osc::isTruthy(none) == false);
+}
+
 // The parse reads an unauthenticated datagram off the LAN, so a malformed one must be refused
 // rather than read past. Every case here would be an out-of-bounds read in a naive parser.
 TEST_CASE("A malformed datagram is refused, never read past its end") {
@@ -175,7 +198,7 @@ TEST_CASE("The address contract: what a controller can send") {
     const Case cases[] = {
         {"/mm/fader/1", 1.0f, 255},
         {"/mm/fader/8", 0.0f, 0},
-        {"/mm/enc/3", 0.5f, 128},
+        {"/mm/encoder/3", 0.5f, 128},
         {"/mm/control/Drivers/brightness", 1.0f, 255},
     };
     for (const auto& c : cases) {
@@ -216,4 +239,51 @@ TEST_CASE("A string argument with an unpadded tail is rejected, not read past") 
     osc::Message m2;
     CHECK_FALSE(osc::parse(padded.data(), padded.size(), m2));
     CHECK_FALSE(m2.hasValue);
+}
+
+// A switch is a BOOL control, and controllers send FLOATS: Open Stage Control's button emits 1.0
+// for on. toByte scales that to 255, which parseBool (accepting `true` or `1`) reads as false, so
+// "on" arrived as off while "off" appeared to do nothing. The switch route therefore converts to a
+// boolean rather than passing a byte. Found on the bench 2026-08-30 with a real surface.
+TEST_CASE("A float 1.0 is ON for a switch, not the byte 255") {
+    osc::Message m;
+    const auto on = withFloat("/mm/switch/4", 1.0f);
+    REQUIRE(osc::parse(on.data(), on.size(), m));
+    CHECK(osc::toByte(m) == 255);          // the byte form is unchanged for faders
+    CHECK((osc::toByte(m) != 0) == true);  // and NONZERO is what a switch reads
+
+    osc::Message off;
+    const auto z = withFloat("/mm/switch/4", 0.0f);
+    REQUIRE(osc::parse(z.data(), z.size(), off));
+    CHECK(osc::toByte(off) == 0);
+    CHECK((osc::toByte(off) != 0) == false);
+}
+
+// Encoding is the mirror of parsing, so the strongest test is a round trip: what we emit, our own
+// parser must read back. The padding boundary is where a hand-rolled encoder goes wrong, and it is
+// the same boundary the inbound overread lived on, so every length is exercised.
+TEST_CASE("an encoded message round-trips through the parser at every padding boundary") {
+    for (const char* addr : {"/a", "/ab", "/abc", "/abcd", "/abcde",
+                             "/mm/fader/1", "/mm/encoder/8", "/mm/switch/3"}) {
+        uint8_t buf[64];
+        const size_t n = osc::encodeFloat(buf, sizeof(buf), addr, 0.5f);
+        REQUIRE_MESSAGE(n > 0, addr);
+        CHECK_MESSAGE(n % 4 == 0, addr);            // every OSC element is 4-byte aligned
+
+        osc::Message m;
+        REQUIRE_MESSAGE(osc::parse(buf, n, m), addr);
+        CHECK(std::strcmp(m.address, addr) == 0);
+        CHECK(m.hasValue);
+        CHECK(m.wasFloat);
+        CHECK(m.f == doctest::Approx(0.5f));
+        CHECK(static_cast<int>(osc::toByte(m)) == 128);
+    }
+}
+
+// Refuses rather than truncates: a half-written packet on the wire is worse than none.
+TEST_CASE("encoding refuses a buffer that cannot hold the whole message") {
+    uint8_t small[8];
+    CHECK(osc::encodeFloat(small, sizeof(small), "/mm/fader/1", 1.0f) == 0);
+    CHECK(osc::encodeFloat(small, sizeof(small), "no-leading-slash", 1.0f) == 0);
+    CHECK(osc::encodeFloat(nullptr, 64, "/a", 1.0f) == 0);
 }

@@ -138,12 +138,51 @@ inline bool parse(const uint8_t* pkt, size_t len, Message& out) {
     return true;   // a valid message that simply carries no number
 }
 
+/// Write one OSC message with a single float argument into `out`, returning its length, or 0 when
+/// it would not fit. The mirror image of parse(), and deliberately the only encoder: every value
+/// projectMM sends is a number, and a float in 0..1 is what OSC apps expect (parse() accepts an int
+/// too, because hardware bridges send those, but nothing forces us to emit one).
+///
+/// Same three padded parts as parse() reads: address, type tags, argument.
+inline size_t encodeFloat(uint8_t* out, size_t cap, const char* address, float value) {
+    if (!out || !address) return 0;
+    const size_t addrLen = std::strlen(address);
+    if (addrLen == 0 || address[0] != '/') return 0;      // not an address pattern
+    const size_t addrPad = pad4(addrLen + 1);
+    const size_t tagsPad = pad4(3);                       // ",f" + NUL
+    const size_t total = addrPad + tagsPad + 4;
+    if (total > cap) return 0;
+
+    std::memset(out, 0, total);                           // the padding IS NULs; write them once
+    std::memcpy(out, address, addrLen);
+    out[addrPad] = ',';
+    out[addrPad + 1] = 'f';
+
+    // Big-endian, the network order parse() reads. memcpy for the type pun, as beFloat32 does.
+    uint32_t bits;
+    std::memcpy(&bits, &value, 4);
+    uint8_t* arg = out + addrPad + tagsPad;
+    arg[0] = static_cast<uint8_t>((bits >> 24) & 0xFF);
+    arg[1] = static_cast<uint8_t>((bits >> 16) & 0xFF);
+    arg[2] = static_cast<uint8_t>((bits >> 8) & 0xFF);
+    arg[3] = static_cast<uint8_t>(bits & 0xFF);
+    return total;
+}
+
 /// The 0..255 control value a message means.
 ///
 /// OSC apps overwhelmingly send a float in 0..1 (TouchOSC, Resolume); hardware bridges usually
 /// send an int in the target's own range. Both are accepted, and CLAMPED rather than rejected: a
 /// controller sending 0..127 must not appear dead, and a float slightly past 1.0 is a rounding
 /// artifact, not an error.
+/// Is this message ON? For a BOOLEAN destination, where any nonzero means on. Separate from
+/// toByte because scaling to a byte rounds a small float to zero: 0.001 is not off, it is a
+/// controller that sends a range where a switch wanted a flag.
+inline bool isTruthy(const Message& m) {
+    if (!m.hasValue) return false;
+    return m.wasFloat ? (m.f != 0.0f) : (m.i != 0);
+}
+
 inline uint8_t toByte(const Message& m) {
     if (!m.hasValue) return 0;
     if (m.wasFloat) {

@@ -74,6 +74,17 @@
       "process_name": "preview_installer.py"
     },
     {
+      "id": "run_open_stage_control",
+      "tab": "desktop",
+      "group": "run",
+      "label": "Control Surface",
+      "speed": "medium",
+      "help": "run_open_stage_control",
+      "script": "run/run_open_stage_control.py",
+      "long_running": true,
+      "process_name": "open-stage-control"
+    },
+    {
       "id": "check_module",
       "tab": "desktop",
       "group": "tools",

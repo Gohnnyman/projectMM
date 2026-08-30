@@ -7,6 +7,8 @@
 // presets at all.
 
 #include "doctest.h"
+
+#include <vector>
 #include "core/ControlModule.h"
 #include "core/FilesystemModule.h"
 #include "core/ModuleFactory.h"
@@ -897,4 +899,208 @@ TEST_CASE("ControlModule keeps a renamed preset active under its new name") {
 
     REQUIRE(d.control->setListRowField(d.firstRowId(), "name", "{\"value\":\"after\"}"));
     CHECK(std::string(d.control->currentLook()) == "after");
+}
+
+// The switch row: a desk's channel buttons, and the control type an on/off target needs. A fader
+// can only say `on` as 0 or 255, which is a switch pretending to be a slider, so these are their
+// own bank. They sit FIRST because control order is render order and a channel's buttons are above
+// its knob and fader on the surfaces this mirrors.
+TEST_CASE("ControlModule exposes eight switches, ahead of the encoders and faders") {
+    Device d;
+
+    auto& cs = d.control->controls();
+    int firstSwitch = -1, firstEncoder = -1, firstFader = -1, switches = 0;
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strncmp(cs[i].name, "switch", 6) == 0) {
+            switches++;
+            if (firstSwitch < 0) firstSwitch = i;
+        } else if (std::strncmp(cs[i].name, "encoder", 7) == 0 && firstEncoder < 0) {
+            firstEncoder = i;
+        } else if (std::strncmp(cs[i].name, "fader", 5) == 0 && firstFader < 0) {
+            firstFader = i;
+        }
+    }
+    CHECK(switches == 8);
+    REQUIRE(firstSwitch >= 0);
+    REQUIRE(firstEncoder >= 0);
+    REQUIRE(firstFader >= 0);
+    CHECK(firstSwitch < firstEncoder);   // the row is the TOP row
+    CHECK(firstEncoder < firstFader);
+
+    // A switch is a BOOLEAN, so the UI renders a checkbox and a target gets a definite on/off
+    // rather than a threshold someone has to pick.
+    bool found = false;
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "switch1") != 0) continue;
+        CHECK(cs[i].type == mm::ControlType::Bool);
+        found = true;
+        break;
+    }
+    REQUIRE(found);   // else a rename makes this test pass by never running its check
+}
+
+// --- Control surfaces -----------------------------------------------------------------------
+//
+// A surface MIRRORS ControlModule's state rather than owning any, which is what lets two attach at
+// once and stay in step. These pin the four properties that make the mirror safe, each of which is
+// a way this class of feature usually fails.
+
+namespace {
+/// Records what a surface was told, so a test can assert the mirror's decisions rather than a wire.
+struct RecordingSurface : mm::ControlSurface {
+    struct Call { mm::SurfaceControl kind; uint8_t index; uint8_t value; };
+    std::vector<Call> calls;
+    void sendValue(mm::SurfaceControl kind, uint8_t index, uint8_t value) override {
+        calls.push_back({kind, index, value});
+    }
+    int countFor(mm::SurfaceControl kind, uint8_t index) const {
+        int n = 0;
+        for (const auto& c : calls) if (c.kind == kind && c.index == index) n++;
+        return n;
+    }
+    void clear() { calls.clear(); }
+};
+
+/// Set a fader the way any writer does, then run the mirror.
+void setFader(Device& d, uint8_t index, uint8_t value) {
+    auto& cs = d.control->controls();
+    char name[16];
+    std::snprintf(name, sizeof(name), "fader%u", static_cast<unsigned>(index + 1));
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, name) != 0) continue;
+        *static_cast<uint8_t*>(cs[i].ptr) = value;
+        return;
+    }
+}
+}  // namespace
+
+// A surface that attaches mid-show is correct immediately. Without the seed it would show whatever
+// its own defaults were until something happened to change, which on a quiet rig is never.
+TEST_CASE("attaching a surface seeds it with the current state") {
+    Device d;
+    setFader(d, 0, 200);
+    RecordingSurface s;
+    d.control->addSurface(&s);
+    CHECK(s.countFor(mm::SurfaceControl::Fader, 0) == 1);
+    for (const auto& c : s.calls)
+        if (c.kind == mm::SurfaceControl::Fader && c.index == 0) CHECK(c.value == 200);
+    d.control->removeSurface(&s);
+}
+
+// Only CHANGES go out. This is the first half of the echo guard: a value a surface just sent us
+// already matches what we would send back, so it never bounces.
+TEST_CASE("the mirror sends a control only when its value changed") {
+    Device d;
+    RecordingSurface s;
+    d.control->addSurface(&s);
+    s.clear();
+
+    d.control->mirrorToSurfaces();
+    CHECK(s.calls.empty());              // nothing moved, nothing sent
+
+    setFader(d, 2, 128);
+    d.control->mirrorToSurfaces();
+    CHECK(s.countFor(mm::SurfaceControl::Fader, 2) == 1);
+
+    s.clear();
+    d.control->mirrorToSurfaces();
+    CHECK(s.calls.empty());              // same value: silent
+    d.control->removeSurface(&s);
+}
+
+// THE echo guard, and the reason feedback is sampled rather than sent from the write path: a value
+// that came FROM a surface must not be sent back to it. Without this, a fader dragged over two
+// seconds gets last second's position pushed back under the user's finger mid-drag.
+TEST_CASE("a value written through the control path is not echoed back to the surfaces") {
+    Device d;
+    RecordingSurface s;
+    d.control->addSurface(&s);
+    s.clear();
+
+    // The write a surface makes: through setControl, the same primitive the OSC module and the HTTP
+    // API use, which is what makes the surface unprivileged.
+    const auto r = d.scheduler.setControl("Control", "fader4", "{\"value\":77}");
+    CHECK(r == mm::Scheduler::SetControlResult::Ok);
+
+    d.control->mirrorToSurfaces();
+    CHECK(s.countFor(mm::SurfaceControl::Fader, 4) == 0);   // it already knows: no echo
+
+    // A change from the DEVICE side still goes out, so suppressing the echo has not gone too far
+    // and made the mirror deaf.
+    setFader(d, 4, 200);
+    d.control->mirrorToSurfaces();
+    CHECK(s.countFor(mm::SurfaceControl::Fader, 4) == 1);
+    d.control->removeSurface(&s);
+}
+
+// A hand on a control suppresses feedback to it. Drive a motorised fader while someone is moving it
+// and the device fights the user, which is why a desk reports touch at all. On release it resyncs,
+// rather than the missed value being lost.
+TEST_CASE("a touched control is not driven, and resyncs when released") {
+    Device d;
+    RecordingSurface s;
+    d.control->addSurface(&s);
+    s.clear();
+
+    d.control->setTouched(mm::SurfaceControl::Fader, 3, true);
+    setFader(d, 3, 90);
+    d.control->mirrorToSurfaces();
+    CHECK(s.countFor(mm::SurfaceControl::Fader, 3) == 0);   // hands off
+
+    d.control->setTouched(mm::SurfaceControl::Fader, 3, false);
+    d.control->mirrorToSurfaces();
+    CHECK(s.countFor(mm::SurfaceControl::Fader, 3) == 1);   // and it catches up
+    d.control->removeSurface(&s);
+}
+
+// A Mackie encoder sends DETENTS, not a position, so the accumulation has to happen here: the
+// transport knows only "one click clockwise". Clamped, because a knob has no travel limit.
+TEST_CASE("an encoder delta accumulates and clamps at both ends") {
+    Device d;
+    auto value = [&](uint8_t i) {
+        auto& cs = d.control->controls();
+        char name[16];
+        std::snprintf(name, sizeof(name), "encoder%u", static_cast<unsigned>(i + 1));
+        for (uint8_t k = 0; k < cs.count(); k++)
+            if (std::strcmp(cs[k].name, name) == 0) return *static_cast<uint8_t*>(cs[k].ptr);
+        return static_cast<uint8_t>(0);
+    };
+
+    d.control->applyEncoderDelta(0, 10);
+    CHECK(value(0) == 10);
+    d.control->applyEncoderDelta(0, -4);
+    CHECK(value(0) == 6);
+    d.control->applyEncoderDelta(0, -120);
+    CHECK(value(0) == 0);                 // clamped, not wrapped to 242
+    for (int i = 0; i < 40; i++) d.control->applyEncoderDelta(0, 100);
+    CHECK(value(0) == 255);               // and clamped at the top
+}
+
+// Switch 1 is the master on/off every driver honours, the natural partner to fader 1's brightness:
+// the two controls a lighting desk expects to find first. It sends a BOOL body rather than a
+// number, because the target is a bool control and parseBool reads `true`/`1` but not the 255 a
+// byte path would produce, which is exactly how the OSC switches failed before.
+TEST_CASE("ControlModule switch 1 drives the global on/off") {
+    Device d;
+    auto driversOn = [&] {
+        auto& cs = d.drivers->controls();
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (std::strcmp(cs[i].name, "on") == 0) return *static_cast<bool*>(cs[i].ptr);
+        return false;
+    };
+
+    auto flip = [&](bool to) {
+        auto& cs = d.control->controls();
+        for (uint8_t i = 0; i < cs.count(); i++) {
+            if (std::strcmp(cs[i].name, "switch1") != 0) continue;
+            *static_cast<bool*>(cs[i].ptr) = to;
+            d.control->onControlChanged("switch1");
+            return;
+        }
+    };
+
+    flip(false);
+    CHECK_FALSE(driversOn());     // the rig goes dark from the surface
+    flip(true);
+    CHECK(driversOn());           // and comes back
 }

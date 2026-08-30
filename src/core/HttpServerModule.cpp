@@ -1226,9 +1226,14 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
         // An editable List (the CRUD primitive) tells the UI to show add/delete/reorder + inline
         // row editors; a plain List stays read-only. The row objects carry a stable "id" the
         // /api/list/* ops address, and each editable row's detail carries its field descriptors.
-        if (c.fader || c.encoder) {
-            sink.append(c.fader ? ",\"fader\":true" : ",\"encoder\":true");
-            if (c.faderTarget) { sink.append(",\"target\":"); sink.writeJsonString(c.faderTarget); }
+        if (c.switchRow) sink.append(",\"switchRow\":true");
+        // The target rides with all three surface kinds: a switch drives something too (switch1 is
+        // the global on/off), and the popup that shows what a fader drives should say the same for
+        // a switch rather than showing it as unassigned.
+        if (c.fader || c.encoder || c.switchRow) {
+            if (c.fader)        sink.append(",\"fader\":true");
+            else if (c.encoder) sink.append(",\"encoder\":true");
+            if (c.surfaceTarget) { sink.append(",\"target\":"); sink.writeJsonString(c.surfaceTarget); }
         }
         if (c.type == ControlType::List) {
             const auto* ls = static_cast<const ListSource*>(c.ptr);

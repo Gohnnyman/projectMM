@@ -852,6 +852,37 @@ body.cards-resizing {
    wide pane from inflating 8 columns into something that pushes the surface off-screen. */
 .card { --surface-col: clamp(26px, 5.2vw, 52px); }
 
+/* The switch strip shares the encoder strip's geometry, so switch N lines up over encoder N and
+   fader N. Only the ORDER differs: a switch has no separate readout, so it is control then name. */
+.control-switch {
+    margin: 0;
+    box-sizing: border-box;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    width: var(--surface-col);
+    vertical-align: top;
+    gap: 2px;
+}
+.control-switch .control-label { flex: 0 0 auto; text-align: center; order: 2; font-size: 10px; }
+/* Ends a bank: a full-width block between two runs of inline-flex strips, so the next bank starts
+   on its own row however wide the card is. Inserted by the control builder after the last strip of
+   a kind, because only it knows where one bank stops and the next begins. */
+.surface-break { display: block; width: 100%; height: 8px; }
+/* The toggle is a fixed 40px pill, but a surface column narrows to 26px on a small card: at that
+   width eight of them overflowed the row and wrapped the encoders onto a second line. Inside a
+   strip the pill follows the column, which is what keeps switch N over encoder N over fader N. */
+.control-switch .switch {
+    order: 1;
+    width: 100%;
+    max-width: var(--surface-col);
+    height: 18px;
+}
+/* The reset arrow a normal row carries would double the strip's height for no gain here. */
+.control-switch .reset-btn { display: none; }
+
+
+
 .control-encoder {
     margin: 0;              /* strips sit in a row; the generic 6px row margin doubled the gaps */
     /* Inline-flex siblings collapse whitespace differently per browser; box-sizing keeps the strip
@@ -1024,6 +1055,7 @@ body.cards-resizing {
    drift out of line with the knobs after a few columns. The strips are inline-flex siblings (each IS
    a .control-row), so their spacing is a margin rather than the grid's gap. */
 .list-pads-fixed { gap: 4px; }
+.control-switch,
 .control-encoder,
 .control-fader { margin-right: 4px; }
 .list-pads-fixed .list-pad {
@@ -1296,7 +1328,7 @@ body.cards-resizing {
     border-radius: 50%;
     background: var(--fg);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    transition: transform 0.15s;
+    transition: left 0.15s, right 0.15s;   /* the checked rule moves the thumb by its insets */
 }
 .switch:has(input:checked) .switch-track {
     /* Light accent tint, not flooded — matches the slider's filled-portion look. */
@@ -1304,8 +1336,13 @@ body.cards-resizing {
     border-color: var(--accent);
 }
 .switch:has(input:checked) .switch-track::after {
-    /* width(40) - thumb(12) - left(2) - right(2) = 24px travel */
-    transform: translateX(24px);
+    /* Park the thumb against the RIGHT inset rather than translating it a fixed distance. The pill
+       is 40px in a normal row but narrows to --surface-col (26px) inside a switch strip, so any
+       constant travel is wrong at one of the two sizes; a percentage is no better, because on a
+       ::after it resolves against the thumb, not the track. Letting layout place it works at both. */
+    left: auto;
+    right: 2px;
+    transform: none;
 }
 .switch:hover .switch-track { border-color: var(--accent); }
 .control-row progress {
