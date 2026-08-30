@@ -929,11 +929,14 @@ TEST_CASE("ControlModule exposes eight switches, ahead of the encoders and fader
 
     // A switch is a BOOLEAN, so the UI renders a checkbox and a target gets a definite on/off
     // rather than a threshold someone has to pick.
+    bool found = false;
     for (uint8_t i = 0; i < cs.count(); i++) {
         if (std::strcmp(cs[i].name, "switch1") != 0) continue;
         CHECK(cs[i].type == mm::ControlType::Bool);
+        found = true;
         break;
     }
+    REQUIRE(found);   // else a rename makes this test pass by never running its check
 }
 
 // --- Control surfaces -----------------------------------------------------------------------
@@ -1002,6 +1005,31 @@ TEST_CASE("the mirror sends a control only when its value changed") {
     s.clear();
     d.control->mirrorToSurfaces();
     CHECK(s.calls.empty());              // same value: silent
+    d.control->removeSurface(&s);
+}
+
+// THE echo guard, and the reason feedback is sampled rather than sent from the write path: a value
+// that came FROM a surface must not be sent back to it. Without this, a fader dragged over two
+// seconds gets last second's position pushed back under the user's finger mid-drag.
+TEST_CASE("a value written through the control path is not echoed back to the surfaces") {
+    Device d;
+    RecordingSurface s;
+    d.control->addSurface(&s);
+    s.clear();
+
+    // The write a surface makes: through setControl, the same primitive the OSC module and the HTTP
+    // API use, which is what makes the surface unprivileged.
+    const auto r = d.scheduler.setControl("Control", "fader4", "{\"value\":77}");
+    CHECK(r == mm::Scheduler::SetControlResult::Ok);
+
+    d.control->mirrorToSurfaces();
+    CHECK(s.countFor(mm::SurfaceControl::Fader, 4) == 0);   // it already knows: no echo
+
+    // A change from the DEVICE side still goes out, so suppressing the echo has not gone too far
+    // and made the mirror deaf.
+    setFader(d, 4, 200);
+    d.control->mirrorToSurfaces();
+    CHECK(s.countFor(mm::SurfaceControl::Fader, 4) == 1);
     d.control->removeSurface(&s);
 }
 

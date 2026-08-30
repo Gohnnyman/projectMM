@@ -500,8 +500,13 @@ def render_markdown(new, old):
         # one column per device, so a board's cost for a given pipeline is readable across the
         # fleet and a regression on one target stands out from a change that moved all of them.
         matrix = (new.get("perf") or {}).get("scenario_matrix") or {}
-        if matrix:
-            cols = [c for c in MATRIX_TARGETS if any(c in per for per in matrix.values())]
+        if matrix and any(matrix.values()):
+            # MATRIX_TARGETS fixes the column ORDER (desktop first, then the boards); a target it
+            # does not name still gets a column, appended, rather than being dropped without a
+            # word -- a new board on the bench must show up here the day it first reports.
+            seen = {c for per in matrix.values() for c in per}
+            cols = ([c for c in MATRIX_TARGETS if c in seen]
+                    + sorted(c for c in seen if c not in MATRIX_TARGETS))
             prevm = ((o.get("perf") or {}).get("scenario_matrix") or {})
             L += ["### Scenario tick by target (p50 of each sample window)", "",
                   "| Scenario | " + " | ".join(cols) + " |",
@@ -520,7 +525,7 @@ def render_markdown(new, old):
                     cells.append(_arrow(st.get("p50", 0), prev, "p50",
                                         lambda n: f"{n:,}") + mark)
                 L.append(f"| {name} | " + " | ".join(cells) + " |")
-            cells = len(matrix) * len(cols)
+            cells = max(1, len(matrix) * len(cols))  # max(): the percentages below divide by it
             have = sum(1 for per in matrix.values() for c in cols if c in per)
             solid = sum(1 for per in matrix.values() for c in cols
                         if (per.get(c) or {}).get("n", 0) >= 4)

@@ -72,6 +72,13 @@ public:
         // A port or listen change reopens the socket: the setting applies live, no reboot
         // (architecture.md's live-reconfiguration rule).
         if (std::strcmp(name, "port") == 0 || std::strcmp(name, "listen") == 0) closeSocket();
+        // Turning feedback on, or pointing it somewhere else, means the receiver knows nothing:
+        // change-detection would leave it wrong until something happened to move, which on a quiet
+        // rig is never. Push everything once instead.
+        if (std::strcmp(name, "feedback") == 0 || std::strcmp(name, "feedbackTo") == 0
+            || std::strcmp(name, "feedbackPort") == 0) {
+            if (feedback) resendAll_ = true;
+        }
     }
 
     void release() override {
@@ -259,7 +266,13 @@ private:
     /// False when neither is known, which is the normal state before anything has connected.
     bool feedbackDest(uint8_t out[4]) const {
         unsigned a, b, c, d;
-        if (feedbackTo_[0] && std::sscanf(feedbackTo_, "%u.%u.%u.%u", &a, &b, &c, &d) == 4
+        int used = 0;
+        // %n captures how much was consumed, so trailing junk is rejected: sscanf alone accepts
+        // "1.2.3.4nonsense" as a valid address, and silently sending feedback to a mistyped host
+        // is worse than falling back to the peer that actually wrote to us.
+        if (feedbackTo_[0]
+            && std::sscanf(feedbackTo_, "%u.%u.%u.%u%n", &a, &b, &c, &d, &used) == 4
+            && feedbackTo_[used] == '\0'
             && a < 256 && b < 256 && c < 256 && d < 256) {
             out[0] = static_cast<uint8_t>(a); out[1] = static_cast<uint8_t>(b);
             out[2] = static_cast<uint8_t>(c); out[3] = static_cast<uint8_t>(d);

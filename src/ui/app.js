@@ -1360,6 +1360,21 @@ async function moonbaseUpdateFlow(opts) {
     }
 }
 
+// Which surface bank a control belongs to, or null for an ordinary row. A surface strip is
+// inline-flex, so consecutive strips pack onto one line and a wide card would run the switches
+// straight into the encoders; a break closes a bank where the kind changes. BOTH render paths use
+// this (createCard builds a card from scratch, syncVisibleControls rebuilds it live when a hidden
+// flag flips), because a render rule that lives in only one of them is right until the other runs.
+function surfaceBank(ctrl) {
+    return ctrl.switchRow ? "switch" : ctrl.encoder ? "encoder" : ctrl.fader ? "fader" : null;
+}
+
+function surfaceBreak() {
+    const br = document.createElement("div");
+    br.className = "surface-break";
+    return br;
+}
+
 function createCard(mod, depth) {
     const card = document.createElement("div");
     card.className = "card";
@@ -1550,19 +1565,11 @@ function createCard(mod, depth) {
     }
 
     if (mod.controls) {
-        // A surface strip (switch / encoder / fader) is inline-flex, so consecutive strips pack onto
-        // one line and a wide card would run the switches straight into the encoders. Close a bank
-        // when the KIND changes: only this loop knows where one ends and the next starts.
         let bank = null;
         for (const ctrl of mod.controls) {
             if (!controlRendersGenerically(mod, ctrl)) continue;
-            const kind = ctrl.switchRow ? "switch" : ctrl.encoder ? "encoder"
-                       : ctrl.fader ? "fader" : null;
-            if (bank && kind !== bank) {
-                const br = document.createElement("div");
-                br.className = "surface-break";
-                controlsHost.appendChild(br);
-            }
+            const kind = surfaceBank(ctrl);
+            if (bank && kind !== bank) controlsHost.appendChild(surfaceBreak());
             bank = kind;
             const row = createControl(mod.name, mod.type, ctrl);
             if (row) controlsHost.appendChild(row);
@@ -3949,6 +3956,19 @@ function syncVisibleControls(mod) {
                   || host.querySelector(":scope > .card-footer");
         }
         host.insertBefore(row, anchor);
+    }
+    // Rebuild the bank breaks. This path inserts rows one at a time, so it cannot know where a bank
+    // ends while it works; doing it once at the end, from the same predicate createCard uses, is
+    // what keeps the two paths agreeing. Stale breaks are dropped first: a rebuild that left them
+    // in place would wrap the strips at last render's boundaries.
+    for (const br of host.querySelectorAll(":scope > .surface-break")) br.remove();
+    let bank = null;
+    for (const c of visibleControls) {
+        const kind = surfaceBank(c);
+        const row = host.querySelector(`:scope > .control-row[data-key="${cssEscape(c.name)}"]`);
+        if (!row) continue;
+        if (bank && kind !== bank) host.insertBefore(surfaceBreak(), row);
+        bank = kind;
     }
     return true;
 }

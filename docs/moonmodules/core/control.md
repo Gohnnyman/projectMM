@@ -15,7 +15,7 @@ A grid of preset pads, a row of rotary encoders above them, a row of on/off swit
 <img src="../../assets/core/ControlModule.png" width="300" alt="Control module surface: encoders, preset pads, faders">
 
 - `presets` — the pad grid (8×8). One pad per preset file; click to apply, right-click (or long-press) to name it, pick which single subtree it captures, save or delete. Drag a pad to rearrange the surface.
-- `switch1` … `switch8` — the top row of on/off switches, for a target a fader cannot express (a fader says `on` only as 0 or 255, which is a switch pretending to be a slider). Unassigned until bound.
+- `switch1` … `switch8` — the top row of on/off switches, for a target a fader cannot express (a fader says `on` only as 0 or 255, which is a switch pretending to be a slider). `switch1` drives `Drivers.on`, the master the whole rig honours; the rest are unassigned until bound.
 - `encoder1` … `encoder8` — rotary encoders. Drag or scroll to turn; right-click shows what each drives.
 - `fader1` … `fader8` — faders. `fader1` drives `Drivers.brightness`; the rest are unassigned until bound.
 

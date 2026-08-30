@@ -1,8 +1,8 @@
 {
-  "commit": "b1b8ae6e",
+  "commit": "214c77f6",
   "flash": {
     "esp32s3-n16r8": 1880912,
-    "desktop": 1652744,
+    "desktop": 1673512,
     "esp32": 1809456,
     "esp32p4rev1-eth": 1675216,
     "esp32p4rev1-eth-wifi": 2019392,
@@ -17,8 +17,8 @@
   },
   "perf": {
     "desktop": {
-      "tick_us": 133,
-      "fps": 7518,
+      "tick_us": 2597,
+      "fps": 385,
       "scenario_p50": {
         "Layer_base_pipeline": {
           "p50": 75,
@@ -158,7 +158,7 @@
       "Audio_mutation": {
         "desktop-macos": {
           "p50": 29,
-          "p95": 221,
+          "p95": 790,
           "n": 32,
           "last": "2026-08-30"
         },
@@ -184,7 +184,7 @@
       "Driver_mutation": {
         "desktop-macos": {
           "p50": 28,
-          "p95": 308,
+          "p95": 300,
           "n": 32,
           "last": "2026-08-30"
         },
@@ -210,7 +210,7 @@
       "Effects_composition": {
         "desktop-macos": {
           "p50": 306,
-          "p95": 1282,
+          "p95": 2653,
           "n": 32,
           "last": "2026-08-30"
         },
@@ -322,7 +322,7 @@
       "Layouts_mutation": {
         "desktop-macos": {
           "p50": 100,
-          "p95": 580,
+          "p95": 2190,
           "n": 32,
           "last": "2026-08-30"
         },
@@ -374,7 +374,7 @@
       "MoonLiveEffect_livescript": {
         "desktop-macos": {
           "p50": 7,
-          "p95": 92,
+          "p95": 132,
           "n": 32,
           "last": "2026-08-30"
         },
@@ -424,7 +424,7 @@
         },
         "desktop-macos": {
           "p50": 8,
-          "p95": 60,
+          "p95": 167,
           "n": 32,
           "last": "2026-08-30"
         },
@@ -466,7 +466,7 @@
       "modifier_chain": {
         "desktop-macos": {
           "p50": 47,
-          "p95": 1141,
+          "p95": 1237,
           "n": 32,
           "last": "2026-08-30"
         },
@@ -480,7 +480,7 @@
       "modifier_swap": {
         "desktop-macos": {
           "p50": 27,
-          "p95": 443,
+          "p95": 660,
           "n": 32,
           "last": "2026-08-30"
         },
@@ -518,7 +518,7 @@
       "perf_full": {
         "desktop-macos": {
           "p50": 341,
-          "p95": 1231,
+          "p95": 1898,
           "n": 32,
           "last": "2026-08-30"
         },
@@ -550,7 +550,7 @@
       "perf_light": {
         "desktop-macos": {
           "p50": 21,
-          "p95": 91,
+          "p95": 134,
           "n": 32,
           "last": "2026-08-30"
         },
@@ -594,7 +594,7 @@
         },
         "desktop-macos": {
           "p50": 332,
-          "p95": 1393,
+          "p95": 1708,
           "n": 32,
           "last": "2026-08-30"
         },
@@ -614,7 +614,7 @@
         },
         "desktop-macos": {
           "p50": 5,
-          "p95": 20,
+          "p95": 19,
           "n": 32,
           "last": "2026-08-30"
         },
@@ -640,54 +640,54 @@
     }
   },
   "loc": {
-    "core": 21576,
-    "light": 28582,
+    "core": 21611,
+    "light": 29629,
     "platform": 17041,
-    "ui": 8620,
-    "test": 50131,
-    "moondeck": 22788
+    "ui": 8650,
+    "test": 50159,
+    "moondeck": 22808
   },
   "comments": {
     "core": {
-      "lines": 8486,
+      "lines": 8506,
       "ratio": 0.426
     },
     "light": {
-      "lines": 11095,
-      "ratio": 0.428
+      "lines": 11339,
+      "ratio": 0.422
     },
     "platform": {
       "lines": 5916,
       "ratio": 0.381
     },
     "ui": {
-      "lines": 2353,
+      "lines": 2361,
       "ratio": 0.289
     },
     "test": {
-      "lines": 9216,
+      "lines": 9223,
       "ratio": 0.211
     },
     "moondeck": {
-      "lines": 3673,
+      "lines": 3678,
       "ratio": 0.184
     }
   },
   "tests": {
-    "cases": 1687,
+    "cases": 1688,
     "scenarios": 23
   },
   "docs": {
     "md_files": 207,
-    "md_lines": 31286,
+    "md_lines": 31337,
     "plans_files": 111,
     "backlog_lines": 4778,
     "lessons_lines": 622,
     "claude_md_lines": 140
   },
   "complexity": {
-    "functions": 2961,
-    "over_threshold": 195,
+    "functions": 3013,
+    "over_threshold": 198,
     "worst_ccn": 108
   }
 }

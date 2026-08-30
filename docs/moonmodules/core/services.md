@@ -155,10 +155,10 @@ uv run moondeck/run/run_open_stage_control.py --host 192.168.1.42
 ```
 
 Open **http://127.0.0.1:8088** and the surface is there. On the device, turn `listen` and `feedback`
-on; nothing else needs configuring, because the launcher passes the session, the send address, the
-listen port and the custom module as arguments rather than leaving them to be typed into a settings
-panel. The module sends `/mm/hello` when it starts, so every widget shows the device's real values
-straight away instead of its layout file's defaults.
+on; nothing else needs configuring, because the launcher passes the session, the send address and
+the listen port as arguments rather than leaving them to be typed into a settings panel. The session
+itself sends `/mm/hello` when the page loads, so every widget shows the device's real values straight
+away instead of its layout file's defaults, and a browser refresh re-reads them.
 
 It runs **headless**: a web server rather than a desktop window. That is deliberate. The surface is
 then reachable from a phone or another laptop on the same network (the launcher prints those URLs),
@@ -170,6 +170,7 @@ and on macOS it sidesteps the quarantine dialog an unsigned download otherwise r
 | `--listen` | where we receive feedback, the device's `feedbackPort` (default 9001) |
 | `--ui-port` | the surface's web UI (default 8088; 8080 is projectMM's own) |
 | `--app` | the Open Stage Control binary, when it is not on PATH or in the usual place |
+| `--gui` | also open the desktop window; by default it is the server alone |
 
 The launcher looks on PATH first, then in each platform's default install location. **Windows and
 Linux are untested**: the paths are the ones those installers use, but only macOS has been run. If
@@ -189,12 +190,12 @@ in its launcher must be off to edit the layout.
 
 Driving the device from that session, beside the Control card it mirrors.
 
-It binds only to `/mm/fader/N` and `/mm/encoder/N` on purpose. A surface should address the SURFACE, and
-[Control](control.md) decides what each fader drives, so one layout keeps working as assignments
-change and a hardware desk lands on the same bindings. Reaching past it to
+It binds only to `/mm/switch/N`, `/mm/encoder/N` and `/mm/fader/N` on purpose. A surface should
+address the SURFACE, and [Control](control.md) decides what each one drives, so one layout keeps
+working as assignments change and a hardware desk lands on the same bindings. Reaching past it to
 `/mm/control/<Module>/<control>` also works and is the right answer for a one-off, but it hard-codes
-into the layout a mapping that belongs on the device. Only fader 1 has a target today
-(`Drivers.brightness`); the rest wait for a target picker.
+into the layout a mapping that belongs on the device. Two have targets today, `switch1`
+(`Drivers.on`) and `fader1` (`Drivers.brightness`); the rest wait for a target picker.
 
 **It does not reach a Mackie desk.** The X-Touch and QCon Pro G2 speak Mackie Control over MIDI,
 not OSC: see [control surfaces](../../reference/control-surfaces.md) for what would.

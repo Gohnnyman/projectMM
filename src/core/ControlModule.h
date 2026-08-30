@@ -204,7 +204,7 @@ public:
         // will bind to later. Rendered as a bank of vertical sliders by the UI.
         for (uint8_t i = 0; i < kFaderCount; i++) {
             controls_.addControl(kFaderNames[i], faders_[i]);
-            controls_.setFader(controls_.count() - 1, true, faderTarget(i));
+            controls_.setFader(controls_.count() - 1, true, surfaceTarget(i));
         }
         // The save form. All HIDDEN: these are what the pad popup drives, not controls a user reads
         // off the card. Shown on the card they were ambiguous — `name` and the capture toggles look
@@ -247,11 +247,18 @@ public:
         if (std::strcmp(controlName, "save") == 0) { savePreset(); return; }
         for (uint8_t i = 0; i < kFaderCount; i++) {
             if (std::strcmp(controlName, kFaderNames[i]) != 0) continue;
+            sentFaders_[i] = faders_[i];   // see markSent
             driveFader(i);
+            return;
+        }
+        for (uint8_t i = 0; i < kEncoderCount; i++) {
+            if (std::strcmp(controlName, kEncoderNames[i]) != 0) continue;
+            sentEncoders_[i] = encoders_[i];
             return;
         }
         for (uint8_t i = 0; i < kSwitchCount; i++) {
             if (std::strcmp(controlName, kSwitchNames[i]) != 0) continue;
+            sentSwitches_[i] = switches_[i] ? 255 : 0;
             driveSwitch(i);
             return;
         }
@@ -408,7 +415,7 @@ public:
     /// scales by); the rest are unassigned and do nothing until a target picker exists.
     /// What a fader drives, as "Module.control", or null when it drives nothing yet. The UI shows
     /// this in the fader's popup, so the answer comes from the module rather than the UI assuming.
-    static const char* faderTarget(uint8_t index) {
+    static const char* surfaceTarget(uint8_t index) {
         return index == 0 ? "Drivers.brightness" : nullptr;
     }
 
@@ -438,10 +445,10 @@ public:
         sched->setControl(module, dot + 1, body);
     }
 
-    /// Drives whatever `faderTarget` declares, so the binding is stated ONCE: the popup and the
+    /// Drives whatever `surfaceTarget` declares, so the binding is stated ONCE: the popup and the
     /// action cannot disagree, and a fader starts working the moment it gains a target.
     void driveFader(uint8_t index) {
-        const char* target = faderTarget(index);
+        const char* target = surfaceTarget(index);
         if (!target) return;                          // unassigned
         const char* dot = std::strchr(target, '.');
         if (!dot) return;
@@ -865,8 +872,11 @@ private:
     static constexpr uint8_t kMaxSurfaces = 4;
     ControlSurface* surfaces_[kMaxSurfaces] = {};
     uint8_t surfaceCount_ = 0;
-    /// The last value pushed per control, so only CHANGES go out. Also the first half of the echo
-    /// guard: a value a surface just sent us already matches, so it is never sent back.
+    /// The last value KNOWN to a surface, so only changes go out. Written in two places, and both
+    /// are needed: after a push in mirrorOne, and in onControlChanged, which fires for every write
+    /// whatever made it. That second one is the echo guard. Without it a value a surface just sent
+    /// us looks like a change at the next sample and is sent straight back: a fader dragged over
+    /// two seconds gets last second's position pushed back under the user's finger.
     uint8_t sentSwitches_[kSwitchCount] = {};
     uint8_t sentEncoders_[kEncoderCount] = {};
     uint8_t sentFaders_[kFaderCount] = {};

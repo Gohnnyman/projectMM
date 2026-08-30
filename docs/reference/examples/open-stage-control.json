@@ -1032,7 +1032,7 @@
     "layout": "grid",
     "gridTemplate": 8,
     "widgetType": "push",
-    "quantity": 48,
+    "quantity": 64,
     "colorBg": "#1a1a2e",
     "props": {
      "colorBg": "#16213e",

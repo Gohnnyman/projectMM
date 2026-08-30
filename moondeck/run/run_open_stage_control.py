@@ -67,18 +67,29 @@ def entry_script(app: Path) -> Path | None:
     return None
 
 
+def port(value: str) -> int:
+    """A TCP/UDP port. Argparse's `type=int` accepts 99999 and 0, which reach Open Stage
+    Control as a bind failure buried in its own output; reject them where we can say why."""
+    n = int(value)
+    if not 1 <= n <= 65535:
+        raise argparse.ArgumentTypeError(f"{n} is not a port (1..65535)")
+    return n
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", default="127.0.0.1",
                     help="the device's address (default: this machine)")
-    ap.add_argument("--port", type=int, default=9000,
+    ap.add_argument("--port", type=port, default=9000,
                     help="the device's OSC port, its `port` control (default 9000)")
-    ap.add_argument("--listen", type=int, default=9001,
+    ap.add_argument("--listen", type=port, default=9001,
                     help="where WE listen, the device's `feedbackPort` control (default 9001)")
-    ap.add_argument("--ui-port", type=int, default=8088,
+    ap.add_argument("--ui-port", type=port, default=8088,
                     help="the Open Stage Control web UI (default 8088; 8080 is projectMM's)")
     ap.add_argument("--app", help="path to the open-stage-control binary, if it is not found")
+    ap.add_argument("--gui", action="store_true",
+                    help="also open the desktop window (default: server only, use a browser)")
     args = ap.parse_args()
 
     app = args.app or find_app()
@@ -100,6 +111,10 @@ def main() -> int:
            "--osc-port", str(args.listen),
            "--port", str(args.ui_port),
            "--load", str(SESSION)]
+    # Server-only by default: the surface is meant for the phone or tablet in the room, and an
+    # Electron window on the build machine costs a few hundred MB to show the same page.
+    if not args.gui:
+        cmd.append("--no-gui")
 
     print(f"projectMM at {args.host}:{args.port}, feedback to us on {args.listen}")
     print(f"surface at http://127.0.0.1:{args.ui_port}")

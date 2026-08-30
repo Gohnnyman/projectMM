@@ -879,7 +879,7 @@ body.cards-resizing {
     height: 18px;
 }
 /* The reset arrow a normal row carries would double the strip's height for no gain here. */
-.control-switch .control-reset { display: none; }
+.control-switch .reset-btn { display: none; }
 
 
 
@@ -1336,8 +1336,10 @@ body.cards-resizing {
     border-color: var(--accent);
 }
 .switch:has(input:checked) .switch-track::after {
-    /* width(40) - thumb(12) - left(2) - right(2) = 24px travel */
-    transform: translateX(24px);
+    /* Travel is the track's own width minus the thumb and both insets, not a constant: the pill is
+       40px in a normal row but narrows to --surface-col (26px) inside a switch strip, where a fixed
+       24px slid the thumb past the right edge. 100% here is the track, which is inset: 0. */
+    transform: translateX(calc(100% - 12px - 2px - 2px));
 }
 .switch:hover .switch-track { border-color: var(--accent); }
 .control-row progress {

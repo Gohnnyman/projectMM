@@ -353,6 +353,56 @@ Pacman is always his own yellow; the ghosts take their body colors from the acti
 
 Origin: projectMM original; inspired by Namco's Pac-Man (1980), the pixel art drawn fresh for this effect
 
+<a id="spaceinvaders"></a>
+
+### Space Invaders 🔬📊 · 2D
+
+The 1978 formation marching down the wall: five ranks of squid, crab and octopus stepping sideways in the two-frame wiggle, dropping a row and reversing at each wall, and speeding up as the ranks thin. That acceleration is the defining mechanic rather than a flourish, because the arcade original sped up for a mechanical reason (fewer invaders meant a shorter loop for the hardware to draw) and the tension it produced is the reason anyone remembers the game. Invaders fire down, the cannon tracks the lowest one and fires back, and when the formation lands the board resets so the attract loop runs forever.
+
+On a panel narrower than the formation the ranks scroll through the court instead of turning at the walls, so a 16-wide matrix shows the march passing rather than a block stuck at the top.
+
+- `marchBpm` — steps per minute at a full formation; the effective rate rises to four times this as the ranks are cleared.
+- `stepX` — how far a step moves the formation sideways, in pixels.
+- `dropY` — how far a wall turn drops it, in pixels.
+- `size` — integer magnification per art pixel; 1 on a matrix, 2 or more on a wall.
+- `soundReactive` — the beat becomes the clock: the formation steps on transients and stands still in silence, so the march locks to the track.
+
+The invaders take their body color from the active palette. Origin: projectMM original; inspired by Taito's Space Invaders (1978), the pixel art drawn fresh for this effect
+
+<a id="spritefountain"></a>
+
+### Sprite Fountain 🔬📊 · 2D
+
+A fountain that throws the project's whole sprite cast: fish, Pacman and his ghosts, toasters and toast, and the three invaders, launched from the floor on a sweeping nozzle and falling back under gravity. The pixel art is SHARED with the effects that introduced it rather than copied, so a fix to a fish fixes it in both places. The particle pool's one spare byte per particle carries which character a slot is, which is what makes a mixed cast free: widening the pool for a sprite id would cost every particle system in the project memory for a field only this effect reads.
+
+Physics run on elapsed time, not per frame, so the plume looks the same on a 60 fps board and a 1200 fps desktop.
+
+- `lift` — how hard the nozzle throws; scales with the grid, so it fills a small panel and a wall alike.
+- `pull` — gravity. Measured rather than guessed: 3 gives a two-second arc, which is long enough to read a 12x8 toaster.
+- `rate` — sprites launched per beat of the emit clock.
+- `emitBpm` — launches per minute, so the plume's density is a choice rather than a side effect of how fast the device runs.
+- `size` — integer magnification per art pixel.
+- `soundReactive` — one sprite per frequency band, thrown when that band is loud, so the cast maps onto the spectrum: bass throws toasters, treble throws tiny fish. Silence throws nothing.
+
+Colors come from the active palette, one entry per sprite, held for its whole flight. Origin: projectMM original
+
+<a id="pong"></a>
+
+### Pong 🔬📊 · 2D
+
+Two paddles rallying a ball across the grid, the attract-mode reading of the 1972 original where both players are the machine. A perfect tracker would rally forever and never look like a game, so each paddle has a reaction delay and a small aiming error, re-rolled every exchange: it starts moving a moment after the ball turns and meets it slightly off center. That is what produces near-misses, edge hits and the occasional point. Where on the paddle the ball lands sets the angle it leaves at, which was the one piece of skill the original had.
+
+The court is fixed point rather than pixels, so the game plays identically on a 16x16 matrix and a 256-wide wall; positions are scaled to the grid only when they are drawn.
+
+- `rallyBpm` — ball crossings per minute, so the rally takes the same wall-clock time on any grid.
+- `paddle` — paddle length as a percentage of the court height; short paddles miss more, which is what makes points happen.
+- `reflex` — how sharply a paddle chases the ball. Below full speed it lags a fast ball, which is where the misses come from.
+- `size` — integer magnification, when the ball is a sprite.
+- `spriteBall` — swap the classic square for a member of the shared sprite cast, re-picked on every hit, so a paddle knocks one character away and another back.
+- `soundReactive` — the ball advances only on the beat, so it crosses the court in time with the track and stands still in silence.
+
+Uses the global palette. Origin: projectMM original; inspired by Atari's Pong (1972)
+
 <a id="ballpit"></a>
 
 ### Ballpit 🔬 · 2D
