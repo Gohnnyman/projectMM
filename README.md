@@ -107,7 +107,7 @@ The numbers above are observations. The **contracts** projectMM commits to, what
 Then open `http://localhost:8080/`. It opens by itself on start; pass `--no-browser` to suppress
 that (a headless server, or a service manager), and `--port <n>` to serve somewhere else.
 
-**Your settings live with your user, not beside the executable**, so they survive moving the app, reinstalling, and upgrading: `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, and `$XDG_DATA_HOME/projectMM` on Linux, falling back to `~/.local/share/projectMM` when that is unset. An uninstall leaves them in place; delete that folder to start clean. Set `MM_DATA_DIR` to put them somewhere else. Running from a source checkout keeps using `build/` instead, so a development tree stays self-contained.
+**Your settings live with your user, not beside the executable**, so they survive moving the app, reinstalling, and upgrading: `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, and `$XDG_DATA_HOME/projectMM` on Linux, falling back to `~/.local/share/projectMM` when that is unset. An uninstall leaves them in place; delete that folder to start clean. Set `MM_DATA_DIR` to put them somewhere else. Running from a source checkout keeps using `build/fs/` instead (config under `build/fs/.config/`), so a development tree stays self-contained.
 
 Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, send it to Art-Net, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source (see [building.md](docs/building.md)), though currently only the macOS, Windows, Linux and ESP32 binaries ship as releases.
 

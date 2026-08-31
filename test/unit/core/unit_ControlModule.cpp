@@ -976,9 +976,15 @@ void setFader(Device& d, uint8_t index, uint8_t value) {
 
 // A surface that attaches mid-show is correct immediately. Without the seed it would show whatever
 // its own defaults were until something happened to change, which on a quiet rig is never.
+//
+// Seeded from the TARGET, not from the mirror's own last value: fader 1 rides Drivers.brightness,
+// so what a connecting surface must be told is what the rig is running at. Setting the mirror byte
+// directly (what this test used to do) asserted the stale reading instead: a surface connecting
+// between ticks was sent the boot default while the rig was at another level.
 TEST_CASE("attaching a surface seeds it with the current state") {
     Device d;
-    setFader(d, 0, 200);
+    REQUIRE(d.scheduler.setControl("Drivers", "brightness", "{\"value\":200}")
+            == mm::Scheduler::SetControlResult::Ok);
     RecordingSurface s;
     d.control->addSurface(&s);
     CHECK(s.countFor(mm::SurfaceControl::Fader, 0) == 1);

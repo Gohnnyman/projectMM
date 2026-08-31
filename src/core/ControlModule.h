@@ -119,6 +119,10 @@ public:
             if (surfaces_[i] == s) return;
         if (surfaceCount_ >= kMaxSurfaces) return;
         surfaces_[surfaceCount_++] = s;
+        // Read the targets BEFORE seeding: a surface that connects between ticks would otherwise be
+        // sent whatever the mirror last held, which on the very first connect is the boot default
+        // rather than what the rig is running. Same correction mirrorToSurfaces does every tick.
+        followTargets();
         resendTo(s);
     }
 

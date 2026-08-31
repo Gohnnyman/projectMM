@@ -250,11 +250,10 @@ public:
             const uint8_t* s = src + static_cast<size_t>(i) * srcCh;
             uint8_t rgb[3];
             if (outCh == 3) {
-                // Color only: HLS is a video picture: motion is not part of it.
-                correction_.applyColorOnly(s, rgb);
+                correction_.apply(s, rgb, srcCh);
             } else if (wide) {
                 uint8_t* c = &corrScratch_[0];
-                correction_.applyColorOnly(s, c);
+                correction_.apply(s, c, srcCh);
                 rgb[0] = c[0]; rgb[1] = c[1]; rgb[2] = c[2];
             } else {
                 rgb[0] = s[0]; rgb[1] = s[1]; rgb[2] = s[2];

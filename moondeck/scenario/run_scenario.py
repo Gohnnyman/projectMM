@@ -152,7 +152,8 @@ def _host_target() -> str:
     )
 
 
-def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> int:
+def _run_one(path: Path, update_contract: bool, update_reason: str | None,
+             no_write: bool = False) -> int:
     """Run one scenario. Always parses MEASURE lines and writes
     observed.<target> blocks back into the scenario JSON (every run produces a
     drift record). With --update-contract, also rewrites the contract.
@@ -262,6 +263,15 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
             step.setdefault("contract", {})[target] = new_block
             touched_contract += 1
 
+    # --no-write: report the drift, change nothing. A gate must leave the tree exactly as it
+    # found it, or the run invalidates its own result.
+    if no_write:
+        if touched_observed or touched_contract:
+            print(f"  (drift in {path.name}: observed[{target}] x {touched_observed}"
+                  f"{f', contract x {touched_contract}' if touched_contract else ''};"
+                  f" run without --no-write to record it)")
+        return 0
+
     if touched_observed or touched_contract:
         # Serialize, then put each sample window back on one line: a 32-element array
         # spread over 32 lines hides the statistics it belongs to (_observed.py).
@@ -284,6 +294,12 @@ def main():
                         help="Scenario name (file stem). Runs all if omitted.")
     parser.add_argument("--module", default=None,
                         help="Module filter. Runs only scenarios that match.")
+    parser.add_argument("--no-write", action="store_true",
+                        help="run and report, but do not write observations back into the "
+                             "scenario JSON. What the GATES use: a gate that writes dirties the "
+                             "tree it just checked, which makes it look like it needs running "
+                             "again, and puts an observation diff in every commit. Run without "
+                             "the flag to refresh the recorded numbers.")
     parser.add_argument("--update-contract", action="store_true",
                         help=("Renegotiate the per-step performance contract: write "
                               "observed tick/heap into contract[<host-target>] and "
@@ -312,7 +328,7 @@ def main():
         if module_filter and scenario_file not in test_meta.paths_for_module(module_filter):
             print(f"Scenario {args.name} does not match module {module_filter}.")
             sys.exit(1)
-        sys.exit(_run_one(scenario_file, args.update_contract, args.reason))
+        sys.exit(_run_one(scenario_file, args.update_contract, args.reason, args.no_write))
 
     if module_filter:
         paths = test_meta.paths_for_module(module_filter)
@@ -320,14 +336,16 @@ def main():
             print(f"No scenarios found for module: {module_filter}")
             sys.exit(1)
         print(f"Module filter: {module_filter} ({len(paths)} scenario(s))")
-        failed = sum(1 for p in paths if _run_one(p, args.update_contract, args.reason) != 0)
+        failed = sum(1 for p in paths if _run_one(p, args.update_contract, args.reason,
+                                          args.no_write) != 0)
         sys.exit(1 if failed else 0)
 
     # Run all scenarios. We iterate per-file (instead of letting the C++ runner
     # auto-discover) because _run_one captures MEASURE lines and writes
     # observed.<target> blocks back into each scenario JSON on every run.
     paths = sorted((ROOT / "test" / "scenarios").rglob("scenario_*.json"))
-    failed = sum(1 for p in paths if _run_one(p, args.update_contract, args.reason) != 0)
+    failed = sum(1 for p in paths if _run_one(p, args.update_contract, args.reason,
+                                          args.no_write) != 0)
     sys.exit(1 if failed else 0)
 
 

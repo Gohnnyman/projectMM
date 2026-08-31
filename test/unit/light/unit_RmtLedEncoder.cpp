@@ -77,7 +77,7 @@ TEST_CASE("encoder: GRB ordering comes from Correction, encoder is order-agnosti
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::GRB);   // full brightness, GRB
     const uint8_t logicalRed[3] = {255, 0, 0};
     uint8_t wire[4] = {};
-    c.applyColorOnly(logicalRed, wire);              // -> GRB: {0, 255, 0}
+    c.apply(logicalRed, wire, 3);              // -> GRB: {0, 255, 0}
 
     uint32_t out[24] = {};
     mm::encodeWs2812Symbols(wire, c.outChannels, T0H, T1H, PERIOD, out);
@@ -93,7 +93,7 @@ TEST_CASE("encoder: RGBW preset yields 32 symbols per light") {
     CHECK(c.outChannels == 4);
     const uint8_t logical[3] = {10, 20, 30};
     uint8_t wire[4] = {};
-    c.applyColorOnly(logical, wire);
+    c.apply(logical, wire, 3);
 
     uint32_t out[32] = {};
     mm::encodeWs2812Symbols(wire, c.outChannels, T0H, T1H, PERIOD, out);

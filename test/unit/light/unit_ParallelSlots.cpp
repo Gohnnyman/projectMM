@@ -88,7 +88,7 @@ TEST_CASE("LCD encoder: GRB ordering via Correction") {
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     const uint8_t rgb[3] = {255, 0, 0};   // logical red
     uint8_t wire[8 * 4] = {};
-    corr.applyColorOnly(rgb, wire);                 // lane 0 wire = {0, 255, 0}
+    corr.apply(rgb, wire, 3);                 // lane 0 wire = {0, 255, 0}
 
     Slots s{};
     mm::encodeWs2812ParallelSlots(wire, static_cast<uint8_t>(0x01), 3, s.bytes);
@@ -105,7 +105,7 @@ TEST_CASE("LCD encoder: RGBW row is 96 slot bytes") {
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRBW);
     const uint8_t rgb[3] = {10, 10, 10};
     uint8_t wire[8 * 4] = {};
-    corr.applyColorOnly(rgb, wire);
+    corr.apply(rgb, wire, 3);
 
     uint8_t out[4 * 8 * 3];
     std::memset(out, 0xEE, sizeof(out));

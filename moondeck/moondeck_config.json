@@ -239,33 +239,6 @@
       "script": "report/history_report.py"
     },
     {
-      "id": "event_precommit",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Pre-Commit Gates",
-      "speed": "slow",
-      "help": "event_precommit",
-      "script": "event/precommit.py"
-    },
-    {
-      "id": "event_premerge",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Pre-Merge Gates",
-      "speed": "slow",
-      "help": "event_premerge",
-      "script": "event/premerge.py"
-    },
-    {
-      "id": "event_prerelease",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Pre-Release Gates",
-      "speed": "slow",
-      "help": "event_prerelease",
-      "script": "event/prerelease.py"
-    },
-    {
       "id": "install_playwright",
       "tab": "desktop",
       "group": "docs",

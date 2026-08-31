@@ -48,7 +48,7 @@ TEST_CASE("Correction RGB preset: apply is identity at full brightness") {
     CHECK(c.offWhite == Correction::kAbsent);   // no white channel for the RGB family
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[3] = {};
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 10);
     CHECK(out[1] == 20);
     CHECK(out[2] == 30);
@@ -62,7 +62,7 @@ TEST_CASE("Correction GRB preset: channels reordered, 3 output channels") {
     CHECK(c.offWhite == Correction::kAbsent);   // no white channel for the RGB family
     const uint8_t src[3] = {10, 20, 30};  // R=10 G=20 B=30
     uint8_t out[3] = {};
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 20);  // G
     CHECK(out[1] == 10);  // R
     CHECK(out[2] == 30);  // B
@@ -74,7 +74,7 @@ TEST_CASE("Correction BGR preset: full reverse") {
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::BGR);
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[3] = {};
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 30);  // B
     CHECK(out[1] == 20);  // G
     CHECK(out[2] == 10);  // R
@@ -88,7 +88,7 @@ TEST_CASE("Correction RGBW preset: 4 channels, white = min(r,g,b)") {
     CHECK(c.offWhite == 3);   // white derived into the 4th channel
     const uint8_t src[3] = {10, 20, 30};  // min = 10
     uint8_t out[4] = {};
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 10);  // R
     CHECK(out[1] == 20);  // G
     CHECK(out[2] == 30);  // B
@@ -102,7 +102,7 @@ TEST_CASE("Correction GRBW preset: reordered RGB + white") {
     CHECK(c.outChannels == 4);
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[4] = {};
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 20);  // G
     CHECK(out[1] == 10);  // R
     CHECK(out[2] == 30);  // B
@@ -116,7 +116,7 @@ TEST_CASE("Correction: brightness applied BEFORE white derivation") {
     mm::test::rebuildFromPreset(c, 128, mm::test::PresetOrder::RGBW);  // half brightness
     const uint8_t src[3] = {100, 200, 60};  // scaled: 50, 100, 30 → min = 30
     uint8_t out[4] = {};
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 50);   // (100*128)/255
     CHECK(out[1] == 100);  // (200*128)/255
     CHECK(out[2] == 30);   // (60*128)/255
@@ -147,7 +147,7 @@ TEST_CASE("Correction whiteMode None: white channel forced to 0, RGB intact") {
     c.whiteMode = WhiteMode::None;
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[4] = {0, 0, 0, 77};   // pre-fill W with a stale value from a prior frame
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 10);
     CHECK(out[1] == 20);
     CHECK(out[2] == 30);
@@ -165,7 +165,7 @@ TEST_CASE("Correction whiteMode Accurate: white subtracted from RGB") {
     c.whiteMode = WhiteMode::Accurate;
     const uint8_t src[3] = {10, 20, 30};  // min = 10
     uint8_t out[4] = {};
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 0);    // R: 10 - 10
     CHECK(out[1] == 10);   // G: 20 - 10
     CHECK(out[2] == 20);   // B: 30 - 10
@@ -191,7 +191,7 @@ TEST_CASE("Correction roles array: arbitrary Custom wiring derives correct offse
     CHECK(c.briLut[255] == 128);   // LUT refreshed (brightness applied)
     const uint8_t src[3] = {200, 100, 60};  // scaled: 100, 50, 30 → min = 30
     uint8_t out[4] = {};
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     CHECK(out[3] == 100);  // R at channel 3
     CHECK(out[2] == 50);   // G at channel 2
     CHECK(out[1] == 30);   // B at channel 1
@@ -210,7 +210,7 @@ TEST_CASE("Correction roles array: absent color role is not emitted") {
     CHECK(c.outChannels == 2);
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[2] = {0, 0};
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 10);   // R
     CHECK(out[1] == 30);   // B — green (20) simply not written
 }
@@ -228,7 +228,7 @@ TEST_CASE("Correction roles array: non-color role reserves a channel apply() ski
     CHECK(c.offBlue == 3);
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[4] = {77, 0, 0, 0};   // channel 0 (Pan) pre-set; apply() must leave it
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 77);   // Pan channel untouched by the RGB path
     CHECK(out[1] == 10);   // R
     CHECK(out[2] == 20);   // G
@@ -249,7 +249,7 @@ TEST_CASE("Correction: WarmWhite/Yellow/UV synthesised from RGB via whiteMode") 
     CHECK(c.offUV == 5);
     const uint8_t src[3] = {40, 100, 200};   // R=40 G=100 B=200
     uint8_t out[6] = {};
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 40);   // R
     CHECK(out[1] == 100);  // G
     CHECK(out[2] == 200);  // B
@@ -270,7 +270,7 @@ TEST_CASE("Correction Accurate: Yellow/UV use pre-subtraction RGB, not post-Whit
     c.whiteMode = WhiteMode::Accurate;
     const uint8_t src[3] = {40, 100, 200};   // R=40 G=100 B=200, so w = min = 40
     uint8_t out[6] = {};
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
     // White = min(R,G,B) = 40, subtracted from RGB → R=0, G=60, B=160.
     CHECK(out[3] == 40);            // White
     CHECK(out[0] == 0);            // R after subtraction
@@ -294,7 +294,7 @@ TEST_CASE("Correction: UV dark on warm colors; whiteMode None zeroes WW/Y/UV") {
     {   // warm color: R,G high, B low → UV = max(0, B-max(R,G)) = 0
         const uint8_t src[3] = {200, 180, 20};
         uint8_t out[6] = {};
-        c.applyColorOnly(src, out);
+        c.apply(src, out, 3);
         CHECK(out[5] == 0);            // UV dark: no blue excess
         CHECK(out[4] == 180);          // Yellow = min(200,180)
     }
@@ -302,7 +302,7 @@ TEST_CASE("Correction: UV dark on warm colors; whiteMode None zeroes WW/Y/UV") {
         c.whiteMode = WhiteMode::None;
         const uint8_t src[3] = {40, 100, 200};
         uint8_t out[6] = {0, 0, 0, 55, 66, 77};   // stale WW/Y/UV
-        c.applyColorOnly(src, out);
+        c.apply(src, out, 3);
         CHECK(out[3] == 0);            // WW zeroed
         CHECK(out[4] == 0);            // Yellow zeroed
         CHECK(out[5] == 0);            // UV zeroed
@@ -322,7 +322,7 @@ TEST_CASE("A preset's master dimmer channel is driven, so the fixture actually l
 
     const uint8_t src[3] = {200, 100, 50};
     uint8_t out[11] = {};
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
 
     CHECK(out[5] == 255);      // CH6 dimmer: open, or the fixture is dark whatever the colors say
     CHECK(out[7] == 200);      // CH8 red still lands on its own channel
@@ -340,7 +340,7 @@ TEST_CASE("Pan and tilt channels are left alone by the color path") {
 
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[6] = {77, 88, 0, 0, 0, 0};   // pan/tilt pre-set by their own writer
-    c.applyColorOnly(src, out);
+    c.apply(src, out, 3);
 
     CHECK(out[0] == 77);       // pan untouched
     CHECK(out[1] == 88);       // tilt untouched

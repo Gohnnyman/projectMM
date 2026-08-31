@@ -150,26 +150,7 @@ Check that a firmware binary exists and is newer than every source that feeds it
 uv run moondeck/check/check_esp32_built.py --firmware esp32s3-n16r8
 ```
 
-The cheap stand-in for a full `idf.py build` in the commit and merge gates. Freshness is measured against the **sources**, not the clock: a wall-clock rule ("built in the last hour") passes a binary that predates an edit made twenty minutes ago, which is the stale-artifact trap that sends debugging at the wrong image. On failure it names the newer file and prints the rebuild command. `--max-age-hours N` adds an optional age rule on top; the default (0) disables it.
-
-### event_precommit / event_premerge / event_prerelease
-
-Run the gate list for one lifecycle event ([CLAUDE.md § The Process](../CLAUDE.md#the-process)).
-
-```bash
-uv run moondeck/event/precommit.py                    # commit event
-uv run moondeck/event/precommit.py --build-esp32      # …compiling the firmware for real
-uv run moondeck/event/precommit.py --firmware esp32   # pick the ESP32 variant
-uv run moondeck/event/premerge.py                     # merge event (branch diff vs main)
-uv run moondeck/event/prerelease.py                   # release event (diff vs previous tag)
-```
-
-Each gate carries an objective trigger read from the changed-file set, so a docs-only change runs the spec check and skips the rest, while a `src/` change runs the full list. Every gate reports **PASS** (ran, succeeded), **FAIL** (ran, failed), **SKIP** (trigger did not match) or **MANUAL** (a human decision — hardware, review, release criteria — listed, never auto-failed). Gates do not stop at the first failure: one pass gives the whole picture, and the run ends with a `DONE` line so a long run's finish is unambiguous. The scripts are **product-owner initiated** and never commit, merge, or tag.
-
-**The commit list is built to stay under ~10 seconds**, because a gate list nobody runs protects nothing. Two steps that would otherwise dominate it are deliberately cheap:
-
-- **ESP32 is a freshness check, not a compile** — [check_esp32_built](#check_esp32_built) instead of a cold `idf.py build`. `--build-esp32` compiles for real; `prerelease.py` always does, since that is the event where the binary ships; CI builds every variant on every PR regardless.
-- **KPI skips the live serial capture** — the gate passes `--no-live-capture` (see [collect_kpi](#collect_kpi)), so it needs no bench board and costs seconds.
+The cheap stand-in for a full `idf.py build` in the commit and merge checks. Freshness is measured against the **sources**, not the clock: a wall-clock rule ("built in the last hour") passes a binary that predates an edit made twenty minutes ago, which is the stale-artifact trap that sends debugging at the wrong image. On failure it names the newer file and prints the rebuild command. `--max-age-hours N` adds an optional age rule on top; the default (0) disables it.
 
 ### check_devices
 

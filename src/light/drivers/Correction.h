@@ -104,18 +104,18 @@ struct Correction {
     /// keeps running and the buffer keeps changing, so the show stays on its clock and the rig
     /// rejoins it where it now is. Freezing the WRITE instead would have stopped the show and left
     /// the buffer holding a stale cue.
+    /// Written by Drivers::updateMotionHold on the render thread, read by apply() which in split
+    /// mode runs on the core-1 encode task. A plain bool rather than an atomic: it is byte-sized on
+    /// every supported target so a read cannot tear, and the only cost of observing the previous
+    /// value is that a park or release lands one frame late against a timeout measured in tens of
+    /// seconds. An atomic load here would sit in the per-light loop, which is the one place this
+    /// project does not spend cycles for a race whose worst outcome is 20 ms of latency.
     bool motionHeld = false;
     uint8_t offYellow = kAbsent;
     uint8_t offUV = kAbsent;
     uint8_t outChannels = 3;        // bytes emitted per light (= channelsPerLight of the wiring)
     WhiteMode whiteMode = WhiteMode::Min;   // how white is synthesized from RGB (white lights only)
 
-    // Cold path: refresh the brightness LUT and DERIVE the color-role offsets from the
-    // light's channel-role array (`roles`, `nChannels` entries — the driver's dynamic
-    // array, canonical). A role appearing at channel i sets that color's offset to i;
-    // a color role not present stays kAbsent (apply() skips it). outChannels becomes the
-    // channel count. Non-color roles (pan/tilt/…) are ignored here — they're written by
-    // the fixture role writers, not by apply()'s RGB path.
     // Refresh just the brightness LUT (briLut[v] = v * brightness / 255). Split out so a brightness-
     // only change re-scales the LUT without touching the channel offsets, and so a driver can apply
     // brightness even when the role source (the preset library) isn't available yet.
@@ -123,6 +123,11 @@ struct Correction {
         for (int v = 0; v < 256; v++) briLut[v] = static_cast<uint8_t>((v * brightness) / 255);
     }
 
+    // Cold path: refresh the brightness LUT and DERIVE the color-role offsets from the light's
+    // channel-role array (`roles`, `nChannels` entries: the driver's dynamic array, canonical).
+    // A role appearing at channel i sets that color's offset to i; a color role not present stays
+    // kAbsent (apply() skips it). outChannels becomes the channel count. Motion roles set the
+    // motion offsets and hasMotion, which is what apply() reads to decide whether to remap.
     void rebuild(uint8_t brightness, const ChannelRole* roles, uint8_t nChannels) {
         rebuildBrightness(brightness);
         offRed = offGreen = offBlue = offWhite = kAbsent;
@@ -152,18 +157,18 @@ struct Correction {
         outChannels = nChannels;
     }
 
-    // Hot path: transform one source light (3-channel RGB at `src`) into `out`
-    // (`outChannels` bytes). Brightness via LUT, then place each present color role at
-    // its derived offset, then synthesize white per whiteMode. No allocation, integer-only.
-    // A color role the light doesn't carry (offset == kAbsent) is simply not written — so
-    // a wiring that omits, say, red just doesn't emit it. Channels holding non-color roles
-    // (pan/tilt) are left for their own writers; apply() never touches them.
-    /// Color only: motion is NOT carried. For a sink that has no motion to express (an LED
-    /// strand, an RGB preview). Named rather than defaulted so a new driver has to say which it
-    /// wants, instead of silently dropping a fixture's aim by taking the shorter overload.
-    inline void applyColorOnly(const uint8_t* src, uint8_t* out) const { apply(src, out, 0); }
-
-    /// `srcChannels` is the SOURCE light's width, and passing it enables the motion mapping.
+    /// Hot path: transform one source light (`srcChannels` bytes at `src`) into `out`
+    /// (`outChannels` bytes). Brightness via LUT, then place each present color role at its
+    /// derived offset, then synthesize white per whiteMode. No allocation, integer-only.
+    /// A color role the light doesn't carry (offset == kAbsent) is simply not written, so a
+    /// wiring that omits, say, red just doesn't emit it.
+    ///
+    /// `srcChannels` is the SOURCE light's width. Every driver passes the width it has; whether
+    /// motion is carried is decided HERE, from `hasMotion` (derived in rebuild from the fixture's
+    /// own roles). A sink with no motion channels never enters that branch, so it needs no say in
+    /// the matter: the preset describes the fixture, and the pipeline carries whatever it declares.
+    /// That is also what lets a moving-head preset be driven by an LED driver, which emits its
+    /// motion bytes like any other channel: unusual, but the honest result of the wiring asked for.
     ///
     /// This is a REMAP, not a copy: motion is read from the LAYER's packed slots (kMotionBase
     /// onward, in pan/tilt/zoom/rotate/gobo order) and written to the FIXTURE's own offsets, which

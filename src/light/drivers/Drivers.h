@@ -343,7 +343,7 @@ public:
         const bool held = !on && motionHold != kMotionHoldNever && offSeconds_ >= motionHold;
         for (uint8_t i = 0; i < childCount(); i++) {
             if (child(i)->role() != ModuleRole::Driver) continue;
-            static_cast<DriverBase*>(child(i))->correctionForHold().motionHeld = held;
+            static_cast<DriverBase*>(child(i))->setMotionHeld(held);
         }
     }
 

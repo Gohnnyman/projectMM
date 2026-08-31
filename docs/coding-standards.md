@@ -175,7 +175,7 @@ Two things worth knowing:
 
 ## When checks run
 
-Which checks run at which lifecycle event is defined once, in [CLAUDE.md § The Process](../CLAUDE.md#the-process), and executed by the `moondeck/event/` scripts (`precommit.py`, `premerge.py`, `prerelease.py`) — see [MoonDeck.md](../moondeck/MoonDeck.md#event_precommit--event_premerge--event_prerelease). Each gate carries an objective trigger, so a change runs only the checks it makes applicable. CI runs the same checks on every PR ([.github/workflows/](../.github/workflows/)).
+Which checks run at which lifecycle event is defined once, in the [Commit](../CLAUDE.md#commit), [Merge](../CLAUDE.md#merge) and [Release](../CLAUDE.md#release) tables: one command per check, each with an objective path trigger, so a change runs only the checks it makes applicable. CI runs the same checks on every PR ([.github/workflows/](../.github/workflows/)).
 
 ## Tests
 
