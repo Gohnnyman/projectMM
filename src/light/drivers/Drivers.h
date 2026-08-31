@@ -255,8 +255,10 @@ public:
     /// Seconds the rig has been off, counted on tick1s. Stops climbing once the hold expires, so a
     /// device left off for a week does not wrap it.
     uint16_t offSeconds_ = 0;
-    /// What movable() said when the control list was last built, so a change is noticed
-    /// without walking the preset every tick.
+    /// Whether any enabled driver was aimable at the last check, so the control list is rebuilt
+    /// on the transition rather than every second. Seeded false and corrected on the first tick:
+    /// a rig that starts with a moving head gets its control one second in, which is a second
+    /// after the tree is even renderable.
     bool     movableNow_ = false;
 
     void defineControls() override {
@@ -342,8 +344,19 @@ public:
         // moving head (and stays visible after they leave one), against the rule that every setting
         // applies live. Compared rather than rebuilt blindly: rebuildControls() fires a WS resync,
         // and this runs every second.
-        if (movableNow_ != fixtureChannels().movable()) {
-            movableNow_ = !movableNow_;
+        //
+        // Read from each driver's ALREADY-RESOLVED correction rather than through
+        // fixtureChannels(), which calls rebuildCorrection() on every child: that re-walks the
+        // preset roles and rebuilds a 256-entry brightness LUT per driver, which is exactly the
+        // "wrong cost" the rebuildCorrection doc below names, once a second on the render tick.
+        bool movable = false;
+        for (uint8_t i = 0; i < childCount() && !movable; i++) {
+            if (child(i)->role() != ModuleRole::Driver || !child(i)->enabled()) continue;
+            const Correction& c = static_cast<DriverBase*>(child(i))->correction();
+            movable = c.offPan != Correction::kAbsent || c.offTilt != Correction::kAbsent;
+        }
+        if (movableNow_ != movable) {
+            movableNow_ = movable;
             rebuildControls();
         }
         if (on) {

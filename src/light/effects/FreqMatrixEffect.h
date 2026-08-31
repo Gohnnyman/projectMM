@@ -39,7 +39,7 @@ namespace mm {
 /// Audio-reactive effect: scrolls the dominant frequency as a color column.
 class FreqMatrixEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🐙🎶"; }  // 1D · audio
+    const char* tags() const override { return "🐙🎶"; }  // WLED origin · audio
     Dim dimensions() const override { return Dim::D1; }   // writes the x=0 column, runs along Y (1D)
 
     // Defaults from WLED Freqmatrix (speed=255, fx/intensity=128, lowBin/custom1=18,

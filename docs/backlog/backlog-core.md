@@ -208,6 +208,26 @@ NetworkReceiveEffect accepts E1.31 via unicast only — the same scope MoonLight
 
 **The SEND half is the more interesting one, and it's the honest scale answer.** sACN puts the universe number *in the group address*, so with **IGMP snooping** the switch filters per-universe in hardware — each node's NIC sees only the universes it joined. That is broadcast's send-once efficiency *plus* unicast's selectivity, and it's the one addressing mode that beats per-node unicast when many nodes want overlapping universes. `NetworkSendDriver` already knows its universe range, so the group address is a pure function of `universe_start` — a small increment, not a redesign. **The catch that keeps it off the default path:** without IGMP snooping the switch floods multicast exactly like broadcast (and on WiFi it goes out at the lowest basic rate to every station), so it degrades straight back into the starvation regime — and firmware cannot detect whether the switch snoops. So: unicast stays the portable default; multicast is the opt-in optimization for a network the user controls. Do the receive join and the send group together when it lands.
 
+### A scripted module's DIMENSION chip still comes from its type, not its script
+
+`writeModuleJson` emits an instance's `tags()` (HttpServerModule.cpp), so a MoonLive module shows
+the emoji its loaded script declares. Its DIMENSION does not follow the same path: `/api/types`
+carries `dim` per TYPE, captured at boot from a probe with no script loaded, and the module state
+carries no `dim` at all. So a script declaring `int dimensions() { return 3; }` renders as 🟦 on the
+card while behaving as D3 through `Layer::extrude`: the behavior is right and the chip lies.
+
+The fix is not a line in the serializer. `MoonModule` deliberately has no `dimensions()`:
+`ModuleFactory::registerType` detects one with `if constexpr (requires ...)` on the CONCRETE type
+precisely so the light-domain `Dim` enum stays out of core (ModuleFactory.h). Core holds a
+`MoonModule*` when it writes state, so emitting a per-instance dim means giving `MoonModule` a
+virtual that returns a byte, which puts a light-domain concept on the domain-neutral base for the
+sake of a chip.
+
+Options, cheapest first: a `uint8_t dimByte()` on MoonModule defaulting to 0 (the enum stays in the
+light domain, only the number crosses, mirroring what the probe already does); or leave it and
+accept that a scripted module's dimension chip reflects its type. Worth doing when someone is
+annoyed by the wrong chip, not before.
+
 ### British spellings predate the prose gate (118 files)
 
 `check_prose.py` reports on ADDED lines only, so the American-spelling rule has been enforced from

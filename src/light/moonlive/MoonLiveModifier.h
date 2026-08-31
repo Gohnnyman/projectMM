@@ -41,7 +41,17 @@ namespace mm {
 /// Modifier whose coordinate transform is a live-authored MoonLive script.
 class MoonLiveModifier : public ModifierBase {
 public:
-    const char* tags() const override { return "📝"; }   // scripted
+    /// Both answered by the SCRIPT when it says, the same delegation MoonLiveEffect does. 📝 marks
+    /// a script that declared nothing of its own: the notepad says "this is scripted", which is all
+    /// a module can say about a program it has not been told about.
+    const char* tags() const override {
+        const char* t = script_.tags();
+        return t ? t : "📝";
+    }
+
+    /// Advisory here rather than functional: extrude reads the EFFECT's dimensions. It is what the
+    /// card and the picker show, so a script that declares 3 stops reading as 2 once it is running.
+    Dim dimensions() const override { return script_.dimensions(); }
 
     void defineControls() override {
         // The script NAME, not the script — the text lives in a file the UI loads and saves

@@ -4,6 +4,7 @@
 // split into .h + .cpp so implementation edits don't cascade-recompile every TU
 // that includes the header.
 
+#include <new>                             // placement new: removeRecursive's heap DirLevel
 #include "core/HttpServerModule.h"
 
 #include "core/Scheduler.h"
@@ -654,7 +655,8 @@ void collectEntry(const char* name, bool isDir, uint32_t, void* user) {
 /// which is all fsRemove promises.
 ///
 /// `depth` bounds the recursion rather than trusting the tree: this walks a filesystem a user can
-/// shape, and the stack it runs on belongs to the web-server task. 8 is far past any real layout
+/// shape, and it runs on the MAIN task (handleConnection, called inline from tick20ms), which is
+/// also the render task. 8 is far past any real layout
 /// (`/.config`, `/moonlive` and the rest are one level deep).
 }  // namespace
 
@@ -668,12 +670,13 @@ bool HttpServerModule::removeRecursive(const char* path, uint8_t depth) {
     // A user can nest folders freely through POST /api/dir, so a few levels would smash the stack
     // of the task that renders. One allocation per level costs a malloc on a path that is already
     // doing filesystem writes, and the frame drops to a pointer.
-    auto* lvlp = static_cast<DirLevel*>(platform::alloc(sizeof(DirLevel)));
-    if (!lvlp) return false;                     // no room to list: report failure, delete nothing
+    auto* raw = platform::alloc(sizeof(DirLevel));
+    if (!raw) return false;                      // no room to list: report failure, delete nothing
+    // Placement new rather than assigning the two fields by hand: DirLevel already declares its
+    // defaults, and a copy here silently skips whatever member is added to it next.
+    DirLevel* lvlp = new (raw) DirLevel;
     DirLevel& lvl = *lvlp;
-    lvl.count = 0;
-    lvl.truncated = false;
-    struct Freer { DirLevel* p; ~Freer() { platform::free(p); } } freer{lvlp};
+    struct Freer { DirLevel* p; ~Freer() { p->~DirLevel(); platform::free(p); } } freer{lvlp};
     platform::fsList(path, &collectEntry, &lvl);
     if (lvl.count == 0) return false;            // not a directory, or unreadable: the failure stands
 

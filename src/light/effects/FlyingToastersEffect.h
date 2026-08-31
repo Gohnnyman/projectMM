@@ -104,7 +104,7 @@ class FlyingToastersEffect : public EffectBase {
 public:
     static constexpr uint8_t kPool = 20;   // 12 toasters + 8 toast, the control maxima
 
-    const char* tags() const override { return "💫🎵✨👾"; }  // audio-reactive when soundReactive is set
+    const char* tags() const override { return "💫🎶✨👾"; }  // audio-reactive when soundReactive is set
     Dim dimensions() const override { return Dim::D2; }
 
     /// How many of each fly, and how fast the flock drifts.

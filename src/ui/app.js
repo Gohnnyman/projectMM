@@ -1007,8 +1007,8 @@ function renderModuleTree(mod, parentEl, depth) {
     // from mod.children on every render, so adding a layer adds its tab: there is no tab registry
     // to keep in sync, which is the whole of the "dynamic" requirement.
     if (depth === 0) {
-        // The "+" tab takes over the add affordance, so hide the footer's duplicate button: but keep
-        // the footer element itself, because openTypePicker renders the picker into it.
+        // The "+" tab takes over the add affordance, so hide the footer's duplicate button. The
+        // footer element stays: it is what the tab's handler walks up to find this card's mod.
         const addBtn = card.querySelector(".card-footer > .add-btn");
         if (addBtn) addBtn.style.display = "none";
         renderChildTabs(mod, childrenEl, depth);
@@ -1136,7 +1136,10 @@ function renderChildTabs(mod, childrenEl, depth) {
             // effects instead of another layer). Scope to direct children of this card.
             const card = childrenEl.parentElement;
             const footer = [...card.children].find(el => el.classList.contains("card-footer"));
-            if (footer) openTypePicker(mod, footer.querySelector(".add-btn") || footer);
+            // Anchored to the TAB, which is what the user clicked. The footer's own add button
+            // is display:none at this depth (renderModuleTree hides it), and a hidden
+            // element's rect is all zeros, which pinned the modal to the top of the window.
+            if (footer) openTypePicker(mod, addTab);
         });
         strip.appendChild(addTab);
     }
@@ -1834,7 +1837,7 @@ function createActionButtons(mod) {
     replaceBtn.textContent = "✎";
     replaceBtn.title = "Replace with another type";
     replaceBtn.addEventListener("click", () => {
-        // Anchor the picker to the card so it drops below the card content,
+        // Anchored to the button: the picker is a modal that opens under whatever was clicked,
         // not inside the cramped 26px action-button row.
         openReplacePicker(mod, replaceBtn);
     });
@@ -1958,7 +1961,7 @@ function docPathForType(moduleType) {
 //
 // The INSTANCE's own tags win when it has them. A scripted module answers from the script it
 // loaded, so two MoonLive effects running different scripts read differently while sharing one
-// entry in /api/types: the audio one shows 📊, the moving-head one 🎯. A compiled module sends
+// entry in /api/types: the audio one shows 🎶, the moving-head one 🎯. A compiled module sends
 // nothing here and keeps its type's answer.
 function emojiTagsForMod(mod) {
     if (!mod) return "";
@@ -2661,10 +2664,8 @@ function createControl(moduleName, moduleType, ctrl) {
                 for (const o of picker.options) if (o.value) add(o.value, remote.includes(o.value));
                 for (const n of (g.names || [])) add(n, !localNames.has(n) && remote.includes(n));
                 if (!items.length) return;
-                // Anchored to the STACK, not the button: openPicker renders inside its anchor and
-                // takes that element's width, so anchoring to a toolbar button drew the list as an
-                // unreadable sliver. The stack is the control's full-width column, which is the
-                // same shape the module picker's footer anchor gives it.
+                // Anchored to the field itself: the picker opens under it as a modal, sized and
+                // placed by openPicker rather than by whatever element it hangs from.
                 openPicker(picker, {
                     items,
                     actionLabel: "use",
@@ -4525,17 +4526,14 @@ function cssEscape(s) {
 // 6. Type picker
 // ---------------------------------------------------------------------------
 
-// Role → emoji. The role part of the MoonLight emoji-key system
-// (https://moonmodules.org/MoonLight/moonlight/overview/#emoji-key):
-// 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver · 🥞 layer (projectMM
-// addition: every Layer instance, child of the Effects container). The role
-// tag is derived here, not duplicated in every module's tags() string: one
-// source of truth in the UI saves repeating the same character in ~30 module
-// headers and a few bytes per type in /api/types. Each module's tags() then
-// only carries its categorical origin (🐙 WLED · 💫 MoonLight · ⚡️ FastLED)
-// and any feature extras (audio: ♫ FFT · ♪ volume · moving-head: 🚨 color ·
-// 🗼 movement). The dimensional emoji (📏 1D · 🟦 2D · 🧊 3D) is derived from
-// the type's `dim` field. All three are merged in emojiTagsFor().
+// Role → emoji, derived here rather than duplicated in every module's tags(): one home in the UI
+// saves repeating the same character in ~90 module headers and a few bytes per type in /api/types.
+// The dimensional chip comes from the type's `dim` the same way (DIM_EMOJI below), and both are
+// merged with the module's own tags() in emojiTagsFor().
+//
+// What each emoji MEANS is documented once, for the people who read the chips:
+// docs/tutorials/how-projectmm-works.md, "The emoji on every card". Re-listing the vocabulary here
+// is how this comment came to name four emoji no module carries any more.
 const ROLE_EMOJI = {
     effect:     "🔥",
     driver:     "☸️",
@@ -4565,7 +4563,7 @@ function roleHue(roles) {
     return hues.length === 1 ? String(hues[0]) : null;
 }
 
-// Dim int → emoji. Only effects carry `dim` (1/2/3); other modules have dim == 0
+// Dim int → emoji. Effects, layouts and modifiers all carry `dim` (1/2/3); everything else has 0
 // and contribute nothing here. Same MoonLight key. Keeps emojiTagsFor() the
 // single place that assembles the chip set per type.
 const DIM_EMOJI = {

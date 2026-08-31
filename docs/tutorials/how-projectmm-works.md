@@ -190,7 +190,7 @@ The rest the module declares about itself:
 | 🧬 | a simulation: the picture emerges from cells evolving off their own last frame, rather than being drawn |
 | 📹 | motion-tracking aware: it follows people or objects moving in the room *(reserved, nothing carries it yet)* |
 
-A module can carry several: `💫♫` is a MoonLight effect that reacts to frequency.
+A module can carry several: `💫🎶` is a MoonLight effect that reacts to frequency.
 
 ---
 
