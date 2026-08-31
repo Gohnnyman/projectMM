@@ -130,6 +130,7 @@ nav:
       - How projectMM works: tutorials/how-projectmm-works.md
       - Installing projectMM on a desktop: tutorials/installing-to-desktop.md
       - Driving LED panels with a receiving card: tutorials/panel-cards.md
+      - Driving projectMM from a phone or tablet: tutorials/control-surface.md
       - Build your own MoonModules: usecases/build-your-own-moonmodules.md
       - Home automation: usecases/home-automation.md
       - LED signal integrity: usecases/led-signal-integrity.md

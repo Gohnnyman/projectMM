@@ -31,6 +31,59 @@ A Service (added by the user, not auto-wired): the audio source that feeds the F
 - `syncPort` — (network build) the UDP port (default 11988, the WLED standard), shown when sending or receiving; set it the same on both ends. `sync status` reports the live send/receive state.
 - read-only — `level` (RMS), `peakHz` (the audio driving effects, from any source).
 
+Detail: [technical](moxygen/AudioService.md)
+
+[Tests](../../tests/unit-tests.md#audioservice)
+
+<a id="osc"></a>
+
+### OSC
+
+<img src="../../assets/core/OscModule.png" width="300" alt="OSC module controls: listen, port, status">
+
+Receives [OSC](https://opensoundcontrol.stanford.edu/) over UDP and writes it onto this device's
+controls, so a fader in Resolume, TouchDesigner, TouchOSC or a DIY Arduino-over-Ethernet rig drives
+projectMM directly. It owns no surface of its own: everything lands in the same control writes the
+HTTP API and the UI use, so every validator still runs.
+
+- `listen` — receive OSC (default **off**). This opens an unauthenticated UDP port that writes
+  controls, on the same LAN-trust basis as the Art-Net and audio-sync receivers, so it is a
+  capability you turn on rather than one every device carries.
+- `port` — the UDP port (default 9000, what TouchOSC uses). Applies live.
+- `status` — listening, off, or why the port could not be opened.
+
+Detail: [technical](moxygen/IrService.md)
+
+<a id="ir"></a>
+
+### IR
+
+A Service (added per board): an IR remote receiver that drives other modules' controls through the shared `Scheduler::setControl` primitive. It **learns** any remote (NEC-over-RMT): pick an action in `learn`, press a button to bind its code. What each action does + the status-line messages: ⌄ details.
+
+<img src="../../assets/core/IrService.png" width="300" alt="IR module controls">
+
+- `pin` — the IR receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4 alongside Ethernet).
+- `learn` — pick an action to bind (`on/off` / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms. The first option, `off`, is the disarmed state (bind nothing), not a light action.
+- `code on/off` / `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
+
+**Feedback: the device answers.** With `feedback` on, a control that changes anywhere (the web UI, a
+preset recall, an audio-reactive effect) is mirrored back to the surface, which is what keeps a
+client honest and what moves a motorised fader. `feedbackTo` names the receiver, or is left empty to
+answer whoever last wrote to us; `feedbackPort` is where that client LISTENS, which is not the port
+we listen on (Open Stage Control calls its own `osc-port`).
+
+A client learns the current state three ways: when it first writes to us from a new address, when
+its address changes, and whenever it sends **`/mm/hello`**. The last one exists because a client
+restarting on the SAME address is invisible to the other two, and most controllers send nothing of
+their own on load, so every widget would show its layout file's defaults until the user moved one.
+The shipped session has a `sync from device` button for exactly this.
+
+**Setting one up**, from installing the app to using it from a phone, is its own page:
+[Driving projectMM from a phone or tablet](../../tutorials/control-surface.md). It needs no
+checkout and no tooling, just the app and the session file from the latest release.
+
+## Audio — details
+
 #### WLED audio sync: what is on the wire
 
 Sending and receiving both use the **multicast address 239.0.0.1**, which is what WLED's own
@@ -82,26 +135,7 @@ value would drive effects harder than locally analyzed audio ever could.
 
 Prior art: the WLED-MM audio-reactive usermod by **Frank ([@softhack007](https://github.com/softhack007))**, the most-used open-source audio-reactive LED implementation, whose adaptive noise-gate concept the analysis here descends from (analyzed with his permission); and **[@troyhacks](https://github.com/troyhacks/WLED)**, who reworked that DSP onto Espressif's [esp-dsp](https://github.com/espressif/esp-dsp) FFT, the same choice this service makes. The line-in path exists because **wladi ([myhome-control](https://shop.myhome-control.de))** supplied the hardware and pinout for the [MHC-WLED ESP32-P4 shield](../../reference/mhc-wled-esp32-p4-shield.md): its onboard PCM1808 I2S ADC is what `mclkPin` is for.
 
-Detail: [technical](moxygen/AudioService.md)
-
-[Tests](../../tests/unit-tests.md#audioservice)
-
-<a id="osc"></a>
-
-### OSC
-
-<img src="../../assets/core/OscModule.png" width="300" alt="OSC module controls: listen, port, status">
-
-Receives [OSC](https://opensoundcontrol.stanford.edu/) over UDP and writes it onto this device's
-controls, so a fader in Resolume, TouchDesigner, TouchOSC or a DIY Arduino-over-Ethernet rig drives
-projectMM directly. It owns no surface of its own: everything lands in the same control writes the
-HTTP API and the UI use, so every validator still runs.
-
-- `listen` — receive OSC (default **off**). This opens an unauthenticated UDP port that writes
-  controls, on the same LAN-trust basis as the Art-Net and audio-sync receivers, so it is a
-  capability you turn on rather than one every device carries.
-- `port` — the UDP port (default 9000, what TouchOSC uses). Applies live.
-- `status` — listening, off, or why the port could not be opened.
+## OSC — details
 
 **Addresses.** These are a public contract: a TouchOSC layout built against them keeps working, so
 they stay small and boring.
@@ -120,31 +154,7 @@ a controller sending 0..127 does something sensible instead of appearing dead.
 
 Send one from the bench with `uv run moondeck/check/send_osc.py <ip> /mm/fader/1 0.75`.
 
-**Feedback: the device answers.** With `feedback` on, a control that changes anywhere (the web UI, a
-preset recall, an audio-reactive effect) is mirrored back to the surface, which is what keeps a
-client honest and what moves a motorised fader. `feedbackTo` names the receiver, or is left empty to
-answer whoever last wrote to us; `feedbackPort` is where that client LISTENS, which is not the port
-we listen on (Open Stage Control calls its own `osc-port`).
-
-A client learns the current state three ways: when it first writes to us from a new address, when
-its address changes, and whenever it sends **`/mm/hello`**. The last one exists because a client
-restarting on the SAME address is invisible to the other two, and most controllers send nothing of
-their own on load, so every widget would show its layout file's defaults until the user moved one.
-The shipped session has a `sync from device` button for exactly this.
-
-**Without the repo or any tooling**, which is the usual case for someone who just owns a device:
-
-1. Install [Open Stage Control](https://openstagecontrol.ammd.net/) (free, macOS / Windows / Linux).
-   macOS quarantines the unsigned download, so the first launch needs a right-click Open, once.
-2. Download **`projectMM-control-surface.json`** from the
-   [latest release](https://github.com/MoonModules/projectMM/releases/latest), beside the firmware.
-3. Start Open Stage Control and fill in three fields on its launcher:
-   `send` = `<device-ip>:9000`, `osc-port` = `9001`, `load` = the file you downloaded.
-4. On the device, turn the OSC module's `listen` and `feedback` on, and leave `feedbackPort` at 9001.
-
-The session asks the device for its state whenever the page loads, so the widgets are right
-immediately and stay right through a refresh. It sends to whatever `send` names, so nothing in the
-file needs editing for a device on another machine.
+Origin: projectMM original
 
 **One command to a working surface** (with the repo checked out). Install
 [Open Stage Control](https://openstagecontrol.ammd.net/) (free, macOS / Windows / Linux), then:
@@ -176,15 +186,10 @@ The launcher looks on PATH first, then in each platform's default install locati
 Linux are untested**: the paths are the ones those installers use, but only macOS has been run. If
 it cannot find the app, `--app` takes the full path and that always works.
 
-**A ready-made control surface.** [Open Stage Control](https://openstagecontrol.ammd.net/) is free
-and runs on macOS, Windows, Linux and any phone browser, which makes it the quickest way to drive a
-device by hand. A session of the switches, encoders and faders ships as a release asset
-(`projectMM-control-surface.json`), and lives in the repo at
-[`docs/reference/examples/open-stage-control.json`](../../reference/examples/open-stage-control.json):
-point its `load` option at that file, set `send` to `<device-ip>:9000`, and give its own `port`
-something other than 8080, which the projectMM UI already uses. macOS quarantines the unsigned
-download, so the first launch needs a right-click Open rather than a double-click, and `read-only`
-in its launcher must be off to edit the layout.
+**A ready-made control surface.** A session of the switches, encoders and faders ships as a release
+asset (`projectMM-control-surface.json`) and lives in the repo at
+[`docs/reference/examples/open-stage-control.json`](../../reference/examples/open-stage-control.json).
+Editing the layout needs `read-only` off in the launcher.
 
 <img src="../../assets/core/OscModule-open-stage-control.png" width="600" alt="The shipped Open Stage Control session beside projectMM's own Control card: eight switches, eight encoders and eight faders in both">
 
@@ -204,22 +209,6 @@ placeholder rather than as part of the contract above.
 
 **It does not reach a Mackie desk.** The X-Touch and QCon Pro G2 speak Mackie Control over MIDI,
 not OSC: see [control surfaces](../../reference/control-surfaces.md) for what would.
-
-Origin: projectMM original
-
-<a id="ir"></a>
-
-### IR
-
-A Service (added per board): an IR remote receiver that drives other modules' controls through the shared `Scheduler::setControl` primitive. It **learns** any remote (NEC-over-RMT): pick an action in `learn`, press a button to bind its code. What each action does + the status-line messages: ⌄ details.
-
-<img src="../../assets/core/IrService.png" width="300" alt="IR module controls">
-
-- `pin` — the IR receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4 alongside Ethernet).
-- `learn` — pick an action to bind (`on/off` / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms. The first option, `off`, is the disarmed state (bind nothing), not a light action.
-- `code on/off` / `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
-
-Detail: [technical](moxygen/IrService.md)
 
 ## IR — details
 

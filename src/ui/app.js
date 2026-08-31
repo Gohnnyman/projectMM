@@ -2326,6 +2326,21 @@ function createControl(moduleName, moduleType, ctrl) {
             // No `dir` means the name IS the path: joinFsPath("", n) would return "/n" and point
             // at the filesystem root instead of the file the module named.
             const pathOf = (n) => (n ? (dir ? joinFsPath(dir, n) : n) : "");
+            // Where a script actually IS, which is not always `dir`: a factory script sits in the
+            // catalog's directory until an edit forks it into the user's. The device resolves the
+            // same way (user copy first), so the editor has to look in both or it would open an
+            // empty box for a script that is plainly listed.
+            const scriptPathOf = async (n) => {
+                if (!n || !dir) return pathOf(n);
+                const local = joinFsPath(dir, n);
+                if (!mlGroupForExt(ext)) return local;
+                try {
+                    const here = await fmFetchDir(dir).catch(() => []);
+                    if (here.some(e => !e.isDir && e.name === n)) return local;
+                    const cat = await mlFetchCatalog();
+                    return joinFsPath(cat.dir, n);
+                } catch (_) { return local; }
+            };
 
             const stack = document.createElement("div");
             stack.className = "control-fileedit-stack";
@@ -2341,6 +2356,15 @@ function createControl(moduleName, moduleType, ctrl) {
             picker.className = "control-select fileedit-pick";
             picker.dataset.mid = moduleName;
             picker.dataset.key = ctrl.name;
+            // Which scripts this picker can offer that are not on the device yet. Names only:
+            // picking one downloads it. Empty for a filepath control that is not a script picker.
+            let remote = [];
+            // Local names that also exist in the catalog: a user edit shadowing a factory script.
+            let forks = new Set();
+            // Every name the catalog ships for this role, whether or not it is on the device.
+            let catalogNames = new Set();
+            // Names in the USER's directory: written or edited here, so worth proposing upstream.
+            let localNames = new Set();
             const fillPicker = async () => {
                 picker.innerHTML = "";
                 const none = document.createElement("option");
@@ -2354,17 +2378,56 @@ function createControl(moduleName, moduleType, ctrl) {
                                        .map(e => e.name);
                     } catch (_) { /* an unreachable directory leaves just "none" */ }
                 }
+                // The user's OWN files, before the factory listing is merged in below: a name here
+                // is something they wrote or edited, which is what the share button offers.
+                localNames = new Set(names);
+                // A script picker also lists the FACTORY directory, where downloads land. A name in
+                // both is the user's edit shadowing the factory copy, which is what the device
+                // resolves too, so it appears once.
+                const group = mlGroupForExt(ext);
+                let cat = null;
+                if (group) {
+                    try {
+                        cat = await mlFetchCatalog();
+                        const factory = await fmFetchDir(cat.dir, true).catch(() => []);
+                        for (const e of factory)
+                            if (!e.isDir && e.name.endsWith(ext) && !names.includes(e.name))
+                                names.push(e.name);
+                    } catch (_) { /* no catalog: the picker still lists what is here */ }
+                }
+                names.sort();
+                // A local name that ALSO exists in the catalog is a fork: the user edited a factory
+                // script, so their copy shadows one that can be restored. Deleting it is a revert,
+                // not a loss, and the delete button says so.
+                forks = cat ? new Set(((cat[group] || {}).names || []).filter(n => names.includes(n)))
+                            : new Set();
+                // Everything the catalog offers that is not here yet, listed after the local ones
+                // so a user's own scripts stay at the top of the list.
+                remote = cat ? ((cat[group] || {}).names || []).filter(n => !names.includes(n)) : [];
+                // Every name the library ships for this role, downloaded or not: what the share
+                // button uses to tell a user's own script from one of ours.
+                catalogNames = new Set(cat ? ((cat[group] || {}).names || []) : []);
+
                 // The current value may name a file the listing does not have (deleted underneath,
                 // or a directory that could not be read). Keep it selectable so the card still
                 // shows what the module is pointing at, rather than silently appearing unset.
                 const cur = String(ctrl.value ?? "");
-                if (cur && !names.includes(cur)) names.unshift(cur);
+                if (cur && !names.includes(cur) && !remote.includes(cur)) names.unshift(cur);
                 for (const n of names) {
                     const o = document.createElement("option");
                     o.value = n; o.textContent = n;
                     picker.appendChild(o);
                 }
+                // Marked, because picking one costs a download and can fail. One list rather than
+                // two groups: to the user it is one library, and where a script happens to live is
+                // the device's business.
+                for (const n of remote) {
+                    const o = document.createElement("option");
+                    o.value = n; o.textContent = "\u2601 " + n;   // cloud: not on this device yet
+                    picker.appendChild(o);
+                }
                 picker.value = cur;
+                refreshDelLabel();
             };
 
             // Save sits with the other file actions rather than in a row of its own: the card is
@@ -2402,12 +2465,87 @@ function createControl(moduleName, moduleType, ctrl) {
             delBtn.className = "card-btn card-btn-del";
             delBtn.textContent = "×";                  // the card's own delete, red on the symbol
             delBtn.title = "Delete this script";
+            // The SAME button reverts a factory script, because it is the same operation: the
+            // editor only ever saves to the user directory, so an edited factory script is a second
+            // file shadowing the first, and removing it brings the original back. Saying "delete"
+            // there would misdescribe it, and a second button would make one act look like two.
+            const shareBtn = document.createElement("button");
+            shareBtn.className = "card-btn";
+            shareBtn.textContent = "\u2197";           // north-east arrow: it leaves for somewhere else
+            shareBtn.title = "Propose this script for the shared library";
+
+            function refreshDelLabel() {
+                const isFork = forks.has(picker.value);
+                delBtn.textContent = isFork ? "\u21ba" : "\u00d7";   // undo arrow, or the delete cross
+                delBtn.title = isFork
+                    ? "Revert to the shipped version (discards your changes)"
+                    : "Delete this script";
+                delBtn.classList.toggle("card-btn-del", !isFork);
+                // Offered for anything the user WROTE, which is a script of their own or a fork of
+                // a shipped one: both are a change worth sending back, and the flow differs only in
+                // which GitHub URL it opens. NOT offered for an untouched factory copy, where the
+                // file on the device is byte-identical to the one in the repo and a pull request
+                // would propose no change at all.
+                const known = catalogNames.has(picker.value);
+                const edited = localNames.has(picker.value);   // it sits in the USER directory
+                shareBtn.hidden = !picker.value || !mlGroupForExt(ext) || !edited;
+                shareBtn.title = known
+                    ? "Propose your changes to the shared library"
+                    : "Propose this script for the shared library";
+            }
+            // Share: open a pull request adding this script to the library.
+            //
+            // GitHub's "new file" URL takes the path and the contents as query parameters and opens
+            // its editor pre-filled, forking the repo on the user's behalf when they propose it. So
+            // a script someone wrote on their own device reaches the library with one click and no
+            // API, no token and nothing stored here.
+            //
+            // Only for scripts a user WROTE: a factory script is already in the library, and a fork
+            // of one would open a PR that recreates a file that exists.
+            shareBtn.addEventListener("click", async () => {
+                const name = picker.value;
+                const group = mlGroupForExt(ext);
+                if (!name || !group) return;
+                await editor.save();                  // propose what is on screen, not the last save
+                let text = "";
+                try {
+                    const res = await fetch("/api/file?path=" + encodeURIComponent(await scriptPathOf(name)));
+                    if (!res.ok) throw new Error(await errorMessage(res));
+                    text = await res.text();
+                } catch (err) { alert("could not read the script: " + err.message); return; }
+
+                const cat = await mlFetchCatalog().catch(() => null);
+                const folder = cat && cat[group] ? cat[group].folder : group;
+                // A name the library already ships is an EDIT of that file; anything else is a new
+                // one. GitHub has a flow for each, and both fork on the user's behalf when they
+                // propose the change, so neither needs write access to this repo.
+                const repoPath = "moonlive/" + folder + "/" + name;
+                const url = catalogNames.has(name)
+                    ? "https://github.com/MoonModules/projectMM/edit/main/" + repoPath
+                      + "?value=" + encodeURIComponent(text)
+                    : "https://github.com/MoonModules/projectMM/new/main"
+                      + "?filename=" + encodeURIComponent(repoPath)
+                      + "&value=" + encodeURIComponent(text);
+                // The script rides in the query string, and browsers stop honouring a URL somewhere
+                // past ~8 KB. Every shipped script is under 2.5 KB so this is headroom rather than a
+                // real limit, but a long one would otherwise open a truncated editor and look fine.
+                if (url.length > 7000) {
+                    await navigator.clipboard.writeText(text).catch(() => {});
+                    alert("This script is too long to send through a link.\n\n"
+                        + "It has been copied to your clipboard: open\n"
+                        + "github.com/MoonModules/projectMM, add a file under moonlive/" + folder
+                        + "/ and paste it there.");
+                    return;
+                }
+                window.open(url, "_blank", "noopener");
+            });
+
             bar.appendChild(picker);
             const tools = document.createElement("div");
             tools.className = "fileedit-tools";
             tools.appendChild(saveBtn);
             tools.appendChild(popBtn);
-            if (dir) { tools.appendChild(newBtn); tools.appendChild(delBtn); }
+            if (dir) { tools.appendChild(newBtn); tools.appendChild(shareBtn); tools.appendChild(delBtn); }
             bar.appendChild(tools);
             stack.appendChild(bar);
 
@@ -2421,6 +2559,23 @@ function createControl(moduleName, moduleType, ctrl) {
                 sizeKey: key,
                 saveButton: saveBtn,
                 statusEl,
+                // Editing a factory script FORKS it: the read came from the library directory, but
+                // the write goes to the user's, so the shipped copy stays untouched and the new one
+                // shadows it. Without this an edit overwrote the library copy and there was nothing
+                // left to revert to.
+                savePath: (readPath) => {
+                    if (!dir) return readPath;
+                    const base = readPath.slice(readPath.lastIndexOf("/") + 1);
+                    return base ? joinFsPath(dir, base) : readPath;
+                },
+                // A save may have just created the fork, so what the picker thinks is local is out
+                // of date: re-read it, which is also what turns the delete button into revert.
+                onSaved: (written) => {
+                    if (!mlGroupForExt(ext)) return;
+                    if (!written.startsWith(dir + "/")) return;
+                    const sel = picker.value;
+                    fillPicker().then(() => { picker.value = sel; refreshDelLabel(); });
+                },
             });
 
             // Re-read after the modal closes: it edits the same file through the same endpoints, so
@@ -2430,16 +2585,37 @@ function createControl(moduleName, moduleType, ctrl) {
                 // Flush unsaved edits first: the modal loads the file from the device, so opening
                 // it on a dirty pane would show stale bytes and then save them back over the edit.
                 await editor.save();
-                await openFileEditor(pathOf(picker.value));
-                await editor.load(pathOf(picker.value));
+                const p = await scriptPathOf(picker.value);
+                await openFileEditor(p);
+                await editor.load(p);
             });
 
             picker.addEventListener("change", async () => {
                 // Same reason as the modal above: switching files discards the edit otherwise.
                 await editor.save();
+                const chosen = picker.value;
+                // A factory script the device does not hold yet: download it BEFORE selecting it,
+                // so the module never points at a file that is not there. A failure reports and
+                // puts the picker back, rather than leaving the card pointing at nothing.
+                if (remote.includes(chosen)) {
+                    const previous = String(ctrl.value ?? "");
+                    picker.disabled = true;
+                    try {
+                        await mlDownloadScript(chosen, mlGroupForExt(ext));
+                    } catch (e) {
+                        picker.disabled = false;
+                        alert("could not download " + chosen + ": " + (e && e.message ? e.message : e));
+                        picker.value = previous;
+                        return;
+                    }
+                    picker.disabled = false;
+                    await fillPicker();          // it is local now, so it loses its marker
+                    picker.value = chosen;
+                }
+                refreshDelLabel();
                 dragTs[key] = Date.now();
-                sendControl(moduleName, ctrl.name, picker.value);
-                editor.load(pathOf(picker.value));
+                sendControl(moduleName, ctrl.name, chosen);
+                editor.load(await scriptPathOf(chosen));
             });
 
             newBtn.addEventListener("click", async () => {
@@ -2461,19 +2637,45 @@ function createControl(moduleName, moduleType, ctrl) {
             armPressTwice(delBtn, async () => {
                 const victim = picker.value;
                 if (!victim) return;
+                const wasFork = forks.has(victim);
                 try {
+                    // Always the USER path: the factory copy is not ours to remove, and it is what
+                    // a revert falls back to.
                     const res = await fetch("/api/dir?path=" + encodeURIComponent(pathOf(victim)),
                                             { method: "DELETE" });
                     if (!res.ok) throw new Error(await errorMessage(res));
-                } catch (err) { alert("delete failed: " + err.message); return; }
+                } catch (err) {
+                    alert((wasFork ? "revert failed: " : "delete failed: ") + err.message);
+                    return;
+                }
                 await fillPicker();
+                if (wasFork) {
+                    // The factory script is what resolves now, so the module keeps running: stay on
+                    // it rather than unsetting the control, which is the whole point of a revert.
+                    picker.value = victim;
+                    refreshDelLabel();
+                    dragTs[key] = Date.now();
+                    sendControl(moduleName, ctrl.name, victim);
+                    await editor.load(await scriptPathOf(victim));
+                    return;
+                }
                 picker.value = "";
+                refreshDelLabel();
                 dragTs[key] = Date.now();
                 sendControl(moduleName, ctrl.name, "");
                 await editor.load("");
-            }, { armedText: "✓", armedTitle: "Click again to delete" });
+            }, { armedText: "✓", armedTitle: "Click again to confirm" });
 
-            fillPicker();
+            // The editor mounted on the USER path above, which is right for a script the user
+            // wrote and wrong for a factory one that has never been edited. Resolving needs the
+            // catalog, so it cannot happen during the synchronous mount: re-point it once the
+            // listing is in, and only when it actually resolves elsewhere.
+            fillPicker().then(async () => {
+                const cur = String(ctrl.value ?? "");
+                if (!cur || !mlGroupForExt(ext)) return;
+                const real = await scriptPathOf(cur);
+                if (real !== pathOf(cur)) await editor.load(real);
+            });
             break;
         }
         case "password": {
@@ -4898,6 +5100,55 @@ function fmState(mod) {
 }
 
 // Fetch one directory's children (name/isDir/size) from /api/dir. `hidden` includes dotfiles.
+// The MoonLive factory catalog: which scripts EXIST upstream, as opposed to which are on this
+// device. Cached for the session because it is compiled into the firmware and cannot change while
+// the device runs.
+let mlCatalog = null;
+async function mlFetchCatalog() {
+    if (mlCatalog) return mlCatalog;
+    const res = await fetch("/api/scripts");
+    if (!res.ok) throw new Error(await errorMessage(res));
+    mlCatalog = await res.json();
+    return mlCatalog;
+}
+
+/// Which catalog group a picker's extension belongs to, so a script picker offers only its own role.
+function mlGroupForExt(ext) {
+    return ext === ".mle" ? "effects" : ext === ".mll" ? "layouts" : ext === ".mlm" ? "modifiers" : null;
+}
+
+// Download one factory script and save it to the device.
+//
+// The BROWSER fetches it, not the device: raw.githubusercontent.com sends
+// `access-control-allow-origin: *`, so the page can read it directly, and the device then needs no
+// TLS stack, no certificate bundle and no internet of its own. A rig on an isolated network is
+// served by whatever laptop is looking at its UI. Same approach as WLED-MM's arti-fx.
+//
+// Pinned to the firmware's own tag (the endpoint decides which), so a script always matches the
+// engine that will run it rather than whatever main happens to hold.
+async function mlDownloadScript(name, group) {
+    const cat = await mlFetchCatalog();
+    const folder = (cat[group] || {}).folder;
+    if (!folder) throw new Error("unknown script kind");
+    const url = "https://raw.githubusercontent.com/MoonModules/projectMM/"
+              + encodeURIComponent(cat.tag) + "/moonlive/" + folder + "/" + encodeURIComponent(name);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(res.status === 404 ? name + " is not in this firmware's release" : "download failed");
+    const text = await res.text();
+    if (!text.trim()) throw new Error("downloaded script is empty");
+    // The factory directory has to exist first: POST /api/file does not create parents, so on a
+    // device where nothing has been downloaded yet the write fails with "write failed" and no clue
+    // why. mkdir is idempotent, so this costs one request and only on the first download.
+    await fetch("/api/dir?path=" + encodeURIComponent(cat.dir), { method: "POST" }).catch(() => {});
+    // Straight to the factory directory, never the user's: an edit is what puts a copy there, and
+    // that copy is what shadows this one.
+    const save = await fetch("/api/file?path=" + encodeURIComponent(cat.dir + "/" + name), {
+        method: "POST", headers: { "Content-Type": "application/octet-stream" },
+        body: new Blob([text]),
+    });
+    if (!save.ok) throw new Error(await errorMessage(save));
+}
+
 async function fmFetchDir(absPath, hidden) {
     const res = await fetch("/api/dir?path=" + encodeURIComponent(absPath) + (hidden ? "&hidden=1" : ""));
     if (!res.ok) throw new Error(await errorMessage(res));
@@ -5608,7 +5859,11 @@ async function fmCreateFile(dir, name, content = "") {
 // `onSaved(relPath)` fires after each successful save. Returns a handle so a caller can point the
 // same pane at a different file without rebuilding it.
 function fmMountEditor(host, relPath, opts = {}) {
-    const { expectedSize, onSaved, sizeKey, saveButton, statusEl } = opts;
+    // `savePath(readPath)` lets a caller WRITE somewhere other than it read. The script picker uses
+    // it: a factory script is read from the read-only library directory, and editing it must create
+    // the user's own copy rather than overwrite what shipped. Defaults to writing back where it
+    // read, which is what every other caller wants.
+    const { expectedSize, onSaved, sizeKey, saveButton, statusEl, savePath } = opts;
     const wrap = document.createElement("div");
     wrap.className = "fm-editor-pane";
     // The footer carries Save and the status line, UNLESS the host supplies both: a card already has
@@ -5666,7 +5921,8 @@ function fmMountEditor(host, relPath, opts = {}) {
             if (body.readOnly || !dirty || !path) return;   // re-check: a queued save may be moot
             const saved = body.value;                       // what THIS request writes
             status.textContent = "saving…";
-            const r = await fmSaveFrom(body, path);
+            const dest = savePath ? savePath(path) : path;
+            const r = await fmSaveFrom(body, dest);
             status.textContent = r.message;
             // A failed write (no space, a vanished path) must not be silent. The modal shows it on
             // its status line; a host that supplied its own hidden one gets an alert, because the
@@ -5674,7 +5930,12 @@ function fmMountEditor(host, relPath, opts = {}) {
             if (!r.ok && statusEl && statusEl.hidden) alert(r.message);
             // Only clear dirty if the body still holds what we just wrote: typing during the
             // request means there are newer bytes on screen that nobody has saved yet.
-            if (r.ok && body.value === saved) { setDirty(false); if (onSaved) onSaved(path); }
+            if (r.ok && body.value === saved) {
+                setDirty(false);
+                // Report where it LANDED, not where it came from: a caller that refreshes a listing
+                // needs to know a new file now exists in the user's directory.
+                if (onSaved) onSaved(savePath ? savePath(path) : path);
+            }
         });
         return saving;
     };

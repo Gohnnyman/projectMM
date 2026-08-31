@@ -21,7 +21,17 @@ Inside a function the grammar is a sequence of **statements** — a function cal
 
 **A script's role is its extension**: `.mle` an effect, `.mll` a [layout](MoonLiveLayout.md), `.mlm` a [modifier](MoonLiveModifier.md). That is what a card filters its picker on, so an effect card offers effects. The engine is role-blind and runs whichever moment the binding asks for; the extension decides what is OFFERED, not what runs.
 
-**The shipped scripts are the reference**: [`moonlive/`](https://github.com/MoonModules/projectMM/tree/main/moonlive) in the repository holds every script a device ships with, one file per effect, layout and modifier. Read them to see what the language looks like in practice: they are the same text the card edits, and a device keeps its own copies under `/moonlive/`.
+**The shipped scripts are the reference**: [`moonlive/`](https://github.com/MoonModules/projectMM/tree/main/moonlive) in the repository holds every script the library ships, one file per effect, layout and modifier. Read them to see what the language looks like in practice: they are the same text the card edits.
+
+**The library, and how it reaches a device.** A device carries the NAMES of every library script and the text of none, so the picker offers the whole library while flash holds a few KB rather than a few hundred. A name the device does not have yet is marked with a cloud; picking it downloads that one script and it becomes an ordinary local file. A device therefore holds the handful it actually uses, which is the normal case: one layout describes the rig it is wired to and the rest are meaningless on it.
+
+The browser does the downloading, not the device: it reads the script from GitHub and posts it to the device's own file endpoint. So the device needs no internet at any point, and a rig on an isolated network is served by whatever machine is looking at its UI. The script comes from the firmware's own release tag, so it always matches the engine that will run it.
+
+**Two directories, and why.** A downloaded library script lands in `/.moonlive`, hidden the way `/.config` is; your own scripts live in `/moonlive`. The editor only ever saves to `/moonlive`, so **editing a library script forks it**: your copy is a second file of the same name, and it wins. Deleting the fork restores the original, which is why the delete button reads **revert** (`↺`) there. That is a local operation, so getting a shipped script back never needs a network.
+
+**Sending one back.** A script you wrote or changed carries a **`↗`** button beside the editor. It opens GitHub with the script already filled in: a new script as a new file under `moonlive/`, a changed library script as an edit of the one that is there. GitHub forks the repository on your behalf when you propose it, so contributing needs a GitHub account and nothing else. The button appears only for a file in your own directory, since an untouched library copy is byte-identical to what is already upstream.
+
+**`GET /api/scripts`** is what the picker reads: the library's names per role (`effects`, `layouts`, `modifiers`), the tag they are fetched from, and the directory a download lands in. The catalog is compiled into the firmware, generated from `moonlive/` at build time by `catalog_scripts.cmake`, so a script added to the repository reaches devices with no other change.
 
 The **class name is not the file name**. `plasma.mle` may declare `class PlasmaEffect`; the file is what the engine loads, the class is what diagnostics and the module status report. Renaming either leaves the other alone, the same way a C translation unit and the functions inside it are independent.
 
@@ -29,7 +39,7 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 
 ## Controls
 
-- `script`: the script this module runs, picked from `/moonlive/` and **edited on the card itself**. A fresh module has none: it reports `no script — set the script name` and renders nothing, rather than every new module compiling the same default.
+- `script`: the script this module runs, picked from the library or your own files and **edited on the card itself**. A fresh module has none: it reports `no script — set the script name` and renders nothing, rather than every new module compiling the same default.
 
     Type in the box and the script compiles when you click away, press Ctrl/Cmd+S, or press Save; a dot on the Save button marks unsaved work. A valid script swaps in on the next tick. A failed compile frees the old code, shows the diagnostic in the module status, and renders dark until it is fixed, so a typo costs a message rather than a reboot. Fixing it in place is enough: nothing has to be renamed.
 

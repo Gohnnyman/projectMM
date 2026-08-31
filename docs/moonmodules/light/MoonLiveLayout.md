@@ -105,7 +105,7 @@ Past half full, the status also names the tightest limit the script is approachi
 
 | control | what it does |
 |---|---|
-| `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-places the lights live |
+| `script` | the script's file name, picked from the [library](MoonLiveEffect.md) or your own; naming it (or re-naming it after an edit) recompiles and re-places the lights live |
 
 Plus one control per `addControl` in the script's `defineControls()`.
 

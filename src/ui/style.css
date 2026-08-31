@@ -665,6 +665,13 @@ body.cards-resizing {
     gap: 4px;
 }
 
+/* `hidden` has to WIN. The UA sheet's [hidden] {display:none} is weaker than any class-level
+   display, and a .card-btn inside a flex row (.fileedit-tools) becomes a flex item regardless, so
+   setting .hidden = true on one did nothing at all: the share button stayed visible for every
+   script. One rule here rather than per button, because the next hidden control in a flex row
+   would hit exactly this. */
+[hidden] { display: none !important; }
+
 .card-btn {
     background: transparent;
     border: 1px solid var(--border);

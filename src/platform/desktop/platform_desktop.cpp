@@ -591,7 +591,12 @@ std::filesystem::path defaultRoot() {
     std::error_code ec;
     if (std::filesystem::exists("CMakeLists.txt", ec) && !ec
         && std::filesystem::is_directory("moondeck", ec) && !ec)
-        return std::filesystem::path("build");
+        // `build/fs`, not `build`: the device's filesystem is what the File Manager shows as its
+        // root, and rooting it at the build directory listed CMake caches, object archives and
+        // every ESP32 variant's build folder beside the four directories a device actually has.
+        // A subfolder makes the desktop look like a board, which is the point of the desktop
+        // build: what a user sees there has to be what they will see on hardware.
+        return std::filesystem::path("build") / "fs";
     std::filesystem::path user = userDataDir();
     return user.empty() ? std::filesystem::path("build") : user;
 }

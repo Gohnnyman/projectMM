@@ -13,6 +13,20 @@ namespace mm::moonlive {
 /// the File Manager has one obvious place to look.
 inline constexpr const char* kScriptDir = "/moonlive";
 
+/// Where the FACTORY scripts land: the ones the picker offers from the shipped catalog and the UI
+/// downloads on first use. Separate from kScriptDir, and that split is the whole revert mechanism.
+///
+/// The script editor only ever saves to kScriptDir, so editing a factory script writes a second
+/// file of the same name there rather than changing this one, and resolveScript below prefers it.
+/// Un-editing is then deleting that copy, a LOCAL operation: with one directory an edit would
+/// overwrite the only copy and getting the original back would mean downloading it again, needing
+/// internet at exactly the moment a rig is already on site.
+///
+/// Dot-prefixed for the same reason `/.config` is: the File Manager hides it unless `hidden=1`, so
+/// the factory copies do not clutter the tree, while staying plain readable text for anyone who
+/// looks. A library you learn from has to be readable.
+inline constexpr const char* kFactoryScriptDir = "/.moonlive";
+
 /// A script's ROLE, in its file name. One language, three extensions: an effect is `.mle`, a
 /// layout `.mll`, a modifier `.mlm`.
 ///
@@ -106,7 +120,27 @@ inline uint32_t scriptHash(const char* s, size_t len) {
     return h;
 }
 
-/// The hash of `<kScriptDir>/<name>`'s CURRENT text, without compiling it.
+/// Where `name` actually lives: the user's copy if there is one, else the factory copy.
+///
+/// ONE resolver for both readers below. They used to build the path themselves, and the day a
+/// second directory appeared that would have been two places to keep in step: a fork compiled from
+/// kScriptDir while its hash came from the factory copy would look changed on every prepare sweep
+/// and recompile forever.
+///
+/// Writes the resolved path into `out` and returns true when a file is there. False means neither
+/// directory has it, and `out` then holds the USER path, so a caller reporting an error names the
+/// place a user would put one.
+inline bool resolveScript(const char* name, char* out, size_t outLen) {
+    std::snprintf(out, outLen, "%s/%s", kScriptDir, name);
+    if (platform::fsSize(out) >= 0) return true;
+    char factory[96];
+    std::snprintf(factory, sizeof(factory), "%s/%s", kFactoryScriptDir, name);
+    if (platform::fsSize(factory) < 0) return false;   // neither: leave `out` as the user path
+    std::snprintf(out, outLen, "%s", factory);
+    return true;
+}
+
+/// The hash of `name`'s CURRENT text, without compiling it.
 ///
 /// Answers "has the file changed since I compiled it" for the cost of ONE read, which is what a
 /// binding asks on every prepare sweep. It costs the same whole-file read compileScriptFile makes
@@ -118,7 +152,7 @@ inline uint32_t scriptHash(const char* s, size_t len) {
 inline bool scriptFileHash(const char* name, uint32_t& out) {
     if (!name || !name[0]) return false;
     char path[96];
-    std::snprintf(path, sizeof(path), "%s/%s", kScriptDir, name);
+    if (!resolveScript(name, path, sizeof(path))) return false;
     const long size = platform::fsSize(path);
     if (size <= 0 || size > kScriptFileMax) return false;
 
@@ -188,8 +222,10 @@ inline bool compileScriptFile(MoonLive& engine, const char* name,
         err = "script name must end in .mle, .mll or .mlm"; return false;
     }
 
+    // The user's copy wins over the factory one of the same name: that is what makes editing a
+    // factory script a fork rather than a change to it.
     char path[96];
-    std::snprintf(path, sizeof(path), "%s/%s", kScriptDir, name);
+    resolveScript(name, path, sizeof(path));
 
     const long size = platform::fsSize(path);
     if (size < 0)               { err = "script not found"; return false; }

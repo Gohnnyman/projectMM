@@ -82,6 +82,7 @@ moondeck/.last_flash.json
 # Generated files
 src/ui/ui_embedded.h
 src/core/build_info.h
+src/light/moonlive/script_catalog.h
 
 # ESP-IDF: per-board build directories live under /build/esp32-*/; legacy
 # esp32/build/ is still ignored so a developer's existing tree doesn't

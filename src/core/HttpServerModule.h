@@ -512,6 +512,10 @@ private:
     void handleDeleteModule(platform::TcpConnection& conn, const char* moduleName);
     void handleReplaceModule(platform::TcpConnection& conn, const char* moduleName, const char* body);
     void serveTypes(platform::TcpConnection& conn);
+    // GET /api/scripts → the MoonLive script catalog: which factory scripts exist, per role, plus
+    // the repo tag to fetch them from. The UI needs it to offer a script the device does not hold
+    // yet; the catalog is compiled in, so this costs no filesystem access.
+    void serveScriptCatalog(platform::TcpConnection& conn);
 
     /// GET /api/modules/<name> — one module's JSON, byte-identical to its entry in /api/state
     /// (children included). `name` is the raw path segment and may be percent-encoded, since a

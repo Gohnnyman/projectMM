@@ -16,6 +16,9 @@
 #include "core/FilesystemModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/SystemModule.h"      // deviceName() for the WLED /json/info shim
+#include "light/moonlive/MoonLiveScriptFile.h"   // kFactoryScriptDir: where a download lands
+#include "light/moonlive/script_catalog.h"        // generated: which factory scripts exist
+#include "core/build_info.h"                      // kVersion: the tag a script is fetched from
 #include "light/Palette.h"          // Palettes::nearestForHue: maps HA's RGB color picker onto our
                                     // hue→palette convention (same core→light bridge MqttModule uses
                                     // for hsv/set; see the note in MqttModule.cpp:7-14).
@@ -271,6 +274,8 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
         else if (std::strcmp(path, "/api/system") == 0) serveSystem(conn);
         else if (std::strcmp(path, "/api/types") == 0) serveTypes(conn);
+        // GET /api/scripts → the MoonLive factory catalog (names per role + the tag to fetch from).
+        else if (std::strcmp(path, "/api/scripts") == 0) serveScriptCatalog(conn);
         // GET /api/modules/<name> → that ONE module's JSON, the same object /api/state
         // carries for it. Exists for issue reports: a user opens the card's `api` link and
         // pastes what they see, instead of hunting one card out of the whole-tree dump.
@@ -1782,6 +1787,25 @@ void HttpServerModule::writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, b
 
 // Apply-core: add one module under a named parent. Transport-free; returns an
 // OpResult. Idempotent on the id (an existing name returns Ok, "already there").
+// Does `parent` accept a child of this role? Its acceptsChildRoles() is a comma-separated list of
+// role names ("effect,modifier"); empty means it takes no children at all. The UI reads the same
+// string out of /api/types to build its picker, so both sides answer from one declaration.
+static bool parentAcceptsRole(const MoonModule* parent, ModuleRole childRole) {
+    if (!parent) return false;
+    const char* csv = parent->acceptsChildRoles();
+    if (!csv || !csv[0]) return false;
+    const char* want = roleName(childRole);
+    const size_t wantLen = std::strlen(want);
+    for (const char* p = csv; *p;) {
+        const char* comma = std::strchr(p, ',');
+        const size_t len = comma ? static_cast<size_t>(comma - p) : std::strlen(p);
+        if (len == wantLen && std::strncmp(p, want, len) == 0) return true;
+        if (!comma) break;
+        p = comma + 1;
+    }
+    return false;
+}
+
 HttpServerModule::OpResult HttpServerModule::applyAddModule(
         const char* typeName, const char* id, const char* parentId,
         char* outName, size_t outNameLen) {
@@ -1805,6 +1829,16 @@ HttpServerModule::OpResult HttpServerModule::applyAddModule(
     auto* mod = ModuleFactory::create(typeName);
     if (!mod) return OpResult::UnknownType;
     if (id && id[0] != 0) mod->setName(id);
+
+    // The parent's declared child roles are a RULE, not a UI hint. The picker filters by them, so
+    // the UI never offers a bad pairing, but nothing stopped the API from making one: an effect
+    // nested inside a layout ticks in the wrong pass and renders its controls on the wrong card.
+    // Checked here rather than in addChild because persistence and boot legitimately build a tree
+    // before roles are settled; this is the path where a caller asks for a specific pairing.
+    if (!parentAcceptsRole(parent, mod->role())) {
+        delete mod;
+        return OpResult::BadRequest;
+    }
 
     if (!parent->addChild(mod)) {
         delete mod;
@@ -2132,6 +2166,58 @@ void HttpServerModule::serveModule(platform::TcpConnection& conn, const char* na
     // The SAME writer /api/state uses, so the two can never disagree about a module's shape.
     JsonSink sink(conn);
     writeModuleJson(sink, mod);
+    sink.flush();
+}
+
+// GET /api/scripts: the shipped MoonLive catalog.
+//
+// The device carries the NAMES of every factory script and the text of none: the UI fetches a
+// script from GitHub the first time someone picks it and posts it back to /api/file. So this
+// endpoint answers "what could I offer" while /api/dir answers "what is actually here".
+//
+// `tag` is what to fetch from, and it is the firmware's own version so a script always matches the
+// engine that will run it. A development build has no upstream tag of its own, so it falls back to
+// the branch, which is stated here rather than guessed at in the browser.
+void HttpServerModule::serveScriptCatalog(platform::TcpConnection& conn) {
+    const char* header =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Connection: close\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "\r\n";
+    conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+
+    JsonSink sink(conn);
+    sink.append("{\"tag\":");
+    // A version ending in -dev has no release tag upstream; main is where those scripts live.
+    const char* v = kVersion;
+    const bool dev = std::strstr(v, "-dev") != nullptr;
+    if (dev) {
+        sink.writeJsonString("main");
+    } else {
+        char tag[32];
+        std::snprintf(tag, sizeof(tag), "v%s", v);
+        sink.writeJsonString(tag);
+    }
+    sink.append(",\"dir\":");
+    sink.writeJsonString(moonlive::kFactoryScriptDir);
+
+    auto emit = [&sink](const char* key, const char* folder,
+                        const char* const* names, size_t count) {
+        sink.appendf(",\"%s\":{\"folder\":\"%s\",\"names\":[", key, folder);
+        for (size_t i = 0; i < count; i++) {
+            if (i) sink.append(",");
+            sink.writeJsonString(names[i]);
+        }
+        sink.append("]}");
+    };
+    emit("effects", moonlive::kEffectFolder, moonlive::kEffectCatalog,
+         moonlive::kEffectCatalogCount);
+    emit("layouts", moonlive::kLayoutFolder, moonlive::kLayoutCatalog,
+         moonlive::kLayoutCatalogCount);
+    emit("modifiers", moonlive::kModifierFolder, moonlive::kModifierCatalog,
+         moonlive::kModifierCatalogCount);
+    sink.append("}");
     sink.flush();
 }
 

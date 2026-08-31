@@ -153,6 +153,21 @@ add_custom_command(
 )
 add_custom_target(ui_embed DEPENDS ${UI_DIR}/ui_embedded.h)
 
+# The MoonLive script catalog: names of every factory script, so the picker can offer the whole
+# library while the device holds only what someone actually picked. CONFIGURE_DEPENDS re-globs when
+# a script is added or removed, so the catalog cannot go stale against the repo.
+set(MOONLIVE_DIR ${COMPONENT_DIR}/../../moonlive)
+set(MOONLIVE_GEN ${COMPONENT_DIR}/../../src/light/moonlive)
+file(GLOB MOONLIVE_SCRIPTS CONFIGURE_DEPENDS
+     ${MOONLIVE_DIR}/effects/*.mle ${MOONLIVE_DIR}/layouts/*.mll ${MOONLIVE_DIR}/modifiers/*.mlm)
+add_custom_command(
+    OUTPUT ${MOONLIVE_GEN}/script_catalog.h
+    COMMAND ${CMAKE_COMMAND} -DSCRIPT_DIR=${MOONLIVE_DIR} -DOUT=${MOONLIVE_GEN}/script_catalog.h -DPYTHON_CMD=${Python3_EXECUTABLE} -P ${MOONLIVE_GEN}/catalog_scripts.cmake
+    DEPENDS ${MOONLIVE_SCRIPTS} ${MOONLIVE_GEN}/catalog_scripts.cmake ${MOONLIVE_GEN}/catalog_scripts.py
+    COMMENT "Generating MoonLive script catalog"
+)
+add_custom_target(moonlive_catalog DEPENDS ${MOONLIVE_GEN}/script_catalog.h)
+
 # Generate build_info.h from library.json + git (carries version, build id, build date, board name).
 #
 # **Deliberately ALWAYS out-of-date** — the target runs the generator on every build, not just when
@@ -171,4 +186,4 @@ add_custom_target(build_info_gen ALL
     VERBATIM
 )
 
-add_dependencies(${COMPONENT_LIB} ui_embed build_info_gen)
+add_dependencies(${COMPONENT_LIB} ui_embed build_info_gen moonlive_catalog)
