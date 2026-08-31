@@ -72,7 +72,7 @@ def main() -> int:
         lower = role.lower()
         folder = FOLDER_BY_ROLE[role]
         parts.append(f"/// Every factory {lower}, by file name. They live in `moonlive/{folder}/`\n")
-        parts.append(f"/// upstream and in the factory script directory on the device.\n")
+        parts.append("/// upstream and in the factory script directory on the device.\n")
         parts.append(f"constexpr const char* k{role}Catalog[] = {{\n")
         parts.append("".join(f'    "{n}",\n' for n in names))
         parts.append("};\n")

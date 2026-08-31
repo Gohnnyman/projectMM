@@ -510,10 +510,18 @@ TEST_CASE("one class can serve several moments, and each is called on its own") 
     eng.run(buf.data(), 1, 3, 0, "tick");
     CHECK(buf[0] == 7);
 
-    // The fold moment writes a coordinate into the same three-byte shape, untouched by the above.
+    // The fold moment sends its coordinate to the SINK, not into the buffer: a coordinate on a
+    // wall wider than 255 does not fit in a byte, so setXYZ is a full-width call rather than the
+    // three-byte store it used to be. Nothing here reaches the buffer above.
+    static uint32_t got[3];
+    got[0] = got[1] = got[2] = 0;
+    mm::moonlive::setCoordSink([](void*, uint32_t x, uint32_t y, uint32_t z) {
+        got[0] = x; got[1] = y; got[2] = z;
+    }, nullptr);
     uint8_t pos[3] = {0, 0, 0};
     eng.run(pos, 1, 3, 0, "modifyLogical");
-    CHECK(pos[0] == 3); CHECK(pos[1] == 4); CHECK(pos[2] == 5);
+    mm::moonlive::setCoordSink(nullptr, nullptr);
+    CHECK(got[0] == 3); CHECK(got[1] == 4); CHECK(got[2] == 5);
 }
 
 // A class that defines NEITHER of a binding's moments is not an error: it compiles, and the binding
@@ -1125,14 +1133,29 @@ TEST_CASE("an array larger than the arena is refused at compile time") {
 // syntax. A modifier is handed ONE coordinate per call and can write nothing but slot 0, so an
 // explicit index was a constant every author typed and none could explain. setRGB keeps its index
 // because an effect picks a pixel out of a whole buffer, where the index is the whole point.
+namespace {
+/// The three values a script's setXYZ produced, captured from the coordinate sink.
+///
+/// setXYZ became a full-width CALL when a coordinate outgrew a byte, so it no longer writes into
+/// the run buffer: a test that wants what the script computed reads it here. Static because the
+/// sink takes a plain function pointer.
+uint32_t gXyz[3];
+void captureXyz(void*, uint32_t x, uint32_t y, uint32_t z) { gXyz[0] = x; gXyz[1] = y; gXyz[2] = z; }
+struct XyzProbe {
+    XyzProbe() { gXyz[0] = gXyz[1] = gXyz[2] = 0; mm::moonlive::setCoordSink(&captureXyz, nullptr); }
+    ~XyzProbe() { mm::moonlive::setCoordSink(nullptr, nullptr); }
+};
+}  // namespace
+
 TEST_CASE("a modifier writes its coordinate without naming a destination slot") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class M { modifyLogical() { setXYZ(3, 4, 5); } }\n", kCtrlTable, kSys));
+    XyzProbe probe;
     uint8_t xyz[3] = {0, 0, 0};
     eng.run(xyz, 1, 3, 0, moonlive::kEntryModify);
-    CHECK(xyz[0] == 3);
-    CHECK(xyz[1] == 4);
-    CHECK(xyz[2] == 5);
+    CHECK(gXyz[0] == 3);
+    CHECK(gXyz[1] == 4);
+    CHECK(gXyz[2] == 5);
     eng.free();
 }
 
@@ -1338,14 +1361,15 @@ TEST_CASE("a longer blend never reads as less merged than a short one") {
                         "  setRGB(0, 0, 0, 0);"
                         "  setXYZ(smin(300, 500, 0), smin(300, 500, 400), smin(300, 500, 60000));"
                         "} }", kCtrlTable, kSys));
+    XyzProbe probe;
     uint8_t px[3] = {};
     eng.run(px, 1, 3, 0, moonlive::kEntryTick);
     eng.free();
-    // setXYZ writes the three results as bytes, so each is its low byte.
-    CHECK(px[0] == 44);                      // k = 0: a plain min, 300 & 0xFF
-    CHECK(px[1] <= px[0]);                   // a real blend pulls the surface below the union
-    CHECK(px[2] == 248);                     // k = 60000: -14600 & 0xFF, still merging further
-                                             // below the union rather than wrapping above it
+    // setXYZ reports FULL WIDTH now, so these are the values themselves rather than their low
+    // bytes: the test reads what smin actually computed instead of what survived a byte.
+    CHECK(gXyz[0] == 300);                   // k = 0: a plain min of 300 and 500
+    CHECK(static_cast<int32_t>(gXyz[1]) <= static_cast<int32_t>(gXyz[0]));   // a blend pulls below the union
+    CHECK(static_cast<int32_t>(gXyz[2]) == -14600);   // k = 60000: still merging further below
 }
 
 // fade(amt) is the trail primitive: an effect that fades rather than clears leaves a decaying

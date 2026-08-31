@@ -160,10 +160,15 @@ set(MOONLIVE_DIR ${COMPONENT_DIR}/../../moonlive)
 set(MOONLIVE_GEN ${COMPONENT_DIR}/../../src/light/moonlive)
 file(GLOB MOONLIVE_SCRIPTS CONFIGURE_DEPENDS
      ${MOONLIVE_DIR}/effects/*.mle ${MOONLIVE_DIR}/layouts/*.mll ${MOONLIVE_DIR}/modifiers/*.mlm)
+# See the desktop CMakeLists: the file LIST is a dependency, so a DELETED script regenerates the
+# catalog rather than lingering in it.
+string(REPLACE ";" "\n" MOONLIVE_SCRIPT_LIST "${MOONLIVE_SCRIPTS}")
+set(MOONLIVE_STAMP ${CMAKE_BINARY_DIR}/moonlive_scripts.stamp)
+file(CONFIGURE OUTPUT ${MOONLIVE_STAMP} CONTENT "${MOONLIVE_SCRIPT_LIST}\n")
 add_custom_command(
     OUTPUT ${MOONLIVE_GEN}/script_catalog.h
     COMMAND ${CMAKE_COMMAND} -DSCRIPT_DIR=${MOONLIVE_DIR} -DOUT=${MOONLIVE_GEN}/script_catalog.h -DPYTHON_CMD=${Python3_EXECUTABLE} -P ${MOONLIVE_GEN}/catalog_scripts.cmake
-    DEPENDS ${MOONLIVE_SCRIPTS} ${MOONLIVE_GEN}/catalog_scripts.cmake ${MOONLIVE_GEN}/catalog_scripts.py
+    DEPENDS ${MOONLIVE_SCRIPTS} ${MOONLIVE_STAMP} ${MOONLIVE_GEN}/catalog_scripts.cmake ${MOONLIVE_GEN}/catalog_scripts.py
     COMMENT "Generating MoonLive script catalog"
 )
 add_custom_target(moonlive_catalog DEPENDS ${MOONLIVE_GEN}/script_catalog.h)

@@ -1,0 +1,58 @@
+// Sweep: the moving-head formations, in script form. MOTION ONLY, no color.
+//
+// The same five relationships the compiled MovingHead effect draws, written so the maths is
+// readable and editable: the sweep is one sine per axis, and a formation is nothing more than a
+// per-head phase offset and a direction. Change either line and you have a formation of your own.
+//
+// Writing no color is the point of this one. Stack it under any color effect on the same layer and
+// that effect paints while this one aims: two scripts, one rig, neither fighting the other.
+
+class SweepEffect {
+  byte formation = 0;   // 0 fan, 1 mirror, 2 chase, 3 cross, 4 unison
+  byte panBpm = 6;
+  byte tiltBpm = 9;
+  byte panRange = 128;
+  byte tiltRange = 96;
+
+  int spread = 0;
+  int dir = 1;
+
+  defineControls() {
+    addControl("formation", formation, 0, 4);
+    addControl("panBpm", panBpm, 1, 120);
+    addControl("tiltBpm", tiltBpm, 1, 120);
+    addControl("panRange", panRange, 0, 255);
+    addControl("tiltRange", tiltRange, 0, 255);
+  }
+
+  tick() {
+    for (i = 0; i < height; i = i + 1) {
+      // Distance along the rig, as a fraction of a sweep. The heads run down y on a 1 x N chain,
+      // which is how a head rig is laid out.
+      spread = 0;
+      dir = 1;
+      if (formation == 1) {
+        // Mirror: the halves face each other.
+        if (i < div(height, 2)) { dir = 1; } else { dir = 0 - 1; }
+      }
+      if (formation == 2) {
+        // Chase: the same sweep, delayed head by head, so a wave travels the rig.
+        spread = div(i * 255, height);
+      }
+      if (formation == 3) {
+        // Cross: alternate heads oppose, a tight scissoring that reads fast at a low BPM.
+        if (mod(i, 2) == 1) { dir = 0 - 1; }
+      }
+      if (formation == 0) {
+        // Fan: each head takes a slice of the sweep, so the rig opens like a hand.
+        spread = div(i * 128, height);
+      }
+      // formation 4 (unison) leaves spread 0 and dir 1: every head on the same aim.
+
+      // Sweep around the middle of the travel, using `range` of it. beatsin gives 0..255, so
+      // subtracting 128 centers it and the range scales how far it swings.
+      setPan(i, 128 + div((beatsin(panBpm, t + spread, 255) - 128) * dir * panRange, 256));
+      setTilt(i, 128 + div((beatsin(tiltBpm, t + spread, 255) - 128) * tiltRange, 256));
+    }
+  }
+}

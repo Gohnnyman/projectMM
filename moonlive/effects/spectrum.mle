@@ -1,0 +1,49 @@
+// Spectrum: the room's frequency bands as bars, bass on the left and treble on the right.
+// The effect that shows a rig is listening. On a matrix each band is a column growing from the
+// bottom; on a single strand the bands share the length, so a strip becomes a VU meter.
+//
+// Every audio reading is 0 in a quiet room or on a device with no microphone, so this renders
+// nothing rather than misbehaving: the script is safe to run anywhere.
+
+class SpectrumEffect {
+  byte gain = 100;
+  byte fadeAmt = 60;
+  byte peakHold = 1;
+
+  int n = 0;
+  int b = 0;
+  int mag = 0;
+  int top = 0;
+
+  defineControls() {
+    addControl("gain", gain, 10, 255);
+    addControl("fadeAmt", fadeAmt, 1, 200);
+    addControl("peakHold", peakHold, 0, 1);
+  }
+
+  tick() {
+    // Fading rather than clearing leaves a decay behind each bar, which is what makes a meter
+    // readable: the eye follows a falling edge better than a flickering one.
+    fade(fadeAmt);
+
+    for (x = 0; x < width; x = x + 1) {
+      // Spread 16 bands across whatever width the rig has: a 16-wide matrix gets one band per
+      // column, a 300-light strand gets each band over ~19 lights.
+      b = div(x * 16, width);
+      mag = div(audioBand(b) * gain, 100);
+      if (mag > 255) { mag = 255; }
+      // How far up this column the bar reaches.
+      top = div(mag * height, 256);
+      for (y = 0; y < top; y = y + 1) {
+        // Colour by BAND, not by height: the spectrum keeps its identity as it moves, so bass is
+        // always the same hue however loud it is.
+        setRGB((height - 1 - y) * width + x, paletteR(b * 16, 255), paletteG(b * 16, 255),
+               paletteB(b * 16, 255));
+      }
+      // A bright cap on the top of each bar, the classic meter look.
+      if (peakHold > 0) {
+        if (top > 0) { setRGB((height - top) * width + x, 255, 255, 255); }
+      }
+    }
+  }
+}

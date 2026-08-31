@@ -96,6 +96,15 @@ struct Correction {
     // "This fixture has at least one motion channel", resolved once at rebuild so the hot path
     // never scans the five offsets to discover they are all absent.
     bool hasMotion = false;
+    /// Hold the rig's aim: motion stops being written to the wire, so a fixture keeps the last
+    /// position it was sent. Set while the rig has been powered off long enough to be considered
+    /// parked (Drivers::motionHold), and cleared the moment power returns.
+    ///
+    /// Here rather than upstream because this is where motion reaches the wire at all: the effect
+    /// keeps running and the buffer keeps changing, so the show stays on its clock and the rig
+    /// rejoins it where it now is. Freezing the WRITE instead would have stopped the show and left
+    /// the buffer holding a stale cue.
+    bool motionHeld = false;
     uint8_t offYellow = kAbsent;
     uint8_t offUV = kAbsent;
     uint8_t outChannels = 3;        // bytes emitted per light (= channelsPerLight of the wiring)
@@ -173,7 +182,10 @@ struct Correction {
         // hasMotion is precomputed at rebuild, so a fixture WITHOUT motion channels (every LED
         // strip and PAR) pays exactly one predictable branch here, not a five-slot scan per light
         // per frame. Motion support must cost nothing on the rigs that do not use it.
-        if (hasMotion && srcChannels != 0) {
+        // `motionHeld` parks the rig: skipping the remap leaves the fixture on its last aim, which
+        // is what makes a device that has been switched off go quiet instead of sweeping in the
+        // dark. Costs nothing on a rig with no motion, which never enters this branch anyway.
+        if (hasMotion && srcChannels != 0 && !motionHeld) {
             // Read the LAYER slot, write the FIXTURE channel. The layer packs motion after RGBW in
             // a fixed order (FixtureChannels::kMotionBase); the fixture puts it wherever its preset
             // says. Two layouts, mapped here, which is what keeps an effect's pan write off the red

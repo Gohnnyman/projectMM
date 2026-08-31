@@ -2399,7 +2399,11 @@ function createControl(moduleName, moduleType, ctrl) {
                 // A local name that ALSO exists in the catalog is a fork: the user edited a factory
                 // script, so their copy shadows one that can be restored. Deleting it is a revert,
                 // not a loss, and the delete button says so.
-                forks = cat ? new Set(((cat[group] || {}).names || []).filter(n => names.includes(n)))
+                // localNames, NOT names: by here `names` also carries the factory listing, so a
+                // script that was downloaded and never touched counted as a fork. It showed the
+                // revert arrow for an edit that does not exist, and reverting it deleted a
+                // /moonlive path with nothing at it.
+                forks = cat ? new Set(((cat[group] || {}).names || []).filter(n => localNames.has(n)))
                             : new Set();
                 // Everything the catalog offers that is not here yet, listed after the local ones
                 // so a user's own scripts stay at the top of the list.
@@ -2507,6 +2511,13 @@ function createControl(moduleName, moduleType, ctrl) {
                 const group = mlGroupForExt(ext);
                 if (!name || !group) return;
                 await editor.save();                  // propose what is on screen, not the last save
+                // A save that failed leaves the pane dirty, and the read below would then fetch the
+                // PREVIOUS text from the device: the user would be proposing something other than
+                // what they are looking at, which is the one outcome worth refusing outright.
+                if (editor.isDirty()) {
+                    alert("Save the script first: it still has unsaved changes.");
+                    return;
+                }
                 let text = "";
                 try {
                     const res = await fetch("/api/file?path=" + encodeURIComponent(await scriptPathOf(name)));
@@ -2639,9 +2650,13 @@ function createControl(moduleName, moduleType, ctrl) {
                 if (!victim) return;
                 const wasFork = forks.has(victim);
                 try {
-                    // Always the USER path: the factory copy is not ours to remove, and it is what
-                    // a revert falls back to.
-                    const res = await fetch("/api/dir?path=" + encodeURIComponent(pathOf(victim)),
+                    // A fork is deleted from the USER directory, which is the whole revert: the
+                    // factory copy underneath is what resolves afterwards. Anything else is deleted
+                    // where it actually sits, because a downloaded factory script has no user copy
+                    // and a DELETE on /moonlive/<name> would report a failure for a file that was
+                    // never there.
+                    const target = wasFork ? pathOf(victim) : await scriptPathOf(victim);
+                    const res = await fetch("/api/dir?path=" + encodeURIComponent(target),
                                             { method: "DELETE" });
                     if (!res.ok) throw new Error(await errorMessage(res));
                 } catch (err) {
@@ -5375,7 +5390,9 @@ function renderFileManager(mod, host) {
     const delBtn = document.createElement("button");
     delBtn.className = "fm-tool fm-tool--icon fm-tool--danger";
     delBtn.textContent = "🗑";
-    delBtn.title = "Delete: delete the selected file or empty folder";
+    // A folder goes with everything in it: emptying one by hand before it would delete was busywork
+    // on a folder of scripts. The two-press arm is the confirmation.
+    delBtn.title = "Delete: delete the selected file, or a folder and everything in it";
     delBtn.disabled = st.selected === "/";   // never delete the root
     armPressTwice(delBtn, () => runOp("delete", st.selected), { armedText: "✓" });
     bar.appendChild(delBtn);

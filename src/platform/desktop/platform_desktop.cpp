@@ -584,7 +584,8 @@ std::filesystem::path userDataDir() {
 //
 // Deliberately the working directory and not the executable's location:
 // `./build/windows/Release/projectMM` run from the repo root is the dev loop this preserves, and an
-// installed copy is never launched that way.
+// installed copy is never launched that way. In a checkout the root is `build/fs` (config under
+// `build/fs/.config`), a subdirectory rather than the build tree itself: see below.
 std::filesystem::path defaultRoot() {
     if (const char* env = std::getenv("MM_DATA_DIR"); env && *env)
         return std::filesystem::path(env);

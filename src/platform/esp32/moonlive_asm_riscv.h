@@ -116,6 +116,9 @@ private:
     static constexpr uint8_t kMaxFixups = kAsmFixups;
 
     void emit32(uint32_t w);
+    /// One conditional branch, as an inverted short branch over a `jal` (see the definition for
+    /// why every conditional branch takes the two-word form).
+    void branchRelaxed(uint8_t rs1, uint8_t rs2, uint8_t f3, Label l);
     // A pending reference to a label. `kind` distinguishes the B-type conditional branches from a
     // J-type `jal`: the two scatter their immediate into different bit fields, so patching one as
     // the other silently retargets it.

@@ -50,7 +50,7 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 // Golden values, recorded from this backend. See the .inc for what they are and are not.
 #define MM_GOLD_GRID_LEN  225u
 #define MM_GOLD_FX_LEN    105u
-#define MM_GOLD_FILLLOOP_LEN 254u  // fits now: the host arguments left the register file
+#define MM_GOLD_FILLLOOP_LEN 253u  // fits now: the host arguments left the register file
 #define MM_GOLD_FXLOOP_LEN  190u
 #define MM_GOLD_FXLOOP_HASH 307181036u
 #define MM_GOLD_FX_HASH   2796457628u

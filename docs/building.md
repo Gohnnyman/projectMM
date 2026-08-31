@@ -67,7 +67,7 @@ Each host writes into its own build dir: `build/macos/`, `build/linux/`, `build/
 
 ### Where the desktop keeps its settings
 
-A **source checkout writes to `build/.config/`**, recognized by `CMakeLists.txt` and `moondeck/` both being in the working directory, so a development tree stays self-contained and gitignored. Anywhere else, an installed or unzipped binary writes to the OS per-user data directory:
+A **source checkout writes to `build/fs/`** (its config under `build/fs/.config/`), recognized by `CMakeLists.txt` and `moondeck/` both being in the working directory, so a development tree stays self-contained and gitignored. The device's filesystem is that one subdirectory rather than the whole build tree, so the File Manager shows what a board shows instead of build output. Anywhere else, an installed or unzipped binary writes to the OS per-user data directory:
 
 | Platform | Directory |
 |---|---|
@@ -286,6 +286,8 @@ The platform abstraction layer replaces what libraries typically provide. Today 
 | [ArduinoJson](https://github.com/bblanchon/ArduinoJson) | Works on ESP-IDF, but heavy: dynamic allocation, large footprint. | Own fixed-size control storage. JSON only for API serialisation, not internal state. |
 
 When a library is genuinely needed (e.g. FastLED for specific hardware support), it lives inside `src/platform/` and is not referenced from core or light-domain code.
+
+Why the trade is worth making, and what it costs: [Why we write our own code](why-we-write-our-own.md).
 
 ## Teensy
 

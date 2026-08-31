@@ -211,10 +211,17 @@ file(GLOB MOONLIVE_SCRIPTS CONFIGURE_DEPENDS
      ${CMAKE_SOURCE_DIR}/moonlive/effects/*.mle
      ${CMAKE_SOURCE_DIR}/moonlive/layouts/*.mll
      ${CMAKE_SOURCE_DIR}/moonlive/modifiers/*.mlm)
+# The file LIST itself is a dependency, not just each file's timestamp: DEPENDS notices an edited
+# script but not a DELETED one, so removing a script left it in the catalog and the device went on
+# offering a name that no longer exists upstream. The stamp is written at configure time from the
+# glob, so a removal changes it and the command re-runs.
+string(REPLACE ";" "\n" MOONLIVE_SCRIPT_LIST "${MOONLIVE_SCRIPTS}")
+set(MOONLIVE_STAMP ${CMAKE_BINARY_DIR}/moonlive_scripts.stamp)
+file(CONFIGURE OUTPUT ${MOONLIVE_STAMP} CONTENT "${MOONLIVE_SCRIPT_LIST}\n")
 add_custom_command(
     OUTPUT ${CMAKE_SOURCE_DIR}/src/light/moonlive/script_catalog.h
     COMMAND ${CMAKE_COMMAND} -DSCRIPT_DIR=${CMAKE_SOURCE_DIR}/moonlive -DOUT=${CMAKE_SOURCE_DIR}/src/light/moonlive/script_catalog.h -DUV_EXECUTABLE=${UV_EXECUTABLE} -P ${CMAKE_SOURCE_DIR}/src/light/moonlive/catalog_scripts.cmake
-    DEPENDS ${MOONLIVE_SCRIPTS} ${CMAKE_SOURCE_DIR}/src/light/moonlive/catalog_scripts.cmake ${CMAKE_SOURCE_DIR}/src/light/moonlive/catalog_scripts.py
+    DEPENDS ${MOONLIVE_SCRIPTS} ${MOONLIVE_STAMP} ${CMAKE_SOURCE_DIR}/src/light/moonlive/catalog_scripts.cmake ${CMAKE_SOURCE_DIR}/src/light/moonlive/catalog_scripts.py
     COMMENT "Generating MoonLive script catalog"
 )
 add_custom_target(moonlive_catalog DEPENDS ${CMAKE_SOURCE_DIR}/src/light/moonlive/script_catalog.h)

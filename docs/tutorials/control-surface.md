@@ -39,7 +39,7 @@ The surface sends to an address, so you need the one your device is on.
 
 It is in the projectMM UI on the **System** card, and it is the same address you typed into the browser to get there. On a desktop install talking to itself, it is `127.0.0.1`.
 
-Write it down; it goes in step 4.
+Write it down; it goes in step 5.
 
 ---
 
@@ -106,7 +106,7 @@ This is where it gets good, and it needs no extra setup.
 
 Open Stage Control also serves the surface as a **web page**. While it is running, look at its console output for a line naming a port (`8080` by default). On any phone or tablet on the same network, browse to:
 
-```
+```text
 http://<the-computer-running-open-stage-control>:8080
 ```
 
@@ -162,7 +162,7 @@ Worth knowing if you ever edit the layout.
 
 Each control sends to an address naming **the surface**, not the thing it drives:
 
-```
+```text
 /mm/switch/1 … /mm/switch/8
 /mm/encoder/1 … /mm/encoder/8
 /mm/fader/1 … /mm/fader/8

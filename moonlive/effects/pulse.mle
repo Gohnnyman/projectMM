@@ -1,0 +1,35 @@
+// Pulse: the whole rig flashes on the beat and decays between hits.
+// The simplest audio-reactive effect there is, and the one that proves a rig is listening at a
+// glance. Where spectrum shows WHAT the room sounds like, this shows WHEN.
+//
+// The colour walks on every beat, so a track never flashes the same shade twice in a row.
+
+class PulseEffect {
+  byte decay = 30;
+  byte hueStep = 24;
+  byte floorBri = 0;
+
+  int lit = 0;
+  int hue = 0;
+
+  defineControls() {
+    addControl("decay", decay, 1, 120);
+    addControl("hueStep", hueStep, 0, 128);
+    addControl("floorBri", floorBri, 0, 128);
+  }
+
+  tick() {
+    // audioBeat() is the project's shared transient test, so a beat here means the same thing it
+    // means to every compiled effect rather than a threshold this script invented.
+    if (audioBeat() > 0) {
+      lit = 255;
+      hue = hue + hueStep;
+    }
+    // Decay between hits. Without it a beat is a single-frame flicker no eye can follow.
+    if (lit > decay) { lit = lit - decay; }
+    else { lit = 0; }
+
+    if (lit < floorBri) { lit = floorBri; }
+    fill(paletteR(hue, lit), paletteG(hue, lit), paletteB(hue, lit));
+  }
+}

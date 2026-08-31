@@ -45,9 +45,9 @@ One source tree drives ESP32, Teensy, Raspberry Pi, macOS, Windows and Linux.
 
 -   :material-speedometer: **Numbers and people**
 
-    Measured frame rates per device, how the project works, and who inspired what.
+    Measured frame rates per device, how the project works, why the code is ours, and who inspired what.
 
-    [Performance](performance.md) · [How we work](https://github.com/MoonModules/projectMM#how-we-work) · [Credits](https://github.com/MoonModules/projectMM#credits)
+    [Performance](performance.md) · [Why our own code](why-we-write-our-own.md) · [How we work](https://github.com/MoonModules/projectMM#how-we-work) · [Credits](https://github.com/MoonModules/projectMM#credits)
 
 </div>
 

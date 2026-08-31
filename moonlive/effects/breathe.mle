@@ -1,0 +1,32 @@
+// Breathe: the whole rig rising and falling on one slow sine, in palette colour.
+// The calm end of the library. Everything else here sparks, falls or scrolls; this is the one to
+// leave on in a room where the lights are furniture rather than a show.
+//
+// `drift` walks the palette while it breathes, so the colour is never quite the same twice. At 0
+// the rig holds one colour and only the brightness moves.
+
+class BreatheEffect {
+  byte bpm = 8;
+  byte hue = 0;
+  byte drift = 20;
+  byte floorBri = 20;
+
+  int bri = 0;
+  int p = 0;
+
+  defineControls() {
+    addControl("bpm", bpm, 1, 60);
+    addControl("hue", hue, 0, 255);
+    addControl("drift", drift, 0, 255);
+    addControl("floorBri", floorBri, 0, 200);
+  }
+
+  tick() {
+    // Never all the way to black: a breath that reaches zero reads as a fault rather than a rest,
+    // so floorBri is where the exhale stops.
+    bri = floorBri + div(beatsin(bpm, t, 255) * (255 - floorBri), 255);
+    // The colour walks on its own slower clock, so the rig drifts through the palette as it breathes.
+    p = hue + scale(beat(div(bpm, 2) + 1, t), drift + 1);
+    fill(paletteR(p, bri), paletteG(p, bri), paletteB(p, bri));
+  }
+}

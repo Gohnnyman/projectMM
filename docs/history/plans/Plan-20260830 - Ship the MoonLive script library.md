@@ -83,7 +83,7 @@ way, which is a further reason the content comes per file from the repo rather t
 
 ### Where a script comes from
 
-```
+```text
 https://raw.githubusercontent.com/MoonModules/projectMM/<tag>/moonlive/<role>/<name>
 ```
 

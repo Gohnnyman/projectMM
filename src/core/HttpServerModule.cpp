@@ -628,22 +628,77 @@ void HttpServerModule::handleMakeDir(platform::TcpConnection& conn, const char* 
     else sendResponse(conn, 500, "application/json", "{\"error\":\"mkdir failed\"}");
 }
 
-// DELETE /api/dir?path=<rel> → remove a file or EMPTY dir (fsRemove fails cleanly on a non-empty
-// dir). Same path guard as handleMakeDir.
+namespace {
+
+/// One directory level, collected. fsList hands entries to a C callback while the directory is open,
+/// and removing a file from inside that callback mutates what is being walked, which LittleFS does
+/// not promise to survive. So a level is read out first, then acted on.
+struct DirLevel {
+    static constexpr uint8_t kMax = 64;   ///< entries per level; a deeper listing is deleted in passes
+    char names[kMax][40];
+    bool isDir[kMax];
+    uint8_t count = 0;
+    bool truncated = false;
+};
+
+void collectEntry(const char* name, bool isDir, uint32_t, void* user) {
+    auto* lvl = static_cast<DirLevel*>(user);
+    if (lvl->count >= DirLevel::kMax) { lvl->truncated = true; return; }
+    if (!name || std::strlen(name) >= sizeof(lvl->names[0])) return;
+    std::snprintf(lvl->names[lvl->count], sizeof(lvl->names[0]), "%s", name);
+    lvl->isDir[lvl->count] = isDir;
+    lvl->count++;
+}
+
+/// Delete `path` and everything under it. Depth-first: a directory can only go once it is empty,
+/// which is all fsRemove promises.
+///
+/// `depth` bounds the recursion rather than trusting the tree: this walks a filesystem a user can
+/// shape, and the stack it runs on belongs to the web-server task. 8 is far past any real layout
+/// (`/.config`, `/moonlive` and the rest are one level deep).
+}  // namespace
+
+bool HttpServerModule::removeRecursive(const char* path, uint8_t depth) {
+    if (depth > 8) return false;
+    if (platform::fsRemove(path)) return true;   // a file, or an already-empty directory
+
+    DirLevel lvl;
+    platform::fsList(path, &collectEntry, &lvl);
+    if (lvl.count == 0) return false;            // not a directory, or unreadable: the failure stands
+
+    bool ok = true;
+    for (uint8_t i = 0; i < lvl.count; i++) {
+        char child[192];
+        std::snprintf(child, sizeof(child), "%s/%s", path, lvl.names[i]);
+        if (!removeRecursive(child, static_cast<uint8_t>(depth + 1))) ok = false;
+    }
+    // A level wider than kMax leaves entries behind, so the directory is still not empty. Report the
+    // failure rather than a false success: the caller can delete again to take the next batch.
+    if (!ok || lvl.truncated) return false;
+    return platform::fsRemove(path);
+}
+
+// DELETE /api/dir?path=<rel> → remove a file, or a directory AND everything in it. Same path guard
+// as handleMakeDir.
+//
+// Recursive because the alternative is worse: fsRemove only takes an empty directory, so a user
+// facing a folder of scripts had to delete every file by hand before the folder itself would go,
+// and the error said "folder not empty?" without saying which. The File Manager already arms a
+// delete twice before it fires, which is the confirmation this needs.
 void HttpServerModule::handleRemoveEntry(platform::TcpConnection& conn, const char* query) {
     char path[160];
     if (!parseFilePath(query, path, sizeof(path))) {
         sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
         return;
     }
-    if (platform::fsRemove(path)) {
+    if (removeRecursive(path)) {
         // A REMOVED file is a change to persistent state exactly as a written one is: a module that
         // derived something from it is now running against a file that is gone, and should say so
         // rather than keep running the vanished program until something else happens to sweep.
         applyFileChanged(path);
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
     } else {
-        sendResponse(conn, 500, "application/json", "{\"error\":\"delete failed (folder not empty?)\"}");
+        sendResponse(conn, 500, "application/json", "{\"error\":\"delete failed\"}");
     }
 }
 
@@ -2066,6 +2121,15 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
     auto* fresh = ModuleFactory::create(typeName);
     if (!fresh) {
         sendResponse(conn, 400, "application/json", "{\"error\":\"unknown type\"}");
+        return;
+    }
+
+    // The same rule the add path enforces: a replacement has to be something the parent accepts, or
+    // a Layer's effect could be swapped for a layout that ticks in the wrong pass. Checked before
+    // the old module is touched, so a refusal leaves the tree exactly as it was.
+    if (!parentAcceptsRole(parent, fresh->role())) {
+        delete fresh;
+        sendResponse(conn, 400, "application/json", "{\"error\":\"parent rejected child\"}");
         return;
     }
 

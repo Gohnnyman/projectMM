@@ -193,6 +193,13 @@ public:
     /// channels. Read-only: the driver owns it and rebuilds it when the preset or sliders change.
     const Correction& correction() const { return correction_; }
 
+    /// The correction, for the ONE field the container sets directly: `motionHeld`. Everything else
+    /// in here is derived by rebuildCorrection from the preset and the global brightness, and a
+    /// caller reaching in to change those would be overwritten by the next rebuild. The hold is
+    /// different: it is a transmission decision the Drivers container owns and re-asserts every
+    /// second, so it is set rather than derived.
+    Correction& correctionForHold() { return correction_; }
+
 protected:
     Layer* layer_ = nullptr;
 

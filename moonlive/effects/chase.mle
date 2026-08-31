@@ -1,0 +1,42 @@
+// Chase: a band of colour running along the strand, the effect a strip owner reaches for daily.
+// Built for 1D on purpose. Most of the library needs a matrix; this one wants a single strand and
+// treats the whole rig as one line however it is laid out.
+//
+// `spread` is the length of the band in lights, `tail` how sharply it falls off behind. A short
+// band with a long tail is a comet; a long band with none is a solid bar marching past.
+
+class ChaseEffect {
+  byte bpm = 20;
+  byte spread = 8;
+  byte tail = 180;
+  byte hue = 0;
+
+  int n = 0;
+  int head = 0;
+  int d = 0;
+  int bri = 0;
+
+  defineControls() {
+    addControl("bpm", bpm, 1, 240);
+    addControl("spread", spread, 1, 60);
+    addControl("tail", tail, 0, 255);
+    addControl("hue", hue, 0, 255);
+  }
+
+  tick() {
+    fill(0, 0, 0);
+    n = width * height * depth;
+    // The band's leading edge, one lap of the rig per beat.
+    head = scale(beat(bpm, t), n);
+    for (i = 0; i < n; i = i + 1) {
+      // Distance BEHIND the head, wrapping at the end so the band runs off one end onto the other.
+      d = head - i;
+      if (d < 0) { d = d + n; }
+      if (d < spread) {
+        // Falls off along the band: full at the head, `tail` decides how fast it dims behind.
+        bri = 255 - div(d * tail, spread);
+        setRGB(i, paletteR(hue + d, bri), paletteG(hue + d, bri), paletteB(hue + d, bri));
+      }
+    }
+  }
+}

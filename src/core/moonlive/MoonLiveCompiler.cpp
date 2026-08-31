@@ -554,7 +554,10 @@ struct Parser {
                     return v;
                 }
                 VReg v = alloc();
-                emit({IrOp::LoadCtrl, v, 0,0,0,0, sv->where, nullptr, {}});
+                // LoadCtrl32, not LoadCtrl: a system variable occupies a 4-byte slot because a
+                // grid is wider than a byte. A 1-byte load read only the low byte, which on a
+                // 768-wide wall is 0 for width and 102 for height.
+                emit({IrOp::LoadCtrl32, v, 0,0,0,0, sv->where, nullptr, {}});
                 return v;
             }
             const int li = findLocal(lex.identBeg, lex.identLen);

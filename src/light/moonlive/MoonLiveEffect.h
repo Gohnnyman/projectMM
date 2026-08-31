@@ -95,6 +95,16 @@ public:
         moonlive::setFadeSink([](void* ctx, uint8_t amt) {
             if (Layer* l = static_cast<MoonLiveEffect*>(ctx)->layer()) l->fadeToBlackBy(amt);
         }, this);
+        // setPan/setTilt reach the fixture's motion channels, whose offsets live in the layer's
+        // channel map. Routed through EffectBase's own setters, so a script aims a head by exactly
+        // the path a compiled effect does, including the no-op on a light that has no such channel.
+        moonlive::setMotionSink([](void* ctx, moonlive::MotionAxis axis, uint32_t index,
+                                   uint8_t value) {
+            auto* self = static_cast<MoonLiveEffect*>(ctx);
+            const auto i = static_cast<nrOfLightsType>(index);
+            if (axis == moonlive::MotionAxis::Pan) self->setPan(i, value);
+            else                                   self->setTilt(i, value);
+        }, this);
         // The particle builtins reach this effect's own pool, with the frame scale the binding
         // computed: framerate independence is the system's property, not the script author's.
         if (particles_.count() > 0)
@@ -105,6 +115,7 @@ public:
         if (script_.engine().hasEntry(moonlive::kEntryTick))
             script_.engine().run(buffer(), nrOfLights(), cpl, elapsed(), moonlive::kEntryTick);
         moonlive::setPoolSink(nullptr, 0);
+        moonlive::setMotionSink(nullptr, nullptr);
         moonlive::setFadeSink(nullptr, nullptr);
         moonlive::setDrawCanvas({});
     }
@@ -125,11 +136,10 @@ public:
     void setScript(const char* name) { script_.setName(name); }
 
 private:
-    // Publish one system variable into its arena slot, saturating to the uint8 a slot holds: a
-    // layer wider than 255 reports 255 rather than wrapping to a small number and drawing garbage.
-    void writeSysVar(uint8_t offset, uint16_t value) {
-        if (uint8_t* slot = script_.engine().controlSlot(offset))
-            *slot = static_cast<uint8_t>(value > 255 ? 255 : value);
+    // Publish one system variable into its arena slot, FULL WIDTH. It used to saturate to a byte,
+    // which is what made a 768-wide wall report 255 and every 2D script paint a corner.
+    void writeSysVar(uint8_t offset, uint32_t value) {
+        moonlive::writeSysVarSlot(script_.engine().controlSlot(offset), value);
     }
 
 

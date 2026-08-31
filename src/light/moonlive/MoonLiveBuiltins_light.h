@@ -13,6 +13,8 @@
 #include "core/math16.h"   // beat16 / triwave16 — full-range waveforms
 #include "light/shader.h"  // shader::smoothstep, the GLSL vocabulary, already in fixed point
 #include "core/noise.h"    // inoise8 — the shared value-noise field
+#include <cstring>
+#include "core/AudioService.h"   // the audio vocabulary reads the latest frame
 #include "light/draw.h"    // draw::line, the shared 3D Bresenham a script draws with
 #include "light/particles.h" // particles::Pool, the kernel a scripted particle effect drives
 
@@ -488,6 +490,28 @@ struct AddControlSink { AddControlFn fn = nullptr; void* ctx = nullptr; };
 using FadeFn = void (*)(void* ctx, uint8_t amt);
 struct FadeSink { FadeFn fn = nullptr; void* ctx = nullptr; };
 
+/// Where setPan/setTilt send their writes. A motion channel is not at a fixed offset the way a
+/// color byte is: WHERE pan lives in a light's bytes comes from the layer's fixture channel map,
+/// which the engine has no notion of, so this cannot be an Inline store like setRGB and goes
+/// through the binding instead.
+///
+/// `axis` selects which channel, so one sink and one host function serve both rather than two of
+/// everything. A light with no such channel is written by nobody: the binding's setPan is already
+/// a no-op there, which is what lets one script run on a moving head and on a plain strip.
+/// Where setXYZ sends a modifier's transformed coordinate.
+///
+/// A Call with a sink rather than the Inline store it used to be, and the reason is width: the
+/// inline form wrote three BYTES into the caller's buffer, so `setXYZ(767 - xPos, …)` on a
+/// 768-wide wall stored 255 and mirrored the light to the wrong place. A layout's addLight was
+/// never affected because it is already a Call taking full-width arguments; this brings setXYZ to
+/// the same footing.
+using CoordFn = void (*)(void* ctx, uint32_t x, uint32_t y, uint32_t z);
+struct CoordSink { CoordFn fn = nullptr; void* ctx = nullptr; };
+
+enum class MotionAxis : uint8_t { Pan = 0, Tilt = 1 };
+using MotionFn = void (*)(void* ctx, MotionAxis axis, uint32_t index, uint8_t value);
+struct MotionSink { MotionFn fn = nullptr; void* ctx = nullptr; };
+
 /// Where pool(n) sends its sizing request, and where the per-frame particle builtins find the pool.
 /// TWO sinks for one feature, deliberately: sizing ALLOCATES, so it is installed only around the
 /// defineControls run (the cold path, once per script edit), while the per-frame calls get a
@@ -507,7 +531,8 @@ namespace detail {
 // addLight sink (a layout run installs it) and the draw canvas (an effect run installs it). A
 // second table would repeat the claim/release machinery for the same lifetime.
 struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; draw::Canvas canvas;
-                  AddControlSink controls; FadeSink fade; PoolSizeSink poolSize; PoolSink pool; };
+                  AddControlSink controls; FadeSink fade; MotionSink motion; CoordSink coord;
+                  PoolSizeSink poolSize; PoolSink pool; };
 /// Two slots: the render task and whichever task edits a control are the two that ever run a script
 /// at once. A third concurrent runner gets the overflow slot, which holds no sink — so its addLight
 /// calls no-op instead of writing through someone else's context.
@@ -584,6 +609,38 @@ inline void setFadeSink(FadeFn fn, void* ctx) MM_NONBLOCKING {
     detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
     if (!s) return;
     s->fade = {fn, ctx};
+    if (!fn) detail::releaseIfEmpty(s);
+}
+
+/// This thread's coordinate sink, or an empty one. Reading does not claim a slot.
+inline const CoordSink& coordSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit CoordSink none{};
+    return s ? s->coord : none;
+}
+
+/// Point setXYZ at the modifier for one run; nullptr to detach.
+inline void setCoordSink(CoordFn fn, void* ctx) MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
+    if (!s) return;
+    s->coord = {fn, ctx};
+    if (!fn) detail::releaseIfEmpty(s);
+}
+
+/// This thread's motion sink, or an empty one. Reading does not claim a slot, as fadeSink does not.
+inline const MotionSink& motionSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit MotionSink none{};
+    return s ? s->motion : none;
+}
+
+/// Point setPan/setTilt at the effect for the duration of one run; nullptr to detach. Installed in
+/// the same bracket as the draw canvas, so a script calling setPan from a layout or a modifier
+/// reaches no sink and does nothing.
+inline void setMotionSink(MotionFn fn, void* ctx) MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
+    if (!s) return;
+    s->motion = {fn, ctx};
     if (!fn) detail::releaseIfEmpty(s);
 }
 
@@ -761,6 +818,80 @@ extern "C" inline uint32_t mm_light_fade(const uintptr_t* args, uint32_t, const 
     if (!f.fn) return 0;
     const uint32_t amt = uint32_t(args[0]);
     f.fn(f.ctx, static_cast<uint8_t>(amt > 255 ? 255 : amt));
+    return 0;
+}
+
+/// setXYZ(x, y, z) → where this light goes, from a modifier. Full width, unlike the inline store
+/// it replaces: a coordinate on a large wall does not fit in a byte.
+///
+/// A no-op outside a modifier run, where no sink is installed, exactly as fade and setPan are.
+extern "C" inline uint32_t mm_light_setXYZ(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const CoordSink& c = coordSink();
+    if (!c.fn) return 0;
+    c.fn(c.ctx, uint32_t(args[0]), uint32_t(args[1]), uint32_t(args[2]));
+    return 0;
+}
+
+/// The audio vocabulary: what the room sounds like, for a script to paint with.
+///
+/// Reads AudioService's latest frame, the same one every compiled audio-reactive effect uses, so a
+/// script and a compiled effect hear exactly the same thing. Every value is already a small integer
+/// (the frame is pre-scaled for this), so a script does integer maths straight off them.
+///
+/// SILENCE READS ZERO, and that is the contract worth relying on: with no audio module, no
+/// microphone, or a quiet room, every one of these returns 0 and an audio-reactive script simply
+/// renders nothing rather than failing to compile or drawing garbage. A script can therefore be
+/// written once and run on a device that has no audio at all. No null check is needed for that:
+/// latestFrame() hands back a constexpr silent frame when no module holds the seat.
+extern "C" inline uint32_t mm_light_level(const uintptr_t*, uint32_t, const uint8_t*) {
+    return AudioService::latestFrame()->level;
+}
+extern "C" inline uint32_t mm_light_levelSmooth(const uintptr_t*, uint32_t, const uint8_t*) {
+    return AudioService::latestFrame()->levelSmoothed;
+}
+/// band(i) → one of the 16 log-spaced magnitudes, bass at 0 and treble at 15. An out-of-range index
+/// reads 0 rather than wrapping: a script asking for band 20 has a bug, and wrapping would answer it
+/// with a plausible number from the wrong end of the spectrum.
+extern "C" inline uint32_t mm_light_band(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t i = uint32_t(args[0]);
+    return i < 16 ? AudioService::latestFrame()->bands[i] : 0;
+}
+extern "C" inline uint32_t mm_light_peakHz(const uintptr_t*, uint32_t, const uint8_t*) {
+    return AudioService::latestFrame()->peakHz;
+}
+/// beat() → 1 on a transient, 0 otherwise. The SAME test the compiled effects use (the raw level
+/// rising above its own smoothed average by a margin), so "a beat" means one thing across the
+/// project rather than each script inventing a threshold. Silence never beats.
+extern "C" inline uint32_t mm_light_onBeat(const uintptr_t*, uint32_t, const uint8_t*) {
+    const AudioFrame* a = AudioService::latestFrame();
+    constexpr uint16_t kSilence = 8, kBeatMargin = 8;
+    if (a->levelSmoothed < kSilence) return 0;
+    return a->level > a->levelSmoothed + kBeatMargin ? 1 : 0;
+}
+
+/// setPan(index, value) / setTilt(index, value) → aim one moving head.
+///
+/// A NO-OP when the light carries no such channel, which is the property that lets one script run
+/// on a moving head and on an LED strip: the strip has no pan channel, nothing is written, and the
+/// script just paints color. Never scaled by brightness, unlike color, because dimming a rig must
+/// not swing its heads toward 0/0.
+///
+/// A Call rather than an Inline store, unlike setRGB: where pan lives inside a light's bytes comes
+/// from the layer's fixture channel map, and the engine has no notion of one. Motion is written
+/// once per HEAD per frame where color is written per pixel, so the per-call cost is not on the
+/// same path as setRGB's.
+extern "C" inline uint32_t mm_light_set_pan(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const MotionSink& m = motionSink();
+    if (!m.fn) return 0;
+    const uint32_t v = uint32_t(args[1]);
+    m.fn(m.ctx, MotionAxis::Pan, uint32_t(args[0]), static_cast<uint8_t>(v > 255 ? 255 : v));
+    return 0;
+}
+extern "C" inline uint32_t mm_light_set_tilt(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const MotionSink& m = motionSink();
+    if (!m.fn) return 0;
+    const uint32_t v = uint32_t(args[1]);
+    m.fn(m.ctx, MotionAxis::Tilt, uint32_t(args[0]), static_cast<uint8_t>(v > 255 ? 255 : v));
     return 0;
 }
 
@@ -964,13 +1095,27 @@ extern "C" inline uint32_t mm_light_line(const uintptr_t* args, uint32_t, const 
 //
 // Adding one is a single line here plus the binding writing its slot.
 enum : uint8_t {
-    kSysWidth  = kCtrlBytes + 0,
-    kSysHeight = kCtrlBytes + 1,
-    kSysDepth  = kCtrlBytes + 2,
-    kSysX      = kCtrlBytes + 3,
-    kSysY      = kCtrlBytes + 4,
-    kSysZ      = kCtrlBytes + 5,
+    kSysWidth  = kCtrlBytes + 0 * kSysVarBytes,
+    kSysHeight = kCtrlBytes + 1 * kSysVarBytes,
+    kSysDepth  = kCtrlBytes + 2 * kSysVarBytes,
+    kSysX      = kCtrlBytes + 3 * kSysVarBytes,
+    kSysY      = kCtrlBytes + 4 * kSysVarBytes,
+    kSysZ      = kCtrlBytes + 5 * kSysVarBytes,
 };
+
+/// Write one system variable into its arena slot, full width.
+///
+/// FOUR bytes, matching kSysVarBytes and the LoadCtrl32 the compiler emits to read it. A byte-wide
+/// write clamped `width` to 255, so a script looping `for (x = 0; x < width; …)` on a 768-wide wall
+/// drew a complete picture into a 255x255 corner and left the rest black.
+///
+/// Unaligned-safe by construction: the block starts at kCtrlBytes (64) and every slot is four bytes
+/// on from it, but the store goes through memcpy rather than a cast so it stays correct if the
+/// layout ever changes.
+inline void writeSysVarSlot(uint8_t* arenaSlot, uint32_t value) MM_NONBLOCKING {
+    if (!arenaSlot) return;
+    std::memcpy(arenaSlot, &value, sizeof(value));
+}
 
 /// The system variables a light script can read. Each binding registers the names it actually
 /// WRITES, so an unwritten name stays unknown rather than reading a silent 0 — a script that asks
@@ -1055,12 +1200,29 @@ inline BuiltinTable lightBuiltins() {
     // element 0, which is the whole of what a modifier can do. The two are asked different
     // questions. An effect picks a pixel out of a whole buffer, so its index is the point; a
     // modifier is handed ONE coordinate per call, so there is no index to give.
-    t.add({"setXYZ", 3, /*returns*/ false, BuiltinKind::Inline, nullptr, InlineOp::StoreFirst});
+    t.add({"setXYZ", 3, /*returns*/ false, BuiltinKind::Call, &mm_light_setXYZ, {}});
     // fill(r, g, b)           → write every light. Inline op FillElems.
     t.add({"fill", 3, false, BuiltinKind::Inline, nullptr, InlineOp::FillElems});
     // fade(amt)              → dim every light toward black, FastLED's fadeToBlackBy. The trail
     // primitive, collected by the layer so N fading effects cost one pass. See mm_light_fade.
     t.add({"fade", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_fade, {}});
+    // setPan(index, value) / setTilt(index, value) → aim a moving head. Calls, not Inline stores:
+    // the channel offset comes from the layer's fixture map, which the engine cannot see.
+    // The audio vocabulary. All return 0 without audio, so a script written for a rig with a
+    // microphone still runs on one without: it simply renders nothing rather than failing.
+    // level(): the RAW level, which snaps to a transient. levelSmooth(): the averaged one, which
+    // swells. A punchy effect wants the first, a glowing one the second.
+    // NAMED `audio*`, and the prefix is the point: registering a builtin RESERVES the name, so a
+    // plain `level` would stop every script that declares `byte level = 200` from compiling. That
+    // is exactly the name an author reaches for, and breaking existing scripts to claim it would be
+    // the language taking a word the user had first.
+    t.add({"audioLevel", 0, /*returns*/ true, BuiltinKind::Call, &mm_light_level, {}});
+    t.add({"audioSmooth", 0, /*returns*/ true, BuiltinKind::Call, &mm_light_levelSmooth, {}});
+    t.add({"audioBand", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_band, {}});
+    t.add({"audioPeakHz", 0, /*returns*/ true, BuiltinKind::Call, &mm_light_peakHz, {}});
+    t.add({"audioBeat", 0, /*returns*/ true, BuiltinKind::Call, &mm_light_onBeat, {}});
+    t.add({"setPan", 2, /*returns*/ false, BuiltinKind::Call, &mm_light_set_pan, {}});
+    t.add({"setTilt", 2, /*returns*/ false, BuiltinKind::Call, &mm_light_set_tilt, {}});
     // pool(n)                → size this script's particle pool, from defineControls(). Returns the
     // count actually available, 0 when the allocation failed. See mm_light_pool.
     t.add({"pool", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_pool, {}});

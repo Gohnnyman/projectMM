@@ -98,13 +98,21 @@ TEST_CASE("a broken script leaves the pattern alone rather than taking the layer
     CHECK(m.severity() == MoonModule::Severity::Error);            // the reason is visible to the user
 }
 
-TEST_CASE("a coordinate too large for a script input passes through untransformed") {
-    // A script input is one byte, so an axis beyond 255 cannot be handed to the script at all.
-    // Passing it through unchanged is the honest degrade: wrapping it would silently place the
-    // light somewhere it is not. The 16-bit element store that lifts this is backlogged.
-    const Coord3D p = transform(mmScriptAs("modifyLogical", "setXYZ(255 - xPos, yPos, zPos);"), 300, 10, 0);
-    CHECK(p.x == 300);                                 // untouched, not wrapped to 44
+TEST_CASE("a coordinate beyond 255 is scripted like any other, in and out") {
+    // FULL WIDTH both ways, which is what makes a scripted modifier usable on a real wall.
+    //
+    // Neither side used to be. `xPos` and `width` were read from one-byte arena slots, so a script
+    // on a 768-wide wall saw 255; and setXYZ wrote three BYTES into the run buffer, so whatever it
+    // computed came back truncated. A scripted mirror therefore placed lights in the wrong half of
+    // any rig wider than 255, silently.
+    const Coord3D p = transform(mmScriptAs("modifyLogical", "setXYZ(1000 - xPos, yPos, zPos);"), 300, 10, 0);
+    CHECK(p.x == 700);                                 // transformed and returned whole
     CHECK(p.y == 10);
+
+    // A negative is refused: it names no light, and wrapping it would place the light at the far
+    // edge rather than nowhere.
+    const Coord3D n = transform(mmScriptAs("modifyLogical", "setXYZ(xPos, yPos, zPos);"), -1, 10, 0);
+    CHECK(n.x == -1);
 }
 
 TEST_CASE("editing the script changes the transform without a rebuild of the firmware") {
@@ -149,7 +157,7 @@ TEST_CASE("a scaled mirror, the transform this binding exists to make possible")
     // Two operators and an input in one expression: reflect, then halve. Expressible now, and not
     // expressible at all before arithmetic landed.
     const Coord3D p = transform(mmScriptAs("modifyLogical", "setXYZ((255 - xPos) * 2, yPos, zPos);"), 100, 5, 0);
-    CHECK(p.x == 54);      // (255-100)*2 = 310, truncated into the byte the input slot holds
+    CHECK(p.x == 310);     // (255-100)*2, whole: this used to come back as 54, its low byte
     CHECK(p.y == 5);
 }
 

@@ -18,6 +18,8 @@
 #include "platform/platform.h"
 
 #include <cstdio>
+#include <filesystem>
+#include <system_error>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -47,14 +49,31 @@ std::string scriptWith(const char* controlName) {
            "\", v, 0, 9); } tick() { fill(0, 0, 0); } }";
 }
 
-/// Both directories cleared of `name`, so one test cannot leak into the next.
-struct Clean {
-    const char* name;
-    explicit Clean(const char* n) : name(n) { wipe(); }
-    ~Clean() { wipe(); }
-    void wipe() const {
-        drop(moonlive::kScriptDir, name);
-        drop(moonlive::kFactoryScriptDir, name);
+/// An ISOLATED filesystem for one test: its own temp root, torn down after.
+///
+/// The same pattern unit_FileManagerModule uses, and for the reason it records: without a root of
+/// its own a test writes into whatever the process is pointed at, which under a developer's build
+/// is the real device directory. These tests create scripts named for what they check, so they were
+/// leaving files in the user's own `/moonlive` and reading whatever happened to be there.
+struct Rig {
+    char root[256];
+    Rig() {
+        static unsigned counter = 0;
+        std::snprintf(root, sizeof(root), "%s/mm_resolve_test_%u",
+                      std::filesystem::temp_directory_path().string().c_str(), counter++);
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+        std::filesystem::create_directories(root, ec);
+        platform::fsSetRoot(root);
+        platform::fsMount();
+    }
+    // Restore the default root so a later test in the same binary starts from the baseline it
+    // expects. noexcept and error_code-only: this runs while the stack unwinds from a failed CHECK,
+    // and a throw there would terminate the process and lose the failure being reported.
+    ~Rig() noexcept {
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+        platform::fsSetRoot("");
     }
 };
 
@@ -64,7 +83,7 @@ struct Clean {
 // naming it is enough. Without the fallback every downloaded script would report "script not found".
 TEST_CASE("a factory script resolves when the user has no copy of it") {
     const char* name = "resolve-factory.mle";
-    Clean clean(name);
+    Rig rig;
     put(moonlive::kFactoryScriptDir, name, scriptWith("factory").c_str());
 
     char path[96];
@@ -76,7 +95,7 @@ TEST_CASE("a factory script resolves when the user has no copy of it") {
 // edit of a factory script, and it has to win or an edit would appear to do nothing.
 TEST_CASE("a user's copy shadows the factory script of the same name") {
     const char* name = "resolve-both.mle";
-    Clean clean(name);
+    Rig rig;
     put(moonlive::kFactoryScriptDir, name, scriptWith("factory").c_str());
     put(moonlive::kScriptDir, name, scriptWith("mine").c_str());
 
@@ -89,7 +108,7 @@ TEST_CASE("a user's copy shadows the factory script of the same name") {
 // factory script with no network, where a single directory would need it downloaded again.
 TEST_CASE("deleting a user's copy restores the factory script") {
     const char* name = "resolve-revert.mle";
-    Clean clean(name);
+    Rig rig;
     put(moonlive::kFactoryScriptDir, name, scriptWith("factory").c_str());
     put(moonlive::kScriptDir, name, scriptWith("mine").c_str());
 
@@ -107,7 +126,7 @@ TEST_CASE("deleting a user's copy restores the factory script") {
 // naming a place a user would not write to sends them looking in the wrong folder.
 TEST_CASE("a script in neither directory is not found") {
     const char* name = "resolve-absent.mle";
-    Clean clean(name);
+    Rig rig;
 
     char path[96];
     CHECK_FALSE(moonlive::resolveScript(name, path, sizeof(path)));
@@ -119,7 +138,7 @@ TEST_CASE("a script in neither directory is not found") {
 // its hash comes from the other, so it looks changed on every prepare sweep and recompiles forever.
 TEST_CASE("the compiler and the change-detector read the same file") {
     const char* name = "resolve-agree.mle";
-    Clean clean(name);
+    Rig rig;
     const std::string factory = scriptWith("factory");
     const std::string mine    = scriptWith("mine");
     put(moonlive::kFactoryScriptDir, name, factory.c_str());
