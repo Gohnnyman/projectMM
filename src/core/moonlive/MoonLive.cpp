@@ -117,7 +117,9 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysV
         const uint8_t n = cr.entries[i].nameLen < kMaxEntryName ? cr.entries[i].nameLen : kMaxEntryName;
         for (uint8_t j = 0; j < n; j++) entryNames_[i][j] = cr.entries[i].name[j];
         entryNames_[i][n] = '\0';
-        entries_[i] = {entryNames_[i], n, cr.entries[i].offset};
+        // The DECLARED return type travels with the entry: without it every function reads as
+        // Void here and runValue refuses to answer for any of them.
+        entries_[i] = {entryNames_[i], n, cr.entries[i].offset, cr.entries[i].ret};
     }
     stringLen_ = cr.stringLen;
     ctrl_ = reinterpret_cast<CtrlFn>(block);

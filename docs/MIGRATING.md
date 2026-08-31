@@ -24,6 +24,28 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### The desktop build keeps its files in `build/fs`, not `build`
+
+**Action: move your data, or lose your settings.** Affects the DESKTOP build only, and only a
+developer running it from a repository checkout; devices are unaffected.
+
+A desktop install used the build directory itself as the device's filesystem, so the File Manager's
+root listed CMake caches, object archives and every ESP32 variant's build folder alongside the four
+directories a device actually has. It now roots at `build/fs`, so what the desktop shows is what a
+board shows.
+
+An existing checkout starts with an empty-looking device, because its `.config` is one level up.
+Move what you want to keep:
+
+```sh
+mkdir -p build/fs
+mv build/.config build/moonlive build/.hls build/fs/ 2>/dev/null
+```
+
+Nothing is deleted if you skip this: the old directories stay where they are, and the device simply
+starts fresh. `MM_DATA_DIR` still overrides the location, and a packaged desktop install (which uses
+the per-user data directory) is unchanged.
+
 ### projectMM no longer appears in WLED apps by default
 
 Device discovery now announces on the multicast group `239.255.77.77` and, by default, **not** on

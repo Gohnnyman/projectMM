@@ -27,8 +27,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
-# What feeds an ESP32 image. Kept in step with the gate's own trigger in
-# moondeck/event/precommit.py — both answer "could this change alter the firmware?".
+# What feeds an ESP32 image. Kept in step with this check's trigger in
+# CLAUDE.md § Commit: both answer "could this change alter the firmware?".
 SOURCE_DIRS = ("src", "esp32")
 SOURCE_FILES = ("CMakeLists.txt", "library.json")
 SOURCE_SUFFIXES = {".c", ".cpp", ".h", ".hpp", ".cmake", ".json", ".txt", ".py", ".js",
@@ -46,7 +46,7 @@ SKIP_PARTS = {"build", "managed_components", "__pycache__", ".git"}
 SKIP_FILES = {"src/ui/ui_embedded.h", "src/core/build_info.h"}
 
 # The desktop-only platform never compiles into an ESP32 image, so an edit there cannot
-# stale the firmware. Kept in step with the ESP32 gate's own trigger in precommit.py,
+# stale the firmware. Kept in step with this check's trigger in CLAUDE.md § Commit,
 # which excludes the same path.
 SKIP_PREFIXES = ("src/platform/desktop/",)
 

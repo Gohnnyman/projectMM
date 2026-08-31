@@ -119,6 +119,10 @@ public:
             if (surfaces_[i] == s) return;
         if (surfaceCount_ >= kMaxSurfaces) return;
         surfaces_[surfaceCount_++] = s;
+        // Read the targets BEFORE seeding: a surface that connects between ticks would otherwise be
+        // sent whatever the mirror last held, which on the very first connect is the boot default
+        // rather than what the rig is running. Same correction mirrorToSurfaces does every tick.
+        followTargets();
         resendTo(s);
     }
 
@@ -171,6 +175,7 @@ public:
     /// Sampling also means a value that arrived and left between two samples never bounces.
     void mirrorToSurfaces() {
         if (surfaceCount_ == 0) return;
+        followTargets();
         for (uint8_t i = 0; i < kSwitchCount; i++)
             mirrorOne(SurfaceControl::Switch, i, switches_[i] ? 255 : 0, sentSwitches_[i]);
         for (uint8_t i = 0; i < kEncoderCount; i++)
@@ -443,6 +448,53 @@ public:
         char body[32];
         std::snprintf(body, sizeof(body), "{\"value\":%s}", switches_[index] ? "true" : "false");
         sched->setControl(module, dot + 1, body);
+    }
+
+    /// Read every bound control back, so a surface FOLLOWS what it drives.
+    ///
+    /// Driving is only half of a control surface. Without this the surface's own value and its
+    /// target's drift apart the moment anything else writes the target: the web UI, a preset
+    /// recall, an audio-reactive effect. They also start out of step, because a surface control's
+    /// default has never met the target's persisted value: switch1 read `off` at boot on a device
+    /// whose `Drivers.on` was on, which is the bug that named this.
+    ///
+    /// Reads through Scheduler::getControl, the mirror of the setControl that writes, so a binding
+    /// costs nothing here. That is what makes this work for the soft-wired controls to come: a
+    /// fader pointed at a different target by the user follows it with no new code.
+    ///
+    /// The TARGET wins on a disagreement. It is the value the device is actually running on, and
+    /// the surface is a view of it: a fader showing something the rig is not doing is the failure
+    /// this exists to prevent. A write from the surface still takes effect immediately (it goes
+    /// straight through driveFader), so this only ever corrects a value nothing on the surface is
+    /// currently moving.
+    void followTargets() {
+        auto* sched = Scheduler::instance();
+        if (!sched) return;
+        for (uint8_t i = 0; i < kFaderCount; i++) pullTarget(SurfaceControl::Fader, i, faders_[i]);
+        for (uint8_t i = 0; i < kSwitchCount; i++) {
+            uint8_t v = switches_[i] ? 255 : 0;
+            if (pullTarget(SurfaceControl::Switch, i, v)) switches_[i] = v != 0;
+        }
+    }
+
+    /// One control's read-back. Splits the target, asks the scheduler, and reports whether `value`
+    /// moved so the caller can store it in whatever the control's own storage is.
+    bool pullTarget(SurfaceControl kind, uint8_t index, uint8_t& value) {
+        const char* target = kind == SurfaceControl::Switch ? switchTarget(index) : surfaceTarget(index);
+        if (!target) return false;                    // unassigned: nothing to follow
+        const char* dot = std::strchr(target, '.');
+        if (!dot) return false;
+        auto* sched = Scheduler::instance();
+        if (!sched) return false;
+        char module[24];
+        const size_t n = std::min(static_cast<size_t>(dot - target), sizeof(module) - 1);
+        std::memcpy(module, target, n);
+        module[n] = '\0';
+        uint8_t live = 0;
+        if (!sched->getControl(module, dot + 1, live)) return false;
+        if (live == value) return false;
+        value = live;
+        return true;
     }
 
     /// Drives whatever `surfaceTarget` declares, so the binding is stated ONCE: the popup and the

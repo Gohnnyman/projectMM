@@ -1,10 +1,16 @@
-// A gradient painted by a loop: red rises across the strand while blue falls.
-// The script that first proved `for` reaches the emitter with a distinct value each pass.
+// Gradient: red rising across the rig while blue falls, the simplest thing that is still a picture.
 
 class GradientEffect {
-  tick() {
-    for (i = 0; i < 256; i = i + 1) {
-      setRGB(i, i, 255 - i, 60);
+  int n = 0;                      // total lights, whatever the shape
+
+  int dimensions() { return 3; }
+
+  string tags() { return "💫"; }
+
+  void tick() {
+    n = width * height * depth;
+    for (i = 0; i < n; i = i + 1) {
+      setRGB(i, div(i * 255, n), 255 - div(i * 255, n), 60);
     }
   }
 }

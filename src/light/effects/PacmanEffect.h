@@ -123,7 +123,7 @@ class PacmanEffect : public EffectBase {
 public:
     static constexpr uint8_t kPool = 12;
 
-    const char* tags() const override { return "🔬📊"; }  // audio-reactive when soundReactive is set
+    const char* tags() const override { return "💫🎶✨👾"; }  // audio-reactive when soundReactive is set
     Dim dimensions() const override { return Dim::D2; }
 
     /// How many of each, and how fast they travel.

@@ -26,7 +26,7 @@ namespace mm {
 /// Audio-reactive effect: blurred dots positioned by frequency band.
 class BlurzEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🐙📊"; }  // WLED-lineage · audio
+    const char* tags() const override { return "🐙🎶"; }  // WLED-lineage · audio
     Dim dimensions() const override { return Dim::D2; }
 
     // MoonLight/WLED defaults (fadeRate 48, blur 127). fadeRate 48 fades the trail fast enough that

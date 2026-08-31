@@ -440,6 +440,14 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
             } else {
                 m->addChild(created);
             }
+            // A freshly created module carries the factory's display name, so restoring one config
+            // while another tree already holds that name leaves TWO modules answering to it. The
+            // boot path gets this from deduplicateNamesInTree, but a config applied after boot (a
+            // card saved, a preset recalled) reached the live tree without it: a MoonLiveLayout and
+            // a MoonLiveEffect were then both "MoonLive", and every lookup that resolves a module by
+            // name (parent_id on an add, the UI's card selector) found whichever came first, so the
+            // effect's controls rendered on the layout's card.
+            if (auto* sched = Scheduler::instance()) sched->ensureUniqueName(created);
         }
 
         char childPrefix[MAX_KEY];

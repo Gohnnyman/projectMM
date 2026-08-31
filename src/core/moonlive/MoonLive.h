@@ -54,11 +54,29 @@ public:
     /// recorded, which is why a script may define as many functions as it likes for the cost of one
     /// allocation.
     CtrlFn entry(const char* name) const {
+        const uint8_t* p = entryCode(name);
+        return p ? reinterpret_cast<CtrlFn>(reinterpret_cast<uintptr_t>(p)) : nullptr;
+    }
+
+    /// What a named entry point declared it returns, or Void when the script has no such function.
+    /// Void is the honest answer for both: a function that is absent gives back nothing either.
+    RetType retTypeOf(const char* name) const {
+        if (!name) return RetType::Void;
+        for (uint8_t i = 0; i < entryCount_; i++)
+            if (std::strcmp(entryNames_[i], name) == 0) return entries_[i].ret;
+        return RetType::Void;
+    }
+
+    /// The ADDRESS of a named entry point, with no signature attached. Emitted machine code has no
+    /// C++ type, and it is called through two different ones (CtrlFn for an effect, ValueFn for a
+    /// function that answers), so the lookup hands back the address and each caller reads it as
+    /// what it is calling. One home for the name search and the bounds check.
+    const uint8_t* entryCode(const char* name) const {
         if (!code_ || !name) return nullptr;
         for (uint8_t i = 0; i < entryCount_; i++) {
             if (std::strcmp(entryNames_[i], name) != 0) continue;
             if (entries_[i].offset >= codeLen_) return nullptr;   // a corrupt map is not callable
-            return reinterpret_cast<CtrlFn>(static_cast<uint8_t*>(code_) + entries_[i].offset);
+            return static_cast<const uint8_t*>(code_) + entries_[i].offset;
         }
         return nullptr;
     }
@@ -100,6 +118,36 @@ public:
         }
         else if (fn_) fn_(buf, nLights, cpl);                 // hand-encoded fixed fill
         else if (anim_) anim_(buf, nLights, cpl, t);          // hand-encoded animated fill
+    }
+
+    /// Run the entry point called `name` and return its answer, or `fallback` when the script did
+    /// not define it.
+    ///
+    /// The COLD path: a script declares what it is (`dimensions()`, `tags()`) once at load, not per
+    /// frame. It takes the same arguments run() does because it is the same emitted block with the
+    /// same prologue: a function that ignores them simply never reads them, and one that reads a
+    /// control still needs the arena.
+    ///
+    /// `fallback` rather than 0 for a missing function, because "the script did not say" and "the
+    /// script said 0" are different answers and only the caller knows what the first one means.
+    uintptr_t runValue(const char* name, RetType want, uintptr_t fallback = 0,
+                       uint8_t* buf = nullptr, uint32_t nLights = 0, uint8_t cpl = 0,
+                       uint32_t t = 0) const {
+        if (!name || !ctrl_ || !ctrlArena_) return fallback;
+        // The DECLARED type decides whether there is a value to read. Calling a `void` function
+        // through ValueFn reads whatever sat in the return register, which is a plausible number
+        // rather than an obvious failure: exactly what the type declaration exists to prevent.
+        if (retTypeOf(name) != want) return fallback;
+        // Through the CODE ADDRESS, not through CtrlFn: casting between two function-pointer types
+        // that differ in return type is what -Wcast-function-type-mismatch exists to catch, and the
+        // compiler is right to ask. The emitted block has no C++ type at all, so the honest route is
+        // to take its address and read it as the signature the call actually uses. Same bytes, same
+        // frame, same arena: only the return register is looked at.
+        const uint8_t* code = entryCode(name);
+        if (!code) return fallback;
+        ValueFn f = reinterpret_cast<ValueFn>(reinterpret_cast<uintptr_t>(code));
+        ctrlArena_[kDepthSlot] = 0;      // same fresh-depth contract as run()
+        return f(buf, nLights, cpl, t, ctrlArena_);
     }
 
     /// A member's 4-byte slot, little-endian, which is the layout every backend's 32-bit load and

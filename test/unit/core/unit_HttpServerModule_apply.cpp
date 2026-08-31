@@ -31,9 +31,15 @@ struct Knob : public mm::MoonModule {
         if (showExtra) controls_.addControl("extra", value, 0, 100);
     }
 };
+// A container. Declares the roles it takes, because applyAddModule now enforces that declaration:
+// the rule used to live only in the UI's picker, so the API would happily nest an effect inside a
+// layout, which ticks in the wrong pass and renders its controls on the wrong card.
 struct Box : public mm::MoonModule {
-    // accepts any child (the HTTP role gate lives above the apply-core).
+    const char* acceptsChildRoles() const override { return "generic,effect"; }
 };
+
+// A container that takes NOTHING, so a test can assert the refusal rather than only the accept.
+struct Leaf : public mm::MoonModule {};
 
 // A leaf with a VALIDATED Text control — mirrors SystemModule.deviceModel: the printable-
 // ASCII rule is a per-control validator, so a bad value is rejected on EVERY write path
@@ -74,6 +80,7 @@ void registerTestTypes() {
     if (done) return;
     mm::ModuleFactory::registerType<Knob>("Knob");
     mm::ModuleFactory::registerType<Box>("Box");
+    mm::ModuleFactory::registerType<Leaf>("Leaf");
     mm::ModuleFactory::registerType<Tag>("Tag");
     mm::ModuleFactory::registerType<FakeDrivers>("Drivers");
     done = true;
@@ -90,6 +97,36 @@ mm::MoonModule* childNamed(mm::MoonModule* parent, const char* name) {
 }
 
 } // namespace
+
+// A parent's declared child roles are a RULE the device enforces, not advice to the UI. The picker
+// filters by the same declaration, so a user never sees a bad pairing, but the API is reachable
+// without it: an effect nested inside a layout ticks in the wrong pass, and because the UI resolves
+// a card by module name it renders its controls onto the parent's card.
+TEST_CASE("apply-core: a parent refuses a child whose role it does not accept") {
+    registerTestTypes();
+    mm::Scheduler sched;
+    mm::HttpServerModule http;
+    auto* root = new Box();
+    root->setName("Root");
+    sched.addModule(root);
+    http.setScheduler(&sched);
+    sched.setup();
+
+    using OpResult = mm::HttpServerModule::OpResult;
+
+    // Box accepts "generic,effect": a generic Knob is fine.
+    CHECK(http.applyAddModule("Knob", "K", "Root") == OpResult::Ok);
+    CHECK(root->childCount() == 1);
+
+    // Leaf accepts nothing, so nothing may be added under it, whatever its role.
+    CHECK(http.applyAddModule("Leaf", "L", "Root") == OpResult::Ok);
+    CHECK(http.applyAddModule("Knob", "K2", "L") == OpResult::BadRequest);
+    auto* leaf = childNamed(root, "L");
+    REQUIRE(leaf != nullptr);
+    CHECK(leaf->childCount() == 0);   // refused, and nothing leaked into the tree
+
+    sched.release();
+}
 
 TEST_CASE("apply-core: applyAddModule adds a child, idempotent on the id") {
     registerTestTypes();

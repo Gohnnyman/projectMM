@@ -19,6 +19,8 @@ namespace mm {
 /// Layout of parallel LED tubes.
 class TubesLayout : public LayoutBase {
 public:
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D2; }
     // Defaults verbatim from MoonLight (nrOfTubes 4, ledsPerTube 54,
     // tubeDistance 10, reversed off).
     lengthType nrOfTubes = 4;

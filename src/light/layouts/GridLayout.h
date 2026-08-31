@@ -15,6 +15,8 @@ constexpr lengthType defaultGridSize = 16;
 /// @card GridLayout.png
 class GridLayout : public LayoutBase {
 public:
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D3; }
     lengthType width = defaultGridSize;
     lengthType height = defaultGridSize;
     lengthType depth = 1;

@@ -31,7 +31,7 @@ namespace mm {
 /// Effect: a propagating water surface where drops ripple, reflect and interfere.
 class WaterRippleEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫🧬"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t speed    = 60;    // simulation steps per second — how fast the water itself moves

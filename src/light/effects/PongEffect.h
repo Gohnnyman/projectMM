@@ -23,7 +23,7 @@ namespace mm {
 /// @card PongEffect.gif
 class PongEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬📊"; }   // audio-reactive when soundReactive is set
+    const char* tags() const override { return "💫🎵👾"; }   // audio-reactive when soundReactive is set
     Dim dimensions() const override { return Dim::D2; }
 
     /// Rally speed, in ball crossings per minute rather than pixels per frame: the court is a

@@ -30,7 +30,7 @@ namespace mm {
 /// Effect: two color fields trading places pixel by pixel, with no per-pixel state.
 class DissolveEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t bpm      = 12;    // how fast one transition completes

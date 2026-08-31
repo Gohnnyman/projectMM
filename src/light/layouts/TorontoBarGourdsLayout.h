@@ -46,6 +46,7 @@ public:
     }
 
     const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D3; }
 
     nrOfLightsType lightCount() const override {
         nrOfLightsType n = 0;

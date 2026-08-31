@@ -12,7 +12,7 @@ The script transforms **one coordinate**. It needs no loop over the lights, beca
 
 ```c
 class MirrorModifier {
-  modifyLogical() { setXYZ(width - 1 - xPos, yPos, zPos); }   // mirror along x
+  void modifyLogical() { setXYZ(width - 1 - xPos, yPos, zPos); }   // mirror along x
 }
 ```
 
@@ -58,7 +58,7 @@ Past half full, the status also names the tightest limit the script is approachi
 
 | control | what it does |
 |---|---|
-| `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-maps live |
+| `script` | the script's file name, picked from the [library](MoonLiveEffect.md) or your own; naming it (or re-naming it after an edit) recompiles and re-maps live |
 
 Plus one control per `addControl` in the script's `defineControls()`: `addControl("amount", amount, 0, 64)`
 becomes a slider, and moving it rebuilds the mapping just as editing the script does.

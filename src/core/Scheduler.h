@@ -143,6 +143,23 @@ public:
     SetControlResult setControl(const char* moduleName, const char* controlName,
                                 const char* valueJson);
 
+    /// Read one control's value as a BYTE: the mirror of setControl, and the other half of what a
+    /// control surface needs. A surface that only writes drifts the moment anything else moves the
+    /// target (the web UI, a preset recall, an audio-reactive effect), and starts out of step at
+    /// boot, where the surface's own default has never met the target's persisted value.
+    ///
+    /// A byte because that is the unit every surface control speaks (a fader's travel, a switch's
+    /// on/off, an encoder's position), and the scaling to a wire lives in the transport. A Bool
+    /// reads back 0 or 255 so a switch and a fader answer in the same units.
+    ///
+    /// Deliberately generic rather than a per-target accessor: the bindings are hard-wired today
+    /// (fader1 to brightness, switch1 to on), and the point of routing through the same primitive
+    /// setControl uses is that a soft-wired binding needs no new code here.
+    ///
+    /// Returns false when the module or control does not exist, or its type has no byte reading
+    /// (a text or file-path control); `out` is untouched then.
+    bool getControl(const char* moduleName, const char* controlName, uint8_t& out) const;
+
 private:
     void walkAndEnsureUnique(MoonModule* mod);
     static MoonModule* firstInTree(MoonModule* mod, const char* name);

@@ -34,7 +34,7 @@ namespace mm {
 /// Audio-reactive effect: sawtooth bands driven by the frequency spectrum.
 class FreqSawsEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫📊"; }  // MoonLight origin · audio
+    const char* tags() const override { return "💫🎶"; }  // MoonLight origin · audio
     Dim dimensions() const override { return Dim::D2; }   // writes only the z=0 slice; extrude fills z
 
     // Defaults match MoonLight's FreqSaws exactly.

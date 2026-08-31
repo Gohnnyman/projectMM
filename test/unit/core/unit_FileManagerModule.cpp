@@ -236,3 +236,40 @@ TEST_CASE("HTTP header names match case-insensitively, so any client's Content-L
     // Bounded by the blank line: a header name inside the BODY is data, not a header.
     CHECK(mm::HttpServerModule::findHeaderCI("POST / HTTP/1.1\r\nHost: x\r\n\r\nContent-Length: 4", "Content-Length:") == nullptr);
 }
+
+// removeRecursive: the DELETE /api/dir path, exercised directly rather than through a socket.
+//
+// It is public for exactly this, and until now nothing called it: the header claimed the tests
+// exercised the real recursion while none referenced it. These are the behaviors a user reaches
+// by deleting a folder from the File Manager.
+TEST_CASE("removeRecursive deletes a folder and everything under it") {
+    Rig r;
+    std::filesystem::create_directories(std::string(r.root) + "/tree/a/b");
+    writeFile(std::string(r.root) + "/tree/top.txt", "1");
+    writeFile(std::string(r.root) + "/tree/a/mid.txt", "2");
+    writeFile(std::string(r.root) + "/tree/a/b/leaf.txt", "3");
+
+    CHECK(mm::HttpServerModule::removeRecursive("/tree"));
+    CHECK_FALSE(r.onDisk("/tree"));
+}
+
+// The depth bound is what keeps a user-shaped tree from running the stack out. A tree deeper than
+// the bound is REFUSED rather than half-deleted: reporting failure lets the caller delete again and
+// take the next batch, which is the same contract the width cap (DirLevel::kMax) has.
+TEST_CASE("removeRecursive refuses a tree deeper than its bound") {
+    Rig r;
+    std::string deep = std::string(r.root) + "/deep";
+    for (int i = 0; i < 12; i++) deep += "/x";        // past the depth-8 bound
+    std::filesystem::create_directories(deep);
+
+    CHECK_FALSE(mm::HttpServerModule::removeRecursive("/deep"));
+    CHECK(r.onDisk("/deep"));                         // still there, not partly gone
+}
+
+// A single file, which is the case that returns on the first fsRemove without ever listing.
+TEST_CASE("removeRecursive deletes a plain file") {
+    Rig r;
+    CHECK(r.onDisk("/readme.txt"));
+    CHECK(mm::HttpServerModule::removeRecursive("/readme.txt"));
+    CHECK_FALSE(r.onDisk("/readme.txt"));
+}

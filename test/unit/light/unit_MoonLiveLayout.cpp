@@ -425,8 +425,8 @@ TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
     layout.setScript(mmWriteScript(
         "class GrowLayout {\n"
         "  byte cols = 4;\n"
-        "  defineControls() { addControl(\"cols\", cols, 1, 64); }\n"
-        "  placeLights() { for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); } }\n"
+        "  void defineControls() { addControl(\"cols\", cols, 1, 64); }\n"
+        "  void placeLights() { for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); } }\n"
         "}\n"));
     layout.prepare();
     // The script's own controls (`cols`) exist only once it has COMPILED, and a module starts with
@@ -772,8 +772,8 @@ TEST_CASE("a disabled scripted module publishes no controls bound to freed memor
     l.setScript(mmWriteScript(
         "class T {\n"
         "  byte cols = 7;\n"
-        "  defineControls() { addControl(\"cols\", cols, 1, 64); }\n"
-        "  placeLights() { for (x = 0; x < cols; x = x + 1) { addLight(x, 0, 0); } }\n"
+        "  void defineControls() { addControl(\"cols\", cols, 1, 64); }\n"
+        "  void placeLights() { for (x = 0; x < cols; x = x + 1) { addLight(x, 0, 0); } }\n"
         "}\n"));
     l.prepare();
 

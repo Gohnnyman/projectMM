@@ -13,7 +13,7 @@ namespace mm {
 /// @card FireEffect.png
 class FireEffect : public EffectBase {
 public:
-    const char* tags() const override { return "⚡️🦅"; }  // FastLED origin (Fire2012-style) · David Jupijn / Rising Step
+    const char* tags() const override { return "⚡️🦅🧬"; }  // FastLED origin (Fire2012-style) · David Jupijn / Rising Step
     // Iterates y and x only; Layer::extrude fills z on 3D layers. The heat
     // buffer covers only the z=0 plane (w*h), not the full 3D buffer.
     Dim dimensions() const override { return Dim::D2; }

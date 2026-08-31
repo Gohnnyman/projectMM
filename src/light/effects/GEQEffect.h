@@ -28,7 +28,7 @@ namespace mm {
 /// Audio-reactive graphic-equaliser effect: 16 bands as vertical bars.
 class GEQEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🐙📊"; }  // MoonLight origin · 2D · audio
+    const char* tags() const override { return "💫🐙🎶"; }  // MoonLight origin · WLED · audio
     Dim dimensions() const override { return Dim::D2; }      // writes only the z=0 slice; extrude fills z
 
     // Defaults match the WLED/MoonLight GEQ.

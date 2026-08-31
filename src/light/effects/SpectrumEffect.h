@@ -31,7 +31,7 @@ namespace mm {
 /// Audio effect: a spectrum analyser with asymmetric ballistics and falling peak dots.
 class SpectrumEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬📊"; }  // showcase + audio-reactive
+    const char* tags() const override { return "💫🎶"; }  // showcase + audio-reactive
     Dim dimensions() const override { return Dim::D2; }   // writes the z=0 slice; extrude fills z
 
     uint8_t attack   = 200;  // how fast a bar rises toward a new level (255 = instant)

@@ -23,7 +23,7 @@ namespace mm {
 /// Physics effect: gravity-bounced balls trailing along the layer.
 class BouncingBallsEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🐙"; }  // MoonLight origin · 2D
+    const char* tags() const override { return "💫🐙"; }  // MoonLight origin · WLED
     // Writes only the z=0 slice (one ball column per x, ball drawn at (x, pos)); Layer::extrude
     // duplicates it across z on 3D layers.
     Dim dimensions() const override { return Dim::D2; }

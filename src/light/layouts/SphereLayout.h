@@ -19,6 +19,8 @@ namespace mm {
 /// Layout mapping LEDs onto a sphere surface.
 class SphereLayout : public LayoutBase {
 public:
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D3; }
     // Surface radius in light-units. Min 1 (the smallest hollow sphere: 18
     // lights — the 6 axis-neighbours at d^2=1 plus the 12 edge-neighbours at
     // d^2=2, all rounding to distance 1 under the band predicate below).

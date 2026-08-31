@@ -1,0 +1,30 @@
+// Sparkle: lights flickering on at random and fading out, like sun on water.
+
+class SparkleEffect {
+  byte density = 6;
+  byte fadeAmt = 40;
+  byte hueSpread = 255;
+
+  int n = 0;                      // total lights, whatever the shape
+  int p = 0;                      // the light this spark landed on
+
+  int dimensions() { return 3; }
+
+  string tags() { return "💫"; }
+
+  void defineControls() {
+    addControl("density", density, 1, 40);          // how many lights catch per frame
+    addControl("fadeAmt", fadeAmt, 1, 120);         // how fast a spark dies
+    addControl("hueSpread", hueSpread, 0, 255);     // how much of the palette the sparks use
+  }
+
+  void tick() {
+    fade(fadeAmt);
+    n = width * height * depth;
+    for (i = 0; i < density; i = i + 1) {
+      p = random16(256);
+      if (p > hueSpread) { p = hueSpread; }
+      setRGB(random16(n), paletteR(p, 255), paletteG(p, 255), paletteB(p, 255));
+    }
+  }
+}

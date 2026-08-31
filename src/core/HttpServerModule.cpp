@@ -4,6 +4,7 @@
 // split into .h + .cpp so implementation edits don't cascade-recompile every TU
 // that includes the header.
 
+#include <new>                             // placement new: removeRecursive's heap DirLevel
 #include "core/HttpServerModule.h"
 
 #include "core/Scheduler.h"
@@ -16,6 +17,9 @@
 #include "core/FilesystemModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/SystemModule.h"      // deviceName() for the WLED /json/info shim
+#include "light/moonlive/MoonLiveScriptFile.h"   // kFactoryScriptDir: where a download lands
+#include "light/moonlive/script_catalog.h"        // generated: which factory scripts exist
+#include "core/build_info.h"                      // kVersion: the tag a script is fetched from
 #include "light/Palette.h"          // Palettes::nearestForHue: maps HA's RGB color picker onto our
                                     // hue→palette convention (same core→light bridge MqttModule uses
                                     // for hsv/set; see the note in MqttModule.cpp:7-14).
@@ -271,6 +275,8 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
         else if (std::strcmp(path, "/api/system") == 0) serveSystem(conn);
         else if (std::strcmp(path, "/api/types") == 0) serveTypes(conn);
+        // GET /api/scripts → the MoonLive factory catalog (names per role + the tag to fetch from).
+        else if (std::strcmp(path, "/api/scripts") == 0) serveScriptCatalog(conn);
         // GET /api/modules/<name> → that ONE module's JSON, the same object /api/state
         // carries for it. Exists for issue reports: a user opens the card's `api` link and
         // pastes what they see, instead of hunting one card out of the whole-tree dump.
@@ -623,22 +629,94 @@ void HttpServerModule::handleMakeDir(platform::TcpConnection& conn, const char* 
     else sendResponse(conn, 500, "application/json", "{\"error\":\"mkdir failed\"}");
 }
 
-// DELETE /api/dir?path=<rel> → remove a file or EMPTY dir (fsRemove fails cleanly on a non-empty
-// dir). Same path guard as handleMakeDir.
+namespace {
+
+/// One directory level, collected. fsList hands entries to a C callback while the directory is open,
+/// and removing a file from inside that callback mutates what is being walked, which LittleFS does
+/// not promise to survive. So a level is read out first, then acted on.
+struct DirLevel {
+    static constexpr uint8_t kMax = 64;   ///< entries per level; a deeper listing is deleted in passes
+    char names[kMax][40];
+    bool isDir[kMax];
+    uint8_t count = 0;
+    bool truncated = false;
+};
+
+void collectEntry(const char* name, bool isDir, uint32_t, void* user) {
+    auto* lvl = static_cast<DirLevel*>(user);
+    if (lvl->count >= DirLevel::kMax) { lvl->truncated = true; return; }
+    if (!name || std::strlen(name) >= sizeof(lvl->names[0])) return;
+    std::snprintf(lvl->names[lvl->count], sizeof(lvl->names[0]), "%s", name);
+    lvl->isDir[lvl->count] = isDir;
+    lvl->count++;
+}
+
+/// Delete `path` and everything under it. Depth-first: a directory can only go once it is empty,
+/// which is all fsRemove promises.
+///
+/// `depth` bounds the recursion rather than trusting the tree: this walks a filesystem a user can
+/// shape, and it runs on the MAIN task (handleConnection, called inline from tick20ms), which is
+/// also the render task. 8 is far past any real layout
+/// (`/.config`, `/moonlive` and the rest are one level deep).
+}  // namespace
+
+bool HttpServerModule::removeRecursive(const char* path, uint8_t depth) {
+    if (depth > 8) return false;
+    if (platform::fsRemove(path)) return true;   // a file, or an already-empty directory
+
+    // The listing lives on the HEAP, not in the frame. A DirLevel is ~2.6 KB, and one per
+    // activation at depth 8 is ~20 KB of stack: this runs from handleConnection, which tick20ms
+    // calls inline on the main task, and that task has 12 KB (CONFIG_ESP_MAIN_TASK_STACK_SIZE).
+    // A user can nest folders freely through POST /api/dir, so a few levels would smash the stack
+    // of the task that renders. One allocation per level costs a malloc on a path that is already
+    // doing filesystem writes, and the frame drops to a pointer.
+    auto* raw = platform::alloc(sizeof(DirLevel));
+    if (!raw) return false;                      // no room to list: report failure, delete nothing
+    // Placement new rather than assigning the two fields by hand: DirLevel already declares its
+    // defaults, and a copy here silently skips whatever member is added to it next.
+    DirLevel* lvlp = new (raw) DirLevel;
+    DirLevel& lvl = *lvlp;
+    struct Freer { DirLevel* p; ~Freer() { p->~DirLevel(); platform::free(p); } } freer{lvlp};
+    platform::fsList(path, &collectEntry, &lvl);
+    if (lvl.count == 0) return false;            // not a directory, or unreadable: the failure stands
+
+    bool ok = true;
+    for (uint8_t i = 0; i < lvl.count; i++) {
+        char child[192];
+        // A TRUNCATED child path names a different file than the one listed, so deleting through it
+        // would either fail or, worse, hit a shorter path that happens to exist. snprintf reports
+        // the length it wanted: anything at or past the buffer means the name did not fit.
+        const int n = std::snprintf(child, sizeof(child), "%s/%s", path, lvl.names[i]);
+        if (n < 0 || static_cast<size_t>(n) >= sizeof(child)) { ok = false; continue; }
+        if (!removeRecursive(child, static_cast<uint8_t>(depth + 1))) ok = false;
+    }
+    // A level wider than kMax leaves entries behind, so the directory is still not empty. Report the
+    // failure rather than a false success: the caller can delete again to take the next batch.
+    if (!ok || lvl.truncated) return false;
+    return platform::fsRemove(path);
+}
+
+// DELETE /api/dir?path=<rel> → remove a file, or a directory AND everything in it. Same path guard
+// as handleMakeDir.
+//
+// Recursive because the alternative is worse: fsRemove only takes an empty directory, so a user
+// facing a folder of scripts had to delete every file by hand before the folder itself would go,
+// and the error said "folder not empty?" without saying which. The File Manager already arms a
+// delete twice before it fires, which is the confirmation this needs.
 void HttpServerModule::handleRemoveEntry(platform::TcpConnection& conn, const char* query) {
     char path[160];
     if (!parseFilePath(query, path, sizeof(path))) {
         sendResponse(conn, 400, "application/json", "{\"error\":\"bad path\"}");
         return;
     }
-    if (platform::fsRemove(path)) {
+    if (removeRecursive(path)) {
         // A REMOVED file is a change to persistent state exactly as a written one is: a module that
         // derived something from it is now running against a file that is gone, and should say so
         // rather than keep running the vanished program until something else happens to sweep.
         applyFileChanged(path);
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
     } else {
-        sendResponse(conn, 500, "application/json", "{\"error\":\"delete failed (folder not empty?)\"}");
+        sendResponse(conn, 500, "application/json", "{\"error\":\"delete failed\"}");
     }
 }
 
@@ -1144,6 +1222,15 @@ void HttpServerModule::writeModuleJson(JsonSink& sink, MoonModule* mod) {
         static_cast<unsigned>(mod->tickTimeUs()),
         static_cast<unsigned>(mod->classSize()),
         static_cast<unsigned>(mod->dynamicBytes()));
+    // What this INSTANCE says it is, which for a scripted module comes from the script it loaded.
+    // /api/types answers per TYPE, and two MoonLive effects running different scripts share one
+    // entry there, so the instance has to speak for itself or the UI shows both the same emoji.
+    //
+    // Only when there is something to say: a module with no tags of its own emits nothing.
+    if (const char* tg = mod->tags(); tg && tg[0]) {
+        sink.append(",\"tags\":");
+        sink.writeJsonString(tg);
+    }
     writeStatus(sink, mod);
     // userEditable: omit when true (the common case) to save bytes: the UI
     // treats absent as editable, same convention as the control hidden/readonly
@@ -1782,6 +1869,25 @@ void HttpServerModule::writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, b
 
 // Apply-core: add one module under a named parent. Transport-free; returns an
 // OpResult. Idempotent on the id (an existing name returns Ok, "already there").
+// Does `parent` accept a child of this role? Its acceptsChildRoles() is a comma-separated list of
+// role names ("effect,modifier"); empty means it takes no children at all. The UI reads the same
+// string out of /api/types to build its picker, so both sides answer from one declaration.
+static bool parentAcceptsRole(const MoonModule* parent, ModuleRole childRole) {
+    if (!parent) return false;
+    const char* csv = parent->acceptsChildRoles();
+    if (!csv || !csv[0]) return false;
+    const char* want = roleName(childRole);
+    const size_t wantLen = std::strlen(want);
+    for (const char* p = csv; *p;) {
+        const char* comma = std::strchr(p, ',');
+        const size_t len = comma ? static_cast<size_t>(comma - p) : std::strlen(p);
+        if (len == wantLen && std::strncmp(p, want, len) == 0) return true;
+        if (!comma) break;
+        p = comma + 1;
+    }
+    return false;
+}
+
 HttpServerModule::OpResult HttpServerModule::applyAddModule(
         const char* typeName, const char* id, const char* parentId,
         char* outName, size_t outNameLen) {
@@ -1805,6 +1911,16 @@ HttpServerModule::OpResult HttpServerModule::applyAddModule(
     auto* mod = ModuleFactory::create(typeName);
     if (!mod) return OpResult::UnknownType;
     if (id && id[0] != 0) mod->setName(id);
+
+    // The parent's declared child roles are a RULE, not a UI hint. The picker filters by them, so
+    // the UI never offers a bad pairing, but nothing stopped the API from making one: an effect
+    // nested inside a layout ticks in the wrong pass and renders its controls on the wrong card.
+    // Checked here rather than in addChild because persistence and boot legitimately build a tree
+    // before roles are settled; this is the path where a caller asks for a specific pairing.
+    if (!parentAcceptsRole(parent, mod->role())) {
+        delete mod;
+        return OpResult::BadRequest;
+    }
 
     if (!parent->addChild(mod)) {
         delete mod;
@@ -2035,6 +2151,15 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
         return;
     }
 
+    // The same rule the add path enforces: a replacement has to be something the parent accepts, or
+    // a Layer's effect could be swapped for a layout that ticks in the wrong pass. Checked before
+    // the old module is touched, so a refusal leaves the tree exactly as it was.
+    if (!parentAcceptsRole(parent, fresh->role())) {
+        delete fresh;
+        sendResponse(conn, 400, "application/json", "{\"error\":\"parent rejected child\"}");
+        return;
+    }
+
     // Name on replace: keep a CUSTOM name (a scenario id like "MOD", or a
     // user-renamed slot) so callers can keep addressing the slot by it. But if
     // the old name was just the old type's factory display name ("Multiply" for
@@ -2132,6 +2257,87 @@ void HttpServerModule::serveModule(platform::TcpConnection& conn, const char* na
     // The SAME writer /api/state uses, so the two can never disagree about a module's shape.
     JsonSink sink(conn);
     writeModuleJson(sink, mod);
+    sink.flush();
+}
+
+// GET /api/scripts: the shipped MoonLive catalog.
+//
+// The device carries the NAMES of every factory script and the text of none: the UI fetches a
+// script from GitHub the first time someone picks it and posts it back to /api/file. So this
+// endpoint answers "what could I offer" while /api/dir answers "what is actually here".
+//
+// `tag` is what to fetch from, and it is the firmware's own version so a script always matches the
+// engine that will run it. A development build has no upstream tag of its own, so it falls back to
+// the branch, which is stated here rather than guessed at in the browser.
+void HttpServerModule::serveScriptCatalog(platform::TcpConnection& conn) {
+    const char* header =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Connection: close\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "\r\n";
+    conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+
+    JsonSink sink(conn);
+    sink.append("{\"tag\":");
+    // A version ending in -dev has no release tag upstream, so it fetches from the COMMIT it was
+    // built from: kBuildId is that short hash, and raw.githubusercontent.com serves any commit-ish.
+    //
+    // The hash rather than a branch name, because a dev build's scripts must match its own engine.
+    // A branch moves under the device mid-session, and `main` is simply the wrong tree while a
+    // language change is in flight: this branch adds declared return types, so main's scripts no
+    // longer compile against this firmware. The hash cannot drift.
+    //
+    // A `+` suffix marks a DIRTY tree, whose hash is still a real commit (the parent of the
+    // uncommitted work), so it is stripped rather than refused. A commit that was never pushed is
+    // not on GitHub at all and the fetch 404s, which the browser already reports as a failed
+    // download.
+    const char* v = kVersion;
+    const bool dev = std::strstr(v, "-dev") != nullptr;
+    if (dev) {
+        char commit[24];
+        std::snprintf(commit, sizeof(commit), "%s", kBuildId);
+        for (char* c = commit; *c; c++) if (*c == '+') { *c = '\0'; break; }
+        sink.writeJsonString(commit[0] ? commit : "main");
+    } else {
+        char tag[32];
+        std::snprintf(tag, sizeof(tag), "v%s", v);
+        sink.writeJsonString(tag);
+    }
+    sink.append(",\"dir\":");
+    sink.writeJsonString(moonlive::kFactoryScriptDir);
+
+    // `dim` and `tags` alongside each name, so a picker can show a factory script the way the
+    // module picker shows a type: its dimension and its emoji, BEFORE it is downloaded. Both are
+    // extracted from the script's own source at build time, so this is a copy for display; the
+    // compiled script is what decides behavior once it is on the device.
+    auto emit = [&sink](const char* key, const char* folder,
+                        const char* const* names, const unsigned char* dims,
+                        const char* const* tags, size_t count) {
+        sink.appendf(",\"%s\":{\"folder\":\"%s\",\"names\":[", key, folder);
+        for (size_t i = 0; i < count; i++) {
+            if (i) sink.append(",");
+            sink.writeJsonString(names[i]);
+        }
+        sink.append("],\"dim\":[");
+        for (size_t i = 0; i < count; i++) sink.appendf(i ? ",%u" : "%u", unsigned(dims[i]));
+        sink.append("],\"tags\":[");
+        for (size_t i = 0; i < count; i++) {
+            if (i) sink.append(",");
+            sink.writeJsonString(tags[i]);
+        }
+        sink.append("]}");
+    };
+    emit("effects", moonlive::kEffectFolder, moonlive::kEffectCatalog,
+         moonlive::kEffectCatalogDim, moonlive::kEffectCatalogTags,
+         moonlive::kEffectCatalogCount);
+    emit("layouts", moonlive::kLayoutFolder, moonlive::kLayoutCatalog,
+         moonlive::kLayoutCatalogDim, moonlive::kLayoutCatalogTags,
+         moonlive::kLayoutCatalogCount);
+    emit("modifiers", moonlive::kModifierFolder, moonlive::kModifierCatalog,
+         moonlive::kModifierCatalogDim, moonlive::kModifierCatalogTags,
+         moonlive::kModifierCatalogCount);
+    sink.append("}");
     sink.flush();
 }
 

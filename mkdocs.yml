@@ -130,6 +130,7 @@ nav:
       - How projectMM works: tutorials/how-projectmm-works.md
       - Installing projectMM on a desktop: tutorials/installing-to-desktop.md
       - Driving LED panels with a receiving card: tutorials/panel-cards.md
+      - Driving projectMM from a phone or tablet: tutorials/control-surface.md
       - Build your own MoonModules: usecases/build-your-own-moonmodules.md
       - Home automation: usecases/home-automation.md
       - LED signal integrity: usecases/led-signal-integrity.md
@@ -159,6 +160,9 @@ nav:
       # First in this section because it is the "how we work here" a new contributor
       # reads before the technical references below it.
       - Principles & process: principles-and-process.md
+      # The reasoning behind the no-library rule, next to the rules it explains: the
+      # process page says HOW we work, this says why the code is ours to begin with.
+      - Why we write our own code: why-we-write-our-own.md
       - Architecture: architecture.md
       - Coding standards: coding-standards.md
       - Building: building.md

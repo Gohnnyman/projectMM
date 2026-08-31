@@ -976,14 +976,67 @@ void setFader(Device& d, uint8_t index, uint8_t value) {
 
 // A surface that attaches mid-show is correct immediately. Without the seed it would show whatever
 // its own defaults were until something happened to change, which on a quiet rig is never.
+//
+// Seeded from the TARGET, not from the mirror's own last value: fader 1 rides Drivers.brightness,
+// so what a connecting surface must be told is what the rig is running at. Setting the mirror byte
+// directly (what this test used to do) asserted the stale reading instead: a surface connecting
+// between ticks was sent the boot default while the rig was at another level.
 TEST_CASE("attaching a surface seeds it with the current state") {
     Device d;
-    setFader(d, 0, 200);
+    REQUIRE(d.scheduler.setControl("Drivers", "brightness", "{\"value\":200}")
+            == mm::Scheduler::SetControlResult::Ok);
     RecordingSurface s;
     d.control->addSurface(&s);
     CHECK(s.countFor(mm::SurfaceControl::Fader, 0) == 1);
     for (const auto& c : s.calls)
         if (c.kind == mm::SurfaceControl::Fader && c.index == 0) CHECK(c.value == 200);
+    d.control->removeSurface(&s);
+}
+
+// THE two-way half. A surface that only writes drifts from what it drives, and starts out of step:
+// switch1 read `off` at boot on a device whose Drivers.on was on, because the surface's own default
+// had never met the target's value.
+TEST_CASE("a switch follows the control it drives, including at startup") {
+    Device d;
+    RecordingSurface s;
+
+    // Drivers.on is on by default, and switch1 (bound to it) starts false. Before the follow this
+    // disagreement survived forever: the surface said off while the rig was on.
+    d.control->addSurface(&s);
+    d.control->mirrorToSurfaces();
+
+    auto& cs = d.control->controls();
+    bool found = false;
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "switch1") != 0) continue;
+        CHECK(*static_cast<bool*>(cs[i].ptr) == true);   // caught up to Drivers.on
+        found = true;
+        break;
+    }
+    REQUIRE(found);
+    d.control->removeSurface(&s);
+}
+
+// The same for a fader, driven from the OTHER side: turning brightness down in the web UI must move
+// the fader that drives it, or the surface shows a value the rig is not running on.
+TEST_CASE("a fader follows its target when something else moves it") {
+    Device d;
+    RecordingSurface s;
+    d.control->addSurface(&s);
+    d.control->mirrorToSurfaces();          // settle the startup catch-up
+    s.clear();
+
+    // Anything else writes the target: the web UI, a preset recall, an audio-reactive effect.
+    REQUIRE(d.scheduler.setControl("Drivers", "brightness", "{\"value\":42}")
+            == mm::Scheduler::SetControlResult::Ok);
+    d.control->mirrorToSurfaces();
+
+    // The surface was told, and its own fader now reads what the device is running on.
+    CHECK(s.countFor(mm::SurfaceControl::Fader, 0) == 1);
+    auto& cs = d.control->controls();
+    for (uint8_t i = 0; i < cs.count(); i++)
+        if (std::strcmp(cs[i].name, "fader1") == 0)
+            CHECK(*static_cast<uint8_t*>(cs[i].ptr) == 42);
     d.control->removeSurface(&s);
 }
 
@@ -995,6 +1048,11 @@ TEST_CASE("the mirror sends a control only when its value changed") {
     d.control->addSurface(&s);
     s.clear();
 
+    // The first mirror after an attach is not silent: the surface FOLLOWS its targets, and
+    // switch1's own default (off) has never met Drivers.on (on), so it corrects itself. Settle
+    // that, then assert the steady state, which is what this case is about.
+    d.control->mirrorToSurfaces();
+    s.clear();
     d.control->mirrorToSurfaces();
     CHECK(s.calls.empty());              // nothing moved, nothing sent
 

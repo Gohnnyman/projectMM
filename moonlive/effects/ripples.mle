@@ -1,22 +1,19 @@
 // Ripples: two wave sources gliding around the grid, their expanding rings interfering
-// where they cross. Nothing is stored between frames: the picture IS the distance field,
-// and it moves because the sources do. Squared distance feeds sin directly (one turn is
-// 0..65535 and wraps), so no square root is needed, and unsigned wrap-around makes
-// (x - cx) * (x - cx) correct even when the source is to the right of the cell.
-//
-// The heaviest shipped script: ~15 host calls per cell against plasma's 9, so it is also
-// the working stress test for the call path.
 
 class RipplesEffect {
   byte bpm = 10;
   byte rings = 8;
 
-  defineControls() {
-    addControl("bpm", bpm, 1, 120);
-    addControl("rings", rings, 1, 32);
+  int dimensions() { return 2; }
+
+  string tags() { return "💫"; }
+
+  void defineControls() {
+    addControl("bpm", bpm, 1, 120);                 // how fast the sources circle
+    addControl("rings", rings, 1, 32);              // how tightly the rings pack
   }
 
-  tick() {
+  void tick() {
     for (y = 0; y < height; y = y + 1) {
       for (x = 0; x < width; x = x + 1) {
         setRGB(y * width + x,

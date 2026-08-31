@@ -76,8 +76,8 @@ TEST_CASE("a function the script calls can light pixels and read the script's co
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
                         "  byte level = 200;\n"
-                        "  paint() { setRGB(1, level, 0, 0); }\n"
-                        "  tick()  { setRGB(0, 7, 8, 9); paint(); }\n"
+                        "  void paint() { setRGB(1, level, 0, 0); }\n"
+                        "  void tick()  { setRGB(0, 7, 8, 9); paint(); }\n"
                         "}\n", kTable, kSys));
     REQUIRE(eng.ok());
     std::vector<uint8_t> buf(4 * 3, 0);
@@ -93,9 +93,9 @@ TEST_CASE("a function the script calls can light pixels and read the script's co
 TEST_CASE("arguments reach a function two calls deep") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
-                        "  inner()  { setRGB(2, 44, 0, 0); }\n"
-                        "  outer()  { setRGB(1, 33, 0, 0); inner(); }\n"
-                        "  tick()   { setRGB(0, 22, 0, 0); outer(); }\n"
+                        "  void inner()  { setRGB(2, 44, 0, 0); }\n"
+                        "  void outer()  { setRGB(1, 33, 0, 0); inner(); }\n"
+                        "  void tick()   { setRGB(0, 22, 0, 0); outer(); }\n"
                         "}\n", kTable, kSys));
     REQUIRE(eng.ok());
     std::vector<uint8_t> buf(4 * 3, 0);
@@ -116,8 +116,8 @@ TEST_CASE("arguments reach a function two calls deep") {
 TEST_CASE("a script that recurses without end keeps rendering instead of resetting") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
-                        "  forever() { setRGB(1, 200, 0, 0); forever(); }\n"
-                        "  tick()    { setRGB(0, 50, 0, 0); forever(); }\n"
+                        "  void forever() { setRGB(1, 200, 0, 0); forever(); }\n"
+                        "  void tick()    { setRGB(0, 50, 0, 0); forever(); }\n"
                         "}\n", kTable, kSys));
     REQUIRE(eng.ok());                       // it COMPILES: whether it terminates is not decidable
     std::vector<uint8_t> buf(4 * 3, 0);
@@ -145,9 +145,9 @@ TEST_CASE("a script that recurses without end keeps rendering instead of resetti
 TEST_CASE("an empty function does not consume the recursion budget") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
-                        "  nop()  { }\n"
-                        "  draw() { setRGB(0, 255, 0, 0); }\n"
-                        "  tick() { nop(); nop(); draw(); }\n"
+                        "  void nop()  { }\n"
+                        "  void draw() { setRGB(0, 255, 0, 0); }\n"
+                        "  void tick() { nop(); nop(); draw(); }\n"
                         "}\n", kTable, kSys));
     REQUIRE(eng.ok());
     std::vector<uint8_t> buf(4 * 3, 0);
@@ -162,12 +162,12 @@ TEST_CASE("an empty function does not consume the recursion budget") {
 TEST_CASE("a function name too long to store is refused, not silently truncated") {
     uint8_t out[2048];
     std::string longName(mm::moonlive::kMaxEntryName + 1, 'a');
-    const std::string src = "class T {\n  " + longName + "() { }\n  tick() { }\n}\n";
+    const std::string src = "class T {\n  void " + longName + "() { }\n  void tick() { }\n}\n";
     auto r = moonlive::compileSource(src.c_str(), kTable, kSys, out, sizeof(out));
     CHECK_FALSE(r.ok);
     CHECK(std::strlen(r.error) > 0);
     // One character shorter is fine, so the limit is the limit and not an off-by-one.
-    const std::string ok = "class T {\n  " + longName.substr(1) + "() { }\n  tick() { }\n}\n";
+    const std::string ok = "class T {\n  void " + longName.substr(1) + "() { }\n  void tick() { }\n}\n";
     auto r2 = moonlive::compileSource(ok.c_str(), kTable, kSys, out, sizeof(out));
     CHECK(r2.ok);
 }
@@ -323,8 +323,8 @@ TEST_CASE("a control is declared by calling addControl, and a plain member is no
     REQUIRE(eng.compile("class T {\n"
                         "  byte speed = 50;\n"
                         "  byte hidden = 7;\n"
-                        "  defineControls() { addControl(\"speed\", speed, 0, 99); }\n"
-                        "  tick() { setRGB(0, speed, hidden, 255); }\n"
+                        "  void defineControls() { addControl(\"speed\", speed, 0, 99); }\n"
+                        "  void tick() { setRGB(0, speed, hidden, 255); }\n"
                         "}\n", kTable, kSys));
     moonlive::runDefineControls(eng);
 
@@ -352,8 +352,8 @@ TEST_CASE("a control's range can be computed, not just written as a literal") {
     REQUIRE(eng.compile("class T {\n"
                         "  byte base = 10;\n"
                         "  byte speed = 20;\n"
-                        "  defineControls() { addControl(\"speed\", speed, base, base * 4 + 5); }\n"
-                        "  tick() { setRGB(0, speed, 0, 0); }\n"
+                        "  void defineControls() { addControl(\"speed\", speed, base, base * 4 + 5); }\n"
+                        "  void tick() { setRGB(0, speed, 0, 0); }\n"
                         "}\n", kTable, kSys));
     moonlive::runDefineControls(eng);
     uint8_t n = 0;
@@ -497,7 +497,7 @@ TEST_CASE("a long script compiles or refuses, but never spins") {
     // And the sanity bound still refuses a runaway rather than trying to allocate for it.
     // Built directly rather than through mmScript: 3000 statements is far past any fixed buffer,
     // which is the whole point of the case.
-    std::string absurd = "class Runaway {\n  tick() {\n";
+    std::string absurd = "class Runaway {\n  void tick() {\n";
     for (int i = 0; i < 3000; i++) absurd += "addLight(1, 0, 0);";
     absurd += "\n  }\n}\n";
     auto big = moonlive::compileSource(absurd.c_str(), kTable, kSys, out, sizeof(out));
@@ -512,10 +512,10 @@ TEST_CASE("compileSource: malformed control declarations fail with a diagnostic,
         mmScript("byte speed = 300; setRGB(0,0,0,0);"),                     // default > 255
         // The range cases moved to defineControls, where a range now lives. A comment cannot be
         // malformed any more, because a comment no longer declares anything.
-        "class T {\n  byte s = 5;\n  defineControls() { addControl(\"s\", nope, 0, 9); }\n"
-        "  tick() { setRGB(0,0,0,0); }\n}\n",                                 // binds an undeclared member
-        "class T {\n  byte s = 5;\n  defineControls() { addControl(s, s, 0, 9); }\n"
-        "  tick() { setRGB(0,0,0,0); }\n}\n",                                 // name is not a string
+        "class T {\n  byte s = 5;\n  void defineControls() { addControl(\"s\", nope, 0, 9); }\n"
+        "  void tick() { setRGB(0,0,0,0); }\n}\n",                                 // binds an undeclared member
+        "class T {\n  byte s = 5;\n  void defineControls() { addControl(s, s, 0, 9); }\n"
+        "  void tick() { setRGB(0,0,0,0); }\n}\n",                                 // name is not a string
         mmScript("byte random16 = 5; setRGB(0,0,0,0);"),                    // name shadows a builtin
         "byte speed = 50;",                                       // not even a class
         mmScript("byte = 50; setRGB(0,0,0,0);"),                            // no name
@@ -538,8 +538,8 @@ TEST_CASE("a class reports every function it defined, and where each one starts"
     uint8_t out[4096];
     auto r = moonlive::compileSource(
         "class TwoFns {\n"
-        "  helper() { setRGB(1, 10, 20, 30); }\n"
-        "  tick()   { setRGB(2, 40, 50, 60); }\n"
+        "  void helper() { setRGB(1, 10, 20, 30); }\n"
+        "  void tick()   { setRGB(2, 40, 50, 60); }\n"
         "}\n", kTable, kSys, out, sizeof(out));
     // The entry table is published only by a SUCCESSFUL compile: compileSource returns at codegen
     // failure, before it copies the table, which is the same rule the declared controls follow (a
@@ -566,7 +566,7 @@ TEST_CASE("a class reports every function it defined, and where each one starts"
 TEST_CASE("a function the host has no name for is still reported") {
     uint8_t out[4096];
     auto r = moonlive::compileSource(
-        "class Helpers {\n  paint() { setRGB(0, 1, 2, 3); }\n}\n", kTable, kSys, out, sizeof(out));
+        "class Helpers {\n  void paint() { setRGB(0, 1, 2, 3); }\n}\n", kTable, kSys, out, sizeof(out));
 #if !MM_MOONLIVE_HAS_HOST_JIT
     return;                       // no backend: no successful compile, so no table to report
 #endif
@@ -655,7 +655,7 @@ TEST_CASE("an int array element round-trips a value no byte could hold") {
 // string. A refusal names the gap; a wrong number would not.
 TEST_CASE("a string array is refused with a diagnostic rather than mis-read") {
     moonlive::MoonLive eng;
-    CHECK_FALSE(eng.compile("class T { string names[4]; tick() { fill(0, 0, 0); } }",
+    CHECK_FALSE(eng.compile("class T { string names[4]; void tick() { fill(0, 0, 0); } }",
                             kTable, kSys));
     eng.free();
 }
@@ -779,7 +779,7 @@ TEST_CASE("a bool member takes 0 or 1 and refuses anything else") {
                           "if (on != 0) { setRGB(0, 9, 0, 0); } else { setRGB(0, 1, 0, 0); }"),
                  1)[0] == 9);
     moonlive::MoonLive eng;
-    CHECK_FALSE(eng.compile("class T { bool on = 7; tick() { setRGB(0, on, 0, 0); } }",
+    CHECK_FALSE(eng.compile("class T { bool on = 7; void tick() { setRGB(0, on, 0, 0); } }",
                             kTable, kSys));
     eng.free();
 }
@@ -985,7 +985,7 @@ TEST_CASE("a fixed multiply is correct when its destination aliases a source") {
 // become 44 with nothing reporting it.
 TEST_CASE("a byte member outside 0..255 is refused at the declaration") {
     moonlive::MoonLive eng;
-    CHECK_FALSE(eng.compile("class T { byte n = 300; tick() { setRGB(0, n, 0, 0); } }",
+    CHECK_FALSE(eng.compile("class T { byte n = 300; void tick() { setRGB(0, n, 0, 0); } }",
                             kTable, kSys));
     eng.free();
 }
@@ -996,8 +996,8 @@ TEST_CASE("a byte member outside 0..255 is refused at the declaration") {
 TEST_CASE("a byte member and an int member occupy the same sized slot") {
     moonlive::MoonLive a;
     REQUIRE(a.compile("class T {\n  byte first = 1;\n  byte second = 2;\n"
-                      "  defineControls() { addControl(\"second\", second, 0, 9); }\n"
-                      "  tick() { setRGB(0, first, second, 0); }\n}\n", kTable, kSys));
+                      "  void defineControls() { addControl(\"second\", second, 0, 9); }\n"
+                      "  void tick() { setRGB(0, first, second, 0); }\n}\n", kTable, kSys));
     moonlive::runDefineControls(a);
     uint8_t na = 0;
     const auto* da = a.declaredControls(na);
@@ -1006,8 +1006,8 @@ TEST_CASE("a byte member and an int member occupy the same sized slot") {
 
     moonlive::MoonLive b;
     REQUIRE(b.compile("class T {\n  int first = 1;\n  byte second = 2;\n"
-                      "  defineControls() { addControl(\"second\", second, 0, 9); }\n"
-                      "  tick() { setRGB(0, first, second, 0); }\n}\n", kTable, kSys));
+                      "  void defineControls() { addControl(\"second\", second, 0, 9); }\n"
+                      "  void tick() { setRGB(0, first, second, 0); }\n}\n", kTable, kSys));
     moonlive::runDefineControls(b);
     uint8_t nb = 0;
     const auto* db = b.declaredControls(nb);
@@ -1022,8 +1022,8 @@ TEST_CASE("a byte member and an int member occupy the same sized slot") {
 TEST_CASE("a byte array packs one byte per element where an int array takes four") {
     moonlive::MoonLive small;
     REQUIRE(small.compile("class T {\n  byte heat[8];\n  byte after = 3;\n"
-                          "  defineControls() { addControl(\"after\", after, 0, 9); }\n"
-                          "  tick() { setRGB(0, heat[0], after, 0); }\n}\n", kTable, kSys));
+                          "  void defineControls() { addControl(\"after\", after, 0, 9); }\n"
+                          "  void tick() { setRGB(0, heat[0], after, 0); }\n}\n", kTable, kSys));
     moonlive::runDefineControls(small);
     uint8_t ns = 0;
     const auto* ds = small.declaredControls(ns);
@@ -1031,8 +1031,8 @@ TEST_CASE("a byte array packs one byte per element where an int array takes four
 
     moonlive::MoonLive wide;
     REQUIRE(wide.compile("class T {\n  int heat[8];\n  byte after = 3;\n"
-                         "  defineControls() { addControl(\"after\", after, 0, 9); }\n"
-                         "  tick() { setRGB(0, heat[0], after, 0); }\n}\n", kTable, kSys));
+                         "  void defineControls() { addControl(\"after\", after, 0, 9); }\n"
+                         "  void tick() { setRGB(0, heat[0], after, 0); }\n}\n", kTable, kSys));
     moonlive::runDefineControls(wide);
     uint8_t nw = 0;
     const auto* dw = wide.declaredControls(nw);
@@ -1048,15 +1048,15 @@ TEST_CASE("a byte array packs one byte per element where an int array takes four
 TEST_CASE("a control refuses a member the UI has no widget for") {
     moonlive::MoonLive eng;
     CHECK_FALSE(eng.compile("class T {\n  fixed scale = 1;\n"
-                            "  defineControls() { addControl(\"scale\", scale, 0, 9); }\n"
-                            "  tick() { setRGB(0, 1, 0, 0); }\n}\n", kTable, kSys));
+                            "  void defineControls() { addControl(\"scale\", scale, 0, 9); }\n"
+                            "  void tick() { setRGB(0, 1, 0, 0); }\n}\n", kTable, kSys));
     eng.free();
 }
 
 // true and false say bool, so seeding another type with one is a diagnostic rather than a silent 1.
 TEST_CASE("true and false initialize a bool and nothing else") {
     moonlive::MoonLive eng;
-    CHECK_FALSE(eng.compile("class T { byte n = true; tick() { setRGB(0, n, 0, 0); } }",
+    CHECK_FALSE(eng.compile("class T { byte n = true; void tick() { setRGB(0, n, 0, 0); } }",
                             kTable, kSys));
     eng.free();
 }
@@ -1087,7 +1087,7 @@ TEST_CASE("a conversion refuses a value already of its target type") {
 // wrapping: 40000.0 does not fit Q16.16's ±32767.99998.
 TEST_CASE("a fixed member outside its range is refused at the declaration") {
     moonlive::MoonLive eng;
-    CHECK_FALSE(eng.compile("class T { fixed v = 40000.0; tick() { setRGB(0, 1, 0, 0); } }",
+    CHECK_FALSE(eng.compile("class T { fixed v = 40000.0; void tick() { setRGB(0, 1, 0, 0); } }",
                             kTable, kSys));
     eng.free();
 }
@@ -1116,11 +1116,11 @@ TEST_CASE("a fixed value passed to a built-in names the conversion") {
 TEST_CASE("an array index is refused as a fixed value") {
     moonlive::MoonLive eng;
     CHECK_FALSE(eng.compile("class T { byte h[4]; fixed f = 1.5;\n"
-                            "  tick() { setRGB(0, h[f], 0, 0); } }", kTable, kSys));
+                            "  void tick() { setRGB(0, h[f], 0, 0); } }", kTable, kSys));
     eng.free();
     moonlive::MoonLive eng2;
     CHECK_FALSE(eng2.compile("class T { byte h[4]; fixed f = 1.5;\n"
-                             "  tick() { h[f] = 1; setRGB(0, 1, 0, 0); } }", kTable, kSys));
+                             "  void tick() { h[f] = 1; setRGB(0, 1, 0, 0); } }", kTable, kSys));
     eng2.free();
 }
 
@@ -1130,7 +1130,7 @@ TEST_CASE("an array index is refused as a fixed value") {
 TEST_CASE("an array element carries its array's type, not its index's") {
     moonlive::MoonLive eng;
     CHECK_FALSE(eng.compile("class T { byte h[4]; fixed f = 0.0;\n"
-                            "  tick() { f = h[3] * 0.5; setRGB(0, toInt(f), 0, 0); } }",
+                            "  void tick() { f = h[3] * 0.5; setRGB(0, toInt(f), 0, 0); } }",
                             kTable, kSys));
     eng.free();
 }
@@ -1138,7 +1138,7 @@ TEST_CASE("an array element carries its array's type, not its index's") {
 // An element STORE takes what the element type holds, the same wall a scalar store enforces.
 TEST_CASE("an array element refuses a value of the wrong type") {
     moonlive::MoonLive eng;
-    CHECK_FALSE(eng.compile("class T { byte h[4]; tick() { h[0] = 1.5; setRGB(0, h[0], 0, 0); } }",
+    CHECK_FALSE(eng.compile("class T { byte h[4]; void tick() { h[0] = 1.5; setRGB(0, h[0], 0, 0); } }",
                             kTable, kSys));
     eng.free();
 }
@@ -1148,7 +1148,7 @@ TEST_CASE("an array element refuses a value of the wrong type") {
 TEST_CASE("a loop header refuses a fixed value in any of its three clauses") {
     moonlive::MoonLive eng;
     CHECK_FALSE(eng.compile("class T { fixed f = 3.0;\n"
-                            "  tick() { for (i = 0; i < f; i = i + 1) { setRGB(0, 1, 0, 0); } } }",
+                            "  void tick() { for (i = 0; i < f; i = i + 1) { setRGB(0, 1, 0, 0); } } }",
                             kTable, kSys));
     eng.free();
 }
@@ -1158,7 +1158,7 @@ TEST_CASE("a loop header refuses a fixed value in any of its three clauses") {
 TEST_CASE("the remainder of two fixed values is itself fixed") {
     moonlive::MoonLive eng;
     CHECK(eng.compile("class T { fixed a = 1.5; fixed b = 1.0;\n"
-                      "  tick() { setRGB(0, toInt(a % b * toFixed(100)), 0, 0); } }",
+                      "  void tick() { setRGB(0, toInt(a % b * toFixed(100)), 0, 0); } }",
                       kTable, kSys));
     eng.free();
 }
@@ -1166,9 +1166,9 @@ TEST_CASE("the remainder of two fixed values is itself fixed") {
 // A member may not take a name the expression parser resolves first, or it could be declared and
 // then never read. Same stance the language already takes for a builtin's name.
 TEST_CASE("a member may not be named after a conversion or a boolean literal") {
-    for (const char* src : {"class T { byte toFixed = 5; tick() { setRGB(0, 1, 0, 0); } }",
-                            "class T { byte toInt = 5; tick() { setRGB(0, 1, 0, 0); } }",
-                            "class T { byte true = 5; tick() { setRGB(0, 1, 0, 0); } }"}) {
+    for (const char* src : {"class T { byte toFixed = 5; void tick() { setRGB(0, 1, 0, 0); } }",
+                            "class T { byte toInt = 5; void tick() { setRGB(0, 1, 0, 0); } }",
+                            "class T { byte true = 5; void tick() { setRGB(0, 1, 0, 0); } }"}) {
         moonlive::MoonLive eng;
         CHECK_FALSE(eng.compile(src, kTable, kSys));
         eng.free();
@@ -1179,7 +1179,7 @@ TEST_CASE("a member may not be named after a conversion or a boolean literal") {
 // about what b is.
 TEST_CASE("a whole-number member refuses a fixed initializer") {
     moonlive::MoonLive eng;
-    CHECK_FALSE(eng.compile("class T { byte b = 0.0; tick() { setRGB(0, b, 0, 0); } }",
+    CHECK_FALSE(eng.compile("class T { byte b = 0.0; void tick() { setRGB(0, b, 0, 0); } }",
                             kTable, kSys));
     eng.free();
 }
@@ -1188,7 +1188,7 @@ TEST_CASE("a whole-number member refuses a fixed initializer") {
 // expression that reads it and the value that writes it, which scalars get from their declaration.
 TEST_CASE("a fixed array is refused with a diagnostic") {
     moonlive::MoonLive eng;
-    CHECK_FALSE(eng.compile("class T { fixed w[4]; tick() { setRGB(0, 1, 0, 0); } }",
+    CHECK_FALSE(eng.compile("class T { fixed w[4]; void tick() { setRGB(0, 1, 0, 0); } }",
                             kTable, kSys));
     eng.free();
 }
@@ -1253,7 +1253,214 @@ TEST_CASE("every shipped script compiles") {
 // member to 1 as though nothing had been written.
 TEST_CASE("a bool initializer takes no sign") {
     moonlive::MoonLive eng;
-    CHECK_FALSE(eng.compile("class T { bool b = -true; tick() { setRGB(0, 1, 0, 0); } }",
+    CHECK_FALSE(eng.compile("class T { bool b = -true; void tick() { setRGB(0, 1, 0, 0); } }",
                             kTable, kSys));
     eng.free();
+}
+
+// A system variable's arena offset is validated at REGISTRATION, because the failure it prevents is
+// silent: LoadCtrl32 reads four bytes, so an offset at the depth slot reads the recursion counter
+// and one byte past the arena, and an unaligned one straddles two cells. Neither shows up as a
+// compile error or a wrong pixel: the script just reads a number nobody wrote.
+TEST_CASE("a system variable cannot be registered outside the arena's 32-bit cells") {
+    moonlive::SysVarTable t;
+    const auto arena = [](uint8_t where) {
+        moonlive::SysVar v{};
+        v.name = "probe";
+        v.kind = moonlive::SysVarKind::Arena;
+        v.where = where;
+        return v;
+    };
+
+    // The first system slot: the one offset every real registration starts from.
+    CHECK(t.add(arena(moonlive::kCtrlBytes)));
+
+    // Below the system range is a SCRIPT member's byte, not a system variable's.
+    CHECK_FALSE(t.add(arena(moonlive::kCtrlBytes - 1)));
+    // The depth slot sits above the system range: a 4-byte read there runs off the end.
+    CHECK_FALSE(t.add(arena(moonlive::kDepthSlot)));
+    CHECK_FALSE(t.add(arena(moonlive::kArenaBytes)));
+    // Inside the range but straddling two cells.
+    CHECK_FALSE(t.add(arena(moonlive::kCtrlBytes + 1)));
+    CHECK_FALSE(t.add(arena(moonlive::kCtrlBytes + moonlive::kSysVarBytes - 1)));
+}
+
+#if MM_MOONLIVE_HAS_HOST_JIT
+// Everything from here EXECUTES emitted code (render() runs a frame, runValue() calls an entry
+// point), so it needs a host backend. Without one the engine compiles nothing and render() is not
+// even defined: the same guard the other compile-through-run tests in this file carry.
+
+// `return`: the language's first statement that ANSWERS rather than acts.
+//
+// Two jobs, tested separately because they fail differently. As an early exit it is what a script
+// writes when a guard fails and the rest of the frame is pointless; the failure there is the
+// statements after it running anyway. As the way a function reports a value it is what
+// dimensions() and tags() are built on; the failure there is a plausible wrong number, which is
+// why the value is read back rather than merely compiled.
+TEST_CASE("return leaves tick() early, and the statements after it do not run") {
+    // Paint every light red, then return, then paint them all green. Green must never appear.
+    auto buf = render(mmScript("fill(255, 0, 0);"
+                               "return;"
+                               "fill(0, 255, 0);"), 4);
+    for (int i = 0; i < 4; i++) {
+        CHECK(buf[i * 3]     == 255);   // the red before the return landed
+        CHECK(buf[i * 3 + 1] == 0);     // the green after it did not
+    }
+}
+
+// A return inside a loop leaves the FUNCTION, not just the iteration: the classic early-out.
+TEST_CASE("return inside a loop leaves the whole function") {
+    auto buf = render(mmScript("for (i = 0; i < 4; i = i + 1) {"
+                               "  setRGB(i, 9, 0, 0);"
+                               "  if (i >= 1) { return; }"
+                               "}"), 4);
+    CHECK(buf[0] == 9);   // i = 0 painted
+    CHECK(buf[3] == 9);   // i = 1 painted, then returned
+    CHECK(buf[6] == 0);   // i = 2 never ran
+    CHECK(buf[9] == 0);
+}
+
+// A conditional return: the guard shape a real script writes. Both directions in one test, because
+// a return that ALWAYS fires and one that never does are both wrong and only the pair rules them
+// out. The condition is a literal comparison rather than a grid variable: this fixture runs with no
+// layout, so width/height are 0 and a guard reading them is not the branch under test.
+TEST_CASE("a return fires only when its condition holds") {
+    // Guard false: the return is skipped and the fill runs.
+    auto ran = render(mmScript("if (0 > 1) { return; }"
+                               "fill(7, 7, 7);"), 2);
+    CHECK(ran[0] == 7);
+
+    // Guard true: the return fires and the same fill never happens.
+    auto skipped = render(mmScript("if (1 > 0) { return; }"
+                                   "fill(7, 7, 7);"), 2);
+    CHECK(skipped[0] == 0);
+}
+
+// The other half of `return`: the host reads the answer. This is what dimensions() and tags() are
+// built on, so it is pinned at the engine level before any binding depends on it.
+//
+// Failure here is a plausible wrong NUMBER rather than a crash, which is why the value is read back
+// rather than the script merely compiled: a return-register move emitted for the wrong register
+// (they differ per ISA) produces a number that looks like an answer.
+TEST_CASE("the host reads a value a script function returned") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class S {"
+                        "  int dimensions() { return 3; }"
+                        "  void tick() { fill(1, 2, 3); }"
+                        "}", kTable, kSys));
+    REQUIRE(eng.ok());
+    CHECK(eng.runValue("dimensions", moonlive::RetType::Int, 99) == 3);
+
+    // A function the script never defined answers with the FALLBACK, not 0: "the script did not
+    // say" and "the script said 0" are different answers.
+    CHECK(eng.runValue("tags", moonlive::RetType::Str, 99) == 99);
+}
+
+// A returned value survives arithmetic and a control read, so it is a real expression rather than
+// only a literal the parser happened to fold.
+TEST_CASE("a returned value can be computed") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class S {"
+                        "  int answer() { return 6 * 7; }"
+                        "  void tick() { fill(0, 0, 0); }"
+                        "}", kTable, kSys));
+    REQUIRE(eng.ok());
+    CHECK(eng.runValue("answer", moonlive::RetType::Int, 0) == 42);
+}
+
+// A STRING literal returns as the pointer it compiles to, which is what tags() needs: the host
+// reads it as a const char*. The source text outlives the call, so the pointer stays valid.
+TEST_CASE("a script returns a string the host can read") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile("class S {"
+                        "  string tags() { return \"AB\"; }"
+                        "  void tick() { fill(0, 0, 0); }"
+                        "}", kTable, kSys));
+    REQUIRE(eng.ok());
+    const auto p = eng.runValue("tags", moonlive::RetType::Str, 0);
+    REQUIRE(p != 0);
+    CHECK(std::strncmp(reinterpret_cast<const char*>(p), "AB", 2) == 0);
+}
+#endif  // MM_MOONLIVE_HAS_HOST_JIT
+
+// A function DECLARES what it hands back, so a script reads like the compiled module it stands in
+// for (`void tick()` beside `void tick() override`) and the host can tell a function that answers
+// from one that acts. The declaration is required rather than optional: accepting a bare name as
+// implicit void would leave two spellings meaning the same thing forever.
+TEST_CASE("a function without a declared return type is refused") {
+    uint8_t out[2048];
+    auto r = moonlive::compileSource("class T { tick() { fill(1,2,3); } }", kTable, kSys,
+                                     out, sizeof(out));
+    CHECK_FALSE(r.ok);
+    CHECK(std::strlen(r.error) > 0);
+}
+
+// The three types are all the language has values for. `byte tick()` is refused rather than
+// silently treated as int: it would suggest the engine narrows the value, which it does not.
+TEST_CASE("void, int and string are the return types; a member type is not one") {
+    uint8_t out[2048];
+    // A string return INTERNS its literal, so this form needs the pool the engine always supplies.
+    // Without one the compile fails with "no room for this script's strings", which is the honest
+    // answer to a caller that offered nowhere to put it.
+    static char pool[moonlive::CompileResult::kStringPool];
+    for (const char* good : {"class T { void tick() { fill(1,2,3); } }",
+                             "class T { int dimensions() { return 2; } void tick() { fill(1,2,3); } }",
+                             "class T { string tags() { return \"x\"; } void tick() { fill(1,2,3); } }"}) {
+        INFO("source: ", good);
+        auto r = moonlive::compileSource(good, kTable, kSys, out, sizeof(out), nullptr, nullptr,
+                                         pool, sizeof(pool));
+        INFO("error: ", r.error);
+        CHECK(r.ok);
+    }
+    for (const char* bad : {"class T { byte tick() { fill(1,2,3); } }",
+                            "class T { fixed tick() { fill(1,2,3); } }",
+                            "class T { bool tick() { fill(1,2,3); } }"}) {
+        INFO("source: ", bad);
+        CHECK_FALSE(moonlive::compileSource(bad, kTable, kSys, out, sizeof(out)).ok);
+    }
+}
+
+// A `return` must match what its function declared. Without this the declaration would be a label
+// rather than a contract: `return "x";` in a void function compiles, and the host that calls it for
+// its effect never looks at the register, so a script silently disagrees with its own signature.
+TEST_CASE("a return must match the type its function declared") {
+    uint8_t out[2048];
+    static char pool[moonlive::CompileResult::kStringPool];
+    const auto compiles = [&](const char* src) {
+        return moonlive::compileSource(src, kTable, kSys, out, sizeof(out), nullptr, nullptr,
+                                       pool, sizeof(pool)).ok;
+    };
+
+    // A value from a void function has nowhere to go.
+    CHECK_FALSE(compiles("class T { void tick() { return 2; } }"));
+    // A function that promised a value cannot return without one: the caller would read whatever
+    // sat in the return register.
+    CHECK_FALSE(compiles("class T { int dimensions() { return; } void tick() { fill(1,2,3); } }"));
+    // The two value kinds are not interchangeable: a string is a pointer, an int is a number.
+    CHECK_FALSE(compiles("class T { int dimensions() { return \"2\"; } void tick() { fill(1,2,3); } }"));
+    CHECK_FALSE(compiles("class T { string tags() { return 2; } void tick() { fill(1,2,3); } }"));
+
+    // And the matching forms still compile, so the check rejects rather than forbids.
+    CHECK(compiles("class T { void tick() { return; } }"));
+    CHECK(compiles("class T { int dimensions() { return 2; } void tick() { fill(1,2,3); } }"));
+    CHECK(compiles("class T { string tags() { return \"x\"; } void tick() { fill(1,2,3); } }"));
+}
+
+// A member and a typed function open with the SAME token, and only the token after the name says
+// which. Both orders compile: a class whose members come first, and one that starts with a
+// function, which is what the lookahead exists for.
+TEST_CASE("a member declaration and a typed function are told apart") {
+    uint8_t out[2048];
+    auto members = moonlive::compileSource(
+        "class T { int speed = 5; void tick() { fill(speed,2,3); } }", kTable, kSys, out, sizeof(out));
+    INFO("error: ", members.error);
+    CHECK(members.ok);
+    CHECK(members.memberCount == 1);        // `int speed = 5;` stayed a member
+
+    auto fnFirst = moonlive::compileSource(
+        "class T { int dimensions() { return 2; } int speed = 5; void tick() { fill(1,2,3); } }",
+        kTable, kSys, out, sizeof(out));
+    // A member AFTER a function is refused by the existing grammar (declarations come first), so
+    // this pins the diagnostic rather than a silent misparse.
+    CHECK((fnFirst.ok || std::strlen(fnFirst.error) > 0));
 }

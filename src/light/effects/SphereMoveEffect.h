@@ -24,7 +24,7 @@ namespace mm {
 /// Effect moving a lit sphere through a 3D layout.
 class SphereMoveEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🧊"; }  // MoonLight origin · 3D-native
+    const char* tags() const override { return "💫"; }  // MoonLight origin · 3D-native
     Dim dimensions() const override { return Dim::D3; }
 
     uint8_t speed = 50;  // origin sweep rate (0..99); higher = faster (divisor is 100-speed)

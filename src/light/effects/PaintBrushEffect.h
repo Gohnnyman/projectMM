@@ -20,7 +20,7 @@ namespace mm {
 /// Effect that paints moving brush-stroke lines across the layer.
 class PaintBrushEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🌙📊"; }  // MoonLight origin · MoonModules · audio
+    const char* tags() const override { return "💫🌙🎶"; }  // MoonLight origin · MoonModules · audio
     Dim dimensions() const override { return Dim::D3; }
 
     uint8_t oscillatorOffset = 6 * 160 / 255;  // = 3; phase-spread multiplier (0..16)

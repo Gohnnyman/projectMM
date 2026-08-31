@@ -136,6 +136,17 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
     LabelId tooDeep[kMaxIrEntries];
     if (guardDepth)
         for (uint8_t f = 0; f < ir.fnCount; f++) tooDeep[f] = a.newLabel();
+    // Where an early `return` jumps: the function's ONE exit, bound by closeFn ahead of the depth
+    // decrement so a return unwinds exactly as running off the end does. Allocated for every
+    // function whether or not it returns early, because the label is what closeFn binds; unused
+    // ones bind and emit nothing. Not shared with tooDeep: that one only exists when the script
+    // calls, and a return needs an exit either way.
+    LabelId fnExit[kMaxIrEntries];
+    for (uint8_t f = 0; f < ir.fnCount; f++) fnExit[f] = a.newLabel();
+    // Which function is being emitted, so a Ret knows which exit is its own. -1 until the first
+    // function opens: a function-less program (the hand-built IR the codegen tests use) has no
+    // exit label to jump to, and its Ret is refused rather than jumping to label -1.
+    int curFn = -1;
     // Function number + 1 while a guard is owed, 0 when none is: the guard is emitted a few ops
     // after the prologue, once the host arguments have been parked.
     int guardPending = 0;
@@ -179,6 +190,9 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
     // would leak a level per attempt and shrink the budget until nothing recursed at all.
     auto closeFn = [&](uint8_t f) {
         flushGuard();          // an empty function still balances: increment, then decrement
+        // Every early `return` lands here, AHEAD of the decrement below: an exit that skipped it
+        // would leak a depth level per call, which is the same bug the too-deep path documents.
+        a.bind(fnExit[f]);
         if (guardDepth) {
             a.bind(tooDeep[f]);                      // the too-deep path joins here
             const RegId d = host(kArg4);
@@ -200,6 +214,7 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
         for (uint8_t f = 0; f < ir.fnCount; f++) {
             if (ir.fnIrStart[f] != i) continue;
             if (f > 0) closeFn(static_cast<uint8_t>(f - 1));   // the previous function returns
+            curFn = f;
             // Align BEFORE recording the offset, so the recorded address is the one a caller
             // actually jumps to. On Xtensa a function entry must be 4-byte aligned or the call
             // cannot be encoded and the instruction itself is illegal; the other backends are
@@ -350,6 +365,23 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
                 a.callLabel(fnLabel[op.imm]);
                 break;
             }
+            case IrOp::Ret:
+                // The value first, then the jump: retValue parks it in the ABI's return register,
+                // and the exit's teardown is what publishes that register to the caller.
+                if (op.imm) a.retValue(reg(op.a));
+                // A jump to the function's one exit, spelled as the always-taken BranchGe idiom the
+                // compiler already uses for an unconditional jump, so no backend needs a new
+                // instruction: `x >= x` holds whatever x is.
+                //
+                // The comparison uses host(kArg0), NOT op.a: a BARE return carries no value, so its
+                // `a` field is uninitialized and reg() would map a nonsense vreg. kArg0 is the buf
+                // pointer, always live and always mapped, and comparing it with itself reads it
+                // without disturbing it.
+                if (curFn >= 0) {
+                    const RegId z = host(kArg0);
+                    a.branchGeU(z, z, fnExit[curFn]);
+                }
+                break;
             case IrOp::Spill:  a.spillStore(reg(op.a), static_cast<uint8_t>(op.imm)); break;
             case IrOp::Reload: a.spillLoad(reg(op.dst), static_cast<uint8_t>(op.imm)); break;
             case IrOp::Call: {

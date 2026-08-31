@@ -203,13 +203,36 @@ add_custom_command(
 )
 add_custom_target(ui_embed DEPENDS ${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h)
 
+# The MoonLive script catalog: names of every factory script, so the picker can offer the whole
+# library while the device holds only what someone actually picked. Globbed, so the DEPENDS is the
+# directory contents rather than a file list that would drift; CONFIGURE_DEPENDS re-globs when a
+# script is added or removed.
+file(GLOB MOONLIVE_SCRIPTS CONFIGURE_DEPENDS
+     ${CMAKE_SOURCE_DIR}/moonlive/effects/*.mle
+     ${CMAKE_SOURCE_DIR}/moonlive/layouts/*.mll
+     ${CMAKE_SOURCE_DIR}/moonlive/modifiers/*.mlm)
+# The file LIST itself is a dependency, not just each file's timestamp: DEPENDS notices an edited
+# script but not a DELETED one, so removing a script left it in the catalog and the device went on
+# offering a name that no longer exists upstream. The stamp is written at configure time from the
+# glob, so a removal changes it and the command re-runs.
+string(REPLACE ";" "\n" MOONLIVE_SCRIPT_LIST "${MOONLIVE_SCRIPTS}")
+set(MOONLIVE_STAMP ${CMAKE_BINARY_DIR}/moonlive_scripts.stamp)
+file(CONFIGURE OUTPUT ${MOONLIVE_STAMP} CONTENT "${MOONLIVE_SCRIPT_LIST}\n")
+add_custom_command(
+    OUTPUT ${CMAKE_SOURCE_DIR}/src/light/moonlive/script_catalog.h
+    COMMAND ${CMAKE_COMMAND} -DSCRIPT_DIR=${CMAKE_SOURCE_DIR}/moonlive -DOUT=${CMAKE_SOURCE_DIR}/src/light/moonlive/script_catalog.h -DUV_EXECUTABLE=${UV_EXECUTABLE} -P ${CMAKE_SOURCE_DIR}/src/light/moonlive/catalog_scripts.cmake
+    DEPENDS ${MOONLIVE_SCRIPTS} ${MOONLIVE_STAMP} ${CMAKE_SOURCE_DIR}/src/light/moonlive/catalog_scripts.cmake ${CMAKE_SOURCE_DIR}/src/light/moonlive/catalog_scripts.py
+    COMMENT "Generating MoonLive script catalog"
+)
+add_custom_target(moonlive_catalog DEPENDS ${CMAKE_SOURCE_DIR}/src/light/moonlive/script_catalog.h)
+
 # mm_core's HttpServerModule.cpp consumes ui_embedded.h and SystemModule.h
 # (a mm_core public header) consumes build_info.h. Anything that links mm_core
 # transitively includes those headers, so both generated files must exist
 # before any mm_core compile unit starts. CI's parallel clean build exposes
 # the race (test/ compiles SystemModule.h while build_info_gen is still
 # running); wiring the dep here makes the ordering explicit on every consumer.
-add_dependencies(mm_core ui_embed build_info_gen)
+add_dependencies(mm_core ui_embed build_info_gen moonlive_catalog)
 
 # Windows: give the exe its own icon, so it is recognizable in Explorer, the taskbar and the Start
 # menu whether it was installed or just unzipped. Generated from the same mooninstaller/favicon.png
@@ -243,7 +266,7 @@ endif()
 # Application
 add_executable(projectMM src/main.cpp src/platform/desktop/main_desktop.cpp ${MM_WIN_RESOURCES})
 target_link_libraries(projectMM PRIVATE mm_core mm_platform)
-add_dependencies(projectMM ui_embed build_info_gen)
+add_dependencies(projectMM ui_embed build_info_gen moonlive_catalog)
 
 # Tests
 enable_testing()

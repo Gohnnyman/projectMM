@@ -20,7 +20,7 @@ namespace mm {
 /// Audio-reactive effect: colors the layer from the 16-band FFT spectrum.
 class AudioSpectrumEffect : public EffectBase {
 public:
-    const char* tags() const override { return "📊"; }
+    const char* tags() const override { return "💫🎶"; }
     Dim dimensions() const override { return Dim::D2; }   // writes the z=0 slice; extrude fills z
 
     // 0 = height gradient (green base → red top, the VU look); 1 = per-band hue

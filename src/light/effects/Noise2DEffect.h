@@ -25,7 +25,7 @@ namespace mm {
 /// 2D value-noise effect.
 class Noise2DEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🌙🐙"; }  // MoonLight origin · MoonModules · 2D
+    const char* tags() const override { return "💫🌙🐙"; }  // MoonLight origin · MoonModules · WLED
     Dim dimensions() const override { return Dim::D2; }
 
     uint8_t speed = 8;    // time-flow rate (0..15); higher = faster morph (divisor is 16-speed)

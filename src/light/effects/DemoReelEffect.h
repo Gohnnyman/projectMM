@@ -26,7 +26,7 @@ namespace mm {
 /// Showcase effect: cycles through other effects with a name overlay.
 class DemoReelEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🎬"; }   // demo reel
+    const char* tags() const override { return "💫"; }   // demo reel
     // D3: the reel produces a COMPLETE frame — it runs the child, extrudes the child's output itself,
     // then draws the name overlay on top — so the Layer must not extrude again (that would fan the
     // child's x=0 column across X and wipe the overlay). The child's own dimensionality is handled

@@ -26,6 +26,9 @@ namespace mm {
 class PinwheelModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
+    /// Advisory UI chip: what this modifier can work on (polar around a center in the x/y plane).
+    /// Nothing branches on it, since extrude reads the EFFECT's dimensions.
+    Dim dimensions() const override { return Dim::D2; }
 
     uint8_t petals = 60;
     // Signed: negative values reverse the swirl direction. MoonLight's slider

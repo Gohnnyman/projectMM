@@ -197,6 +197,13 @@ void RiscvAssembler::movImm(Reg d, int32_t imm) {
     emit32(encAddi(xr(d), xr(d), lo));                     // addi rd, rd, lo
 }
 void RiscvAssembler::movReg(Reg d, Reg a)       { emit32(encAddi(xr(d), xr(a), 0)); }   // mv = addi rd,ra,0
+
+// The RISC-V return register is a0 (x10), which is where R0 lives: R0..R3 map to a0..a3, the host
+// arguments. Free when the value is already there.
+void RiscvAssembler::retValue(Reg a) {
+    if (a == R0) return;                    // already in a0
+    movReg(R0, a);
+}
 void RiscvAssembler::addImm(Reg d, Reg a, int32_t imm) { emit32(encAddi(xr(d), xr(a), imm)); }
 void RiscvAssembler::addReg(Reg d, Reg a, Reg b) { emit32(encAdd(xr(d), xr(a), xr(b))); }
 void RiscvAssembler::mulReg(Reg d, Reg a, Reg b) { emit32(encMul(xr(d), xr(a), xr(b))); }
@@ -241,21 +248,39 @@ void RiscvAssembler::load8Idx(Reg d, Reg base, Reg off) {
     emit32(encAdd(kScratchAddr, xr(base), xr(off)));                              // t6 = base + off
     emit32((uint32_t(kScratchAddr) << 15) | (4 << 12) | (xr(d) << 7) | 0x03);     // lbu d, 0(t6)
 }
+// A conditional branch to `l`, RELAXED: emitted as the inverted condition jumping over an
+// unconditional `jal` that carries the real target.
+//
+//     b<!cond> rs1, rs2, +8      skip the jal when the branch is not taken
+//     jal      x0, l             ... otherwise go, with a +/-1 MB reach
+//
+// Two words instead of one, always, because the alternative is worse. A B-type branch reaches
+// +/-4 KB; metal.mle compiles to 5652 bytes, so its loop branches fell outside and the patcher
+// silently truncated the offset to 13 bits, landing on 0x230c and 0xfffff5e8: an Illegal
+// instruction panic on an S31, and nothing at all on the host, where the same script runs fine.
+// Choosing the short or the long form per branch needs the final layout, which is not known while
+// emitting (patching happens after, when moving code would shift every later address), so this
+// takes the uniform form and pays one extra word per conditional branch.
+//
+// funct3 inversion: the low bit of the field is the sense, so ^1 turns beq<->bne, blt<->bge,
+// bltu<->bgeu. That is an encoding property of the ISA, not an arithmetic trick.
+void RiscvAssembler::branchRelaxed(uint8_t rs1, uint8_t rs2, uint8_t f3, Label l) {
+    emit32(encBranch(rs1, rs2, f3 ^ 1, 8));            // b<!cond> rs1, rs2, +8  (over the jal)
+    addFixup(len_, l, FixKind::Jal);
+    emit32(0x0000006f);                                // jal x0, l  (patched; rd = x0 discards ra)
+}
+
 void RiscvAssembler::branchIfZero(Reg a, Label l) {    // a == 0  ⇔  bgeu x0, a (unsigned 0 >= a)
-    addFixup(len_, l);
-    emit32(encBranch(0, xr(a), 7, 0));                 // bgeu x0, a, l  (patched)
+    branchRelaxed(0, xr(a), 7, l);
 }
 void RiscvAssembler::branchGeU(Reg a, Reg b, Label l) {
-    addFixup(len_, l);
-    emit32(encBranch(xr(a), xr(b), 7, 0));             // bgeu a, b, l
+    branchRelaxed(xr(a), xr(b), 7, l);
 }
 void RiscvAssembler::branchGeS(Reg a, Reg b, Label l) {
-    addFixup(len_, l);
-    emit32(encBranch(xr(a), xr(b), 5, 0));             // bge a, b, l  (funct3 5, vs 7 unsigned)
+    branchRelaxed(xr(a), xr(b), 5, l);                 // bge (funct3 5, vs 7 unsigned)
 }
 void RiscvAssembler::branchNe(Reg a, Reg b, Label l) {
-    addFixup(len_, l);
-    emit32(encBranch(xr(a), xr(b), 1, 0));             // bne a, b, l
+    branchRelaxed(xr(a), xr(b), 1, l);                 // bne
 }
 
 // Standard call to a host built-in: d = fn(a). All vreg temps are caller-saved, so a value
@@ -329,6 +354,14 @@ void RiscvAssembler::patchBranches() {
         int32_t off = labelPos_[f.label] - static_cast<int32_t>(f.at);
         uint32_t w; std::memcpy(&w, buf_ + f.at, 4);
         if (f.kind == FixKind::Branch) {
+            // A B-type branch reaches +/-4 KB and no further. Past that the mask below silently
+            // truncates the offset and the branch lands on whatever address the low 13 bits
+            // happen to name: metal.mle compiled to 5652 bytes and jumped to 0x230c and
+            // 0xfffff5e8, which is an Illegal instruction panic on the board and nothing at all
+            // on the host. Fail the compile instead, exactly as the J-type path below does: the
+            // module then reports the error and renders dark, which is a message rather than a
+            // reboot.
+            if (off < -4096 || off > 4094) { overflow_ = true; return; }
             // re-scatter the offset into the B-type immediate fields, keeping the rest.
             w &= ~((1u<<31) | (0x3fu<<25) | (0xfu<<8) | (1u<<7));
             uint32_t o = uint32_t(off) & 0x1fff;

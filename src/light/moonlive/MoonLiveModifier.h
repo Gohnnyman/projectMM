@@ -41,7 +41,17 @@ namespace mm {
 /// Modifier whose coordinate transform is a live-authored MoonLive script.
 class MoonLiveModifier : public ModifierBase {
 public:
-    const char* tags() const override { return "📝"; }   // scripted
+    /// Both answered by the SCRIPT when it says, the same delegation MoonLiveEffect does. 📝 marks
+    /// a script that declared nothing of its own: the notepad says "this is scripted", which is all
+    /// a module can say about a program it has not been told about.
+    const char* tags() const override {
+        const char* t = script_.tags();
+        return t ? t : "📝";
+    }
+
+    /// Advisory here rather than functional: extrude reads the EFFECT's dimensions. It is what the
+    /// card and the picker show, so a script that declares 3 stops reading as 2 once it is running.
+    Dim dimensions() const override { return script_.dimensions(); }
 
     void defineControls() override {
         // The script NAME, not the script — the text lives in a file the UI loads and saves
@@ -86,39 +96,57 @@ public:
         if (!script_.ok()) return true;   // a broken script passes coordinates through unchanged
         // A control slot is a byte: a coordinate outside 0..255 cannot be represented, so it is
         // passed through untransformed rather than silently wrapping to a wrong position.
-        if (pos.x < 0 || pos.x > 255 || pos.y < 0 || pos.y > 255 || pos.z < 0 || pos.z > 255)
-            return true;
+        // Negatives only. This used to reject anything past 255 because a slot was one byte, which
+        // meant a scripted modifier silently passed every light through on any grid wider than
+        // that: the script never ran. The slots are 32-bit now, so the whole rig is scriptable.
+        if (pos.x < 0 || pos.y < 0 || pos.z < 0) return true;
 
         auto* self = const_cast<MoonLiveModifier*>(this);
         uint8_t* sx = self->script_.engine().controlSlot(moonlive::kSysX);
         uint8_t* sy = self->script_.engine().controlSlot(moonlive::kSysY);
         uint8_t* sz = self->script_.engine().controlSlot(moonlive::kSysZ);
         if (!sx || !sy || !sz) return true;
-        *sx = static_cast<uint8_t>(pos.x);
-        *sy = static_cast<uint8_t>(pos.y);
-        *sz = static_cast<uint8_t>(pos.z);
-        // The box, clamped into the byte a control slot holds. A grid wider than 255 reports 255,
-        // which is wrong but bounded — and that axis already cannot be scripted at all (the input
-        // guard above passes it straight through), so no script sees the clamped value.
-        auto clamp255 = [](lengthType v) { return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v)); };
-        if (uint8_t* sw = self->script_.engine().controlSlot(moonlive::kSysWidth))  *sw = clamp255(box_.x);
-        if (uint8_t* sh = self->script_.engine().controlSlot(moonlive::kSysHeight)) *sh = clamp255(box_.y);
-        if (uint8_t* sd = self->script_.engine().controlSlot(moonlive::kSysDepth))  *sd = clamp255(box_.z);
+        moonlive::writeSysVarSlot(sx, static_cast<uint32_t>(pos.x));
+        moonlive::writeSysVarSlot(sy, static_cast<uint32_t>(pos.y));
+        moonlive::writeSysVarSlot(sz, static_cast<uint32_t>(pos.z));
+        // The box, full width. It used to clamp to a byte, so a grid wider than 255 told the script
+        // 255 and every size-dependent line in it was wrong.
+        moonlive::writeSysVarSlot(self->script_.engine().controlSlot(moonlive::kSysWidth),
+                                  static_cast<uint32_t>(box_.x < 0 ? 0 : box_.x));
+        moonlive::writeSysVarSlot(self->script_.engine().controlSlot(moonlive::kSysHeight),
+                                  static_cast<uint32_t>(box_.y < 0 ? 0 : box_.y));
+        moonlive::writeSysVarSlot(self->script_.engine().controlSlot(moonlive::kSysDepth),
+                                  static_cast<uint32_t>(box_.z < 0 ? 0 : box_.z));
 
         // One light's worth of destination, which is why setXYZ(x, y, z) names no slot: a modifier
         // is handed a single coordinate per call and can write nothing else. (setRGB keeps its
         // index because an effect picks a pixel out of a whole buffer.)
-        uint8_t out[3] = {*sx, *sy, *sz};   // seeded with the input, so a script that writes
-                                            // nothing leaves the coordinate untouched
         // The fold moment: run `modifyLogical` if the script defined one, and leave the coordinate
         // untouched otherwise. The cold path (once per light at mapping build, not per frame), so
         // the lookup costs nothing measurable.
         if (!script_.engine().hasEntry(moonlive::kEntryModify)) return true;
-        self->script_.engine().run(out, 1, 3, 0, moonlive::kEntryModify);
 
-        pos.x = static_cast<lengthType>(out[0]);
-        pos.y = static_cast<lengthType>(out[1]);
-        pos.z = static_cast<lengthType>(out[2]);
+        // setXYZ reports through the coordinate sink rather than into a byte buffer: a coordinate
+        // on a wall wider than 255 does not fit in a byte, and the old three-byte store truncated
+        // it, so a scripted mirror placed the light in the wrong half.
+        //
+        // Seeded with the INPUT so a script that writes nothing leaves the coordinate untouched,
+        // which is the same contract the buffer version had.
+        struct Out { uint32_t x, y, z; } out{static_cast<uint32_t>(pos.x),
+                                             static_cast<uint32_t>(pos.y),
+                                             static_cast<uint32_t>(pos.z)};
+        moonlive::setCoordSink([](void* ctx, uint32_t x, uint32_t y, uint32_t z) {
+            auto* o = static_cast<Out*>(ctx);
+            o->x = x; o->y = y; o->z = z;
+        }, &out);
+        uint8_t scratch[3] = {0, 0, 0};   // the run buffer: unused by a modifier, which writes
+                                          // only through the sink above
+        self->script_.engine().run(scratch, 1, 3, 0, moonlive::kEntryModify);
+        moonlive::setCoordSink(nullptr, nullptr);
+
+        pos.x = static_cast<lengthType>(out.x);
+        pos.y = static_cast<lengthType>(out.y);
+        pos.z = static_cast<lengthType>(out.z);
         return true;
     }
 

@@ -30,6 +30,23 @@ uint32_t word(const HostAssembler& a, size_t i) {
 
 // b.ge (cond 0xA) against b.hs (cond 0x2): the condition nibble is what decides whether a
 // negative compares below zero or above everything.
+// retValue parks a script's `return` value where the ABI hands it back. Byte-checked because the
+// register differs per ISA and a wrong one is SILENT: the host reads a plausible number, so
+// dimensions() would answer with whatever that register happened to hold rather than crashing.
+TEST_CASE("arm64: retValue moves the value into x0, the AAPCS64 return register") {
+    HostAssembler a; a.retValue(R1); a.finalize();
+    REQUIRE(a.size() == 4);
+    // mov x0, x1 == orr x0, xzr, x1: 0xaa0003e0 | (Rm << 16). Full 64 bits, so a returned POINTER
+    // (tags() hands back a string) keeps its top half.
+    CHECK(word(a, 0) == 0xaa0103e0u);
+
+    // R0 already IS x0 (it is the buf argument), so returning it emits the no-op move rather than
+    // a different instruction: correct either way, and free.
+    HostAssembler z; z.retValue(R0); z.finalize();
+    REQUIRE(z.size() == 4);
+    CHECK(word(z, 0) == 0xaa0003e0u);
+}
+
 TEST_CASE("arm64: branchGeS branches on GE where branchGeU branches on HS") {
     HostAssembler u; { auto l = u.newLabel(); u.branchGeU(R0, R1, l); u.bind(l); u.finalize(); }
     HostAssembler s; { auto l = s.newLabel(); s.branchGeS(R0, R1, l); s.bind(l); s.finalize(); }

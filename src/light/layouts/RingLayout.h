@@ -23,6 +23,8 @@ namespace mm {
 /// Layout of a single ring of evenly-spaced LEDs.
 class RingLayout : public LayoutBase {
 public:
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D2; }
     // MoonLight defaults and ranges, preserved verbatim.
     uint8_t  nrOfLEDs   = 24;    // 1..255
     uint16_t angleFirst = 0;     // 0..359 — angle of the first LED (0 = top)

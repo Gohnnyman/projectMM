@@ -24,7 +24,8 @@ namespace mm {
 /// Conway's Game of Life cellular-automaton effect.
 class GameOfLifeEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🌙"; }  // MoonLight origin · MoonModules
+    const char* tags() const override { return "💫🌙🧬"; }  // MoonLight origin · MoonModules
+    Dim dimensions() const override { return Dim::D3; }
 
     // Rulesets: index → B(orn)/S(urvive) string. Index 0 reads customRuleString. The label is
     // descriptive only; parsing reads the digits around the '/' (see parseRuleset).

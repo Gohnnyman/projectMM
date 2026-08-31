@@ -15,12 +15,12 @@ class GridLayout {
   byte cols = 16;
   byte rows = 16;
 
-  defineControls() {
+  void defineControls() {
     addControl("cols", cols, 1, 64);
     addControl("rows", rows, 1, 64);
   }
 
-  placeLights() {
+  void placeLights() {
     for (y = 0; y < rows; y = y + 1) {
       for (x = 0; x < cols; x = x + 1) {
         addLight(x, y, 0);
@@ -105,7 +105,7 @@ Past half full, the status also names the tightest limit the script is approachi
 
 | control | what it does |
 |---|---|
-| `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-places the lights live |
+| `script` | the script's file name, picked from the [library](MoonLiveEffect.md) or your own; naming it (or re-naming it after an edit) recompiles and re-places the lights live |
 
 Plus one control per `addControl` in the script's `defineControls()`.
 

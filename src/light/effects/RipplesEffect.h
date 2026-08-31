@@ -23,7 +23,7 @@ namespace mm {
 /// @card RipplesEffect.gif
 class RipplesEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🟦🦅"; }  // MoonLight origin · water-ripple
+    const char* tags() const override { return "💫🦅"; }  // MoonLight origin · water-ripple
     Dim dimensions() const override { return Dim::D3; }
 
     uint8_t speed = 50;     // 0 = stopped, 99 = fast

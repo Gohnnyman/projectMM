@@ -240,6 +240,15 @@ constexpr size_t codeCapFor(uint32_t tokens) {
 
 static constexpr uint8_t kMaxSysVars  = 8;
 
+/// Bytes per system variable. FOUR, not one: `width` on a 768-wide wall does not fit in a byte, and
+/// clamping it made every script that loops `for (x = 0; x < width; …)` draw a complete picture into
+/// a 255x255 corner and leave the rest of the rig black. A script scalar is already 4 bytes
+/// (LoadCtrl32 exists for members), so widening these costs arena space and nothing else.
+///
+/// The block starts at kCtrlBytes, which is 4-byte aligned, so every slot is too: a 32-bit load
+/// needs that, and one-byte spacing would have left every second slot misaligned.
+static constexpr uint8_t kSysVarBytes = 4;
+
 /// Where the emitted code keeps its RECURSION DEPTH, one byte in the arena above the system
 /// variables. In the arena rather than in a C++ member because the counter is read and written by
 /// the emitted block itself: a recursive call happens entirely inside the exec block, with no C++
@@ -249,7 +258,7 @@ static constexpr uint8_t kMaxSysVars  = 8;
 /// The host zeroes it before each run rather than trusting the block to unwind cleanly: a script
 /// that hits the limit leaves the counter wherever the skipped call left it, and a stale value
 /// would shrink the budget of every later frame until nothing ran at all.
-static constexpr uint8_t kDepthSlot = kCtrlBytes + kMaxSysVars;
+static constexpr uint8_t kDepthSlot = kCtrlBytes + kMaxSysVars * kSysVarBytes;
 
 /// The depth at which a call is REFUSED: an activation that would make the counter reach this
 /// number returns without running, so 31 activations execute, the entry function included.
@@ -263,7 +272,7 @@ static constexpr uint8_t kDepthSlot = kCtrlBytes + kMaxSysVars;
 /// stack and the rest of the render path need.
 static constexpr uint8_t kMaxCallDepth = 32;
 
-static constexpr uint8_t kArenaBytes  = kCtrlBytes + kMaxSysVars + 1;   // +1: kDepthSlot
+static constexpr uint8_t kArenaBytes  = kCtrlBytes + kMaxSysVars * kSysVarBytes + 1;   // +1: kDepthSlot
 
 /// A name the HOST defines and the script only reads: `width`, `height`, `depth`. Reserved — a
 /// script cannot declare one, so the name means the same thing in every script (the `t` rule, one
@@ -301,7 +310,13 @@ struct SysVarTable {
     // controls, inside the arena); an Arg must name a real argument register.
     bool add(const SysVar& v) {
         if (count >= kMax || v.name == nullptr) return false;
-        if (v.kind == SysVarKind::Arena && (v.where < kCtrlBytes || v.where >= kArenaBytes))
+        // Below kDepthSlot, not merely inside the arena: the depth counter sits above the system
+        // range and a 4-byte LoadCtrl32 at that offset would read it and run past the arena's end.
+        // Aligned to kSysVarBytes for the same reason the registrations already are, so every slot
+        // is a whole 32-bit cell rather than one straddling two.
+        if (v.kind == SysVarKind::Arena &&
+            (v.where < kCtrlBytes || v.where >= kDepthSlot ||
+             (v.where - kCtrlBytes) % kSysVarBytes != 0))
             return false;
         // kArg4 is the last argument register (MoonLiveIr.h owns the enum, and includes THIS
         // header, so the bound is spelled here rather than referenced).

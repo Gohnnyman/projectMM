@@ -56,8 +56,8 @@ TEST_CASE("a script sizes its own particle pool and is told what it got") {
     // The SAME script with and without the pool call, so the difference is the buffers alone and
     // not the compiled program, which varies with the source text.
     Scene without, with_;
-    without.run("class T { defineControls() { addControl(\"n\", n, 0, 9); } byte n = 0; tick() { } }");
-    with_.run("class T { defineControls() { pool(64); } tick() { } }");
+    without.run("class T { void defineControls() { addControl(\"n\", n, 0, 9); } byte n = 0; void tick() { } }");
+    with_.run("class T { void defineControls() { pool(64); } void tick() { } }");
     CHECK(with_.effect.dynamicBytes() > without.effect.dynamicBytes() + 1000);   // ~1216 of buffers
 }
 
@@ -65,7 +65,7 @@ TEST_CASE("a script sizes its own particle pool and is told what it got") {
 // particle buffers it never asked for, so there is no default pool.
 TEST_CASE("a script that never asks for particles allocates none") {
     Scene shader;
-    shader.run("class T { tick() { fill(1, 2, 3); } }");
+    shader.run("class T { void tick() { fill(1, 2, 3); } }");
     // A shader script holds its compiled program and nothing else. The smallest pool a script
     // could ask for is 23 bytes; anything under that is program alone.
     CHECK(shader.effect.dynamicBytes() < 1000);
@@ -76,7 +76,7 @@ TEST_CASE("a script that never asks for particles allocates none") {
 // count and nothing is allocated, every frame, forever.
 TEST_CASE("asking for a pool while the frame is running allocates nothing") {
     Scene s;
-    s.run("class T { defineControls() { pool(32); } tick() { setRGB(0, pool(4000), 0, 0); } }");
+    s.run("class T { void defineControls() { pool(32); } void tick() { setRGB(0, pool(4000), 0, 0); } }");
     const size_t sized = s.effect.dynamicBytes();
     REQUIRE(sized > 0);
     for (int i = 0; i < 5; i++) s.layer.tick();
@@ -87,10 +87,10 @@ TEST_CASE("asking for a pool while the frame is running allocates nothing") {
 // defineControls, which resizes.
 TEST_CASE("editing a script to a different pool size resizes it") {
     Scene s;
-    s.run("class T { defineControls() { pool(16); } tick() { } }");
+    s.run("class T { void defineControls() { pool(16); } void tick() { } }");
     const size_t small = s.effect.dynamicBytes();
     REQUIRE(small > 0);
-    s.run("class T { defineControls() { pool(128); } tick() { } }");
+    s.run("class T { void defineControls() { pool(128); } void tick() { } }");
     CHECK(s.effect.dynamicBytes() >= small + 112 * (4 * 4 + 2 + 1));
 }
 
@@ -98,7 +98,7 @@ TEST_CASE("editing a script to a different pool size resizes it") {
 // pointing at freed buffers, which is the trap ParticlesEffect documents at its own prepare().
 TEST_CASE("disabling a scripted effect frees its particles") {
     Scene s;
-    s.run("class T { defineControls() { pool(64); } tick() { } }");
+    s.run("class T { void defineControls() { pool(64); } void tick() { } }");
     REQUIRE(s.effect.dynamicBytes() > 0);
     s.effect.release();
     CHECK(s.effect.dynamicBytes() == 0);
@@ -108,7 +108,7 @@ TEST_CASE("disabling a scripted effect frees its particles") {
 // so the calls do nothing rather than writing through another module's buffers.
 TEST_CASE("a particle call from a script with no pool does nothing") {
     Scene s;
-    s.run("class T { tick() { setRGB(0, pool(0) + 7, 0, 0); } }");
+    s.run("class T { void tick() { setRGB(0, pool(0) + 7, 0, 0); } }");
     s.layer.tick();
     CHECK(s.layer.buffer().data()[0] == 7);      // ran to completion, pool() reported 0
 }
@@ -122,8 +122,8 @@ TEST_CASE("a spark thrown upward comes back down") {
     // A member counter, so the spark is thrown once and then only physics runs.
     s.run("class T {"
           "  byte fired = 0;"
-          "  defineControls() { pool(8); }"
-          "  tick() { fill(0, 0, 0);"
+          "  void defineControls() { pool(8); }"
+          "  void tick() { fill(0, 0, 0);"
           "           if (fired == 0) { emit(8, 15, 49152, 260, 4, 600, 40); fired = 1; }"
           "           gravity(22); step(); age(1); render(255); } }");
 
@@ -151,8 +151,8 @@ TEST_CASE("a spark thrown upward comes back down") {
 TEST_CASE("emitting into a full pool stops rather than overwriting") {
     Scene s(16, 16);
     s.run("class T {"
-          "  defineControls() { pool(4); }"
-          "  tick() { emit(8, 8, 16384, 100, 8, 60000, 40); render(255); } }");
+          "  void defineControls() { pool(4); }"
+          "  void tick() { emit(8, 8, 16384, 100, 8, 60000, 40); render(255); } }");
     for (int f = 0; f < 10; f++) s.layer.tick();
     int lit = 0;
     for (int i = 0; i < 16 * 16; i++)
@@ -168,8 +168,8 @@ TEST_CASE("a script's particles die and free their slots for new ones") {
     Scene s(16, 16);
     // Life 2 with a fast age: every spark is gone within a few frames, so emit always succeeds.
     s.run("class T {"
-          "  defineControls() { pool(4); }"
-          "  tick() { emit(8, 8, 16384, 60, 2, 2, 40); age(64); step(); render(255); } }");
+          "  void defineControls() { pool(4); }"
+          "  void tick() { emit(8, 8, 16384, 60, 2, 2, 40); age(64); step(); render(255); } }");
     for (int f = 0; f < 40; f++) s.layer.tick();
     int lit = 0;
     for (int i = 0; i < 16 * 16; i++)
@@ -182,9 +182,9 @@ TEST_CASE("a script's particles die and free their slots for new ones") {
 // another's layer. This is the "what does a second script asking for a pool get" question.
 TEST_CASE("two scripted effects each get their own particles") {
     Scene a(16, 16), b(16, 16);
-    a.run("class T { defineControls() { pool(8); }"
-          "  tick() { emit(8, 8, 16384, 100, 4, 600, 40); render(255); } }");
-    b.run("class T { defineControls() { pool(8); } tick() { render(255); } }");
+    a.run("class T { void defineControls() { pool(8); }"
+          "  void tick() { emit(8, 8, 16384, 100, 4, 600, 40); render(255); } }");
+    b.run("class T { void defineControls() { pool(8); } void tick() { render(255); } }");
     for (int f = 0; f < 5; f++) { a.layer.tick(); b.layer.tick(); }
     int litA = 0, litB = 0;
     for (int i = 0; i < 16 * 16; i++) {
@@ -229,8 +229,8 @@ TEST_CASE("the fountain example keeps emitting once its pool has cycled") {
 TEST_CASE("emitting twice from the same point does not repeat the same trajectories") {
     Scene s(24, 24);
     s.run("class T {"
-          "  defineControls() { pool(64); }"
-          "  tick() { fill(0, 0, 0); emit(12, 23, 49152, 700, 6, 600, 40);"
+          "  void defineControls() { pool(64); }"
+          "  void tick() { fill(0, 0, 0); emit(12, 23, 49152, 700, 6, 600, 40);"
           "           step(); render(255); } }");
 
     // Two frames of emission, each sampled where its own sparks landed.
@@ -255,8 +255,8 @@ TEST_CASE("colliding balls spread sideways instead of falling through each other
     auto pileHeight = [](const char* collideCall) {
         Scene s(16, 16);
         std::string src = std::string(
-            "class T { defineControls() { pool(12); }"
-            "  tick() { fill(0, 0, 0);"
+            "class T { void defineControls() { pool(12); }"
+            "  void tick() { fill(0, 0, 0);"
             "           emit(8, 0, 16384, 4, 2, 60000, 40);"
             "           gravity(20); ") + collideCall +
             " step(); bounce(120); render(1); } }";

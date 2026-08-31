@@ -1007,8 +1007,8 @@ function renderModuleTree(mod, parentEl, depth) {
     // from mod.children on every render, so adding a layer adds its tab: there is no tab registry
     // to keep in sync, which is the whole of the "dynamic" requirement.
     if (depth === 0) {
-        // The "+" tab takes over the add affordance, so hide the footer's duplicate button: but keep
-        // the footer element itself, because openTypePicker renders the picker into it.
+        // The "+" tab takes over the add affordance, so hide the footer's duplicate button. The
+        // footer element stays: it is what the tab's handler walks up to find this card's mod.
         const addBtn = card.querySelector(".card-footer > .add-btn");
         if (addBtn) addBtn.style.display = "none";
         renderChildTabs(mod, childrenEl, depth);
@@ -1136,7 +1136,10 @@ function renderChildTabs(mod, childrenEl, depth) {
             // effects instead of another layer). Scope to direct children of this card.
             const card = childrenEl.parentElement;
             const footer = [...card.children].find(el => el.classList.contains("card-footer"));
-            if (footer) openTypePicker(mod, footer);
+            // Anchored to the TAB, which is what the user clicked. The footer's own add button
+            // is display:none at this depth (renderModuleTree hides it), and a hidden
+            // element's rect is all zeros, which pinned the modal to the top of the window.
+            if (footer) openTypePicker(mod, addTab);
         });
         strip.appendChild(addTab);
     }
@@ -1726,17 +1729,10 @@ function createCard(mod, depth) {
             addBtn.className = "add-btn";
             addBtn.textContent = "+ add module";
             addBtn.addEventListener("click", () => {
-                // Hide the button while the picker is open (the picker takes its
-                // place); restore it once the picker is removed (cancel/create/Esc).
-                addBtn.style.display = "none";
-                openTypePicker(mod, footer);
-                const obs = new MutationObserver(() => {
-                    if (!footer.querySelector(".type-picker")) {
-                        addBtn.style.display = "";
-                        obs.disconnect();
-                    }
-                });
-                obs.observe(footer, {childList: true});
+                // The picker is a modal, so the button stays where it is: it used to be hidden
+                // and restored through a MutationObserver because the picker was appended into
+                // the footer and took the button's place.
+                openTypePicker(mod, addBtn);
             });
             footer.appendChild(addBtn);
             card.appendChild(footer);
@@ -1841,9 +1837,9 @@ function createActionButtons(mod) {
     replaceBtn.textContent = "✎";
     replaceBtn.title = "Replace with another type";
     replaceBtn.addEventListener("click", () => {
-        // Anchor the picker to the card so it drops below the card content,
+        // Anchored to the button: the picker is a modal that opens under whatever was clicked,
         // not inside the cramped 26px action-button row.
-        openReplacePicker(mod, replaceBtn.closest(".card"));
+        openReplacePicker(mod, replaceBtn);
     });
     wrap.appendChild(replaceBtn);
 
@@ -1962,10 +1958,15 @@ function docPathForType(moduleType) {
 // Curated emoji string for a live module: its role emoji plus the type's
 // `tags` from /api/types, deduplicated, in role-first order. "" if the type
 // isn't loaded yet. Used on the card title and in the type picker.
+//
+// The INSTANCE's own tags win when it has them. A scripted module answers from the script it
+// loaded, so two MoonLive effects running different scripts read differently while sharing one
+// entry in /api/types: the audio one shows 🎶, the moving-head one 🎯. A compiled module sends
+// nothing here and keeps its type's answer.
 function emojiTagsForMod(mod) {
     if (!mod) return "";
     const t = availableTypes.find(t => t.name === mod.type) || {role: mod.role, tags: ""};
-    return emojiTagsFor(t).join("");
+    return emojiTagsFor(mod.tags ? {...t, tags: mod.tags} : t).join("");
 }
 
 // Whether a control appears in the generic control list: false for controls the module marked
@@ -2326,6 +2327,21 @@ function createControl(moduleName, moduleType, ctrl) {
             // No `dir` means the name IS the path: joinFsPath("", n) would return "/n" and point
             // at the filesystem root instead of the file the module named.
             const pathOf = (n) => (n ? (dir ? joinFsPath(dir, n) : n) : "");
+            // Where a script actually IS, which is not always `dir`: a factory script sits in the
+            // catalog's directory until an edit forks it into the user's. The device resolves the
+            // same way (user copy first), so the editor has to look in both or it would open an
+            // empty box for a script that is plainly listed.
+            const scriptPathOf = async (n) => {
+                if (!n || !dir) return pathOf(n);
+                const local = joinFsPath(dir, n);
+                if (!mlGroupForExt(ext)) return local;
+                try {
+                    const here = await fmFetchDir(dir).catch(() => []);
+                    if (here.some(e => !e.isDir && e.name === n)) return local;
+                    const cat = await mlFetchCatalog();
+                    return joinFsPath(cat.dir, n);
+                } catch (_) { return local; }
+            };
 
             const stack = document.createElement("div");
             stack.className = "control-fileedit-stack";
@@ -2334,13 +2350,51 @@ function createControl(moduleName, moduleType, ctrl) {
             const bar = document.createElement("div");
             bar.className = "fileedit-bar";
 
-            // A native <select>: keyboard-accessible, needs no CSS to look right, and matches every
-            // other picker in this UI. Populated from the directory listing, so a file created in
-            // the File Manager shows up on the next render without a reload.
-            const picker = document.createElement("select");
+            // A select-SHAPED button, opening the shared picker. It reads as a select (the current
+            // name, then the ⌄ affordance) and behaves as one, but the list it opens is the same
+            // widget the module picker uses: search, emoji chips, keyboard, one row per script.
+            // A native <select> can only render plain text, so a script's emoji and dimension had
+            // nowhere to go.
+            //
+            // It presents the SAME surface a <select> does (`value`, `options`, `disabled`, and a
+            // `change` event), so everything around it (the fork/share/delete labels, the editor
+            // load, the download-on-pick) is unchanged and unaware.
+            const picker = document.createElement("button");
+            picker.type = "button";
             picker.className = "control-select fileedit-pick";
             picker.dataset.mid = moduleName;
             picker.dataset.key = ctrl.name;
+            // The options, as data. `fillPicker` appends option elements exactly as it did to the
+            // <select>; they are never rendered, they are the list the modal is built from.
+            picker.options = [];
+            picker.appendChild = (o) => { picker.options.push(o); return o; };
+            const paintPicker = () => {
+                const cur = picker.options.find(o => o.value === picker._value);
+                picker.textContent = cur ? cur.textContent : "(none)";
+                const caret = document.createElement("span");
+                caret.className = "fileedit-pick-caret";
+                caret.textContent = "\u2304";        // ⌄, the select affordance
+                picker.append(caret);
+            };
+            Object.defineProperty(picker, "value", {
+                get: () => picker._value ?? "",
+                set: (v) => { picker._value = String(v ?? ""); paintPicker(); },
+            });
+            picker._value = "";
+            // innerHTML = "" is how fillPicker clears the list; keep that meaning.
+            Object.defineProperty(picker, "innerHTML", {
+                set: (v) => { if (v === "") { picker.options = []; picker.replaceChildren(); } },
+                get: () => "",
+            });
+            // Which scripts this picker can offer that are not on the device yet. Names only:
+            // picking one downloads it. Empty for a filepath control that is not a script picker.
+            let remote = [];
+            // Local names that also exist in the catalog: a user edit shadowing a factory script.
+            let forks = new Set();
+            // Every name the catalog ships for this role, whether or not it is on the device.
+            let catalogNames = new Set();
+            // Names in the USER's directory: written or edited here, so worth proposing upstream.
+            let localNames = new Set();
             const fillPicker = async () => {
                 picker.innerHTML = "";
                 const none = document.createElement("option");
@@ -2354,17 +2408,75 @@ function createControl(moduleName, moduleType, ctrl) {
                                        .map(e => e.name);
                     } catch (_) { /* an unreachable directory leaves just "none" */ }
                 }
+                // The user's OWN files, before the factory listing is merged in below: a name here
+                // is something they wrote or edited, which is what the share button offers.
+                localNames = new Set(names);
+                // A script picker also lists the FACTORY directory, where downloads land. A name in
+                // both is the user's edit shadowing the factory copy, which is what the device
+                // resolves too, so it appears once.
+                const group = mlGroupForExt(ext);
+                let cat = null;
+                if (group) {
+                    try {
+                        cat = await mlFetchCatalog();
+                        const factory = await fmFetchDir(cat.dir, true).catch(() => []);
+                        for (const e of factory)
+                            if (!e.isDir && e.name.endsWith(ext) && !names.includes(e.name))
+                                names.push(e.name);
+                    } catch (_) { /* no catalog: the picker still lists what is here */ }
+                }
+                names.sort();
+                // A local name that ALSO exists in the catalog is a fork: the user edited a factory
+                // script, so their copy shadows one that can be restored. Deleting it is a revert,
+                // not a loss, and the delete button says so.
+                // localNames, NOT names: by here `names` also carries the factory listing, so a
+                // script that was downloaded and never touched counted as a fork. It showed the
+                // revert arrow for an edit that does not exist, and reverting it deleted a
+                // /moonlive path with nothing at it.
+                forks = cat ? new Set(((cat[group] || {}).names || []).filter(n => localNames.has(n)))
+                            : new Set();
+                // Everything the catalog offers that is not here yet, listed after the local ones
+                // so a user's own scripts stay at the top of the list.
+                remote = cat ? ((cat[group] || {}).names || []).filter(n => !names.includes(n)) : [];
+                // Every name the library ships for this role, downloaded or not: what the share
+                // button uses to tell a user's own script from one of ours.
+                catalogNames = new Set(cat ? ((cat[group] || {}).names || []) : []);
+
                 // The current value may name a file the listing does not have (deleted underneath,
                 // or a directory that could not be read). Keep it selectable so the card still
                 // shows what the module is pointing at, rather than silently appearing unset.
                 const cur = String(ctrl.value ?? "");
-                if (cur && !names.includes(cur)) names.unshift(cur);
+                if (cur && !names.includes(cur) && !remote.includes(cur)) names.unshift(cur);
+                // What the catalog says each factory script is: its dimension and its own emoji,
+                // read from the script's `int dimensions()` / `string tags()` at build time. So a
+                // row reads like the module picker's rows do, BEFORE the script is downloaded. A
+                // script the catalog does not carry (the user's own) simply has no prefix.
+                const decl = (n) => {
+                    const g = cat && cat[group];
+                    if (!g || !g.names) return "";
+                    const i = g.names.indexOf(n);
+                    if (i < 0) return "";
+                    const marks = [];
+                    if (g.tags && g.tags[i]) marks.push(g.tags[i]);
+                    if (g.dim && DIM_EMOJI[g.dim[i]]) marks.push(DIM_EMOJI[g.dim[i]]);
+                    return marks.length ? marks.join("") + " " : "";
+                };
                 for (const n of names) {
                     const o = document.createElement("option");
-                    o.value = n; o.textContent = n;
+                    o.value = n; o.textContent = decl(n) + n;
+                    picker.appendChild(o);
+                }
+                // Marked, because picking one costs a download and can fail. One list rather than
+                // two groups: to the user it is one library, and where a script happens to live is
+                // the device's business.
+                for (const n of remote) {
+                    const o = document.createElement("option");
+                    o.value = n;
+                    o.textContent = "\u2601 " + decl(n) + n;   // cloud: not on this device yet
                     picker.appendChild(o);
                 }
                 picker.value = cur;
+                refreshDelLabel();
             };
 
             // Save sits with the other file actions rather than in a row of its own: the card is
@@ -2402,12 +2514,94 @@ function createControl(moduleName, moduleType, ctrl) {
             delBtn.className = "card-btn card-btn-del";
             delBtn.textContent = "×";                  // the card's own delete, red on the symbol
             delBtn.title = "Delete this script";
+            // The SAME button reverts a factory script, because it is the same operation: the
+            // editor only ever saves to the user directory, so an edited factory script is a second
+            // file shadowing the first, and removing it brings the original back. Saying "delete"
+            // there would misdescribe it, and a second button would make one act look like two.
+            const shareBtn = document.createElement("button");
+            shareBtn.className = "card-btn";
+            shareBtn.textContent = "\u2197";           // north-east arrow: it leaves for somewhere else
+            shareBtn.title = "Propose this script for the shared library";
+
+            function refreshDelLabel() {
+                const isFork = forks.has(picker.value);
+                delBtn.textContent = isFork ? "\u21ba" : "\u00d7";   // undo arrow, or the delete cross
+                delBtn.title = isFork
+                    ? "Revert to the shipped version (discards your changes)"
+                    : "Delete this script";
+                delBtn.classList.toggle("card-btn-del", !isFork);
+                // Offered for anything the user WROTE, which is a script of their own or a fork of
+                // a shipped one: both are a change worth sending back, and the flow differs only in
+                // which GitHub URL it opens. NOT offered for an untouched factory copy, where the
+                // file on the device is byte-identical to the one in the repo and a pull request
+                // would propose no change at all.
+                const known = catalogNames.has(picker.value);
+                const edited = localNames.has(picker.value);   // it sits in the USER directory
+                shareBtn.hidden = !picker.value || !mlGroupForExt(ext) || !edited;
+                shareBtn.title = known
+                    ? "Propose your changes to the shared library"
+                    : "Propose this script for the shared library";
+            }
+            // Share: open a pull request adding this script to the library.
+            //
+            // GitHub's "new file" URL takes the path and the contents as query parameters and opens
+            // its editor pre-filled, forking the repo on the user's behalf when they propose it. So
+            // a script someone wrote on their own device reaches the library with one click and no
+            // API, no token and nothing stored here.
+            //
+            // Only for scripts a user WROTE: a factory script is already in the library, and a fork
+            // of one would open a PR that recreates a file that exists.
+            shareBtn.addEventListener("click", async () => {
+                const name = picker.value;
+                const group = mlGroupForExt(ext);
+                if (!name || !group) return;
+                await editor.save();                  // propose what is on screen, not the last save
+                // A save that failed leaves the pane dirty, and the read below would then fetch the
+                // PREVIOUS text from the device: the user would be proposing something other than
+                // what they are looking at, which is the one outcome worth refusing outright.
+                if (editor.isDirty()) {
+                    alert("Save the script first: it still has unsaved changes.");
+                    return;
+                }
+                let text = "";
+                try {
+                    const res = await fetch("/api/file?path=" + encodeURIComponent(await scriptPathOf(name)));
+                    if (!res.ok) throw new Error(await errorMessage(res));
+                    text = await res.text();
+                } catch (err) { alert("could not read the script: " + err.message); return; }
+
+                const cat = await mlFetchCatalog().catch(() => null);
+                const folder = cat && cat[group] ? cat[group].folder : group;
+                // A name the library already ships is an EDIT of that file; anything else is a new
+                // one. GitHub has a flow for each, and both fork on the user's behalf when they
+                // propose the change, so neither needs write access to this repo.
+                const repoPath = "moonlive/" + folder + "/" + name;
+                const url = catalogNames.has(name)
+                    ? "https://github.com/MoonModules/projectMM/edit/main/" + repoPath
+                      + "?value=" + encodeURIComponent(text)
+                    : "https://github.com/MoonModules/projectMM/new/main"
+                      + "?filename=" + encodeURIComponent(repoPath)
+                      + "&value=" + encodeURIComponent(text);
+                // The script rides in the query string, and browsers stop honoring a URL somewhere
+                // past ~8 KB. Every shipped script is under 2.5 KB so this is headroom rather than a
+                // real limit, but a long one would otherwise open a truncated editor and look fine.
+                if (url.length > 7000) {
+                    await navigator.clipboard.writeText(text).catch(() => {});
+                    alert("This script is too long to send through a link.\n\n"
+                        + "It has been copied to your clipboard: open\n"
+                        + "github.com/MoonModules/projectMM, add a file under moonlive/" + folder
+                        + "/ and paste it there.");
+                    return;
+                }
+                window.open(url, "_blank", "noopener");
+            });
+
             bar.appendChild(picker);
             const tools = document.createElement("div");
             tools.className = "fileedit-tools";
             tools.appendChild(saveBtn);
             tools.appendChild(popBtn);
-            if (dir) { tools.appendChild(newBtn); tools.appendChild(delBtn); }
+            if (dir) { tools.appendChild(newBtn); tools.appendChild(shareBtn); tools.appendChild(delBtn); }
             bar.appendChild(tools);
             stack.appendChild(bar);
 
@@ -2421,25 +2615,117 @@ function createControl(moduleName, moduleType, ctrl) {
                 sizeKey: key,
                 saveButton: saveBtn,
                 statusEl,
+                // Editing a factory script FORKS it: the read came from the library directory, but
+                // the write goes to the user's, so the shipped copy stays untouched and the new one
+                // shadows it. Without this an edit overwrote the library copy and there was nothing
+                // left to revert to.
+                savePath: (readPath) => {
+                    if (!dir) return readPath;
+                    const base = readPath.slice(readPath.lastIndexOf("/") + 1);
+                    return base ? joinFsPath(dir, base) : readPath;
+                },
+                // A save may have just created the fork, so what the picker thinks is local is out
+                // of date: re-read it, which is also what turns the delete button into revert.
+                onSaved: (written) => {
+                    if (!mlGroupForExt(ext)) return;
+                    if (!written.startsWith(dir + "/")) return;
+                    const sel = picker.value;
+                    fillPicker().then(() => { picker.value = sel; refreshDelLabel(); });
+                },
             });
 
             // Re-read after the modal closes: it edits the same file through the same endpoints, so
             // whatever it saved is what this pane should now show.
+            // One row per script, shaped like a type so the shared picker can render it: the name is
+            // what the control stores, the dimension and emoji come from the catalog, and the role
+            // is what the picker prints on the right.
+            const openScriptPicker = async () => {
+                if (picker.disabled) return;
+                const group = mlGroupForExt(ext);
+                const cat = group ? await mlFetchCatalog().catch(() => null) : null;
+                const g = (cat && cat[group]) || {};
+                const roleWord = group ? group.replace(/s$/, "") : "file";
+                const seen = new Set();
+                const items = [];
+                const add = (n, remoteFlag) => {
+                    if (seen.has(n)) return;
+                    seen.add(n);
+                    const i = (g.names || []).indexOf(n);
+                    items.push({
+                        name: n,
+                        // The cloud marks a script the device does not hold yet: picking it costs a
+                        // download, which is worth knowing before choosing.
+                        displayName: (remoteFlag ? "\u2601 " : "") + n,
+                        role: roleWord,
+                        tags: i >= 0 && g.tags ? (g.tags[i] || "") : "",
+                        dim: i >= 0 && g.dim ? g.dim[i] : 0,
+                    });
+                };
+                for (const o of picker.options) if (o.value) add(o.value, remote.includes(o.value));
+                for (const n of (g.names || [])) add(n, !localNames.has(n) && remote.includes(n));
+                if (!items.length) return;
+                // Anchored to the field itself: the picker opens under it as a modal, sized and
+                // placed by openPicker rather than by whatever element it hangs from.
+                openPicker(picker, {
+                    items,
+                    actionLabel: "use",
+                    currentType: picker.value,
+                    // Route through the <select>'s own change handler, which already downloads a
+                    // remote script, updates the delete label and loads the editor. One path for
+                    // both ways of choosing.
+                    commit: (name) => {
+                        picker.value = name;
+                        picker.dispatchEvent(new Event("change"));
+                    },
+                });
+            };
+            picker.addEventListener("click", openScriptPicker);
+
             popBtn.addEventListener("click", async () => {
                 if (!picker.value) return;
                 // Flush unsaved edits first: the modal loads the file from the device, so opening
                 // it on a dirty pane would show stale bytes and then save them back over the edit.
+                // save() RESOLVES on a failed write (it reports, it does not throw), so the flush is
+                // only trustworthy if the pane came clean: opening anyway would discard the edit.
                 await editor.save();
-                await openFileEditor(pathOf(picker.value));
-                await editor.load(pathOf(picker.value));
+                if (editor.isDirty()) { alert("Not opening: this script still has unsaved changes."); return; }
+                const p = await scriptPathOf(picker.value);
+                await openFileEditor(p);
+                await editor.load(p);
             });
 
             picker.addEventListener("change", async () => {
-                // Same reason as the modal above: switching files discards the edit otherwise.
+                // Same reason as the modal above: switching files discards the edit otherwise, and
+                // a save that failed leaves the pane dirty while resolving normally.
                 await editor.save();
+                if (editor.isDirty()) {
+                    alert("Not switching: this script still has unsaved changes.");
+                    picker.value = String(ctrl.value ?? "");
+                    return;
+                }
+                const chosen = picker.value;
+                // A factory script the device does not hold yet: download it BEFORE selecting it,
+                // so the module never points at a file that is not there. A failure reports and
+                // puts the picker back, rather than leaving the card pointing at nothing.
+                if (remote.includes(chosen)) {
+                    const previous = String(ctrl.value ?? "");
+                    picker.disabled = true;
+                    try {
+                        await mlDownloadScript(chosen, mlGroupForExt(ext));
+                    } catch (e) {
+                        picker.disabled = false;
+                        alert("could not download " + chosen + ": " + (e && e.message ? e.message : e));
+                        picker.value = previous;
+                        return;
+                    }
+                    picker.disabled = false;
+                    await fillPicker();          // it is local now, so it loses its marker
+                    picker.value = chosen;
+                }
+                refreshDelLabel();
                 dragTs[key] = Date.now();
-                sendControl(moduleName, ctrl.name, picker.value);
-                editor.load(pathOf(picker.value));
+                sendControl(moduleName, ctrl.name, chosen);
+                editor.load(await scriptPathOf(chosen));
             });
 
             newBtn.addEventListener("click", async () => {
@@ -2461,19 +2747,49 @@ function createControl(moduleName, moduleType, ctrl) {
             armPressTwice(delBtn, async () => {
                 const victim = picker.value;
                 if (!victim) return;
+                const wasFork = forks.has(victim);
                 try {
-                    const res = await fetch("/api/dir?path=" + encodeURIComponent(pathOf(victim)),
+                    // A fork is deleted from the USER directory, which is the whole revert: the
+                    // factory copy underneath is what resolves afterwards. Anything else is deleted
+                    // where it actually sits, because a downloaded factory script has no user copy
+                    // and a DELETE on /moonlive/<name> would report a failure for a file that was
+                    // never there.
+                    const target = wasFork ? pathOf(victim) : await scriptPathOf(victim);
+                    const res = await fetch("/api/dir?path=" + encodeURIComponent(target),
                                             { method: "DELETE" });
                     if (!res.ok) throw new Error(await errorMessage(res));
-                } catch (err) { alert("delete failed: " + err.message); return; }
+                } catch (err) {
+                    alert((wasFork ? "revert failed: " : "delete failed: ") + err.message);
+                    return;
+                }
                 await fillPicker();
+                if (wasFork) {
+                    // The factory script is what resolves now, so the module keeps running: stay on
+                    // it rather than unsetting the control, which is the whole point of a revert.
+                    picker.value = victim;
+                    refreshDelLabel();
+                    dragTs[key] = Date.now();
+                    sendControl(moduleName, ctrl.name, victim);
+                    await editor.load(await scriptPathOf(victim));
+                    return;
+                }
                 picker.value = "";
+                refreshDelLabel();
                 dragTs[key] = Date.now();
                 sendControl(moduleName, ctrl.name, "");
                 await editor.load("");
-            }, { armedText: "✓", armedTitle: "Click again to delete" });
+            }, { armedText: "✓", armedTitle: "Click again to confirm" });
 
-            fillPicker();
+            // The editor mounted on the USER path above, which is right for a script the user
+            // wrote and wrong for a factory one that has never been edited. Resolving needs the
+            // catalog, so it cannot happen during the synchronous mount: re-point it once the
+            // listing is in, and only when it actually resolves elsewhere.
+            fillPicker().then(async () => {
+                const cur = String(ctrl.value ?? "");
+                if (!cur || !mlGroupForExt(ext)) return;
+                const real = await scriptPathOf(cur);
+                if (real !== pathOf(cur)) await editor.load(real);
+            });
             break;
         }
         case "password": {
@@ -4210,17 +4526,14 @@ function cssEscape(s) {
 // 6. Type picker
 // ---------------------------------------------------------------------------
 
-// Role → emoji. The role part of the MoonLight emoji-key system
-// (https://moonmodules.org/MoonLight/moonlight/overview/#emoji-key):
-// 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver · 🥞 layer (projectMM
-// addition: every Layer instance, child of the Effects container). The role
-// tag is derived here, not duplicated in every module's tags() string: one
-// source of truth in the UI saves repeating the same character in ~30 module
-// headers and a few bytes per type in /api/types. Each module's tags() then
-// only carries its categorical origin (🐙 WLED · 💫 MoonLight · ⚡️ FastLED)
-// and any feature extras (audio: ♫ FFT · ♪ volume · moving-head: 🚨 color ·
-// 🗼 movement). The dimensional emoji (📏 1D · 🟦 2D · 🧊 3D) is derived from
-// the type's `dim` field. All three are merged in emojiTagsFor().
+// Role → emoji, derived here rather than duplicated in every module's tags(): one home in the UI
+// saves repeating the same character in ~90 module headers and a few bytes per type in /api/types.
+// The dimensional chip comes from the type's `dim` the same way (DIM_EMOJI below), and both are
+// merged with the module's own tags() in emojiTagsFor().
+//
+// What each emoji MEANS is documented once, for the people who read the chips:
+// docs/tutorials/how-projectmm-works.md, "The emoji on every card". Re-listing the vocabulary here
+// is how this comment came to name four emoji no module carries any more.
 const ROLE_EMOJI = {
     effect:     "🔥",
     driver:     "☸️",
@@ -4250,7 +4563,7 @@ function roleHue(roles) {
     return hues.length === 1 ? String(hues[0]) : null;
 }
 
-// Dim int → emoji. Only effects carry `dim` (1/2/3); other modules have dim == 0
+// Dim int → emoji. Effects, layouts and modifiers all carry `dim` (1/2/3); everything else has 0
 // and contribute nothing here. Same MoonLight key. Keeps emojiTagsFor() the
 // single place that assembles the chip set per type.
 const DIM_EMOJI = {
@@ -4318,16 +4631,32 @@ function openReplacePicker(targetMod, anchorEl) {
 
 function openPicker(anchorEl, opts) {
     // Close any existing picker
+    // Its MODAL, not just the inner block: removing only the picker would leave an open
+    // dialog with an empty backdrop over the page.
+    document.querySelectorAll(".type-picker-modal").forEach(d => d.remove());
     document.querySelectorAll(".type-picker").forEach(p => p.remove());
 
-    // Alphabetical by display name so the picker list is scannable regardless of registration
-    // order (localeCompare: case-insensitive, locale-aware).
-    const filtered = availableTypes
-        .filter(t => opts.roles.includes(t.role))
+    // The items are the CALLER's, defaulting to the registered types filtered by role. Everything
+    // below works on {name, displayName, role, tags, dim}, so anything describing itself that way
+    // gets this widget: the MoonLive script picker passes its scripts and inherits the search box,
+    // the emoji chip filter, the keyboard handling and the row layout rather than growing its own.
+    //
+    // Sorting stays here so every picker is ordered the same way, and stays alphabetical by display
+    // name so the list is scannable regardless of registration order (localeCompare:
+    // case-insensitive, locale-aware).
+    const source = opts.items || availableTypes.filter(t => opts.roles.includes(t.role));
+    const filtered = [...source]
         .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
 
     const picker = document.createElement("div");
     picker.className = "type-picker";
+    // Dismiss: closes the modal when there is one (which removes it), and falls back to removing
+    // the picker itself. One function so every exit path (cancel, Enter, double-click, commit)
+    // dismisses the same way.
+    const closePicker = () => {
+        const dlg = picker.closest("dialog");
+        if (dlg) dlg.close(); else picker.remove();
+    };
 
     const search = document.createElement("input");
     search.type = "text";
@@ -4340,25 +4669,52 @@ function openPicker(anchorEl, opts) {
     const activeChips = new Set();
     const chipRow = document.createElement("div");
     chipRow.className = "type-picker-chips";
-    const chipEmoji = [];
     const chipSeen = new Set();
+    const present = [];
     for (const t of filtered) {
         for (const ch of emojiTagsFor(t)) {
-            if (!chipSeen.has(ch)) { chipSeen.add(ch); chipEmoji.push(ch); }
+            if (!chipSeen.has(ch)) { chipSeen.add(ch); present.push(ch); }
         }
     }
-    for (const emoji of chipEmoji) {
-        const chip = document.createElement("button");
-        chip.className = "type-picker-chip";
-        chip.textContent = emoji;
-        chip.addEventListener("click", () => {
-            if (activeChips.has(emoji)) { activeChips.delete(emoji); chip.classList.remove("active"); }
-            else { activeChips.add(emoji); chip.classList.add("active"); }
-            refresh();
-        });
-        chipRow.appendChild(chip);
+    // Grouped rather than in first-seen order, so the row reads as the legend does: the scripted
+    // marker, then what a module IS (role, then dimension), then where it came from, then what it
+    // can do. A chip whose category is unknown falls in the last group rather than vanishing, so a
+    // new emoji is visible before anyone remembers to classify it.
+    const CHIP_GROUPS = [
+        ["\u{1F4DD}"],                                   // MoonLive: scripted, first
+        Object.values(ROLE_EMOJI),                       // type
+        Object.values(DIM_EMOJI),                        // dimension
+        ["\u{1F4AB}", "\u{1F319}", "\u{1F419}", "\u26A1\uFE0F"],   // origin
+    ];
+    const groups = CHIP_GROUPS.map(g => present.filter(e => g.includes(e)));
+    const classified = new Set(CHIP_GROUPS.flat());
+    groups.push(present.filter(e => !classified.has(e)));   // capabilities and anything new
+
+    let first = true;
+    for (const group of groups) {
+        if (!group.length) continue;
+        // A separator between groups, never leading or trailing: it marks a boundary, and a
+        // boundary with nothing on one side is just a mark.
+        if (!first) {
+            const sep = document.createElement("span");
+            sep.className = "type-picker-chip-sep";
+            sep.setAttribute("aria-hidden", "true");
+            chipRow.appendChild(sep);
+        }
+        first = false;
+        for (const emoji of group) {
+            const chip = document.createElement("button");
+            chip.className = "type-picker-chip";
+            chip.textContent = emoji;
+            chip.addEventListener("click", () => {
+                if (activeChips.has(emoji)) { activeChips.delete(emoji); chip.classList.remove("active"); }
+                else { activeChips.add(emoji); chip.classList.add("active"); }
+                refresh();
+            });
+            chipRow.appendChild(chip);
+        }
     }
-    if (chipEmoji.length > 0) picker.appendChild(chipRow);
+    if (present.length > 0) picker.appendChild(chipRow);
 
     const list = document.createElement("div");
     list.className = "type-picker-list";
@@ -4368,7 +4724,7 @@ function openPicker(anchorEl, opts) {
     actions.className = "type-picker-actions";
     const cancelBtn = document.createElement("button");
     cancelBtn.textContent = "cancel";
-    cancelBtn.addEventListener("click", () => picker.remove());
+    cancelBtn.addEventListener("click", () => closePicker());
     const createBtn = document.createElement("button");
     createBtn.className = "create";
     createBtn.textContent = opts.actionLabel;
@@ -4428,7 +4784,7 @@ function openPicker(anchorEl, opts) {
             });
             item.addEventListener("dblclick", () => {
                 opts.commit(t.name);
-                picker.remove();
+                closePicker();
             });
             list.appendChild(item);
         });
@@ -4462,10 +4818,10 @@ function openPicker(anchorEl, opts) {
             e.preventDefault();
             if (selectedType) {
                 opts.commit(selectedType);
-                picker.remove();
+                closePicker();
             }
         } else if (e.key === "Escape") {
-            picker.remove();
+            closePicker();
         }
     });
 
@@ -4476,12 +4832,72 @@ function openPicker(anchorEl, opts) {
     createBtn.addEventListener("click", () => {
         if (selectedType) {
             opts.commit(selectedType);
-            picker.remove();
+            closePicker();
         }
     });
 
-    anchorEl.appendChild(picker);
+    // A MODAL, not a block appended to whatever opened it. Appending made the picker inherit its
+    // anchor's width and position: from a card footer it drew at the bottom of the card, far from
+    // the field being changed, and from a toolbar button it collapsed to an unreadable sliver.
+    // A dialog sits above the page at its own size wherever it is opened from.
+    //
+    // The native <dialog>, the same one the File Manager's editor uses: Esc and the backdrop are
+    // the browser's job, so there is no overlay, no focus trap and no scroll lock to maintain here.
+    // Where the anchor sits BEFORE the modal opens: showModal() can move the page under it (the
+    // body's scrollbar goes), so a rect read afterwards describes a layout that has already shifted.
+    const anchorRect = anchorEl && anchorEl.getBoundingClientRect
+        ? anchorEl.getBoundingClientRect() : null;
+
+    const dlg = document.createElement("dialog");
+    dlg.className = "type-picker-modal";
+    dlg.appendChild(picker);
+    document.body.appendChild(dlg);
+    // Esc closes it (the browser fires `close`), and so does clicking the backdrop: the dialog
+    // element itself is the backdrop, so a click that lands on it rather than on the picker inside
+    // is a click outside.
+    dlg.addEventListener("close", () => dlg.remove());
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+    dlg.showModal();
     refresh();
+
+    // Centered over the CARDS column, not the viewport. showModal() centers on the page, which puts
+    // the list far from the card whose control opened it: the eye is on the right-hand column and
+    // the answer appears in the middle of the preview. Falls back to the page center when the
+    // column is absent (the PiP layout, where cards are full width anyway).
+    //
+    // AFTER refresh(): the rows are what give the picker its height, so measuring before them read
+    // an empty list (111px against a real 311px) and the bottom-of-screen clamp never fired.
+    const col = document.getElementById("main");
+    const d = dlg.getBoundingClientRect();
+    const c = col ? col.getBoundingClientRect() : null;
+    if (c && c.width > d.width) {
+        // VERTICALLY the search box lands on what was clicked, so the list opens under the hand
+        // rather than jumping the eye across the screen. Clamped upward when the picker would run
+        // off the bottom, and never above the top edge: on a short window it simply starts at the
+        // top and the list scrolls, which beats a dialog with its buttons out of reach.
+        const margin = 8;
+        // MEASURE FIRST, then write: reading a rect after setting `left`/`margin` reads a box that
+        // has already moved, and using that as an offset walks the dialog down the page.
+        const s = picker.querySelector(".type-picker-search");
+        const inset = s ? s.getBoundingClientRect().top - d.top : 0;   // dialog top to search box
+        // The search box lands just BELOW the control that opened it, so the thing clicked stays
+        // visible above the picker rather than being covered by it.
+        //
+        // Clamped so the whole picker stays on screen: it rises rather than hanging off the bottom.
+        // On a window too short to hold it at all, `max` wins over `min` and it starts at the top
+        // margin with the list scrolling, which beats putting the buttons out of reach.
+        dlg.style.position = "fixed";
+        dlg.style.left = Math.round(c.left + (c.width - d.width) / 2) + "px";
+        dlg.style.margin = "0";
+        // Clamp against the height the dialog has ONCE POSITIONED. `d` was measured while it was
+        // still centered by showModal(), and a fixed dialog lays out to a different height, so
+        // clamping against the stale number let it hang off the bottom of a short window.
+        const h = dlg.getBoundingClientRect().height;
+        let top = (anchorRect ? anchorRect.bottom + margin : d.top) - inset;
+        top = Math.min(top, window.innerHeight - h - margin);
+        top = Math.max(margin, top);
+        dlg.style.top = Math.round(top) + "px";
+    }
     search.focus();
 }
 
@@ -4898,6 +5314,65 @@ function fmState(mod) {
 }
 
 // Fetch one directory's children (name/isDir/size) from /api/dir. `hidden` includes dotfiles.
+// The MoonLive factory catalog: which scripts EXIST upstream, as opposed to which are on this
+// device. Cached for the session because it is compiled into the firmware and cannot change while
+// the device runs.
+let mlCatalog = null;
+async function mlFetchCatalog() {
+    if (mlCatalog) return mlCatalog;
+    const res = await fetch("/api/scripts");
+    if (!res.ok) throw new Error(await errorMessage(res));
+    mlCatalog = await res.json();
+    return mlCatalog;
+}
+
+/// Which catalog group a picker's extension belongs to, so a script picker offers only its own role.
+function mlGroupForExt(ext) {
+    return ext === ".mle" ? "effects" : ext === ".mll" ? "layouts" : ext === ".mlm" ? "modifiers" : null;
+}
+
+// Download one factory script and save it to the device.
+//
+// The BROWSER fetches it, not the device: raw.githubusercontent.com sends
+// `access-control-allow-origin: *`, so the page can read it directly, and the device then needs no
+// TLS stack, no certificate bundle and no internet of its own. A rig on an isolated network is
+// served by whatever laptop is looking at its UI. Same approach as WLED-MM's arti-fx.
+//
+// Pinned to the firmware's own tag (the endpoint decides which), so a script always matches the
+// engine that will run it rather than whatever main happens to hold.
+async function mlDownloadScript(name, group) {
+    const cat = await mlFetchCatalog();
+    const folder = (cat[group] || {}).folder;
+    if (!folder) throw new Error("unknown script kind");
+    const url = "https://raw.githubusercontent.com/MoonModules/projectMM/"
+              + encodeURIComponent(cat.tag) + "/moonlive/" + folder + "/" + encodeURIComponent(name);
+    const res = await fetch(url);
+    // A 404 has two causes now. A RELEASE build fetches from its tag, so a missing script means the
+    // release does not carry it. A DEV build fetches from the commit it was built from, so a 404
+    // usually means that commit was never pushed: the scripts exist locally and GitHub has never
+    // seen them. Say which, because the fix differs (wait for a release vs push the branch).
+    if (!res.ok) {
+        if (res.status !== 404) throw new Error("download failed");
+        const dev = !String(cat.tag || "").startsWith("v");
+        throw new Error(dev
+            ? name + " is not on GitHub at commit " + cat.tag + " (push the branch, or the script is new)"
+            : name + " is not in this firmware's release");
+    }
+    const text = await res.text();
+    if (!text.trim()) throw new Error("downloaded script is empty");
+    // The factory directory has to exist first: POST /api/file does not create parents, so on a
+    // device where nothing has been downloaded yet the write fails with "write failed" and no clue
+    // why. mkdir is idempotent, so this costs one request and only on the first download.
+    await fetch("/api/dir?path=" + encodeURIComponent(cat.dir), { method: "POST" }).catch(() => {});
+    // Straight to the factory directory, never the user's: an edit is what puts a copy there, and
+    // that copy is what shadows this one.
+    const save = await fetch("/api/file?path=" + encodeURIComponent(cat.dir + "/" + name), {
+        method: "POST", headers: { "Content-Type": "application/octet-stream" },
+        body: new Blob([text]),
+    });
+    if (!save.ok) throw new Error(await errorMessage(save));
+}
+
 async function fmFetchDir(absPath, hidden) {
     const res = await fetch("/api/dir?path=" + encodeURIComponent(absPath) + (hidden ? "&hidden=1" : ""));
     if (!res.ok) throw new Error(await errorMessage(res));
@@ -5124,7 +5599,9 @@ function renderFileManager(mod, host) {
     const delBtn = document.createElement("button");
     delBtn.className = "fm-tool fm-tool--icon fm-tool--danger";
     delBtn.textContent = "🗑";
-    delBtn.title = "Delete: delete the selected file or empty folder";
+    // A folder goes with everything in it: emptying one by hand before it would delete was busywork
+    // on a folder of scripts. The two-press arm is the confirmation.
+    delBtn.title = "Delete: delete the selected file, or a folder and everything in it";
     delBtn.disabled = st.selected === "/";   // never delete the root
     armPressTwice(delBtn, () => runOp("delete", st.selected), { armedText: "✓" });
     bar.appendChild(delBtn);
@@ -5608,7 +6085,11 @@ async function fmCreateFile(dir, name, content = "") {
 // `onSaved(relPath)` fires after each successful save. Returns a handle so a caller can point the
 // same pane at a different file without rebuilding it.
 function fmMountEditor(host, relPath, opts = {}) {
-    const { expectedSize, onSaved, sizeKey, saveButton, statusEl } = opts;
+    // `savePath(readPath)` lets a caller WRITE somewhere other than it read. The script picker uses
+    // it: a factory script is read from the read-only library directory, and editing it must create
+    // the user's own copy rather than overwrite what shipped. Defaults to writing back where it
+    // read, which is what every other caller wants.
+    const { expectedSize, onSaved, sizeKey, saveButton, statusEl, savePath } = opts;
     const wrap = document.createElement("div");
     wrap.className = "fm-editor-pane";
     // The footer carries Save and the status line, UNLESS the host supplies both: a card already has
@@ -5666,7 +6147,8 @@ function fmMountEditor(host, relPath, opts = {}) {
             if (body.readOnly || !dirty || !path) return;   // re-check: a queued save may be moot
             const saved = body.value;                       // what THIS request writes
             status.textContent = "saving…";
-            const r = await fmSaveFrom(body, path);
+            const dest = savePath ? savePath(path) : path;
+            const r = await fmSaveFrom(body, dest);
             status.textContent = r.message;
             // A failed write (no space, a vanished path) must not be silent. The modal shows it on
             // its status line; a host that supplied its own hidden one gets an alert, because the
@@ -5674,7 +6156,12 @@ function fmMountEditor(host, relPath, opts = {}) {
             if (!r.ok && statusEl && statusEl.hidden) alert(r.message);
             // Only clear dirty if the body still holds what we just wrote: typing during the
             // request means there are newer bytes on screen that nobody has saved yet.
-            if (r.ok && body.value === saved) { setDirty(false); if (onSaved) onSaved(path); }
+            if (r.ok && body.value === saved) {
+                setDirty(false);
+                // Report where it LANDED, not where it came from: a caller that refreshes a listing
+                // needs to know a new file now exists in the user's directory.
+                if (onSaved) onSaved(savePath ? savePath(path) : path);
+            }
         });
         return saving;
     };

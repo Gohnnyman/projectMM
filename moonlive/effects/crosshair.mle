@@ -1,35 +1,44 @@
-// Crosshair: a red column and a blue row sweeping the grid, each drawn by a function the script
-// defines for itself.
-//
-// The point of this script is the helpers. `column()` and `row()` are the script's own functions,
-// called from `tick()`. Each is a REAL call: the callee allocates its own frame when it runs, which
-// is what lets one helper call another, and eventually itself. Nothing is pasted in by the compiler.
-//
-// A script function takes no arguments and returns nothing yet, so a helper here does a whole job
-// rather than computing a value. Parameters and members that a caller can set are the next steps;
-// when they arrive, the shape of this script does not change, the helpers just get shorter.
+// Crosshair: a sight sweeping the grid, drawn by functions the script defines for itself.
+
 class CrosshairEffect {
   byte bpm = 30;
+  byte spread = 3;
 
-  defineControls() {
-    addControl("bpm", bpm, 1, 240);
+  int cx = 0;                     // where the sight sits, across
+  int cy = 0;                     // where the sight sits, down
+  int d = 0;                      // distance from this light to the line
+
+  int dimensions() { return 2; }
+
+  string tags() { return "💫"; }
+
+  void defineControls() {
+    addControl("bpm", bpm, 1, 240);                 // how fast the sight sweeps
+    addControl("spread", spread, 0, 20);            // how thick the lines are
   }
 
-  column() {
-    for (y = 0; y < height; y = y + 1) {
-      setRGB(y * width + scale(beat(bpm, t), width), 255, 40, 0);
+  void column() {
+    for (y = 0; y < height; y = y + 1) { setRGB(y * width + cx, 200, 30, 0); }
+  }
+
+  void row() {
+    for (x = 0; x < width; x = x + 1) { setRGB(cy * width + x, 0, 90, 200); }
+  }
+
+  void center() {
+    for (i = 0; i < spread + spread + 1; i = i + 1) {
+      d = i - spread;
+      if (cx + d >= 0) { if (cx + d < width) { setRGB(cy * width + cx + d, 255, 255, 255); } }
+      if (cy + d >= 0) { if (cy + d < height) { setRGB((cy + d) * width + cx, 255, 255, 255); } }
     }
   }
 
-  row() {
-    for (x = 0; x < width; x = x + 1) {
-      setRGB(scale(beat(bpm + 7, t), height) * width + x, 0, 120, 255);
-    }
-  }
-
-  tick() {
+  void tick() {
     fill(0, 0, 0);
+    cx = scale(beat(bpm, t), width);
+    cy = scale(beat(bpm + 7, t), height);
     column();
     row();
+    center();
   }
 }

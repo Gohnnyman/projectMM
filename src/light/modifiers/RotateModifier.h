@@ -4,7 +4,7 @@
 
 namespace mm {
 
-// Rotates the 2D image around its centre, turning continuously over time. The one
+// Rotates the 2D image around its center, turning continuously over time. The one
 // DYNAMIC modifier in the set: it overrides modifyLive(), so the Layer re-applies it
 // every frame (a smooth turn, not a stepped LUT rebuild). A static-only chain pays
 // nothing — the per-frame pass runs only because this modifier reports hasModifyLive().
@@ -17,8 +17,8 @@ namespace mm {
 // This modifier is also the codebase's **transform-matrix reference**. Rotation is the
 // canonical affine transform, so unlike the % / mask folds (Multiply, Checkerboard,
 // Region — non-affine, expressed as direct coordinate folds), it's written as an explicit
-// 2×2 rotation matrix R(-θ) = [[c, s], [-s, c]] applied to the centred coordinate. The
-// matrix entries are integer fixed-point (cos8/sin8 → 0..255 centred at 128, so c=cos8-128
+// 2×2 rotation matrix R(-θ) = [[c, s], [-s, c]] applied to the centered coordinate. The
+// matrix entries are integer fixed-point (cos8/sin8 → 0..255 centered at 128, so c=cos8-128
 // is the signed unit component scaled by 128; the >>7 divides back out). A future affine
 // "Transform" modifier (translate+scale+rotate+shear in one) would compose its matrix the
 // same way and apply it here — the fold interface hosts a matrix-backed modifier with no
@@ -28,9 +28,10 @@ namespace mm {
 // Prior art: MoonLight M_MoonLight.h Rotate (modifyXYZ per-frame transform). Same per-frame
 // coordinate remap; we name the hook modifyLive and carry an explicit matrix.
 // Author: WildCats08 / @Brandon502 (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
-/// Modifier rotating the 2D image about its centre over time.
+/// Modifier rotating the 2D image about its center over time.
 class RotateModifier : public ModifierBase {
 public:
+    const char* tags() const override { return "💫"; }
     Dim dimensions() const override { return Dim::D2; }   // 2D rotation (advisory chip)
     bool hasModifyLive() const override { return true; }  // animates every frame
 
@@ -45,25 +46,25 @@ public:
     bool affectsPrepare(const char* /*controlName*/) const override { return false; }
 
     // Per-frame backward map: a destination logical cell `pos` is replaced by the
-    // SOURCE cell it samples — the inverse rotation R(-θ) about the box centre.
+    // SOURCE cell it samples: the inverse rotation R(-θ) about the box center.
     // `logical` is the box. Out-of-box sources stay out-of-box, so the Layer's live
     // pass leaves that destination dark (nothing to gather) — a clean edge, no wrap.
     void modifyLive(Coord3D& pos, const Coord3D& logical) const override {
-        // Centre in half-units (×2) so an even-width box rotates about its true centre.
-        const int32_t cx2 = logical.x - 1;                       // 2·centreX
-        const int32_t cy2 = logical.y - 1;                       // 2·centreY
-        const int32_t dx2 = 2 * static_cast<int32_t>(pos.x) - cx2;   // 2·(x − centre)
+        // Center in half-units (×2) so an even-width box rotates about its true center.
+        const int32_t cx2 = logical.x - 1;                       // 2·centerX
+        const int32_t cy2 = logical.y - 1;                       // 2·centerY
+        const int32_t dx2 = 2 * static_cast<int32_t>(pos.x) - cx2;   // 2·(x − center)
         const int32_t dy2 = 2 * static_cast<int32_t>(pos.y) - cy2;
 
         // R(-θ) = [[ c,  s],
         //          [-s,  c]]   with c = cos θ, s = sin θ in signed fixed-point /128.
-        // source = R(-θ) · dest. cos8/sin8 are 0..255 centred at 128.
+        // source = R(-θ) · dest. cos8/sin8 are 0..255 centered at 128.
         const int32_t c = static_cast<int32_t>(cos8(angle_)) - 128;
         const int32_t s = static_cast<int32_t>(sin8(angle_)) - 128;
         const int32_t sx2 = ( dx2 * c + dy2 * s) >> 7;           // row 0 of the matrix · dest
         const int32_t sy2 = (-dx2 * s + dy2 * c) >> 7;           // row 1 of the matrix · dest
 
-        // Undo the ×2 and centre shift, rounding to nearest.
+        // Undo the ×2 and center shift, rounding to nearest.
         pos.x = static_cast<lengthType>((sx2 + cx2 + 1) >> 1);
         pos.y = static_cast<lengthType>((sy2 + cy2 + 1) >> 1);
         // z passes through (2D rotation).

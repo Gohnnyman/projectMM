@@ -1,0 +1,160 @@
+// Auto-generated from moonlive/ by catalog_scripts.cmake. Do not edit; rebuild to update.
+//
+// The CATALOG, not the library: names only. A device carries this list and the UI fetches a
+// script's text from GitHub the first time someone picks it, so flash scales with how many
+// scripts exist rather than how large they are, and the filesystem holds only what is used.
+//
+// One array per role: the folder a script lives in is implied by its role and the role by its
+// extension, so neither is stored per entry.
+#pragma once
+#include <cstddef>
+
+namespace mm::moonlive {
+
+/// Every factory effect, by file name. They live in `moonlive/effects/`
+/// upstream and in the factory script directory on the device.
+constexpr const char* kEffectCatalog[] = {
+    "aim.mle",
+    "ballpit.mle",
+    "balls.mle",
+    "breathe.mle",
+    "chase.mle",
+    "comet-trail.mle",
+    "crosshair.mle",
+    "dot.mle",
+    "ember.mle",
+    "fountain.mle",
+    "fractal.mle",
+    "gradient.mle",
+    "lines.mle",
+    "metal.mle",
+    "noise.mle",
+    "octopus.mle",
+    "plasma.mle",
+    "pulse.mle",
+    "rain.mle",
+    "random-pixel.mle",
+    "ripples.mle",
+    "sparkle.mle",
+    "spectrum.mle",
+    "sweep.mle",
+};
+constexpr size_t kEffectCatalogCount = 24;
+/// What each effect above declares about itself, in the same order.
+/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
+constexpr unsigned char kEffectCatalogDim[] = {
+    1,
+    2,
+    2,
+    1,
+    3,
+    2,
+    2,
+    2,
+    1,
+    2,
+    2,
+    3,
+    2,
+    2,
+    2,
+    2,
+    2,
+    1,
+    2,
+    1,
+    2,
+    3,
+    2,
+    1,
+};
+/// The emoji each declares, "" when it declares none.
+constexpr const char* kEffectCatalogTags[] = {
+    "💫🎯",
+    "💫✨",
+    "💫",
+    "💫",
+    "💫",
+    "💫✨",
+    "💫",
+    "💫",
+    "💫",
+    "💫✨",
+    "💫🖌️",
+    "💫",
+    "💫",
+    "💫🖌️",
+    "💫",
+    "💫🖌️",
+    "💫",
+    "💫🎵",
+    "💫✨",
+    "💫",
+    "💫",
+    "💫",
+    "💫🎶",
+    "💫🎯",
+};
+constexpr const char* kEffectFolder = "effects";   ///< its directory upstream
+
+/// Every factory layout, by file name. They live in `moonlive/layouts/`
+/// upstream and in the factory script directory on the device.
+constexpr const char* kLayoutCatalog[] = {
+    "diagonal.mll",
+    "grid.mll",
+    "lattice.mll",
+    "reversed-row.mll",
+    "ring.mll",
+    "rose.mll",
+    "two-rows.mll",
+};
+constexpr size_t kLayoutCatalogCount = 7;
+/// What each layout above declares about itself, in the same order.
+/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
+constexpr unsigned char kLayoutCatalogDim[] = {
+    2,
+    2,
+    3,
+    1,
+    2,
+    2,
+    2,
+};
+/// The emoji each declares, "" when it declares none.
+constexpr const char* kLayoutCatalogTags[] = {
+    "💫",
+    "💫",
+    "💫",
+    "💫",
+    "💫",
+    "💫",
+    "💫",
+};
+constexpr const char* kLayoutFolder = "layouts";   ///< its directory upstream
+
+/// Every factory modifier, by file name. They live in `moonlive/modifiers/`
+/// upstream and in the factory script directory on the device.
+constexpr const char* kModifierCatalog[] = {
+    "mirror.mlm",
+    "shift.mlm",
+    "transpose.mlm",
+};
+constexpr size_t kModifierCatalogCount = 3;
+/// What each modifier above declares about itself, in the same order.
+/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
+constexpr unsigned char kModifierCatalogDim[] = {
+    2,
+    2,
+    2,
+};
+/// The emoji each declares, "" when it declares none.
+constexpr const char* kModifierCatalogTags[] = {
+    "💫",
+    "💫",
+    "💫",
+};
+constexpr const char* kModifierFolder = "modifiers";   ///< its directory upstream
+
+constexpr size_t kCatalogCount = 34;   ///< every factory script, all roles
+
+} // namespace mm::moonlive

@@ -21,6 +21,7 @@ namespace mm {
 /// @card Layouts.png
 class Layouts : public MoonModule {
 public:
+    const char* tags() const override { return "💫"; }
     const char* acceptsChildRoles() const override { return "layout"; }
 
     /// Sum of `lightCount` across enabled children — sizes the layer buffer and the

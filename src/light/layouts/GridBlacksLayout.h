@@ -19,6 +19,8 @@ namespace mm {
 /// Layout of a dense 3D grid with mid-strand dark columns (a spacer).
 class GridBlacksLayout : public LayoutBase {
 public:
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D3; }
     lengthType width = 16;
     lengthType height = 16;
     lengthType depth = 1;

@@ -39,6 +39,10 @@ namespace mm {
 /// Modifier carving the layer to a percentage sub-rectangle.
 class RegionModifier : public ModifierBase {
 public:
+    /// Advisory UI chip: what this modifier can work on (clips a box, which is an extent on every axis).
+    /// Nothing branches on it, since extrude reads the EFFECT's dimensions.
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D3; }
     lengthType startX = 0,   startY = 0,   startZ = 0;
     lengthType endX   = 100, endY   = 100, endZ   = 100;
 

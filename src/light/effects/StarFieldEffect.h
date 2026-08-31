@@ -31,7 +31,7 @@ namespace mm {
 /// Star-field effect: drifting points like flying through stars.
 class StarFieldEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫"; }  // MoonLight origin
+    const char* tags() const override { return "💫🖌️"; }  // MoonLight origin
     Dim dimensions() const override { return Dim::D2; }  // writes only the z=0 slice
 
     uint8_t speed      = 20;     // advance rate (0..30); 0 = paused. Throttle is 1000/speed ms.

@@ -22,7 +22,10 @@ import subprocess
 import sys
 
 # Files whose prose the standards govern. Not .json or .txt: generated or data.
-SUFFIXES = (".h", ".hpp", ".c", ".cpp", ".inc", ".md", ".py", ".js", ".css", ".html")
+# .mle/.mll/.mlm are MoonLive scripts: shipped, opened in the device's own editor, and read by
+# every user who learns the language, so they are the most user-facing prose in the repo.
+SUFFIXES = (".h", ".hpp", ".c", ".cpp", ".inc", ".md", ".py", ".js", ".css", ".html",
+            ".mle", ".mll", ".mlm")
 
 # Paths exempt, with the reason each earns it.
 EXEMPT = (

@@ -1,29 +1,30 @@
 // Comet: a head flying a lissajous path, shedding sparks that become its trail.
-// Turn spread to 0 for a tight ribbon, up for a wide cloud.
 
 class CometTrailEffect {
   byte speed = 30;
   byte spread = 40;
   byte sparks = 3;
 
-  int hx = 0;
-  int hy = 0;
+  int hx = 0;                     // the comet's head, across
+  int hy = 0;                     // the comet's head, down
 
-  defineControls() {
+  int dimensions() { return 2; }
+
+  string tags() { return "💫✨"; }
+
+  void defineControls() {
     pool(400);
-    addControl("speed", speed, 4, 120);
-    addControl("spread", spread, 0, 200);
-    addControl("sparks", sparks, 1, 10);
+    addControl("speed", speed, 4, 120);             // how fast the comet flies
+    addControl("spread", spread, 0, 200);           // how far the tail spreads
+    addControl("sparks", sparks, 1, 10);            // sparks thrown per frame
   }
 
-  tick() {
+  void tick() {
     fade(28);
 
-    // The head traces a lissajous: two beats at different rates, so the path never repeats exactly.
     hx = scale(beatsin(speed, t, 65535), width);
     hy = scale(beatsin(speed + 7, t, 65535), height);
 
-    // Sparks leave from wherever the head is now; their speed is the spread control.
     emit(hx, hy, beat(speed + 3, t), spread * 4, sparks, 90, scale(beat(6, t), 256));
 
     drag(6);
@@ -31,7 +32,6 @@ class CometTrailEffect {
     age(2);
     render(90);
 
-    // The head itself, drawn bright on top of its own debris.
     setPaletteColor(hx, hy, scale(beat(6, t), 256), 255);
   }
 }

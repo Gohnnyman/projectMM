@@ -23,7 +23,7 @@ namespace mm {
 /// Audio-reactive 3D graphic-equaliser effect.
 class GEQ3DEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🌙📊"; }  // MoonLight origin · MoonModules · audio
+    const char* tags() const override { return "💫🌙🎶"; }  // MoonLight origin · MoonModules · audio
     Dim dimensions() const override { return Dim::D2; }
 
     uint8_t speed     = 2;     // projector sweep rate (1..10; higher = faster). Time-based (BPM), so

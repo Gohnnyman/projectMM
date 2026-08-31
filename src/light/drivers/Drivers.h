@@ -239,10 +239,37 @@ public:
     // `on` and `brightness` independent means "off" never clobbers the level the user chose.
     uint8_t effectiveBrightness() const { return on ? brightness : 0; }
 
+    /// How long a powered-off rig keeps tracking before its heads go still, in seconds.
+    ///
+    /// `on=false` is asked to mean two different things. Between cues it is a BLACKOUT: a desk
+    /// drops intensity and leaves the heads following the look, so the show stays on its clock and
+    /// the beams are already in the right place when it comes back. Between sets it is a PARK: the
+    /// device is done for now, and a rig grinding through a chase nobody can see is noise in a
+    /// quiet room. The duration is what separates them, so the timeout decides rather than the user.
+    ///
+    /// Effects never stop: only the transmission of motion does. Power returns and the rig rejoins
+    /// the show where it now is, rather than resuming a cue that has gone stale.
+    uint8_t motionHold = 30;
+    static constexpr uint8_t kMotionHoldNever = 0;   ///< 0: keep tracking, the desk behavior
+
+    /// Seconds the rig has been off, counted on tick1s. Stops climbing once the hold expires, so a
+    /// device left off for a week does not wrap it.
+    uint16_t offSeconds_ = 0;
+    /// Whether any enabled driver was aimable at the last check, so the control list is rebuilt
+    /// on the transition rather than every second. Seeded false and corrected on the first tick:
+    /// a rig that starts with a moving head gets its control one second in, which is a second
+    /// after the tree is even renderable.
+    bool     movableNow_ = false;
+
     void defineControls() override {
         controls_.addControl("on", on);   // master power — first so it renders at the top of the card
         controls_.addControl("brightness", brightness, 0, 255);
         controls_.addPalette("palette", palette, mm::paletteOptions, mm::palettes::kCount);
+        // Only where it can DO something: a rig of LED strips has no aim to hold, so the control
+        // would be a question about hardware the user does not have. Same add-then-setHidden shape
+        // the renderWait field below uses.
+        controls_.addControl("motionHold", motionHold, 0, 240);
+        controls_.setHidden(controls_.count() - 1, !fixtureChannels().movable());
         controls_.addControl("multicore", multicore);   // render↔encode split on/off (see the member's doc)
         controls_.setAdvanced(controls_.count() - 1);   // a tuning knob, not a user setting
         // Read-only KPI, the multicore sibling of the driver's frameTime: how long core 0 waited at the
@@ -299,7 +326,51 @@ public:
                                               static_cast<unsigned>(renderWaitPeakUs_));
         else                    std::snprintf(renderWaitStr_, sizeof(renderWaitStr_), "—");
         renderWaitPeakUs_ = 0;   // start a fresh window
+        updateMotionHold();
         MoonModule::tick1s();
+    }
+
+    /// Count the rig's time powered off, and park it once the hold expires.
+    ///
+    /// Runs on the 1 Hz tick, which is the resolution this needs: the difference between a cue gap
+    /// and a set break is tens of seconds, not milliseconds. Writing the flag straight into each
+    /// driver's Correction rather than re-deriving it: the hold changes what is TRANSMITTED, not
+    /// what the preset says, so a full rebuildCorrection would be the wrong cost and would fight
+    /// the brightness LUT it shares.
+    void updateMotionHold() MM_NONBLOCKING {
+        // Whether the control is SHOWN follows the rig, and the rig changes when a child driver
+        // picks a different light preset. That write rebuilds the child's own controls, never this
+        // container's, so without re-deriving here the row stays hidden after a user selects a
+        // moving head (and stays visible after they leave one), against the rule that every setting
+        // applies live. Compared rather than rebuilt blindly: rebuildControls() fires a WS resync,
+        // and this runs every second.
+        //
+        // Read from each driver's ALREADY-RESOLVED correction rather than through
+        // fixtureChannels(), which calls rebuildCorrection() on every child: that re-walks the
+        // preset roles and rebuilds a 256-entry brightness LUT per driver, which is exactly the
+        // "wrong cost" the rebuildCorrection doc below names, once a second on the render tick.
+        bool movable = false;
+        for (uint8_t i = 0; i < childCount() && !movable; i++) {
+            if (child(i)->role() != ModuleRole::Driver || !child(i)->enabled()) continue;
+            const Correction& c = static_cast<DriverBase*>(child(i))->correction();
+            movable = c.offPan != Correction::kAbsent || c.offTilt != Correction::kAbsent;
+        }
+        if (movableNow_ != movable) {
+            movableNow_ = movable;
+            rebuildControls();
+        }
+        if (on) {
+            offSeconds_ = 0;
+        } else if (offSeconds_ < 0xFFFF) {
+            offSeconds_++;
+        }
+        // 0 means never park: keep tracking however long the power is off, which is what a lighting
+        // desk does and what a show running to timecode wants.
+        const bool held = !on && motionHold != kMotionHoldNever && offSeconds_ >= motionHold;
+        for (uint8_t i = 0; i < childCount(); i++) {
+            if (child(i)->role() != ModuleRole::Driver) continue;
+            static_cast<DriverBase*>(child(i))->setMotionHeld(held);
+        }
     }
 
     /// Re-resolve every driver's correction (preset roles + brightness LUT) into its flat
