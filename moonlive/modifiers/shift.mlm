@@ -4,11 +4,11 @@
 class ShiftModifier {
   byte amount = 4;
 
-  defineControls() {
+  void defineControls() {
     addControl("amount", amount, 0, 64);
   }
 
-  modifyLogical() {
+  void modifyLogical() {
     setXYZ(xPos + amount, yPos, zPos);
   }
 }

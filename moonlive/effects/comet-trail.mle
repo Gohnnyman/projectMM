@@ -9,14 +9,18 @@ class CometTrailEffect {
   int hx = 0;
   int hy = 0;
 
-  defineControls() {
+  int dimensions() { return 2; }   // an x/y picture; extrude copies it through the depth
+
+  string tags() { return "✨"; }   // particles
+
+  void defineControls() {
     pool(400);
     addControl("speed", speed, 4, 120);
     addControl("spread", spread, 0, 200);
     addControl("sparks", sparks, 1, 10);
   }
 
-  tick() {
+  void tick() {
     fade(28);
 
     // The head traces a lissajous: two beats at different rates, so the path never repeats exactly.

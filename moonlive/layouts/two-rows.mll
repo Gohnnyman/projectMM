@@ -4,11 +4,11 @@
 class TwoRowsLayout {
   byte cols = 16;
 
-  defineControls() {
+  void defineControls() {
     addControl("cols", cols, 1, 64);
   }
 
-  placeLights() {
+  void placeLights() {
     for (i = 0; i < cols; i = i + 1) {
       addLight(i, 0, 0);
     }

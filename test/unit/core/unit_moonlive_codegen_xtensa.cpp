@@ -54,6 +54,11 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 #define MM_GOLD_FXLOOP_LEN  190u
 #define MM_GOLD_FXLOOP_HASH 307181036u
 #define MM_GOLD_FX_HASH   2796457628u
+// `mov.n a2, aN`: two bytes, {(dst << 4) | 0xd, src}. a2 is the windowed ABI's return register and
+// where R0 lives, so the first byte is 0x2d whatever the source. This backend emits BYTES in memory
+// order (not 24-bit words), so the pair is read as it sits.
+#define MM_ISA_RET_WRITES_RETREG(p) ((p)[0] == 0x2du)
+#define MM_ISA_RET_STRIDE 1
 #define MM_ISA_LOWER mm_xtensa_backend::mm::moonlive::lowerToBytes
 // The assembler type itself, so the stack-budget check can measure the object the compile path
 // puts on a 12 KB task rather than re-deriving its layout from the constants.
@@ -328,7 +333,7 @@ TEST_CASE("Xtensa: a fixed multiply emits mulsh beside mull") {
                            "  fixed a = 0.5;\n"
                            "  fixed b = 2.0;\n"
                            "  fixed c = 0.0;\n"
-                           "  tick() { c = a * b; setRGB(0, toInt(c), 0, 0); }\n"
+                           "  void tick() { c = a * b; setRGB(0, toInt(c), 0, 0); }\n"
                            "}\n",
                            mm::moonlive::modifierSysVars(), ok);
     REQUIRE(ok);

@@ -106,6 +106,10 @@ public:
     /// return address in x1 and jumps; the callee's own prologue saves ra, so recursion works.
     void callLabel(Label l);
     void epilogue();                     // undo prologue's frame (if any), then ret
+    /// Park `a` where the ABI returns a value, so the host reads it after the call. The move
+    /// happens BEFORE the epilogue's teardown: on a windowed or frame-pointer ABI the
+    /// teardown is what makes the register the caller sees.
+    void retValue(Reg a);
     void ret();
 
 private:

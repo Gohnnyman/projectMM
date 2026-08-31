@@ -4,7 +4,9 @@
 class GradientEffect {
   int n = 0;
 
-  tick() {
+  int dimensions() { return 3; }   // addresses every light, whatever shape the rig is
+
+  void tick() {
     // Across the WHOLE rig, whatever its size: a fixed count lit the first 256 lights and left a
     // longer strand dark, which is the shape a script written against one test rig has.
     n = width * height * depth;

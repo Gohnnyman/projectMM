@@ -14,14 +14,16 @@ class BreatheEffect {
   int bri = 0;
   int p = 0;
 
-  defineControls() {
+  int dimensions() { return 1; }   // a line of lights: extrude fans it across a wider rig
+
+  void defineControls() {
     addControl("bpm", bpm, 1, 60);
     addControl("hue", hue, 0, 255);
     addControl("drift", drift, 0, 255);
     addControl("floorBri", floorBri, 0, 200);
   }
 
-  tick() {
+  void tick() {
     // Never all the way to black: a breath that reaches zero reads as a fault rather than a rest,
     // so floorBri is where the exhale stops.
     bri = floorBri + div(beatsin(bpm, t, 255) * (255 - floorBri), 255);

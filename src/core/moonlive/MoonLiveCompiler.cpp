@@ -166,9 +166,12 @@ struct Parser {
     // Each function the class defined, with the IR index its body starts at. An IR index, not a byte
     // offset: the parser runs before lowering, so the byte an entry lands on is not known yet. The
     // emitter converts one to the other, which is the same seam a linker crosses.
-    struct FnMark { const char* name; uint8_t nameLen; uint16_t irStart; };
+    struct FnMark { const char* name; uint8_t nameLen; uint16_t irStart; RetType ret; };
     FnMark             fns[kMaxEntryPoints] = {};
     uint8_t            fnCount = 0;
+    /// What the function currently being parsed declared it returns, so a `return` can be
+    /// checked against it at the point it is written rather than after the fact.
+    RetType            curRet = RetType::Void;
     VReg               nextTemp = kFirstTemp;   // high-water mark — also IrProgram.vregsUsed
     VReg               freeStack[kMaxVRegs] = {};   // recycled temps (LIFO), so a dead vreg is reused
     uint8_t            freeCount = 0;
@@ -1009,6 +1012,17 @@ struct Parser {
         return atKeyword("int", 3) || atKeyword("byte", 4) || atKeyword("bool", 4) ||
                atKeyword("fixed", 5) || atKeyword("string", 6);
     }
+    /// A function's declared return type: `void`, `int` or `string`. Deliberately NOT every member
+    /// type: `byte tick()` would suggest the engine narrows the value, which it does not, and
+    /// `fixed` is an int at this boundary. Three words, each meaning exactly one thing.
+    bool atRetKeyword() const {
+        return atKeyword("void", 4) || atKeyword("int", 3) || atKeyword("string", 6);
+    }
+    RetType currentRet() const {
+        if (atKeyword("int", 3))    return RetType::Int;
+        if (atKeyword("string", 6)) return RetType::Str;
+        return RetType::Void;
+    }
     /// The type the current keyword names. Only called when atTypeKeyword() is true.
     CtrlType currentType() const {
         if (atKeyword("byte", 4))   return CtrlType::Byte;
@@ -1438,6 +1452,7 @@ struct Parser {
     bool parseStatement() {
         if (atKeyword("for", 3)) return parseFor();
         if (atKeyword("if", 2))  return parseIf();
+        if (atKeyword("return", 6)) return parseReturn();
         if (lex.kind != Tok::Ident) { fail("expected a function call or an assignment"); return false; }
         // One token of lookahead separates `name = …` from `name(…)`. Both start with an
         // identifier, and only the token AFTER it says which, so the name is saved and the lexer
@@ -1451,6 +1466,47 @@ struct Parser {
         lex = save;
         parseCall(nullptr);
         if (failed) return false;
+        return expect(Tok::Semicolon, "expected ';'");
+    }
+
+    /// returnStmt := "return" [expr] ";"
+    ///
+    /// Two jobs. Inside `tick()` it is an EARLY EXIT, which is what a script wants when a guard
+    /// fails and the rest of the frame has nothing to do. And it is how a function ANSWERS, which
+    /// is what `dimensions()` and `tags()` are: the host calls them and reads the value.
+    ///
+    /// The value is a machine word, like every other value here: a number, or the pointer a string
+    /// literal already compiles to. Nothing checks that a function returns consistently, in keeping
+    /// with the rest of the language, and a function that never returns one answers 0.
+    bool parseReturn() {
+        lex.advance();                       // past `return`
+        if (lex.kind == Tok::Semicolon) {    // a bare return: unwind, no value
+            emit({IrOp::Ret, 0, 0,0,0,0, 0, nullptr, {}});
+            lex.advance();
+            return true;
+        }
+        VReg v = 0;
+        if (lex.kind == Tok::String) {
+            // A string is a POINTER, which is a value like any other here. Returning one is how
+            // tags() answers, and it is the only way a script hands text to the host: an expression
+            // cannot otherwise carry a string, and does not need to.
+            //
+            // Interned rather than pointed at the source, for the same reason a control label is:
+            // the text must outlive the compile, and an interned copy is final the moment it is
+            // made.
+            const char* interned = internString(lex.identBeg, lex.identLen);
+            if (!interned) { fail("no room for this script's strings"); return false; }
+            v = alloc();
+            emit({IrOp::ConstPtr, v, 0,0,0,0, 0, nullptr, interned, {}});
+            lex.advance();
+        } else {
+            v = parseExpr();
+            if (failed) return false;
+        }
+        // imm 1 says "this return carries a value", which is what the spill pass reads to decide
+        // whether `a` is a register it must keep alive.
+        emit({IrOp::Ret, 0, v, 0,0,0, 1, nullptr, {}});
+        freeTemp(v);
         return expect(Tok::Semicolon, "expected ';'");
     }
 
@@ -1487,12 +1543,40 @@ struct Parser {
         if (!expect(Tok::LBrace, "expected '{' to open the class body")) return false;
 
         // Declarations first (the controls), then the functions. Both live inside the braces now.
-        while (!failed && atTypeKeyword()) { const CtrlType ty = currentType(); lex.advance(); parseDecl(ty); }
+        //
+        // A member and a typed function open with the SAME token: `int speed = 50;` and
+        // `int dimensions() { … }`. Two tokens of lookahead separate them, and only the one after
+        // the name says which, so the lexer is saved and rewound rather than committing. Without
+        // this the member parser swallows `int dimensions` and then fails on the '(' it did not
+        // expect, reporting a member error for a perfectly good function.
+        while (!failed && atTypeKeyword()) {
+            const CtrlType ty = currentType();
+            Lexer save = lex;
+            lex.advance();                       // past the type
+            const bool isFn = lex.kind == Tok::Ident && [&] {
+                Lexer probe = lex;
+                probe.advance();                 // past the name
+                return probe.kind == Tok::LParen;
+            }();
+            if (isFn) { lex = save; break; }     // a function: leave it for the loop below
+            parseDecl(ty);
+        }
         if (failed) return false;
 
         bool any = false;
         while (!failed && lex.kind != Tok::RBrace && lex.kind != Tok::End) {
-            if (lex.kind != Tok::Ident) { fail("expected a function, or '}' to close the class"); return false; }
+            // Every function DECLARES what it hands back, so a script reads like the compiled module
+            // it stands in for (`void tick()` beside `void tick() override`) and the host can tell a
+            // function that answers from one that acts. Not optional: a bare name accepted as
+            // implicit void would leave the two spellings meaning the same thing forever, and the
+            // point of the declaration is that the host can rely on it.
+            if (!atRetKeyword()) {
+                fail("a function declares what it returns: void, int or string");
+                return false;
+            }
+            const RetType ret = currentRet();
+            lex.advance();                       // past the return type
+            if (lex.kind != Tok::Ident) { fail("expected a function name after its return type"); return false; }
             if (fnCount >= kMaxEntryPoints) { fail("too many functions in one class"); return false; }
             // The engine copies entry names into a fixed buffer, so a longer one would be
             // TRUNCATED there. Two functions sharing a 23-character prefix would then land under
@@ -1501,7 +1585,8 @@ struct Parser {
             // script author is told rather than the engine guessing.
             if (lex.identLen > kMaxEntryName) { fail("function name too long"); return false; }
             fns[fnCount] = {lex.identBeg, static_cast<uint8_t>(lex.identLen),
-                            static_cast<uint16_t>(ir.count)};
+                            static_cast<uint16_t>(ir.count), ret};
+            curRet = ret;                        // what this function's `return` is checked against
             // The IR carries the start INDEX; the lowering turns it into a byte offset.
             ir.fnIrStart[fnCount] = static_cast<uint16_t>(ir.count);
             ir.fnCount = static_cast<uint8_t>(fnCount + 1);
@@ -1582,7 +1667,10 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
     // binding asks for an entry by name and gets an address inside the one emitted block.
     r.entryCount = parser.fnCount;
     for (uint8_t i = 0; i < parser.fnCount; i++)
-        r.entries[i] = {parser.fns[i].name, parser.fns[i].nameLen, ir.fnOffset[i]};
+        // The declared return type travels with the entry all the way to the engine: dropped
+        // here, every function reads as Void and runValue refuses to answer for any of them.
+        r.entries[i] = {parser.fns[i].name, parser.fns[i].nameLen, ir.fnOffset[i],
+                        parser.fns[i].ret};
     return r;
 }
 

@@ -12,7 +12,7 @@ The script transforms **one coordinate**. It needs no loop over the lights, beca
 
 ```c
 class MirrorModifier {
-  modifyLogical() { setXYZ(width - 1 - xPos, yPos, zPos); }   // mirror along x
+  void modifyLogical() { setXYZ(width - 1 - xPos, yPos, zPos); }   // mirror along x
 }
 ```
 

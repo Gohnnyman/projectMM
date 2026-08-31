@@ -73,6 +73,10 @@ public:
             // defineControls(). Before the binding's rebuildControls(), which turns the declared
             // list into UI cards.
             runDefineControls(engine_, sizePool_, poolCtx_);
+            // What the script SAYS it is, read once per compile rather than per frame. Both are
+            // cold-path questions the host asks about a program, the same two a compiled module
+            // answers with `Dim dimensions()` and `const char* tags()`.
+            readIdentity();
             // A compiled script is not an error, but it has something to say: how big it is, and
             // the one budget it is closest to using up. The card's memory figure is the ALLOCATION,
             // word-rounded, which says nothing about the program itself.
@@ -118,6 +122,19 @@ public:
     }
 
     /// Hand back everything this script reported to its owner. Called from a binding's release(),
+    /// The dimensionality the script declared, or D2 when it declared none.
+    ///
+    /// D2 is the fallback because it is what every script rendered as before scripts could say,
+    /// so a script that stays silent keeps behaving exactly as it did. An out-of-range answer is
+    /// treated the same way: a script cannot make the layer extrude along an axis that does not
+    /// exist.
+    Dim dimensions() const { return dim_; }
+
+    /// The emoji the script declared, or nullptr when it declared none (the binding then keeps its
+    /// own default). Points into the engine's string pool, which lives as long as the compiled
+    /// program, so it stays valid until the next compile replaces it.
+    const char* tags() const { return tags_; }
+
     /// AFTER engine().free(): the exec block is gone, so the owner's card must stop counting it.
     ///
     /// One home for all three bindings rather than two lines each: MoonLive::free() does not touch
@@ -197,7 +214,27 @@ public:
     bool ok() const { return engine_.ok(); }
 
 private:
+    /// Read what the script says it is, once per compile. Both questions a compiled module answers
+    /// with a member function, asked here the same way: by running the function the script wrote.
+    ///
+    /// A script that declares neither keeps the binding's own defaults, so every script written
+    /// before these existed behaves exactly as it did.
+    void readIdentity() {
+        dim_ = Dim::D2;
+        tags_ = nullptr;
+        // runValue answers only for a function whose DECLARED type matches, so a script that wrote
+        // `void dimensions()` gets the fallback rather than the return register's contents.
+        const uintptr_t d = engine_.runValue("dimensions", moonlive::RetType::Int, 2);
+        if (d >= 1 && d <= 3) dim_ = static_cast<Dim>(d);
+        const uintptr_t s = engine_.runValue("tags", moonlive::RetType::Str, 0);
+        if (s) tags_ = reinterpret_cast<const char*>(s);
+    }
+
     MoonLive engine_;
+    /// What the compiled script declared, cached: both are cold-path answers the host asks once,
+    /// and re-running a script function to answer them per frame would put a call on the tick path.
+    Dim         dim_  = Dim::D2;
+    const char* tags_ = nullptr;
     // Backing store for the status line: MoonModule::setStatus keeps a POINTER, so the text has to
     // outlive the call. The same module-owned pattern NetworkModule uses.
     char     statusBuf_[48] = {};

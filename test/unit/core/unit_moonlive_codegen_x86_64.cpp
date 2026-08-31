@@ -74,6 +74,21 @@ static void checkBytes(const HostAssembler& A, const uint8_t* want, size_t n) {
 // movImm — mov r64, imm32 (sign-extended)
 // =================================================================================================
 
+// retValue parks a script's `return` value where the ABI hands it back. STRUCTURAL, not exact
+// bytes: which vreg holds rax differs between Win64 and SysV, and what must hold on both is that
+// the destination IS rax. A wrong register here is silent: the host reads a plausible number.
+TEST_CASE("x86_64: retValue moves the value into rax, the return register") {
+    // R1 is never rax (rax is the LAST vreg by design, see the static_assert in the backend), so
+    // this always emits a real move rather than the elided self-copy.
+    HostAssembler a; a.retValue(R1); a.finalize();
+    REQUIRE_FALSE(a.overflowed());
+    REQUIRE(a.size() == 3);                  // REX.W + 0x89 + ModRM
+    CHECK((a.bytes()[0] & 0xFBu) == 0x48u);  // REX.W set; the R bit varies with the source register
+    CHECK(a.bytes()[1] == 0x89u);            // MOV r/m64, r64
+    // mod=11 (register direct) and rm=000 (rax): the destination is the return register.
+    CHECK((a.bytes()[2] & 0xC7u) == 0xC0u);
+}
+
 TEST_CASE("x86_64: movImm(R0, 42) is mov r64, 42 (sign-extended imm32)") {
     HostAssembler A;
     A.movImm(R0, 42);
@@ -540,7 +555,7 @@ TEST_CASE("x86_64: two sequential call-bearing loops stay under the density boun
     // densest ordinary script the hand-sized test buffers hold on arm64, so it serves as this
     // backend's density canary.
     const char* src =
-        "class T { tick() { "
+        "class T { void tick() { "
         "for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); } "
         "for (i = 0; i < 2; i = i + 1) { addLight(i, 1, 0); } "
         "} }\n";
@@ -561,8 +576,8 @@ TEST_CASE("x86_64: a class with a script-to-script call compiles") {
     const char* src =
         "class T {\n"
         "  byte level = 200;\n"
-        "  paint() { setRGB(1, level, 0, 0); }\n"
-        "  tick()  { setRGB(0, 7, 8, 9); paint(); }\n"
+        "  void paint() { setRGB(1, level, 0, 0); }\n"
+        "  void tick()  { setRGB(0, 7, 8, 9); paint(); }\n"
         "}\n";
     std::vector<uint8_t> out(mm::moonlive::codeCapFor(mm::moonlive::countTokens(src)));
     auto builtins = mm::moonlive::lightBuiltins();

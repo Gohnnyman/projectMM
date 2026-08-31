@@ -15,17 +15,39 @@ A class may also define functions of its own and **call them**, including callin
 class CrosshairEffect {
   byte bpm = 30;
 
-  defineControls() { addControl("bpm", bpm, 1, 240); }
+  void defineControls() { addControl("bpm", bpm, 1, 240); }
 
-  column() { for (y = 0; y < height; y = y + 1) { setRGB(y * width + scale(beat(bpm, t), width), 255, 40, 0); } }
-  tick()   { fill(0, 0, 0); column(); }
+  void column() { for (y = 0; y < height; y = y + 1) { setRGB(y * width + scale(beat(bpm, t), width), 255, 40, 0); } }
+  void tick()   { fill(0, 0, 0); column(); }
 }
 ```
 
 These are real calls, not pasted-in text: the callee gets its own frame when it runs, which is what
-lets one helper call another and lets a function recurse. A function takes no arguments and returns
-nothing yet, so a helper does a whole job rather than computing a value. `effects/crosshair.mle` is
-the worked example.
+lets one helper call another and lets a function recurse. A function takes no arguments yet, so a
+helper is parameterised through the class's members. `effects/crosshair.mle` is the worked example.
+
+**Every function declares what it returns**, the way the compiled module a script stands in for
+does: `void tick()` beside `void tick() override`. Three types, which is all the language has values
+for:
+
+| Type | Means | Example |
+|---|---|---|
+| `void` | it acts, it answers nothing | `void tick() { … }` |
+| `int` | a number: any whole value, and a `fixed` one | `int dimensions() { return 2; }` |
+| `string` | a literal | `string tags() { return "🌀"; }` |
+
+`return` leaves a function, with a value or without one. Inside `tick()` a bare `return;` is an
+early exit, which is what a guard wants:
+
+```
+void tick() {
+  if (width < 2) { return; }        // nothing to draw on a single column
+  fill(0, 0, 0);
+}
+```
+
+`string` names what comes back rather than introducing a string type: a script returns a literal,
+and building, joining or comparing text is out of scope.
 
 **A declaration is a MEMBER; `defineControls()` decides what the UI shows.** `byte bpm = 30;` is
 state the script owns: visible in every function, surviving every tick. Naming it in
@@ -81,6 +103,34 @@ a call to one declared further down reports `unknown function`. A function can a
 task has a fixed stack, so the alternative to a limit is a device that resets mid-frame. What you
 see if you hit it is the picture being wrong where the recursion stopped, on a device that keeps
 running. Nothing is reported; the exact depth is `kMaxCallDepth`.
+
+**A script says what it is: `dimensions()` and `tags()`.** Both optional, both named after the
+member functions a compiled module declares (`Dim dimensions() const override`,
+`const char* tags() const override`), and both read once when the script compiles.
+
+```
+class RainEffect {
+  int dimensions() { return 2; }        // an x/y picture
+  string tags() { return "✨"; }         // shown on the card and in the picker
+
+  void tick() { fill(0, 0, 40); }
+}
+```
+
+`dimensions()` returns 1, 2 or 3, and it decides how the layer EXTRUDES the script. A script that
+returns 1 paints the x=0 column and the framework fans it across the width; one that returns 2
+paints the z=0 slice and the framework copies it through the depth. So a script fills a rig it never
+indexed, and a wrong answer is visible: declare 1 and paint a picture, and only the first column
+survives. A script that stays silent is treated as 2, which is what every script rendered as before
+this existed.
+
+`tags()` returns the emoji shown beside the script, so a row in the picker reads like a compiled
+effect's. The vocabulary is shared with the compiled modules: 📊 audio-reactive, ✨ particles,
+🎯 aims moving heads. A script that declares none shows 📝, the mark of a scripted effect.
+
+Both reach the picker before a factory script is downloaded, because the build extracts them from
+the source into the catalog. That copy is for display only: once a script is on the device, the
+compiled script is what decides.
 
 **A script's ROLE is its file extension**: `.mle` an effect, `.mll` a layout, `.mlm` a modifier. One
 language, three names, the way GLSL uses `.vert`/`.frag` for one shading language. It is what a card

@@ -16,14 +16,16 @@ class ChaseEffect {
   int d = 0;
   int bri = 0;
 
-  defineControls() {
+  int dimensions() { return 3; }   // addresses every light, whatever shape the rig is
+
+  void defineControls() {
     addControl("bpm", bpm, 1, 240);
     addControl("spread", spread, 1, 60);
     addControl("tail", tail, 0, 255);
     addControl("hue", hue, 0, 255);
   }
 
-  tick() {
+  void tick() {
     fill(0, 0, 0);
     n = width * height * depth;
     // The band's leading edge, one lap of the rig per beat.

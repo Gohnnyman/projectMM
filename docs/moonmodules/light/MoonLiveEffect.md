@@ -10,7 +10,7 @@ A scripted effect names a **script file** under `/moonlive/`; the UI loads, edit
 
 ```
 class RandomPixelEffect {
-  tick() {
+  void tick() {
     setRGB(random16(256), 0, 0, 255);   // a random pixel, blue
     setRGB(5, random16(256), 0, 0);     // pixel 5, a random red
   }
@@ -53,13 +53,13 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
     int  dwell = 900;           // a value a byte cannot hold
     byte phase = 0;             // a member, not a control: the UI never shows it
 
-    defineControls() {
+    void defineControls() {
       addControl("speed", speed, 0, 99);
       addControl("hue", hue, 0, 255);
       addControl("dwell", dwell, 0, 1000);
     }
 
-    tick() { setRGB(speed, hue, phase, 255); }
+    void tick() { setRGB(speed, hue, phase, 255); }
   }
   ```
 
@@ -120,6 +120,15 @@ The coordinate is `xPos`/`yPos`/`zPos` rather than `x`/`y`/`z` so that **`x` and
 `width`/`height`/`depth` are the Layer's own dimensions, derived from the layouts and the modifier chain. An effect is *told* its canvas rather than declaring it: a size restated as a control is a second answer that can disagree with the first, and a script that sets `width` to 16 on an 8×8 panel draws off the edge. A [layout](MoonLiveLayout.md) is upstream of that grid — it is what the dimensions are derived *from* — so it names its own controls instead (`cols`, `rows`) and reads the grid only if it has a use for it.
 
 Reserving is what makes the guarantee hold: without it a declaration would silently shadow the value the engine handed in, and the script would disagree with its layer with no error anywhere.
+
+The grid is TOLD to a script; its own dimensionality is DECLARED. `int dimensions() { return 1; }`
+says the script paints a line, `2` an x/y picture, `3` the whole volume, and the Layer extrudes
+whatever it writes across the axes it did not iterate: a D1 script's x=0 column is fanned across the
+width, a D2 script's z=0 slice copied through the depth. That is what lets one script fill a 16x16
+panel and a 1x60x10 tube rig without knowing either shape. A script that declares nothing is treated
+as 2, which is what every script rendered as before it could say. `string tags()` alongside it gives
+the emoji the card and the picker show. Both are read once per compile; the full rules are in
+[the language reference](https://github.com/MoonModules/projectMM/blob/main/moonlive/README.md).
 
 ### The vocabulary — what a script can call
 

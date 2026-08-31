@@ -386,3 +386,54 @@ TEST_CASE("sequential loops reuse the same register, so a script is not billed p
     CHECK((r.ok || std::string(r.error) == moonlive::kCodegenFailed));
 #endif
 }
+
+// The DOCUMENTATION's script examples compile.
+//
+// A doc example is what a user copies first, so one that no longer parses is worse than no example:
+// it teaches a syntax the engine rejects, and it fails on their device rather than in CI. The
+// language gained declared return types and every example in four files went stale at once, which
+// is exactly the drift this catches.
+//
+// Read from the .md files rather than pasted here: a pasted copy stops being the documented one the
+// first time someone edits the real page.
+TEST_CASE("every script example in the docs compiles") {
+    const std::filesystem::path repo = scriptRoot().parent_path();
+    const std::filesystem::path pages[] = {
+        repo / "moonlive" / "README.md",
+        repo / "docs" / "moonmodules" / "light" / "MoonLiveEffect.md",
+        repo / "docs" / "moonmodules" / "light" / "MoonLiveLayout.md",
+        repo / "docs" / "moonmodules" / "light" / "MoonLiveModifier.md",
+    };
+
+    int checked = 0;
+    for (const auto& page : pages) {
+        INFO("page: ", page.string());
+        REQUIRE(std::filesystem::exists(page));
+        const std::string text = read(page);
+
+        // Every fenced block that declares a class is a script. A fence holding a fragment (a
+        // control table, a shell line) has no `class` and is skipped: the point is to compile what
+        // a reader would paste as a whole script.
+        size_t pos = 0;
+        while ((pos = text.find("\n```", pos)) != std::string::npos) {
+            const size_t bodyStart = text.find('\n', pos + 1);
+            if (bodyStart == std::string::npos) break;
+            const size_t end = text.find("\n```", bodyStart);
+            if (end == std::string::npos) break;
+            const std::string block = text.substr(bodyStart + 1, end - bodyStart - 1);
+            pos = end + 1;
+            if (block.find("class ") == std::string::npos) continue;
+
+            INFO("block: ", block);
+            moonlive::MoonLive eng;
+            // The EFFECT vocabulary for every block: the three role tables are aliases of one light
+            // vocabulary (pinned by "the three roles are handed the same table"), so which one is
+            // passed is documentation rather than a behavioral choice.
+            CHECK(eng.compile(block.c_str(), moonlive::lightBuiltins(), moonlive::effectSysVars()));
+            checked++;
+        }
+    }
+    // A page that stopped holding examples would make this vacuously green.
+    CHECK_MESSAGE(checked > 0, "no doc examples found: the test would pass without checking anything");
+    MESSAGE("compiled " << checked << " script examples from the docs");
+}

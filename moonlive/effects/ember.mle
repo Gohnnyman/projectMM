@@ -8,13 +8,15 @@ class EmberEffect {
   byte  cycle = 20;
   byte  heat[16];
 
-  defineControls() {
+  int dimensions() { return 1; }   // a line of lights: extrude fans it across a wider rig
+
+  void defineControls() {
     addControl("cool", cool, 1, 120);
     addControl("spark", spark, 0, 200);
     addControl("cycle", cycle, 1, 120);
   }
 
-  tick() {
+  void tick() {
     for (i = 0; i < 16; i = i + 1) {
       if (heat[i] > cool) { heat[i] = heat[i] - cool; } else { heat[i] = 0; }
     }

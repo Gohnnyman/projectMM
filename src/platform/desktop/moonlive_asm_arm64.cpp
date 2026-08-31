@@ -225,6 +225,14 @@ void HostAssembler::branchIf(Cond c, Label l) {            // b.cond l  (offset 
 // cmp + b.cond here, and one instruction on RISC-V and Xtensa. Both spellings live behind the
 // same name, which is what lets the IR walk be written once.
 void HostAssembler::movReg(Reg d, Reg a) { addImm(d, a, 0); }    // mov wD, wA (add wD, wA, #0)
+
+// The AAPCS64 return register is x0, which is ALSO vreg R0 (the buf argument): a script that
+// returns while R0 still holds buf would emit `mov x0, x0`, which is correct and free. Emitted as
+// a 64-bit move rather than a 32-bit one so a returned POINTER (tags() returns a string) keeps its
+// top half; a numeric return is unaffected because the host reads it as a uintptr_t either way.
+void HostAssembler::retValue(Reg a) {
+    emit32(0xaa0003e0u | (uint32_t(mr(a)) << 16));   // mov x0, x<a>
+}
 void HostAssembler::branchGeU(Reg a, Reg b, Label l) { cmp(a, b); branchIf(Cond::Hs, l); }
 void HostAssembler::branchGeS(Reg a, Reg b, Label l) { cmp(a, b); branchIf(Cond::Ge, l); }
 void HostAssembler::branchNe(Reg a, Reg b, Label l)  { cmp(a, b); branchIf(Cond::Ne, l); }

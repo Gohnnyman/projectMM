@@ -1,7 +1,7 @@
 // Mirror along x. Reflecting around `width` (not a fixed 255) keeps every light in the grid.
 
 class MirrorModifier {
-  modifyLogical() {
+  void modifyLogical() {
     setXYZ(width - 1 - xPos, yPos, zPos);
   }
 }

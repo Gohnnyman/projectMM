@@ -669,7 +669,11 @@ bool HttpServerModule::removeRecursive(const char* path, uint8_t depth) {
     bool ok = true;
     for (uint8_t i = 0; i < lvl.count; i++) {
         char child[192];
-        std::snprintf(child, sizeof(child), "%s/%s", path, lvl.names[i]);
+        // A TRUNCATED child path names a different file than the one listed, so deleting through it
+        // would either fail or, worse, hit a shorter path that happens to exist. snprintf reports
+        // the length it wanted: anything at or past the buffer means the name did not fit.
+        const int n = std::snprintf(child, sizeof(child), "%s/%s", path, lvl.names[i]);
+        if (n < 0 || static_cast<size_t>(n) >= sizeof(child)) { ok = false; continue; }
         if (!removeRecursive(child, static_cast<uint8_t>(depth + 1))) ok = false;
     }
     // A level wider than kMax leaves entries behind, so the directory is still not empty. Report the
@@ -1204,6 +1208,15 @@ void HttpServerModule::writeModuleJson(JsonSink& sink, MoonModule* mod) {
         static_cast<unsigned>(mod->tickTimeUs()),
         static_cast<unsigned>(mod->classSize()),
         static_cast<unsigned>(mod->dynamicBytes()));
+    // What this INSTANCE says it is, which for a scripted module comes from the script it loaded.
+    // /api/types answers per TYPE, and two MoonLive effects running different scripts share one
+    // entry there, so the instance has to speak for itself or the UI shows both the same emoji.
+    //
+    // Only when there is something to say: a module with no tags of its own emits nothing.
+    if (const char* tg = mod->tags(); tg && tg[0]) {
+        sink.append(",\"tags\":");
+        sink.writeJsonString(tg);
+    }
     writeStatus(sink, mod);
     // userEditable: omit when true (the common case) to save bytes: the UI
     // treats absent as editable, same convention as the control hidden/readonly
@@ -2253,11 +2266,25 @@ void HttpServerModule::serveScriptCatalog(platform::TcpConnection& conn) {
 
     JsonSink sink(conn);
     sink.append("{\"tag\":");
-    // A version ending in -dev has no release tag upstream; main is where those scripts live.
+    // A version ending in -dev has no release tag upstream, so it fetches from the COMMIT it was
+    // built from: kBuildId is that short hash, and raw.githubusercontent.com serves any commit-ish.
+    //
+    // The hash rather than a branch name, because a dev build's scripts must match its own engine.
+    // A branch moves under the device mid-session, and `main` is simply the wrong tree while a
+    // language change is in flight: this branch adds declared return types, so main's scripts no
+    // longer compile against this firmware. The hash cannot drift.
+    //
+    // A `+` suffix marks a DIRTY tree, whose hash is still a real commit (the parent of the
+    // uncommitted work), so it is stripped rather than refused. A commit that was never pushed is
+    // not on GitHub at all and the fetch 404s, which the browser already reports as a failed
+    // download.
     const char* v = kVersion;
     const bool dev = std::strstr(v, "-dev") != nullptr;
     if (dev) {
-        sink.writeJsonString("main");
+        char commit[24];
+        std::snprintf(commit, sizeof(commit), "%s", kBuildId);
+        for (char* c = commit; *c; c++) if (*c == '+') { *c = '\0'; break; }
+        sink.writeJsonString(commit[0] ? commit : "main");
     } else {
         char tag[32];
         std::snprintf(tag, sizeof(tag), "v%s", v);
@@ -2266,20 +2293,35 @@ void HttpServerModule::serveScriptCatalog(platform::TcpConnection& conn) {
     sink.append(",\"dir\":");
     sink.writeJsonString(moonlive::kFactoryScriptDir);
 
+    // `dim` and `tags` alongside each name, so a picker can show a factory script the way the
+    // module picker shows a type: its dimension and its emoji, BEFORE it is downloaded. Both are
+    // extracted from the script's own source at build time, so this is a copy for display; the
+    // compiled script is what decides behavior once it is on the device.
     auto emit = [&sink](const char* key, const char* folder,
-                        const char* const* names, size_t count) {
+                        const char* const* names, const unsigned char* dims,
+                        const char* const* tags, size_t count) {
         sink.appendf(",\"%s\":{\"folder\":\"%s\",\"names\":[", key, folder);
         for (size_t i = 0; i < count; i++) {
             if (i) sink.append(",");
             sink.writeJsonString(names[i]);
         }
+        sink.append("],\"dim\":[");
+        for (size_t i = 0; i < count; i++) sink.appendf(i ? ",%u" : "%u", unsigned(dims[i]));
+        sink.append("],\"tags\":[");
+        for (size_t i = 0; i < count; i++) {
+            if (i) sink.append(",");
+            sink.writeJsonString(tags[i]);
+        }
         sink.append("]}");
     };
     emit("effects", moonlive::kEffectFolder, moonlive::kEffectCatalog,
+         moonlive::kEffectCatalogDim, moonlive::kEffectCatalogTags,
          moonlive::kEffectCatalogCount);
     emit("layouts", moonlive::kLayoutFolder, moonlive::kLayoutCatalog,
+         moonlive::kLayoutCatalogDim, moonlive::kLayoutCatalogTags,
          moonlive::kLayoutCatalogCount);
     emit("modifiers", moonlive::kModifierFolder, moonlive::kModifierCatalog,
+         moonlive::kModifierCatalogDim, moonlive::kModifierCatalogTags,
          moonlive::kModifierCatalogCount);
     sink.append("}");
     sink.flush();

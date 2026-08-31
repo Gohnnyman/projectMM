@@ -569,8 +569,12 @@ inline SinkSlot* ownedSlot(bool claim) MM_NONBLOCKING {
 /// live would hand this thread's context to the next claimer, whose script would then reach a dead
 /// engine through it.
 inline void releaseIfEmpty(SinkSlot* s) MM_NONBLOCKING {
+    // EVERY sink the slot carries, motion and coord included: releasing while one is still
+    // installed lets another thread claim the slot and reach a context whose run has ended. Two
+    // were missed when motion/coord were added, which is why this reads as a list rather than a
+    // pair of checks: a new sink that is not named here reintroduces exactly that bug.
     if (s && !s->sink.fn && !s->sink.ctx && !s->canvas.data && !s->controls.fn && !s->fade.fn &&
-        !s->poolSize.fn && !s->pool.pool)
+        !s->motion.fn && !s->coord.fn && !s->poolSize.fn && !s->pool.pool)
         s->owner.store(0, std::memory_order_release);
 }
 }  // namespace detail
@@ -883,15 +887,19 @@ extern "C" inline uint32_t mm_light_onBeat(const uintptr_t*, uint32_t, const uin
 extern "C" inline uint32_t mm_light_set_pan(const uintptr_t* args, uint32_t, const uint8_t*) {
     const MotionSink& m = motionSink();
     if (!m.fn) return 0;
-    const uint32_t v = uint32_t(args[1]);
-    m.fn(m.ctx, MotionAxis::Pan, uint32_t(args[0]), static_cast<uint8_t>(v > 255 ? 255 : v));
+    // byteArg, not a raw widen: a script computing an aim below zero (pan - 50 past the
+    // end) reinterprets as a huge unsigned here and clamped to 255, slamming the head to the
+    // OPPOSITE extreme. byteArg is the one home for the signed reading every other builtin uses.
+    m.fn(m.ctx, MotionAxis::Pan, uint32_t(args[0]), byteArg(args[1]));
     return 0;
 }
 extern "C" inline uint32_t mm_light_set_tilt(const uintptr_t* args, uint32_t, const uint8_t*) {
     const MotionSink& m = motionSink();
     if (!m.fn) return 0;
-    const uint32_t v = uint32_t(args[1]);
-    m.fn(m.ctx, MotionAxis::Tilt, uint32_t(args[0]), static_cast<uint8_t>(v > 255 ? 255 : v));
+    // byteArg, not a raw widen: a script computing an aim below zero (pan - 50 past the
+    // end) reinterprets as a huge unsigned here and clamped to 255, slamming the head to the
+    // OPPOSITE extreme. byteArg is the one home for the signed reading every other builtin uses.
+    m.fn(m.ctx, MotionAxis::Tilt, uint32_t(args[0]), byteArg(args[1]));
     return 0;
 }
 

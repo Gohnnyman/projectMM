@@ -42,6 +42,15 @@ using AnimFn = void (*)(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t)
 // signature compileSource()'d code is called through.
 using CtrlFn = void (*)(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t, const uint8_t* ctrls);
 
+/// The SAME emitted function, called for its answer rather than its effect: identical parameters,
+/// identical frame, only the host's view of the return register differs. A script function that
+/// ends in `return <expr>` parks its value there, which is what lets `dimensions()` and `tags()`
+/// report to the host without a second calling convention.
+///
+/// Calling a function that returns nothing through this alias reads whatever the register held, so
+/// the binding calls it only for functions the script actually declared: `hasEntry(name)` first.
+using ValueFn = uintptr_t (*)(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t, const uint8_t* ctrls);
+
 // Emit the fixed-color fill routine's machine code into `out` (capacity `cap` bytes), for
 // the ISA this translation unit was compiled for, with the color baked in. Returns the
 // number of bytes written, or 0 if `cap` is too small (the caller degrades). The emitted

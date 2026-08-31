@@ -8,13 +8,13 @@ class LatticeLayout {
   byte rows = 3;
   byte layers = 5;
 
-  defineControls() {
+  void defineControls() {
     addControl("cols", cols, 1, 32);
     addControl("rows", rows, 1, 32);
     addControl("layers", layers, 1, 32);
   }
 
-  placeLights() {
+  void placeLights() {
     for (z = 0; z < layers; z = z + 1) {
       for (y = 0; y < rows; y = y + 1) {
         for (x = 0; x < cols; x = x + 1) {

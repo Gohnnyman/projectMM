@@ -404,6 +404,13 @@ void HostAssembler::movReg(Reg d, Reg a) {
     emitMovRegReg(this, xr(d), xr(a));
 }
 
+// The System V return register is rax. emitMovRegReg emits a 64-bit move (REX.W), so a returned
+// pointer survives whole: tags() hands back a string address, not a number.
+void HostAssembler::retValue(Reg a) {
+    if (xr(a) == x64::RAX) return;                       // already there
+    emitMovRegReg(this, x64::RAX, xr(a));
+}
+
 // --- arithmetic ---------------------------------------------------------------------------------
 
 // add r64, imm  (REX.W 83 /0 ib when the immediate fits a signed byte — the common case: loop

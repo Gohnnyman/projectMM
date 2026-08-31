@@ -6,14 +6,18 @@ class RainEffect {
   byte wind = 128;
   byte drops = 3;
 
-  defineControls() {
+  int dimensions() { return 2; }   // an x/y picture; extrude copies it through the depth
+
+  string tags() { return "✨"; }   // particles
+
+  void defineControls() {
     pool(400);
     addControl("fall", fall, 4, 80);
     addControl("wind", wind, 0, 255);
     addControl("drops", drops, 1, 12);
   }
 
-  tick() {
+  void tick() {
     fade(90);
 
     // 16384 is straight down. Wind leans the launch either side of it.

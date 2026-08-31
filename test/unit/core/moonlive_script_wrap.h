@@ -5,7 +5,7 @@
 
 // Wrap a bare statement body in the class and entry point a MoonLive script needs.
 //
-// A script is a class: `class T { tick() { … } }`. Nearly every test here is about ONE behavior
+// A script is a class: `class T { void tick() { … } }`. Nearly every test here is about ONE behavior
 // inside that body (a loop counter surviving a call, a control keeping its value, a golden byte
 // sequence), and spelling the enclosing class out at every call site would bury the assertion under
 // four lines of identical ceremony. This puts the ceremony in one place so a test reads as what it
@@ -77,10 +77,10 @@ inline const char* mmScriptAs(const char* entry, const char* body) {
 
     if (declEnd != body) {
         const int declLen = static_cast<int>(declEnd - body);
-        std::snprintf(wrapped, kSlotBytes, "class T {\n%.*s\n  %s() {\n%s\n  }\n}\n",
+        std::snprintf(wrapped, kSlotBytes, "class T {\n%.*s\n  void %s() {\n%s\n  }\n}\n",
                       declLen, body, entry, declEnd);
     } else {
-        std::snprintf(wrapped, kSlotBytes, "class T {\n  %s() {\n%s\n  }\n}\n", entry, body);
+        std::snprintf(wrapped, kSlotBytes, "class T {\n  void %s() {\n%s\n  }\n}\n", entry, body);
     }
     return wrapped;
 }

@@ -12,12 +12,14 @@ class OctopusEffect {
   byte cx = 0;
   byte cy = 0;
 
-  defineControls() {
+  int dimensions() { return 2; }   // an x/y picture; extrude copies it through the depth
+
+  void defineControls() {
     addControl("speed", speed, 1, 120);
     addControl("branches", branches, 1, 8);
   }
 
-  tick() {
+  void tick() {
     cx = scale(32768, width);
     cy = scale(32768, height);
 

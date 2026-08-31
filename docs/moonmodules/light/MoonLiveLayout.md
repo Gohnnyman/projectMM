@@ -15,12 +15,12 @@ class GridLayout {
   byte cols = 16;
   byte rows = 16;
 
-  defineControls() {
+  void defineControls() {
     addControl("cols", cols, 1, 64);
     addControl("rows", rows, 1, 64);
   }
 
-  placeLights() {
+  void placeLights() {
     for (y = 0; y < rows; y = y + 1) {
       for (x = 0; x < cols; x = x + 1) {
         addLight(x, y, 0);

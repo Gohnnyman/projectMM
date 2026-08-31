@@ -2,7 +2,9 @@
 // and the smallest script that shows the engine running.
 
 class RandomPixelEffect {
-  tick() {
+  int dimensions() { return 1; }   // a line of lights: extrude fans it across a wider rig
+
+  void tick() {
     setRGB(random16(256), random16(256), random16(256), random16(256));
   }
 }

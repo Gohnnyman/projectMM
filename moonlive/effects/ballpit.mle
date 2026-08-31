@@ -8,14 +8,18 @@ class BallpitEffect {
 
   bool last = false;
 
-  defineControls() {
+  int dimensions() { return 2; }   // an x/y picture; extrude copies it through the depth
+
+  string tags() { return "✨"; }   // particles
+
+  void defineControls() {
     pool(64);
     addControl("balls", balls, 4, 60);
     addControl("size", size, 1, 5);
     addControl("bouncy", bouncy, 60, 255);
   }
 
-  tick() {
+  void tick() {
     fill(0, 0, 0);
 
     // A ball roughly ten times a second, on the clock rather than per frame, so the pit fills at

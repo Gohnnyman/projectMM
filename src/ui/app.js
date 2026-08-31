@@ -1726,17 +1726,10 @@ function createCard(mod, depth) {
             addBtn.className = "add-btn";
             addBtn.textContent = "+ add module";
             addBtn.addEventListener("click", () => {
-                // Hide the button while the picker is open (the picker takes its
-                // place); restore it once the picker is removed (cancel/create/Esc).
-                addBtn.style.display = "none";
+                // The picker is a modal, so the button stays where it is: it used to be hidden
+                // and restored through a MutationObserver because the picker was appended into
+                // the footer and took the button's place.
                 openTypePicker(mod, footer);
-                const obs = new MutationObserver(() => {
-                    if (!footer.querySelector(".type-picker")) {
-                        addBtn.style.display = "";
-                        obs.disconnect();
-                    }
-                });
-                obs.observe(footer, {childList: true});
             });
             footer.appendChild(addBtn);
             card.appendChild(footer);
@@ -1962,10 +1955,15 @@ function docPathForType(moduleType) {
 // Curated emoji string for a live module: its role emoji plus the type's
 // `tags` from /api/types, deduplicated, in role-first order. "" if the type
 // isn't loaded yet. Used on the card title and in the type picker.
+//
+// The INSTANCE's own tags win when it has them. A scripted module answers from the script it
+// loaded, so two MoonLive effects running different scripts read differently while sharing one
+// entry in /api/types: the audio one shows 📊, the moving-head one 🎯. A compiled module sends
+// nothing here and keeps its type's answer.
 function emojiTagsForMod(mod) {
     if (!mod) return "";
     const t = availableTypes.find(t => t.name === mod.type) || {role: mod.role, tags: ""};
-    return emojiTagsFor(t).join("");
+    return emojiTagsFor(mod.tags ? {...t, tags: mod.tags} : t).join("");
 }
 
 // Whether a control appears in the generic control list: false for controls the module marked
@@ -2349,13 +2347,42 @@ function createControl(moduleName, moduleType, ctrl) {
             const bar = document.createElement("div");
             bar.className = "fileedit-bar";
 
-            // A native <select>: keyboard-accessible, needs no CSS to look right, and matches every
-            // other picker in this UI. Populated from the directory listing, so a file created in
-            // the File Manager shows up on the next render without a reload.
-            const picker = document.createElement("select");
+            // A select-SHAPED button, opening the shared picker. It reads as a select (the current
+            // name, then the ⌄ affordance) and behaves as one, but the list it opens is the same
+            // widget the module picker uses: search, emoji chips, keyboard, one row per script.
+            // A native <select> can only render plain text, so a script's emoji and dimension had
+            // nowhere to go.
+            //
+            // It presents the SAME surface a <select> does (`value`, `options`, `disabled`, and a
+            // `change` event), so everything around it (the fork/share/delete labels, the editor
+            // load, the download-on-pick) is unchanged and unaware.
+            const picker = document.createElement("button");
+            picker.type = "button";
             picker.className = "control-select fileedit-pick";
             picker.dataset.mid = moduleName;
             picker.dataset.key = ctrl.name;
+            // The options, as data. `fillPicker` appends option elements exactly as it did to the
+            // <select>; they are never rendered, they are the list the modal is built from.
+            picker.options = [];
+            picker.appendChild = (o) => { picker.options.push(o); return o; };
+            const paintPicker = () => {
+                const cur = picker.options.find(o => o.value === picker._value);
+                picker.textContent = cur ? cur.textContent : "(none)";
+                const caret = document.createElement("span");
+                caret.className = "fileedit-pick-caret";
+                caret.textContent = "\u2304";        // ⌄, the select affordance
+                picker.append(caret);
+            };
+            Object.defineProperty(picker, "value", {
+                get: () => picker._value ?? "",
+                set: (v) => { picker._value = String(v ?? ""); paintPicker(); },
+            });
+            picker._value = "";
+            // innerHTML = "" is how fillPicker clears the list; keep that meaning.
+            Object.defineProperty(picker, "innerHTML", {
+                set: (v) => { if (v === "") { picker.options = []; picker.replaceChildren(); } },
+                get: () => "",
+            });
             // Which scripts this picker can offer that are not on the device yet. Names only:
             // picking one downloads it. Empty for a filepath control that is not a script picker.
             let remote = [];
@@ -2417,9 +2444,23 @@ function createControl(moduleName, moduleType, ctrl) {
                 // shows what the module is pointing at, rather than silently appearing unset.
                 const cur = String(ctrl.value ?? "");
                 if (cur && !names.includes(cur) && !remote.includes(cur)) names.unshift(cur);
+                // What the catalog says each factory script is: its dimension and its own emoji,
+                // read from the script's `int dimensions()` / `string tags()` at build time. So a
+                // row reads like the module picker's rows do, BEFORE the script is downloaded. A
+                // script the catalog does not carry (the user's own) simply has no prefix.
+                const decl = (n) => {
+                    const g = cat && cat[group];
+                    if (!g || !g.names) return "";
+                    const i = g.names.indexOf(n);
+                    if (i < 0) return "";
+                    const marks = [];
+                    if (g.tags && g.tags[i]) marks.push(g.tags[i]);
+                    if (g.dim && DIM_EMOJI[g.dim[i]]) marks.push(DIM_EMOJI[g.dim[i]]);
+                    return marks.length ? marks.join("") + " " : "";
+                };
                 for (const n of names) {
                     const o = document.createElement("option");
-                    o.value = n; o.textContent = n;
+                    o.value = n; o.textContent = decl(n) + n;
                     picker.appendChild(o);
                 }
                 // Marked, because picking one costs a download and can fail. One list rather than
@@ -2427,7 +2468,8 @@ function createControl(moduleName, moduleType, ctrl) {
                 // the device's business.
                 for (const n of remote) {
                     const o = document.createElement("option");
-                    o.value = n; o.textContent = "\u2601 " + n;   // cloud: not on this device yet
+                    o.value = n;
+                    o.textContent = "\u2601 " + decl(n) + n;   // cloud: not on this device yet
                     picker.appendChild(o);
                 }
                 picker.value = cur;
@@ -2591,19 +2633,75 @@ function createControl(moduleName, moduleType, ctrl) {
 
             // Re-read after the modal closes: it edits the same file through the same endpoints, so
             // whatever it saved is what this pane should now show.
+            // One row per script, shaped like a type so the shared picker can render it: the name is
+            // what the control stores, the dimension and emoji come from the catalog, and the role
+            // is what the picker prints on the right.
+            const openScriptPicker = async () => {
+                if (picker.disabled) return;
+                const group = mlGroupForExt(ext);
+                const cat = group ? await mlFetchCatalog().catch(() => null) : null;
+                const g = (cat && cat[group]) || {};
+                const roleWord = group ? group.replace(/s$/, "") : "file";
+                const seen = new Set();
+                const items = [];
+                const add = (n, remoteFlag) => {
+                    if (seen.has(n)) return;
+                    seen.add(n);
+                    const i = (g.names || []).indexOf(n);
+                    items.push({
+                        name: n,
+                        // The cloud marks a script the device does not hold yet: picking it costs a
+                        // download, which is worth knowing before choosing.
+                        displayName: (remoteFlag ? "\u2601 " : "") + n,
+                        role: roleWord,
+                        tags: i >= 0 && g.tags ? (g.tags[i] || "") : "",
+                        dim: i >= 0 && g.dim ? g.dim[i] : 0,
+                    });
+                };
+                for (const o of picker.options) if (o.value) add(o.value, remote.includes(o.value));
+                for (const n of (g.names || [])) add(n, !localNames.has(n) && remote.includes(n));
+                if (!items.length) return;
+                // Anchored to the STACK, not the button: openPicker renders inside its anchor and
+                // takes that element's width, so anchoring to a toolbar button drew the list as an
+                // unreadable sliver. The stack is the control's full-width column, which is the
+                // same shape the module picker's footer anchor gives it.
+                openPicker(picker, {
+                    items,
+                    actionLabel: "use",
+                    currentType: picker.value,
+                    // Route through the <select>'s own change handler, which already downloads a
+                    // remote script, updates the delete label and loads the editor. One path for
+                    // both ways of choosing.
+                    commit: (name) => {
+                        picker.value = name;
+                        picker.dispatchEvent(new Event("change"));
+                    },
+                });
+            };
+            picker.addEventListener("click", openScriptPicker);
+
             popBtn.addEventListener("click", async () => {
                 if (!picker.value) return;
                 // Flush unsaved edits first: the modal loads the file from the device, so opening
                 // it on a dirty pane would show stale bytes and then save them back over the edit.
+                // save() RESOLVES on a failed write (it reports, it does not throw), so the flush is
+                // only trustworthy if the pane came clean: opening anyway would discard the edit.
                 await editor.save();
+                if (editor.isDirty()) { alert("Not opening: this script still has unsaved changes."); return; }
                 const p = await scriptPathOf(picker.value);
                 await openFileEditor(p);
                 await editor.load(p);
             });
 
             picker.addEventListener("change", async () => {
-                // Same reason as the modal above: switching files discards the edit otherwise.
+                // Same reason as the modal above: switching files discards the edit otherwise, and
+                // a save that failed leaves the pane dirty while resolving normally.
                 await editor.save();
+                if (editor.isDirty()) {
+                    alert("Not switching: this script still has unsaved changes.");
+                    picker.value = String(ctrl.value ?? "");
+                    return;
+                }
                 const chosen = picker.value;
                 // A factory script the device does not hold yet: download it BEFORE selecting it,
                 // so the module never points at a file that is not there. A failure reports and
@@ -4535,16 +4633,32 @@ function openReplacePicker(targetMod, anchorEl) {
 
 function openPicker(anchorEl, opts) {
     // Close any existing picker
+    // Its MODAL, not just the inner block: removing only the picker would leave an open
+    // dialog with an empty backdrop over the page.
+    document.querySelectorAll(".type-picker-modal").forEach(d => d.remove());
     document.querySelectorAll(".type-picker").forEach(p => p.remove());
 
-    // Alphabetical by display name so the picker list is scannable regardless of registration
-    // order (localeCompare: case-insensitive, locale-aware).
-    const filtered = availableTypes
-        .filter(t => opts.roles.includes(t.role))
+    // The items are the CALLER's, defaulting to the registered types filtered by role. Everything
+    // below works on {name, displayName, role, tags, dim}, so anything describing itself that way
+    // gets this widget: the MoonLive script picker passes its scripts and inherits the search box,
+    // the emoji chip filter, the keyboard handling and the row layout rather than growing its own.
+    //
+    // Sorting stays here so every picker is ordered the same way, and stays alphabetical by display
+    // name so the list is scannable regardless of registration order (localeCompare:
+    // case-insensitive, locale-aware).
+    const source = opts.items || availableTypes.filter(t => opts.roles.includes(t.role));
+    const filtered = [...source]
         .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
 
     const picker = document.createElement("div");
     picker.className = "type-picker";
+    // Dismiss: closes the modal when there is one (which removes it), and falls back to removing
+    // the picker itself. One function so every exit path (cancel, Enter, double-click, commit)
+    // dismisses the same way.
+    const closePicker = () => {
+        const dlg = picker.closest("dialog");
+        if (dlg) dlg.close(); else picker.remove();
+    };
 
     const search = document.createElement("input");
     search.type = "text";
@@ -4585,7 +4699,7 @@ function openPicker(anchorEl, opts) {
     actions.className = "type-picker-actions";
     const cancelBtn = document.createElement("button");
     cancelBtn.textContent = "cancel";
-    cancelBtn.addEventListener("click", () => picker.remove());
+    cancelBtn.addEventListener("click", () => closePicker());
     const createBtn = document.createElement("button");
     createBtn.className = "create";
     createBtn.textContent = opts.actionLabel;
@@ -4645,7 +4759,7 @@ function openPicker(anchorEl, opts) {
             });
             item.addEventListener("dblclick", () => {
                 opts.commit(t.name);
-                picker.remove();
+                closePicker();
             });
             list.appendChild(item);
         });
@@ -4679,10 +4793,10 @@ function openPicker(anchorEl, opts) {
             e.preventDefault();
             if (selectedType) {
                 opts.commit(selectedType);
-                picker.remove();
+                closePicker();
             }
         } else if (e.key === "Escape") {
-            picker.remove();
+            closePicker();
         }
     });
 
@@ -4693,11 +4807,27 @@ function openPicker(anchorEl, opts) {
     createBtn.addEventListener("click", () => {
         if (selectedType) {
             opts.commit(selectedType);
-            picker.remove();
+            closePicker();
         }
     });
 
-    anchorEl.appendChild(picker);
+    // A MODAL, not a block appended to whatever opened it. Appending made the picker inherit its
+    // anchor's width and position: from a card footer it drew at the bottom of the card, far from
+    // the field being changed, and from a toolbar button it collapsed to an unreadable sliver.
+    // A dialog sits above the page at its own size wherever it is opened from.
+    //
+    // The native <dialog>, the same one the File Manager's editor uses: Esc and the backdrop are
+    // the browser's job, so there is no overlay, no focus trap and no scroll lock to maintain here.
+    const dlg = document.createElement("dialog");
+    dlg.className = "type-picker-modal";
+    dlg.appendChild(picker);
+    document.body.appendChild(dlg);
+    // Esc closes it (the browser fires `close`), and so does clicking the backdrop: the dialog
+    // element itself is the backdrop, so a click that lands on it rather than on the picker inside
+    // is a click outside.
+    dlg.addEventListener("close", () => dlg.remove());
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+    dlg.showModal();
     refresh();
     search.focus();
 }
@@ -5148,7 +5278,17 @@ async function mlDownloadScript(name, group) {
     const url = "https://raw.githubusercontent.com/MoonModules/projectMM/"
               + encodeURIComponent(cat.tag) + "/moonlive/" + folder + "/" + encodeURIComponent(name);
     const res = await fetch(url);
-    if (!res.ok) throw new Error(res.status === 404 ? name + " is not in this firmware's release" : "download failed");
+    // A 404 has two causes now. A RELEASE build fetches from its tag, so a missing script means the
+    // release does not carry it. A DEV build fetches from the commit it was built from, so a 404
+    // usually means that commit was never pushed: the scripts exist locally and GitHub has never
+    // seen them. Say which, because the fix differs (wait for a release vs push the branch).
+    if (!res.ok) {
+        if (res.status !== 404) throw new Error("download failed");
+        const dev = !String(cat.tag || "").startsWith("v");
+        throw new Error(dev
+            ? name + " is not on GitHub at commit " + cat.tag + " (push the branch, or the script is new)"
+            : name + " is not in this firmware's release");
+    }
     const text = await res.text();
     if (!text.trim()) throw new Error("downloaded script is empty");
     // The factory directory has to exist first: POST /api/file does not create parents, so on a

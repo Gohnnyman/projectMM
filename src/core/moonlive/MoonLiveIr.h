@@ -145,6 +145,14 @@ enum class IrOp : uint8_t {
                // so a backend that forgets it fails to COMPILE rather than silently comparing the
                // wrong way, which is why a width lives in its own op rather than a field.
     BranchNe,  // if (a != b) goto label `imm` — the BACKWARD edge that closes the loop.
+    Ret,       // return from the enclosing function, with the value in `a` when `imm` is 1.
+               //
+               // Does NOT emit a bare return instruction: the epilogue also decrements the recursion
+               // depth counter, so an early exit that jumped straight to `ret` would leak a level
+               // per call. This lowers to a jump to the function's ONE exit, which the lowering
+               // binds ahead of that decrement, so every path out of a function unwinds the same
+               // way. A value is parked in the ABI's return register first (retValue), because the
+               // teardown is what makes that register visible to the caller.
     Spill,     // frame slot `imm` = a   — a value the register file could not hold, parked
     Reload,    // dst = frame slot `imm` — the same value brought back for one use
 };

@@ -94,7 +94,7 @@ struct HeadRig {
 TEST_CASE("a script aims each head with setPan and setTilt") {
     HeadRig rig;
     rig.run("class Aim {"
-            "  tick() {"
+            "  void tick() {"
             "    for (i = 0; i < height; i = i + 1) {"
             "      setPan(i, 10 + i * 20);"
             "      setTilt(i, 200 - i * 20);"
@@ -113,7 +113,7 @@ TEST_CASE("a script aims each head with setPan and setTilt") {
 TEST_CASE("setPan on a light with no motion channel writes nothing") {
     HeadRig strip(/*withMotion=*/false);
     strip.run("class Aim {"
-              "  tick() {"
+              "  void tick() {"
               "    fill(0, 0, 0);"
               "    for (i = 0; i < height; i = i + 1) { setPan(i, 255); setTilt(i, 255); }"
               "  }"
@@ -129,7 +129,7 @@ TEST_CASE("setPan on a light with no motion channel writes nothing") {
 // scaling that applies to color must not touch these channels.
 TEST_CASE("a head's aim is not scaled by brightness") {
     HeadRig rig;
-    rig.run("class Aim { tick() { fill(255, 255, 255); setPan(0, 200); setTilt(0, 100); } }");
+    rig.run("class Aim { void tick() { fill(255, 255, 255); setPan(0, 200); setTilt(0, 100); } }");
 
     const uint8_t pan = rig.channel(0, rig.fc.pan);
     const uint8_t tilt = rig.channel(0, rig.fc.tilt);
@@ -141,7 +141,7 @@ TEST_CASE("a head's aim is not scaled by brightness") {
 // through it would corrupt whatever follows the buffer.
 TEST_CASE("setPan past the last light is ignored") {
     HeadRig rig;
-    rig.run("class Aim { tick() { setPan(0, 42); setPan(9999, 200); setTilt(9999, 200); } }");
+    rig.run("class Aim { void tick() { setPan(0, 42); setPan(9999, 200); setTilt(9999, 200); } }");
 
     CHECK(rig.channel(0, rig.fc.pan) == 42);   // the in-range write still happened
 }
@@ -208,7 +208,7 @@ TEST_CASE("sweep.mle moves the rig and its formations differ") {
 TEST_CASE("an audio script runs on a device with no audio, and paints nothing") {
     HeadRig rig(/*withMotion=*/false);
     rig.run("class A {"
-            "  tick() {"
+            "  void tick() {"
             "    fill(0, 0, 0);"
             "    for (i = 0; i < height; i = i + 1) {"
             "      setRGB(i, audioLevel(), audioBand(i), audioBeat() * 255);"
@@ -227,7 +227,7 @@ TEST_CASE("an audio script runs on a device with no audio, and paints nothing") 
 // band 20 has a bug, and wrapping would answer it with a plausible number from the wrong end.
 TEST_CASE("an out-of-range audio band reads zero") {
     HeadRig rig(/*withMotion=*/false);
-    rig.run("class A { tick() { fill(0,0,0); setRGB(0, audioBand(99), 0, 0); } }");
+    rig.run("class A { void tick() { fill(0,0,0); setRGB(0, audioBand(99), 0, 0); } }");
     CHECK(rig.channel(0, 0) == 0);
 }
 
@@ -237,10 +237,117 @@ TEST_CASE("a script may still declare a member called level") {
     HeadRig rig(/*withMotion=*/false);
     rig.run("class A {"
             "  byte level = 200;"
-            "  defineControls() { addControl(\"level\", level, 0, 255); }"
-            "  tick() { fill(level, 0, 0); }"
+            "  void defineControls() { addControl(\"level\", level, 0, 255); }"
+            "  void tick() { fill(level, 0, 0); }"
             "}");
     CHECK(rig.channel(0, 0) == 200);   // it compiled, and the member is what painted
+}
+
+
+// A script says WHAT IT IS, and the module answers with it. The two questions a compiled module
+// answers with `Dim dimensions()` and `const char* tags()`, asked of a script the same way: by
+// running the function the script wrote.
+//
+// This is what makes a scripted effect indistinguishable from a compiled one in the picker, and it
+// is load-time only: both are read once per compile, never per frame.
+TEST_CASE("a script declares its dimensions and its tags") {
+    HeadRig rig(/*withMotion=*/false);
+    rig.run("class S {"
+            "  int dimensions() { return 1; }"
+            "  string tags() { return \"AB\"; }"
+            "  void tick() { fill(1, 2, 3); }"
+            "}");
+    CHECK(rig.effect.dimensions() == Dim::D1);
+    REQUIRE(rig.effect.tags() != nullptr);
+    CHECK(std::strncmp(rig.effect.tags(), "AB", 2) == 0);
+}
+
+// A script that says nothing keeps the defaults, so every script written before scripts could
+// declare anything behaves exactly as it did: D2, and the notepad that marks it as scripted.
+TEST_CASE("a script that declares neither keeps the scripted defaults") {
+    HeadRig rig(/*withMotion=*/false);
+    rig.run("class S { void tick() { fill(1, 2, 3); } }");
+    CHECK(rig.effect.dimensions() == Dim::D2);
+    CHECK(std::strcmp(rig.effect.tags(), "📝") == 0);
+}
+
+// A `void dimensions()` is not an answer: reading a value from it would hand back whatever sat in
+// the return register. The declared type is what makes that checkable rather than conventional.
+TEST_CASE("a dimensions() declared void is ignored rather than read") {
+    HeadRig rig(/*withMotion=*/false);
+    rig.run("class S {"
+            "  void dimensions() { fill(0, 0, 0); }"
+            "  void tick() { fill(1, 2, 3); }"
+            "}");
+    CHECK(rig.effect.dimensions() == Dim::D2);   // the fallback, not the register's contents
+}
+
+// An out-of-range dimension cannot make the layer extrude along an axis that does not exist.
+TEST_CASE("a dimensions() outside 1..3 falls back") {
+    HeadRig rig(/*withMotion=*/false);
+    rig.run("class S {"
+            "  int dimensions() { return 9; }"
+            "  void tick() { fill(1, 2, 3); }"
+            "}");
+    CHECK(rig.effect.dimensions() == Dim::D2);
+}
+
+// The point of a script declaring D1: the LAYER extrudes it. A D1 script paints the x=0 column
+// down y and the framework fans it across the width, so one script fills a wall it never indexed.
+//
+// This is the behavior the declaration buys, and it is what makes `int dimensions()` more than a
+// picker label: get it wrong and a script paints one column of a panel and leaves the rest dark.
+TEST_CASE("a script that declares D1 is extruded across the width") {
+    Layouts layouts;
+    GridLayout grid;
+    Layer layer;
+    MoonLiveEffect effect;
+    grid.width = 4; grid.height = 3; grid.depth = 1;
+    layouts.addChild(&grid);
+    layer.setLayouts(&layouts);
+    layer.setChannelsPerLight(3);
+    layer.addChild(&effect);
+    effect.defineControls();
+
+    // Paints ONLY the x=0 column, by indexing y alone: the shape a D1 script has.
+    effect.setScript(mmWriteScript(
+        "class S {"
+        "  int dimensions() { return 1; }"
+        "  void tick() {"
+        "    fill(0, 0, 0);"
+        "    for (y = 0; y < height; y = y + 1) { setRGB(y * width, 200, 0, 0); }"
+        "  }"
+        "}"));
+    layouts.applyState();
+    layer.applyState();
+    platform::setTestNowMs(1);
+    layer.tick();
+
+    // Every column carries the copy, not just the one the script wrote.
+    const auto& b = layer.buffer();
+    for (nrOfLightsType y = 0; y < 3; y++)
+        for (nrOfLightsType x = 0; x < 4; x++) {
+            const size_t i = (static_cast<size_t>(y) * 4 + x) * 3;
+            INFO("x=", x, " y=", y);
+            CHECK(b.data()[i] == 200);
+        }
+}
+
+// The type REGISTRY stores the pointer tags() returns, once, from a probe instance (ModuleFactory
+// registerType). A scripted tags() points into the engine's string pool, which is freed on the next
+// compile: if that pointer ever reached the registry it would dangle for the life of the device.
+//
+// It cannot, because the probe has no script loaded and so answers with the static "📝". This pins
+// that, because the failure it prevents is a use-after-free in a static table read on every UI
+// refresh, and the thing keeping it safe is easy to break by giving MoonLiveEffect a default script.
+TEST_CASE("a freshly constructed MoonLive effect reports static tags") {
+    MoonLiveEffect probe;
+    REQUIRE(probe.tags() != nullptr);
+    CHECK(std::strcmp(probe.tags(), "📝") == 0);
+    // Twice, from two instances: the registry keeps ONE pointer for the type, so every instance
+    // must agree on it before any script is loaded.
+    MoonLiveEffect other;
+    CHECK(probe.tags() == other.tags());   // the same static storage, not two buffers
 }
 
 #endif  // MM_MOONLIVE_HAS_HOST_JIT

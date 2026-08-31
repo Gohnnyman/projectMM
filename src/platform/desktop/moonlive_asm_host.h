@@ -89,6 +89,10 @@ public:
     // vreg map to save and (on Win64) shadow space its callees are owed.
     void prologue(uint8_t slots);
     void epilogue();                     // tear the frame down, then ret
+    /// Park `a` where the ABI returns a value, so the host reads it after the call. The move
+    /// happens BEFORE the epilogue's teardown: on a windowed or frame-pointer ABI the
+    /// teardown is what makes the register the caller sees.
+    void retValue(Reg a);
     void spillStore(Reg r, uint8_t slot);
     void spillLoad(Reg r, uint8_t slot);
     void slotAddr(Reg d, uint8_t slot);   // d = &frame[slot] — a call's argument block

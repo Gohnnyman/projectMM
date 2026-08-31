@@ -1186,6 +1186,10 @@ body.cards-resizing {
 .control-row input[type="password"],
 .control-row input[type="number"]:not(.control-value-input),
 .control-row select,
+/* The script field is a BUTTON that opens the shared picker, because a native <select> renders
+   plain text only and a script row carries its emoji and its dimension. Styled with the selects so
+   the two are indistinguishable: same box, same padding, same caret on the right. */
+.control-row button.control-select,
 .control-row .control-textarea {
     flex: 1;
     background: var(--bg-0);
@@ -1469,6 +1473,21 @@ body.cards-resizing {
     font-size: 13px;
 }
 .add-btn:hover { border-color: var(--accent); background: var(--card-bg-1); }
+
+/* The picker as a MODAL: centered, above the page, at one width wherever it opens from. It used to
+   be appended into whatever opened it, which put the list at the bottom of a card rather than
+   beside the field being changed, and made it as narrow as the element it hung from. */
+.type-picker-modal {
+    border: none;
+    padding: 0;
+    background: transparent;
+    /* Sized in the dialog itself rather than left to the content: a picker is a list of names and
+       a row of chips, and letting it grow to the widest row made the module picker span the page
+       while the script picker stayed narrow. One width for both. */
+    width: min(420px, 92vw);
+}
+.type-picker-modal::backdrop { background: rgba(0, 0, 0, 0.45); }
+.type-picker-modal .type-picker { margin-top: 0; }
 
 .type-picker {
     margin-top: 8px;
@@ -1778,6 +1797,20 @@ body.cards-resizing {
    text competed for the row, leaving a dropdown whose own value was invisible. It still grows into
    spare space, but never below a width that shows a file name. */
 .fileedit-pick { flex: 1 1 auto; min-width: 9ch; }
+/* Left-aligned like a select's text, with the caret pushed to the far right. */
+button.fileedit-pick {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    white-space: nowrap;
+}
+button.fileedit-pick:hover { border-color: var(--accent); }
+button.fileedit-pick:disabled { opacity: 0.6; cursor: default; }
+/* The name takes the room; the caret keeps its place at the end. */
+.fileedit-pick-caret { margin-left: auto; flex: 0 0 auto; opacity: 0.7; }
 
 /* Unsaved work, marked the way a modified editor tab is: a dot on the Save button. The button stays
    readable on its own, so the dot is an addition rather than the only signal. */

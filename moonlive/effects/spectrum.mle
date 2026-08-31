@@ -14,26 +14,42 @@ class SpectrumEffect {
   int b = 0;
   int mag = 0;
   int top = 0;
+  int bars = 0;
 
-  defineControls() {
+  int dimensions() { return 2; }   // an x/y picture; extrude copies it through the depth
+
+  string tags() { return "📊"; }   // audio-reactive
+
+  void defineControls() {
     addControl("gain", gain, 10, 255);
     addControl("fadeAmt", fadeAmt, 1, 200);
     addControl("peakHold", peakHold, 0, 1);
   }
 
-  tick() {
+  void tick() {
     // Fading rather than clearing leaves a decay behind each bar, which is what makes a meter
     // readable: the eye follows a falling edge better than a flickering one.
     fade(fadeAmt);
 
-    for (x = 0; x < width; x = x + 1) {
-      // Spread 16 bands across whatever width the rig has: a 16-wide matrix gets one band per
+    // A strand is 1 light wide, so its length lives in height: walk THAT as the bar axis and
+    // every band gets a share of the strip. On a matrix width is the bar axis and height is how
+    // tall a bar grows, which is the 2D meter.
+    bars = width;
+    if (width < 2) { bars = height; }
+    for (x = 0; x < bars; x = x + 1) {
+      // Spread 16 bands across whatever length the rig has: a 16-wide matrix gets one band per
       // column, a 300-light strand gets each band over ~19 lights.
-      b = div(x * 16, width);
+      b = div(x * 16, bars);
       mag = div(audioBand(b) * gain, 100);
       if (mag > 255) { mag = 255; }
+      // On a strand the bar IS the light: one position per band step, lit to its magnitude.
+      if (width < 2) {
+        setRGB(x, div(paletteR(b * 16, 255) * mag, 255), div(paletteG(b * 16, 255) * mag, 255),
+               div(paletteB(b * 16, 255) * mag, 255));
+      }
       // How far up this column the bar reaches.
       top = div(mag * height, 256);
+      if (width < 2) { top = 0; }
       for (y = 0; y < top; y = y + 1) {
         // Colour by BAND, not by height: the spectrum keeps its identity as it moves, so bass is
         // always the same hue however loud it is.

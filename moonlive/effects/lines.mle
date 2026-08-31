@@ -8,11 +8,13 @@
 class LinesEffect {
   byte bpm = 30;
 
-  defineControls() {
+  int dimensions() { return 2; }   // an x/y picture; extrude copies it through the depth
+
+  void defineControls() {
     addControl("bpm", bpm, 1, 240);
   }
 
-  tick() {
+  void tick() {
     fill(0, 0, 0);
 
     line(scale(beat(bpm, t), width), 0,

@@ -6,14 +6,18 @@ class FountainEffect {
   byte pull = 18;
   byte sparks = 4;
 
-  defineControls() {
+  int dimensions() { return 2; }   // an x/y picture; extrude copies it through the depth
+
+  string tags() { return "✨"; }   // particles
+
+  void defineControls() {
     pool(300);
     addControl("lift", lift, 20, 200);
     addControl("pull", pull, 4, 60);
     addControl("sparks", sparks, 1, 12);
   }
 
-  tick() {
+  void tick() {
     fade(40);
 
     // Throw and pull both scale with the grid, so the plume fills any panel. 47152 is just under

@@ -3,11 +3,11 @@
 class DiagonalLayout {
   byte count = 16;
 
-  defineControls() {
+  void defineControls() {
     addControl("count", count, 1, 64);
   }
 
-  placeLights() {
+  void placeLights() {
     for (i = 0; i < count; i = i + 1) {
       addLight(i, i, 0);
     }

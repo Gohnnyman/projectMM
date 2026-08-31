@@ -272,6 +272,17 @@ void XtensaAssembler::movReg(Reg d, Reg a) {
     const uint8_t b[2] = {uint8_t((ar(d) << 4) | 0xd), ar(a)};
     emit(b, 2);
 }
+
+// The windowed ABI returns in a2, which is where R0 lives (R0..R3 map to a2..a5, the host
+// arguments). So this is `mov.n a2, aX` and is free when the value is already in R0.
+//
+// BEFORE retw.n, not after: retw.n rotates the window back to the caller, and a move emitted after
+// it would write a register the caller does not see. The lowering calls this then falls into the
+// epilogue, which is the only order that works here.
+void XtensaAssembler::retValue(Reg a) {
+    if (a == R0) return;                    // already in a2
+    movReg(R0, a);
+}
 // addi.n aD, aA, #imm : word (d<<12)|(a<<8)|(imm<<4)|0xb.
 //
 // The narrow form's 4-bit field encodes 1..15, and the bit pattern 0 means MINUS ONE, not zero.

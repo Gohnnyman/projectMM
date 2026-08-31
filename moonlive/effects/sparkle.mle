@@ -11,13 +11,15 @@ class SparkleEffect {
   int n = 0;
   int p = 0;
 
-  defineControls() {
+  int dimensions() { return 3; }   // addresses every light, whatever shape the rig is
+
+  void defineControls() {
     addControl("density", density, 1, 40);
     addControl("fadeAmt", fadeAmt, 1, 120);
     addControl("hueSpread", hueSpread, 0, 255);
   }
 
-  tick() {
+  void tick() {
     // Fade rather than clear: what was lit last frame is still here, dimmer, which is the trail
     // that turns single pixels into a shimmer.
     fade(fadeAmt);

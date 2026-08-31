@@ -17,22 +17,24 @@ class CrosshairEffect {
   int cy = 0;
   int d = 0;
 
-  defineControls() {
+  int dimensions() { return 2; }   // an x/y picture; extrude copies it through the depth
+
+  void defineControls() {
     addControl("bpm", bpm, 1, 240);
     addControl("spread", spread, 0, 20);
   }
 
-  column() {
+  void column() {
     for (y = 0; y < height; y = y + 1) { setRGB(y * width + cx, 200, 30, 0); }
   }
 
-  row() {
+  void row() {
     for (x = 0; x < width; x = x + 1) { setRGB(cy * width + x, 0, 90, 200); }
   }
 
   // Where the axes cross, brighter and wider: the part that makes it read as a sight rather than
   // as two lines that happen to overlap.
-  centre() {
+  void centre() {
     // `<` is the only comparison a for condition takes, so the arm runs 0..2*spread and the
     // offset is derived inside rather than counting from a negative.
     for (i = 0; i < spread + spread + 1; i = i + 1) {
@@ -42,7 +44,7 @@ class CrosshairEffect {
     }
   }
 
-  tick() {
+  void tick() {
     fill(0, 0, 0);
     // Two clocks, deliberately unequal: on one clock the crossing point would run the diagonal
     // and never visit most of the grid.

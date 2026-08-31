@@ -12,14 +12,16 @@ class FractalEffect {
   fixed jy = 0.0;
   int n = 0;
 
-  defineControls() {
+  int dimensions() { return 2; }   // an x/y picture; extrude copies it through the depth
+
+  void defineControls() {
     addControl("bpm", bpm, 0, 30);
     addControl("iters", iters, 8, 64);
     addControl("zoom", zoom, 12, 40);
     addControl("seed", seed, 0, 128);
   }
 
-  tick() {
+  void tick() {
     // The Julia seed walks a cardioid once per beat, the same for every pixel.
     // The wave spans -32768..32767 and the seed 0..128; together they scale to a Julia seed
     // under 1.0, which is the band where the set has structure. seed 0 gives 0 and selects

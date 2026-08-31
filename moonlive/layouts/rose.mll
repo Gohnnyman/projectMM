@@ -11,12 +11,12 @@ class RoseLayout {
   byte petals = 2;
   byte radius = 15;
 
-  defineControls() {
+  void defineControls() {
     addControl("petals", petals, 1, 8);
     addControl("radius", radius, 4, 30);
   }
 
-  placeLights() {
+  void placeLights() {
     for (i = 0; i < 256; i = i + 1) {
       addLight(radius - scale(sin(i * turn(256) * petals), radius + 1)
                  + scale(cos(i * turn(256)),

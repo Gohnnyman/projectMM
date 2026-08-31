@@ -55,6 +55,12 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 #define MM_GOLD_FXLOOP_LEN  252u   // +16: four branches
 #define MM_GOLD_FXLOOP_HASH 1379319229u
 #define MM_GOLD_FX_HASH   4146299475u
+// `mv a0, xN` is `addi a0, xN, 0`: opcode 0x13, funct3 0, rd = x10 (a0), imm 0. rs1 is the
+// allocator's choice, so it is masked out; rd and the immediate are the contract.
+#define MM_ISA_RET_WRITES_RETREG(p) \
+    (((uint32_t((p)[0]) | (uint32_t((p)[1]) << 8) | (uint32_t((p)[2]) << 16) | \
+       (uint32_t((p)[3]) << 24)) & 0xfff07fffu) == 0x00000513u)
+#define MM_ISA_RET_STRIDE 4
 #define MM_ISA_LOWER mm_riscv_backend::mm::moonlive::lowerToBytes
 // The assembler type itself, so the stack-budget check can measure the object the compile path
 // puts on a 12 KB task rather than re-deriving its layout from the constants.

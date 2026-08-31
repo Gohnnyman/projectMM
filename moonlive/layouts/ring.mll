@@ -6,12 +6,12 @@ class RingLayout {
   int count = 24;
   byte radius = 5;
 
-  defineControls() {
+  void defineControls() {
     addControl("count", count, 3, 1000);
     addControl("radius", radius, 1, 127);
   }
 
-  placeLights() {
+  void placeLights() {
     for (i = 0; i < count; i = i + 1) {
       addLight(scale(cos(i * turn(count)), radius * 2 + 1),
                scale(sin(i * turn(count)), radius * 2 + 1), 0);

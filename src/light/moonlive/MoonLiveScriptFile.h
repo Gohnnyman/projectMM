@@ -52,11 +52,11 @@ inline constexpr const char* kEffectTemplate =
     "class NewEffect {\n"
     "  byte bpm = 60;\n"
     "\n"
-    "  defineControls() {\n"
+    "  void defineControls() {\n"
     "    addControl(\"bpm\", bpm, 1, 255);\n"
     "  }\n"
     "\n"
-    "  tick() {\n"
+    "  void tick() {\n"
     "    fill(scale(beat(bpm, t), 256), 0, 100);\n"
     "  }\n"
     "}\n";
@@ -66,12 +66,12 @@ inline constexpr const char* kLayoutTemplate =
     "  byte cols = 16;\n"
     "  byte rows = 16;\n"
     "\n"
-    "  defineControls() {\n"
+    "  void defineControls() {\n"
     "    addControl(\"cols\", cols, 1, 64);\n"
     "    addControl(\"rows\", rows, 1, 64);\n"
     "  }\n"
     "\n"
-    "  placeLights() {\n"
+    "  void placeLights() {\n"
     "    for (y = 0; y < rows; y = y + 1) {\n"
     "      for (x = 0; x < cols; x = x + 1) {\n"
     "        addLight(x, y, 0);\n"
@@ -82,7 +82,7 @@ inline constexpr const char* kLayoutTemplate =
 
 inline constexpr const char* kModifierTemplate =
     "class NewModifier {\n"
-    "  modifyLogical() {\n"
+    "  void modifyLogical() {\n"
     "    setXYZ(width - 1 - xPos, yPos, zPos);\n"
     "  }\n"
     "}\n";

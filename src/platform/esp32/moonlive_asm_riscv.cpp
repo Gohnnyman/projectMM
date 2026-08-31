@@ -197,6 +197,13 @@ void RiscvAssembler::movImm(Reg d, int32_t imm) {
     emit32(encAddi(xr(d), xr(d), lo));                     // addi rd, rd, lo
 }
 void RiscvAssembler::movReg(Reg d, Reg a)       { emit32(encAddi(xr(d), xr(a), 0)); }   // mv = addi rd,ra,0
+
+// The RISC-V return register is a0 (x10), which is where R0 lives: R0..R3 map to a0..a3, the host
+// arguments. Free when the value is already there.
+void RiscvAssembler::retValue(Reg a) {
+    if (a == R0) return;                    // already in a0
+    movReg(R0, a);
+}
 void RiscvAssembler::addImm(Reg d, Reg a, int32_t imm) { emit32(encAddi(xr(d), xr(a), imm)); }
 void RiscvAssembler::addReg(Reg d, Reg a, Reg b) { emit32(encAdd(xr(d), xr(a), xr(b))); }
 void RiscvAssembler::mulReg(Reg d, Reg a, Reg b) { emit32(encMul(xr(d), xr(a), xr(b))); }

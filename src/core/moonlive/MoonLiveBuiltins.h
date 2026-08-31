@@ -310,7 +310,13 @@ struct SysVarTable {
     // controls, inside the arena); an Arg must name a real argument register.
     bool add(const SysVar& v) {
         if (count >= kMax || v.name == nullptr) return false;
-        if (v.kind == SysVarKind::Arena && (v.where < kCtrlBytes || v.where >= kArenaBytes))
+        // Below kDepthSlot, not merely inside the arena: the depth counter sits above the system
+        // range and a 4-byte LoadCtrl32 at that offset would read it and run past the arena's end.
+        // Aligned to kSysVarBytes for the same reason the registrations already are, so every slot
+        // is a whole 32-bit cell rather than one straddling two.
+        if (v.kind == SysVarKind::Arena &&
+            (v.where < kCtrlBytes || v.where >= kDepthSlot ||
+             (v.where - kCtrlBytes) % kSysVarBytes != 0))
             return false;
         // kArg4 is the last argument register (MoonLiveIr.h owns the enum, and includes THIS
         // header, so the bound is spelled here rather than referenced).

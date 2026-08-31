@@ -11,14 +11,18 @@ class AimEffect {
   int lean = 0;
   int p = 0;
 
-  defineControls() {
+  int dimensions() { return 1; }   // a line of lights: extrude fans it across a wider rig
+
+  string tags() { return "🎯"; }   // aims moving heads
+
+  void defineControls() {
     addControl("pan", pan, 0, 255);
     addControl("tilt", tilt, 0, 255);
     addControl("spread", spread, 0, 255);
     addControl("bright", bright, 0, 255);
   }
 
-  tick() {
+  void tick() {
     fill(bright, bright, bright);
     for (i = 0; i < height; i = i + 1) {
       // spread fans the rig out from the aim: head 0 keeps it, each next head leans a little

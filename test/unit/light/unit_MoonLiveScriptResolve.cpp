@@ -45,8 +45,8 @@ void drop(const char* dir, const char* name) {
 /// A script that compiles and is trivially told apart from another by its control name, so a test
 /// can prove WHICH file was read rather than merely that something was.
 std::string scriptWith(const char* controlName) {
-    return std::string("class R { byte v = 1; defineControls() { addControl(\"") + controlName +
-           "\", v, 0, 9); } tick() { fill(0, 0, 0); } }";
+    return std::string("class R { byte v = 1; void defineControls() { addControl(\"") + controlName +
+           "\", v, 0, 9); } void tick() { fill(0, 0, 0); } }";
 }
 
 /// An ISOLATED filesystem for one test: its own temp root, torn down after.

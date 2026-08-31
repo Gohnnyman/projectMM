@@ -57,6 +57,11 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         case IrOp::Mov:
         case IrOp::AddImm:
         case IrOp::Spill:      out[0] = in.a;               return 1;
+        // A `return` reads its value ONLY when it carries one: `imm` says so, because it is not a
+        // register field and the rewriter renumbers every vreg reported here. A bare return reports
+        // nothing, so its `a` stays whatever the emitter left and the lowering never reads it.
+        case IrOp::Ret:        if (!in.imm) return 0;
+                               out[0] = in.a;               return 1;
         case IrOp::LoadCtrl:   out[0] = kArg4;              return 1;   // reads the arena pointer
         // A member STORE reads the VALUE being written, and nothing else. The arena pointer is
         // deliberately NOT reported, for the same reason LoadIdx/StoreIdx do not report it: the

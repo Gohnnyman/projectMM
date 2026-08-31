@@ -23,8 +23,20 @@ namespace mm {
 /// Effect whose render is a live-authored MoonLive script.
 class MoonLiveEffect : public EffectBase {
 public:
-    const char* tags() const override { return "📝"; }   // scripted
-    Dim dimensions() const override { return Dim::D2; }
+    /// Both answered by the SCRIPT when it says, and by the binding when it stays silent.
+    ///
+    /// 📝 marks a script that declared no tags of its own: the notepad says "this is scripted",
+    /// which is all a module can say about a program it has not been told about. A script that
+    /// declares `string tags()` replaces it, so its row reads like any other effect's.
+    const char* tags() const override {
+        const char* t = script_.tags();
+        return t ? t : "📝";
+    }
+
+    /// The layer EXTRUDES on this (Layer::tick), so a script declaring 1 paints one column and the
+    /// framework fills the rest, exactly as a compiled D1 effect does. A script that declares
+    /// nothing stays D2, which is what every script rendered as before it could say.
+    Dim dimensions() const override { return script_.dimensions(); }
 
     // The effect carries its script's NAME as an editable, persisted text control, plus a control
     // for every control the script declared (`addControl("speed", speed, 0, 99)`). The

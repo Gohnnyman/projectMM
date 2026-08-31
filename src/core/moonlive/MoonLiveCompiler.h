@@ -34,10 +34,21 @@ inline constexpr const char* kCodegenFailed = "codegen failed (unsupported on th
 /// This is a symbol table, which is what every compiler and linker keeps: one code section, and a
 /// name-to-offset map over it. The binding asks for an entry by name and gets a callable address,
 /// so which ROLE a script plays is decided by which entries it defined rather than by its type.
+/// What a function hands back. `void` is the default because it is what every entry point that
+/// ACTS rather than answers declares, and the three cases are all the language has values for.
+///
+/// `Str` is a literal's pointer, not a string type: a script returns one, it cannot build,
+/// concatenate or compare one. Naming the type says what comes back without implying the rest.
+enum class RetType : uint8_t { Void, Int, Str };
+
 struct EntryPoint {
     const char* name = nullptr;    ///< into the source, or the engine's own copy after compile
     uint8_t     nameLen = 0;
     uint16_t    offset = 0;        ///< byte offset of its first instruction within the block
+    /// What this function returns, as the script DECLARED it. The host reads a value only from a
+    /// function that says it has one: calling a `void` function through ValueFn reads whatever sat
+    /// in the return register, which is a plausible number rather than an obvious failure.
+    RetType     ret = RetType::Void;
 };
 
 /// How many named functions one script may define. A handful of entry points plus the helpers a

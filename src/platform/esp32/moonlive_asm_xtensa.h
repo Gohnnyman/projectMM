@@ -121,6 +121,10 @@ public:
     /// per-function prologues already give it.
     void callLabel(Label l);
     void epilogue();                     // retw.n
+    /// Park `a` where the ABI returns a value, so the host reads it after the call. The move
+    /// happens BEFORE the epilogue's teardown: on a windowed or frame-pointer ABI the
+    /// teardown is what makes the register the caller sees.
+    void retValue(Reg a);
 
 private:
     // The emitted-code buffer's size, fixed for this object's life but chosen per script.

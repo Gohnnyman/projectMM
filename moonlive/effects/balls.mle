@@ -11,13 +11,15 @@ class BallsEffect {
   byte px = 0;
   byte py = 0;
 
-  defineControls() {
+  int dimensions() { return 2; }   // an x/y picture; extrude copies it through the depth
+
+  void defineControls() {
     addControl("count", count, 1, 4);
     addControl("size", size, 1, 10);
     addControl("bpm", bpm, 1, 120);
   }
 
-  drawBall() {
+  void drawBall() {
     for (dy = 0; dy < 21; dy = dy + 1) {
       for (dx = 0; dx < 21; dx = dx + 1) {
         if ((dx - radius) * (dx - radius) + (dy - radius) * (dy - radius) <= radius * radius) {
@@ -29,7 +31,7 @@ class BallsEffect {
     }
   }
 
-  tick() {
+  void tick() {
     fill(0, 0, 0);
 
     // Sized off the smaller axis, capped at the 21x21 drawing window; 0 on an axis too
