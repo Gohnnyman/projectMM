@@ -1,10 +1,10 @@
 {
-  "commit": "d65bae2",
+  "commit": "717fc50",
   "flash": {
     "esp32": 1754896,
     "esp32p4rev1-eth": 1643616,
-    "esp32p4rev1-eth-wifi": 1940176,
-    "esp32s3-n16r8": 1794496,
+    "esp32p4rev1-eth-wifi": 2070128,
+    "esp32s3-n16r8": 1800864,
     "esp32s3-n8r8": 1753232,
     "esp32s31": 2074256,
     "esp32-16mb": 1714608,
@@ -12,12 +12,12 @@
     "esp32-wrover": 1765504,
     "qemu": 1318160,
     "esp32p4rev3-eth": 1643760,
-    "desktop": 1580056
+    "desktop": 1581336
   },
   "perf": {
     "desktop": {
-      "tick_us": 91,
-      "fps": 10989
+      "tick_us": 89,
+      "fps": 11235
     },
     "esp32": {
       "tick_us": 2151,
@@ -25,24 +25,24 @@
     }
   },
   "loc": {
-    "core": 19691,
+    "core": 19778,
     "light": 25380,
-    "platform": 13509,
+    "platform": 13569,
     "ui": 6859,
-    "test": 44829,
+    "test": 44852,
     "moondeck": 21159
   },
   "comments": {
     "core": {
-      "lines": 7676,
-      "ratio": 0.423
+      "lines": 7694,
+      "ratio": 0.422
     },
     "light": {
       "lines": 9922,
       "ratio": 0.432
     },
     "platform": {
-      "lines": 4806,
+      "lines": 4830,
       "ratio": 0.392
     },
     "ui": {
@@ -50,7 +50,7 @@
       "ratio": 0.279
     },
     "test": {
-      "lines": 8093,
+      "lines": 8100,
       "ratio": 0.208
     },
     "moondeck": {
@@ -59,7 +59,7 @@
     }
   },
   "tests": {
-    "cases": 1461,
+    "cases": 1463,
     "scenarios": 23
   },
   "docs": {
@@ -71,8 +71,8 @@
     "claude_md_lines": 135
   },
   "complexity": {
-    "functions": 2632,
-    "over_threshold": 163,
+    "functions": 2664,
+    "over_threshold": 164,
     "worst_ccn": 108
   }
 }

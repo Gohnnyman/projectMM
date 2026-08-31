@@ -144,6 +144,14 @@ constexpr bool hasI2sMic = true;
 constexpr bool hasI2sMic = false;
 #endif
 
+// USB video needs BOTH, and only the ESP32-P4 has both: a High-Speed USB PHY (the S3 has USB, but
+// only the slow kind — too slow to carry video) and a hardware JPEG decoder.
+#if defined(CONFIG_SOC_USB_UTMI_PHY_NUM) && defined(CONFIG_SOC_JPEG_DECODE_SUPPORTED)
+constexpr bool hasUsbVideo = true;
+#else
+constexpr bool hasUsbVideo = false;
+#endif
+
 
 // Some boards put the mic behind an I2S audio codec configured over I2C (vs a
 // direct I2S MEMS mic). The codec type + its control pins are a fixed board

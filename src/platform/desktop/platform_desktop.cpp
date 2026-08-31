@@ -1638,6 +1638,19 @@ bool audioCodecInit(CodecType /*type*/, const AudioCodecPins& /*pins*/, uint32_t
 }
 void audioCodecDeinit() {}
 
+// USB video capture — no USB host on desktop, so init fails and VideoService's usb
+// source reports "no capture device" while its other sources keep working.
+bool videoCaptureInit(VideoCaptureHandle& /*h*/, uint16_t /*width*/, uint16_t /*height*/,
+                      uint8_t /*fps*/) {
+    return false;
+}
+size_t videoCaptureFormats(VideoCaptureFormat* /*out*/, size_t /*max*/) { return 0; }
+const uint8_t* videoCaptureFrame(VideoCaptureHandle& /*h*/, uint16_t& /*width*/,
+                                 uint16_t& /*height*/) MM_NONBLOCKING {
+    return nullptr;
+}
+void videoCaptureDeinit(VideoCaptureHandle& /*h*/) {}
+
 // I2S microphone — no capture on desktop (hasI2sMic == false, AudioService inert),
 // so init fails and read returns nothing.
 bool audioMicInit(AudioMicHandle& /*h*/, uint16_t /*wsPin*/, uint16_t /*sdPin*/,

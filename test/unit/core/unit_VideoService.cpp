@@ -19,13 +19,13 @@ namespace {
 int parse(const char* text, uint16_t& w, uint16_t& h) {
     return VideoService::parsePpmHeader(text, static_cast<int>(std::strlen(text)), w, h);
 }
-}  // namespace
+} // namespace
 
 // The canonical form ffmpeg and ImageMagick emit: magic, dimensions, maxval, one newline, pixels.
 TEST_CASE("VideoService PPM: a canonical P6 header yields the dimensions and the pixel offset") {
     uint16_t w = 0, h = 0;
     const char* hdr = "P6\n64 36\n255\n";
-    CHECK(parse(hdr, w, h) == 13);   // pixels begin straight after the final newline
+    CHECK(parse(hdr, w, h) == 13); // pixels begin straight after the final newline
     CHECK(w == 64);
     CHECK(h == 36);
 }
@@ -48,7 +48,7 @@ TEST_CASE("VideoService PPM: only one separator byte is consumed before the pixe
     // A leading pixel byte that happens to be whitespace-valued (0x20) must survive as data.
     const char hdr[] = {'P', '6', '\n', '2', ' ', '2', '\n', '2', '5', '5', '\n', ' ', 'X'};
     const int off = VideoService::parsePpmHeader(hdr, static_cast<int>(sizeof(hdr)), w, h);
-    CHECK(off == 11);          // after the newline — NOT after the following 0x20
+    CHECK(off == 11); // after the newline — NOT after the following 0x20
     CHECK(w == 2);
     CHECK(h == 2);
 }
@@ -73,10 +73,10 @@ TEST_CASE("VideoService PPM: malformed and truncated headers fail without readin
     uint16_t w = 0, h = 0;
     CHECK(parse("", w, h) == -1);
     CHECK(parse("not an image at all", w, h) == -1);
-    CHECK(parse("P6", w, h) == -1);              // magic only
-    CHECK(parse("P6\n64", w, h) == -1);          // no height
-    CHECK(parse("P6\n64 36\n", w, h) == -1);     // no maxval
-    CHECK(parse("P6\n64 36\n255", w, h) == -1);  // no separator, so no pixel data can follow
+    CHECK(parse("P6", w, h) == -1);             // magic only
+    CHECK(parse("P6\n64", w, h) == -1);         // no height
+    CHECK(parse("P6\n64 36\n", w, h) == -1);    // no maxval
+    CHECK(parse("P6\n64 36\n255", w, h) == -1); // no separator, so no pixel data can follow
 }
 
 // A zero side has no pixels, and an absurd dimension would overflow the width*height*3 allocation
@@ -85,7 +85,7 @@ TEST_CASE("VideoService PPM: zero and out-of-range dimensions are refused at the
     uint16_t w = 0, h = 0;
     CHECK(parse("P6\n0 36\n255\n", w, h) == -1);
     CHECK(parse("P6\n64 0\n255\n", w, h) == -1);
-    CHECK(parse("P6\n99999 36\n255\n", w, h) == -1);   // past kMaxDim
+    CHECK(parse("P6\n99999 36\n255\n", w, h) == -1); // past kMaxDim
 }
 
 // With no service instantiated, latestFrame() still returns a readable struct — an effect must
@@ -105,18 +105,41 @@ TEST_CASE("VideoService: latestFrame is readable with no service present and rep
 // one on its next tick — so effects keep seeing a live frame for any add/remove order. Same
 // robustness AudioService's mic seat has; without the tick() re-claim only a reboot recovers.
 TEST_CASE("VideoService: a survivor takes over the seat when the elected source is destroyed") {
-    auto* elected = new VideoService();   // constructed first, so it claims the seat
-    elected->source = 0;                  // test pattern — needs no file
+    auto* elected = new VideoService(); // constructed first, so it claims the seat
+    elected->source = 0;                // test pattern — needs no file
     elected->applyState();
     REQUIRE(VideoService::latestFrame()->rgb != nullptr);
 
-    VideoService survivor;                // seat already held, so its claim is a no-op
+    VideoService survivor; // seat already held, so its claim is a no-op
     survivor.source = 0;
     survivor.applyState();
 
-    delete elected;                       // ~ActiveInstance vacates: the seat is now empty
+    delete elected; // ~ActiveInstance vacates: the seat is now empty
     CHECK(VideoService::latestFrame()->rgb == nullptr);
 
-    survivor.tick();                      // the survivor inherits it
+    survivor.tick(); // the survivor inherits it
     CHECK(VideoService::latestFrame()->rgb != nullptr);
+}
+
+// Unit tests link the desktop platform, which cannot capture, so this pins that side: the usb
+// source is not offered, and a config restored from a board that had one falls back rather than
+// selecting a dead option. The static_assert fails loudly if the suite ever runs somewhere that
+// CAN capture, which would need its own case rather than this one quietly changing meaning.
+TEST_CASE("VideoService: a platform that cannot capture does not offer the usb source") {
+    static_assert(!mm::platform::hasUsbVideo, "tests assume the desktop platform");
+    CHECK(VideoService::kSourceCount == 2);
+
+    VideoService v;
+    v.source = 2;
+    v.applyState();
+    CHECK(v.source == 0); // fell back to the test pattern
+    CHECK(VideoService::latestFrame()->rgb != nullptr);
+}
+
+// The format dropdown is populated from whatever the device advertises, so a platform with no
+// capture at all must report an EMPTY list rather than a placeholder — VideoService only offers the
+// control when the count is non-zero, and a phantom entry would let the user pick a dead format.
+TEST_CASE("VideoService: a platform with no capture advertises no formats") {
+    mm::platform::VideoCaptureFormat formats[4];
+    CHECK(mm::platform::videoCaptureFormats(formats, 4) == 0);
 }

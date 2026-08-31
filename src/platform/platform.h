@@ -1267,6 +1267,42 @@ void audioMicDeinit(AudioMicHandle& h);
 void audioFft(const float* windowed, size_t n, float* outMag);
 
 // ---------------------------------------------------------------------------
+// USB video capture (UVC) — an HDMI grabber presenting itself as a webcam. MJPEG
+// off the wire, decoded by the target's JPEG hardware, so the RGB888 read back here
+// never passed through a software decoder. ESP32-P4 only; every other target links a
+// stub whose init fails, which VideoService reports as a status, not an error.
+// ---------------------------------------------------------------------------
+
+struct VideoCaptureHandle { void* impl = nullptr; };
+
+// One row of what the attached device advertises, so the UI offers real choices rather than asking
+// the user to guess. MJPEG only — nothing else is decodable here, so there is no format field.
+struct VideoCaptureFormat {
+    uint16_t width = 0;
+    uint16_t height = 0;
+    uint8_t fps = 0;
+};
+
+// Fills `out` with up to `max` of those rows and returns how many were written. Learned when a
+// device enumerates, so it survives a failed videoCaptureInit — which is exactly when it is worth
+// reading. 0 means no device has been seen yet.
+size_t videoCaptureFormats(VideoCaptureFormat* out, size_t max);
+
+// Claim the first UVC device on the bus and stream MJPEG. All three of width,
+// height and fps are requests rather than promises: the device negotiates what it
+// can, and videoCaptureFrame reports what actually arrived. False when nothing is
+// attached, the target has no USB host, or no MJPEG format matches.
+bool videoCaptureInit(VideoCaptureHandle& h, uint16_t width, uint16_t height, uint8_t fps);
+
+// Newest decoded frame as RGB888, or nullptr when none arrived since the last call.
+// The buffer belongs to the platform (the JPEG decoder writes it by DMA and needs its
+// own alignment) and stays valid until the next call — the caller borrows it for one
+// tick, exactly as VideoFrame does.
+const uint8_t* videoCaptureFrame(VideoCaptureHandle& h, uint16_t& width, uint16_t& height) MM_NONBLOCKING;
+
+void videoCaptureDeinit(VideoCaptureHandle& h);
+
+// ---------------------------------------------------------------------------
 // I2C bus diagnostics — domain-neutral, not audio-specific. Probes a bus and
 // reports which 7-bit addresses ACK, the standard `i2cdetect` operation. Used
 // by the I2cScanModule diagnostic (src/core/I2cScanModule.h) to help bring up

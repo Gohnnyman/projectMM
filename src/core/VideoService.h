@@ -30,13 +30,16 @@ class VideoService : public MoonModule {
 public:
     ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Service; }
 
-    // 0 = synthesised test pattern, 1 = PPM file. A USB capture source becomes index 2, appended so
-    // a persisted index keeps its meaning.
+    // 0 = test pattern, 1 = PPM file, 2 = USB capture (platform::hasUsbVideo only). Appended, so a
+    // persisted index keeps its meaning.
     uint8_t source = 0;
     char file[64] = "/frame.ppm";
+    uint8_t usbFormat = 0; // index into the device's advertised list; the only USB setting persisted
 
-    static constexpr const char* kSourceOptions[] = {"test pattern", "file"};
-    static constexpr uint8_t kSourceCount = sizeof(kSourceOptions) / sizeof(kSourceOptions[0]);
+    static constexpr const char* kSourceOptions[] = {"test pattern", "file", "usb"};
+    // A target with no High-Speed USB host or no JPEG decoder cannot capture, so it is not offered
+    // the option — the two software sources still work everywhere.
+    static constexpr uint8_t kSourceCount = platform::hasUsbVideo ? 3 : 2;
 
     // Synthesised-pattern extent. Small on purpose: a border effect averages the frame down to a
     // few dozen values, so pixels beyond that buy nothing but bandwidth and decode time. 16:9.
@@ -63,17 +66,28 @@ public:
         controls_.setHidden(controls_.count() - 1, source != 1);
         controls_.addButton("reload");
         controls_.setHidden(controls_.count() - 1, source != 1);
+        // The device decides what is on offer, so there is nothing to type. Until one has
+        // enumerated the control still renders — read-only, holding a placeholder — rather than
+        // appearing out of nowhere once a cable is plugged in.
+        static constexpr const char* kNoDevice[] = {"no device"};
+        const bool known = formatCount_ > 0;
+        controls_.addSelect("offered", usbFormat, known ? formatOptions_ : kNoDevice,
+                            known ? formatCount_ : 1);
+        controls_.setHidden(controls_.count() - 1, source != 2);
+        controls_.setReadOnly(controls_.count() - 1, !known);
         MoonModule::defineControls();
     }
 
     /// A source switch changes what the buffer must hold, so it re-runs the whole build. The reload
     /// button re-reads the same file in place — cheap, and it must NOT tear down the pipeline.
     bool affectsPrepare(const char* name) const override {
-        return std::strcmp(name, "source") == 0 || std::strcmp(name, "file") == 0;
+        return std::strcmp(name, "source") == 0 || std::strcmp(name, "file") == 0 ||
+               std::strcmp(name, "offered") == 0;
     }
 
     void onControlChanged(const char* name) override {
         if (std::strcmp(name, "reload") == 0) loadFile();
+        if (std::strcmp(name, "offered") == 0) applyFormat();
         MoonModule::onControlChanged(name);
     }
 
@@ -81,7 +95,26 @@ public:
     /// before the first tick rather than one tick later.
     void prepare() override {
         seat_.claim(); // re-take after a disable/enable cycle — release() vacated it
-        if (source == 1) {
+        platform::videoCaptureDeinit(capture_); // a source switch releases the device
+        if (source >= kSourceCount) source = 0;   // a config restored from a capture-capable board
+        if (source == 2) {
+            // The first open doubles as a probe: a device only lists its formats once it
+            // enumerates, which happens inside init — so open, learn what is really on offer, and
+            // open again when a restored pick differs. Only the last attempt reports, or a failed
+            // probe would leave an error over the retry that fixed it.
+            bool open = platform::videoCaptureInit(capture_, usbWidth, usbHeight, usbFps);
+            readFormats();
+            if (applyFormat()) {
+                platform::videoCaptureDeinit(capture_);
+                open = platform::videoCaptureInit(capture_, usbWidth, usbHeight, usbFps);
+            }
+            if (!open) {
+                fail("no capture device");
+            } else {
+                std::snprintf(status_, sizeof(status_), "%ux%u %ufps", usbWidth, usbHeight, usbFps);
+                setStatus(status_, Severity::Status);
+            }
+        } else if (source == 1) {
             loadFile();
         } else {
             if (!allocate(kPatternW, kPatternH)) return;
@@ -96,10 +129,12 @@ public:
         // rather than going permanently dark. claim() only fills an empty seat, never yanks one.
         seat_.claim();
         if (source == 0 && buf_.data()) renderPattern();
+        else if (source == 2) readCapture();
         MoonModule::tick();
     }
 
     void release() override {
+        platform::videoCaptureDeinit(capture_);
         seat_.vacate();
         frame_ = VideoFrame{};
         MoonModule::release();
@@ -111,6 +146,58 @@ private:
     // disable/enable, and in tick() so a survivor inherits an empty seat.
     ActiveInstance<VideoService> seat_{*this};
 
+    /// Resolve the selected row into the request fields. True when that changed something — the
+    /// index survives a reboot but the list behind it does not, so this is how a restored pick
+    /// reaches the device.
+    bool applyFormat() {
+        if (usbFormat >= formatCount_) return false;
+        const platform::VideoCaptureFormat& f = formats_[usbFormat];
+        const bool changed = f.width != usbWidth || f.height != usbHeight || f.fps != usbFps;
+        usbWidth = f.width;
+        usbHeight = f.height;
+        usbFps = f.fps;
+        return changed;
+    }
+
+    /// Cold path: cache what the device advertises as dropdown labels. Kept out of
+    /// defineControls(), which must stay pure — it only reads what this leaves behind.
+    void readFormats() {
+        const uint8_t was = formatCount_;
+        formatCount_ = static_cast<uint8_t>(platform::videoCaptureFormats(formats_, kMaxFormats));
+        for (uint8_t i = 0; i < formatCount_; i++) {
+            std::snprintf(formatLabels_[i], sizeof(formatLabels_[i]), "%ux%u %ufps", formats_[i].width,
+                          formats_[i].height, formats_[i].fps);
+            formatOptions_[i] = formatLabels_[i];
+        }
+        if (usbFormat >= formatCount_) usbFormat = 0;
+        if (formatCount_ != was) rebuildControls(); // the dropdown appeared, or its length changed
+    }
+
+    /// Publish the newest decoded frame. Unlike the other sources this does not fill buf_ — the
+    /// JPEG decoder owns its output buffer (it writes it by DMA, with its own alignment), so the
+    /// frame borrows that instead.
+    void readCapture() MM_NONBLOCKING {
+        uint16_t w = 0, h = 0;
+        const uint8_t* rgb = platform::videoCaptureFrame(capture_, w, h);
+        if (!rgb) return; // nothing new this tick; the frame already published still stands
+        frame_.rgb = rgb;
+        frame_.width = w;
+        frame_.height = h;
+        publish();
+    }
+
+    platform::VideoCaptureHandle capture_;
+
+    // Derived from the selected row, never typed — what actually gets requested of the device.
+    uint16_t usbWidth = 640;
+    uint16_t usbHeight = 480;
+    uint8_t usbFps = 60;
+
+    static constexpr uint8_t kMaxFormats = 24;
+    platform::VideoCaptureFormat formats_[kMaxFormats] = {};
+    char formatLabels_[kMaxFormats][24] = {};
+    const char* formatOptions_[kMaxFormats] = {};
+    uint8_t formatCount_ = 0;
     ScratchBuffer<uint8_t> buf_{*this}; // width*height*3, accounted in dynamicBytes()
     VideoFrame frame_;
     uint32_t seq_ = 0;

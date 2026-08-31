@@ -53,6 +53,9 @@ constexpr uint8_t i2sLanes = 0;
 // band math runs end-to-end in host tests; only live capture is absent.
 constexpr bool hasI2sMic = false;
 
+// No USB host on desktop; VideoService keeps its test-pattern and file sources.
+constexpr bool hasUsbVideo = false;
+
 // Audio-codec config type — desktop has no codec (audioCodecInit stubs to true),
 // but platform.h declares audioCodecInit(CodecType, const AudioCodecPins&, …) for
 // every platform, so the types must exist here too. Mirror the esp32 definitions;
