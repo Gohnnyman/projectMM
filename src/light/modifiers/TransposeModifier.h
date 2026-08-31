@@ -21,6 +21,9 @@ namespace mm {
 class TransposeModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
+    /// Advisory UI chip: what this modifier can work on (transposeXY/XZ/YZ: it can swap any pair).
+    /// Nothing branches on it, since extrude reads the EFFECT's dimensions.
+    Dim dimensions() const override { return Dim::D3; }
 
     // Pairwise axis swaps. XY on by default (the common 2D transpose).
     bool transposeXY = true;

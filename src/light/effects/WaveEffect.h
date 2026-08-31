@@ -24,7 +24,7 @@ namespace mm {
 /// Effect of a travelling wave across the layer.
 class WaveEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🌊"; }
+    const char* tags() const override { return "💫"; }
     // D2 — writes the z=0 plane only; Layer::extrude duplicates it across z on a 3D layout.
     Dim dimensions() const override { return Dim::D2; }
 

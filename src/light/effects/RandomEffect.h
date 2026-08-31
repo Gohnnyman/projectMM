@@ -20,7 +20,7 @@ namespace mm {
 /// Effect that fills the layer with animated random colors.
 class RandomEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫"; }  // MoonLight origin
+    const char* tags() const override { return "💫✨"; }  // MoonLight origin
     // D3: the single lit light is picked by flat index over the entire volume, so this effect
     // writes into any z slice — it iterates (addresses) every axis the layer has.
     Dim dimensions() const override { return Dim::D3; }

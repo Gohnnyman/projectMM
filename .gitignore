@@ -79,10 +79,16 @@ moondeck/moondeck.json
 # on the next device refresh to link last_port → device.
 moondeck/.last_flash.json
 
-# Generated files
+# Generated files. These change on every build (a git hash, a build date, a minified blob), so
+# tracking them would put a diff of their own volatility in every commit.
 src/ui/ui_embedded.h
 src/core/build_info.h
-src/light/moonlive/script_catalog.h
+
+# script_catalog.h is generated too, but it is TRACKED on purpose: it changes only when a script
+# is added, removed, or edits its dimensions()/tags(), which is exactly the change worth reviewing.
+# A wrong dimension or a missing emoji is one readable line in a diff, and a generator that silently
+# read a declaration as "unsaid" shows up as a diff rather than as nothing at all. The scripts stay
+# the source of truth; this is a checked-in view of them.
 
 # ESP-IDF: per-board build directories live under /build/esp32-*/; legacy
 # esp32/build/ is still ignored so a developer's existing tree doesn't

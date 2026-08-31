@@ -1,6 +1,4 @@
 // Ember: a fire that simulates rather than draws. Each cell holds a heat value that decays and
-// re-ignites at random, so this frame depends on the last one — `heat` is the state that makes
-// it a simulation rather than a formula.
 
 class EmberEffect {
   byte  cool = 30;
@@ -8,12 +6,14 @@ class EmberEffect {
   byte  cycle = 20;
   byte  heat[16];
 
-  int dimensions() { return 1; }   // a line of lights: extrude fans it across a wider rig
+  int dimensions() { return 1; }
+
+  string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("cool", cool, 1, 120);
-    addControl("spark", spark, 0, 200);
-    addControl("cycle", cycle, 1, 120);
+    addControl("cool", cool, 1, 120);              // how fast a cell loses heat
+    addControl("spark", spark, 0, 200);            // how fiercely new embers catch
+    addControl("cycle", cycle, 1, 120);            // how often the fire re-ignites
   }
 
   void tick() {
@@ -21,9 +21,6 @@ class EmberEffect {
       if (heat[i] > cool) { heat[i] = heat[i] - cool; } else { heat[i] = 0; }
     }
 
-    // Ignition breathes: strongest at the start of each cycle, fading to nothing by its end.
-    // `cycle` is a BPM because beat() takes one; a wider slider would truncate to a byte and
-    // read back as a different, non-monotonic speed.
     for (j = 0; j < 16; j = j + 1) {
       if (random16(256) < scale(spark, 65535 - beat(cycle, t))) { heat[j] = 255; }
     }

@@ -685,14 +685,21 @@ The light domain plugs into the UI at three points: a fixed top-level tree (Layo
 
 ## Tag emoji legend
 
-A module's chips come from three sources, rendered identically on the card and the type picker: a **role** chip (UI-derived from `role`), a **dimensional** chip (UI-derived from `dim`), and the curated **`tags()`** string (a flash literal the module returns; the UI splits it into grapheme clusters, one chip each). Role and dim are *not* repeated in `tags()` — only the categories below are. The `ROLE_EMOJI` / `DIM_EMOJI` maps in `app.js` are the single source of truth for the UI-derived chips; the legend takes [MoonLight](https://github.com/MoonModules/MoonLight)'s set as the canonical basis:
+The legend itself lives with the people who read the chips: [How projectMM works § The emoji on
+every card](tutorials/how-projectmm-works.md#5-the-emoji-on-every-card). What belongs here is the
+mechanism.
 
-| Category | Emoji | Meaning |
-|---|---|---|
-| **Role** (UI-derived) | 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver · 🛰️ service · 🥞 layer · ⚙️ generic | what kind of module (from `role`, via `ROLE_EMOJI`) |
-| **Dimensionality** (UI-derived) | 📏 1D · 🟦 2D · 🧊 3D | native axes (from `dim`) |
-| **Origin / library** (`tags()`) | 💫 MoonLight · 🐙 WLED · ⚡️ FastLED · *(projectMM-native is the default origin — an origin emoji marks a module that came from elsewhere)* | which library the module came from; the migration files docs by this, the emoji filters by it |
-| **Creator** (`tags()`) | 🦅 a named contributor (credited at the introduction site) | individual authorship credit |
-| **Audio** (`tags()`) | 🔊 audio-reactive | reads `AudioService::latestFrame()` |
+A module's chips come from three sources, rendered identically on the card and the type picker: a
+**role** chip and a **dimensional** chip, both UI-derived from `role` and `dim` through the
+`ROLE_EMOJI` / `DIM_EMOJI` maps in `app.js` (the single source of truth for those two), and the
+curated **`tags()`** string, a flash literal the module returns which the UI splits into grapheme
+clusters, one chip each.
 
-`tags()` carries **only** origin + creator + audio (+ any genuinely module-specific marker); a module can carry several (e.g. `💫🦅` = MoonLight origin, a named creator). Role and dim are added by the UI, so a module never duplicates them in its string. When migrating, set each module's `tags()` from this legend so the chip set is consistent across the library.
+**Role and dim are never repeated in `tags()`**: the UI already adds them, and a module that spells
+them again gets the chip twice. `tags()` carries origin, creator, and the capability groups the
+legend lists. An emoji earns its place by GROUPING several modules, which is what the picker's chip
+filter is for: a unique marker per module filters nothing, so a module that fits no group returns
+"".
+
+A scripted module answers the same way a compiled one does: `MoonLiveEffect::tags()` returns what
+the loaded script's `string tags()` declared, so a script's row reads like any other.

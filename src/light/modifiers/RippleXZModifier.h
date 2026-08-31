@@ -27,6 +27,9 @@ namespace mm {
 class RippleXZModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
+    /// Advisory UI chip: what this modifier can work on (folds x or z into a ripple, so it needs the third axis).
+    /// Nothing branches on it, since extrude reads the EFFECT's dimensions.
+    Dim dimensions() const override { return Dim::D3; }
 
     // Collapse the box (shrink) and which axes to collapse. towardsX flattens X,
     // towardsZ flattens Z. Y is never collapsed.

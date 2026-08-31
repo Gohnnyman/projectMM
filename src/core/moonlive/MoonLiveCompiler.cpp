@@ -1481,12 +1481,20 @@ struct Parser {
     bool parseReturn() {
         lex.advance();                       // past `return`
         if (lex.kind == Tok::Semicolon) {    // a bare return: unwind, no value
+            // A bare return in a function that promised a value would leave the caller reading
+            // whatever sat in the return register, which is the exact failure the declaration
+            // exists to prevent.
+            if (curRet != RetType::Void) { fail("this function must return a value"); return false; }
             emit({IrOp::Ret, 0, 0,0,0,0, 0, nullptr, {}});
             lex.advance();
             return true;
         }
+        // A value from a `void` function has nowhere to go: the host calls it for its effect and
+        // never looks at the register.
+        if (curRet == RetType::Void) { fail("a void function returns no value"); return false; }
         VReg v = 0;
         if (lex.kind == Tok::String) {
+            if (curRet != RetType::Str) { fail("this function returns an int, not a string"); return false; }
             // A string is a POINTER, which is a value like any other here. Returning one is how
             // tags() answers, and it is the only way a script hands text to the host: an expression
             // cannot otherwise carry a string, and does not need to.
@@ -1500,6 +1508,7 @@ struct Parser {
             emit({IrOp::ConstPtr, v, 0,0,0,0, 0, nullptr, interned, {}});
             lex.advance();
         } else {
+            if (curRet != RetType::Int) { fail("this function returns a string, not a number"); return false; }
             v = parseExpr();
             if (failed) return false;
         }
@@ -1586,7 +1595,7 @@ struct Parser {
             if (lex.identLen > kMaxEntryName) { fail("function name too long"); return false; }
             fns[fnCount] = {lex.identBeg, static_cast<uint8_t>(lex.identLen),
                             static_cast<uint16_t>(ir.count), ret};
-            curRet = ret;                        // what this function's `return` is checked against
+            curRet = ret;                        // every `return` below is checked against it
             // The IR carries the start INDEX; the lowering turns it into a byte offset.
             ir.fnIrStart[fnCount] = static_cast<uint16_t>(ir.count);
             ir.fnCount = static_cast<uint8_t>(fnCount + 1);

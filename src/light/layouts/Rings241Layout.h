@@ -31,6 +31,8 @@ namespace mm {
 /// Layout of the 241-LED concentric-rings disc.
 class Rings241Layout : public LayoutBase {
 public:
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D2; }
     // Spacing multiplier — scales both the ring radii and the shared centre.
     // MoonLight default 2, range 1..10.
     uint8_t scale = 2;

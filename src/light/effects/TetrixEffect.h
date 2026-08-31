@@ -24,7 +24,7 @@ namespace mm {
 /// Tetris-style effect: falling, stacking blocks.
 class TetrixEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🌙"; }  // MoonLight origin · MoonModules
+    const char* tags() const override { return "💫🌙✨"; }  // MoonLight origin · MoonModules
     Dim dimensions() const override { return Dim::D2; }   // writes only the z=0 slice; iterates x and y
 
     // Controls — MoonLight's exact defaults. `speedControl` is the UI "speed" (0 = random per brick).

@@ -121,7 +121,7 @@ class FishTankEffect : public EffectBase {
 public:
     static constexpr uint8_t kPool = 24;   // the control maxima, summed
 
-    const char* tags() const override { return "📊"; }  // audio-reactive when soundReactive is set
+    const char* tags() const override { return "💫🎶✨👾"; }  // audio-reactive when soundReactive is set
     Dim dimensions() const override { return Dim::D2; }
 
     /// How many of each swim, and how fast.

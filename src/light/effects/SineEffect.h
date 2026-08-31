@@ -21,7 +21,7 @@ namespace mm {
 /// Effect of a moving sine wave across the layer.
 class SineEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🌀"; }
+    const char* tags() const override { return "💫"; }
     Dim dimensions() const override { return Dim::D3; }
 
     uint8_t frequency = 1;     // spatial frequency (waves across the box), 1..20

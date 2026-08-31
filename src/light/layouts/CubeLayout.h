@@ -63,6 +63,7 @@ public:
     }
 
     const char* tags() const override { return "💫"; }  // MoonLight origin
+    Dim dimensions() const override { return Dim::D3; }
 
     nrOfLightsType lightCount() const override {
         // Solid volume: product of the three edges. Multiply in uint32_t and

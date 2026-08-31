@@ -662,7 +662,18 @@ bool HttpServerModule::removeRecursive(const char* path, uint8_t depth) {
     if (depth > 8) return false;
     if (platform::fsRemove(path)) return true;   // a file, or an already-empty directory
 
-    DirLevel lvl;
+    // The listing lives on the HEAP, not in the frame. A DirLevel is ~2.6 KB, and one per
+    // activation at depth 8 is ~20 KB of stack: this runs from handleConnection, which tick20ms
+    // calls inline on the main task, and that task has 12 KB (CONFIG_ESP_MAIN_TASK_STACK_SIZE).
+    // A user can nest folders freely through POST /api/dir, so a few levels would smash the stack
+    // of the task that renders. One allocation per level costs a malloc on a path that is already
+    // doing filesystem writes, and the frame drops to a pointer.
+    auto* lvlp = static_cast<DirLevel*>(platform::alloc(sizeof(DirLevel)));
+    if (!lvlp) return false;                     // no room to list: report failure, delete nothing
+    DirLevel& lvl = *lvlp;
+    lvl.count = 0;
+    lvl.truncated = false;
+    struct Freer { DirLevel* p; ~Freer() { platform::free(p); } } freer{lvlp};
     platform::fsList(path, &collectEntry, &lvl);
     if (lvl.count == 0) return false;            // not a directory, or unreadable: the failure stands
 

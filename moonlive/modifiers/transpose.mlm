@@ -1,6 +1,10 @@
 // Swap the axes: rows become columns.
 
 class TransposeModifier {
+  int dimensions() { return 2; }
+
+  string tags() { return "💫"; }
+
   void modifyLogical() {
     setXYZ(yPos, xPos, zPos);
   }

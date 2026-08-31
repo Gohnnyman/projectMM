@@ -15,6 +15,8 @@ namespace mm {
 /// Layout of one vertical LED column (1D).
 class SingleColumnLayout : public LayoutBase {
 public:
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D1; }
     // Geometry controls mirror MoonLight's defaults and ranges 1:1.
     uint8_t  start_y = 0;          // "starting Y", 0..255
     uint16_t height = 30;          // "height", 1..1000

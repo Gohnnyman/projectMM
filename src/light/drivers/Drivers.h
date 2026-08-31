@@ -255,6 +255,9 @@ public:
     /// Seconds the rig has been off, counted on tick1s. Stops climbing once the hold expires, so a
     /// device left off for a week does not wrap it.
     uint16_t offSeconds_ = 0;
+    /// What movable() said when the control list was last built, so a change is noticed
+    /// without walking the preset every tick.
+    bool     movableNow_ = false;
 
     void defineControls() override {
         controls_.addControl("on", on);   // master power — first so it renders at the top of the card
@@ -333,6 +336,16 @@ public:
     /// what the preset says, so a full rebuildCorrection would be the wrong cost and would fight
     /// the brightness LUT it shares.
     void updateMotionHold() MM_NONBLOCKING {
+        // Whether the control is SHOWN follows the rig, and the rig changes when a child driver
+        // picks a different light preset. That write rebuilds the child's own controls, never this
+        // container's, so without re-deriving here the row stays hidden after a user selects a
+        // moving head (and stays visible after they leave one), against the rule that every setting
+        // applies live. Compared rather than rebuilt blindly: rebuildControls() fires a WS resync,
+        // and this runs every second.
+        if (movableNow_ != fixtureChannels().movable()) {
+            movableNow_ = !movableNow_;
+            rebuildControls();
+        }
         if (on) {
             offSeconds_ = 0;
         } else if (offSeconds_ < 0xFFFF) {

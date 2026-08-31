@@ -24,7 +24,7 @@ class CrosshairEffect {
 
 These are real calls, not pasted-in text: the callee gets its own frame when it runs, which is what
 lets one helper call another and lets a function recurse. A function takes no arguments yet, so a
-helper is parameterised through the class's members. `effects/crosshair.mle` is the worked example.
+helper is parameterized through the class's members. `effects/crosshair.mle` is the worked example.
 
 **Every function declares what it returns**, the way the compiled module a script stands in for
 does: `void tick()` beside `void tick() override`. Three types, which is all the language has values
@@ -146,7 +146,7 @@ class defining several is still legal.
 | folder | run by | a script writes |
 |---|---|---|
 | `layouts/` | [MoonLiveLayout](../docs/moonmodules/light/MoonLiveLayout.md) | where the lights physically are — `addLight(x, y, z)` |
-| `effects/` | [MoonLiveEffect](../docs/moonmodules/light/MoonLiveEffect.md) | a colour per light: `setRGB(index, r, g, b)`, or a whole shape at once with `line(x1, y1, x2, y2, r, g, b)` |
+| `effects/` | [MoonLiveEffect](../docs/moonmodules/light/MoonLiveEffect.md) | a color per light: `setRGB(index, r, g, b)`, or a whole shape at once with `line(x1, y1, x2, y2, r, g, b)` |
 | `modifiers/` | [MoonLiveModifier](../docs/moonmodules/light/MoonLiveModifier.md) | where one light lands: `setXYZ(xPos, yPos, zPos)` |
 
 Each module ships one of these as its default, so the folder doubles as the reference for what a

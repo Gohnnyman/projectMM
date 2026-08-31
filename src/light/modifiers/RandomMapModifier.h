@@ -29,6 +29,10 @@ namespace mm {
 /// Modifier remapping every light through a random 1:1 permutation.
 class RandomMapModifier : public ModifierBase {
 public:
+    /// Advisory UI chip: what this modifier can work on (shuffles within a box that spans all three axes).
+    /// Nothing branches on it, since extrude reads the EFFECT's dimensions.
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D3; }
     uint8_t bpm = 6;   // reshuffles per minute (0–60); 6 ≈ every 10 s; 0 = frozen
 
     ~RandomMapModifier() override { releasePerm(); }

@@ -69,6 +69,20 @@ public:
     virtual nrOfLightsType lightCount() const = 0;
     virtual void placeLights(const CoordSink& sink) const = 0;
 
+    /// The shape this layout LAYS OUT: a line, a picture, a volume.
+    ///
+    /// **Every layout states it, including the ones that match this default.** A module that says
+    /// nothing is indistinguishable from one nobody checked, and the default is expected to MOVE to
+    /// D3 as the library becomes 3D-native: everything stated survives that change untouched, where
+    /// everything implicit would silently follow it.
+    ///
+    /// It describes THIS layout, not the rig: two 1D strands added to a tree compose into a 2D
+    /// grid, and the composed extent is what the Layouts card reports (`256 lights, 16x16x1`).
+    /// So this answers "what is this one capable of", which is what a user picking from the
+    /// catalog needs, and nothing consumes it: unlike an EFFECT's dimensions, which drives
+    /// Layer::extrude, a layout's is the advisory 📏/🟦/🧊 chip alone.
+    virtual Dim dimensions() const { return Dim::D2; }
+
     /// Whether this layout emits any GAP (black) pixels — physical wire slots held dark. Default
     /// false: a layout with no dark regions never overrides this and stays unaware gaps exist. Gates
     /// the Layer's dense-identity fast path (which would light a gap) off when true. See CoordSink.

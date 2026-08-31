@@ -208,6 +208,115 @@ NetworkReceiveEffect accepts E1.31 via unicast only — the same scope MoonLight
 
 **The SEND half is the more interesting one, and it's the honest scale answer.** sACN puts the universe number *in the group address*, so with **IGMP snooping** the switch filters per-universe in hardware — each node's NIC sees only the universes it joined. That is broadcast's send-once efficiency *plus* unicast's selectivity, and it's the one addressing mode that beats per-node unicast when many nodes want overlapping universes. `NetworkSendDriver` already knows its universe range, so the group address is a pure function of `universe_start` — a small increment, not a redesign. **The catch that keeps it off the default path:** without IGMP snooping the switch floods multicast exactly like broadcast (and on WiFi it goes out at the lowest basic rate to every station), so it degrades straight back into the starvation regime — and firmware cannot detect whether the switch snoops. So: unicast stays the portable default; multicast is the opt-in optimization for a network the user controls. Do the receive join and the send group together when it lands.
 
+### British spellings predate the prose gate (118 files)
+
+`check_prose.py` reports on ADDED lines only, so the American-spelling rule has been enforced from
+the day it landed forward, and everything written before it was never swept. 118 files still carry
+`colour`, `centre`, `behaviour`, `recognise`, `initialise` and friends, in comments and in a few
+identifiers.
+
+The gate keeps it from growing, so this is a one-time sweep rather than a leak. It is deliberately
+NOT folded into a feature branch: a whole-repo rename touches more files than any review can read,
+and mixing it with real changes is how a review gets declined for size. Do it as its own commit,
+mechanically, with the gate run over the whole tree afterwards rather than over a diff.
+
+Identifiers first and separately: a rename changes an API, where a comment does not. `centre()` in
+the shipped `crosshair.mle` was one and is already fixed, since a shipped teaching script is the
+highest-value case.
+
+**Now caught going forward for scripts too**: `.mle`/`.mll`/`.mlm` joined the checker's SUFFIXES
+(they were unchecked, which is how `colour` reached ten shipped scripts), so the library cannot
+drift again.
+
+### Multicast discovery has no fallback when the group never arrives
+
+`DevicesModule` announces presence on the multicast group and every device always joins it, so peers
+find each other whatever each has set `wledCompatible` to. The docstring states the worst case as
+"without IGMP snooping a switch floods multicast exactly like broadcast", i.e. it degrades to the
+thing it was avoiding. **Field reports from other projects say the real worst case is stronger:
+multicast sometimes does not arrive at all**, most often when the path bridges physical media
+(a WiFi client talking to a wired one), where consumer access points and switches handle group
+membership least well. Bursty delivery is reported too, packets arriving in clumps rather than at
+the send cadence.
+
+That failure is silent here: peers simply never appear, and the card shows an empty list that looks
+exactly like a healthy single-device setup.
+
+**A periodic broadcast probe is the obvious fix and it is the wrong one.** The trigger would be
+"no peer seen for N seconds", which is the PERMANENT state of every device that has no company,
+and most installs are a single device. Every one of them would broadcast forever, which is the
+chatter multicast was chosen to avoid, and worst on exactly the WiFi networks already struggling.
+A device cannot tell "the group is broken" from "I am alone" by listening: both are silence.
+
+So the fallback needs a trigger that is not silence.
+
+**The shape that works: try broadcast because it is cheap, rather than waiting for silence to mean
+something.** Announce on multicast, listen on BOTH, and let evidence decide. What is detectable is
+not "I heard nothing" but an ASYMMETRY: a peer heard over broadcast that never arrived over
+multicast proves the group is broken, where silence proves nothing. A device that sees that adds
+the broadcast copy to its own announcements and keeps it.
+
+That needs a bootstrap, because two devices both waiting for evidence never produce any: each is
+quiet on broadcast, so neither gives the other the packet that would settle it. **Announce on both
+for a bounded window after boot, then settle to multicast alone unless broadcast proved necessary.**
+The chatter is one-time and bounded rather than permanent, which is what makes it affordable on the
+WiFi networks this exists for.
+
+The control that follows is a mode rather than a compatibility flag: `multicast` (quiet, today's
+default), `multicast + broadcast` (what `wledCompatible = true` does now, and what WLED apps need),
+and `auto` (the rule above). Unicast is deliberately absent: discovery is one-to-many, and there is
+no address to unicast to before anything has been discovered. Document broadcast as the
+WLED-compatible mode rather than naming the flag after WLED.
+
+**It stays on DevicesModule rather than moving up to NetworkModule.** Three places in the codebase
+send to a group, and only one of them is ours to choose: discovery uses projectMM's own
+`239.255.x.x`, audio sync uses WLED's `239.0.0.1`, and sACN send uses the universe-derived
+`239.255.{hi}.{lo}` that E1.31 mandates. A network-level "prefer broadcast" switch could not move
+the latter two without breaking the protocols they speak, so a control there would imply an
+authority it does not have.
+
+**Can a device self-test by hearing its own multicast? Mostly no, and the reason is worth writing
+down.** `IP_MULTICAST_LOOP` is never set anywhere in the platform layer, so it sits at the stack
+default, which is ON for both lwIP and BSD sockets. A device therefore hears its own multicast
+delivered internally, before the packet ever reaches the wire, so the test passes on a network where
+multicast is entirely broken. Turning loopback off makes hearing yourself meaningful, but then the
+test demands that the switch or AP reflect group traffic back to the sending port, which plenty
+deliberately do not do, so healthy networks would fail it.
+
+What the self-test IS good for is the negative case: with loopback on, NOT hearing your own
+multicast means the local join or socket is broken, which is a real and actionable fault. It
+diagnoses the device, not the network. The network half still needs a peer, because "did my packet
+cross this switch" cannot be answered with nothing on the other side.
+
+**Unverified:** the lwIP loopback default above is read from the socket semantics and our own code,
+not measured on a board. Confirm on an ESP32 before building on it.
+
+**Land the diagnosis whatever else happens.** Reporting "joined the group, no peers seen" on the
+card costs almost nothing and turns a silent failure into a legible state, and it is useful even if
+the auto mode is never built.
+
+### ESP32 UDP receive is bounded by PACKET COUNT, not bytes
+
+Reported from other projects working the same ground: the ESP32 family's incoming UDP limit behaves
+as a **mailbox of packets** rather than a memory budget, with a hard numerical ceiling, and the P4
+is no better. The observed shape is perfect reception up to that count and then progressively worse
+loss as universes climb, rather than a clean cliff. Raising it is tunable but bounded, since the raw
+packet buffers are full-frame sized whatever the payload.
+
+Two consequences worth having in mind:
+
+- **Pixels-per-packet is the lever, not bandwidth.** Art-Net is DMX512 on the wire, so it is capped
+  at 512 values per packet whatever the frame size; DDP fills close to a whole MTU. For the same
+  pixel count DDP therefore needs far fewer packets, which is the resource that runs out first.
+  This matches our own measurement that ArtNet is where the WiFi limit bites.
+- **A P4-specific escape exists.** Have the packet handler DMA the payload to PSRAM and release the
+  hardware buffer immediately, then parse from another task, so the mailbox drains at memory speed
+  rather than at parse speed. That is real work and speculative, but it is the shape of a fix rather
+  than a tuning knob.
+
+Unverified on our own bench: this is other people's measurement, recorded so the next receive-path
+investigation starts from it rather than rediscovering it. Confirm before acting on it.
+
 ### WiFi ArtNet performance (pending investigation)
 
 128×128 WiFi ArtNet measurements exist (see [performance.md](../performance.md) "ArtNet over WiFi" and "Build-variant WiFi comparison"). Remaining matrix:

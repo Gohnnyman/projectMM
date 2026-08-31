@@ -30,7 +30,7 @@ namespace mm {
 /// Effect: a warped, kaleidoscopic noise field in polar coordinates.
 class PolarNoiseEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫🖌️"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t bpm      = 8;    // how fast the field drifts

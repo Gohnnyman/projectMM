@@ -685,11 +685,15 @@ private:
             // Apply the shared Correction (brightness LUT + channel order) so the global
             // brightness slider and a swapped color order reach Hue too — same as the physical
             // drivers. apply() writes outChannels bytes; we read the first three (RGB) for HSV.
-            // Sized for the widest fixture a preset can declare (RGBW + the five motion roles),
-            // because apply() writes outChannels bytes and a moving-head preset pointed at a Hue
-            // bulb is a wiring the user is allowed to ask for. Only the first three are read.
-            uint8_t rgb[FixtureChannels::kMotionBase + 5] = { px[0], px[1], px[2], 0 };
-            correction_.apply(px, rgb, cpl);
+            // apply() writes outChannels bytes at the fixture's DERIVED offsets, and a preset
+            // declares its own width: the seeded moving heads are 15, 24 and 32 channels and the
+            // editor allows 255. So a fixed buffer sized to any guess is a stack overrun the moment
+            // a wide preset is pointed at a Hue bulb, which is a wiring the user is allowed to ask
+            // for. Correct it in place only while the buffer provably holds the whole light, and
+            // pass the raw RGB through otherwise: a bulb reads three bytes either way, so the wide
+            // case loses the brightness scaling rather than corrupting the render task's stack.
+            uint8_t rgb[4] = { px[0], px[1], px[2], 0 };
+            if (correction_.outChannels <= sizeof(rgb)) correction_.apply(px, rgb, cpl);
             char body[80];
             if (diffAndFormat(li, rgb[0], rgb[1], rgb[2], body, sizeof(body))) {
                 char host[16]; bridgeStr(host);

@@ -31,6 +31,7 @@ namespace mm {
 /// Modifier rotating the 2D image about its centre over time.
 class RotateModifier : public ModifierBase {
 public:
+    const char* tags() const override { return "💫"; }
     Dim dimensions() const override { return Dim::D2; }   // 2D rotation (advisory chip)
     bool hasModifyLive() const override { return true; }  // animates every frame
 

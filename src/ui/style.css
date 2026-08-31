@@ -1521,13 +1521,25 @@ body.cards-resizing {
     cursor: pointer;
     line-height: 1.2;
 }
+/* A hairline between chip groups: the row reads role | dimension | origin | capability, and the
+   gap alone was not enough to see the boundary. */
+.type-picker-chip-sep {
+    width: 1px;
+    align-self: stretch;
+    margin: 2px 3px;
+    background: var(--border);
+    flex: 0 0 auto;
+}
 .type-picker-chip:hover { border-color: var(--accent); }
 .type-picker-chip.active {
     background: var(--accent-soft);
     border-color: var(--accent);
 }
 .type-picker-list {
-    max-height: 200px;
+    /* Bounded by the WINDOW as well as by a fixed height: on a short window the fixed 200px plus
+       the search box, chips and buttons is taller than the viewport, and the picker hung off the
+       bottom whatever the positioning did. The list is the part that gives. */
+    max-height: min(200px, calc(100vh - 190px));
     overflow-y: auto;
 }
 .type-picker-item {

@@ -23,7 +23,7 @@ namespace mm {
 /// Effect rendering a rotating Rubik's cube on a 3D layout.
 class RubiksCubeEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🧊"; }  // MoonLight origin · 3D-native
+    const char* tags() const override { return "💫"; }  // MoonLight origin · 3D-native
     Dim dimensions() const override { return Dim::D3; }
 
     // Defaults match MoonLight's RubiksCube exactly.

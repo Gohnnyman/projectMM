@@ -1,14 +1,13 @@
 // Gradient: red rising across the rig while blue falls, the simplest thing that is still a picture.
-// The first script to prove `for` reaches the emitter with a distinct value each pass.
 
 class GradientEffect {
-  int n = 0;
+  int n = 0;                      // total lights, whatever the shape
 
-  int dimensions() { return 3; }   // addresses every light, whatever shape the rig is
+  int dimensions() { return 3; }
+
+  string tags() { return "💫"; }
 
   void tick() {
-    // Across the WHOLE rig, whatever its size: a fixed count lit the first 256 lights and left a
-    // longer strand dark, which is the shape a script written against one test rig has.
     n = width * height * depth;
     for (i = 0; i < n; i = i + 1) {
       setRGB(i, div(i * 255, n), 255 - div(i * 255, n), 60);

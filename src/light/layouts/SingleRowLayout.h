@@ -20,6 +20,7 @@ namespace mm {
 class SingleRowLayout : public LayoutBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
+    Dim dimensions() const override { return Dim::D1; }
 
     // First x of the row. uint8_t (0..255) — MoonLight's exact type/range.
     uint8_t startX = 0;

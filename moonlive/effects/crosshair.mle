@@ -1,27 +1,20 @@
 // Crosshair: a sight sweeping the grid, drawn by functions the script defines for itself.
-//
-// The point of this script is the HELPERS. `column()`, `row()` and `centre()` are the script's own
-// functions, called from `tick()`. Each is a REAL call: the callee allocates its own frame when it
-// runs, which is what lets one helper call another, and eventually itself. Nothing is pasted in by
-// the compiler. It is the worked example the language docs point at.
-//
-// Distinct from `lines`, which draws a similar shape with one line() call each: this one has a
-// bright core where the axes meet, and the two axes run on different clocks so the crossing point
-// wanders instead of tracking a diagonal.
 
 class CrosshairEffect {
   byte bpm = 30;
   byte spread = 3;
 
-  int cx = 0;
-  int cy = 0;
-  int d = 0;
+  int cx = 0;                     // where the sight sits, across
+  int cy = 0;                     // where the sight sits, down
+  int d = 0;                      // distance from this light to the line
 
-  int dimensions() { return 2; }   // an x/y picture; extrude copies it through the depth
+  int dimensions() { return 2; }
+
+  string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("bpm", bpm, 1, 240);
-    addControl("spread", spread, 0, 20);
+    addControl("bpm", bpm, 1, 240);                 // how fast the sight sweeps
+    addControl("spread", spread, 0, 20);            // how thick the lines are
   }
 
   void column() {
@@ -32,11 +25,7 @@ class CrosshairEffect {
     for (x = 0; x < width; x = x + 1) { setRGB(cy * width + x, 0, 90, 200); }
   }
 
-  // Where the axes cross, brighter and wider: the part that makes it read as a sight rather than
-  // as two lines that happen to overlap.
-  void centre() {
-    // `<` is the only comparison a for condition takes, so the arm runs 0..2*spread and the
-    // offset is derived inside rather than counting from a negative.
+  void center() {
     for (i = 0; i < spread + spread + 1; i = i + 1) {
       d = i - spread;
       if (cx + d >= 0) { if (cx + d < width) { setRGB(cy * width + cx + d, 255, 255, 255); } }
@@ -46,12 +35,10 @@ class CrosshairEffect {
 
   void tick() {
     fill(0, 0, 0);
-    // Two clocks, deliberately unequal: on one clock the crossing point would run the diagonal
-    // and never visit most of the grid.
     cx = scale(beat(bpm, t), width);
     cy = scale(beat(bpm + 7, t), height);
     column();
     row();
-    centre();
+    center();
   }
 }

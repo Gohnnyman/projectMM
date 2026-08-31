@@ -1,32 +1,27 @@
 // Sparkle: lights flickering on at random and fading out, like sun on water.
-// Density decides how many catch at once, fade how long each one lingers: turn fade down for hard
-// static, up for a slow shimmer. The whole effect is one random light per pass over a fading field,
-// which is the smallest thing in the library that still reads as a look rather than a test.
 
 class SparkleEffect {
   byte density = 6;
   byte fadeAmt = 40;
   byte hueSpread = 255;
 
-  int n = 0;
-  int p = 0;
+  int n = 0;                      // total lights, whatever the shape
+  int p = 0;                      // the light this spark landed on
 
-  int dimensions() { return 3; }   // addresses every light, whatever shape the rig is
+  int dimensions() { return 3; }
+
+  string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("density", density, 1, 40);
-    addControl("fadeAmt", fadeAmt, 1, 120);
-    addControl("hueSpread", hueSpread, 0, 255);
+    addControl("density", density, 1, 40);          // how many lights catch per frame
+    addControl("fadeAmt", fadeAmt, 1, 120);         // how fast a spark dies
+    addControl("hueSpread", hueSpread, 0, 255);     // how much of the palette the sparks use
   }
 
   void tick() {
-    // Fade rather than clear: what was lit last frame is still here, dimmer, which is the trail
-    // that turns single pixels into a shimmer.
     fade(fadeAmt);
     n = width * height * depth;
     for (i = 0; i < density; i = i + 1) {
-      // paletteR/G/B take a palette index, so the sparks follow the device's palette instead of
-      // being locked to one colour.
       p = random16(256);
       if (p > hueSpread) { p = hueSpread; }
       setRGB(random16(n), paletteR(p, 255), paletteG(p, 255), paletteB(p, 255));

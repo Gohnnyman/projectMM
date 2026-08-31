@@ -67,6 +67,7 @@ public:
     }
 
     const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D2; }
 
     nrOfLightsType lightCount() const override {
         // Total lights = (panels in grid) × (lights per panel). Multiply in

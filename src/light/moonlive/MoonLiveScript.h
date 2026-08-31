@@ -85,6 +85,11 @@ public:
             compileFailed_ = false;
         } else {
             owner.setStatus(err, MoonModule::Severity::Error);
+            // Forget what the LAST script said it was. A failed compile has already interned its
+            // strings into the same pool from offset zero, so a tags_ kept from the previous
+            // program now points at whatever those bytes became, and the card would show it.
+            dim_ = Dim::D2;
+            tags_ = nullptr;
             compileFailed_ = true;
             failedHash_ = fileHash;
             failedReadable_ = readable;   // distinguishes "this text is broken" from "no file"

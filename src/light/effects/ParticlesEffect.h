@@ -10,7 +10,7 @@ namespace mm {
 /// @card ParticlesEffect.png
 class ParticlesEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step
+    const char* tags() const override { return "💫🦅✨"; }  // MoonLight origin · David Jupijn / Rising Step
     // Iterates y and x only; Layer::extrude fills z on 3D layers. The trail
     // buffer is sized to the z=0 plane (w*h*cpl), not the full 3D buffer.
     Dim dimensions() const override { return Dim::D2; }

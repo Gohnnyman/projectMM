@@ -16,6 +16,7 @@ namespace mm {
 class LinesEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D3; }
 
     uint8_t speed = 30;   // BPM
     uint8_t axis  = 0;    // 0=all 1=x(red) 2=y(green) 3=z(blue)

@@ -1136,7 +1136,7 @@ function renderChildTabs(mod, childrenEl, depth) {
             // effects instead of another layer). Scope to direct children of this card.
             const card = childrenEl.parentElement;
             const footer = [...card.children].find(el => el.classList.contains("card-footer"));
-            if (footer) openTypePicker(mod, footer);
+            if (footer) openTypePicker(mod, footer.querySelector(".add-btn") || footer);
         });
         strip.appendChild(addTab);
     }
@@ -1729,7 +1729,7 @@ function createCard(mod, depth) {
                 // The picker is a modal, so the button stays where it is: it used to be hidden
                 // and restored through a MutationObserver because the picker was appended into
                 // the footer and took the button's place.
-                openTypePicker(mod, footer);
+                openTypePicker(mod, addBtn);
             });
             footer.appendChild(addBtn);
             card.appendChild(footer);
@@ -1836,7 +1836,7 @@ function createActionButtons(mod) {
     replaceBtn.addEventListener("click", () => {
         // Anchor the picker to the card so it drops below the card content,
         // not inside the cramped 26px action-button row.
-        openReplacePicker(mod, replaceBtn.closest(".card"));
+        openReplacePicker(mod, replaceBtn);
     });
     wrap.appendChild(replaceBtn);
 
@@ -2579,7 +2579,7 @@ function createControl(moduleName, moduleType, ctrl) {
                     : "https://github.com/MoonModules/projectMM/new/main"
                       + "?filename=" + encodeURIComponent(repoPath)
                       + "&value=" + encodeURIComponent(text);
-                // The script rides in the query string, and browsers stop honouring a URL somewhere
+                // The script rides in the query string, and browsers stop honoring a URL somewhere
                 // past ~8 KB. Every shipped script is under 2.5 KB so this is headroom rather than a
                 // real limit, but a long one would otherwise open a truncated editor and look fine.
                 if (url.length > 7000) {
@@ -4671,25 +4671,52 @@ function openPicker(anchorEl, opts) {
     const activeChips = new Set();
     const chipRow = document.createElement("div");
     chipRow.className = "type-picker-chips";
-    const chipEmoji = [];
     const chipSeen = new Set();
+    const present = [];
     for (const t of filtered) {
         for (const ch of emojiTagsFor(t)) {
-            if (!chipSeen.has(ch)) { chipSeen.add(ch); chipEmoji.push(ch); }
+            if (!chipSeen.has(ch)) { chipSeen.add(ch); present.push(ch); }
         }
     }
-    for (const emoji of chipEmoji) {
-        const chip = document.createElement("button");
-        chip.className = "type-picker-chip";
-        chip.textContent = emoji;
-        chip.addEventListener("click", () => {
-            if (activeChips.has(emoji)) { activeChips.delete(emoji); chip.classList.remove("active"); }
-            else { activeChips.add(emoji); chip.classList.add("active"); }
-            refresh();
-        });
-        chipRow.appendChild(chip);
+    // Grouped rather than in first-seen order, so the row reads as the legend does: the scripted
+    // marker, then what a module IS (role, then dimension), then where it came from, then what it
+    // can do. A chip whose category is unknown falls in the last group rather than vanishing, so a
+    // new emoji is visible before anyone remembers to classify it.
+    const CHIP_GROUPS = [
+        ["\u{1F4DD}"],                                   // MoonLive: scripted, first
+        Object.values(ROLE_EMOJI),                       // type
+        Object.values(DIM_EMOJI),                        // dimension
+        ["\u{1F4AB}", "\u{1F319}", "\u{1F419}", "\u26A1\uFE0F"],   // origin
+    ];
+    const groups = CHIP_GROUPS.map(g => present.filter(e => g.includes(e)));
+    const classified = new Set(CHIP_GROUPS.flat());
+    groups.push(present.filter(e => !classified.has(e)));   // capabilities and anything new
+
+    let first = true;
+    for (const group of groups) {
+        if (!group.length) continue;
+        // A separator between groups, never leading or trailing: it marks a boundary, and a
+        // boundary with nothing on one side is just a mark.
+        if (!first) {
+            const sep = document.createElement("span");
+            sep.className = "type-picker-chip-sep";
+            sep.setAttribute("aria-hidden", "true");
+            chipRow.appendChild(sep);
+        }
+        first = false;
+        for (const emoji of group) {
+            const chip = document.createElement("button");
+            chip.className = "type-picker-chip";
+            chip.textContent = emoji;
+            chip.addEventListener("click", () => {
+                if (activeChips.has(emoji)) { activeChips.delete(emoji); chip.classList.remove("active"); }
+                else { activeChips.add(emoji); chip.classList.add("active"); }
+                refresh();
+            });
+            chipRow.appendChild(chip);
+        }
     }
-    if (chipEmoji.length > 0) picker.appendChild(chipRow);
+    if (present.length > 0) picker.appendChild(chipRow);
 
     const list = document.createElement("div");
     list.className = "type-picker-list";
@@ -4818,6 +4845,11 @@ function openPicker(anchorEl, opts) {
     //
     // The native <dialog>, the same one the File Manager's editor uses: Esc and the backdrop are
     // the browser's job, so there is no overlay, no focus trap and no scroll lock to maintain here.
+    // Where the anchor sits BEFORE the modal opens: showModal() can move the page under it (the
+    // body's scrollbar goes), so a rect read afterwards describes a layout that has already shifted.
+    const anchorRect = anchorEl && anchorEl.getBoundingClientRect
+        ? anchorEl.getBoundingClientRect() : null;
+
     const dlg = document.createElement("dialog");
     dlg.className = "type-picker-modal";
     dlg.appendChild(picker);
@@ -4829,6 +4861,45 @@ function openPicker(anchorEl, opts) {
     dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
     dlg.showModal();
     refresh();
+
+    // Centered over the CARDS column, not the viewport. showModal() centers on the page, which puts
+    // the list far from the card whose control opened it: the eye is on the right-hand column and
+    // the answer appears in the middle of the preview. Falls back to the page center when the
+    // column is absent (the PiP layout, where cards are full width anyway).
+    //
+    // AFTER refresh(): the rows are what give the picker its height, so measuring before them read
+    // an empty list (111px against a real 311px) and the bottom-of-screen clamp never fired.
+    const col = document.getElementById("main");
+    const d = dlg.getBoundingClientRect();
+    const c = col ? col.getBoundingClientRect() : null;
+    if (c && c.width > d.width) {
+        // VERTICALLY the search box lands on what was clicked, so the list opens under the hand
+        // rather than jumping the eye across the screen. Clamped upward when the picker would run
+        // off the bottom, and never above the top edge: on a short window it simply starts at the
+        // top and the list scrolls, which beats a dialog with its buttons out of reach.
+        const margin = 8;
+        // MEASURE FIRST, then write: reading a rect after setting `left`/`margin` reads a box that
+        // has already moved, and using that as an offset walks the dialog down the page.
+        const s = picker.querySelector(".type-picker-search");
+        const inset = s ? s.getBoundingClientRect().top - d.top : 0;   // dialog top to search box
+        // The search box lands just BELOW the control that opened it, so the thing clicked stays
+        // visible above the picker rather than being covered by it.
+        //
+        // Clamped so the whole picker stays on screen: it rises rather than hanging off the bottom.
+        // On a window too short to hold it at all, `max` wins over `min` and it starts at the top
+        // margin with the list scrolling, which beats putting the buttons out of reach.
+        dlg.style.position = "fixed";
+        dlg.style.left = Math.round(c.left + (c.width - d.width) / 2) + "px";
+        dlg.style.margin = "0";
+        // Clamp against the height the dialog has ONCE POSITIONED. `d` was measured while it was
+        // still centered by showModal(), and a fixed dialog lays out to a different height, so
+        // clamping against the stale number let it hang off the bottom of a short window.
+        const h = dlg.getBoundingClientRect().height;
+        let top = (anchorRect ? anchorRect.bottom + margin : d.top) - inset;
+        top = Math.min(top, window.innerHeight - h - margin);
+        top = Math.max(margin, top);
+        dlg.style.top = Math.round(top) + "px";
+    }
     search.focus();
 }
 

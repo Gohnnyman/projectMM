@@ -31,7 +31,7 @@ namespace mm {
 /// Effect: two SDF shapes orbiting and melting together, with a soft edge and an outline.
 class SdfShapesEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫🖌️"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t bpm = 12;         // orbit speed

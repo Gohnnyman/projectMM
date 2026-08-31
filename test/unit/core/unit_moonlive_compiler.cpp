@@ -1420,6 +1420,32 @@ TEST_CASE("void, int and string are the return types; a member type is not one")
     }
 }
 
+// A `return` must match what its function declared. Without this the declaration would be a label
+// rather than a contract: `return "x";` in a void function compiles, and the host that calls it for
+// its effect never looks at the register, so a script silently disagrees with its own signature.
+TEST_CASE("a return must match the type its function declared") {
+    uint8_t out[2048];
+    static char pool[moonlive::CompileResult::kStringPool];
+    const auto compiles = [&](const char* src) {
+        return moonlive::compileSource(src, kTable, kSys, out, sizeof(out), nullptr, nullptr,
+                                       pool, sizeof(pool)).ok;
+    };
+
+    // A value from a void function has nowhere to go.
+    CHECK_FALSE(compiles("class T { void tick() { return 2; } }"));
+    // A function that promised a value cannot return without one: the caller would read whatever
+    // sat in the return register.
+    CHECK_FALSE(compiles("class T { int dimensions() { return; } void tick() { fill(1,2,3); } }"));
+    // The two value kinds are not interchangeable: a string is a pointer, an int is a number.
+    CHECK_FALSE(compiles("class T { int dimensions() { return \"2\"; } void tick() { fill(1,2,3); } }"));
+    CHECK_FALSE(compiles("class T { string tags() { return 2; } void tick() { fill(1,2,3); } }"));
+
+    // And the matching forms still compile, so the check rejects rather than forbids.
+    CHECK(compiles("class T { void tick() { return; } }"));
+    CHECK(compiles("class T { int dimensions() { return 2; } void tick() { fill(1,2,3); } }"));
+    CHECK(compiles("class T { string tags() { return \"x\"; } void tick() { fill(1,2,3); } }"));
+}
+
 // A member and a typed function open with the SAME token, and only the token after the name says
 // which. Both orders compile: a class whose members come first, and one that starts with a
 // function, which is what the lookahead exists for.

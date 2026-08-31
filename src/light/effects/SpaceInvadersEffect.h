@@ -120,7 +120,7 @@ static_assert(sizeof(kCannon) == static_cast<size_t>(GW) * GH * GF, "cannon: one
 /// @card SpaceInvadersEffect.gif
 class SpaceInvadersEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬📊"; }   // audio-reactive when soundReactive is set
+    const char* tags() const override { return "💫🎵👾"; }   // audio-reactive when soundReactive is set
     Dim dimensions() const override { return Dim::D2; }
 
     /// Steps per minute at full strength. The arcade had no such control: its tempo WAS the

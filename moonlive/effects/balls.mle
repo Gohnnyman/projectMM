@@ -1,22 +1,23 @@
 // Bouncing balls: four balls on their own paths, each reversing at every wall.
-// Ported from MoonLight's E_balls.sc.
 
 class BallsEffect {
   byte count = 4;
   byte size = 5;
   byte bpm = 20;
 
-  byte b = 0;
-  byte radius = 4;
-  byte px = 0;
-  byte py = 0;
+  byte b = 0;                     // the ball being drawn
+  byte radius = 4;                // that ball's radius in lights
+  byte px = 0;                    // its center, across
+  byte py = 0;                    // its center, down
 
-  int dimensions() { return 2; }   // an x/y picture; extrude copies it through the depth
+  int dimensions() { return 2; }
+
+  string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("count", count, 1, 4);
-    addControl("size", size, 1, 10);
-    addControl("bpm", bpm, 1, 120);
+    addControl("count", count, 1, 4);               // how many balls bounce
+    addControl("size", size, 1, 10);                // ball size as a share of the grid
+    addControl("bpm", bpm, 1, 120);                 // how fast they travel
   }
 
   void drawBall() {
@@ -34,8 +35,6 @@ class BallsEffect {
   void tick() {
     fill(0, 0, 0);
 
-    // Sized off the smaller axis, capped at the 21x21 drawing window; 0 on an axis too
-    // small to hold a ball, which draws a single pixel rather than underflowing the bound.
     radius = scale(height, size * 819) + 1;
     if (width < height) { radius = scale(width, size * 819) + 1; }
     if (radius > 10) { radius = 10; }
@@ -45,8 +44,6 @@ class BallsEffect {
     for (i = 0; i < 4; i = i + 1) {
       b = i;
       if (b < count) {
-        // A beatsin between 0 and the wall IS a bounce. Different rates per ball and per
-        // axis, so each traces its own path instead of all four moving together.
         px = beatsin(bpm + b * 7, t, width - radius * 2 - 1);
         py = beatsin(bpm + b * 5 + 3, t, height - radius * 2 - 1);
         drawBall();

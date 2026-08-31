@@ -36,6 +36,7 @@ public:
     }
 
     const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D3; }
 
     nrOfLightsType lightCount() const override {
         // Sum of the five face areas, matching the loop bounds in placeLights:

@@ -52,19 +52,6 @@ HTTP API and the UI use, so every validator still runs.
 - `port` — the UDP port (default 9000, what TouchOSC uses). Applies live.
 - `status` — listening, off, or why the port could not be opened.
 
-Detail: [technical](moxygen/IrService.md)
-
-<a id="ir"></a>
-
-### IR
-
-A Service (added per board): an IR remote receiver that drives other modules' controls through the shared `Scheduler::setControl` primitive. It **learns** any remote (NEC-over-RMT): pick an action in `learn`, press a button to bind its code. What each action does + the status-line messages: ⌄ details.
-
-<img src="../../assets/core/IrService.png" width="300" alt="IR module controls">
-
-- `pin` — the IR receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4 alongside Ethernet).
-- `learn` — pick an action to bind (`on/off` / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms. The first option, `off`, is the disarmed state (bind nothing), not a light action.
-- `code on/off` / `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
 
 **Feedback: the device answers.** With `feedback` on, a control that changes anywhere (the web UI, a
 preset recall, an audio-reactive effect) is mirrored back to the surface, which is what keeps a
@@ -81,6 +68,22 @@ The shipped session has a `sync from device` button for exactly this.
 **Setting one up**, from installing the app to using it from a phone, is its own page:
 [Driving projectMM from a phone or tablet](../../tutorials/control-surface.md). It needs no
 checkout and no tooling, just the app and the session file from the latest release.
+
+Detail: [technical](moxygen/OscModule.md)
+
+<a id="ir"></a>
+
+### IR
+
+A Service (added per board): an IR remote receiver that drives other modules' controls through the shared `Scheduler::setControl` primitive. It **learns** any remote (NEC-over-RMT): pick an action in `learn`, press a button to bind its code. What each action does + the status-line messages: ⌄ details.
+
+<img src="../../assets/core/IrService.png" width="300" alt="IR module controls">
+
+- `pin` — the IR receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4 alongside Ethernet).
+- `learn` — pick an action to bind (`on/off` / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms. The first option, `off`, is the disarmed state (bind nothing), not a light action.
+- `code on/off` / `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
+
+Detail: [technical](moxygen/IrService.md)
 
 ## Audio — details
 

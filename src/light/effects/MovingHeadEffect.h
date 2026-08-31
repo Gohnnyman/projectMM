@@ -26,7 +26,7 @@ namespace mm {
 /// @card MovingHeadEffect.gif
 class MovingHeadEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬📊"; }   // audio-reactive when soundReactive is set
+    const char* tags() const override { return "💫🎶🎯"; }   // audio-reactive when soundReactive is set
     /// D3: every head is a fixture with its own aim, so the effect places all of them itself.
     ///
     /// Declaring D1 would be smaller, but it is a promise the Layer keeps by EXTRUDING: it writes

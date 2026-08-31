@@ -44,6 +44,7 @@ public:
     }
 
     const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D2; }
 
     nrOfLightsType lightCount() const override {
         // Count via the exact same emit walk so count and emit never disagree

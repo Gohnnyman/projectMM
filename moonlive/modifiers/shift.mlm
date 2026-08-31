@@ -1,11 +1,14 @@
 // Slide along x. A coordinate is a byte, so keep amount small enough that xPos + amount stays under
-// 256: past that it wraps and the light reappears at the left edge.
 
 class ShiftModifier {
   byte amount = 4;
 
+  int dimensions() { return 2; }
+
+  string tags() { return "💫"; }
+
   void defineControls() {
-    addControl("amount", amount, 0, 64);
+    addControl("amount", amount, 0, 64);            // how far to slide, in lights
   }
 
   void modifyLogical() {

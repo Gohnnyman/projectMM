@@ -190,6 +190,12 @@ public:
     /// snooping a switch floods multicast exactly like broadcast, and on WiFi it goes out at the
     /// lowest basic rate to every station. Firmware cannot tell which kind of network it is on.
     ///
+    /// And flooding is the GOOD failure. Multicast also just fails to arrive on some consumer gear,
+    /// most often where the path bridges physical media (a WiFi client to a wired one), so an empty
+    /// device list can mean the group never got through rather than that nobody is there. A device
+    /// cannot tell those apart by listening, since both are silence: see backlog-core.md,
+    /// "Multicast discovery has no fallback when the group never arrives".
+    ///
     /// **Devices need not agree on this.** Presence ALWAYS goes to the group and every device
     /// ALWAYS joins it, so projectMM peers find each other whatever each has chosen; the flag
     /// only adds the broadcast copy WLED needs. A fleet can therefore be mixed, and turning it

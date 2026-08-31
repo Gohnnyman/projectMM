@@ -37,7 +37,7 @@ namespace mm {
 /// Effect: randomly-turned arc tiles that join into endless winding paths.
 class TruchetEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫🖌️"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t bpm      = 6;    // how fast the pattern drifts

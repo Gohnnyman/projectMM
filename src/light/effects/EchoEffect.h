@@ -29,7 +29,7 @@ namespace mm {
 /// Effect: the previous frame fed back through a zoom and rotation, leaving spiralling trails.
 class EchoEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫✨"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t bpm    = 30;    // how fast the source moves

@@ -54,6 +54,7 @@ public:
     }
 
     const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D2; }
 
     nrOfLightsType lightCount() const override {
         // Multiply in uint32_t to detect overflow before casting, per GridLayout.

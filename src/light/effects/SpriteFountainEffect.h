@@ -25,7 +25,7 @@ namespace mm {
 /// @card SpriteFountainEffect.gif
 class SpriteFountainEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬📊"; }   // audio-reactive when soundReactive is set
+    const char* tags() const override { return "💫🎶✨👾"; }   // audio-reactive when soundReactive is set
     Dim dimensions() const override { return Dim::D2; }
 
     /// How hard the nozzle throws, and how hard gravity pulls back. Both scale with the grid, so
