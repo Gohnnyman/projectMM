@@ -59,7 +59,7 @@ def main() -> int:
         print("usage: catalog_scripts.py <filelist> <out.h>", file=sys.stderr)
         return 2
 
-    paths = [Path(p) for p in Path(sys.argv[1]).read_text().split("\n") if p.strip()]
+    paths = [Path(p) for p in Path(sys.argv[1]).read_text(encoding="utf-8").split("\n") if p.strip()]
     out = Path(sys.argv[2])
 
     # A name must be unique on the device: the repo's subfolders vanish when scripts land in one
@@ -136,7 +136,11 @@ def main() -> int:
     parts.append(f"constexpr size_t kCatalogCount = {total};   ///< every factory script, all roles\n\n")
     parts.append("} // namespace mm::moonlive\n")
 
-    out.write_text("".join(parts))
+    # UTF-8 EXPLICITLY, on every read and write in this file: a script's tags() is emoji, and
+    # Python falls back to the platform encoding when none is named, which on Windows is
+    # cp1252 and cannot encode them. The build failed there with UnicodeEncodeError while
+    # every POSIX host passed, because their default already is UTF-8.
+    out.write_text("".join(parts), encoding="utf-8")
     print(f"catalog: {len(paths)} scripts")
     return 0
 
