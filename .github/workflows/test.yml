@@ -30,6 +30,12 @@ on:
       # the "this is a subset of C++" claim needs re-checking.
       - 'moonlive/**'
       - 'src/light/moonlive/MoonLiveBuiltins_light.h'
+      # The sanitizer jobs below compile the WHOLE C++ suite, so they have to run when any of it
+      # changes. Without these, a C++ change could break them with no run at all, and the fix could
+      # not prove itself either: exactly what happened to a missing <string> in a unit test.
+      - 'src/**'
+      - 'test/unit/**'
+      - 'CMakeLists.txt'
       - '.github/workflows/test.yml'
   push:
     branches:
