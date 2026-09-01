@@ -12,7 +12,7 @@ class ReversedRowLayout {
   }
 
   void placeLights() {
-    for (i = 0; i < cols; i = i + 1) {
+    for (int i = 0; i < cols; i = i + 1) {
       addLight(cols - 1 - i, 0, 0);
     }
   }

@@ -54,6 +54,22 @@ uv run moondeck/test/test_desktop.py
 
 Runs `./build/<host>/test/mm_tests -s` (doctest with all test cases shown) — same per-host build dir as the desktop build above.
 
+### test_host
+
+Run the host test suites: the Python ones and the JS ones.
+
+```bash
+uv run moondeck/test/test_host.py            # both
+uv run moondeck/test/test_host.py --python   # just Python
+uv run moondeck/test/test_host.py --js       # just JS
+```
+
+The tests the C++ binary cannot reach: the cross-language contracts (the Improv frame's wire format,
+WLED's `/json` shape), the MoonDeck scripts themselves, the browser code under `src/ui`, and the
+claim that every shipped MoonLive script is valid C++ (`test_scripts_are_cpp.py` hands each one to a
+real compiler). The commit gate and CI run the same two commands; this is the card in front of them.
+JS reports SKIP rather than failing when node is absent, since a Python-only bench is a normal setup.
+
 ### run_desktop
 
 Launch the desktop executable as a detached background process and exit. The app keeps running across other MoonDeck scripts and outlives MoonDeck itself — the same model as flashing an ESP32, where the device runs independently of this console.

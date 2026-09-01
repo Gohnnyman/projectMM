@@ -18,6 +18,7 @@
 #include "core/moonlive/moonlive_emit.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include "light/moonlive/MoonLiveScriptFile.h"   // the role extensions the sweep filters on
+#include "light/moonlive/MoonLiveScript.h"       // kMaxStatus: the status line a failure reports through
 #include "light/moonlive/script_catalog.h"       // generated: what the device offers
 
 #include <algorithm>
@@ -163,10 +164,10 @@ TEST_CASE("the shipped catalog names every script in moonlive/") {
 TEST_CASE("every script reads the same system-variable vocabulary") {
     struct Case { const char* src; bool ok; const char* what; };
     const Case cases[] = {
-        {mmScript("for (y = 0; y < 2; y = y + 1) { for (x = 0; x < 3; x = x + 1) { addLight(x, y, 0); } }"),
+        {mmScript("for (int y = 0; y < 2; y = y + 1) { for (int x = 0; x < 3; x = x + 1) { addLight(x, y, 0); } }"),
          true,  "x and y are ordinary loop counters, in EVERY role: they are the names an author "
                 "reaches for, which is why the coordinate is xPos/yPos/zPos instead"},
-        {mmScript("for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }"),
+        {mmScript("for (int i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }"),
          true,  "a layout may read width: same name, same meaning, whoever asks"},
         {mmScript("setRGB(width, 0, 0, 0);"),           true,  "an effect reads the layer's width"},
         {mmScript("setXYZ(width - 1 - xPos, yPos, zPos);"),
@@ -215,11 +216,11 @@ TEST_CASE("a comment is whitespace, wherever it appears") {
     const Case cases[] = {
         {mmScript("// leading comment\naddLight(1, 2, 3);"), true, "a comment before the code"},
         {mmScript("addLight(1, 2, 3); // trailing comment"), true, "a comment after the code"},
-        {mmScript("for (i = 0; i < 2; i = i + 1) {\n  // inside the body\n  addLight(i, 0, 0);\n}"), true,
+        {mmScript("for (int i = 0; i < 2; i = i + 1) {\n  // inside the body\n  addLight(i, 0, 0);\n}"), true,
          "a comment inside a loop body"},
         {mmScript("// @control 1..64 is just text now\naddLight(1, 2, 3);"), true,
          "the old annotation is an ordinary comment"},
-        {mmScript("byte n = 4; // anything at all !!\nfor (i = 0; i < n; i = i + 1) { addLight(i, 0, 0); }"),
+        {mmScript("byte n = 4; // anything at all !!\nfor (int i = 0; i < n; i = i + 1) { addLight(i, 0, 0); }"),
          true, "a comment after a member declaration"},
     };
     for (const Case& c : cases) {
@@ -240,10 +241,10 @@ TEST_CASE("a comment changes nothing about what a script does") {
     // with no code emitted, "same length" is two zeroes and proves nothing.
 #if MM_MOONLIVE_HAS_HOST_JIT
     moonlive::MoonLive bare, commented;
-    CHECK(bare.compile(mmScript("for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"),
+    CHECK(bare.compile(mmScript("for (int i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"),
                        moonlive::lightBuiltins(), moonlive::modifierSysVars()));
     CHECK(commented.compile(mmScript("// place three lights in a row\n"
-                            "for (i = 0; i < 3; i = i + 1) {\n"
+                            "for (int i = 0; i < 3; i = i + 1) {\n"
                             "  addLight(i, 0, 0);   // one per step\n"
                             "}"),
                             moonlive::lightBuiltins(), moonlive::modifierSysVars()));
@@ -295,7 +296,7 @@ TEST_CASE("noise is smooth across neighbouring points, and varies across the fie
     // One light per sample: light i gets the noise at x = i * 64, so the 32 lights walk 8 whole
     // cells (256 units each) and the buffer IS a real slice of the field, not a corner of one cell.
     auto r = moonlive::compileSource(
-        mmScript("for (i = 0; i < 32; i = i + 1) { setRGB(i, noise(i * 64, 0, 0), 0, 0); }"),
+        mmScript("for (int i = 0; i < 32; i = i + 1) { setRGB(i, noise(i * 64, 0, 0), 0, 0); }"),
         moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
     REQUIRE(r.ok);
     void* blk = platform::allocExec(r.len);
@@ -336,7 +337,7 @@ TEST_CASE("mod wraps a sweep, so an animation repeats instead of running off the
     uint8_t code[4096];
     auto r = moonlive::compileSource(
         mmScript("byte w = 16;\n"
-        "for (yy = 0; yy < w; yy = yy + 1) { setRGB(yy * w + mod(t, w), 255, 0, 0); }"),
+        "for (int yy = 0; yy < w; yy = yy + 1) { setRGB(yy * w + mod(t, w), 255, 0, 0); }"),
         moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
     REQUIRE(r.ok);
     void* blk = platform::allocExec(r.len);
@@ -370,10 +371,10 @@ TEST_CASE("sequential loops reuse the same register, so a script is not billed p
     // Four loops, each with a call in the body — comfortably over budget if counters accumulate.
     auto r = moonlive::compileSource(
         mmScript("byte w = 16;\n"
-        "for (a = 0; a < w; a = a + 1) { setRGB(a, 255, 0, 0); }\n"
-        "for (b = 0; b < w; b = b + 1) { setRGB(b, 0, 255, 0); }\n"
-        "for (c = 0; c < w; c = c + 1) { setRGB(c, 0, 0, 255); }\n"
-        "for (d = 0; d < w; d = d + 1) { setRGB(d, 255, 255, 0); }"),
+        "for (int a = 0; a < w; a = a + 1) { setRGB(a, 255, 0, 0); }\n"
+        "for (int b = 0; b < w; b = b + 1) { setRGB(b, 0, 255, 0); }\n"
+        "for (int c = 0; c < w; c = c + 1) { setRGB(c, 0, 0, 255); }\n"
+        "for (int d = 0; d < w; d = d + 1) { setRGB(d, 255, 255, 0); }"),
         moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
     if (!r.ok) INFO(r.error);
     // What this pins is REGISTER REUSE, which the front-end does on every host — but proving it
@@ -396,6 +397,45 @@ TEST_CASE("sequential loops reuse the same register, so a script is not billed p
 //
 // Read from the .md files rather than pasted here: a pasted copy stops being the documented one the
 // first time someone edits the real page.
+TEST_CASE("every compile error fits the status line whole, its position included") {
+    // A failure reaches the UI as ONE string, "<message> @<offset>": the sentence a user reads and
+    // the position the editor marks the failing line from. MoonLiveScript formats it into a fixed
+    // buffer, so a message longer than that buffer loses its explanation, and a slightly longer one
+    // eats the offset and the line marking silently stops working. Both happened.
+    //
+    // Read from the SOURCE rather than a list kept here: a hand-kept copy would agree with the
+    // buffer while the compiler moved on, which is the drift this exists to prevent.
+    const std::filesystem::path repo =
+        std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path();
+    size_t longest = 0;
+    const char* longestText = "";
+    for (const char* rel : {"src/core/moonlive/MoonLiveCompiler.cpp",
+                            "src/core/moonlive/MoonLiveCompiler.h"}) {
+        std::ifstream in(repo / rel);
+        REQUIRE(in.good());
+        std::string line;
+        while (std::getline(in, line)) {
+            // Both shapes a diagnostic is written in: fail("...") and a kName = "..." constant.
+            for (const char* lead : {"fail(\"", "= \""}) {
+                size_t at = 0;
+                while ((at = line.find(lead, at)) != std::string::npos) {
+                    const size_t beg = at + std::strlen(lead);
+                    const size_t end = line.find('"', beg);
+                    if (end == std::string::npos) break;
+                    const size_t len = end - beg;
+                    if (len > longest) { longest = len; }
+                    at = end;
+                }
+            }
+        }
+    }
+    INFO("longest diagnostic is " << longest << " chars");
+    CHECK(longest >= 40);              // a control: a parse that found nothing would pass silently
+    // " @" + up to 5 digits + the terminator, against the buffer MoonLiveScript declares.
+    CHECK(longest + 8 <= mm::moonlive::MoonLiveScript::kMaxStatus);
+    (void)longestText;
+}
+
 TEST_CASE("every script example in the docs compiles") {
     const std::filesystem::path repo = scriptRoot().parent_path();
     const std::filesystem::path pages[] = {

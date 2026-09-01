@@ -16,9 +16,9 @@ class LatticeLayout {
   }
 
   void placeLights() {
-    for (z = 0; z < layers; z = z + 1) {
-      for (y = 0; y < rows; y = y + 1) {
-        for (x = 0; x < cols; x = x + 1) {
+    for (int z = 0; z < layers; z = z + 1) {
+      for (int y = 0; y < rows; y = y + 1) {
+        for (int x = 0; x < cols; x = x + 1) {
           addLight(x, y, z);
         }
       }

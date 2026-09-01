@@ -1748,18 +1748,108 @@ body.cards-resizing {
 .fm-editor-path { font-family: ui-monospace, monospace; font-size: 0.9rem; color: var(--fg-muted); }
 .fm-editor-x { background: none; border: none; color: var(--fg-muted); cursor: pointer; font-size: 1rem; }
 .fm-editor-x:hover { color: var(--fg); }
-.fm-editor-body {
-    flex: 1 1 auto; min-height: 240px; margin: 0; padding: 12px 14px;
-    border: none; resize: vertical; font-family: ui-monospace, monospace;
-    font-size: 0.85rem; line-height: 1.5; background: var(--bg-1); color: var(--fg);
+/* The editor is TWO layers in one box: a <pre> that paints the syntax and a textarea that does the
+   editing, the textarea on top with transparent text so the paint shows through its caret and
+   selection. They must agree on every metric that positions a glyph, so the font, size, line
+   height, padding and whitespace handling are declared once and shared: any drift between them and
+   the colors slide off the characters. */
+/* The STACK carries the height and the resize grip, not the textarea inside it. When the textarea
+   owned its own height it could end up shorter than the stack, and every click below its real
+   bottom landed on the stack instead of the text: the editor stopped responding partway down. */
+.fm-editor-stack {
+    position: relative; display: flex; flex: 1 1 auto;
+    min-height: 120px; overflow: hidden;
 }
+/* The resize handle, ours rather than the browser's `resize`. The native gesture cannot work here:
+   the textarea is positioned over the whole stack, corner included, so the press that would start
+   the drag lands on the text instead. This is a real element above both layers, so it both draws
+   the familiar corner strokes and receives the pointer. */
+.fm-editor-grip {
+    position: absolute; right: 0; bottom: 0; width: 18px; height: 18px;
+    z-index: 3; cursor: ns-resize; touch-action: none;
+    background:
+        linear-gradient(135deg, transparent 42%, var(--fg-muted) 42%, var(--fg-muted) 56%, transparent 56%),
+        linear-gradient(135deg, transparent 70%, var(--fg-muted) 70%, var(--fg-muted) 84%, transparent 84%);
+    background-size: 12px 12px; background-position: right 3px bottom 3px;
+    background-repeat: no-repeat;
+    opacity: 0.75;
+}
+.fm-editor-grip:hover { opacity: 1; }
+.fm-editor-body, .fm-editor-hl {
+    margin: 0; padding: 12px 14px; border: none;
+    font-family: ui-monospace, monospace; font-size: 0.85rem; line-height: 1.5;
+    white-space: pre; overflow: auto; tab-size: 4;
+}
+.fm-editor-hl {
+    position: absolute; inset: 0; pointer-events: none;
+    background: var(--bg-1); color: var(--fg);
+    /* The layer never scrolls itself: the textarea owns the scroll and this follows by transform,
+       so the two cannot disagree about a scroll position. `overflow: hidden` also stops it from
+       claiming a scrollbar and shrinking its own content box below the textarea's. */
+    overflow: hidden;
+}
+.fm-editor-body {
+    position: absolute; inset: 0; width: 100%; height: 100%; resize: none;
+    background: transparent; color: transparent; caret-color: var(--fg);
+}
+/* A textarea leaves its RIGHT padding out of scrollWidth where a <pre> includes it, so the two
+   boxes drift by one padding once a line is wider than the box: the caret then sits a character
+   away from the glyph under it. The paint carries its padding on the inner <code> instead, and the
+   layer itself has none, which makes the two geometries identical. */
+.fm-editor-hl { padding: 0; }
+.fm-editor-hl > code {
+    display: block; padding: 12px 14px;
+    font: inherit; line-height: inherit; white-space: pre; tab-size: 4;
+}
+/* The selection has to stay visible through transparent text. */
+.fm-editor-body::selection { background: var(--accent-soft, rgba(122,162,247,0.35)); color: transparent; }
+/* A file with no highlighting (a .json, a .txt) paints nothing, so the textarea shows its own text
+   and the empty layer stays out of the way. The class is set by the editor, which knows the
+   extension: deriving it from the DOM would guess at what the JS already decided. */
+/* The token colors, in the app's OWN palette rather than one of Prism's stock themes: those ship
+   their own background and their own idea of a foreground, and a card that reads as part of this UI
+   is worth more than a familiar-looking editor. Only the roles a MoonLive script actually produces
+   are named; anything else inherits --fg and simply reads as text.
+
+   Comments are muted rather than colored: a script's comments are long by design (one header line
+   and a note per control), and coloring them makes the file harder to scan, not easier. */
+.fm-editor-hl .token.comment { color: var(--fg-muted); font-style: italic; }
+.fm-editor-hl .token.keyword { color: var(--accent); }
+.fm-editor-hl .token.class-name { color: var(--yellow); }
+.fm-editor-hl .token.function { color: #7ec8e3; }
+.fm-editor-hl .token.string { color: var(--green); }
+.fm-editor-hl .token.number { color: #e08a5a; }
+/* The line a compile failed on: a band UNDER the text, not a wrapper around it. Wrapping meant
+   cutting Prism's markup at a newline, which breaks any token spanning lines; a band positioned by
+   line height cannot disturb the markup at all. It sits behind the tokens, so the syntax colors on
+   that line stay readable: the mark says WHERE, the status line says what. */
+.fm-editor-err {
+    position: absolute; left: 0; right: 0; height: 1.5em;
+    margin-top: 12px;                    /* the paint layer's own top padding, so line 0 lines up */
+    background: var(--red-soft, rgba(247,118,142,0.16));
+    box-shadow: inset 2px 0 0 var(--red, #f7768e);
+    pointer-events: none;
+}
+.fm-editor-hl .token.operator,
+.fm-editor-hl .token.punctuation { color: var(--fg-muted); }
+
+.fm-editor-stack.plain .fm-editor-body { background: var(--bg-1); color: var(--fg); }
+.fm-editor-stack.plain .fm-editor-hl { display: none; }
 .fm-editor-body:focus { outline: none; }
-/* wrap="off": code reads by indentation, and a wrapped line hides its structure. The attribute
-   stops the wrapping, this makes the overflow reachable. */
-.fm-editor-body { overflow-x: auto; white-space: pre; }
 .fm-editor-foot {
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
     padding: 10px 14px; border-top: 1px solid var(--border);
+}
+/* A footer holding only the caret readout carries no rule: the row belongs to the editor, but a
+   host that supplied its own save button and status line has nothing here to separate from. */
+.fm-editor-foot:not(:has(.fm-editor-save)):not(:has(.fm-editor-status)) {
+    border-top: none; padding: 4px 14px 6px;
+}
+/* The caret readout: quiet, and on tabular figures so the numbers do not jitter as they change. */
+.fm-editor-caret {
+    margin-left: auto; color: var(--fg-muted);
+    font-family: ui-monospace, monospace; font-size: 0.75rem;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .fm-editor-status { color: var(--fg-muted); font-size: 0.85rem; }
 
@@ -1772,8 +1862,11 @@ body.cards-resizing {
     border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
     background: var(--bg-1);
 }
-/* Shorter than the modal's: a card is one of several on screen, and the grip resizes it. */
-.control-fileedit .fm-editor-body { min-height: 140px; }
+/* The starting height, which the grip then overrides per editor (stored in mm_textareaSizes). On
+   the STACK, not the textarea: the stack owns the height, so a floor on the textarea did nothing.
+   A card is one of several on screen, so it starts shorter than the modal. */
+.fm-editor-stack { height: 240px; }
+.control-fileedit .fm-editor-stack { height: 200px; }
 .control-fileedit .fm-editor-foot { padding: 6px 10px; }
 
 /* Picker row ABOVE the editor, as one column. A .control-row is a flex row, so the two have to be

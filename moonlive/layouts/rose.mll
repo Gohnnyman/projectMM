@@ -14,7 +14,7 @@ class RoseLayout {
   }
 
   void placeLights() {
-    for (i = 0; i < 256; i = i + 1) {
+    for (int i = 0; i < 256; i = i + 1) {
       addLight(radius - scale(sin(i * turn(256) * petals), radius + 1)
                  + scale(cos(i * turn(256)),
                          2 * scale(sin(i * turn(256) * petals), radius + 1) + 1),

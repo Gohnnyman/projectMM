@@ -88,7 +88,7 @@ On "run pre-commit": run the checks whose trigger the diff matches, report one l
 | platform boundary | `uv run moondeck/check/check_platform_boundary.py` | `src/`, except `src/platform/` |
 | hot-path discipline | `uv run moondeck/check/check_nonblocking.py --incremental` | `src/` |
 | ESP32 firmware fresh | `uv run moondeck/check/check_esp32_built.py --firmware <fw>` | `src/`, `esp32/`, `CMakeLists.txt`, `library.json`, except `src/platform/desktop/` |
-| host tests (Python) | `uv run --with pytest --with pyserial --with markdown --with wled pytest test/python -q` | `moondeck/`, `test/python/` |
+| host tests (Python) | `uv run --with pytest --with pyserial --with markdown --with wled pytest test/python -q` | `moondeck/`, `test/python/`, `moonlive/` |
 | host tests (JS) | `node --test "test/js/**/*.test.mjs"` | `mooninstaller/`, `test/js/`, `src/ui/` |
 | desktop build (zero warnings) 🐢 | `cmake --build build` | `src/`, `test/`, `CMakeLists.txt`, `library.json` |
 | unit tests 🐢 | `ctest --test-dir build --output-on-failure --no-tests=error -C Release` | same as the desktop build |

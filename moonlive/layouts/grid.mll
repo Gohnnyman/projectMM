@@ -14,8 +14,8 @@ class GridLayout {
   }
 
   void placeLights() {
-    for (y = 0; y < rows; y = y + 1) {
-      for (x = 0; x < cols; x = x + 1) {
+    for (int y = 0; y < rows; y = y + 1) {
+      for (int x = 0; x < cols; x = x + 1) {
         addLight(x, y, 0);
       }
     }

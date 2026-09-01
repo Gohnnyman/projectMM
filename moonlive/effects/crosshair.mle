@@ -18,15 +18,15 @@ class CrosshairEffect {
   }
 
   void column() {
-    for (y = 0; y < height; y = y + 1) { setRGB(y * width + cx, 200, 30, 0); }
+    for (int y = 0; y < height; y = y + 1) { setRGB(y * width + cx, 200, 30, 0); }
   }
 
   void row() {
-    for (x = 0; x < width; x = x + 1) { setRGB(cy * width + x, 0, 90, 200); }
+    for (int x = 0; x < width; x = x + 1) { setRGB(cy * width + x, 0, 90, 200); }
   }
 
   void center() {
-    for (i = 0; i < spread + spread + 1; i = i + 1) {
+    for (int i = 0; i < spread + spread + 1; i = i + 1) {
       d = i - spread;
       if (cx + d >= 0) { if (cx + d < width) { setRGB(cy * width + cx + d, 255, 255, 255); } }
       if (cy + d >= 0) { if (cy + d < height) { setRGB((cy + d) * width + cx, 255, 255, 255); } }

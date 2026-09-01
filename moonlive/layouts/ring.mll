@@ -14,7 +14,7 @@ class RingLayout {
   }
 
   void placeLights() {
-    for (i = 0; i < count; i = i + 1) {
+    for (int i = 0; i < count; i = i + 1) {
       addLight(scale(cos(i * turn(count)), radius * 2 + 1),
                scale(sin(i * turn(count)), radius * 2 + 1), 0);
     }

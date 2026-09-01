@@ -267,6 +267,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         else if (std::strcmp(path, "/app.js") == 0) serveFile(conn, "app.js", "application/javascript");
         else if (std::strcmp(path, "/install-picker.js") == 0) serveFile(conn, "install-picker.js", "application/javascript");
         else if (std::strcmp(path, "/semver.js") == 0) serveFile(conn, "semver.js", "application/javascript");
+        else if (std::strcmp(path, "/prism.js") == 0) serveFile(conn, "prism.js", "application/javascript");
         else if (std::strcmp(path, "/preview3d.js") == 0) serveFile(conn, "preview3d.js", "application/javascript");
         else if (std::strcmp(path, "/preview-adapt.js") == 0) serveFile(conn, "preview-adapt.js", "application/javascript");
         else if (std::strcmp(path, "/migrate.js") == 0) serveFile(conn, "migrate.js", "application/javascript");
@@ -1019,6 +1020,7 @@ void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* file
     else if (std::strcmp(filename, "app.js") == 0) { data = ui::appJs; dataLen = ui::appJsLen; gzipped = true; }
     else if (std::strcmp(filename, "install-picker.js") == 0) { data = ui::installPickerJs; dataLen = ui::installPickerJsLen; gzipped = true; }
     else if (std::strcmp(filename, "semver.js") == 0) { data = ui::semverJs; dataLen = ui::semverJsLen; gzipped = true; }
+    else if (std::strcmp(filename, "prism.js") == 0) { data = ui::prismJs; dataLen = ui::prismJsLen; gzipped = true; }
     else if (std::strcmp(filename, "preview3d.js") == 0) { data = ui::preview3dJs; dataLen = ui::preview3dJsLen; gzipped = true; }
     else if (std::strcmp(filename, "preview-adapt.js") == 0) { data = ui::previewAdaptJs; dataLen = ui::previewAdaptJsLen; gzipped = true; }
     else if (std::strcmp(filename, "migrate.js") == 0) { data = ui::migrateJs; dataLen = ui::migrateJsLen; gzipped = true; }
@@ -2106,6 +2108,22 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
 }
 
+/// What a replaced module should be called: the requested name, the old one, or neither.
+///
+/// Three cases, in order. A name the CALLER asked for wins: it knows what the slot now holds, and a
+/// card swapped to a different script must not stay labeled after the old one. Otherwise a CUSTOM
+/// name is kept, so a scenario id or a name a user chose survives a type swap. Otherwise null, and
+/// the fresh module keeps the default name its own type gave it: a Multiply replaced by a
+/// Checkerboard reads as "Checkerboard", not as a mislabeled "Multiply".
+///
+/// Returns null for "leave it alone", never an empty string, so a caller cannot blank a name.
+const char* HttpServerModule::replacementName(const char* requested, const char* current,
+                                              const char* oldDefault) {
+    if (requested && requested[0] != 0) return requested;
+    if (current && oldDefault && std::strcmp(current, oldDefault) != 0) return current;
+    return nullptr;
+}
+
 void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const char* moduleName, const char* body) {
     auto* mod = findModuleByName(moduleName);
     if (!mod) {
@@ -2131,6 +2149,12 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
         sendResponse(conn, 400, "application/json", "{\"error\":\"missing type\"}");
         return;
     }
+    // An optional name for the replacement, the counterpart of `id` on create. Without it a replace
+    // keeps whatever the slot was called, which is right when the type is the only thing changing
+    // and wrong when the caller knows what the slot now holds: swapping a card to a different
+    // MoonLive script leaves it labeled after the old one.
+    char wantName[32] = {};
+    mm::json::parseString(body, "name", wantName, sizeof(wantName));
 
     // Find the child's index within the parent.
     uint8_t index = 0;
@@ -2165,13 +2189,12 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
     // the old name was just the old type's factory display name ("Multiply" for
     // a MultiplyModifier), let the fresh module keep its own factory name
     // ("Checkerboard"): otherwise a Multiply→Checkerboard replace leaves a
-    // Checkerboard mislabelled "Multiply". `fresh` already arrives with its
+    // Checkerboard mislabeled "Multiply". `fresh` already arrives with its
     // correct default name from ModuleFactory::create, so we only override for a
     // custom name; then re-run uniqueness so two same-type siblings don't collide.
-    const char* oldDefault = ModuleFactory::displayNameFor(mod->typeName(), mod->role());
-    if (std::strcmp(mod->name(), oldDefault) != 0) {
-        fresh->setName(mod->name());  // custom name: preserve the slot identity
-    }
+    const char* keep = replacementName(wantName, mod->name(),
+                                       ModuleFactory::displayNameFor(mod->typeName(), mod->role()));
+    if (keep) fresh->setName(keep);
 
     // Swap in place; replaceChildAt returns the old module, which we own.
     MoonModule* old = parent->replaceChildAt(index, fresh);

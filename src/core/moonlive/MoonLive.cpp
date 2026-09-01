@@ -17,6 +17,12 @@ void MoonLive::freeCode() {
     fn_ = nullptr;
     anim_ = nullptr;
     ctrl_ = nullptr;
+    // Likewise the error position. Only a PARSE failure has one, and it is set by the caller right
+    // after this returns; the later failures (no control memory, codegen refused) have no offset of
+    // their own, and without this they would report the position of whatever failed last. An editor
+    // would then mark a line that has nothing to do with the error on screen.
+    errorPos_ = 0;
+    hasErrorPos_ = false;
     // The entry table describes code that no longer exists. Left behind, entry() would hand a
     // binding an address into a freed block: the same stale-state trap the control arena has.
     entryCount_ = 0;
@@ -50,6 +56,7 @@ void* MoonLive::place(const uint8_t* staged, size_t len) {
     codeCap_ = cap;
     codeLen_ = len;
     error_ = "";
+    errorPos_ = 0;
     return block;
 }
 
@@ -99,7 +106,18 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysV
     // through that name, so a broken script silently unbound the user's own sliders.
     CompileResult cr = compileSource(source, table, sysvars, staging.p, staging.n,
                                      nullptr, nullptr, strings_, CompileResult::kStringPool);
-    if (!cr.ok) { freeCode(); error_ = cr.error; return false; }   // surface the parse diagnostic
+    // The diagnostic AND where it happened: an editor can only mark the line if it is told one,
+    // and the parser has already computed the offset (Parser::fail records lex.col()).
+    // errorCol is ONE-based (Lexer::col() adds 1), and every consumer counts from zero: the editor
+    // slices the source up to this offset to find the line. Converted here, at the boundary between
+    // the compiler's convention and everyone else's, rather than in each reader.
+    if (!cr.ok) {
+        freeCode();
+        error_ = cr.error;
+        errorPos_ = cr.errorCol > 0 ? static_cast<uint16_t>(cr.errorCol - 1) : 0;
+        hasErrorPos_ = true;
+        return false;
+    }
     // Allocate the control arena (fixed address) and seed new slots, BEFORE publishing the control
     // set — ensureArena reads the previous controlCount_ to know which slots are new.
     // Seeded from the MEMBERS, not the controls: a member the UI never shows still has an

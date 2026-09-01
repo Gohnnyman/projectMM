@@ -344,7 +344,7 @@ TEST_CASE("a subtraction produces the whole value, not just its low byte") {
 TEST_CASE("a for loop runs its body once per step") {
     MoonLiveModifier m;
     m.defineControls();
-    m.setScript(mmWriteScript(mmScriptAs("modifyLogical", "for (i = 0; i < 4; i = i + 1) { print(i); } setXYZ(xPos, yPos, zPos);")));
+    m.setScript(mmWriteScript(mmScriptAs("modifyLogical", "for (int i = 0; i < 4; i = i + 1) { print(i); } setXYZ(xPos, yPos, zPos);")));
     m.prepare();
     CHECK(m.severity() != MoonModule::Severity::Error);   // it compiles at all
     Coord3D box{16, 16, 1}; m.modifyLogicalSize(box);
@@ -357,7 +357,7 @@ TEST_CASE("a loop over an empty range runs its body no times") {
     // The entry guard: `i < 0` must skip the body entirely rather than wrap and run forever.
     MoonLiveModifier m;
     m.defineControls();
-    m.setScript(mmWriteScript(mmScriptAs("modifyLogical", "for (i = 0; i < 0; i = i + 1) { print(99); } setXYZ(xPos, yPos, zPos);")));
+    m.setScript(mmWriteScript(mmScriptAs("modifyLogical", "for (int i = 0; i < 0; i = i + 1) { print(99); } setXYZ(xPos, yPos, zPos);")));
     m.prepare();
     CHECK(m.severity() != MoonModule::Severity::Error);
     Coord3D box{16, 16, 1}; m.modifyLogicalSize(box);
@@ -369,7 +369,7 @@ TEST_CASE("a loop over an empty range runs its body no times") {
 TEST_CASE("loops nest, which is what placing a grid of lights needs") {
     MoonLiveModifier m;
     m.defineControls();
-    m.setScript(mmWriteScript(mmScriptAs("modifyLogical", "for (a = 0; a < 2; a = a + 1) { for (b = 0; b < 2; b = b + 1) { print(a); } }"
+    m.setScript(mmWriteScript(mmScriptAs("modifyLogical", "for (int a = 0; a < 2; a = a + 1) { for (int b = 0; b < 2; b = b + 1) { print(a); } }"
                 " setXYZ(xPos, yPos, zPos);")));
     m.prepare();
     CHECK(m.severity() != MoonModule::Severity::Error);
@@ -394,7 +394,7 @@ TEST_CASE("a loop in an effect script paints every light it walks") {
     layer.setChannelsPerLight(3);
     auto* fx = new MoonLiveEffect();
     fx->defineControls();
-    fx->setScript(mmWriteScript(mmScript("for (i = 0; i < 8; i = i + 1) { setRGB(i, i, 0, 0); }")));
+    fx->setScript(mmWriteScript(mmScript("for (int i = 0; i < 8; i = i + 1) { setRGB(i, i, 0, 0); }")));
     layer.addChild(fx);
     layouts.applyState();
     layer.applyState();

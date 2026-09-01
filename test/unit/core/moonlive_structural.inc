@@ -32,8 +32,8 @@ TEST_CASE("emitted " MM_ISA_NAME " code keeps every frame offset inside the fram
     struct Case { const char* name; const char* src; int binding; };
     const Case cases[] = {
         {"a bare write",      mmScript("setRGB(0, 255, 0, 0);\n"), 1},
-        {"a loop",            mmScript("for (i = 0; i < 3; i = i + 1) { }\n"), 0},
-        {"a call in a loop",  mmScript("for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }\n"), 0},
+        {"a loop",            mmScript("for (int i = 0; i < 3; i = i + 1) { }\n"), 0},
+        {"a call in a loop",  mmScript("for (int i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }\n"), 0},
         {"the shipped grid",  kGridLayout, 0},
         // Several routines in one block, which is what a class emits. Every function after the
         // first is what a checker reading only the prologue at byte 0 would never look at.
@@ -101,11 +101,11 @@ TEST_CASE("emitted " MM_ISA_NAME " code keeps every frame offset inside the fram
 TEST_CASE("emitted " MM_ISA_NAME " code branches only to instruction boundaries") {
     struct Case { const char* name; const char* src; int binding; };
     const Case cases[] = {
-        {"one loop",     mmScript("for (i = 0; i < 3; i = i + 1) { }\n"), 0},
+        {"one loop",     mmScript("for (int i = 0; i < 3; i = i + 1) { }\n"), 0},
         {"nested loops", kGridLayout, 0},
         // Long enough that a short-displacement branch would have to be relaxed to reach.
         {"a long loop body",
-         mmScript("for (i = 0; i < 8; i = i + 1) {\n"
+         mmScript("for (int i = 0; i < 8; i = i + 1) {\n"
          "  addLight(i, 0, 0); addLight(i, 1, 0); addLight(i, 2, 0); addLight(i, 3, 0);\n"
          "  addLight(i, 4, 0); addLight(i, 5, 0); addLight(i, 6, 0); addLight(i, 7, 0);\n"
          "}\n"), 0},
@@ -169,18 +169,18 @@ TEST_CASE("emitted " MM_ISA_NAME " code reads no register a call destroyed") {
     struct Case { const char* name; const char* src; int binding; };
     const Case cases[] = {
         {"one call",            mmScript("setRGB(0, random16(256), 0, 0);\n"), 1},
-        {"a call in a loop",    mmScript("for (i = 0; i < 4; i = i + 1) { setRGB(i, random16(256), 0, 0); }\n"), 1},
+        {"a call in a loop",    mmScript("for (int i = 0; i < 4; i = i + 1) { setRGB(i, random16(256), 0, 0); }\n"), 1},
         {"nested calls",        mmScript("setRGB(random16(256), random16(256), random16(256), random16(256));\n"), 1},
-        {"a call in a layout",  mmScript("for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }\n"), 0},
+        {"a call in a layout",  mmScript("for (int i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }\n"), 0},
         {"the shipped grid",    kGridLayout, 0},
         // The shape that crashed on hardware, and the nearest ones that did not.
         {"sysvar bound + call in body",
-         mmScript("for (x = 0; x < width; x = x + 1) { setRGB(x, random16(256), 0, 0); }\n"), 1},
+         mmScript("for (int x = 0; x < width; x = x + 1) { setRGB(x, random16(256), 0, 0); }\n"), 1},
         {"member bound + call in body",
          mmScript("byte n = 8;\n"
-         "for (x = 0; x < n; x = x + 1) { setRGB(x, random16(256), 0, 0); }\n"), 1},
+         "for (int x = 0; x < n; x = x + 1) { setRGB(x, random16(256), 0, 0); }\n"), 1},
         {"sysvar read inside the body, with a call",
-         mmScript("for (x = 0; x < 4; x = x + 1) { setRGB(x, width, random16(256), 0); }\n"), 1},
+         mmScript("for (int x = 0; x < 4; x = x + 1) { setRGB(x, width, random16(256), 0); }\n"), 1},
     };
     for (const auto& c : cases) {
         bool ok = false;

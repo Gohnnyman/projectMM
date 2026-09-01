@@ -26,7 +26,7 @@ class ChaseEffect {
     fill(0, 0, 0);
     n = width * height * depth;
     head = scale(beat(bpm, t), n);
-    for (i = 0; i < n; i = i + 1) {
+    for (int i = 0; i < n; i = i + 1) {
       d = head - i;
       if (d < 0) { d = d + n; }
       if (d < spread) {

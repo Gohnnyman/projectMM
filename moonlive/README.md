@@ -17,7 +17,7 @@ class CrosshairEffect {
 
   void defineControls() { addControl("bpm", bpm, 1, 240); }
 
-  void column() { for (y = 0; y < height; y = y + 1) { setRGB(y * width + scale(beat(bpm, t), width), 255, 40, 0); } }
+  void column() { for (int y = 0; y < height; y = y + 1) { setRGB(y * width + scale(beat(bpm, t), width), 255, 40, 0); } }
   void tick()   { fill(0, 0, 0); column(); }
 }
 ```
@@ -25,6 +25,16 @@ class CrosshairEffect {
 These are real calls, not pasted-in text: the callee gets its own frame when it runs, which is what
 lets one helper call another and lets a function recurse. A function takes no arguments yet, so a
 helper is parameterized through the class's members. `effects/crosshair.mle` is the worked example.
+
+**A script is C++, and a compiler checks that.** Every shipped script compiles under
+`c++ -std=c++20 -fsyntax-only` (`test/python/test_scripts_are_cpp.py`), so the language cannot drift
+into a dialect one feature at a time: an editor highlights a script correctly, a reader brings their
+C++ intuition, and a script stands a good chance in any engine that speaks the same subset.
+
+One shape difference is deliberate, and the test bridges exactly that one: a class here needs no
+`public:` and no trailing semicolon.
+
+Anything else a compiler rejects is a divergence, and the test is where it surfaces.
 
 **Every function declares what it returns**, the way the compiled module a script stands in for
 does: `void tick()` beside `void tick() override`. Three types, which is all the language has values
@@ -82,6 +92,10 @@ declared with a literal length and starts at zero:
 int phase = 900;      // a value a byte cannot hold
 byte  heat[16];         // sixteen elements, all zero to begin with
 ```
+
+**Every variable is declared, including a loop's counter.** A member states its type, an assignment
+to a name that was never declared is refused, and a `for` writes `for (int i = 0; ...)`. One rule
+with no exception, and the same line C++ would take.
 
 An index is an arbitrary expression (`heat[i * 2 + 1]`), and an index outside the array is
 **clamped to the last element** rather than refused or allowed through: a script computes indices

@@ -22,6 +22,15 @@ namespace mm::moonlive {
 /// re-read the file each time. Same question, one answer.
 class MoonLiveScript {
 public:
+    /// The longest status this module reports, "<message> @<offset>" included.
+    ///
+    /// Sized for the longest diagnostic the compiler emits plus the suffix. At 48 the longer
+    /// messages truncated, and once the offset moved into this string a truncation also cost the
+    /// editor the position it marks the failing line from: the errors hardest to read were exactly
+    /// the ones that lost their explanation AND their highlight. Public because a unit test pins it
+    /// against the compiler's own messages, which is what stops the two drifting apart again.
+    static constexpr size_t kMaxStatus = 72;
+
     /// Let a binding that owns a particle pool size it from the script's defineControls(). Null for
     /// a binding with no particles, which is every binding but the effect today.
     void setPoolSizer(PoolSizeFn fn, void* ctx) { sizePool_ = fn; poolCtx_ = ctx; }
@@ -84,7 +93,18 @@ public:
             owner.setStatus(statusBuf_, MoonModule::Severity::Status);
             compileFailed_ = false;
         } else {
-            owner.setStatus(err, MoonModule::Severity::Error);
+            // "message @<offset>": the message a user reads, and the position the editor marks.
+            // One string because status IS the channel a module reports through, and a second
+            // control for the number would be a field every non-scripted module carries for nothing.
+            // The suffix is machine-read, so it stays a fixed shape rather than a sentence.
+            if (engine_.hasErrorPos()) {
+                std::snprintf(statusBuf_, sizeof(statusBuf_), "%s @%u",
+                              err ? err : "compile failed",
+                              static_cast<unsigned>(engine_.errorPos()));
+                owner.setStatus(statusBuf_, MoonModule::Severity::Error);
+            } else {
+                owner.setStatus(err, MoonModule::Severity::Error);
+            }
             // Forget what the LAST script said it was. A failed compile has already interned its
             // strings into the same pool from offset zero, so a tags_ kept from the previous
             // program now points at whatever those bytes became, and the card would show it.
@@ -242,7 +262,7 @@ private:
     const char* tags_ = nullptr;
     // Backing store for the status line: MoonModule::setStatus keeps a POINTER, so the text has to
     // outlive the call. The same module-owned pattern NetworkModule uses.
-    char     statusBuf_[48] = {};
+    char     statusBuf_[kMaxStatus] = {};
     // The script's FILE NAME, inside the shared script directory. Empty on a fresh card: it reports
     // "no script" until one is named, rather than every new module compiling the same default.
     char     name_[kMaxScriptName + 1] = "";

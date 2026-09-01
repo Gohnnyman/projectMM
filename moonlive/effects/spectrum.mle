@@ -26,7 +26,7 @@ class SpectrumEffect {
 
     bars = width;
     if (width < 2) { bars = height; }
-    for (x = 0; x < bars; x = x + 1) {
+    for (int x = 0; x < bars; x = x + 1) {
       b = div(x * 16, bars);
       mag = div(audioBand(b) * gain, 100);
       if (mag > 255) { mag = 255; }
@@ -36,7 +36,7 @@ class SpectrumEffect {
       }
       top = div(mag * height, 256);
       if (width < 2) { top = 0; }
-      for (y = 0; y < top; y = y + 1) {
+      for (int y = 0; y < top; y = y + 1) {
         setRGB((height - 1 - y) * width + x, paletteR(b * 16, 255), paletteG(b * 16, 255),
                paletteB(b * 16, 255));
       }

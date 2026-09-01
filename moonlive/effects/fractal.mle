@@ -30,8 +30,8 @@ class FractalEffect {
         - toFixed(sin(beat(bpm, t) * 2) - 32768) / 5120 * toFixed(seed) / 3277)
        * toFixed(870 + noise(t / 4, 0, 0)) / 1000;
 
-    for (y = 0; y < height; y = y + 1) {
-      for (x = 0; x < width; x = x + 1) {
+    for (int y = 0; y < height; y = y + 1) {
+      for (int x = 0; x < width; x = x + 1) {
         cx = uvX(x, width, height) * toFixed(zoom) / 40;
         if (seed == 0) { cx = cx - 0.55; }
 

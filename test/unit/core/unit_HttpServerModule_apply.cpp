@@ -8,6 +8,7 @@
 #include "core/JsonSink.h"
 
 #include <cstring>
+#include <string>    // std::string: named explicitly, GCC does not pull it in transitively
 
 // Pins the transport-free apply-core that HttpServerModule exposes — applyAddModule
 // / applySetControl / applyClearChildren / applyOp. These are the operations the
@@ -586,6 +587,27 @@ TEST_CASE("a burst of file writes costs one re-derive, not one per file") {
     for (int i = 0; i < 10; i++) http.applyFileChanged("/moonlive/x.mle");
     s.tick();
     CHECK(root->prepared == before + 1);
+}
+
+TEST_CASE("a replaced module is named by the caller, then by its old custom name, then by its type") {
+    using H = mm::HttpServerModule;
+
+    // A caller that knows what the slot now holds names it. This is what keeps a card swapped to a
+    // different MoonLive script from staying labeled after the old script: the UI asks for the new
+    // script's name, and it wins over both defaults.
+    CHECK(std::string(H::replacementName("dot", "balls", "MoonLive")) == "dot");
+    CHECK(std::string(H::replacementName("dot", "MoonLive", "MoonLive")) == "dot");
+
+    // No request: a name the user or a scenario chose survives a type swap, so the slot keeps its
+    // identity and callers can still address it.
+    CHECK(std::string(H::replacementName(nullptr, "MOD", "Multiply")) == "MOD");
+    CHECK(std::string(H::replacementName("", "MOD", "Multiply")) == "MOD");
+
+    // No request and no custom name: null means "leave it", so the fresh module keeps the default
+    // its OWN type gave it. Without this a Multiply replaced by a Checkerboard would read as a
+    // mislabeled "Multiply".
+    CHECK(H::replacementName(nullptr, "Multiply", "Multiply") == nullptr);
+    CHECK(H::replacementName("", "Multiply", "Multiply") == nullptr);
 }
 
 TEST_CASE("a file write with no scheduler is a no-op, not a crash") {

@@ -12,7 +12,7 @@ class DiagonalLayout {
   }
 
   void placeLights() {
-    for (i = 0; i < count; i = i + 1) {
+    for (int i = 0; i < count; i = i + 1) {
       addLight(i, i, 0);
     }
   }

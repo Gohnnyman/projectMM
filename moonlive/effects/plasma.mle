@@ -14,8 +14,8 @@ class PlasmaEffect {
   }
 
   void tick() {
-    for (y = 0; y < height; y = y + 1) {
-      for (x = 0; x < width; x = x + 1) {
+    for (int y = 0; y < height; y = y + 1) {
+      for (int x = 0; x < width; x = x + 1) {
         setRGB(y * width + x,
                scale(sin(x * zoom * 8 + beat(bpm, t)), 256),
                scale(sin(y * zoom * 8 + beat(bpm, t)), 256),
