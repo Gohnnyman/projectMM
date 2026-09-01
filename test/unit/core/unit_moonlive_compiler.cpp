@@ -474,10 +474,12 @@ TEST_CASE("a compile error reports the exact offset the editor turns into a line
     const size_t nl = upto.rfind('\n');
     const size_t col = upto.size() - (nl == std::string::npos ? 0 : nl + 1) + 1;
     INFO("reported offset " << at << " -> line " << line << ", col " << col);
+    // The EXACT position, not merely somewhere on the right line: an off-by-one in the one-based
+    // to zero-based conversion keeps the line and still lands inside it, so a loose assertion
+    // passes while the editor marks a character that is not the one the parser choked on.
     CHECK(line == 3);
-    // The character AT the offset is where the parser stopped, on the line it belongs to.
-    CHECK(src[at] != '\n');
-    CHECK(col > 1);
+    CHECK(col == 29);
+    CHECK(src[at] == ';');   // the ';' written where a ')' belongs
 }
 
 TEST_CASE("a for loop declares its counter, as every other variable in the language does") {

@@ -2729,6 +2729,11 @@ function createControl(moduleName, moduleType, ctrl) {
             // module recompiles or reloads on its own. The browser sends nothing extra.
             const editor = fmMountEditor(pane, pathOf(ctrl.value), {
                 sizeKey: key,
+                // The status this module is ALREADY reporting, so a card built while its script is
+                // broken shows the marked line straight away rather than waiting for a recompile.
+                // The EDITOR applies it once the file has loaded: marking at construction would
+                // convert the offset against an empty textarea and put every error on line 1.
+                initialStatus: (findModule(moduleName) || {}).status || "",
                 saveButton: saveBtn,
                 statusEl,
                 // Editing a factory script FORKS it: the read came from the library directory, but
@@ -6410,7 +6415,8 @@ function fmMountEditor(host, relPath, opts = {}) {
     // it: a factory script is read from the read-only library directory, and editing it must create
     // the user's own copy rather than overwrite what shipped. Defaults to writing back where it
     // read, which is what every other caller wants.
-    const { expectedSize, onSaved, onDispose, sizeKey, saveButton, statusEl, savePath } = opts;
+    const { expectedSize, onSaved, onDispose, sizeKey, saveButton, statusEl, savePath,
+            initialStatus } = opts;
     const wrap = document.createElement("div");
     wrap.className = "fm-editor-pane";
     // The footer carries Save and the status line, UNLESS the host supplies both: a card already has
@@ -6479,6 +6485,31 @@ function fmMountEditor(host, relPath, opts = {}) {
     /// Move the paint under the text by TRANSFORM rather than by scrolling it: a scrollTop the
     /// element cannot reach (it has overflow:hidden) is silently clamped, which is what left the
     /// last lines of a file unreachable.
+    /// Mark the line a compile failed on, and return the status with a readable position.
+    ///
+    /// Converts the device's offset against the text this editor HOLDS, so it must not run before
+    /// the file has loaded: every position would resolve to line 1.
+    const markErrorAt = (statusText) => {
+        errorLine = -1;
+        let shown = statusText || "";
+        // Two forms, because this is called with both: the raw device status "message @<offset>" on
+        // every update, and an ALREADY rewritten "message (line L, col C)" when a second editor
+        // opens on a module whose status was converted before it existed.
+        const at = /@(\d+)\s*$/.exec(shown);
+        const lc = /\(line (\d+), col \d+\)\s*$/.exec(shown);
+        if (at) {
+            const p = lineColAt(Number(at[1]));
+            errorLine = p.line - 1;
+            // The offset is replaced, not appended to: line and column is the only half a person can
+            // act on, and the editor marks the line anyway.
+            shown = shown.slice(0, at.index).trimEnd() + ` (line ${p.line}, col ${p.col})`;
+        } else if (lc) {
+            errorLine = Number(lc[1]) - 1;
+        }
+        paintHighlight();
+        return shown;
+    };
+
     const syncHighlightScroll = () => {
         // The band follows VERTICALLY only: it spans the full width, so a horizontal shift would
         // just walk it off the box while the line it marks stays put.
@@ -6622,6 +6653,10 @@ function fmMountEditor(host, relPath, opts = {}) {
         paintHighlight();          // the file just arrived: paint what it says
         showCaret();
         status.textContent = r.message;
+        // A compile error the module was ALREADY reporting when this editor was built. Marked here
+        // rather than at construction, because markError converts an offset against the text: run
+        // before the file arrives and every position resolves to line 1.
+        if (initialStatus) { markErrorAt(initialStatus); initialStatus = null; }
     };
     load(path, expectedSize);
 
@@ -6640,26 +6675,7 @@ function fmMountEditor(host, relPath, opts = {}) {
         /// the only position anyone has: the parser records it and nothing else can reconstruct it.
         /// Passing "" or a status with no @ clears the mark, so a fixed script stops being flagged
         /// the moment it compiles.
-        markError: (statusText) => {
-            errorLine = -1;
-            let shown = statusText || "";
-            // Two forms, because this is called with both: the raw device status "message @<offset>"
-            // on every update, and an ALREADY rewritten "message (line L, col C)" when a second
-            // editor opens on a module whose status was converted before it existed.
-            const at = /@(\d+)\s*$/.exec(shown);
-            const lc = /\(line (\d+), col \d+\)\s*$/.exec(shown);
-            if (at) {
-                const p = lineColAt(Number(at[1]));
-                errorLine = p.line - 1;
-                // The offset is replaced, not appended to: line and column is the only half a person
-                // can act on, and the editor marks the line anyway.
-                shown = shown.slice(0, at.index).trimEnd() + ` (line ${p.line}, col ${p.col})`;
-            } else if (lc) {
-                errorLine = Number(lc[1]) - 1;
-            }
-            paintHighlight();
-            return shown;
-        },
+        markError: markErrorAt,
         dispose: () => { taObserver.disconnect(); wrap.remove(); if (onDispose) onDispose(); },
     };
 }
