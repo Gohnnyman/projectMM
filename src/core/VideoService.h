@@ -35,6 +35,7 @@ public:
     uint8_t source = 0;
     char file[64] = "/frame.ppm";
     uint8_t usbFormat = 0; // index into the device's advertised list; the only USB setting persisted
+    uint16_t staleMs = 2000;   // 0 = hold the last frame forever
 
     static constexpr const char* kSourceOptions[] = {"test pattern", "file", "usb"};
     // A target with no High-Speed USB host or no JPEG decoder cannot capture, so it is not offered
@@ -75,6 +76,10 @@ public:
                             known ? formatCount_ : 1);
         controls_.setHidden(controls_.count() - 1, source != 2);
         controls_.setReadOnly(controls_.count() - 1, !known);
+        // How long a gap in frames is tolerated before the lights go dark. 0 holds the last
+        // picture instead, for a source that legitimately stops sending.
+        controls_.addUint16("staleMs", staleMs, 0, 10000);
+        controls_.setHidden(controls_.count() - 1, source != 2);
         MoonModule::defineControls();
     }
 
@@ -179,11 +184,18 @@ private:
     void readCapture() MM_NONBLOCKING {
         uint16_t w = 0, h = 0;
         const uint8_t* rgb = platform::videoCaptureFrame(capture_, w, h);
-        if (!rgb) return; // nothing new this tick; the frame already published still stands
-        frame_.rgb = rgb;
-        frame_.width = w;
-        frame_.height = h;
-        publish();
+        if (rgb) {
+            lastFrameMs_ = platform::millis();
+            frame_.rgb = rgb;
+            frame_.width = w;
+            frame_.height = h;
+            publish();
+            return;
+        }
+        // A gap of one tick is normal — the decoder runs at its own rate. A long one means the
+        // source stopped (a console asleep, a cable out), and holding the last picture would leave
+        // the room lit by a frozen frame. Dropping it makes every effect fall back to black.
+        if (staleMs && frame_.rgb && platform::millis() - lastFrameMs_ > staleMs) frame_ = VideoFrame{};
     }
 
     platform::VideoCaptureHandle capture_;
@@ -192,6 +204,8 @@ private:
     uint16_t usbWidth = 640;
     uint16_t usbHeight = 480;
     uint8_t usbFps = 60;
+
+    uint32_t lastFrameMs_ = 0;
 
     static constexpr uint8_t kMaxFormats = 24;
     platform::VideoCaptureFormat formats_[kMaxFormats] = {};

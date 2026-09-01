@@ -43,6 +43,12 @@ struct Capture {
     jpeg_decoder_handle_t jpeg = nullptr;
     bool uvcInstalled = false;
 
+    // What to ask for again after a disconnect, and the flag that asks.
+    uint16_t reqWidth = 0;
+    uint16_t reqHeight = 0;
+    uint8_t reqFps = 0;
+    std::atomic<bool> lost{false};
+
     // The frame the UVC callback handed over, or null. Exchanged rather than assigned so the
     // callback never blocks and never overwrites one the decoder is already reading.
     std::atomic<uvc_host_frame_t*> pending{nullptr};
@@ -175,6 +181,7 @@ void onEvent(const uvc_host_stream_event_data_t* event, void* ctx) {
     auto* cap = static_cast<Capture*>(ctx);
     if (event->type == UVC_HOST_DEVICE_DISCONNECTED) {
         cap->published.store(-1);
+        cap->lost.store(true); // decoderTask reopens; stream_open blocks, so not from here
         ESP_LOGW(kTag, "capture device disconnected");
     }
 }
@@ -230,12 +237,31 @@ void decode(Capture& cap, uvc_host_frame_t* frame) {
     cap.published.store(slot, std::memory_order_release); // dimensions first, then the slot
 }
 
+bool openStream(Capture& cap, uint16_t width, uint16_t height, uint8_t fps); // defined below
+
+// Replug recovery. uvc_host_stream_open blocks for up to its timeout, so this runs on the decode
+// task rather than in the event callback or the render tick. A failed attempt costs that timeout,
+// which is its own retry pacing.
+void reopen(Capture& cap) {
+    if (cap.stream) {
+        uvc_host_stream_close(cap.stream);
+        cap.stream = nullptr;
+    }
+    if (!openStream(cap, cap.reqWidth, cap.reqHeight, cap.reqFps)) return;
+    uvc_host_stream_start(cap.stream);
+    cap.lost.store(false);
+    ESP_LOGI(kTag, "capture device back");
+}
+
 // The blocking half, kept off the render tick. Waits on a finite timeout rather than forever so
-// `running` is seen without the callback having to signal a shutdown.
+// `running` and `lost` are seen without the callback having to signal.
 void decoderTask(void* arg) {
     auto* cap = static_cast<Capture*>(arg);
     while (cap->running.load()) {
-        if (xSemaphoreTake(cap->wake, pdMS_TO_TICKS(100)) != pdTRUE) continue;
+        if (xSemaphoreTake(cap->wake, pdMS_TO_TICKS(100)) != pdTRUE) {
+            if (cap->lost.load()) reopen(*cap);
+            continue;
+        }
         if (uvc_host_frame_t* frame = cap->pending.exchange(nullptr)) {
             decode(*cap, frame);
             uvc_host_frame_return(cap->stream, frame);
@@ -289,6 +315,9 @@ bool createSignals(Capture& cap) {
 }
 
 bool openStream(Capture& cap, uint16_t width, uint16_t height, uint8_t fps) {
+    cap.reqWidth = width;
+    cap.reqHeight = height;
+    cap.reqFps = fps;
     uvc_host_stream_config_t streamCfg = {};
     streamCfg.event_cb = onEvent;
     streamCfg.frame_cb = onFrame;
