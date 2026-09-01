@@ -39,13 +39,26 @@ if (-not (Test-Path $Source)) {
 $running = Get-Process -Name projectMM -ErrorAction SilentlyContinue
 if ($running) {
     Write-Host "Stopping the running projectMM..."
-    $running | Stop-Process -Force
-    Start-Sleep -Milliseconds 800
+    # SilentlyContinue because $ErrorActionPreference is Stop: Stop-Process raises on a process
+    # that exited between the two calls, or one owned by another user, and neither is a reason to
+    # abandon the install. A lock that genuinely survives fails loudly at the copy below instead.
+    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    # Wait for the exit rather than guessing at it. A fixed sleep is a race: too short and the copy
+    # below throws with the app already killed, leaving nothing installed.
+    $running | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
 }
 
 Write-Host "Installing to $InstallTo"
 New-Item -ItemType Directory -Path $InstallTo -Force | Out-Null
-Copy-Item $Source (Join-Path $InstallTo "projectMM.exe") -Force
+$destExe = Join-Path $InstallTo "projectMM.exe"
+# Someone who extracted the zip straight into the install directory would otherwise copy the file
+# onto itself, which throws under $ErrorActionPreference = "Stop" AFTER the running copy was
+# stopped: app killed, nothing installed.
+if ([IO.Path]::GetFullPath($Source) -ne [IO.Path]::GetFullPath($destExe)) {
+    Copy-Item $Source $destExe -Force
+} else {
+    Write-Host "  already in the install directory, keeping it in place"
+}
 foreach ($extra in @("README.txt", "Uninstall-projectMM.ps1")) {
     $p = Join-Path $PSScriptRoot $extra
     if (Test-Path $p) {

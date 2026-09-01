@@ -437,6 +437,9 @@ Section "uninstall"
   Delete "$INSTDIR\projectMM.ico"
   Delete "$INSTDIR\README.txt"
   Delete "$INSTDIR\uninstall.exe"
+  ; The zip's script route installs to the same directory and leaves this behind. Without it the
+  ; RMDir below fails silently and the folder survives an uninstall.
+  Delete "$INSTDIR\Uninstall-projectMM.ps1"
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
   Delete "$SMPROGRAMS\${APPNAME}\Uninstall ${APPNAME}.lnk"

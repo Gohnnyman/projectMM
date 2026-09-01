@@ -12,6 +12,17 @@ REM -ExecutionPolicy Bypass applies to THIS ONE invocation only. It changes noth
 REM machine and does not persist: the policy is passed to a single powershell.exe process and
 REM dies with it.
 
+REM Double-clicking this from INSIDE the unextracted zip copies only this file to a temp folder,
+REM so the script it calls is not beside it. Say what the .ps1 would have said, rather than
+REM letting powershell.exe report a missing path.
+if not exist "%~dp0Install-projectMM.ps1" (
+  echo Cannot find Install-projectMM.ps1 beside this file.
+  echo Extract the whole zip first, then run this from the extracted folder.
+  echo.
+  pause
+  exit /b 1
+)
+
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-projectMM.ps1"
 if errorlevel 1 (
   echo.

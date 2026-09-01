@@ -31,6 +31,16 @@ if (Test-Path $InstallTo) {
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# Stop here if the program is still there. Everything below removes the ways BACK to it: the
+# Start-menu shortcut and the Add/Remove Programs entry are how a user would retry. Deleting those
+# while the executable survives leaves them told it is gone, with no route to try again.
+if (Test-Path (Join-Path $InstallTo "projectMM.exe")) {
+    Write-Host ""
+    Write-Host "Could not remove projectMM.exe. It is most likely still running." -ForegroundColor Red
+    Write-Host "Close projectMM and run this again. Nothing else has been changed."
+    exit 1
+}
+
 if (Test-Path $StartMenu) {
     Write-Host "Removing the Start-menu entry"
     Remove-Item $StartMenu -Recurse -Force -ErrorAction SilentlyContinue

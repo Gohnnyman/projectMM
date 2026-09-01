@@ -103,13 +103,15 @@ The badge only appears when a release actually ships a build for your OS, and it
 
 The [releases page](https://github.com/MoonModules/projectMM/releases) also carries `projectMM-windows-x64-vX.Y.Z.zip`. **Extract it first**, rather than opening the executable from inside the zip, because Windows unpacks a zip-launched program into a temporary folder it may clear at any time.
 
-It holds the same application plus two scripts, so it serves two purposes:
+It holds the same application plus three files, so it serves two purposes:
 
 **Run it in place.** Double-click `projectMM.exe` wherever you extracted it. No Start-menu entry, no uninstaller, nothing written outside your settings folder. This is the one to take on a USB stick.
 
-**Or install it properly.** Right-click **`Install-projectMM.ps1`** and choose **Run with PowerShell**. It does exactly what the setup does: copies the program to `%LOCALAPPDATA%\Programs\projectMM`, adds the Start-menu entry with its icon, registers an uninstaller in Add/Remove Programs, and stops a running copy first so it can replace a locked executable. No administrator rights, because everything stays under your own user profile.
+**Or install it properly.** Double-click **`Install-projectMM.cmd`**. It does exactly what the setup does: copies the program to `%LOCALAPPDATA%\Programs\projectMM`, adds the Start-menu entry with its icon, registers an uninstaller in Add/Remove Programs, and stops a running copy first so it can replace a locked executable. No administrator rights, because everything stays under your own user profile.
 
-Two reasons that script exists rather than being redundant with the setup. It is **plain text you can read before you run it**, which an installer cannot offer. And when Defender blocks the setup download outright (§2), it is the way through: a script gives a malware-scoring model nothing to weigh, so it is not subject to the same guesswork.
+The `.cmd` is a three-line wrapper around `Install-projectMM.ps1`, which is where the work happens and which you can read first. **Right-clicking that `.ps1` and choosing "Run with PowerShell" does not work**, and it is worth knowing why rather than being surprised by it: Windows marks every file extracted from a downloaded zip as internet-sourced, and PowerShell's default policy refuses to run an unsigned script carrying that mark. The wrapper exists solely to get past that, and the only thing it adds is permission for its own single invocation.
+
+Two reasons this route exists rather than being redundant with the setup. The script is **plain text you can read before you run it**, which an installer cannot offer. And when Defender blocks the setup download outright (§2), it is the way through: the flagged thing is the compressed installer, not the application, so the zip is unaffected.
 
 Settings live in the same per-user folder whichever route you take, so the three are interchangeable and share one configuration. `Uninstall-projectMM.ps1` reverses the install and leaves your settings alone.
 

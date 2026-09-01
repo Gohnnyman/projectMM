@@ -31,6 +31,10 @@ use_directory_urls: false
 
 theme:
   name: material
+  # System fonts, not Material's default Roboto. The default loads from fonts.googleapis.com, which
+  # sends every docs reader's IP to Google for a typeface nobody chose. Our privacy policy says
+  # GitHub is who receives requests for these pages, and this is what keeps that true.
+  font: false
   # The MoonModules moon-man — browser-tab favicon + the header logo (same PNG
   # the web installer uses, copied into docs/assets/). Paths are relative to docs/.
   favicon: assets/favicon.png
