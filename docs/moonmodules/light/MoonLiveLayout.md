@@ -21,8 +21,8 @@ class GridLayout {
   }
 
   void placeLights() {
-    for (y = 0; y < rows; y = y + 1) {
-      for (x = 0; x < cols; x = x + 1) {
+    for (int y = 0; y < rows; y = y + 1) {
+      for (int x = 0; x < cols; x = x + 1) {
         addLight(x, y, 0);
       }
     }
@@ -40,17 +40,17 @@ A few shapes that are one line here and a new class otherwise:
 
 ```c
 // a strand that runs right to left
-for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }
+for (int i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }
 
 // a diagonal
-for (i = 0; i < cols; i = i + 1) { addLight(i, i, 0); }
+for (int i = 0; i < cols; i = i + 1) { addLight(i, i, 0); }
 
 // two rows, stacked
-for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); addLight(i, 1, 0); }
+for (int i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); addLight(i, 1, 0); }
 
 // a circle: lights and grid cells are not the same number
 // (`count` and `radius` are members, surfaced by addControl in defineControls)
-for (i = 0; i < count; i = i + 1) {
+for (int i = 0; i < count; i = i + 1) {
   addLight(scale(cos(i * turn(count)), radius * 2 + 1),
            scale(sin(i * turn(count)), radius * 2 + 1), 0);
 }
@@ -83,8 +83,8 @@ A serpentine (every other row reversed) is what `if` makes expressible, and it i
 
 ```c
 byte odd = 0;
-for (y = 0; y < rows; y = y + 1) {
-  for (x = 0; x < cols; x = x + 1) {
+for (int y = 0; y < rows; y = y + 1) {
+  for (int x = 0; x < cols; x = x + 1) {
     if (odd == 0) { addLight(x, y, 0); }
     else { addLight(cols - 1 - x, y, 0); }
   }

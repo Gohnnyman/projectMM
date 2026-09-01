@@ -13,7 +13,7 @@ class DotEffect {
 
   void tick() {
     fill(0, 0, 0);
-    for (x = 0; x < width; x = x + 1) {
+    for (int x = 0; x < width; x = x + 1) {
       setRGB(x + scale(beat(bpm, t), height) * width, 0, 255, 0);
     }
   }

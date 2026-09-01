@@ -50,6 +50,7 @@ void* MoonLive::place(const uint8_t* staged, size_t len) {
     codeCap_ = cap;
     codeLen_ = len;
     error_ = "";
+    errorPos_ = 0;
     return block;
 }
 
@@ -99,7 +100,9 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysV
     // through that name, so a broken script silently unbound the user's own sliders.
     CompileResult cr = compileSource(source, table, sysvars, staging.p, staging.n,
                                      nullptr, nullptr, strings_, CompileResult::kStringPool);
-    if (!cr.ok) { freeCode(); error_ = cr.error; return false; }   // surface the parse diagnostic
+    // The diagnostic AND where it happened: an editor can only mark the line if it is told one,
+    // and the parser has already computed the offset (Parser::fail records lex.col()).
+    if (!cr.ok) { freeCode(); error_ = cr.error; errorPos_ = cr.errorCol; return false; }
     // Allocate the control arena (fixed address) and seed new slots, BEFORE publishing the control
     // set — ensureArena reads the previous controlCount_ to know which slots are new.
     // Seeded from the MEMBERS, not the controls: a member the UI never shows still has an

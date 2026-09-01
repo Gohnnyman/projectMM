@@ -64,6 +64,9 @@
             <button type="button" id="preview-show" class="preview-show" aria-label="Show preview" title="Show preview" hidden>◳ preview</button>
         </div>
     </div>
+    <!-- Prism, vendored: it paints the script editor. Loaded before app.js and not as a module,
+         because it publishes a global the editor reads. -->
+    <script src="prism.js"></script>
     <script type="module" src="app.js"></script>
 </body>
 </html>

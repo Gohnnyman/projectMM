@@ -359,7 +359,7 @@
       "description": "Write the script file the card points at, the way the editor saves it.",
       "op": "write_file",
       "path": "/moonlive/sc-row.mll",
-      "value": "class L { placeLights() { for (i = 0; i < 24; i = i + 1) { addLight(i, 0, 0); } } }\n"
+      "value": "class L { placeLights() { for (int i = 0; i < 24; i = i + 1) { addLight(i, 0, 0); } } }\n"
     },
     {
       "name": "layout-a-row",
@@ -817,7 +817,7 @@
       "description": "Write the script file the card points at, the way the editor saves it.",
       "op": "write_file",
       "path": "/moonlive/sc-row.mll",
-      "value": "class L { placeLights() { for (i = 0; i < 4; i = i + 1) { addLight(i, i\n"
+      "value": "class L { placeLights() { for (int i = 0; i < 4; i = i + 1) { addLight(i, i\n"
     },
     {
       "name": "break-the-layout-resync",
@@ -968,7 +968,7 @@
       "description": "Write the script file the card points at, the way the editor saves it.",
       "op": "write_file",
       "path": "/moonlive/sc-row.mll",
-      "value": "class L { placeLights() { for (i = 0; i < 12; i = i + 1) { addLight(i, 0, 0); } } }\n"
+      "value": "class L { placeLights() { for (int i = 0; i < 12; i = i + 1) { addLight(i, 0, 0); } } }\n"
     },
     {
       "name": "recover-the-layout-resync",

@@ -47,8 +47,8 @@ const char* kGridLayout =
     "  byte cols = 16;\n"
     "  byte rows = 16;\n"
     "  void tick() {\n"
-    "    for (y = 0; y < rows; y = y + 1) {\n"
-    "      for (x = 0; x < cols; x = x + 1) {\n"
+    "    for (int y = 0; y < rows; y = y + 1) {\n"
+    "      for (int x = 0; x < cols; x = x + 1) {\n"
     "        addLight(x, y, 0);\n"
     "      }\n"
     "    }\n"
@@ -62,7 +62,7 @@ const char* kEffectSimple =
     "class SimpleEffect {\n  void tick() { setRGB(0, 255, 0, 0); }\n}\n";
 const char* kEffectLoop =
     "class LoopEffect {\n"
-    "  void tick() { for (i = 0; i < 64; i = i + 1) { setRGB(i, i, 255 - i, 60); } }\n"
+    "  void tick() { for (int i = 0; i < 64; i = i + 1) { setRGB(i, i, 255 - i, 60); } }\n"
     "}\n";
 
 /// Compile for THIS TU's backend. `sysvars` is the ONE light vocabulary; the role-named
@@ -132,7 +132,7 @@ TEST_CASE("a scripted effect compiles for " MM_ISA_NAME ", straight-line and loo
 // that pushes any backend back over the edge shows up here first.
 TEST_CASE("fill plus a loop on " MM_ISA_NAME " emits what it currently can") {
     bool ok = false;
-    CHECK(emitLen(mmScript("fill(0,0,0);\nfor (y = 0; y < height; y = y + 1) { setRGB(y, 255, 0, 0); }"),
+    CHECK(emitLen(mmScript("fill(0,0,0);\nfor (int y = 0; y < height; y = y + 1) { setRGB(y, 255, 0, 0); }"),
                   mm::moonlive::effectSysVars(), ok) == MM_GOLD_FILLLOOP_LEN);
 }
 

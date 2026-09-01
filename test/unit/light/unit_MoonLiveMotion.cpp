@@ -95,7 +95,7 @@ TEST_CASE("a script aims each head with setPan and setTilt") {
     HeadRig rig;
     rig.run("class Aim {"
             "  void tick() {"
-            "    for (i = 0; i < height; i = i + 1) {"
+            "    for (int i = 0; i < height; i = i + 1) {"
             "      setPan(i, 10 + i * 20);"
             "      setTilt(i, 200 - i * 20);"
             "    }"
@@ -115,7 +115,7 @@ TEST_CASE("setPan on a light with no motion channel writes nothing") {
     strip.run("class Aim {"
               "  void tick() {"
               "    fill(0, 0, 0);"
-              "    for (i = 0; i < height; i = i + 1) { setPan(i, 255); setTilt(i, 255); }"
+              "    for (int i = 0; i < height; i = i + 1) { setPan(i, 255); setTilt(i, 255); }"
               "  }"
               "}");
 
@@ -210,7 +210,7 @@ TEST_CASE("an audio script runs on a device with no audio, and paints nothing") 
     rig.run("class A {"
             "  void tick() {"
             "    fill(0, 0, 0);"
-            "    for (i = 0; i < height; i = i + 1) {"
+            "    for (int i = 0; i < height; i = i + 1) {"
             "      setRGB(i, audioLevel(), audioBand(i), audioBeat() * 255);"
             "    }"
             "  }"
@@ -315,7 +315,7 @@ TEST_CASE("a script that declares D1 is extruded across the width") {
         "  int dimensions() { return 1; }"
         "  void tick() {"
         "    fill(0, 0, 0);"
-        "    for (y = 0; y < height; y = y + 1) { setRGB(y * width, 200, 0, 0); }"
+        "    for (int y = 0; y < height; y = y + 1) { setRGB(y * width, 200, 0, 0); }"
         "  }"
         "}"));
     layouts.applyState();

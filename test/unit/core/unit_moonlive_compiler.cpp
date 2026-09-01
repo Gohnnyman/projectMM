@@ -376,9 +376,9 @@ TEST_CASE("a script cannot declare a name the engine already defines") {
     const Case refused[] = {
         {mmScript("byte width = 16;\nsetRGB(0, 0, 0, 0);"), "a control named width"},
         {mmScript("byte t = 5;\nsetRGB(0, 0, 0, 0);"),                        "a control named t"},
-        {mmScript("for (xPos = 0; xPos < 4; xPos = xPos + 1) { setRGB(xPos, 0, 0, 0); }"),
+        {mmScript("for (int xPos = 0; xPos < 4; xPos = xPos + 1) { setRGB(xPos, 0, 0, 0); }"),
                                                                         "a loop variable named xPos"},
-        {mmScript("for (height = 0; height < 4; height = height + 1) { setRGB(0, 0, 0, 0); }"),
+        {mmScript("for (int height = 0; height < 4; height = height + 1) { setRGB(0, 0, 0, 0); }"),
                                                                         "a loop variable named height"},
     };
     for (const Case& c : refused) {
@@ -417,13 +417,13 @@ TEST_CASE("a nested loop cannot reuse the enclosing loop's variable") {
     // unit_moonlive_codegen_x86_64.cpp's canary.
     uint8_t out[1024];
     auto r = moonlive::compileSource(
-        mmScript("for (i = 0; i < 2; i = i + 1) { for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); } }"),
+        mmScript("for (int i = 0; i < 2; i = i + 1) { for (int i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); } }"),
         kTable, kSys, out, sizeof(out));
     CHECK_FALSE(r.ok);
     CHECK(std::string(r.error) == "loop variable already in use");
     // Distinct names nest fine — the check must not refuse the ordinary case it exists to protect.
     auto ok = moonlive::compileSource(
-        mmScript("for (yy = 0; yy < 2; yy = yy + 1) { for (xx = 0; xx < 2; xx = xx + 1) { addLight(xx, yy, 0); } }"),
+        mmScript("for (int yy = 0; yy < 2; yy = yy + 1) { for (int xx = 0; xx < 2; xx = xx + 1) { addLight(xx, yy, 0); } }"),
         kTable, kSys, out, sizeof(out));
 #if MM_MOONLIVE_HAS_HOST_JIT
     CHECK(ok.ok);
@@ -433,7 +433,7 @@ TEST_CASE("a nested loop cannot reuse the enclosing loop's variable") {
     // Sequential loops REUSE a name legitimately: the first has left scope by the time the second
     // binds, so this must still compile (two-rows.mll is exactly this shape).
     auto seq = moonlive::compileSource(
-        mmScript("for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); } for (i = 0; i < 2; i = i + 1) { addLight(i, 1, 0); }"),
+        mmScript("for (int i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); } for (int i = 0; i < 2; i = i + 1) { addLight(i, 1, 0); }"),
         kTable, kSys, out, sizeof(out));
 #if MM_MOONLIVE_HAS_HOST_JIT
     CHECK(seq.ok);
@@ -445,21 +445,39 @@ TEST_CASE("a nested loop cannot reuse the enclosing loop's variable") {
 // The emitted loop tests and advances its OWN counter whatever name the condition and step clauses
 // write, so a mistyped name used to compile clean and run as though it said the right thing — a
 // wrong fixture with no diagnostic anywhere. Found by review.
+TEST_CASE("a for loop declares its counter, as every other variable in the language does") {
+    uint8_t out[512];
+    // The rule the language already held everywhere else: a member carries its type and an
+    // assignment to an undeclared name is refused, so a counter appearing out of nowhere was the
+    // last exception. Requiring `int` also makes the loop header identical to the C++ one, which is
+    // what test/python/test_scripts_are_cpp.py compiles every shipped script as.
+    auto bare = moonlive::compileSource(
+        mmScript("for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"),
+        kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(bare.ok);
+    CHECK(std::string(bare.error) == "a loop counter is declared: for (int i = 0; ...)");
+
+    auto declared = moonlive::compileSource(
+        mmScript("for (int i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"),
+        kTable, kSys, out, sizeof(out));
+    CHECK(declared.ok);
+}
+
 TEST_CASE("a for loop's condition and step must name the loop variable") {
     uint8_t out[512];
     struct Case { const char* src; const char* err; const char* what; };
     const Case refused[] = {
-        {mmScript("for (i = 0; j < 3; i = i + 1) { addLight(i, 0, 0); }"),
+        {mmScript("for (int i = 0; j < 3; i = i + 1) { addLight(i, 0, 0); }"),
          "the condition must test the loop variable", "a typo in the condition"},
-        {mmScript("for (i = 0; i < 3; j = j + 1) { addLight(i, 0, 0); }"),
+        {mmScript("for (int i = 0; i < 3; j = j + 1) { addLight(i, 0, 0); }"),
          "the step must advance the loop variable",   "a typo in the step"},
         // Plain names, not x/y: those are system variables in this table and would be refused a
         // step earlier, hiding what this case is about.
-        {mmScript("for (a = 0; a < 4; a = a + 1) { for (b = 0; a < 4; b = b + 1) { addLight(b, a, 0); } }"),
+        {mmScript("for (int a = 0; a < 4; a = a + 1) { for (int b = 0; a < 4; b = b + 1) { addLight(b, a, 0); } }"),
          "the condition must test the loop variable", "an inner loop testing the OUTER variable"},
         // The step is re-lexed from the source it was skipped over, and an expression parser stops
         // at the first token it cannot use — so trailing junk was silently dropped.
-        {mmScript("for (i = 0; i < 3; i = i + 1 garbage) { addLight(i, 0, 0); }"),
+        {mmScript("for (int i = 0; i < 3; i = i + 1 garbage) { addLight(i, 0, 0); }"),
          "unexpected token in the for's step", "trailing junk after the step expression"},
     };
     for (const Case& c : refused) {
@@ -469,7 +487,7 @@ TEST_CASE("a for loop's condition and step must name the loop variable") {
         CHECK(std::string(r.error) == c.err);
     }
     // The ordinary loop is untouched.
-    auto ok = moonlive::compileSource(mmScript("for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"),
+    auto ok = moonlive::compileSource(mmScript("for (int i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"),
                                       kTable, kSys, out, sizeof(out));
 #if MM_MOONLIVE_HAS_HOST_JIT
     CHECK(ok.ok);
@@ -740,7 +758,7 @@ TEST_CASE("a brightness that went below zero renders black rather than full") {
 // The loop guard deliberately stayed UNSIGNED when comparisons went signed: a loop counter is a
 // count, and `for (i = 0; i < width; ...)` must run whatever a signed reading would make of it.
 TEST_CASE("a loop over a count still runs every step after comparisons became signed") {
-    auto px = render(mmScript("for (i = 0; i < 4; i = i + 1) { setRGB(i, 9, 0, 0); }"), 4);
+    auto px = render(mmScript("for (int i = 0; i < 4; i = i + 1) { setRGB(i, 9, 0, 0); }"), 4);
     CHECK(px[0] == 9);
     CHECK(px[3 * 3] == 9);
 }
@@ -1148,7 +1166,7 @@ TEST_CASE("an array element refuses a value of the wrong type") {
 TEST_CASE("a loop header refuses a fixed value in any of its three clauses") {
     moonlive::MoonLive eng;
     CHECK_FALSE(eng.compile("class T { fixed f = 3.0;\n"
-                            "  void tick() { for (i = 0; i < f; i = i + 1) { setRGB(0, 1, 0, 0); } } }",
+                            "  void tick() { for (int i = 0; i < f; i = i + 1) { setRGB(0, 1, 0, 0); } } }",
                             kTable, kSys));
     eng.free();
 }
@@ -1310,7 +1328,7 @@ TEST_CASE("return leaves tick() early, and the statements after it do not run") 
 
 // A return inside a loop leaves the FUNCTION, not just the iteration: the classic early-out.
 TEST_CASE("return inside a loop leaves the whole function") {
-    auto buf = render(mmScript("for (i = 0; i < 4; i = i + 1) {"
+    auto buf = render(mmScript("for (int i = 0; i < 4; i = i + 1) {"
                                "  setRGB(i, 9, 0, 0);"
                                "  if (i >= 1) { return; }"
                                "}"), 4);

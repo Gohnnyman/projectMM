@@ -39,7 +39,8 @@ function functionBody(name) {
 // back twice after being "fixed" because the audit was per-function: the status bar and the tab
 // dot are patched on the same tick and were missed. Adding a function to updateValues without
 // adding it here is the gap this list closes.
-for (const fn of ["updateValues", "updateModuleControls", "updateStatusBar", "applyTabDot"]) {
+for (const fn of ["updateValues", "updateModuleControls", "updateStatusBar", "applyTabDot",
+                  "setStatusText"]) {
     test(`${fn} writes text only through setText, so a selection survives the patch`, () => {
         const body = functionBody(fn);
         const offenders = body
@@ -114,7 +115,7 @@ for (const fn of ["updateValues", "updateModuleControls", "updateStatusBar", "ap
 // calls into (our own, not DOM builtins) is one this file checks.
 test("every function on the patch path is covered by this file", () => {
     const checked = ["updateValues", "updateModuleControls", "updateStatusBar", "applyTabDot",
-                     "updateTabDot", "setText", "setUrlDisplay"];
+                     "updateTabDot", "setText", "setUrlDisplay", "setStatusText"];
     const keywords = ["if", "for", "while", "switch", "catch", "return", "typeof"];
     const dom = ["querySelector", "querySelectorAll", "createElement", "appendChild",
                  "insertBefore", "toggle", "setAttribute", "getAttribute", "remove", "closest",

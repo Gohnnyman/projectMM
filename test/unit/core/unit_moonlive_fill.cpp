@@ -158,7 +158,7 @@ static moonlive::SysVarTable kSys = moonlive::modifierSysVars();
 TEST_CASE("a loop counter survives a call in the body") {
     moonlive::MoonLive eng;
     // random16 is a Call; `i` and the limit `w` are both live around it.
-    REQUIRE(eng.compile(mmScript("byte w = 8;\nfor (i = 0; i < w; i = i + 1) { setRGB(i, random16(200), 200, 0); }"),
+    REQUIRE(eng.compile(mmScript("byte w = 8;\nfor (int i = 0; i < w; i = i + 1) { setRGB(i, random16(200), 200, 0); }"),
                         kCtrlTable, kSys));
     uint8_t buf[8 * 3] = {};
     eng.run(buf, 8, 3, 0);
@@ -592,7 +592,7 @@ TEST_CASE("a loop variable can be assigned in the loop body") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
                         "  void tick() {\n"
-                        "    for (i = 0; i < 8; i = i + 1) {\n"
+                        "    for (int i = 0; i < 8; i = i + 1) {\n"
                         "      i = i + 1;\n"          // skips every other light
                         "      setRGB(i, 99, 0, 0);\n"
                         "    }\n"
@@ -678,7 +678,7 @@ TEST_CASE("an if inside a for runs the body every iteration") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T {\n"
                         "  void tick() {\n"
-                        "    for (i = 0; i < 6; i = i + 1) {\n"
+                        "    for (int i = 0; i < 6; i = i + 1) {\n"
                         "      if (i < 3) { setRGB(i, 50, 0, 0); }\n"
                         "      else { setRGB(i, 200, 0, 0); }\n"
                         "    }\n"
@@ -987,8 +987,8 @@ TEST_CASE("an array element written in one loop is read in the next") {
     REQUIRE(eng.compile("class T {\n"
                         "  byte heat[8];\n"
                         "  void tick() {\n"
-                        "    for (i = 0; i < 8; i = i + 1) { heat[i] = i * 10; }\n"
-                        "    for (j = 0; j < 8; j = j + 1) { setRGB(j, heat[j], 0, 0); }\n"
+                        "    for (int i = 0; i < 8; i = i + 1) { heat[i] = i * 10; }\n"
+                        "    for (int j = 0; j < 8; j = j + 1) { setRGB(j, heat[j], 0, 0); }\n"
                         "  }\n"
                         "}\n", kCtrlTable, kSys));
     uint8_t px[24] = {};
@@ -1004,7 +1004,7 @@ TEST_CASE("array contents survive from one tick to the next") {
     REQUIRE(eng.compile("class T {\n"
                         "  byte acc[4];\n"
                         "  void tick() {\n"
-                        "    for (i = 0; i < 4; i = i + 1) { acc[i] = acc[i] + 5; setRGB(i, acc[i], 0, 0); }\n"
+                        "    for (int i = 0; i < 4; i = i + 1) { acc[i] = acc[i] + 5; setRGB(i, acc[i], 0, 0); }\n"
                         "  }\n"
                         "}\n", kCtrlTable, kSys));
     uint8_t px[12] = {};
@@ -1027,9 +1027,9 @@ TEST_CASE("an out-of-range array index is clamped, not written past the end") {
     REQUIRE(eng.compile("class T {\n"
                         "  byte a[4];\n"
                         "  void tick() {\n"
-                        "    for (i = 0; i < 4; i = i + 1) { a[i] = 1; }\n"
+                        "    for (int i = 0; i < 4; i = i + 1) { a[i] = 1; }\n"
                         "    a[9] = 200;\n"                    // far past the end
-                        "    for (j = 0; j < 4; j = j + 1) { setRGB(j, a[j], 0, 0); }\n"
+                        "    for (int j = 0; j < 4; j = j + 1) { setRGB(j, a[j], 0, 0); }\n"
                         "  }\n"
                         "}\n", kCtrlTable, kSys));
     uint8_t px[12] = {};
@@ -1088,7 +1088,7 @@ TEST_CASE("a int array holds per-element values above 255") {
     REQUIRE(eng.compile("class T {\n"
                         "  int v[4];\n"
                         "  void tick() {\n"
-                        "    for (i = 0; i < 4; i = i + 1) { v[i] = 300 + i; }\n"
+                        "    for (int i = 0; i < 4; i = i + 1) { v[i] = 300 + i; }\n"
                         "    if (v[0] == 300) { setRGB(0, 1, 0, 0); }\n"
                         "    if (v[3] == 303) { setRGB(1, 1, 0, 0); }\n"
                         "  }\n"
@@ -1246,7 +1246,7 @@ TEST_CASE("a shape's outside stays dark once the distance passes its edge") {
     moonlive::MoonLive eng;
     // Sweep the distance from inside the edge to well outside it, one light each.
     REQUIRE(eng.compile("class T { void tick() {"
-                        "  for (i = 0; i < 8; i = i + 1) {"
+                        "  for (int i = 0; i < 8; i = i + 1) {"
                         "    setRGB(i, scale(smoothstep(0, 400, 400 - i * 100), 256), 0, 0);"
                         "  } } }", kCtrlTable, kSys));
     uint8_t px[8 * 3] = {};
@@ -1264,7 +1264,7 @@ TEST_CASE("a shape's outside stays dark once the distance passes its edge") {
 TEST_CASE("smoothstep is a soft ramp rather than a hard threshold") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile("class T { void tick() {"
-                        "  for (i = 0; i < 8; i = i + 1) {"
+                        "  for (int i = 0; i < 8; i = i + 1) {"
                         "    setRGB(i, scale(smoothstep(0, 800, i * 100), 256), 0, 0);"
                         "  } } }", kCtrlTable, kSys));
     uint8_t px[8 * 3] = {};
@@ -1294,8 +1294,8 @@ TEST_CASE("a circle drawn through uv stays circular on a wide panel") {
     // conversion: toInt() alone discards the fraction, which on this grid rounds every cell to
     // the same handful of integers and lights the lot.
     REQUIRE(eng.compile("class T { void tick() {"
-                        "  for (y = 0; y < 8; y = y + 1) {"
-                        "    for (x = 0; x < 32; x = x + 1) {"
+                        "  for (int y = 0; y < 8; y = y + 1) {"
+                        "    for (int x = 0; x < 32; x = x + 1) {"
                         "      if (polarR(toInt(uvX(x, 32, 8) * 1024), "
                         "                 toInt(uvY(y, 32, 8) * 1024)) < 650) {"
                         "        setRGB(y * 32 + x, 255, 0, 0);"
@@ -1334,7 +1334,7 @@ TEST_CASE("uv places the grid center at the origin, with the left half negative"
 TEST_CASE("blending two shapes with smin produces one surface, not two") {
     // Two circles far enough apart that a plain union leaves a gap between them.
     const char* src = "class T { int k = 0; void tick() {"
-                      "  for (x = 0; x < 16; x = x + 1) {"
+                      "  for (int x = 0; x < 16; x = x + 1) {"
                       "    if (smin(polarR(x - 4, 0) - 2, polarR(x - 11, 0) - 2, k) < 0) {"
                       "      setRGB(x, 255, 0, 0); } } } }";
     moonlive::MoonLive hard;

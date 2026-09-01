@@ -36,6 +36,7 @@ EXEMPT = (
     "docs/tests/",        # generated from test comments (fix the test, not the page)
     "docs/moonmodules/",  # partly generated technical pages
     "src/platform/desktop/vendor/",   # upstream single-header code (miniaudio): not our prose
+    "src/ui/vendor/",                 # upstream browser code (Prism): not our prose either
     "moondeck/check/check_prose.py",  # the detector: its rule table spells the very patterns
 )
 

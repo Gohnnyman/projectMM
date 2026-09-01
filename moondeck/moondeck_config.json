@@ -32,6 +32,15 @@
       "needs_module": true
     },
     {
+      "id": "test_host",
+      "tab": "desktop",
+      "group": "test",
+      "label": "Host Tests",
+      "speed": "medium",
+      "help": "test_host",
+      "script": "test/test_host.py"
+    },
+    {
       "id": "scenario_pipeline",
       "tab": "desktop",
       "group": "test",

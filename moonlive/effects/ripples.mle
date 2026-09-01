@@ -14,8 +14,8 @@ class RipplesEffect {
   }
 
   void tick() {
-    for (y = 0; y < height; y = y + 1) {
-      for (x = 0; x < width; x = x + 1) {
+    for (int y = 0; y < height; y = y + 1) {
+      for (int x = 0; x < width; x = x + 1) {
         setRGB(y * width + x,
           scale(sin(((x - beatsin(bpm, t, width - 1)) * (x - beatsin(bpm, t, width - 1))
                    + (y - beatsin(bpm + 4, t, height - 1)) * (y - beatsin(bpm + 4, t, height - 1)))

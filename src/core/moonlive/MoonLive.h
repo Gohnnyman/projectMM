@@ -87,6 +87,11 @@ public:
     uint8_t entryCount() const { return entryCount_; }
     const char* error() const { return error_; }
 
+    /// WHERE the last compile failed: a character offset into the source, 0 when it did not.
+    /// The editor turns it into a line to mark; the parser already knows it, and throwing it
+    /// away meant a user was told what was wrong but never where.
+    uint16_t errorPos() const { return errorPos_; }
+
     // The hot path: run the compiled routine over the host's buffer. `t` is the host's
     // elapsed() ms; a static routine ignores it, an animated one derives its color from
     // it. No-op if !ok() (a failed compile renders nothing). The emitted routines write
@@ -355,6 +360,7 @@ private:
     AnimFn  anim_ = nullptr;     // animated fill (4-arg, reads t), or nullptr
     CtrlFn  ctrl_ = nullptr;     // front-end-compiled routine (5-arg, reads the controls arena)
     const char* error_ = "";
+    uint16_t    errorPos_ = 0;
 
     // The functions the script defined, with their offsets into `code_`, and their names owned here
     // for the same reason the control names are: a CompileResult's `name` points into source text

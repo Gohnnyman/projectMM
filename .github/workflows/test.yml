@@ -26,6 +26,10 @@ on:
       - 'src/platform/esp32/platform_esp32_improv.cpp'
       - 'test/python/**'
       - 'test/js/**'
+      # A MoonLive script IS the subject of test_scripts_are_cpp.py: editing one is exactly when
+      # the "this is a subset of C++" claim needs re-checking.
+      - 'moonlive/**'
+      - 'src/light/moonlive/MoonLiveBuiltins_light.h'
       - '.github/workflows/test.yml'
   push:
     branches:

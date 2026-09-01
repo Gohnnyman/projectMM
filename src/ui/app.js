@@ -1378,6 +1378,68 @@ function surfaceBreak() {
     return br;
 }
 
+/// The live editors on each module's script, by module name.
+///
+/// A card's status row and its script editor are built independently, so neither can reach the
+/// other directly; this is the seam between them. A SET per module, because a module can have two
+/// editors open on the same file at once (the card's pane and the modal it expands into) and both
+/// have to mark the failing line.
+const mlEditors = new Map();
+
+/// Register an editor under a module, and return its own removal.
+///
+/// Handing back the unregister rather than exposing a remove(name, ed) keeps the two halves from
+/// drifting: the modal in particular learns its module from whoever opened it, and cannot then
+/// unregister under a different name.
+function mlEditorAdd(name, ed) {
+    if (!name) return () => {};
+    if (!mlEditors.has(name)) mlEditors.set(name, new Set());
+    mlEditors.get(name).add(ed);
+    return () => {
+        const set = mlEditors.get(name);
+        if (!set) return;
+        set.delete(ed);
+        if (!set.size) mlEditors.delete(name);
+    };
+}
+
+/// The editors on a module that are still on the page.
+///
+/// renderCards rebuilds every card by clearing its host, which orphans an inline editor without
+/// ever calling dispose: registering on create with no counterpart leaked one editor per re-render,
+/// and each leaked one kept re-running the highlighter on detached DOM every time a status arrived.
+/// Testing the DOM is what makes that impossible to get wrong, since it asks the only question that
+/// matters (is this editor still showing?) rather than trusting every teardown path to report.
+function mlLiveEditors(name) {
+    const set = mlEditors.get(name);
+    if (!set) return [];
+    for (const ed of set) if (!ed.isMounted()) set.delete(ed);
+    if (!set.size) { mlEditors.delete(name); return []; }
+    return [...set];
+}
+
+/// Write a module's status, and mark the line it names in every editor showing that script.
+///
+/// Both render paths (createCard and updateModuleControls) come here, because a rule that lives in
+/// only one of them is a rule that applies half the time. A compile failure arrives as
+/// "message @<offset>"; an EDITOR turns that into a line and column, since only it holds the text
+/// the offset counts into. Each returns the same rewritten text, so which one supplies it does not
+/// matter; a module with no editor open shows the raw status unchanged.
+function setStatusText(valEl, mod) {
+    // Every editor on this module marks the line; each returns the same rewritten text, since they
+    // hold the same file. Keeping the first answer rather than the last says that plainly: the
+    // string does not depend on which editor supplied it.
+    let text = mod.status;
+    let first = true;
+    for (const ed of mlLiveEditors(mod.name)) {
+        const rewritten = ed.markError(mod.status);
+        if (first) { text = rewritten; first = false; }
+    }
+    // setText, not a bare assignment: this runs on every state push, and rewriting an unchanged
+    // node throws away a selection the user may be holding on it.
+    setText(valEl, text);
+}
+
 function createCard(mod, depth) {
     const card = document.createElement("div");
     card.className = "card";
@@ -1561,7 +1623,7 @@ function createCard(mod, depth) {
         const val = document.createElement("span");
         val.className = "status-value";
         val.dataset.sev = mod.severity || "status";
-        val.textContent = mod.status;
+        setStatusText(val, mod);
         row.appendChild(label);
         row.appendChild(val);
         controlsHost.appendChild(row);
@@ -2633,6 +2695,7 @@ function createControl(moduleName, moduleType, ctrl) {
                     fillPicker().then(() => { picker.value = sel; refreshDelLabel(); });
                 },
             });
+            mlEditorAdd(moduleName, editor);
 
             // Re-read after the modal closes: it edits the same file through the same endpoints, so
             // whatever it saved is what this pane should now show.
@@ -2690,7 +2753,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 await editor.save();
                 if (editor.isDirty()) { alert("Not opening: this script still has unsaved changes."); return; }
                 const p = await scriptPathOf(picker.value);
-                await openFileEditor(p);
+                await openFileEditor(p, undefined, moduleName);
                 await editor.load(p);
             });
 
@@ -4161,7 +4224,7 @@ function updateValues() {
                     const val = document.createElement("span");
                     val.className = "status-value";
                     val.dataset.sev = mod.severity || "status";
-                    val.textContent = mod.status;
+                    setStatusText(val, mod);
                     statusRow.appendChild(label);
                     statusRow.appendChild(val);
                     // Insert before first .control-row, or append.
@@ -4172,7 +4235,7 @@ function updateValues() {
                 statusRow.style.display = "";
                 const val = statusRow.querySelector(".status-value");
                 if (val) {
-                    setText(val, mod.status);
+                    setStatusText(val, mod);
                     const sev = mod.severity || "status";
                     if (val.dataset.sev !== sev) val.dataset.sev = sev;
                 }
@@ -6084,27 +6147,107 @@ async function fmCreateFile(dir, name, content = "") {
 //
 // `onSaved(relPath)` fires after each successful save. Returns a handle so a caller can point the
 // same pane at a different file without rebuilding it.
+/// Prism's C++ grammar plus the three type names MoonLive adds.
+///
+/// `byte`, `fixed` and `string` are the language's own aliases (a C++ reader would meet uint8_t,
+/// a Q16.16 int and a const char*), so a stock C++ grammar leaves them unpainted beside the `int`
+/// next to them. Extending rather than writing a grammar: everything else in a script IS C++, which
+/// is what test_scripts_are_cpp.py holds each shipped script to.
+///
+/// Built once and cached: the highlighter runs on every keystroke.
+let mlGrammarCache = null;
+function mlGrammar() {
+    if (mlGrammarCache) return mlGrammarCache;
+    // A COPY of the C++ grammar with one rule replaced: its keyword pattern, widened to also match
+    // MoonLive's three type names. Prism.languages.insertBefore was the other route and it is the
+    // wrong tool here (it rebuilds the language in place and expects a rule object, not a bare
+    // RegExp), which silently produced a grammar that highlighted nothing at all.
+    const cpp = Prism.languages.cpp;
+    mlGrammarCache = Object.assign({}, cpp, {
+        keyword: [/\b(?:byte|fixed|string)\b/].concat(cpp.keyword || []),
+    });
+    return mlGrammarCache;
+}
+
 function fmMountEditor(host, relPath, opts = {}) {
     // `savePath(readPath)` lets a caller WRITE somewhere other than it read. The script picker uses
     // it: a factory script is read from the read-only library directory, and editing it must create
     // the user's own copy rather than overwrite what shipped. Defaults to writing back where it
     // read, which is what every other caller wants.
-    const { expectedSize, onSaved, sizeKey, saveButton, statusEl, savePath } = opts;
+    const { expectedSize, onSaved, onDispose, sizeKey, saveButton, statusEl, savePath } = opts;
     const wrap = document.createElement("div");
     wrap.className = "fm-editor-pane";
     // The footer carries Save and the status line, UNLESS the host supplies both: a card already has
     // a toolbar of file actions, so they belong there, and an empty strip under the box is a gap
     // rather than a layout.
-    const ownFooter = !saveButton || !statusEl;
+    // Highlighting is for SCRIPTS: a .mle/.mll/.mlm is MoonLive, which is C++, so Prism's own C++
+    // grammar paints it with nothing of ours to maintain. A .json or a .txt edits as plain text.
+    const hlOn = /\.(mle|mll|mlm)$/i.test(relPath || "");
+
+    // The highlight layer sits BEHIND a transparent textarea, both sharing one box and one set of
+    // font metrics: a textarea cannot color its own text, and this is the standard way around that.
+    // The textarea keeps every editing behavior (caret, selection, undo, IME); the <pre> only paints.
     wrap.innerHTML =
+        '<div class="fm-editor-stack">' +
+        '<pre class="fm-editor-hl" aria-hidden="true"><div class="fm-editor-err" hidden></div><code></code></pre>' +
         '<textarea class="fm-editor-body" spellcheck="false" wrap="off"></textarea>' +
-        (ownFooter
-            ? '<div class="fm-editor-foot">' +
-              (statusEl   ? '' : '  <span class="fm-editor-status"></span>') +
-              (saveButton ? '' : '  <button class="action-btn fm-editor-save">Save</button>') +
-              '</div>'
-            : '');
+        '</div>' +
+        '<div class="fm-editor-foot">' +
+        (statusEl   ? '' : '  <span class="fm-editor-status"></span>') +
+        '  <span class="fm-editor-caret"></span>' +
+        (saveButton ? '' : '  <button class="action-btn fm-editor-save">Save</button>') +
+        '</div>';
     const body = wrap.querySelector(".fm-editor-body");
+    if (!hlOn) wrap.querySelector(".fm-editor-stack").classList.add("plain");
+    let errorLine = -1;                 // 0-based, -1 for none: set by markError below
+
+    /// A character offset as the line and column a person counts in, both 1-based.
+    ///
+    /// The device reports an OFFSET, because that is what the parser has; nobody reads a script by
+    /// offset. The editor holds the same text, so it is the one place that can do the conversion.
+    const lineColAt = (off) => {
+        const upto = body.value.slice(0, Math.max(0, Math.min(off, body.value.length)));
+        const nl = upto.lastIndexOf("\n");
+        return { line: upto.split("\n").length, col: upto.length - nl };
+    };
+    const hl = wrap.querySelector(".fm-editor-hl");
+    const hlCode = hl.querySelector("code");
+    const errBand = hl.querySelector(".fm-editor-err");
+
+    /// Repaint the layer under the caret, and keep it aligned.
+    ///
+    /// Only for a MoonLive script: Prism is given the C++ grammar because that is what the language
+    /// is (test/python/test_scripts_are_cpp.py holds every shipped script to it), so `class`, the
+    /// types and the comments light up with no grammar of our own. Any other file edits as plain
+    /// text, which is what a .json or a .txt should look like.
+    ///
+    /// A trailing newline gets a space: a <pre> collapses the last empty line where a textarea
+    /// keeps it, and without this the two drift by one line at the end of a file.
+    const paintHighlight = () => {
+        if (!hlOn) return;
+        const src = body.value;
+        hlCode.textContent = src.endsWith("\n") ? src + " " : src;
+        if (window.Prism && Prism.languages.cpp) {
+            hlCode.innerHTML = Prism.highlight(hlCode.textContent, mlGrammar(), "cpp");
+        }
+        // The failing line, marked with a BAND positioned over it rather than by wrapping its text.
+        // Wrapping meant splitting Prism's serialized HTML on newlines, which cuts any token that
+        // spans lines (a block comment is one element) in half and leaves unbalanced tags for the
+        // parser to re-balance, shifting the coloring of everything after it. A band cannot touch
+        // the markup at all, and it lands on the same line because both use the same line height.
+        errBand.hidden = errorLine < 0;
+        if (errorLine >= 0) errBand.style.top = `calc(${errorLine} * 1.5em)`;
+        syncHighlightScroll();
+    };
+    /// Move the paint under the text by TRANSFORM rather than by scrolling it: a scrollTop the
+    /// element cannot reach (it has overflow:hidden) is silently clamped, which is what left the
+    /// last lines of a file unreachable.
+    const syncHighlightScroll = () => {
+        // The band follows VERTICALLY only: it spans the full width, so a horizontal shift would
+        // just walk it off the box while the line it marks stays put.
+        hlCode.style.transform = `translate(${-body.scrollLeft}px, ${-body.scrollTop}px)`;
+        errBand.style.transform = `translateY(${-body.scrollTop}px)`;
+    };
     const status = statusEl || wrap.querySelector(".fm-editor-status");
     const saveBtn = saveButton || wrap.querySelector(".fm-editor-save");
     host.appendChild(wrap);
@@ -6126,14 +6269,15 @@ function fmMountEditor(host, relPath, opts = {}) {
     // an editor a user sized once stays that size. Keyed per control, or per path in the modal.
     const key = sizeKey || ("fm:" + path);
     const savedH = textareaSizes[key];
-    if (typeof savedH === "number" && savedH > 0) body.style.height = savedH + "px";
+    const stack = wrap.querySelector(".fm-editor-stack");
+    if (typeof savedH === "number" && savedH > 0) stack.style.height = savedH + "px";
     let taRaf = 0, taPrevH = Math.round(savedH > 0 ? savedH : 0);
     const taObserver = new ResizeObserver((entries) => {
         const h = Math.round(entries[0].contentRect.height);
         if (taRaf || h <= 0 || h === taPrevH) return;
         taRaf = requestAnimationFrame(() => { taRaf = 0; taPrevH = h; saveTextareaSize(key, h); });
     });
-    taObserver.observe(body);
+    taObserver.observe(stack);
 
     // Blur, Cmd+S and the Save button all call save(), and a blur fires when the button takes
     // focus: so without this guard one edit issues overlapping POSTs of the same file. `dirty`
@@ -6166,7 +6310,20 @@ function fmMountEditor(host, relPath, opts = {}) {
         return saving;
     };
 
-    body.addEventListener("input", () => { if (!body.readOnly) setDirty(true); });
+    // Where the caret IS, so a reported line and column can be found by moving to it. Updated from
+    // every event that can move a caret; `selectionchange` alone does not fire on a plain textarea
+    // in every browser, so the input and key/click events cover it.
+    const caretEl = wrap.querySelector(".fm-editor-caret");
+    const showCaret = () => {
+        if (!caretEl) return;
+        const at = lineColAt(body.selectionStart);
+        caretEl.textContent = `Ln ${at.line}, Col ${at.col}`;
+    };
+    ["input", "click", "keyup", "select", "focus"].forEach(e => body.addEventListener(e, showCaret));
+
+    body.addEventListener("input", () => { if (!body.readOnly) setDirty(true); paintHighlight(); });
+    // Scroll is not an input event: the layer has to follow the box it sits under.
+    body.addEventListener("scroll", () => syncHighlightScroll());
     body.addEventListener("blur", save);
     body.addEventListener("keydown", (e) => {
         if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "S")) { e.preventDefault(); save(); }
@@ -6189,6 +6346,8 @@ function fmMountEditor(host, relPath, opts = {}) {
         if (r.aborted || ac !== loadAbort) return;   // a newer load started: that one owns the pane
         body.readOnly = r.readOnly;
         saveBtn.disabled = r.readOnly;
+        paintHighlight();          // the file just arrived: paint what it says
+        showCaret();
         status.textContent = r.message;
     };
     load(path, expectedSize);
@@ -6200,13 +6359,41 @@ function fmMountEditor(host, relPath, opts = {}) {
         // Resolves once any in-flight save has completed, so the caller can safely re-read.
         save,
         isDirty: () => dirty,
-        dispose: () => { taObserver.disconnect(); wrap.remove(); },
+        /// Still on the page? A card rebuild detaches an inline editor without disposing it.
+        isMounted: () => wrap.isConnected,
+        /// Mark the line a compile failed on, from the module's own status.
+        ///
+        /// The device reports "message @<offset>", an offset into the source it compiled, which is
+        /// the only position anyone has: the parser records it and nothing else can reconstruct it.
+        /// Passing "" or a status with no @ clears the mark, so a fixed script stops being flagged
+        /// the moment it compiles.
+        markError: (statusText) => {
+            errorLine = -1;
+            let shown = statusText || "";
+            // Two forms, because this is called with both: the raw device status "message @<offset>"
+            // on every update, and an ALREADY rewritten "message (line L, col C)" when a second
+            // editor opens on a module whose status was converted before it existed.
+            const at = /@(\d+)\s*$/.exec(shown);
+            const lc = /\(line (\d+), col \d+\)\s*$/.exec(shown);
+            if (at) {
+                const p = lineColAt(Number(at[1]));
+                errorLine = p.line - 1;
+                // The offset is replaced, not appended to: line and column is the only half a person
+                // can act on, and the editor marks the line anyway.
+                shown = shown.slice(0, at.index).trimEnd() + ` (line ${p.line}, col ${p.col})`;
+            } else if (lc) {
+                errorLine = Number(lc[1]) - 1;
+            }
+            paintHighlight();
+            return shown;
+        },
+        dispose: () => { taObserver.disconnect(); wrap.remove(); if (onDispose) onDispose(); },
     };
 }
 
 // Open the shared editor in a modal, for the File Manager's tree rows. Uses the native <dialog>,
 // no bespoke overlay code, and mounts exactly the pane a card mounts inline.
-async function openFileEditor(relPath, expectedSize) {
+async function openFileEditor(relPath, expectedSize, moduleName) {
     const dlg = document.createElement("dialog");
     dlg.className = "fm-editor";
     dlg.innerHTML =
@@ -6216,7 +6403,19 @@ async function openFileEditor(relPath, expectedSize) {
         '</form>';
     dlg.querySelector(".fm-editor-path").textContent = relPath;
     document.body.appendChild(dlg);
-    const ed = fmMountEditor(dlg, relPath, { expectedSize });
+    // Registered under the module that opened it, exactly as the card's pane is: the status row is
+    // rendered by the card either way, and setStatusText marks every editor on that module. Without
+    // a module name (the File Manager's own rows) nothing registers and the modal simply highlights.
+    let unregister = () => {};
+    const ed = fmMountEditor(dlg, relPath, { expectedSize, onDispose: () => unregister() });
+    unregister = mlEditorAdd(moduleName, ed);
+    // Mark it NOW, from the status already on the card: registration only catches the next update,
+    // and a compile failure that happened before the modal opened would otherwise show unmarked
+    // until the module recompiles. The row is the card's, so it holds the same text either way.
+    if (moduleName) {
+        const row = document.querySelector(`[data-status-mid="${cssEscape(moduleName)}"] .status-value`);
+        if (row) ed.markError(row.textContent);
+    }
     dlg.showModal();
     // Resolves when the dialog CLOSES, not when it opens: a caller that re-reads the file
     // afterwards (the card's pane shows the same file) would otherwise read it before any edit.

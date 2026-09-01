@@ -19,8 +19,8 @@ class OctopusEffect {
     cx = scale(32768, width);
     cy = scale(32768, height);
 
-    for (y = 0; y < height; y = y + 1) {
-      for (x = 0; x < width; x = x + 1) {
+    for (int y = 0; y < height; y = y + 1) {
+      for (int x = 0; x < width; x = x + 1) {
         setPaletteColor(x, y,
                         polarR(x - cx, y - cy) * 8 + scale(beat(speed, t), 256),
                         scale(sin(polarA(x - cx, y - cy) * branches

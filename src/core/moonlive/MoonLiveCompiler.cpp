@@ -325,7 +325,7 @@ struct Parser {
             outFixed = true;
             return true;
         }
-        fail("this mixes a whole number and a fixed value: write toFixed(x) or toInt(x)");
+        fail("mixes whole and fixed: write toFixed(x) or toInt(x)");
         return false;
     }
 
@@ -1035,7 +1035,7 @@ struct Parser {
     // program := { decl } { stmt }.  Declarations (control vars) come first, then one-or-more
     // call statements. (Multi-statement now: a script has decl lines AND a statement line.)
     /// stmt := call ";" | forStmt
-    /// forStmt := "for" "(" ident "=" expr ";" ident "<" expr ";" ident "=" expr ")" "{" {stmt} "}"
+    /// forStmt := "for" "(" "int" ident "=" expr ";" ident "<" expr ";" ident "=" expr ")" "{" {stmt} "}"
     ///
     /// C-style deliberately: it is the form a script author already knows, and the third clause is
     /// what a serpentine layout needs (`i = i + 2`, or counting down) without inventing more syntax.
@@ -1059,7 +1059,17 @@ struct Parser {
         lex.advance();                                     // consume `for`
         if (!expect(Tok::LParen, "expected '(' after for")) return false;
 
-        // --- init: ident = expr ---
+        // --- init: "int" ident = expr ---
+        // The counter is DECLARED, like every other variable in the language: a member carries its
+        // type and an assignment to an undeclared name is refused, so a counter that appeared out of
+        // nowhere was the one exception left. `int` is also the only type it could be (a fixed init
+        // is rejected below), so the word adds no meaning for the compiler: it is here because it is
+        // what C++ writes and what a script author types by habit.
+        if (!atKeyword("int", 3)) {
+            fail("a loop counter is declared: for (int i = 0; ...)");
+            return false;
+        }
+        lex.advance();                                     // consume `int`
         if (lex.kind != Tok::Ident) { fail("expected a loop variable"); return false; }
         // Two slots per loop: the counter and the limit. Both must outlive the body, and both live
         // in the frame — nesting depth is now bounded by frame slots, not by the register file.
@@ -1256,14 +1266,14 @@ struct Parser {
         const int li = findLocal(name, nameLen);
         const int mi = li >= 0 ? -1 : findMember(name, nameLen);
         if (mi >= 0 && members[mi].count > 1) {
-            fail("an array is assigned one element at a time: write name[i] = value");
+            fail("assign one element: name[i] = value");
             return false;
         }
         if (li < 0 && mi < 0) {
             if (sysvars.find(name, nameLen)) {
-                fail("a system variable is read-only: the engine writes it before every call");
+                fail("a system variable is read-only");
             } else {
-                fail("no member or loop variable of that name: declare it in the class body");
+                fail("not declared: add it to the class body");
             }
             return false;
         }

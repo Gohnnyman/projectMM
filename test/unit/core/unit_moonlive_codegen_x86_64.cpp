@@ -556,8 +556,8 @@ TEST_CASE("x86_64: two sequential call-bearing loops stay under the density boun
     // backend's density canary.
     const char* src =
         "class T { void tick() { "
-        "for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); } "
-        "for (i = 0; i < 2; i = i + 1) { addLight(i, 1, 0); } "
+        "for (int i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); } "
+        "for (int i = 0; i < 2; i = i + 1) { addLight(i, 1, 0); } "
         "} }\n";
     uint8_t out[2048];
     auto r = mm::moonlive::compileSource(src, mm::moonlive::lightBuiltins(),

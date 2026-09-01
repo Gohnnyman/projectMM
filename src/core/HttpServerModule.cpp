@@ -267,6 +267,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         else if (std::strcmp(path, "/app.js") == 0) serveFile(conn, "app.js", "application/javascript");
         else if (std::strcmp(path, "/install-picker.js") == 0) serveFile(conn, "install-picker.js", "application/javascript");
         else if (std::strcmp(path, "/semver.js") == 0) serveFile(conn, "semver.js", "application/javascript");
+        else if (std::strcmp(path, "/prism.js") == 0) serveFile(conn, "prism.js", "application/javascript");
         else if (std::strcmp(path, "/preview3d.js") == 0) serveFile(conn, "preview3d.js", "application/javascript");
         else if (std::strcmp(path, "/preview-adapt.js") == 0) serveFile(conn, "preview-adapt.js", "application/javascript");
         else if (std::strcmp(path, "/migrate.js") == 0) serveFile(conn, "migrate.js", "application/javascript");
@@ -1019,6 +1020,7 @@ void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* file
     else if (std::strcmp(filename, "app.js") == 0) { data = ui::appJs; dataLen = ui::appJsLen; gzipped = true; }
     else if (std::strcmp(filename, "install-picker.js") == 0) { data = ui::installPickerJs; dataLen = ui::installPickerJsLen; gzipped = true; }
     else if (std::strcmp(filename, "semver.js") == 0) { data = ui::semverJs; dataLen = ui::semverJsLen; gzipped = true; }
+    else if (std::strcmp(filename, "prism.js") == 0) { data = ui::prismJs; dataLen = ui::prismJsLen; gzipped = true; }
     else if (std::strcmp(filename, "preview3d.js") == 0) { data = ui::preview3dJs; dataLen = ui::preview3dJsLen; gzipped = true; }
     else if (std::strcmp(filename, "preview-adapt.js") == 0) { data = ui::previewAdaptJs; dataLen = ui::previewAdaptJsLen; gzipped = true; }
     else if (std::strcmp(filename, "migrate.js") == 0) { data = ui::migrateJs; dataLen = ui::migrateJsLen; gzipped = true; }
