@@ -1,6 +1,8 @@
 // @module Correction
 
 #include "doctest.h"
+
+#include <cstring>
 #include "light/drivers/Correction.h"
 #include "correction_presets.h"
 
@@ -393,4 +395,68 @@ TEST_CASE("Correction: gamma and white balance compose into the one table") {
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
     CHECK(c.briLut[0][200] == 149);   // red: curve only — (200/255)^2.2 * 255
     CHECK(c.briLut[2][200] == 74);    // blue: the same curve, then the half trim — (149 * 128) / 255
+}
+
+// --- Current limiting ------------------------------------------------------------------------
+// These check the NUMBERS, not just that something got smaller: the arithmetic is what stands
+// between a white frame and a browned-out supply.
+
+// An unset budget must leave every channel bit-exact, or the feature would dim existing installs.
+TEST_CASE("Correction: no budget leaves the frame untouched") {
+    Correction c;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    const uint8_t src[3] = {255, 255, 255};
+    c.measure(src, 3, 1);
+    CHECK(c.limit == 256);          // unity, so the shift gives the table value back exactly
+    uint8_t out[3] = {};
+    c.apply(src, out);
+    CHECK(out[0] == 255);
+    CHECK(out[1] == 255);
+    CHECK(out[2] == 255);
+}
+
+// A limiter that trims when it needn't is just a dimmer.
+TEST_CASE("Correction: a frame within budget is not scaled") {
+    Correction c;
+    c.budgetMa = 1000;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    const uint8_t src[3] = {255, 255, 255};   // one light, 3 channels x 8 mA = 24 mA
+    c.measure(src, 3, 1);
+    CHECK(c.limit == 256);
+}
+
+// The headline case: white at full brightness on more lights than the supply can carry.
+TEST_CASE("Correction: an over-budget frame is scaled to fit") {
+    Correction c;
+    c.budgetMa = 1200;                        // half of what the frame below wants
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    uint8_t frame[100 * 3];
+    std::memset(frame, 255, sizeof(frame));   // 100 white lights
+    c.measure(frame, 3, 100);                 // 100 x 3 channels x 8 mA = 2400 mA
+    CHECK(c.limit == 128);                    // 1200/2400 -> half
+    uint8_t out[3] = {};
+    c.apply(frame, out);
+    CHECK(out[0] == 127);                     // (255 * 128) >> 8
+}
+
+// Why a per-LIGHT figure cannot describe RGBW: Accurate moves the draw off R/G/B and onto W,
+// which is cheaper for the same colour — 16 mA a light against 40 — so one budget halves a Min
+// frame and leaves an Accurate one alone.
+TEST_CASE("Correction: the estimate follows whiteMode, not a per-light constant") {
+    uint8_t frame[100 * 3];
+    std::memset(frame, 255, sizeof(frame));
+
+    Correction min;
+    min.whiteMode = WhiteMode::Min;
+    min.budgetMa = 2000;
+    mm::test::rebuildFromPreset(min, 255, mm::test::PresetOrder::RGBW);
+    min.measure(frame, 3, 100);               // RGB 3x8 + W 16 = 40 mA/light = 4000 mA
+    CHECK(min.limit == 128);                  // 2000/4000 -> half
+
+    Correction acc;
+    acc.whiteMode = WhiteMode::Accurate;
+    acc.budgetMa = 2000;
+    mm::test::rebuildFromPreset(acc, 255, mm::test::PresetOrder::RGBW);
+    acc.measure(frame, 3, 100);               // RGB drops to 0, W alone = 16 mA/light = 1600 mA
+    CHECK(acc.limit == 256);                  // inside budget, so untouched
 }

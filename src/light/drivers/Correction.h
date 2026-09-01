@@ -92,6 +92,14 @@ struct Correction {
     // not available: there is no headroom above 255, so raising clips instead of balancing.
     uint8_t balRed = 255, balGreen = 255, balBlue = 255;
 
+    // Per CHANNEL, not per light: a white die draws about twice a colour one, so one per-light
+    // figure under-reports white-heavy frames — the direction that browns out a supply. Measured
+    // on a 5 m SK6812 RGBW strip.
+    uint16_t budgetMa = 0;  // 0 disables the limiter
+    uint8_t mAColor = 8;    // one R/G/B channel at 255
+    uint8_t mAWhite = 16;   // one W channel at 255
+    uint16_t limit = 256;   // measure() sets it; 256 = unity, so an unlimited frame is bit-exact
+
     // Cold path: refresh the output tables and DERIVE the color-role offsets from the
     // light's channel-role array (`roles`, `nChannels` entries — the driver's dynamic
     // array, canonical). A role appearing at channel i sets that color's offset to i;
@@ -139,6 +147,35 @@ struct Correction {
         outChannels = nChannels;
     }
 
+    // Shared by measure() and apply(), so the estimate cannot drift from what is emitted.
+    inline uint8_t whiteOf(uint8_t r, uint8_t g, uint8_t b) const {
+        if (whiteMode == WhiteMode::None) return 0;
+        return r < g ? (r < b ? r : b) : (g < b ? g : b);
+    }
+
+    // Once per frame before the emit loop: price this driver's `n` lights and set `limit`.
+    void measure(const uint8_t* src, uint8_t srcCh, uint32_t n) {
+        limit = 256;
+        if (budgetMa == 0) return;
+
+        // Which emitters this light carries cannot change mid-frame, so decide it once rather than
+        // per light. Both white roles are driven from the same synthesised value, so their draw adds.
+        uint32_t whiteMa = 0;
+        if (offWhite != kAbsent) whiteMa += mAWhite;
+        if (offWarmWhite != kAbsent) whiteMa += mAWhite;
+        const bool subtractWhite = offWhite != kAbsent && whiteMode == WhiteMode::Accurate;
+
+        uint32_t sum = 0; // milliamps * 255; dividing per channel would round dim frames to zero
+        for (uint32_t i = 0; i < n; i++, src += srcCh) {
+            uint8_t r = briLut[0][src[0]], g = briLut[1][src[1]], b = briLut[2][src[2]];
+            const uint8_t w = whiteOf(r, g, b);
+            if (subtractWhite) { r -= w; g -= w; b -= w; }
+            sum += (static_cast<uint32_t>(r) + g + b) * mAColor + static_cast<uint32_t>(w) * whiteMa;
+        }
+        const uint32_t demandMa = sum / 255;
+        if (demandMa > budgetMa) limit = static_cast<uint16_t>((budgetMa * 256u) / demandMa);
+    }
+
     // Hot path: transform one source light (3-channel RGB at `src`) into `out`
     // (`outChannels` bytes). Brightness via LUT, then place each present color role at
     // its derived offset, then synthesize white per whiteMode. No allocation, integer-only.
@@ -146,9 +183,9 @@ struct Correction {
     // a wiring that omits, say, red just doesn't emit it. Channels holding non-color roles
     // (pan/tilt) are left for their own writers; apply() never touches them.
     inline void apply(const uint8_t* src, uint8_t* out) const {
-        uint8_t r = briLut[0][src[0]];
-        uint8_t g = briLut[1][src[1]];
-        uint8_t b = briLut[2][src[2]];
+        uint8_t r = static_cast<uint8_t>((briLut[0][src[0]] * limit) >> 8);
+        uint8_t g = static_cast<uint8_t>((briLut[1][src[1]] * limit) >> 8);
+        uint8_t b = static_cast<uint8_t>((briLut[2][src[2]] * limit) >> 8);
         // Every synthesized emitter (white + warm-white/yellow/UV) is gated by the ONE whiteMode:
         // None zeroes them (never a stale value — corrected_ is reused, not re-zeroed, frame to
         // frame), otherwise each is a best-effort approximation from RGB. Accurate additionally
@@ -161,7 +198,7 @@ struct Correction {
             if (offYellow != kAbsent)    out[offYellow] = 0;
             if (offUV != kAbsent)        out[offUV] = 0;
         } else {
-            const uint8_t w = r < g ? (r < b ? r : b) : (g < b ? g : b);  // min(r,g,b): the white component
+            const uint8_t w = whiteOf(r, g, b);   // min(r,g,b): the white component
             // The additive stand-ins (warm-white/yellow/UV) approximate from the CORRECTED RGB — the
             // values BEFORE Accurate pulls white out below. Compute them here, off the pre-subtraction
             // r/g/b, so Accurate's `r -= w` (which only rebalances the RGB emitters) can't corrupt them.

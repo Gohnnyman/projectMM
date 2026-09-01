@@ -127,6 +127,9 @@ public:
         const uint8_t effective =
             static_cast<uint8_t>((globalBrightness * localBrightness_) / 255);
         correction_.whiteMode = static_cast<WhiteMode>(whiteMode_);
+        correction_.budgetMa = budgetMa_;
+        correction_.mAColor = mAColor_;
+        correction_.mAWhite = mAWhite_;
         // Fill inputs, so they must be in place before the rebuild below. Pushed here rather than in
         // onControlChanged so a rebuild from ANY trigger carries the current values.
         correction_.gamma10 = gamma10_;
@@ -257,6 +260,14 @@ protected:
     uint32_t presetId_ = 0;          // stable id into the LightPresets library (0 → resolve to default)
     uint8_t presetSel_ = 0;          // the preset Select's chosen INDEX (mapped to an id in onControlChanged)
     uint8_t whiteMode_ = static_cast<uint8_t>(WhiteMode::Min);  // index into kWhiteModeOptions
+    /// Whether this driver calls Correction::measure() before its emit loop. False by default —
+    /// a network sender feeds another board's supply, so only the drivers that measure are offered
+    /// the controls.
+    virtual bool limitsCurrent() const { return false; }
+
+    uint16_t budgetMa_ = 0;   // 0 = no current limiting
+    uint8_t mAColor_ = 8;     // measured on SK6812 RGBW: R 7.98, G 8.11, B 7.98
+    uint8_t mAWhite_ = 16;    // measured: W 16.11
     uint8_t localBrightness_ = 255;  // per-driver dim, multiplied with the global brightness
     // Calibration for THIS fixture, so per-driver rather than global — two strips on one board can
     // need different values. Semantics in Correction.h.
@@ -291,6 +302,14 @@ protected:
         controls_.addUint8("balanceRed", balRed_, 0, 255);
         controls_.addUint8("balanceGreen", balGreen_, 0, 255);
         controls_.addUint8("balanceBlue", balBlue_, 0, 255);
+        // Per CHANNEL at full, because a white die draws about twice a colour one.
+        const bool limits = limitsCurrent();
+        controls_.addUint16("maxCurrentMa", budgetMa_, 0, 60000);
+        controls_.setHidden(controls_.count() - 1, !limits);
+        controls_.addUint8("mAPerColorChannel", mAColor_, 1, 60);
+        controls_.setHidden(controls_.count() - 1, !limits);
+        controls_.addUint8("mAPerWhiteChannel", mAWhite_, 1, 60);
+        controls_.setHidden(controls_.count() - 1, !limits);
         // The durable reference (the preset NAME) persists but isn't shown — the lightPreset Select
         // above is the user-facing control; presetRef_ just carries the reference across a reboot.
         controls_.addText("presetRef", presetRef_, sizeof(presetRef_));
@@ -308,7 +327,8 @@ protected:
         return std::strcmp(name, "lightPreset") == 0 || std::strcmp(name, "localBrightness") == 0
             || std::strcmp(name, "whiteMode") == 0 || std::strcmp(name, "gamma x10") == 0
             || std::strcmp(name, "balanceRed") == 0 || std::strcmp(name, "balanceGreen") == 0
-            || std::strcmp(name, "balanceBlue") == 0;
+            || std::strcmp(name, "balanceBlue") == 0 || std::strcmp(name, "maxCurrentMa") == 0
+            || std::strcmp(name, "mAPerColorChannel") == 0 || std::strcmp(name, "mAPerWhiteChannel") == 0;
     }
 
 private:
