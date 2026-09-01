@@ -8,6 +8,7 @@
 #include "core/JsonSink.h"
 
 #include <cstring>
+#include <string>    // std::string: named explicitly, GCC does not pull it in transitively
 
 // Pins the transport-free apply-core that HttpServerModule exposes — applyAddModule
 // / applySetControl / applyClearChildren / applyOp. These are the operations the
