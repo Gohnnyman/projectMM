@@ -258,6 +258,11 @@ public:
     /// "content-length:"; the case-sensitive strstr it replaces silently read a length of 0 and
     /// committed EMPTY files with a 200). Public + static so it's unit-testable without a socket.
     static const char* findHeaderCI(const char* hay, const char* needle);
+    /// What a replaced module should be called: requested name, else a custom one, else null
+    /// ("keep the fresh module's own default"). Static and public so the rule is unit-testable:
+    /// it decides what a card is labeled after a swap, which is not something to discover in the UI.
+    static const char* replacementName(const char* requested, const char* current,
+                                       const char* oldDefault);
 
     /// Apply a WLED `{on?, bri?}` state body onto the Drivers `on` / `brightness` controls through
     /// the shared apply-core (`on` and `bri` independent — off preserves the level). The transport-

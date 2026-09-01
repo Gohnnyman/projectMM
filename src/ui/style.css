@@ -1758,8 +1758,23 @@ body.cards-resizing {
    bottom landed on the stack instead of the text: the editor stopped responding partway down. */
 .fm-editor-stack {
     position: relative; display: flex; flex: 1 1 auto;
-    min-height: 240px; overflow: hidden; resize: vertical;
+    min-height: 120px; overflow: hidden;
 }
+/* The resize handle, ours rather than the browser's `resize`. The native gesture cannot work here:
+   the textarea is positioned over the whole stack, corner included, so the press that would start
+   the drag lands on the text instead. This is a real element above both layers, so it both draws
+   the familiar corner strokes and receives the pointer. */
+.fm-editor-grip {
+    position: absolute; right: 0; bottom: 0; width: 18px; height: 18px;
+    z-index: 3; cursor: ns-resize; touch-action: none;
+    background:
+        linear-gradient(135deg, transparent 42%, var(--fg-muted) 42%, var(--fg-muted) 56%, transparent 56%),
+        linear-gradient(135deg, transparent 70%, var(--fg-muted) 70%, var(--fg-muted) 84%, transparent 84%);
+    background-size: 12px 12px; background-position: right 3px bottom 3px;
+    background-repeat: no-repeat;
+    opacity: 0.75;
+}
+.fm-editor-grip:hover { opacity: 1; }
 .fm-editor-body, .fm-editor-hl {
     margin: 0; padding: 12px 14px; border: none;
     font-family: ui-monospace, monospace; font-size: 0.85rem; line-height: 1.5;
@@ -1847,8 +1862,11 @@ body.cards-resizing {
     border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
     background: var(--bg-1);
 }
-/* Shorter than the modal's: a card is one of several on screen, and the grip resizes it. */
-.control-fileedit .fm-editor-body { min-height: 140px; }
+/* The starting height, which the grip then overrides per editor (stored in mm_textareaSizes). On
+   the STACK, not the textarea: the stack owns the height, so a floor on the textarea did nothing.
+   A card is one of several on screen, so it starts shorter than the modal. */
+.fm-editor-stack { height: 240px; }
+.control-fileedit .fm-editor-stack { height: 200px; }
 .control-fileedit .fm-editor-foot { padding: 6px 10px; }
 
 /* Picker row ABOVE the editor, as one column. A .control-row is a flex row, so the two have to be

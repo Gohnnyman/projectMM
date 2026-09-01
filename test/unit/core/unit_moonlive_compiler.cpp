@@ -445,6 +445,41 @@ TEST_CASE("a nested loop cannot reuse the enclosing loop's variable") {
 // The emitted loop tests and advances its OWN counter whatever name the condition and step clauses
 // write, so a mistyped name used to compile clean and run as though it said the right thing — a
 // wrong fixture with no diagnostic anywhere. Found by review.
+TEST_CASE("a compile error reports the exact offset the editor turns into a line and column") {
+    uint8_t out[512];
+    // The offset is the ONLY position anyone has: the editor slices the source up to it to find the
+    // failing line, and marks that line in the paint layer. It is therefore ZERO-based, counted in
+    // characters from the start of the whole source, while Lexer::col() is one-based; the conversion
+    // happens where the two conventions meet. An off-by-one here marks the wrong line whenever a
+    // failure lands on the first character of one.
+    const char* src =
+        "class T {\n"                       // line 1, offsets 0..9
+        "  byte b = 1;\n"                   // line 2, offsets 10..24
+        "  void tick() { fill(0, 0, 0; }\n"  // line 3: the missing ')' is here
+        "}\n";
+    auto r = moonlive::compileSource(src, kTable, kSys, out, sizeof(out));
+    REQUIRE_FALSE(r.ok);
+    CHECK(std::string(r.error) == "expected ')'");
+
+    // What the light domain publishes, and what the editor reads back.
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(src, kTable, kSys));
+    REQUIRE(eng.hasErrorPos());
+    const size_t at = eng.errorPos();
+    REQUIRE(at < std::strlen(src));
+
+    // The line and column a reader counts, derived the way the editor derives them.
+    const std::string upto(src, at);
+    const size_t line = std::count(upto.begin(), upto.end(), '\n') + 1;
+    const size_t nl = upto.rfind('\n');
+    const size_t col = upto.size() - (nl == std::string::npos ? 0 : nl + 1) + 1;
+    INFO("reported offset " << at << " -> line " << line << ", col " << col);
+    CHECK(line == 3);
+    // The character AT the offset is where the parser stopped, on the line it belongs to.
+    CHECK(src[at] != '\n');
+    CHECK(col > 1);
+}
+
 TEST_CASE("a for loop declares its counter, as every other variable in the language does") {
     uint8_t out[512];
     // The rule the language already held everywhere else: a member carries its type and an

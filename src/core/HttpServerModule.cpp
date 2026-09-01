@@ -2108,6 +2108,22 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
 }
 
+/// What a replaced module should be called: the requested name, the old one, or neither.
+///
+/// Three cases, in order. A name the CALLER asked for wins: it knows what the slot now holds, and a
+/// card swapped to a different script must not stay labeled after the old one. Otherwise a CUSTOM
+/// name is kept, so a scenario id or a name a user chose survives a type swap. Otherwise null, and
+/// the fresh module keeps the default name its own type gave it: a Multiply replaced by a
+/// Checkerboard reads as "Checkerboard", not as a mislabeled "Multiply".
+///
+/// Returns null for "leave it alone", never an empty string, so a caller cannot blank a name.
+const char* HttpServerModule::replacementName(const char* requested, const char* current,
+                                              const char* oldDefault) {
+    if (requested && requested[0] != 0) return requested;
+    if (current && oldDefault && std::strcmp(current, oldDefault) != 0) return current;
+    return nullptr;
+}
+
 void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const char* moduleName, const char* body) {
     auto* mod = findModuleByName(moduleName);
     if (!mod) {
@@ -2133,6 +2149,12 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
         sendResponse(conn, 400, "application/json", "{\"error\":\"missing type\"}");
         return;
     }
+    // An optional name for the replacement, the counterpart of `id` on create. Without it a replace
+    // keeps whatever the slot was called, which is right when the type is the only thing changing
+    // and wrong when the caller knows what the slot now holds: swapping a card to a different
+    // MoonLive script leaves it labeled after the old one.
+    char wantName[32] = {};
+    mm::json::parseString(body, "name", wantName, sizeof(wantName));
 
     // Find the child's index within the parent.
     uint8_t index = 0;
@@ -2167,13 +2189,12 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
     // the old name was just the old type's factory display name ("Multiply" for
     // a MultiplyModifier), let the fresh module keep its own factory name
     // ("Checkerboard"): otherwise a Multiply→Checkerboard replace leaves a
-    // Checkerboard mislabelled "Multiply". `fresh` already arrives with its
+    // Checkerboard mislabeled "Multiply". `fresh` already arrives with its
     // correct default name from ModuleFactory::create, so we only override for a
     // custom name; then re-run uniqueness so two same-type siblings don't collide.
-    const char* oldDefault = ModuleFactory::displayNameFor(mod->typeName(), mod->role());
-    if (std::strcmp(mod->name(), oldDefault) != 0) {
-        fresh->setName(mod->name());  // custom name: preserve the slot identity
-    }
+    const char* keep = replacementName(wantName, mod->name(),
+                                       ModuleFactory::displayNameFor(mod->typeName(), mod->role()));
+    if (keep) fresh->setName(keep);
 
     // Swap in place; replaceChildAt returns the old module, which we own.
     MoonModule* old = parent->replaceChildAt(index, fresh);

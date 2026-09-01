@@ -30,14 +30,17 @@ PY_DEPS = ("pytest", "pyserial", "markdown", "wled")
 
 def run(cmd, label):
     print(f"\n=== {label} ===", flush=True)
-    r = subprocess.run(cmd, cwd=ROOT)
+    r = subprocess.run(cmd, cwd=ROOT, check=False)   # the caller collects the code; a raise would skip the other suite
     return r.returncode
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--python", action="store_true", help="run only the Python suite")
-    ap.add_argument("--js", action="store_true", help="run only the JS suite")
+    # Mutually exclusive: each flag means "ONLY this suite", so passing both asks for two
+    # contradictory things. Neither flag still means both suites, which is the common case.
+    only = ap.add_mutually_exclusive_group()
+    only.add_argument("--python", action="store_true", help="run only the Python suite")
+    only.add_argument("--js", action="store_true", help="run only the JS suite")
     args = ap.parse_args()
     both = not (args.python or args.js)
 
@@ -56,11 +59,15 @@ def main() -> int:
         if shutil.which("node") is None:
             print("\n=== JS (test/js) ===\nSKIP: node is not on PATH", flush=True)
         else:
-            # NODE expands this pattern, not a shell: the call takes a list and no shell=True, so
-            # the literal `**` reaches node, which globs it itself (node 22+). The gate and CI spell
-            # the same command inside a shell, where the shell expands it first; both reach the same
-            # files, by two different mechanisms.
-            rc |= run(["node", "--test", "test/js/**/*.test.mjs"], "JS (test/js)")
+            # Expanded HERE, not by node and not by a shell. The call passes a list with no
+            # shell=True, so a literal `test/js/**/*.test.mjs` would reach node and depend on its
+            # own glob support, which older runtimes lack. Resolving the paths in Python makes the
+            # command work on any node, and names the files it ran.
+            tests = sorted(str(f.relative_to(ROOT)) for f in (ROOT / "test/js").rglob("*.test.mjs"))
+            if not tests:
+                print("\n=== JS (test/js) ===\nSKIP: no test files found", flush=True)
+            else:
+                rc |= run(["node", "--test", *tests], "JS (test/js)")
 
     print("\nDONE" if rc == 0 else "\nFAILED", flush=True)
     return rc

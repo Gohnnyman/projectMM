@@ -91,6 +91,10 @@ public:
     /// The editor turns it into a line to mark; the parser already knows it, and throwing it
     /// away meant a user was told what was wrong but never where.
     uint16_t errorPos() const { return errorPos_; }
+    /// Whether errorPos() means anything. Zero is a VALID offset (a failure on the first character),
+    /// so the value cannot also stand for "no position": only a parse failure has one, while the
+    /// later failures (no control memory, codegen refused) do not.
+    bool     hasErrorPos() const { return hasErrorPos_; }
 
     // The hot path: run the compiled routine over the host's buffer. `t` is the host's
     // elapsed() ms; a static routine ignores it, an animated one derives its color from
@@ -361,6 +365,7 @@ private:
     CtrlFn  ctrl_ = nullptr;     // front-end-compiled routine (5-arg, reads the controls arena)
     const char* error_ = "";
     uint16_t    errorPos_ = 0;
+    bool        hasErrorPos_ = false;
 
     // The functions the script defined, with their offsets into `code_`, and their names owned here
     // for the same reason the control names are: a CompileResult's `name` points into source text

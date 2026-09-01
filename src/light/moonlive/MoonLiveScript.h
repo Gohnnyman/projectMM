@@ -97,7 +97,7 @@ public:
             // One string because status IS the channel a module reports through, and a second
             // control for the number would be a field every non-scripted module carries for nothing.
             // The suffix is machine-read, so it stays a fixed shape rather than a sentence.
-            if (engine_.errorPos() > 0) {
+            if (engine_.hasErrorPos()) {
                 std::snprintf(statusBuf_, sizeof(statusBuf_), "%s @%u",
                               err ? err : "compile failed",
                               static_cast<unsigned>(engine_.errorPos()));
