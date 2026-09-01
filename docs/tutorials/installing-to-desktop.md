@@ -36,7 +36,11 @@ Worth knowing so it does not surprise you later: **this happens for every new bu
 
 Occasionally Defender goes a step further and removes the file outright, naming something like `Trojan:Win32/Wacatac.C!ml`. The `!ml` suffix means a **machine-learning guess**, not a match against known malware: an unsigned, zero-reputation executable that opens audio capture devices (the Audio module records from your microphone or a loopback device) fits a pattern the model weighs, and every new build is a brand-new fingerprint for it to judge. The contents are checkable rather than a matter of trust: the binary is compiled from this repository's source in public CI, and the one vendored file behind the audio support (`miniaudio.h`) is byte-identical to its upstream release.
 
-The safest way back is a **fresh download**: delete the quarantined file (**Windows Security → Virus & threat protection → Protection history**) and download the installer again from the [releases page](https://github.com/MoonModules/projectMM/releases) over HTTPS: that re-establishes exactly what you are running without trusting a file out of quarantine. Restoring from Protection history works too, but only for a file you downloaded from the releases page yourself, moments before. An exclusion on the install directory would not help (the quarantined file is the installer in **Downloads**), and a broad Downloads exclusion costs more protection than it is worth. The durable route is reporting the file as a false positive at [microsoft.com/wdsi/filesubmission](https://www.microsoft.com/wdsi/filesubmission): Microsoft typically clears these within days, and it fixes it for everyone.
+**If the download itself fails**, which shows as *"Couldn't download - Download error"*, Defender is stopping it mid-transfer and there is no file to rescue. Re-downloading only repeats it. **Use the zip instead** (§8): it is a different file with a different fingerprint, so the verdict on the setup does not apply to it, and it carries a script that installs projectMM exactly as the setup would.
+
+**If the file did land and was then quarantined**, delete it (**Windows Security → Virus & threat protection → Protection history**) and download again from the [releases page](https://github.com/MoonModules/projectMM/releases) over HTTPS, which re-establishes what you are running rather than trusting a file out of quarantine. Restoring from Protection history works too, but only for a file you downloaded yourself moments before. An exclusion on the install directory would not help, since the flagged file is in **Downloads**, and a broad Downloads exclusion costs more protection than it is worth.
+
+Either way the durable route is reporting it as a false positive at [microsoft.com/wdsi/filesubmission](https://www.microsoft.com/wdsi/filesubmission). Microsoft typically clears these within days, and it fixes it for everyone. The verdict attaches to that one build's fingerprint, so a later release is judged afresh.
 
 ## 3. Run the setup
 
@@ -95,11 +99,19 @@ The badge only appears when a release actually ships a build for your OS, and it
 
 **Nothing is lost.** Running the new setup replaces the program and leaves `%LOCALAPPDATA%\projectMM` untouched, so your layouts, effects and drivers come back exactly as you left them.
 
-## 8. Or run it without installing
+## 8. The zip: run it, or install it without the setup
 
-The [releases page](https://github.com/MoonModules/projectMM/releases) also carries `projectMM-windows-x64-vX.Y.Z.zip`: the same application with no installer, no Start-menu entry and no uninstaller. Choose it if you want projectMM in a folder of your own, or on a USB stick.
+The [releases page](https://github.com/MoonModules/projectMM/releases) also carries `projectMM-windows-x64-vX.Y.Z.zip`. **Extract it first**, rather than opening the executable from inside the zip, because Windows unpacks a zip-launched program into a temporary folder it may clear at any time.
 
-Two things differ. **Extract it before running**, rather than opening the executable from inside the zip, because Windows unpacks a zip-launched program into a temporary folder it may clear at any time. And there is no Start-menu shortcut, so you launch it from wherever you put it. Settings still live in the same per-user folder, so both forms share one configuration.
+It holds the same application plus two scripts, so it serves two purposes:
+
+**Run it in place.** Double-click `projectMM.exe` wherever you extracted it. No Start-menu entry, no uninstaller, nothing written outside your settings folder. This is the one to take on a USB stick.
+
+**Or install it properly.** Right-click **`Install-projectMM.ps1`** and choose **Run with PowerShell**. It does exactly what the setup does: copies the program to `%LOCALAPPDATA%\Programs\projectMM`, adds the Start-menu entry with its icon, registers an uninstaller in Add/Remove Programs, and stops a running copy first so it can replace a locked executable. No administrator rights, because everything stays under your own user profile.
+
+Two reasons that script exists rather than being redundant with the setup. It is **plain text you can read before you run it**, which an installer cannot offer. And when Defender blocks the setup download outright (§2), it is the way through: a script gives a malware-scoring model nothing to weigh, so it is not subject to the same guesswork.
+
+Settings live in the same per-user folder whichever route you take, so the three are interchangeable and share one configuration. `Uninstall-projectMM.ps1` reverses the install and leaves your settings alone.
 
 ---
 
