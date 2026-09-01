@@ -31,6 +31,10 @@ use_directory_urls: false
 
 theme:
   name: material
+  # System fonts, not Material's default Roboto. The default loads from fonts.googleapis.com, which
+  # sends every docs reader's IP to Google for a typeface nobody chose. Our privacy policy says
+  # GitHub is who receives requests for these pages, and this is what keeps that true.
+  font: false
   # The MoonModules moon-man — browser-tab favicon + the header logo (same PNG
   # the web installer uses, copied into docs/assets/). Paths are relative to docs/.
   favicon: assets/favicon.png
@@ -123,6 +127,7 @@ nav:
       # resource it is, rather than warning about an unresolvable absolute path.
       - Web installer: https://moonmodules.org/projectMM/install/
       - Log an issue: logging-an-issue.md
+      - Privacy policy: privacy-policy.md
   # Tutorials: the guided path AFTER "Install & first light". Ordered as a reader
   # would walk them — concepts first, then the longer-form use cases (which predate
   # this section and are being folded in gradually).

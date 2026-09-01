@@ -204,6 +204,14 @@ def readme_text(version: str, platform_label: str) -> str:
         f"Run: ./projectMM (macOS) or projectMM.exe (Windows)\n"
         f"Open: http://localhost:8080/\n"
         f"\n"
+        f"Windows: to INSTALL rather than just run it (Start-menu entry, an\n"
+        f"uninstaller, and an upgrade that keeps your settings), double-click\n"
+        f"Install-projectMM.cmd. No administrator rights are needed; it installs\n"
+        f"only under your own user profile. It runs Install-projectMM.ps1, which\n"
+        f"is plain text you can read first. Windows blocks a downloaded .ps1 from\n"
+        f"running on its own, which is why the .cmd is there.\n"
+        f"The setup.exe on the releases page does the same thing in one click.\n"
+        f"\n"
         f"macOS first run: the app is ad-hoc signed, not notarized, so macOS\n"
         f"refuses it with 'Apple could not verify projectMM is free of malware'.\n"
         f"That dialog has no way through on macOS 15 and later, so clear the\n"
@@ -429,6 +437,9 @@ Section "uninstall"
   Delete "$INSTDIR\projectMM.ico"
   Delete "$INSTDIR\README.txt"
   Delete "$INSTDIR\uninstall.exe"
+  ; The zip's script route installs to the same directory and leaves this behind. Without it the
+  ; RMDir below fails silently and the folder survives an uninstall.
+  Delete "$INSTDIR\Uninstall-projectMM.ps1"
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
   Delete "$SMPROGRAMS\${APPNAME}\Uninstall ${APPNAME}.lnk"
@@ -529,14 +540,35 @@ def package_windows_installer(binary: Path, version: str) -> Path | None:
 
 
 def package_windows(binary: Path, version: str) -> Path:
+    """The zip: a portable copy, and the second route to an installed one.
+
+    It carries Install-projectMM.ps1 alongside the executable, which does what the setup.exe does
+    in plain text. That is not redundancy for its own sake: Defender occasionally flags a freshly
+    built, unsigned installer on a machine-learning guess and blocks the download outright, which
+    leaves no file to rescue and no way in. A script gives the scoring model nothing to judge, and
+    gives the user something they can read before running. The setup.exe stays the primary path.
+    """
     DIST_DIR.mkdir(exist_ok=True)
     out = DIST_DIR / f"projectMM-windows-x64-v{version}.zip"
     readme = DIST_DIR / "_README.txt"
     readme.write_text(readme_text(version, "Windows x64"), encoding="utf-8")
+    scripts = ROOT / "moondeck" / "ci" / "windows"
     try:
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.write(binary, arcname="projectMM.exe")
             zf.write(readme, arcname="README.txt")
+            # Stamp the version in, so the Add/Remove Programs entry carries one. The repo copy
+            # keeps the @VERSION@ placeholder, which the script treats as "unknown" if it is ever
+            # run straight from a checkout.
+            install = (scripts / "Install-projectMM.ps1").read_text(encoding="utf-8")
+            zf.writestr("Install-projectMM.ps1", install.replace("@VERSION@", version))
+            zf.write(scripts / "Uninstall-projectMM.ps1", arcname="Uninstall-projectMM.ps1")
+            # The .cmd is not a convenience: Windows marks everything extracted from a downloaded
+            # zip as internet-sourced, and the default RemoteSigned policy then REFUSES to run an
+            # unsigned .ps1 carrying that mark ("is not digitally signed"). Measured on a stock
+            # machine. So the double-clickable wrapper is the only route that works out of the box,
+            # and the .ps1 beside it stays the thing a careful user reads first.
+            zf.write(scripts / "Install-projectMM.cmd", arcname="Install-projectMM.cmd")
     finally:
         readme.unlink(missing_ok=True)
     print(f"package_desktop: wrote {out}")

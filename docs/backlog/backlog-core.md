@@ -1233,6 +1233,26 @@ Reading the variable wide is only half of it. `toFsPath` composes a `std::filesy
 
 Not done with the per-user data directory because it reverses a documented decision across the whole desktop filesystem layer, four of whose five call sites predate that change. What the change did do is make the root capable of containing a username, where it was previously the literal `build`. Worth closing the next time this file is opened for other reasons.
 
+## Opt-in usage reporting: know which hardware and configurations are actually out there (2026-09-01)
+
+We build for hardware we cannot see. Which chips people actually run, how big their walls are, which drivers and features they enable, and how many are still on an old version are all questions currently answered by whoever happens to speak up on Discord. That is a biased sample: it hears from people with problems and from people who post, and it is silent about the majority who install something and it simply works. Effort therefore goes where the loudest reports are rather than where the users are, and a decision to drop support for something rests on a guess.
+
+**What a report would carry.** Enough to answer "what should we build and what may we stop supporting", and nothing else:
+
+- **The machine.** Chip family and variant for a device (classic ESP32, S3, P4, S31 and so on), flash size, whether PSRAM is present and how much. For a desktop, the OS and architecture instead, which is a question we have no way to answer at all today.
+- **The version.** Firmware or application version, release channel, and on an upgrade the version it came from. Whether this was a fresh install or an upgrade.
+- **The light setup, in shape rather than content.** Total light count, which layouts are in use and their dimensions, which drivers are active, and how many outputs or buses. Not what the wall shows, only how big it is and how it is wired.
+- **Which features are switched on.** The modules present and enabled: audio, MoonLive, MQTT, Art-Net or E1.31 send and receive, panel cards, Ethernet versus WiFi. This is the half that answers "is anyone actually using this", which is what decides whether a feature earns its maintenance.
+- **A country**, derived at the server from the address the request arrives from, so the map is by region rather than by installation.
+
+**What it must never carry**, and this list is a constraint on the design rather than a note on it: device name, IP or MAC address, WiFi credentials, MQTT passwords, any free-text field a user typed, the contents of a layout or a script, and anything that lets two reports be recognized as the same installation. There is no device identifier, which also means no de-duplication: a machine reporting twice counts twice, and that inaccuracy is the price of not being able to track anyone. It is the right trade.
+
+**Consent.** Opt-in, from a prompt shown after a fresh install or an upgrade, with a decline that is as easy to click as the accept and is remembered. One report per install or upgrade, never a heartbeat. A user who declines transmits nothing at all, rather than transmitting a "declined" record.
+
+**The privacy policy already commits to this shape** ([docs/privacy-policy.md](../privacy-policy.md)), including the honest wording about the IP address a server unavoidably sees. Whatever is built has to match what is promised there, and the policy has to be updated with the specifics BEFORE the feature ships, not alongside it.
+
+**Open questions for whoever picks this up.** Where the server runs and who administers it, since it is the first piece of infrastructure this project would own rather than borrow from GitHub. Whether the dashboard is public, which we would want it to be for the same reason the source is. Whether the desktop reports at all or only devices, given the desktop is the half we currently know nothing about. And what happens to a report from a version whose fields have since changed, because a schema that cannot be read a year later answers nothing.
+
 ## A driven GPIO the Pins map never sees: bus padding, and a hidden clockPin
 
 **Found:** 2026-08-21, on MM-S31, after a bench session that started as "the LED panel stopped working" and cost hours chasing a firmware regression that did not exist.

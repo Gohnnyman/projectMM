@@ -620,3 +620,29 @@ frame when the previous one has not drained, report the skip to the receiver (it
 congestion signal), and close only on a real error or FIN. The receiver steers quality from the
 drop reports. Every give-up budget that remains must bound *lack of progress*, never elapsed
 total, or slow-but-healthy transfers get truncated.
+
+
+## A test that does not reproduce the user's conditions proves nothing (2026-09-01)
+
+Two wrong conclusions in one session, from the same root, on the Windows install work.
+
+**The environment differed.** A script was going to ship inside a downloaded zip, so it had to run
+under the default PowerShell policy. It ran fine when tested, and would have shipped. It only
+failed once the policy was forced explicitly: `Get-ExecutionPolicy -List` showed `Process: Bypass`,
+set by the agent's own shell, silently overriding the `RemoteSigned` a user actually has. Under the
+real policy a downloaded, unsigned script is refused outright, so the deliverable would have failed
+for exactly the person it was written for. **Print the setting your test depends on, rather than
+inferring it from the outcome.**
+
+**The path differed.** The same session declared a Defender false positive "cleared" because a
+download succeeded. It had not cleared: the download used a different client. A browser download
+was still being blocked while a scripted one of identical bytes was only *detected* and left on
+disk. The test resembled the failing path without exercising it, so it could not have detected the
+problem it was run to check.
+
+The general form, and the reason both slipped through: **a green result only means something if the
+test could have gone red.** Before believing one, name what would have to be true for it to fail,
+and confirm that condition is actually present. An agent's shell is a particularly bad witness here,
+because it routinely runs with policies, permissions and paths that no user has. Sibling of the
+sabotage rule above: there, force the failure to prove the test sees it; here, prove the test is
+standing in the place where the failure lives.
