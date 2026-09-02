@@ -10,7 +10,7 @@
 
 // Pins the hollow-rectangle perimeter walk: the corner-counted-once light count, the reference
 // clockwise-from-top-left order, the degenerate line cases, and the eight wiring permutations
-// (4 start corners × 2 directions). The wiring controls must reorder INDICES only — the set of
+// (4 start corners × 2 directions). The wiring controls must reorder INDICES only: the set of
 // emitted coordinates is a property of the box and must be byte-identical however the strip is
 // wired, which is the invariant these tests exist to hold.
 
@@ -34,7 +34,7 @@ std::vector<std::pair<int, int>> walk(const RectangleLayout& r) {
 
 // A rectangle is FLAT: every light sits at z = 0. Nothing in the x/y checks below would notice a
 // stray depth, but a non-zero z inflates the layout's bounding box, so the Layer allocates a buffer
-// `depth` times larger for one plane of lights — a silent 10x memory cost, not a visible fault.
+// `depth` times larger for one plane of lights: a silent 10x memory cost, not a visible fault.
 TEST_CASE("RectangleLayout: every light is emitted flat at z = 0") {
     RectangleLayout r;
     r.width = 7; r.height = 5;
@@ -87,7 +87,7 @@ TEST_CASE("RectangleLayout: default walk runs clockwise from the top-left corner
     CHECK(p[6] == std::pair{2, 2});
     CHECK(p[7] == std::pair{1, 2});
     CHECK(p[8] == std::pair{0, 2});
-    // left edge, bottom to top — one cell, both its corners already placed
+    // left edge, bottom to top: one cell, both its corners already placed
     CHECK(p[9] == std::pair{0, 1});
 }
 
@@ -99,13 +99,13 @@ TEST_CASE("RectangleLayout: every light occupies a distinct perimeter cell") {
     const auto p = walk(r);
     const std::set<std::pair<int, int>> unique(p.begin(), p.end());
     CHECK(unique.size() == p.size());
-    // and none of them is an interior cell — this is a HOLLOW rectangle
+    // and none of them is an interior cell: this is a HOLLOW rectangle
     for (const auto& [x, y] : p)
         CHECK((x == 0 || x == r.width - 1 || y == 0 || y == r.height - 1));
 }
 
 // startCorner and clockwise change the WIRING, not the shape. Whatever corner the strip enters at
-// and whichever way it runs, the same set of cells lights up — only the index order differs. This
+// and whichever way it runs, the same set of cells lights up: only the index order differs. This
 // is what lets an effect's "top edge" be the physical top edge on any build.
 TEST_CASE("RectangleLayout: all eight wirings emit the same cells, in different order") {
     RectangleLayout ref;
@@ -128,12 +128,12 @@ TEST_CASE("RectangleLayout: all eight wirings emit the same cells, in different 
     }
 }
 
-// Light 0 lands on the corner the user named — the control's whole purpose. (x, y) origin is
+// Light 0 lands on the corner the user named: the control's whole purpose. (x, y) origin is
 // top-left, so "bottom" is y = height − 1.
 TEST_CASE("RectangleLayout: light 0 sits on the chosen start corner") {
     const int w = 6, h = 4;
     const std::pair<int, int> corners[4] = {
-        {0, 0}, {w - 1, 0}, {w - 1, h - 1}, {0, h - 1}};   // TL, TR, BR, BL — kStartCornerOptions order
+        {0, 0}, {w - 1, 0}, {w - 1, h - 1}, {0, h - 1}};   // TL, TR, BR, BL: kStartCornerOptions order
     for (uint8_t c = 0; c < 4; c++) {
         RectangleLayout r;
         r.width = w; r.height = h;
@@ -239,7 +239,7 @@ TEST_CASE("RectangleLayout: offset rotates the wiring and emits the same coordin
           std::set<std::pair<int, int>>(b.begin(), b.end()));   // the shape did not
 }
 
-// A full lap is a no-op, and anything beyond it wraps — the walk is modular, so an offset larger
+// A full lap is a no-op, and anything beyond it wraps: the walk is modular, so an offset larger
 // than the perimeter must not run off the end of it.
 TEST_CASE("RectangleLayout: an offset of a full lap or more wraps") {
     RectangleLayout plain, lap;

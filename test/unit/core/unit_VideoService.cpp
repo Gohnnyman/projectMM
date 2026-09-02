@@ -7,7 +7,7 @@
 #include <cstring>
 
 // Pins the PPM header grammar VideoService's file source accepts. The parser is the part with real
-// edge cases — comments, whitespace runs, a 16-bit maxval, a truncated header — and it decides
+// edge cases: comments, whitespace runs, a 16-bit maxval, a truncated header, and it decides
 // where pixel data starts, so getting the offset wrong shows as a picture shifted by a few bytes
 // rather than as a clean failure. Driven directly (it is a pure static) so these run without a
 // filesystem, and so a malformed file is testable without writing one.
@@ -30,7 +30,7 @@ TEST_CASE("VideoService PPM: a canonical P6 header yields the dimensions and the
     CHECK(h == 36);
 }
 
-// Netpbm allows any run of whitespace between tokens and `#` comments to end of line — both appear
+// Netpbm allows any run of whitespace between tokens and `#` comments to end of line: both appear
 // in real files (GIMP writes a comment), so both must be skipped without shifting the offset.
 TEST_CASE("VideoService PPM: comments and whitespace runs are skipped, not counted as pixels") {
     uint16_t w = 0, h = 0;
@@ -48,7 +48,7 @@ TEST_CASE("VideoService PPM: only one separator byte is consumed before the pixe
     // A leading pixel byte that happens to be whitespace-valued (0x20) must survive as data.
     const char hdr[] = {'P', '6', '\n', '2', ' ', '2', '\n', '2', '5', '5', '\n', ' ', 'X'};
     const int off = VideoService::parsePpmHeader(hdr, static_cast<int>(sizeof(hdr)), w, h);
-    CHECK(off == 11); // after the newline — NOT after the following 0x20
+    CHECK(off == 11); // after the newline: NOT after the following 0x20
     CHECK(w == 2);
     CHECK(h == 2);
 }
@@ -60,14 +60,14 @@ TEST_CASE("VideoService PPM: the ASCII variant P3 is rejected, not read as binar
     CHECK(parse("P3\n8 8\n255\n", w, h) == -1);
 }
 
-// A 16-bit maxval means two big-endian bytes per sample — a different pixel format. Reading it as
+// A 16-bit maxval means two big-endian bytes per sample: a different pixel format. Reading it as
 // 8-bit would show the high bytes as a dim, doubled image, so it is refused rather than guessed at.
 TEST_CASE("VideoService PPM: a 16-bit maxval is rejected rather than misread as 8-bit") {
     uint16_t w = 0, h = 0;
     CHECK(parse("P6\n8 8\n65535\n", w, h) == -1);
 }
 
-// Garbage, an empty buffer, and a header cut off mid-token must all fail cleanly — the file source
+// Garbage, an empty buffer, and a header cut off mid-token must all fail cleanly: the file source
 // is fed by whatever the user uploads, so this is the ordinary case, not the exceptional one.
 TEST_CASE("VideoService PPM: malformed and truncated headers fail without reading past the buffer") {
     uint16_t w = 0, h = 0;
@@ -88,7 +88,7 @@ TEST_CASE("VideoService PPM: zero and out-of-range dimensions are refused at the
     CHECK(parse("P6\n99999 36\n255\n", w, h) == -1); // past kMaxDim
 }
 
-// With no service instantiated, latestFrame() still returns a readable struct — an effect must
+// With no service instantiated, latestFrame() still returns a readable struct: an effect must
 // never have to null-check the POINTER, only the frame's contents. This is the no-source state
 // every device is in before a capture source is added, so it has to be the safe one.
 TEST_CASE("VideoService: latestFrame is readable with no service present and reports no frame") {
@@ -102,11 +102,11 @@ TEST_CASE("VideoService: latestFrame is readable with no service present and rep
 
 // Deleting the elected source while a second one is still running must hand the seat over, not go
 // permanently dark. The seat is vacated by the destructor, and a running module re-claims an empty
-// one on its next tick — so effects keep seeing a live frame for any add/remove order. Same
+// one on its next tick, so effects keep seeing a live frame for any add/remove order. Same
 // robustness AudioService's mic seat has; without the tick() re-claim only a reboot recovers.
 TEST_CASE("VideoService: a survivor takes over the seat when the elected source is destroyed") {
     auto* elected = new VideoService(); // constructed first, so it claims the seat
-    elected->source = 0;                // test pattern — needs no file
+    elected->source = 0;                // test pattern: needs no file
     elected->applyState();
     REQUIRE(VideoService::latestFrame()->rgb != nullptr);
 
@@ -137,7 +137,7 @@ TEST_CASE("VideoService: a platform that cannot capture does not offer the usb s
 }
 
 // The format dropdown is populated from whatever the device advertises, so a platform with no
-// capture at all must report an EMPTY list rather than a placeholder — VideoService only offers the
+// capture at all must report an EMPTY list rather than a placeholder: VideoService only offers the
 // control when the count is non-zero, and a phantom entry would let the user pick a dead format.
 TEST_CASE("VideoService: a platform with no capture advertises no formats") {
     mm::platform::VideoCaptureFormat formats[4];

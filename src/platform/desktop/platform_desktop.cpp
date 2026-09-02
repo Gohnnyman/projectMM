@@ -2124,7 +2124,7 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*l
 // Audio codec + capture live in platform_desktop_audio.cpp (the miniaudio TU): codec is a
 // succeed-no-op (nothing to bring up), the mic seam reads the OS capture device.
 
-// USB video capture — no USB host on desktop, so init fails and VideoService's usb
+// USB video capture: no USB host on desktop, so init fails and VideoService's usb
 // source reports "no capture device" while its other sources keep working.
 bool videoCaptureInit(VideoCaptureHandle& /*h*/, uint16_t /*width*/, uint16_t /*height*/,
                       uint8_t /*fps*/) {

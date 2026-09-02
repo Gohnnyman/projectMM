@@ -8,7 +8,7 @@ namespace mm {
 // plain-struct contract as AudioFrame, except a frame is hundreds of kilobytes, so this borrows a
 // pointer to the producer's buffer rather than carrying the pixels.
 //
-// `rgb` is valid only until VideoService's next tick — hold it for one effect tick, never across
+// `rgb` is valid only until VideoService's next tick: hold it for one effect tick, never across
 // frames. Before any frame exists it is null, which every consumer must tolerate.
 struct VideoFrame {
     const uint8_t* rgb = nullptr; // width*height*3, row-major, top-left origin, no padding

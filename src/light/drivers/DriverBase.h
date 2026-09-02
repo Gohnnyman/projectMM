@@ -59,7 +59,7 @@ public:
 
     /// Template method: every driver card leads with the per-driver output correction
     /// (localBrightness / lightPreset / whiteMode / gamma / balance / Custom offsets), added once
-    /// here in the base so no driver re-implements the placement (the No-duplication rule) — then
+    /// here in the base so no driver re-implements the placement (the No-duplication rule): then
     /// the driver's own controls via defineDriverControls(), which a driver overrides instead.
     /// A driver that emits raw RGB and ignores correction (Preview) or fixes it internally (Hue)
     /// opts out by returning false from hasCorrectionControls().
@@ -273,7 +273,7 @@ protected:
     uint32_t presetId_ = 0;          // stable id into the LightPresets library (0 → resolve to default)
     uint8_t presetSel_ = 0;          // the preset Select's chosen INDEX (mapped to an id in onControlChanged)
     uint8_t whiteMode_ = static_cast<uint8_t>(WhiteMode::Min);  // index into kWhiteModeOptions
-    /// Whether this driver calls Correction::measure() before its emit loop. False by default —
+    /// Whether this driver calls Correction::measure() before its emit loop. False by default -
     /// a network sender feeds another board's supply, so only the drivers that measure are offered
     /// the controls.
     virtual bool limitsCurrent() const { return false; }
@@ -282,7 +282,7 @@ protected:
     uint8_t mAColor_ = 8;     // measured on SK6812 RGBW: R 7.98, G 8.11, B 7.98
     uint8_t mAWhite_ = 16;    // measured: W 16.11
     uint8_t localBrightness_ = 255;  // per-driver dim, multiplied with the global brightness
-    // Calibration for THIS fixture, so per-driver rather than global — two strips on one board can
+    // Calibration for THIS fixture, so per-driver rather than global: two strips on one board can
     // need different values. Semantics in Correction.h.
     uint8_t gamma10_ = Correction::kGammaOff;
     uint8_t balRed_ = 255, balGreen_ = 255, balBlue_ = 255;
@@ -295,7 +295,7 @@ protected:
     /// Add the correction controls: localBrightness first (the setting a user reaches for most),
     /// then the preset Select (its options are the LightPresets library's names; the chosen index
     /// maps to a stable preset id), then whiteMode, then the calibration block (gamma and the three
-    /// white-balance trims) — the wiring a user must get right first, then the values they tune once
+    /// white-balance trims): the wiring a user must get right first, then the values they tune once
     /// against the fixture. A driver calls this from its defineDriverControls via the
     /// DriverBase::defineControls template method. The Select is rebuilt from the library on
     /// every defineControls (which re-runs on a control change), so adding/renaming a preset shows up.

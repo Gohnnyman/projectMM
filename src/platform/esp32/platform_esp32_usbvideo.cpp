@@ -1,4 +1,4 @@
-// USB video capture — the peripheral half of VideoService (src/core/VideoService.h). An HDMI
+// USB video capture: the peripheral half of VideoService (src/core/VideoService.h). An HDMI
 // grabber presents itself as a UVC webcam; this file owns the UVC stream and the JPEG decode.
 //
 // MJPEG, because uncompressed does not fit: 640x480 YUY2 at 60 fps is 37 MB/s against a USB 2.0
@@ -9,7 +9,7 @@
 // enumeration that loop drives, so it cannot share a thread with init.
 //
 // Decoding runs on a task of its own too. jpeg_decoder_process() blocks, and the render tick is
-// MM_NONBLOCKING — so videoCaptureFrame only reads an index, and the frame it names was decoded
+// MM_NONBLOCKING, so videoCaptureFrame only reads an index, and the frame it names was decoded
 // earlier by decoderTask. A frame arriving while one is still pending is dropped: the newest is
 // the only one worth having.
 
@@ -58,7 +58,7 @@ struct Capture {
     SemaphoreHandle_t stopped = nullptr; // decoder -> deinit
     std::atomic<bool> running{false};
 
-    // Decoded RGB888, from jpeg_alloc_decoder_mem for its cache-line and 2D-DMA alignment — a
+    // Decoded RGB888, from jpeg_alloc_decoder_mem for its cache-line and 2D-DMA alignment: a
     // plain malloc shows up as intermittent corruption, not an error.
     uint8_t* rgb[kSlots] = {};
     size_t rgbCap = 0;
@@ -144,7 +144,7 @@ void addAdvertised(const uvc_host_frame_info_t& info, uint32_t interval, size_t&
     ESP_LOGI(kTag, "offers MJPEG %ux%u @ %u fps", f.width, f.height, f.fps);
 }
 
-// Runs on the UVC driver task when a device enumerates — before any stream is opened, which is what
+// Runs on the UVC driver task when a device enumerates: before any stream is opened, which is what
 // makes the list available even when the open then fails on an unsupported resolution.
 void onDriverEvent(const uvc_host_driver_event_data_t* event, void*) {
     if (event->type != UVC_HOST_DRIVER_EVENT_DEVICE_CONNECTED) return;
@@ -200,7 +200,7 @@ bool allocSlots(Capture& cap, uint16_t w, uint16_t h) {
     return true;
 }
 
-// -1 when every slot is spoken for — unreachable while kSlots is 3, but returning a real index
+// -1 when every slot is spoken for: unreachable while kSlots is 3, but returning a real index
 // anyway would hand the decoder a buffer the render thread is reading. Corruption with no error is
 // worse than a dropped frame.
 int freeSlot(const Capture& cap) {
@@ -212,7 +212,7 @@ int freeSlot(const Capture& cap) {
 }
 
 void decode(Capture& cap, uvc_host_frame_t* frame) {
-    // Dimensions from the bitstream, not from the request — a device may negotiate something else.
+    // Dimensions from the bitstream, not from the request: a device may negotiate something else.
     jpeg_decode_picture_info_t info = {};
     if (jpeg_decoder_get_info(frame->data, frame->data_len, &info) != ESP_OK) return;
     if (static_cast<size_t>(info.width) * info.height * 3 > cap.rgbCap) {
@@ -344,7 +344,7 @@ bool openStream(Capture& cap, uint16_t width, uint16_t height, uint8_t fps) {
     return true;
 }
 
-// Sized from what the device agreed to, not from what we asked for — so no frame can arrive
+// Sized from what the device agreed to, not from what we asked for, so no frame can arrive
 // needing more room than the slots have.
 bool sizeBuffers(Capture& cap) {
     uvc_host_stream_format_t got = {};

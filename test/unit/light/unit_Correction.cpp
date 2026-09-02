@@ -341,7 +341,7 @@ TEST_CASE("Correction gamma: 2.2 pulls midtones down and pins both endpoints") {
     CHECK(c.briLut[0][0] == 0);       // black stays black
     CHECK(c.briLut[0][255] == 255);   // full stays full
     CHECK(c.briLut[0][64] == 12);     // (64/255)^2.2  * 255
-    CHECK(c.briLut[0][128] == 56);    // (128/255)^2.2 * 255 — well under the linear 128
+    CHECK(c.briLut[0][128] == 56);    // (128/255)^2.2 * 255: well under the linear 128
     CHECK(c.briLut[0][192] == 137);
     // The curve is a shape, not a dim: it must be monotonic, or a fade would visibly step back.
     for (int v = 1; v < 256; v++) CHECK(c.briLut[0][v] >= c.briLut[0][v - 1]);
@@ -377,7 +377,7 @@ TEST_CASE("Correction white balance: trimming one channel leaves the others unto
 }
 
 // On an RGBW fixture the white channel is derived as min(R,G,B) from the CORRECTED values, so a
-// balance trim reaches it too — otherwise the synthesized white would carry the very cast the trim
+// balance trim reaches it too: otherwise the synthesized white would carry the very cast the trim
 // exists to remove. This is the case that matters on an SK6812 RGBW strip, where the separate white
 // phosphor sits right beside the RGB dies and makes any mismatch obvious.
 TEST_CASE("Correction white balance: RGBW white is derived from the balanced channels") {
@@ -400,8 +400,8 @@ TEST_CASE("Correction: gamma and white balance compose into the one table") {
     c.gamma10 = 22;
     c.balBlue = 128;
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
-    CHECK(c.briLut[0][200] == 149);   // red: curve only — (200/255)^2.2 * 255
-    CHECK(c.briLut[2][200] == 74);    // blue: the same curve, then the half trim — (149 * 128) / 255
+    CHECK(c.briLut[0][200] == 149);   // red: curve only, (200/255)^2.2 * 255
+    CHECK(c.briLut[2][200] == 74);    // blue: the same curve, then the half trim, (149 * 128) / 255
 }
 
 // --- Current limiting ------------------------------------------------------------------------
@@ -447,7 +447,7 @@ TEST_CASE("Correction: an over-budget frame is scaled to fit") {
 }
 
 // Why a per-LIGHT figure cannot describe RGBW: Accurate moves the draw off R/G/B and onto W,
-// which is cheaper for the same colour — 16 mA a light against 40 — so one budget halves a Min
+// which is cheaper for the same colour (16 mA a light against 40) so one budget halves a Min
 // frame and leaves an Accurate one alone.
 TEST_CASE("Correction: the estimate follows whiteMode, not a per-light constant") {
     uint8_t frame[100 * 3];
@@ -631,4 +631,24 @@ TEST_CASE("Each moving-head formation aims the rig differently") {
     CHECK(mirror[0] != mirror[3]);
 
     mm::platform::setTestNowMs(0);   // back to the real clock for every later test
+}
+
+// A master dimmer is written at 255 every frame, and on an addressable strip every byte is a
+// die: the IRGB preset puts a Dimmer on one of them. Uncounted, 300 lights of that is amps the budget
+// never saw, and the limiter would call an over-budget frame safe.
+TEST_CASE("Correction: the current estimate counts a master dimmer") {
+    const uint8_t frame[3] = {0, 0, 0};   // black, so only the dimmer draws anything
+
+    Correction plain;
+    plain.budgetMa = 1;                   // any draw at all trips it, so limit reports the demand
+    mm::test::rebuildFromPreset(plain, 255, mm::test::PresetOrder::RGB);
+    plain.measure(frame, 3, 1);
+    CHECK(plain.limit == 256);            // nothing lit, nothing drawn
+
+    Correction dimmed;
+    dimmed.budgetMa = 1;
+    mm::test::rebuildFromPreset(dimmed, 255, mm::test::PresetOrder::RGB);
+    dimmed.offDimmer = 3;                 // the fixture carries one
+    dimmed.measure(frame, 3, 1);
+    CHECK(dimmed.limit < 256);            // held at 255, so it draws even on a black frame
 }

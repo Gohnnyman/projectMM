@@ -5,11 +5,11 @@
 namespace mm {
 
 // A hollow rectangle: lights around the PERIMETER of a `width` x `height` box, nothing inside it.
-// The strip-around-a-frame primitive — a TV backlight, a mirror surround, a sign border.
+// The strip-around-a-frame primitive: a TV backlight, a mirror surround, a sign border.
 //
 // - Each corner counts once by default, so the count is `2(width + height) - 4`: a strip bent
 //   around a frame has ONE LED in the corner, even though that corner belongs to two edges. Four
-//   separate strips instead have their own end there — `sharedCorners` off gives `2(width+height)`,
+//   separate strips instead have their own end there: `sharedCorners` off gives `2(width+height)`,
 //   with two lights on each corner coordinate.
 // - `offset` slides the wiring around the perimeter, for a strip that starts partway along an edge
 //   rather than at a corner.
@@ -54,7 +54,7 @@ public:
 
 private:
     /// Perimeter cell count. the -4 is the four corners, each belonging to two edges. A box one
-    /// light thick has no interior to go around, so it degenerates to a line — the rectangle
+    /// light thick has no interior to go around, so it degenerates to a line: the rectangle
     /// formula would walk those cells twice and light phantom positions.
     nrOfLightsType perimeter() const {
         if (width == 0 || height == 0) return 0;
@@ -74,7 +74,7 @@ private:
     ///     left    bottom to top    h-2 cells   (h  "")
     ///
     /// Unshared, each edge keeps its own corner: the right edge starts AT the top-right rather than
-    /// below it, so two lights land on each corner coordinate — four strip ends meeting there.
+    /// below it, so two lights land on each corner coordinate: four strip ends meeting there.
     Coord3D coordAt(nrOfLightsType i, nrOfLightsType n) const {
 
         const int w = width, h = height, k = static_cast<int>(walkIndex(i, n));
@@ -97,7 +97,7 @@ private:
         return at(0, h - 1 - (k - bottomEnd) - drop);                      // y falls, x = 0
     }
 
-    /// Step at which each start corner sits on the reference walk — its segment boundaries, so a
+    /// Step at which each start corner sits on the reference walk: its segment boundaries, so a
     /// corner resolves to an exact index rather than a search.
     nrOfLightsType startIndex() const {
         const int w = width, h = height;

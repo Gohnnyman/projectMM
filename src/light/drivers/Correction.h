@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cmath> // std::pow — the gamma curve
+#include <cmath> // std::pow, the gamma curve
 #include <cstdint>
 
 #include "light/ChannelRole.h"
@@ -45,11 +45,11 @@ inline constexpr uint8_t kWhiteModeCount = sizeof(kWhiteModeOptions) / sizeof(kW
 // Non-color roles (pan/tilt/…) live in the role array for the fixture/preview to read;
 // apply() only writes the color roles it derived offsets for.
 //
-// Brightness, gamma and white balance all bake into ONE per-channel table — `briLut[3][256]`,
+// Brightness, gamma and white balance all bake into ONE per-channel table: `briLut[3][256]`,
 // one row per SOURCE channel (0=R, 1=G, 2=B), filled as `gamma(v) × brightness × balance`.
 struct Correction {
     static constexpr uint8_t kAbsent = 255;   // color role not carried by this light
-    static constexpr uint8_t kGammaOff = 10; // gamma 1.0 — the identity curve, and the default
+    static constexpr uint8_t kGammaOff = 10; // gamma 1.0: the identity curve, and the default
 
     uint8_t briLut[3][256] = {}; // briLut[ch][v] = gamma(v) * brightness * balance[ch], ch: 0=R 1=G 2=B
     // Derived hot-path cache: the output-byte position of each color role. Source is
@@ -120,12 +120,12 @@ struct Correction {
     // fade. Canon: Adafruit, "LED Tricks: Gamma Correction".
     uint8_t gamma10 = kGammaOff;
     // Per-channel white balance, 255 = untouched. Die efficiencies differ, so a white-looking RGB
-    // triple rarely renders neutral — trim the stronger channels DOWN to match the weakest. Up is
+    // triple rarely renders neutral: trim the stronger channels DOWN to match the weakest. Up is
     // not available: there is no headroom above 255, so raising clips instead of balancing.
     uint8_t balRed = 255, balGreen = 255, balBlue = 255;
 
     // Per CHANNEL, not per light: a white die draws about twice a colour one, so one per-light
-    // figure under-reports white-heavy frames — the direction that browns out a supply. Measured
+    // figure under-reports white-heavy frames: the direction that browns out a supply. Measured
     // on a 5 m SK6812 RGBW strip.
     uint16_t budgetMa = 0;  // 0 disables the limiter
     uint8_t mAColor = 8;    // one R/G/B channel at 255
@@ -133,15 +133,15 @@ struct Correction {
     uint16_t limit = 256;   // measure() sets it; 256 = unity, so an unlimited frame is bit-exact
 
     // Cold path: refresh the output tables and DERIVE the color-role offsets from the
-    // light's channel-role array (`roles`, `nChannels` entries — the driver's dynamic
+    // light's channel-role array (`roles`, `nChannels` entries: the driver's dynamic
     // array, canonical). A role appearing at channel i sets that color's offset to i;
     // a color role not present stays kAbsent (apply() skips it). outChannels becomes the
-    // channel count. Non-color roles (pan/tilt/…) are ignored here — they're written by
+    // channel count. Non-color roles (pan/tilt/…) are ignored here: they're written by
     // the fixture role writers, not by apply()'s RGB path.
     // Refill the three output tables from `brightness` plus the current gamma / balance fields.
     // Split out so a brightness-only change re-scales them without touching the channel offsets,
     // and so a driver can apply brightness even when the role source (the preset library) isn't
-    // available yet. Every gamma or balance edit routes through here too — they are inputs to the
+    // available yet. Every gamma or balance edit routes through here too. they are inputs to the
     // same fill, so there is one rebuild, not three.
     void rebuildBrightness(uint8_t brightness) {
         // Gamma FIRST, then the linear scales: scaling before the curve would re-shape it at every
@@ -219,6 +219,13 @@ struct Correction {
             if (subtractWhite) { r -= w; g -= w; b -= w; }
             sum += (static_cast<uint32_t>(r) + g + b) * mAColor + static_cast<uint32_t>(w) * whiteMa;
         }
+        // A master dimmer is held at 255 every frame, so its draw is a constant rather than a term
+        // in the loop. It has to be counted: on an addressable strip every byte is a die, and the
+        // IRGB preset puts a Dimmer on one of them, and 300 lights of that is amps the budget
+        // never saw.
+        // On a fixture with its own supply this over-reports, which is the safe direction, and the
+        // drivers that feed one (NetworkSendDriver, Hue) do not price frames at all.
+        if (offDimmer != kAbsent) sum += n * 255u * mAColor;
         const uint32_t demandMa = sum / 255;
         if (demandMa > budgetMa) limit = static_cast<uint16_t>((budgetMa * 256u) / demandMa);
     }

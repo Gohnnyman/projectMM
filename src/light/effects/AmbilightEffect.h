@@ -17,12 +17,12 @@ namespace mm {
 //   DESTINATION  the layer's logical box, counted in          lightsX x lightsY
 //                LIGHT POSITIONS
 //
-// The source is far the bigger — e.g. a 640x480 picture onto a strip of 60 positions — so each
+// The source is far the bigger (e.g. a 640x480 picture onto a strip of 60 positions) so each
 // light position owns a whole rectangle of pixels and shows their average.
 //
 // The layout decides the shape: on a RectangleLayout the interior maps to no LED, so a border
 // strip shows the frame's border for free; on a GridLayout the same effect is a video wall. The
-// effect asks the mapping only ONE question — does this position light anything — and skips the
+// effect asks the mapping only ONE question (does this position light anything) and skips the
 // averaging where the answer is no. On a border layout that is most of the box.
 
 /// Effect that paints the layer with the live video frame (screen-follow ambient light).
@@ -59,7 +59,7 @@ public:
     }
 
     /// Turning smoothing on or off allocates or frees the accumulators, so it has to re-run
-    /// prepare() — without this the buffer stays empty and the setting does nothing.
+    /// prepare(): without this the buffer stays empty and the setting does nothing.
     bool affectsPrepare(const char* name) const override { return std::strcmp(name, "smoothing") == 0; }
 
     /// Cold path. applyState() prepares a parent before its children, so the Layer's mapping is
@@ -74,13 +74,13 @@ public:
         buildLitList(positions);
     }
 
-    /// The positions that reach an LED, packed y<<16|x, so tick() walks only those — a few hundred
+    /// The positions that reach an LED, packed y<<16|x, so tick() walks only those: a few hundred
     /// of tens of thousands on a border layout.
     void buildLitList(size_t positions) {
         litCount_ = 0;
         const MappingLUT& lut = layer()->lut();
         // A table-free (identity) mapping lights every position, so the list would be 0,1,2,3...
-        // — 4 bytes a position to say "all of them", where the plain loop needs none.
+        //: 4 bytes a position to say "all of them", where the plain loop needs none.
         allLit_ = !lut.hasLUT();
         if (allLit_ || positions == 0) {
             lit_.resize(0);
@@ -98,7 +98,7 @@ public:
         const draw::Canvas out = canvas();
 
         // No source: paint black rather than return, or the PREVIOUS effect's picture stays frozen
-        // on the strip. A merely dropped frame never lands here — VideoService keeps its buffer.
+        // on the strip. A merely dropped frame never lands here: VideoService keeps its buffer.
         if (!frame->rgb || frame->width == 0 || frame->height == 0) {
             draw::fill(out, {0, 0, 0});
             primed_ = false; // so the next frame lands whole instead of creeping up out of black
@@ -127,13 +127,13 @@ public:
                     paint(out, *frame, region, x, y, lightsX, lightsY, canSmooth, level);
         } else if (lit_) {
             // The list. Unlit positions are never written, so they keep the black
-            // Layer::prepare() left on the rebuild this effect's prepare() rode in on — BlendMap
+            // Layer::prepare() left on the rebuild this effect's prepare() rode in on, BlendMap
             // never reads them, but PreviewDriver shows the raw buffer and must not see a ghost.
             for (size_t i = 0; i < litCount_; i++)
                 paint(out, *frame, region, static_cast<lengthType>(lit_[i] & 0xFFFF),
                       static_cast<lengthType>(lit_[i] >> 16), lightsX, lightsY, canSmooth, level);
         } else {
-            // The list could not be allocated. Same output, asking the mapping per position —
+            // The list could not be allocated. Same output, asking the mapping per position -
             // which is the cost the list exists to avoid.
             const MappingLUT& lut = layer()->lut();
             draw::fill(out, {0, 0, 0});
@@ -159,7 +159,7 @@ private:
         int width = 0, height = 0;
         int deepX = 0, deepY = 0; // edgeDepth in pixels, so the divide is not per position
 
-        /// Which source pixels one light position covers — its share of the picture, shifted back
+        /// Which source pixels one light position covers: its share of the picture, shifted back
         /// into frame coordinates. Every input lives here, so the loop only asks.
         Span cols(int x, int lightsX) const { return spanFor(x, lightsX, width, deepX).shifted(left); }
         Span rows(int y, int lightsY) const { return spanFor(y, lightsY, height, deepY).shifted(top); }
@@ -183,7 +183,7 @@ private:
         r.width = frame.width - bars.left - bars.right;
         r.height = frame.height - bars.top - bars.bottom;
         // Rounded UP, so any non-zero percentage is at least one pixel. Flooring would let a small
-        // setting on a small frame land on 0, which is the off value — the control would go quiet.
+        // setting on a small frame land on 0, which is the off value: the control would go quiet.
         r.deepX = (r.width * edgeDepth + 99) / 100;
         r.deepY = (r.height * edgeDepth + 99) / 100;
         return r;
@@ -214,7 +214,7 @@ private:
     static bool scansFromEnd(Edge e) MM_NONBLOCKING { return e == Edge::Bottom || e == Edge::Right; }
 
     /// Is this line dark all the way across? Sampled at a few evenly spaced points rather than
-    /// every pixel — a bar is uniform, so a handful of probes settles it for a fraction of the cost.
+    /// every pixel: a bar is uniform, so a handful of probes settles it for a fraction of the cost.
     bool lineIsDark(const VideoFrame& frame, int line, Edge edge) const MM_NONBLOCKING {
         const bool horizontal = scansRows(edge);
         const int along = horizontal ? frame.width : frame.height;
@@ -240,7 +240,7 @@ private:
         return limit;
     }
 
-    /// Scan this frame and return the bars IN EFFECT — which is not necessarily what was just
+    /// Scan this frame and return the bars IN EFFECT, which is not necessarily what was just
     /// seen. A reading is adopted only once kStableFrames of them agree: bars come and go at scene
     /// changes, and a mapping that follows every dark frame twitches worse than one that ignores
     /// them. Hence the state; the return value is what the caller should actually map across.
@@ -265,7 +265,7 @@ private:
 
     /// Which source pixels light position `lightId` covers along one axis.
     /// - `pixels` shared evenly among `lightsSize` positions, cut at the edges so ranges meet exactly
-    /// - a position ON an edge takes exactly `deep` instead of its share — deeper OR shallower, so
+    /// - a position ON an edge takes exactly `deep` instead of its share: deeper OR shallower, so
     ///   the control sets the depth rather than raising a floor under it
     /// - `deep` of 0 leaves the plain division; interior positions are on no edge either way
     /// - an empty range widens to one pixel, so a strip finer than the picture still lights up
@@ -285,7 +285,7 @@ private:
         return {begin, end};
     }
 
-    /// Mean of one light position's pixels — the box filter Hyperion uses. uint32 accumulators
+    /// Mean of one light position's pixels: the box filter Hyperion uses. uint32 accumulators
     /// because 640x480 onto 32x18 is ~520 pixels each, and 520 x 255 overflows 16 bits several times.
     static RGB meanOf(const VideoFrame& frame, Span cols, Span rows) {
         uint32_t sr = 0, sg = 0, sb = 0;
@@ -341,7 +341,7 @@ private:
     }
 
     /// Walk each channel a fraction of the way toward `color`. The state is 8.8 so the fraction of
-    /// a step survives between frames — in whole bytes a slow setting rounds every step to zero.
+    /// a step survives between frames: in whole bytes a slow setting rounds every step to zero.
     RGB smooth(size_t lightId, RGB color) MM_NONBLOCKING {
         const uint8_t target[3] = {color.r, color.g, color.b};
         const int32_t step = 256 - smoothing;                      // gap closed per frame, of 256

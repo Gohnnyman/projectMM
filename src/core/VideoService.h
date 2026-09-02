@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/ActiveInstance.h" // the one-active-source seat (RAII vacate on destruct)
-#include "core/color.h"          // RGB — the pattern's band colours
+#include "core/color.h"          // RGB: the pattern's band colours
 #include "core/MoonModule.h"
 #include "core/ScratchBuffer.h"
 #include "core/VideoFrame.h"
@@ -13,7 +13,7 @@
 
 namespace mm {
 
-/// The device's video input — one decoded RGB frame per tick, published through the static
+/// The device's video input: one decoded RGB frame per tick, published through the static
 /// `latestFrame()`. Decoded once here however many effects read it, and effects hold no pointer
 /// to this module.
 ///
@@ -21,7 +21,7 @@ namespace mm {
 /// border-mapped effect's orientation self-evident, so a mis-set `startCorner` shows up as the
 /// wrong physical edge lighting rather than as a subtly wrong picture. `file` reads a binary PPM.
 ///
-/// PPM rather than JPEG because there is no software JPEG decoder here — the real capture path uses
+/// PPM rather than JPEG because there is no software JPEG decoder here. the real capture path uses
 /// the P4's JPEG hardware behind the platform layer, and adding one for the desktop build would buy
 /// a dependency for a convenience. USB capture lands as a third source filling the same buffer.
 ///
@@ -39,7 +39,7 @@ public:
 
     static constexpr const char* kSourceOptions[] = {"test pattern", "file", "usb"};
     // A target with no High-Speed USB host or no JPEG decoder cannot capture, so it is not offered
-    // the option — the two software sources still work everywhere.
+    // the option: the two software sources still work everywhere.
     static constexpr uint8_t kSourceCount = platform::hasUsbVideo ? 3 : 2;
 
     // Synthesised-pattern extent. Small on purpose: a border effect averages the frame down to a
@@ -68,7 +68,7 @@ public:
         controls_.addButton("reload");
         controls_.setHidden(controls_.count() - 1, source != 1);
         // The device decides what is on offer, so there is nothing to type. Until one has
-        // enumerated the control still renders — read-only, holding a placeholder — rather than
+        // enumerated the control still renders (read-only, holding a placeholder) rather than
         // appearing out of nowhere once a cable is plugged in.
         static constexpr const char* kNoDevice[] = {"no device"};
         const bool known = formatCount_ > 0;
@@ -84,7 +84,7 @@ public:
     }
 
     /// A source switch changes what the buffer must hold, so it re-runs the whole build. The reload
-    /// button re-reads the same file in place — cheap, and it must NOT tear down the pipeline.
+    /// button re-reads the same file in place: cheap, and it must NOT tear down the pipeline.
     bool affectsPrepare(const char* name) const override {
         return std::strcmp(name, "source") == 0 || std::strcmp(name, "file") == 0 ||
                std::strcmp(name, "offered") == 0;
@@ -99,12 +99,12 @@ public:
     /// Cold path: size the frame buffer for the selected source and fill it once, so a frame exists
     /// before the first tick rather than one tick later.
     void prepare() override {
-        seat_.claim();                          // re-take after a disable/enable cycle — release() vacated it
+        seat_.claim();                          // re-take after a disable/enable cycle: release() vacated it
         platform::videoCaptureDeinit(capture_); // a source switch releases the device
         if (source >= kSourceCount) source = 0; // a config restored from a capture-capable board
         if (source == 2) {
             // The first open doubles as a probe: a device only lists its formats once it
-            // enumerates, which happens inside init — so open, learn what is really on offer, and
+            // enumerates, which happens inside init, so open, learn what is really on offer, and
             // open again when a restored pick differs. Only the last attempt reports, or a failed
             // probe would leave an error over the retry that fixed it.
             bool open = platform::videoCaptureInit(capture_, usbWidth, usbHeight, usbFps);
@@ -155,7 +155,7 @@ private:
     // disable/enable, and in tick() so a survivor inherits an empty seat.
     ActiveInstance<VideoService> seat_{*this};
 
-    /// Resolve the selected row into the request fields. True when that changed something — the
+    /// Resolve the selected row into the request fields. True when that changed something: the
     /// index survives a reboot but the list behind it does not, so this is how a restored pick
     /// reaches the device.
     bool applyFormat() {
@@ -169,7 +169,7 @@ private:
     }
 
     /// Cold path: cache what the device advertises as dropdown labels. Kept out of
-    /// defineControls(), which must stay pure — it only reads what this leaves behind.
+    /// defineControls(), which must stay pure. it only reads what this leaves behind.
     void readFormats() {
         const uint8_t was = formatCount_;
         formatCount_ = static_cast<uint8_t>(platform::videoCaptureFormats(formats_, kMaxFormats));
@@ -182,7 +182,7 @@ private:
         if (formatCount_ != was) rebuildControls(); // the dropdown appeared, or its length changed
     }
 
-    /// Publish the newest decoded frame. Unlike the other sources this does not fill buf_ — the
+    /// Publish the newest decoded frame. Unlike the other sources this does not fill buf_: the
     /// JPEG decoder owns its output buffer (it writes it by DMA, with its own alignment), so the
     /// frame borrows that instead.
     void readCapture() MM_NONBLOCKING {
@@ -196,7 +196,7 @@ private:
             publish();
             return;
         }
-        // A gap of one tick is normal — the decoder runs at its own rate. A long one means the
+        // A gap of one tick is normal: the decoder runs at its own rate. A long one means the
         // source stopped (a console asleep, a cable out), and holding the last picture would leave
         // the room lit by a frozen frame. Dropping it makes every effect fall back to black.
         if (staleMs && frame_.rgb && platform::millis() - lastFrameMs_ > staleMs) frame_ = VideoFrame{};
@@ -204,7 +204,7 @@ private:
 
     platform::VideoCaptureHandle capture_;
 
-    // Derived from the selected row, never typed — what actually gets requested of the device, and
+    // Derived from the selected row, never typed: what actually gets requested of the device, and
     // the opening bid before one has listed its formats. 16:9 on purpose: a 4:3 capture makes a
     // 16:9 source letterbox into it, and the border zones then average bars instead of picture.
     uint16_t usbWidth = 848;
@@ -246,11 +246,11 @@ private:
         return true;
     }
 
-    /// Publish the buffer as a NEW frame — the sequence bump is what tells a consumer the pixels
+    /// Publish the buffer as a NEW frame: the sequence bump is what tells a consumer the pixels
     /// changed, so every producer path ends here (see VideoFrame::seq).
     void publish() { frame_.seq = ++seq_; }
 
-    // Four coloured border bands and a sweeping white block. Integer-only and allocation-free — it
+    // Four coloured border bands and a sweeping white block. Integer-only and allocation-free: it
     // runs on the render tick.
     void renderPattern() {
         uint8_t* p = buf_.data();
@@ -321,7 +321,7 @@ public:
         const long maxval = cur.readInt();
         if (ww <= 0 || ww > static_cast<long>(kMaxDim)) return -1;
         if (hh <= 0 || hh > static_cast<long>(kMaxDim)) return -1;
-        if (maxval != 255) return -1;  // 16-bit samples are two big-endian bytes — another format
+        if (maxval != 255) return -1;  // 16-bit samples are two big-endian bytes: another format
         if (cur.pos >= len) return -1; // no separator byte, so no pixel data can follow
 
         w = static_cast<uint16_t>(ww);

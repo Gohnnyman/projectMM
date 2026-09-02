@@ -13,8 +13,8 @@
 
 // Pins the frame → light mapping end to end, through the real static seam: a live VideoService
 // publishes a frame, the effect renders it, the buffer is read back. The checks are about
-// orientation and coverage, because a picture averaged over the wrong rectangle — or flipped
-// top-for-bottom — still looks like *a* picture.
+// orientation and coverage, because a picture averaged over the wrong rectangle, or flipped
+// top-for-bottom: still looks like *a* picture.
 
 using mm::AmbilightEffect;
 using mm::VideoService;
@@ -54,7 +54,7 @@ struct Rig {
     // applyState() re-runs prepare(), which un-primes the smoother and makes every frame jump.
     // Anything testing the SMOOTHING has to tick without it.
     void tickOnly() { layer.tick(); }
-    /// A tick with a NEW frame behind it — the effect skips a repeated one, so anything measuring
+    /// A tick with a NEW frame behind it: the effect skips a repeated one, so anything measuring
     /// per-frame behaviour has to advance the source too, as the scheduler does.
     void tickOnly(VideoService& source) {
         source.tick();
@@ -68,7 +68,7 @@ struct Rig {
 } // namespace
 
 // Orientation must survive to the buffer: red top band → red first row. Swapped, the whole picture
-// is upside down — on a TV border, the difference between matching the screen and mirroring it.
+// is upside down: on a TV border, the difference between matching the screen and mirroring it.
 TEST_CASE("AmbilightEffect: the frame's orientation reaches the buffer, top band to top row") {
     PatternSource src;
     Rig rig(8, 8);
@@ -109,7 +109,7 @@ TEST_CASE("AmbilightEffect: every light is written, none left dark by an empty z
             const uint8_t* p = rig.px(x, y);
             if (p[0] || p[1] || p[2]) lit++;
         }
-    // The pattern's centre is deliberately black, so not every light is lit — but the four bands
+    // The pattern's centre is deliberately black, so not every light is lit, but the four bands
     // are, and they are the majority of a 16x9 border-shaped frame.
     CHECK(lit > 0);
     // The corners sit inside the coloured bands and must never be dark.
@@ -128,7 +128,7 @@ TEST_CASE("AmbilightEffect: a layer finer than the frame still writes every ligh
     rig.render();
 
     // Top row of the pattern is the red band; at 4 rows tall every row samples some band, so the
-    // whole first row must be lit across its full width — no gaps from zero-width zones.
+    // whole first row must be lit across its full width: no gaps from zero-width zones.
     for (int x = 0; x < 128; x++) {
         const uint8_t* p = rig.px(x, 0);
         CHECK((p[0] || p[1] || p[2]));
@@ -156,7 +156,7 @@ TEST_CASE("AmbilightEffect: brightness scales the sampled colour down") {
     CHECK(dimRed == (fullRed * 64) / 255);
 }
 
-// Saturation stretches each channel away from the zone's luma — above 100 a coloured zone gets
+// Saturation stretches each channel away from the zone's luma: above 100 a coloured zone gets
 // more saturated, which is what pulls averaged means back off grey.
 TEST_CASE("AmbilightEffect: saturation above 100 pushes a coloured zone further from grey") {
     PatternSource src;
@@ -215,7 +215,7 @@ TEST_CASE("AmbilightEffect: smoothing off follows the frame exactly") {
     CHECK(std::memcmp(plain.px(4, 0), off.px(4, 0), 3) == 0);
 }
 
-// The first frame after a gap must land immediately — creeping up from black would show as a fade-in
+// The first frame after a gap must land immediately: creeping up from black would show as a fade-in
 // every time the source reconnects.
 TEST_CASE("AmbilightEffect: the first frame lands whole, not smoothed up out of black") {
     PatternSource src;
@@ -268,7 +268,7 @@ TEST_CASE("AmbilightEffect: fadeInMs off means the first picture lands at full l
     CHECK(std::memcmp(instant.px(4, 0), faded.px(4, 0), 3) == 0);
 }
 
-// With a ramp set, the first frame must be dark and later frames brighter — the whole point being
+// With a ramp set, the first frame must be dark and later frames brighter: the whole point being
 // that a room does not jump to full brightness the instant a console wakes up.
 TEST_CASE("AmbilightEffect: fadeInMs ramps the first frames up from black") {
     PatternSource src;
@@ -290,7 +290,7 @@ TEST_CASE("AmbilightEffect: fadeInMs ramps the first frames up from black") {
 }
 
 // --- edgeDepth ---------------------------------------------------------------------------------
-// A border light's own share is 1/height of the frame — a sliver at the very edge. edgeDepth lets
+// A border light's own share is 1/height of the frame: a sliver at the very edge. edgeDepth lets
 // the outermost positions reach further in without changing how many of them there are.
 
 // Off is the default, so it must be the plain division exactly.
@@ -360,7 +360,7 @@ struct Letterbox {
     char path[64] = {};
     Letterbox(int w, int h, int bar) {
         // The desktop filesystem is rooted at fsRoot_ ("build"), so the service resolves a bare
-        // name under there — write it to the same place rather than to the real /tmp.
+        // name under there: write it to the same place rather than to the real /tmp.
         std::snprintf(path, sizeof(path), "mm_letterbox_%dx%d_%d.ppm", w, h, bar);
         char real[128];
         std::snprintf(real, sizeof(real), "build/%s", path);
@@ -412,7 +412,7 @@ TEST_CASE("AmbilightEffect: the top light escapes the letterbox once bars are de
     CHECK(rig.px(4, 0)[1] > 100);                // now reading the green picture
 }
 
-// The pattern's centre is black and its edges are coloured — the OPPOSITE of a letterbox. Nothing
+// The pattern's centre is black and its edges are coloured: the OPPOSITE of a letterbox. Nothing
 // must be detected in it, or a picture that fills the frame would get cropped.
 TEST_CASE("AmbilightEffect: a frame that fills the picture reports no bars") {
     PatternSource src;
@@ -428,7 +428,7 @@ TEST_CASE("AmbilightEffect: a frame that fills the picture reports no bars") {
 
 // --- Skipping positions that reach no LED -------------------------------------------------------
 // On a RectangleLayout the interior of the box maps to nothing, so averaging it is work whose
-// result the mapping discards — most of the box, on any real border strip. The effect asks the LUT
+// result the mapping discards: most of the box, on any real border strip. The effect asks the LUT
 // and skips those positions. GridLayout is identity, so nothing is skipped there and the video-wall
 // case is unaffected.
 
@@ -470,7 +470,7 @@ TEST_CASE("AmbilightEffect: a border layout paints its perimeter and skips the i
     const uint8_t* top = rig.px(4, 0);
     CHECK((top[0] | top[1] | top[2]) != 0);
 
-    // The interior reaches none. Never averaged, never written — it holds the black that
+    // The interior reaches none. Never averaged, never written. it holds the black that
     // Layer::prepare() left in the buffer on the rebuild the effect's own prepare() rode in on.
     for (int y = 1; y < 7; y++)
         for (int x = 1; x < 7; x++) {
@@ -489,7 +489,7 @@ TEST_CASE("AmbilightEffect: a border layout paints its perimeter and skips the i
 
 
 // --- Skipping a repeated frame -----------------------------------------------------------------
-// The render loop outruns the source — 60 Hz against 30 fps video, or a still picture — and
+// The render loop outruns the source (60 Hz against 30 fps video, or a still picture) and
 // re-averaging a frame already on the strip buys nothing. What the effect advances then runs at the
 // source's rate, which is the rate it should run at.
 

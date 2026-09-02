@@ -133,7 +133,7 @@ public:
              + static_cast<size_t>(maxDest) * sizeof(nrOfLightsType);
     }
 
-    /// Hot-path: does this logical index reach any physical light at all? O(1) — the CSR run is
+    /// Hot-path: does this logical index reach any physical light at all? O(1), the CSR run is
     /// empty exactly when its two offsets match. Lets a producer skip work whose result would be
     /// discarded: on a border layout most of the logical box maps to nothing.
     bool hasDestination(nrOfLightsType logicalIdx) const MM_NONBLOCKING {

@@ -38,7 +38,7 @@ uint32_t millis() MM_NONBLOCKING;
 ///
 /// Exists because C++ `thread_local` is NOT usable on the ESP32: the compiler reaches TLS through
 /// the THREADPTR special register, and a FreeRTOS task that was not created with TLS initialized
-/// has THREADPTR = 0: so the access dereferences a small offset from null (0xfffffff0 was the
+/// has THREADPTR = 0, so the access dereferences a small offset from null (0xfffffff0 was the
 /// measured faulting address) and dies inside the exception handler as a Double exception. This is
 /// the portable seam for "which thread am I", used where per-thread state is genuinely needed.
 uintptr_t currentThreadId() MM_NONBLOCKING;
@@ -108,7 +108,7 @@ void  writeExec(void* dst, const void* src, size_t len);
 void yield();
 
 // Which CPU core the caller runs on (0 or 1 on the S3; always 0 on single-core parts and desktop). The
-// render loop is core 0; the multicore render/encode split runs a driver's tick on core 1: so a driver
+// render loop is core 0; the multicore render/encode split runs a driver's tick on core 1, so a driver
 // seeing core 1 here KNOWS the split is engaged and core 0 is the idle helper (xPortGetCoreID's role).
 uint8_t currentCore();
 // Upper bound on cores that run driver code concurrently: sizes per-CPU scratch (the textbook
@@ -267,7 +267,7 @@ const char* chipModel();
 const char* sdkVersion();
 
 // CPU frequency + core count as one short static string ("240 MHz, 2 cores"), read from the RUNNING
-// hardware, not a config macro: so a stale sdkconfig or a PM downclock is visible in the UI (finding
+// hardware, not a config macro, so a stale sdkconfig or a PM downclock is visible in the UI (finding
 // the chip silently at 160 MHz is exactly what this control exists to catch). Desktop reports cores
 // only (host clock speed has no portable query). Static-buffer contract as macString above.
 const char* cpuInfo();
@@ -289,7 +289,7 @@ const char* psramType();
 // "no version reply" rather than "not detected": on the bench the C6 associates and
 // serves traffic while this particular RPC times out, so declaring the slave absent
 // would be a false statement about working hardware. The field says what is known -
-// the query did not answer: and leaves the conclusion to whoever reads it.
+// the query did not answer, and leaves the conclusion to whoever reads it.
 const char* coprocessorWifi();
 
 // This host's LAN IPv4 address as a dotted string, or "" if unavailable.
@@ -759,7 +759,7 @@ bool http_fetch_to_ota(const char* url,
 // set_boot_partition, then RETURNS true (it does NOT reboot: the caller sends its HTTP 200 first,
 // then reboots into the flashed image, the same order /api/reboot uses). SYNCHRONOUS (unlike
 // http_fetch_to_ota, which runs on its own task): the caller is the HTTP request handler, which runs
-// on the tick20ms tick INSIDE Scheduler::tick: so this blocks rendering for the flash duration. That
+// on the tick20ms tick INSIDE Scheduler::tick, so this blocks rendering for the flash duration. That
 // is the accepted trade-off (a firmware upload is user-initiated and reboots the device on success),
 // bounded by the same upload idle/hard limits; the caller needs the result to reply.
 // `statusBuf` / `bytesReadOut` are updated in place (bytesTotal is the caller-supplied
@@ -903,7 +903,7 @@ public:
 
     // Non-blocking outbound connect to host:port, for a client that must NOT stall the render loop
     // (MQTT runs on tick1s inside Scheduler::tick). `connectStart` resolves `host` (a hostname via
-    // getaddrinfo: one bounded DNS lookup: or a dotted-quad IP) and kicks off a non-blocking
+    // getaddrinfo: one bounded DNS lookup, or a dotted-quad IP) and kicks off a non-blocking
     // connect, returning immediately; `connectPoll` checks the in-flight connect WITHOUT blocking and
     // returns Pending / Connected / Failed. The caller polls across ticks and enforces its own overall
     // timeout, then reads/writes via the non-blocking read()/writeSome(). Caller gates on
@@ -1127,7 +1127,7 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
 // a hard-coded 4 µs busy-wait before each one. An LCD panel does not care; WS2812 is one
 // unbroken self-clocked bit stream, so a mid-frame reset garbles everything after it.
 // That makes a frame split across several esp_lcd transactions impossible to send gaplessly,
-// at any chunk size: which in turn forces the whole frame into ONE transaction, and THAT is
+// at any chunk size, which in turn forces the whole frame into ONE transaction, and THAT is
 // what caps the driver: the DMA must stream the entire frame from one contiguous, DMA-
 // reachable block (hence ~96 lights/strand through the '595 expander on an S3, and no PSRAM
 // at all on the classic ESP32).
@@ -1187,7 +1187,7 @@ struct MoonI80Ws2812Handle { void* impl = nullptr; };
 //
 // `needsPrefill` is the platform's buffer-lifecycle fact the encode's biggest saving hangs on: a ring
 // buffer's CONSTANT words (the shift waveform frame prefillShiftRows lays) survive recycling: a data-only
-// refill of a recycled buffer is byte-identical to a full one: so the encoder may skip the prefill except
+// refill of a recycled buffer is byte-identical to a full one, so the encoder may skip the prefill except
 // when the platform says the buffer's constants are gone: its FIRST use since the pool was built, or after
 // any platform-side memset (the short-last-slice tail zero, the past-frame zero-fill). Only the platform
 // knows those events, so it computes the flag; the domain decides what "prefill" means (and may still
@@ -1480,7 +1480,7 @@ void audioMicDeinit(AudioMicHandle& h);
 void audioFft(const float* windowed, size_t n, float* outMag);
 
 // ---------------------------------------------------------------------------
-// USB video capture (UVC) — an HDMI grabber presenting itself as a webcam. MJPEG
+// USB video capture (UVC): an HDMI grabber presenting itself as a webcam. MJPEG
 // off the wire, decoded by the target's JPEG hardware, so the RGB888 read back here
 // never passed through a software decoder. ESP32-P4 only; every other target links a
 // stub whose init fails, which VideoService reports as a status, not an error.
@@ -1489,7 +1489,7 @@ void audioFft(const float* windowed, size_t n, float* outMag);
 struct VideoCaptureHandle { void* impl = nullptr; };
 
 // One row of what the attached device advertises, so the UI offers real choices rather than asking
-// the user to guess. MJPEG only — nothing else is decodable here, so there is no format field.
+// the user to guess. MJPEG only: nothing else is decodable here, so there is no format field.
 struct VideoCaptureFormat {
     uint16_t width = 0;
     uint16_t height = 0;
@@ -1497,7 +1497,7 @@ struct VideoCaptureFormat {
 };
 
 // Fills `out` with up to `max` of those rows and returns how many were written. Learned when a
-// device enumerates, so it survives a failed videoCaptureInit — which is exactly when it is worth
+// device enumerates, so it survives a failed videoCaptureInit, which is exactly when it is worth
 // reading. 0 means no device has been seen yet.
 size_t videoCaptureFormats(VideoCaptureFormat* out, size_t max);
 
@@ -1509,14 +1509,14 @@ bool videoCaptureInit(VideoCaptureHandle& h, uint16_t width, uint16_t height, ui
 
 // Newest decoded frame as RGB888, or nullptr when none arrived since the last call.
 // The buffer belongs to the platform (the JPEG decoder writes it by DMA and needs its
-// own alignment) and stays valid until the next call — the caller borrows it for one
+// own alignment) and stays valid until the next call: the caller borrows it for one
 // tick, exactly as VideoFrame does.
 const uint8_t* videoCaptureFrame(VideoCaptureHandle& h, uint16_t& width, uint16_t& height) MM_NONBLOCKING;
 
 void videoCaptureDeinit(VideoCaptureHandle& h);
 
 // ---------------------------------------------------------------------------
-// I2C bus diagnostics — domain-neutral, not audio-specific. Probes a bus and
+// I2C bus diagnostics: domain-neutral, not audio-specific. Probes a bus and
 
 // I2C bus diagnostics: domain-neutral, not audio-specific. Probes a bus and
 // reports which 7-bit addresses ACK, the standard `i2cdetect` operation. Used
