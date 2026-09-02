@@ -4,6 +4,7 @@
 #include "core/VideoService.h"
 #include "light/effects/AmbilightEffect.h"
 #include "light/layouts/GridLayout.h"
+#include "light/layouts/RectangleLayout.h"
 #include "light/layouts/Layouts.h"
 
 #include <cstdint>
@@ -25,8 +26,8 @@ namespace {
 struct PatternSource {
     VideoService svc;
     PatternSource() {
-        svc.source = 0;      // test pattern
-        svc.applyState();    // builds the buffer and renders the first frame
+        svc.source = 0;   // test pattern
+        svc.applyState(); // builds the buffer and renders the first frame
     }
 };
 
@@ -38,13 +39,18 @@ struct Rig {
     AmbilightEffect fx;
 
     Rig(uint16_t w, uint16_t h) {
-        grid.width = w; grid.height = h; grid.depth = 1;
+        grid.width = w;
+        grid.height = h;
+        grid.depth = 1;
         layouts.addChild(&grid);
         layer.setLayouts(&layouts);
         layer.setChannelsPerLight(3);
         layer.addChild(&fx);
     }
-    void render() { layer.applyState(); layer.tick(); }
+    void render() {
+        layer.applyState();
+        layer.tick();
+    }
     // applyState() re-runs prepare(), which un-primes the smoother and makes every frame jump.
     // Anything testing the SMOOTHING has to tick without it.
     void tickOnly() { layer.tick(); }
@@ -53,20 +59,20 @@ struct Rig {
     }
 };
 
-}  // namespace
+} // namespace
 
 // Orientation must survive to the buffer: red top band → red first row. Swapped, the whole picture
 // is upside down — on a TV border, the difference between matching the screen and mirroring it.
 TEST_CASE("AmbilightEffect: the frame's orientation reaches the buffer, top band to top row") {
     PatternSource src;
     Rig rig(8, 8);
-    rig.fx.saturation = 100;   // identity, so the raw zone means are what we read
+    rig.fx.saturation = 100; // identity, so the raw zone means are what we read
     rig.render();
 
     const uint8_t* top = rig.px(4, 0);
     const uint8_t* bottom = rig.px(4, 7);
-    CHECK(top[0] > top[2]);        // top row reads red-dominant
-    CHECK(bottom[2] > bottom[0]);  // bottom row reads blue-dominant
+    CHECK(top[0] > top[2]);       // top row reads red-dominant
+    CHECK(bottom[2] > bottom[0]); // bottom row reads blue-dominant
 }
 
 // The horizontal counterpart of the test above; together they pin all four edges. Red separates
@@ -77,10 +83,10 @@ TEST_CASE("AmbilightEffect: the frame's left and right bands reach the matching 
     rig.fx.saturation = 100;
     rig.render();
 
-    const uint8_t* left = rig.px(0, 4);    // mid-height, so neither the top nor bottom band
+    const uint8_t* left = rig.px(0, 4); // mid-height, so neither the top nor bottom band
     const uint8_t* right = rig.px(7, 4);
-    CHECK(left[0] > right[0]);             // yellow carries red; green does not
-    CHECK(right[1] > 0);                   // and the right column is lit at all
+    CHECK(left[0] > right[0]); // yellow carries red; green does not
+    CHECK(right[1] > 0);       // and the right column is lit at all
 }
 
 // Every light must be written. An empty zone leaves its light holding the previous frame, so a
@@ -161,7 +167,7 @@ TEST_CASE("AmbilightEffect: saturation above 100 pushes a coloured zone further 
     const int boostedSpread = static_cast<int>(b[0]) - static_cast<int>(b[2]);
 
     CHECK(flatSpread > 0);
-    CHECK(boostedSpread >= flatSpread);   // red pulled further from blue, or already clipped at 255
+    CHECK(boostedSpread >= flatSpread); // red pulled further from blue, or already clipped at 255
 }
 
 // No source paints black rather than returning early, which would leave the PREVIOUS effect's
@@ -176,7 +182,9 @@ TEST_CASE("AmbilightEffect: no video source paints black, never the previous eff
     uint8_t* buf = rig.layer.buffer().data();
     REQUIRE(buf != nullptr);
     for (size_t i = 0; i < rig.layer.buffer().count(); i++) {
-        buf[i * 3 + 0] = 11; buf[i * 3 + 1] = 22; buf[i * 3 + 2] = 33;
+        buf[i * 3 + 0] = 11;
+        buf[i * 3 + 1] = 22;
+        buf[i * 3 + 2] = 33;
     }
     rig.layer.tick();
     CHECK(rig.px(2, 2)[0] == 0);
@@ -208,7 +216,7 @@ TEST_CASE("AmbilightEffect: the first frame lands whole, not smoothed up out of 
     Rig fast(8, 8), slow(8, 8);
     fast.fx.saturation = 100;
     slow.fx.saturation = 100;
-    slow.fx.smoothing = 240;   // very slow, so a smoothed first frame would be nearly black
+    slow.fx.smoothing = 240; // very slow, so a smoothed first frame would be nearly black
     fast.render();
     slow.render();
     CHECK(std::memcmp(fast.px(4, 0), slow.px(4, 0), 3) == 0);
@@ -222,12 +230,12 @@ TEST_CASE("AmbilightEffect: a heavily smoothed light converges exactly, rising a
     PatternSource src;
     Rig rig(8, 8);
     rig.fx.saturation = 100;
-    rig.fx.smoothing = 250;   // a step of ~6/256 of the remaining distance
-    rig.fx.snapAbove = 0;     // never jump, so only the smoothing can get it there
-    rig.render();             // primes on the first frame, so this one lands whole
+    rig.fx.smoothing = 250; // a step of ~6/256 of the remaining distance
+    rig.fx.snapAbove = 0;   // never jump, so only the smoothing can get it there
+    rig.render();           // primes on the first frame, so this one lands whole
 
     const uint8_t bright = rig.px(4, 0)[0];
-    REQUIRE(bright > 8);      // the band has somewhere to fall from
+    REQUIRE(bright > 8); // the band has somewhere to fall from
 
     // Falling: drive the target down and let it smooth in.
     rig.fx.brightness = 8;
@@ -260,14 +268,14 @@ TEST_CASE("AmbilightEffect: fadeInMs ramps the first frames up from black") {
     PatternSource src;
     Rig rig(8, 8);
     rig.fx.saturation = 100;
-    rig.fx.fadeInMs = 4000;   // long, so the first ticks land near the bottom of the ramp
+    rig.fx.fadeInMs = 4000; // long, so the first ticks land near the bottom of the ramp
     rig.render();
 
     const uint8_t first = rig.px(4, 0)[0];
     for (int i = 0; i < 50; i++) rig.tickOnly();
     const uint8_t later = rig.px(4, 0)[0];
 
-    CHECK(later >= first);    // never goes backwards
+    CHECK(later >= first); // never goes backwards
     // And it does reach full: the reference rig has no ramp, so its value is the target.
     Rig reference(8, 8);
     reference.fx.saturation = 100;
@@ -297,10 +305,25 @@ TEST_CASE("AmbilightEffect: edgeDepth makes the outer row sample deeper") {
     Rig shallow(8, 8), deep(8, 8);
     shallow.fx.saturation = 100;
     deep.fx.saturation = 100;
-    deep.fx.edgeDepth = 50;   // half the frame, so it reaches well past the top band
+    deep.fx.edgeDepth = 50; // half the frame, so it reaches well past the top band
     shallow.render();
     deep.render();
     CHECK(std::memcmp(shallow.px(4, 0), deep.px(4, 0), 3) != 0);
+}
+
+// The control SETS the depth, it does not raise a floor: a value below a position's own share must
+// make its zone thinner
+TEST_CASE("AmbilightEffect: edgeDepth below the natural share makes the outer row thinner") {
+    PatternSource src;
+    // Three rows over a 36-tall pattern is a 12-row share, which reaches past the 9-row red band
+    // into the black centre. A shallower zone stays inside the band, so it reads BRIGHTER.
+    Rig plain(8, 3), thin(8, 3);
+    plain.fx.saturation = 100;
+    thin.fx.saturation = 100;
+    thin.fx.edgeDepth = 10; // ~4 rows, against a natural share of 12
+    plain.render();
+    thin.render();
+    CHECK(thin.px(4, 0)[0] > plain.px(4, 0)[0]);
 }
 
 // Only the outermost ring moves. An interior position has no edge to reach in from, so a video
@@ -314,10 +337,8 @@ TEST_CASE("AmbilightEffect: edgeDepth leaves interior positions alone") {
     plain.render();
     deep.render();
     for (int y = 1; y < 7; y++)
-        for (int x = 1; x < 7; x++)
-            CHECK(std::memcmp(plain.px(x, y), deep.px(x, y), 3) == 0);
+        for (int x = 1; x < 7; x++) CHECK(std::memcmp(plain.px(x, y), deep.px(x, y), 3) == 0);
 }
-
 
 // --- Black bars --------------------------------------------------------------------------------
 // A letterboxed film puts bars exactly where the top and bottom lights look, so those lights go
@@ -374,15 +395,15 @@ TEST_CASE("AmbilightEffect: blackBars off maps across the whole frame") {
 
 // The top light sits in the bar and reads black; with detection it reads the picture instead.
 TEST_CASE("AmbilightEffect: the top light escapes the letterbox once bars are detected") {
-    Letterbox src(64, 64, 16);   // a quarter of the height black at each end
+    Letterbox src(64, 64, 16); // a quarter of the height black at each end
     Rig rig(8, 8);
     rig.fx.saturation = 100;
     rig.fx.detectBlackBars = true;
     rig.render();
 
-    CHECK(rig.px(4, 0)[1] == 0);                    // first frame: still inside the bar
-    for (int i = 0; i < 60; i++) rig.tickOnly();    // past the hysteresis window
-    CHECK(rig.px(4, 0)[1] > 100);                   // now reading the green picture
+    CHECK(rig.px(4, 0)[1] == 0);                 // first frame: still inside the bar
+    for (int i = 0; i < 60; i++) rig.tickOnly(); // past the hysteresis window
+    CHECK(rig.px(4, 0)[1] > 100);                // now reading the green picture
 }
 
 // The pattern's centre is black and its edges are coloured — the OPPOSITE of a letterbox. Nothing
@@ -397,4 +418,56 @@ TEST_CASE("AmbilightEffect: a frame that fills the picture reports no bars") {
     armed.render();
     for (int i = 0; i < 60; i++) armed.tickOnly();
     CHECK(std::memcmp(plain.px(4, 0), armed.px(4, 0), 3) == 0);
+}
+
+// --- Skipping positions that reach no LED -------------------------------------------------------
+// On a RectangleLayout the interior of the box maps to nothing, so averaging it is work whose
+// result the mapping discards — most of the box, on any real border strip. The effect asks the LUT
+// and skips those positions. GridLayout is identity, so nothing is skipped there and the video-wall
+// case is unaffected.
+
+namespace {
+
+// The Rig above, with a hollow rectangle in place of the grid: perimeter lit, interior dead.
+struct RectRig {
+    mm::Layouts layouts;
+    mm::RectangleLayout rect;
+    mm::Layer layer;
+    AmbilightEffect fx;
+
+    RectRig(uint16_t w, uint16_t h) {
+        rect.width = w;
+        rect.height = h;
+        layouts.addChild(&rect);
+        layer.setLayouts(&layouts);
+        layer.setChannelsPerLight(3);
+        layer.addChild(&fx);
+    }
+    void render() {
+        layer.applyState();
+        layer.tick();
+    }
+    const uint8_t* px(int x, int y) const {
+        return layer.buffer().data() + (static_cast<size_t>(y) * rect.width + x) * 3;
+    }
+};
+
+} // namespace
+
+TEST_CASE("AmbilightEffect: a border layout paints its perimeter and skips the interior") {
+    PatternSource src;
+    RectRig rig(8, 8);
+    rig.fx.saturation = 100;
+    rig.render();
+
+    // The perimeter reaches LEDs, so it carries the picture.
+    const uint8_t* top = rig.px(4, 0);
+    CHECK((top[0] | top[1] | top[2]) != 0);
+
+    // The interior reaches none. Left black by the clear, never averaged.
+    for (int y = 1; y < 7; y++)
+        for (int x = 1; x < 7; x++) {
+            const uint8_t* p = rig.px(x, y);
+            CHECK((p[0] | p[1] | p[2]) == 0);
+        }
 }

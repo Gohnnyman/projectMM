@@ -20,9 +20,10 @@ namespace mm {
 // The source is far the bigger — e.g. a 640x480 picture onto a strip of 60 positions — so each
 // light position owns a whole rectangle of pixels and shows their average.
 //
-// It fills the box uniformly and never asks which positions actually reach an LED; that is the
-// layout's business. On a RectangleLayout the interior maps to nothing, so a border strip shows the
-// frame's border for free; on a GridLayout the same effect is a video wall.
+// The layout decides the shape: on a RectangleLayout the interior maps to no LED, so a border
+// strip shows the frame's border for free; on a GridLayout the same effect is a video wall. The
+// effect asks the mapping only ONE question — does this position light anything — and skips the
+// averaging where the answer is no. On a border layout that is most of the box.
 
 /// Effect that paints the layer with the live video frame (screen-follow ambient light).
 class AmbilightEffect : public EffectBase {
@@ -92,11 +93,18 @@ public:
         if (!primed_) fadeStart_ = elapsed(); // a picture arriving after a gap restarts the ramp
         const uint16_t level = fadeLevel();
 
+        // Black first, then only the positions that reach an LED are painted. The skipped ones
+        // would be discarded by the mapping anyway; clearing keeps the raw-buffer preview honest
+        // about which of them are actually lit.
+        const MappingLUT& lut = layer()->lut();
+        draw::fill(out, {0, 0, 0});
+
         for (lengthType y = 0; y < lightsY; y++) {
             const Span rows = region.rows(y, lightsY); // constant down the row
             for (lengthType x = 0; x < lightsX; x++) {
-                const Span cols = region.cols(x, lightsX);
                 const size_t lightId = static_cast<size_t>(y) * lightsX + x;
+                if (!lut.hasDestination(static_cast<nrOfLightsType>(lightId))) continue;
+                const Span cols = region.cols(x, lightsX);
                 RGB color = adjust(meanOf(*frame, cols, rows));
                 if (canSmooth) color = smooth(lightId, color);
                 if (level != 256) color = dim(color, level);
@@ -133,8 +141,10 @@ private:
         r.top = bars.top;
         r.width = frame.width - bars.left - bars.right;
         r.height = frame.height - bars.top - bars.bottom;
-        r.deepX = (r.width * edgeDepth) / 100;
-        r.deepY = (r.height * edgeDepth) / 100;
+        // Rounded UP, so any non-zero percentage is at least one pixel. Flooring would let a small
+        // setting on a small frame land on 0, which is the off value — the control would go quiet.
+        r.deepX = (r.width * edgeDepth + 99) / 100;
+        r.deepY = (r.height * edgeDepth + 99) / 100;
         return r;
     }
 
@@ -214,16 +224,21 @@ private:
 
     /// Which source pixels light position `lightId` covers along one axis.
     /// - `pixels` shared evenly among `lightsSize` positions, cut at the edges so ranges meet exactly
-    /// - an empty range widens to one pixel, so a strip finer than the picture still lights up
-    /// - a position ON an edge then reaches `deep` pixels in from it, never less than its own share
+    /// - a position ON an edge takes exactly `deep` instead of its share — deeper OR shallower, so
+    ///   the control sets the depth rather than raising a floor under it
     /// - `deep` of 0 leaves the plain division; interior positions are on no edge either way
+    /// - an empty range widens to one pixel, so a strip finer than the picture still lights up
     static Span spanFor(int lightId, int lightsSize, int pixels, int deep) {
         int begin = static_cast<int>((static_cast<long>(lightId) * pixels) / lightsSize);
         int end = static_cast<int>((static_cast<long>(lightId + 1) * pixels) / lightsSize);
+        if (deep > 0) {
+            if (lightId == 0) end = deep;                                 // down/right, inward
+            else if (lightId == lightsSize - 1) begin = pixels - deep;    // up/left, inward
+        }
+        if (begin < 0) begin = 0;
+        if (begin >= pixels) begin = pixels - 1;
         if (end <= begin) end = begin + 1;
         if (end > pixels) end = pixels;
-        if (lightId == 0) end = std::max(end, deep);                           // down/right, inward
-        if (lightId == lightsSize - 1) begin = std::min(begin, pixels - deep); // up/left, inward
         return {begin, end};
     }
 
