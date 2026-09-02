@@ -707,6 +707,7 @@ public:
         if (ringSnapshot) { if (!snapshotSourceForRing()) return; }
         else              encodeSrc_ = nullptr;   // OFF: encodeRows reads the live sourceBuffer_
         const uint32_t tkW2 = platform::cycleCount();
+        measureFrame();
         if (peripheral_->busTransmitRing()) {
             inFlight_[0] = true;   // kicked; DO NOT wait here — the next tick waits, freeing the core now
         } else if (deadFrames_ < kDeadFramesBeforeGiveUp) {

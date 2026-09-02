@@ -101,10 +101,15 @@ private:
     /// corner resolves to an exact index rather than a search.
     nrOfLightsType startIndex() const {
         const int w = width, h = height;
+        if (h == 1) return static_cast<nrOfLightsType>((startCorner == 1 || startCorner == 2) ? w - 1 : 0);
+        if (w == 1) return static_cast<nrOfLightsType>(startCorner >= 2 ? h - 1 : 0);
+        const int drop = sharedCorners ? 1 : 0;
+        const int rightEnd = w + h - drop;
+        const int bottomEnd = rightEnd + w - drop;
         switch (startCorner) {
         case 1: return static_cast<nrOfLightsType>(w - 1);         // top-right
-        case 2: return static_cast<nrOfLightsType>(w + h - 2);     // bottom-right
-        case 3: return static_cast<nrOfLightsType>(2 * w + h - 3); // bottom-left
+        case 2: return static_cast<nrOfLightsType>(rightEnd - 1);  // bottom-right
+        case 3: return static_cast<nrOfLightsType>(bottomEnd - 1); // bottom-left
         default: return 0;                                         // top-left
         }
     }

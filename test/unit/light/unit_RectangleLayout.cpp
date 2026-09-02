@@ -220,6 +220,20 @@ TEST_CASE("RectangleLayout: unshared corners double the corner cells and stay in
     CHECK(corners == 8);   // four corners, two lights each
 }
 
+// With four separate strips, light 0 still has to land on the named corner rather than one cell past it.
+TEST_CASE("RectangleLayout: unshared corners still honor the chosen start corner") {
+    const int w = 4, h = 3;
+    const std::pair<int, int> corners[4] = {
+        {0, 0}, {w - 1, 0}, {w - 1, h - 1}, {0, h - 1}};
+    for (uint8_t c = 0; c < 4; c++) {
+        RectangleLayout r;
+        r.width = w; r.height = h;
+        r.sharedCorners = false;
+        r.startCorner = c;
+        CHECK(walk(r)[0] == corners[c]);
+    }
+}
+
 // --- offset --------------------------------------------------------------------------------------
 // A strip rarely starts exactly at a corner. offset slides where index 0 sits WITHOUT moving any
 // light: the same coordinates come out, rotated in the wiring order.

@@ -216,8 +216,14 @@ struct Correction {
         for (uint32_t i = 0; i < n; i++, src += srcCh) {
             uint8_t r = briLut[0][src[0]], g = briLut[1][src[1]], b = briLut[2][src[2]];
             const uint8_t w = whiteOf(r, g, b);
+            const uint8_t y = r < g ? r : g;
+            const uint8_t rg = r > g ? r : g;
+            const uint8_t uv = b > rg ? static_cast<uint8_t>(b - rg) : 0;
             if (subtractWhite) { r -= w; g -= w; b -= w; }
-            sum += (static_cast<uint32_t>(r) + g + b) * mAColor + static_cast<uint32_t>(w) * whiteMa;
+            sum += (static_cast<uint32_t>(r) + g + b) * mAColor
+                 + static_cast<uint32_t>(w) * whiteMa
+                 + (offYellow != kAbsent ? static_cast<uint32_t>(y) * mAColor : 0)
+                 + (offUV != kAbsent ? static_cast<uint32_t>(uv) * mAColor : 0);
         }
         // A master dimmer is held at 255 every frame, so its draw is a constant rather than a term
         // in the loop. It has to be counted: on an addressable strip every byte is a die, and the

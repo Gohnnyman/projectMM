@@ -652,3 +652,17 @@ TEST_CASE("Correction: the current estimate counts a master dimmer") {
     dimmed.measure(frame, 3, 1);
     CHECK(dimmed.limit < 256);            // held at 255, so it draws even on a black frame
 }
+
+// Yellow and UV are real emitted channels on some fixtures, so the limiter has to price them too.
+TEST_CASE("Correction: the current estimate counts Yellow and UV channels") {
+    using R = mm::ChannelRole;
+    const R roles[] = {R::Red, R::Green, R::Blue, R::Yellow, R::UV};
+    const uint8_t frame[3] = {255, 255, 255};   // Y = 255, UV = 0, so the extra channel adds 8 mA
+
+    Correction c;
+    c.budgetMa = 24;   // plain RGB fits exactly; the extra Yellow channel must trip the limiter
+    c.rebuild(255, roles, 5);
+    c.measure(frame, 3, 1);
+
+    CHECK(c.limit < 256);
+}
