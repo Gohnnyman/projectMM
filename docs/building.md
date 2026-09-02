@@ -65,6 +65,28 @@ Or use MoonDeck's Desktop tab for the same operations with a status dot per card
 
 Each host writes into its own build dir: `build/macos/`, `build/linux/`, `build/windows/`. The per-host layout mirrors the ESP32 side's `build/esp32-<board>/` shape — one directory per target, no cross-target clobbering on a multi-host dev machine.
 
+### Where the desktop keeps its settings
+
+A **source checkout writes to `build/fs/`** (its config under `build/fs/.config/`), recognized by `CMakeLists.txt` and `moondeck/` both being in the working directory, so a development tree stays self-contained and gitignored. The device's filesystem is that one subdirectory rather than the whole build tree, so the File Manager shows what a board shows instead of build output. Anywhere else, an installed or unzipped binary writes to the OS per-user data directory:
+
+| Platform | Directory |
+|---|---|
+| Windows | `%LOCALAPPDATA%\projectMM` |
+| macOS | `~/Library/Application Support/projectMM` |
+| Linux | `$XDG_DATA_HOME/projectMM`, else `~/.local/share/projectMM` |
+
+`MM_DATA_DIR` overrides both, which is how the test suite pins its root into the build tree rather than touching a developer's real settings.
+
+The distinction matters because a shipped binary is launched from a download folder or a Start-menu shortcut, where a path relative to the working directory is either unwritable or belongs to that folder rather than to the user. The root is created when the filesystem mounts, and a location that cannot be written to fails the mount and is reported once, rather than surfacing as a failed save on every change.
+
+### Packaging
+
+`uv run moondeck/ci/package_desktop.py` builds and packages for the host it runs on: a `.dmg` with a `.app` on macOS, a `.tar.gz` plus a `.deb` on Linux, and a `.zip` plus an NSIS `-setup.exe` on Windows. The Windows installer puts the program in `%LOCALAPPDATA%\Programs\projectMM` with a Start-menu shortcut and an uninstaller; it needs no elevation, and it never touches the settings directory, so an upgrade keeps the user's configuration.
+
+Both the Windows icon and the macOS `.icns` derive from `mooninstaller/favicon.png`, so the mark has one source. The `.ico` is generated during the CMake build (`moondeck/ci/make_ico.py`, which pulls Pillow on demand through uv) and embedded in the executable, so the binary carries its icon whether it was installed or just unzipped.
+
+Each packager skips its platform-specific format when the tool is missing (`dpkg-deb`, `makensis`) on a dev machine, and fails outright under CI, where a missing artifact would otherwise fail the release with an error naming a glob rather than the absent tool.
+
 ### Prerequisites
 
 Every host needs [uv](https://docs.astral.sh/uv/), CMake 3.20+, and a C++20 compiler.
@@ -113,6 +135,14 @@ uv run moondeck/build/build_esp32.py --firmware esp32                  # WiFi-on
 uv run moondeck/build/flash_esp32.py --firmware esp32 --port /dev/tty.usbserial-XXXX
 uv run moondeck/run/monitor_esp32.py --port /dev/tty.usbserial-XXXX
 ```
+
+On the variants that opt into it (`esp32`, `esp32-16mb`, `esp32-wrover`, `esp32-eth`,
+`esp32s3-zero`, and `qemu`, which is emulated rather than installable) the build also produces
+**MoonBase**, the second boot image ([architecture.md § MoonBase](architecture.md#moonbase-the-second-boot-image)),
+and `flash_esp32.py` writes the corrected layout in one pass: app in the big `ota_0` slot,
+MoonBase in `factory`, and an otadata that boots the app directly. A device on the older
+dual-OTA table adopts this layout only through such a full serial flash, OTA never rewrites
+the partition table.
 
 `setup_esp_idf.py` runs the upstream installer for the host: `install.sh` on macOS/Linux, `install.bat` on Windows. Both create the same `~/.espressif/python_env/...` venv and download the same toolchains (~1.5 GB more) — only the wrapper differs. The Windows installer needs roughly 5 minutes on a fast link. It also offers to move a drifted checkout onto the pinned commit (see [ESP-IDF version](#esp-idf-version)); pass `--no-checkout` to keep it warn-only.
 
@@ -205,31 +235,23 @@ Two guardrails bound the "embrace everything" stance:
 - **Platform-generic stays intact.** These are ESP32-specific gains; none may regress Teensy or the desktop (macOS / Windows / Linux) paths, which don't use ESP-IDF at all. An IDF feature is adopted *inside* the ESP32 platform layer / build tooling, never by leaking an IDF assumption into shared `src/` or the desktop build. If embracing a v6.x feature would touch a cross-platform seam, that seam stays abstracted (the existing platform-boundary rule).
 - **The v6.0 floor.** Adopt only what's in v6.0 (see the rule above), so the v6.0 fallback keeps working.
 
-Each row below states where we are and the trigger to move.
+Where we are on each. The adoption plan and per-item triggers are filed in [backlog-core § Adopting the v6.x ecosystem changes](backlog/backlog-core.md).
 
-| Change | Where we are now | How / when to adopt |
-|---|---|---|
-| **EIM** (ESP-IDF Installation Manager) — the new default, cross-platform installer; Espressif says `install.sh` / `idf_tools.py` are "no longer needed" | `setup_esp_idf.py` drives the legacy `install.sh` / `install.bat`. Works, but is now the *old* documented path. | **Adopt any time** — EIM shipped *in v6.0*, so it clears the v6.0-floor rule, and it has a headless CI mode. This is the highest-priority alignment and doesn't need to wait for the re-pin. Add EIM as the **preferred** path in `setup_esp_idf.py` (CLI: `eim install`), keep `install.sh` as a documented fallback for one release. Keep the exact-commit pin: EIM's multi-version management *helps* reproducibility, it doesn't replace the pin. |
-| **PSA Crypto** — legacy mbedTLS crypto APIs deprecated in favour of the PSA API | No direct exposure: we never call mbedTLS ourselves; OTA uses `esp_https_ota` + `esp_crt_bundle_attach` ([platform_esp32_ota.cpp](../src/platform/esp32/platform_esp32_ota.cpp)), which wrap crypto internally. | Nothing to migrate while we stay on high-level components. **Watch** only: if a future feature needs hashing/signing directly (e.g. signed-OTA verification, a device identity), write it against the **PSA API** from the start, not legacy mbedTLS. Trigger: first direct crypto use. |
-| **`network_provisioning`** — Espressif's Unified Provisioning subsystem, renamed from `wifi_provisioning` in v6.0. Transports: **BLE (GATT)** + **Wi-Fi SoftAP**. Clients: official iOS/Android apps for both, plus `esp_prov` (a Python CLI on Linux/macOS/Windows). Transport-agnostic but ships no web/serial client. | We provision over [Improv](../src/core/ImprovProvisioningModule.h) — serial (USB) + BLE, driven from the **browser** (ESP Web Tools) or a serial CLI. That covers the *web-installer / no-app* onboarding well. What we **don't** have is the IDF-native **phone-app + SoftAP** flow (open the ESP app, pick the device's AP, hand it credentials) that most shipping ESP32 products offer. So this is a real coverage gap, not a duplicate: the two standards meet only on BLE and own different front-ends. | **Adopt to close the gap — this is a planned capability, not a maybe.** `network_provisioning` is in v6.0 (clears the floor) and is *the* IDF-native standard, so embracing it is exactly the stance above. Add it as a **sibling provisioning module** beside ImprovProvisioning (both are wired-by-code System modules; the device can offer whichever transports its chip supports), reusing the same WiFi-credential plumbing. Not a replacement for Improv — they cover different front-ends (browser vs phone-app), and a product can want either. The phone-app + SoftAP path is the part that makes ESP32 deployment feel product-grade. Trigger: scheduled as one of the v6.0-adoption iterations (see below). |
-| **CMake Build System v2** — the named successor to the current build system; technical preview in v6.0/6.1, has its own migration guide | Standard `idf.py` build (v1). Our component is a thin `idf_component_register()` wrapper, so the migration surface is small. | **Watch until it's GA** (not while it's preview — adopting a preview build system would be the opposite of "common patterns first"). Trigger: v2 ships as the default. Then dry-run a build under v2, fix any `idf_component_register()` / Kconfig-dependency fallout, switch. Low risk given how little custom CMake we have. |
-| **Built-in MCP server** (`idf.py mcp-server`) — lets an AI assistant drive build/flash/monitor/debug directly | Not used. Agents and humans both go through the `moondeck/<group>/*.py` layer (the uniform interface in [moondeck/MoonDeck.md](../moondeck/MoonDeck.md)), which wraps pin-drift checks, per-firmware build dirs, and KPI collection. | **Evaluate, don't default to it.** The risk is a *second control path* that bypasses our script policy, and it's ESP32-only (no desktop), so it can't be the uniform path. If adopted, wrap it *behind* a script (`moondeck/run/idf_mcp.py`) so the policy layer still applies, rather than pointing the agent at raw `idf.py`. Trigger: a concrete debug workflow the scripts can't cover. |
+| Change | Where we are now |
+|---|---|
+| **EIM** (ESP-IDF Installation Manager) — the new default, cross-platform installer; Espressif says `install.sh` / `idf_tools.py` are "no longer needed" | `setup_esp_idf.py` drives the legacy `install.sh` / `install.bat`. Works, but is the *old* documented path. |
+| **PSA Crypto** — legacy mbedTLS crypto APIs deprecated in favour of the PSA API | No direct exposure: we never call mbedTLS ourselves; OTA uses `esp_https_ota` + `esp_crt_bundle_attach` ([platform_esp32_ota.cpp](../src/platform/esp32/platform_esp32_ota.cpp)), which wrap crypto internally. |
+| **`network_provisioning`** — Espressif's Unified Provisioning subsystem, renamed from `wifi_provisioning` in v6.0. Transports: **BLE (GATT)** + **Wi-Fi SoftAP**. Clients: official iOS/Android apps for both, plus `esp_prov` (a Python CLI on Linux/macOS/Windows). Transport-agnostic but ships no web/serial client. | We provision over [Improv](../src/core/ImprovProvisioningModule.h) — serial (USB) + BLE, driven from the **browser** (ESP Web Tools) or a serial CLI, which covers mooninstaller / no-app onboarding. The IDF-native **phone-app + SoftAP** flow is a coverage gap rather than a duplicate: the two standards meet only on BLE and own different front-ends. |
+| **CMake Build System v2** — the named successor to the current build system; technical preview in v6.0/6.1, has its own migration guide | Standard `idf.py` build (v1). Our component is a thin `idf_component_register()` wrapper, so the migration surface is small. |
+| **Built-in MCP server** (`idf.py mcp-server`) — lets an AI assistant drive build/flash/monitor/debug directly | Not used. Agents and humans both go through the `moondeck/<group>/*.py` layer (the uniform interface in [moondeck/MoonDeck.md](../moondeck/MoonDeck.md)), which wraps pin-drift checks, per-firmware build dirs, and KPI collection. |
 
-The general rule: **anything already in v6.0 we adopt proactively** (it clears the floor, so there's no reason to wait — EIM and `network_provisioning` are both here), while **preview / not-yet-in-v6.0 features wait** until they're stable *and* in our floor. Each adoption is its own commit with its own hardware re-test, and none may regress the Teensy / desktop paths.
-
-**Adoption iterations (the step-by-step plan).** We close the v6.0 gaps one at a time, picked up as normal feature commits:
-
-1. **EIM installer** — rework `setup_esp_idf.py` to prefer `eim install`, keep `install.sh` as a one-release fallback. Smallest and lowest-risk (build-path only, no firmware change, no hardware re-test), and EIM's multi-version management is what cleanly supports the v6.0-floor / v6.1-fallback juggling — so it sequences first as an enabler for the rest.
-2. **`network_provisioning`** — the headline capability: a sibling provisioning module beside ImprovProvisioning adding the phone-app + SoftAP onboarding flow. Its own plan (spec before code), a wired-by-code System module beside ImprovProvisioning reusing the WiFi-credential plumbing, BLE-stack cost weighed per chip.
-3. Further v6.0 items (PSA-native crypto, CMake v2, MCP) are pulled in as their triggers fire (first direct crypto use; v2 GA; a debug need), per the rows above.
-
-Tracked in [backlog](backlog/README.md).
+The general rule: **anything already in v6.0 we adopt proactively** (it clears the floor), while **preview / not-yet-in-v6.0 features wait** until they are stable *and* in our floor. Each adoption is its own commit with its own hardware re-test, and none may regress the Teensy / desktop paths.
 
 ### Firmware variants
 
 `build_esp32.py --firmware` selects one of the shipping variants. The key combines chip name + feature flags + (for SKU-sensitive chips) module. ("Firmware" here is the compiled binary; the physical product (deviceModel) is a separate concept — see [architecture.md § Firmware vs deviceModel vs board](architecture.md#firmware-vs-devicemodel-vs-board).) `build_esp32.py --help` lists the full set.
 
-The canonical list is the **`FIRMWARES` dict** in [`moondeck/build/build_esp32.py`](../moondeck/build/build_esp32.py) — the single source of truth, carrying each variant's `chip`, sdkconfig `fragments`, `eth_only`, `ships`, and `description`. Its machine-readable projection is [`web-installer/firmwares.json`](../web-installer/firmwares.json) (generated by `generate_firmwares.py`, drift-guarded by `check_firmwares.py`), which the CI release matrix, the ESP Web Tools manifest loops, and MoonDeck all read — so the list lives in exactly one place. `esp32p4rev1-eth-wifi` has `ships: false` (its C6-slave Kconfig isn't reproducible in CI yet), so it builds from the CLI but stays out of the release matrix.
+The canonical list is the **`FIRMWARES` dict** in [`moondeck/build/build_esp32.py`](../moondeck/build/build_esp32.py) — the single source of truth, carrying each variant's `chip`, sdkconfig `fragments`, `eth_only`, `ships`, and `description`. Its machine-readable projection is [`mooninstaller/firmwares.json`](../mooninstaller/firmwares.json) (generated by `generate_firmwares.py`, drift-guarded by `check_firmwares.py`), which the CI release matrix, the ESP Web Tools manifest loops, and MoonDeck all read — so the list lives in exactly one place. `esp32p4rev1-eth-wifi` has `ships: false` (its C6-slave Kconfig isn't reproducible in CI yet), so it builds from the CLI but stays out of the release matrix.
 
 ESP-IDF v6.x has no `CONFIG_ESP_WIFI_ENABLED` switch (the symbol is forced on for WiFi-capable SoCs), so dropping WiFi at compile time happens via `EXCLUDE_COMPONENTS` plus `MM_NO_WIFI` (set when `MM_ETH_ONLY=1`, applied in `esp32/main/CMakeLists.txt`). The `esp32-eth` variant takes this path; the default `esp32` keeps both stacks compiled in and uses the runtime cascade in `NetworkModule` (Ethernet first, WiFi fallback when no PHY responds).
 
@@ -264,6 +286,8 @@ The platform abstraction layer replaces what libraries typically provide. Today 
 | [ArduinoJson](https://github.com/bblanchon/ArduinoJson) | Works on ESP-IDF, but heavy: dynamic allocation, large footprint. | Own fixed-size control storage. JSON only for API serialisation, not internal state. |
 
 When a library is genuinely needed (e.g. FastLED for specific hardware support), it lives inside `src/platform/` and is not referenced from core or light-domain code.
+
+Why the trade is worth making, and what it costs: [Why we write our own code](why-we-write-our-own.md).
 
 ## Teensy
 

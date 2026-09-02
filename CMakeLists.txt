@@ -51,6 +51,32 @@ else()
                         -Wshadow -Wnon-virtual-dtor -Wdouble-promotion
                         -Wimplicit-fallthrough -Wnull-dereference)
 
+    # GCC through 15 raises four of these on code that is provably correct, and -Werror turns
+    # each into a failed build. They stay ON (a real one still has to be read and dismissed);
+    # they just stop being fatal on the versions that cry wolf:
+    #   -Wnull-dereference   fires on a plain `return member_` inlined through a lambda
+    #                        trampoline, where GCC cannot prove `this` across the thunk, and on
+    #                        `buf.data()[15]` after an allocate(10, 3) it cannot see through.
+    #   -Wrestrict           fires on snprintf(dst, n, "%s", src) where both are members of the
+    #                        same object, which GCC reads as a possible overlap.
+    #   -Wstringop-overflow  fires inside <bits/stl_algobase.h> with a bound "between 2^63 and
+    #                        2^64-1", a range no call in this codebase can produce.
+    #   -Wformat-truncation  fires on snprintf(ssid_, 33, "%s", ssid) because a 99-char SSID
+    #                        would not fit. Truncating there is the documented intent (see
+    #                        NetworkModule.h): an over-long SSID is invalid, and snprintf
+    #                        terminates what it writes.
+    # Five of the twelve are inside libstdc++ and glibc headers (<bits/stl_algobase.h>,
+    # <streambuf>, <stdio2.h>), so no source change can reach them. GCC 16 is clean, which is
+    # why this went unnoticed locally: the maintainer's GCC is 16 and CI's is 13.
+    # A version test rather than a flag probe, deliberately: the flags all EXIST here, it is
+    # their judgement that is wrong, so CheckCXXCompilerFlag would happily confirm them.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+        add_compile_options(-Wno-error=null-dereference
+                            -Wno-error=restrict
+                            -Wno-error=stringop-overflow
+                            -Wno-error=format-truncation)
+    endif()
+
     # Hot-path discipline, enforced by the compiler. MM_NONBLOCKING marks tick/tick20ms/tick1s
     # (platform.h); -Wfunction-effects then checks TRANSITIVELY that nothing they reach
     # allocates or blocks, through the whole call graph. Clang 20+ only; the flag does not
@@ -111,17 +137,47 @@ target_include_directories(mm_core PUBLIC src/)
 target_link_libraries(mm_core PUBLIC mm_platform)
 # `add_dependencies(mm_core ui_embed)` is below, after the ui_embed target is defined.
 
+# The computed semver (compute_version.py): the core for a stable tag, <core>-dev.<N> for a
+# moving latest build. Only the release pipeline sets it (package_desktop.py --version); a local
+# build falls through to build_info.h's #ifndef default (library.json). The same override the
+# ESP32 build has (esp32/main/CMakeLists.txt), so a desktop binary reports the same precise
+# version its release assets are named with, which is what lets the UI's update badge compare
+# a running desktop against the `latest` channel at all.
+if(MM_VERSION)
+    add_compile_definitions(MM_VERSION=${MM_VERSION})
+endif()
+
 # Platform library (desktop). moonlive_emit.cpp is the desktop MoonLive backend (host-ISA
 # codegen) — it lives here because emitted machine code is platform/ISA-specific.
 add_library(mm_platform
     src/platform/desktop/platform_desktop.cpp
-    src/platform/desktop/moonlive_emit.cpp
-    src/platform/desktop/moonlive_asm_host.cpp
-    src/platform/desktop/moonlive_lower_host.cpp
+    src/platform/desktop/platform_desktop_audio.cpp
+    src/platform/desktop/moonlive_emit_noarch.cpp
+    src/platform/desktop/moonlive_asm_noarch.cpp
+    src/platform/desktop/moonlive_emit_arm64.cpp
+    src/platform/desktop/moonlive_emit_x86_64.cpp
+    src/platform/desktop/moonlive_asm_arm64.cpp
+    src/platform/desktop/moonlive_asm_x86_64.cpp
 )
 target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
-# Winsock for the desktop socket surface on Windows.
-target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32>)
+# Winsock for the desktop socket surface; IPHLPAPI for real Ethernet link state and negotiated
+# speed (PanelCardDriver warns below gigabit, and a ColorLight card tears rather than erroring).
+# Npcap is deliberately NOT linked: platform_desktop.cpp resolves wpcap.dll at run time so the
+# build needs no SDK and the binary runs without it.
+# `dl` on Linux: miniaudio (platform_desktop_audio.cpp) runtime-links ALSA/PulseAudio via
+# dlopen, so no audio SDK is a build requirement, the same no-SDK rule as Npcap above.
+target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32> $<$<PLATFORM_ID:Windows>:iphlpapi>
+                                          $<$<PLATFORM_ID:Linux>:dl> $<$<PLATFORM_ID:Linux>:pthread>)
+
+# The two libraries genuinely need each other: mm_core calls into the platform surface, and the
+# platform's MoonLive backend calls back into core's target-independent IR passes (lowerWith ->
+# spillToBudget, MoonLiveSpill.cpp). Declaring the cycle makes CMake repeat both archives on the
+# link line until the symbols resolve. Apple's linker and MSVC search archives repeatedly and
+# never noticed; GNU ld makes ONE left-to-right pass, so the reference from mm_platform back into
+# mm_core is unresolved unless the cycle is declared.
+target_link_libraries(mm_platform PUBLIC mm_core)
+set_target_properties(mm_core     PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)
+set_target_properties(mm_platform PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)
 
 # Generate build_info.h from library.json + git (carries version, build id, build date, board name).
 # ALWAYS out-of-date on purpose — see the same rule in esp32/main/CMakeLists.txt for why: MM_BUILD_ID
@@ -142,10 +198,33 @@ add_custom_target(build_info_gen ALL
 add_custom_command(
     OUTPUT ${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h
     COMMAND ${CMAKE_COMMAND} -DUI_DIR=${CMAKE_SOURCE_DIR}/src/ui -DOUT=${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h -DUV_EXECUTABLE=${UV_EXECUTABLE} -P ${CMAKE_SOURCE_DIR}/src/ui/embed_ui.cmake
-    DEPENDS ${CMAKE_SOURCE_DIR}/src/ui/index.html ${CMAKE_SOURCE_DIR}/src/ui/app.js ${CMAKE_SOURCE_DIR}/src/ui/style.css ${CMAKE_SOURCE_DIR}/src/ui/install-picker.js ${CMAKE_SOURCE_DIR}/src/ui/preview3d.js ${CMAKE_SOURCE_DIR}/src/ui/moonlight-logo.png ${CMAKE_SOURCE_DIR}/src/ui/embed_ui.cmake
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/ui/index.html ${CMAKE_SOURCE_DIR}/src/ui/app.js ${CMAKE_SOURCE_DIR}/src/ui/style.css ${CMAKE_SOURCE_DIR}/src/ui/install-picker.js ${CMAKE_SOURCE_DIR}/src/ui/vendor/prism.js ${CMAKE_SOURCE_DIR}/src/ui/preview3d.js ${CMAKE_SOURCE_DIR}/src/ui/moonlight-logo.png ${CMAKE_SOURCE_DIR}/src/ui/embed_ui.cmake
     COMMENT "Embedding UI files"
 )
 add_custom_target(ui_embed DEPENDS ${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h)
+
+# The MoonLive script catalog: names of every factory script, so the picker can offer the whole
+# library while the device holds only what someone actually picked. Globbed, so the DEPENDS is the
+# directory contents rather than a file list that would drift; CONFIGURE_DEPENDS re-globs when a
+# script is added or removed.
+file(GLOB MOONLIVE_SCRIPTS CONFIGURE_DEPENDS
+     ${CMAKE_SOURCE_DIR}/moonlive/effects/*.mle
+     ${CMAKE_SOURCE_DIR}/moonlive/layouts/*.mll
+     ${CMAKE_SOURCE_DIR}/moonlive/modifiers/*.mlm)
+# The file LIST itself is a dependency, not just each file's timestamp: DEPENDS notices an edited
+# script but not a DELETED one, so removing a script left it in the catalog and the device went on
+# offering a name that no longer exists upstream. The stamp is written at configure time from the
+# glob, so a removal changes it and the command re-runs.
+string(REPLACE ";" "\n" MOONLIVE_SCRIPT_LIST "${MOONLIVE_SCRIPTS}")
+set(MOONLIVE_STAMP ${CMAKE_BINARY_DIR}/moonlive_scripts.stamp)
+file(CONFIGURE OUTPUT ${MOONLIVE_STAMP} CONTENT "${MOONLIVE_SCRIPT_LIST}\n")
+add_custom_command(
+    OUTPUT ${CMAKE_SOURCE_DIR}/src/light/moonlive/script_catalog.h
+    COMMAND ${CMAKE_COMMAND} -DSCRIPT_DIR=${CMAKE_SOURCE_DIR}/moonlive -DOUT=${CMAKE_SOURCE_DIR}/src/light/moonlive/script_catalog.h -DUV_EXECUTABLE=${UV_EXECUTABLE} -P ${CMAKE_SOURCE_DIR}/src/light/moonlive/catalog_scripts.cmake
+    DEPENDS ${MOONLIVE_SCRIPTS} ${MOONLIVE_STAMP} ${CMAKE_SOURCE_DIR}/src/light/moonlive/catalog_scripts.cmake ${CMAKE_SOURCE_DIR}/src/light/moonlive/catalog_scripts.py
+    COMMENT "Generating MoonLive script catalog"
+)
+add_custom_target(moonlive_catalog DEPENDS ${CMAKE_SOURCE_DIR}/src/light/moonlive/script_catalog.h)
 
 # mm_core's HttpServerModule.cpp consumes ui_embedded.h and SystemModule.h
 # (a mm_core public header) consumes build_info.h. Anything that links mm_core
@@ -153,12 +232,41 @@ add_custom_target(ui_embed DEPENDS ${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h)
 # before any mm_core compile unit starts. CI's parallel clean build exposes
 # the race (test/ compiles SystemModule.h while build_info_gen is still
 # running); wiring the dep here makes the ordering explicit on every consumer.
-add_dependencies(mm_core ui_embed build_info_gen)
+add_dependencies(mm_core ui_embed build_info_gen moonlive_catalog)
+
+# Windows: give the exe its own icon, so it is recognizable in Explorer, the taskbar and the Start
+# menu whether it was installed or just unzipped. Generated from the same mooninstaller/favicon.png
+# the macOS .icns comes from, so the mark has one source rather than a checked-in binary per
+# platform. Nothing here runs on macOS or Linux, which carry their icon in the .app and the .deb.
+set(MM_WIN_RESOURCES "")
+if(WIN32)
+    set(MM_ICON "${CMAKE_BINARY_DIR}/projectMM.ico")
+    set(MM_RC   "${CMAKE_BINARY_DIR}/projectMM.rc")
+    add_custom_command(
+        OUTPUT "${MM_ICON}"
+        # `uv run <script>` rather than the usual `uv run python <script>`: make_ico.py declares
+        # Pillow inline (PEP 723), and only the script form makes uv honour that declaration.
+        COMMAND ${UV_EXECUTABLE} run "${CMAKE_SOURCE_DIR}/moondeck/ci/make_ico.py"
+                "${CMAKE_SOURCE_DIR}/mooninstaller/favicon.png" "${MM_ICON}"
+        DEPENDS "${CMAKE_SOURCE_DIR}/mooninstaller/favicon.png"
+                "${CMAKE_SOURCE_DIR}/moondeck/ci/make_ico.py"
+        COMMENT "Generating projectMM.ico from favicon.png"
+        VERBATIM)
+    # Forward slashes: rc.exe accepts them, and a backslash here would be an escape.
+    file(WRITE "${MM_RC}"
+         "// Generated by CMake from mooninstaller/favicon.png. Do not edit.\n"
+         "IDI_ICON1 ICON \"${MM_ICON}\"\n")
+    # The .ico rides along as a source so the custom command runs, but it is data, not something to
+    # compile; the .rc recompiles whenever the icon is regenerated.
+    set_source_files_properties("${MM_ICON}" PROPERTIES HEADER_FILE_ONLY TRUE)
+    set_source_files_properties("${MM_RC}" PROPERTIES OBJECT_DEPENDS "${MM_ICON}")
+    set(MM_WIN_RESOURCES "${MM_RC}" "${MM_ICON}")
+endif()
 
 # Application
-add_executable(projectMM src/main.cpp src/platform/desktop/main_desktop.cpp)
+add_executable(projectMM src/main.cpp src/platform/desktop/main_desktop.cpp ${MM_WIN_RESOURCES})
 target_link_libraries(projectMM PRIVATE mm_core mm_platform)
-add_dependencies(projectMM ui_embed build_info_gen)
+add_dependencies(projectMM ui_embed build_info_gen moonlive_catalog)
 
 # Tests
 enable_testing()

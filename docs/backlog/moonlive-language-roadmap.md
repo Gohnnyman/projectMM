@@ -35,7 +35,7 @@ Five hard limits, all found by hitting them:
 | script state | **64 bytes** shared by all members | `kCtrlBytes`, `MoonLiveBuiltins.h:132` |
 | distinct members | **8** | `kMaxCtrls`, same file |
 | branch labels | **16** (an `if` or `for` takes up to 2) | `kIrLabels`, `MoonLiveIr.h:201` |
-| numeric types | `uint8_t`, `uint16_t` | no float, no signed, no division operator |
+| ~~numeric types~~ | ~~`uint8_t`, `uint16_t`, `int16_t`~~ → **`int`, `byte`, `bool`, `fixed`, `string`** ✅ | still no float: `fixed` is Q16.16 |
 | ~~builtin table~~ | ~~16, and 16 used~~ → **64** ✅ | `BuiltinTable::kMax` — raised, with an overflow assert |
 
 The branch budget was binary-searched with generated scripts: **6 `if`/`else` + 2 `for` compiles,
@@ -48,11 +48,9 @@ Each row is a compromise the balls effect makes, and the language feature that w
 
 | forced to | because | wants |
 |---|---|---|
-| 4 objects, not 25 | 64-byte arena, 8 members | a bigger arena |
+| 4 objects, not 25 | 64-byte arena, 8 members | a bigger arena, or a pool handle (shipped for particles) |
 | whole-pixel motion | no fractional type | fixed-point or float |
-| a direction bit per axis | unsigned only | signed values |
 | one flat colour | no `hsv()` builtin | `hsv()` |
-| a disc, no radial falloff | no `/` operator | division |
 | one array per field | no structs | structs |
 | the helper reads a member for its index | functions take no arguments | arguments |
 | guards folded into `mod()` | 16 branch labels | a bigger label budget |
@@ -104,7 +102,106 @@ Item 5 is worth noting against the arena work below: a particle pool as a HANDLE
 does not spend its own 64 bytes on particle state at all. That is a better answer than widening
 the arena, and it is already designed.
 
+## The type system: ✅ *shipped*
+
+Shipped as designed, with three things worth carrying forward that the design did not anticipate:
+
+- **`fixed` needed three new assembler primitives**, not the one the design implied. A Q16.16
+  multiply is `mulhi` + `mul` + two shifts, and the JIT had no shift instruction and no
+  multiply-high at all — `mulReg` is a plain 32-bit multiply. `shlImm`, `sarImm`, `shrImm` and
+  `mulhi` went into all four backends, every encoding checked byte-for-byte against the real
+  assembler. Worth it: the alternative made every fixed multiply a host call inside a per-pixel
+  loop, and made `int`↔`fixed` conversion — one shift — a function call.
+- **An integer literal ADOPTS fixed at a meet point.** The design said any mix is an error; that
+  made `v * 2` and `if (v < 0)` unwritable. A bare literal now converts at compile time by
+  patching its own `Const` (free at run time), while a *variable* still names its conversion,
+  because a literal's meaning is visible at the site and a variable's scaling is not.
+- **`movImm` truncated above 16 bits on arm64 and Xtensa.** A latent bug the whole time, masked
+  `& 0xffff` under a comment warning about exactly that failure mode: invisible while literals
+  capped at 65535, and fatal the moment a Q16.16 literal (2.0 is 131072) rode a `Const`. Both
+  backends now materialize the full 32 bits.
+
+`bool` truncates rather than normalizing (`flag = 256` reads false), because normalizing needs a
+compare-and-select the IR has no op for — there is no `Sub` and no bitwise op. Waiting for a script
+that writes a non-boolean expression into a bool.
+
+The design as agreed follows, unchanged.
+
+## The type system: the settled design (2026-08-23)
+
+Decided with the product owner after the signed-values work, whose four bugs were all
+storage-width plumbing at the scalar boundary (a wrapped uint16 member, a sentinel read through a
+16-bit window, a one-byte store into a two-byte member, a sign-blind array load). The design
+removes that boundary rather than patching it again. This section supersedes the per-width
+thinking in items 3, 5 and 10 below; those entries stay for their history and their measurements.
+
+**Five types, each usable as scalar or array; one storage rule each way:**
+
+> `int`, `byte`, `bool`, `fixed`, `string`. Every SCALAR occupies one uniform 4-byte slot,
+> whatever its type. ARRAYS pack by element type. Strings are literals.
+
+A type is a SEMANTIC, not a storage width, for scalars: a `byte` scalar is an int the compiler
+masks to 8 bits on assignment (one AND), a `bool` normalizes to 0/1 (one compare), `fixed` is an
+int with scaled literals and a shifted multiply, `int` is bare. That single move is what buys
+orthogonality without resurrecting the width machinery: one scalar load, one scalar store, no
+sign windows, no width-matched bindings, no alignment rules. The width question survives only in
+arrays, where it pays for itself in memory, and the array access path already carries an element
+width (`idxPack`), so packed arrays are existing machinery rather than new.
+
+| Type | Min | Max | Step | The range is enough because |
+|---|---|---|---|---|
+| `int` | -2,147,483,648 | 2,147,483,647 | 1 | The domain's biggest integers: the ms clock (2^31 ms = 24.8 days, the known wrap), 12,288 lights, squared on-grid uv distances (<= 2^30). Anything wider lives in 64-bit inside a builtin, as escape() already does. |
+| `byte` | 0 | 255 | 1 | Exactly a hardware channel, a palette index, a heat cell. The LED's range, not a chosen one. |
+| `bool` | 0 | 1 | - | Normalized on store. |
+| `fixed` (Q16.16) | -32,768.0 | +32,767.99998 | 1/65,536 | Coordinates top out near 256 px and uv at +-4.0, orders of magnitude inside the range. The step gives 16 fraction bits against the 8 a channel displays, so two chained factors still land at the display floor. One turn as 1.0 steps at exactly angle16's resolution, the precision sin16 already consumes. Q16.16 is libfixmath's fix16_t, the de-facto embedded standard. |
+| `string` | - | one of the script's literals | - | An index into the compile-time pool. |
+
+**Cost on the hot path: none where it matters.** Scalar loads/stores are plain 32-bit forms
+(on Xtensa `l32i.n`, 2 bytes against `l8ui`'s 3, so smaller than today). A `byte[]` element's
+zero-extend and truncation happen INSIDE the load and store instructions; the only added
+instructions are one mask on a `byte` scalar store and one normalize on a `bool` store. A `fixed`
+multiply costs the mul-high + shift pair, which is the inherent price of fixed-point math the
+builtins already pay inside their Q13/Q8.8 conventions; it just becomes visible and uniform.
+
+**`int` <-> `fixed` conversion is EXPLICIT, never implicit.** The conversion itself is one shift
+(`<<16` / `>>16`), so the cost is trivial; the rule exists so a script never silently mixes a
+pixel count into a Q16.16 expression and gets a number 65,536 times off. A mixed expression is a
+compile error naming the conversion to write.
+
+**The two edges of `fixed`, stated so they are conventions rather than traps:**
+- **Time never goes into `fixed` raw**: 32,768 seconds is 9.1 hours. `t` stays `int` milliseconds
+  and rhythm reaches a script through `beat()`/`beatsin()`, which is already the idiom.
+- **Deep fractal zoom bottoms out at ~16 bits of magnification**, where the step becomes a pixel.
+  The same class of limit Q13 has at 13 bits, and better than float32 past that point (its 23-bit
+  mantissa is shared with the integer part). Extreme zoom is a 64-bit-builtin problem, not a
+  scalar-type problem.
+
+**`float` stays out, with a clean conscience.** The whole compiled library, the particle kernel
+and escape() are integer/fixed already; math16.h supplies sin/atan/dist/sqrt; the hot path makes
+float promotion a fatal warning. The FPU story splits the boards (LX6/LX7/P4 have one, the RISC-V
+line does not), so JIT float either runs wildly differently per board or softfloats, against the
+one-language-four-ISAs-identical rule. Fixed-point is bit-identical everywhere, which is also what
+makes an effect reproducible. If the MoonLight corpus (written with floats) ever forces the issue,
+the answer is compile-time float-literal-to-fixed translation, not runtime float.
+
+**Per-type notes:**
+- `bool[]` ships byte-backed first (elements are 0/1 either way), and the 8-per-byte packing lands
+  later as a pure memory optimization when an automaton effect pays for its read-modify-write
+  codegen. Same rule as every constant here: against a script that needs it, not on speculation.
+- `string` is a literal reference: assignable from literals, comparable, passable to a builtin,
+  one int of storage. NO concatenation, ever: runtime string building means allocation inside the
+  render loop.
+- Where arrays LIVE: small arrays stay in the arena (internal RAM); grid-sized state goes through
+  ScratchBuffer handles (item 9b's model), which prefer PSRAM and fall back to internal heap on
+  the classic ESP32, whose fixtures are small by construction. `byte[]` is what keeps a classic
+  heat map at 1x rather than 4x.
+
+**Migration**: 26 shipped scripts spell C widths (`uint8_t`, `uint16_t`, `int16_t`). MoonLive is
+not launched, so this is a clean mechanical break now and a compatibility program forever after.
+That timing is a large part of why the decision was taken when it was.
+
 ## The order, and why
+
 
 Ordered by **what removing it buys**, not by implementation cost.
 
@@ -126,9 +223,18 @@ The spec asks for ≤ 6 arguments plus an optional return.
 
 Doing #1 and #2 together is what actually opens the library; either alone leaves it stranded.
 
-### 3. A bigger arena and more members — *and check the handle route first*
+### 3. A bigger arena and more members: *check the handle route first; storage rules now in the type-system design above*
 
 64 bytes across 8 members is why an effect holds four objects rather than twenty-five.
+
+**The two limits bind at very different points, and it is the COUNT that bites first.**
+`fractal.mle` wanted 4 controls plus 4 scratch members plus a loop counter: 9 members costing
+**12 of the 64 arena bytes**. It compiled once the counter was dropped (a `for` counter does not
+have to be a member), so the script lost nothing, but the ceiling it hit was `kMaxCtrls` with 81%
+of the arena still free. Any script with a handful of controls and a handful of intermediates
+meets the same wall. If only one of the two moves, the count is the one worth moving: the four
+tables it sizes are `DeclaredControl[8]` at 24 B each, so 8 -> 12 costs 96 B per engine and
+roughly 600 B per device across three engines, against `sizeof(MoonLive)` at 864 B today.
 
 **But check the handle route first.** The power-functions spec's item 5 — a particle pool as an
 arena-allocated HANDLE — means a simulation effect stops storing its own particle state entirely,
@@ -180,6 +286,26 @@ first, and the difference is the useful part.
 |---|---|---|
 | balls | four small discs, ~500 lit pixels | **1278 us** |
 | octopus | every pixel, every frame | **21762 us** |
+
+A third port (`metal.mle`, an SDF shader) put a number on the most expensive builtin, measured on
+shiffy's 80x48:
+
+| variant | tick | vs plasma |
+|---|---|---|
+| plasma (9 calls/px, no sqrt) | **16031 us** | baseline |
+| metal, 2 `polarR`, no `uv` | **32843 us** | 2.0x |
+| metal, 2 blobs + `uv` | **46221 us** | 2.9x |
+| metal, 3 blobs + `uv` | **59600 us** | 3.7x |
+
+**`polarR` costs ~13400 us per call site per frame at 3840 pixels: about 3.5 us per pixel, one
+builtin.** It wraps `dist16`, a real square root, and `draw.h` already measures a sqrt-based SDF at
+~108 cycles/px against ~14 for the squared form. A squared-distance builtin (`polarRSq`, or letting
+a script compare against `r * r` as `ripples.mle` does) is the cheap fix, and it is the same trick
+the compiled effects already use.
+
+Also measured and **disproved**: hoisting the four loop-invariant `beatsin` calls out of the inner
+loop into members moved 59600 to 58459 us. Call overhead per se is NOT the cost here: the square
+roots are. Worth recording because it contradicts the natural first guess.
 
 That is ~5.3 us per pixel, and it is not the arithmetic — it is **~32,000 host calls per frame**.
 Each `polarA`/`polarR`/`sin`/`scale`/`beat` is a real call through the builtin ABI, and a
@@ -237,7 +363,7 @@ Worth noting the ordering: this only pays off with the multi-value call ABI from
 makes that ABI worth having beyond colour — a `Coord3D` in and a `CRGB` out is the shape most of
 the power-functions surface wants.
 
-### 5. Fractional arithmetic — *expensive, and the real unlock*
+### 5. Fractional arithmetic: *superseded by `fixed` in the type-system design above*
 
 Every remaining visual compromise traces back to this: smooth motion, real velocities, a bounce
 that conserves speed, and any falloff term that makes a shape look round rather than flat. Without
@@ -254,18 +380,44 @@ Two routes, and the choice matters more than the schedule:
 Fixed-point first is the pragmatic order: most of the quality at a fraction of the cost, and it
 does not foreclose float.
 
+**Settled** by the type-system design above: `fixed` is Q16.16 on a uniform int slot, float
+stays out, and the range analysis lives there.
+
 ### 6. Function arguments — *moderate, removes a real footgun*
 
 `draw(i)` instead of setting a member the helper reads. The current shape is not just verbose:
 caller and callee agree by convention and nothing checks it, so a helper called from two places
 with different state silently does the wrong thing. It is also what makes helpers composable.
 
-### 7. Signed values — *moderate, and it removes a whole class of workaround*
+### 7. Signed values: ✅ *shipped*
 
-Unsigned-only forces a sign bit alongside every value that can go negative — a velocity, a delta,
-an offset from a centre. It also makes ordinary expressions dangerous: `a - b` wraps instead of
-going negative, so scripts guard every subtraction. Comes naturally with fixed-point (#3) if that
-type is signed, which argues for doing them together.
+`int16_t` members, signed comparison, signed `/` and `%`, and `uvX`/`uvY` returning a signed
+coordinate with no bias to subtract.
+
+**The framing this item had was wrong about the cause, which is worth recording.** It described the
+problem as `a - b` wrapping, and prescribed signed comparison. Writing a Mandelbrot effect produced
+four bugs in one session and **not one of them was a comparison bug**: no `<` or `>` ever produced a
+wrong picture. Three were the *biased-unsigned* convention, where a builtin returned a value centered
+on 32768 and the author had to subtract that bias, which is exactly the subtraction unsigned
+arithmetic breaks. The fourth was a byte argument truncating instead of saturating. Every one
+presented as "the effect renders nothing", never as an error.
+
+So what shipped is smaller than "make the language signed" and removes more than it adds:
+
+- `signedArg`'s undocumented **16-bit window** is gone. It was the inverse of `uint16_t` member
+  truncation, written down in neither place, and it is what made `d = 60000` read as -5536.
+- The **bias on `uvX`/`uvY`** is gone: a coordinate has an origin, so the center is 0.
+- `sin`/`cos` **keep** their bias, deliberately. A wave has no origin, and `scale(sin(a), n)`
+  sweeping a full axis is the idiom 14 shipped call sites use. A script wanting a signed wave
+  writes `sin(a) - 32768`, which works now.
+- **Comparison** is a separate `BranchGeS` op, not a change to `BranchGe`: the array-index clamp
+  and the loop guards need unsigned, and a negative index arriving as a huge value is what lets one
+  branch catch both ends of a range.
+- **`int8_t` is deliberately absent.** Xtensa has no signed byte load, so it would need a
+  sign-extend sequence the other three ISAs do not, for a width no script has asked for.
+
+`escape()` stays a builtin regardless: its Q13 squaring needs 64-bit intermediates, which a 32-bit
+script value cannot express however signed it is.
 
 ### 8. More branch labels — *probably a constant, worth measuring first*
 
@@ -273,11 +425,40 @@ type is signed, which argues for doing them together.
 compile-time table space and nothing at run time. Measure what a realistic effect needs before
 picking a number — the balls port wanted ~12 and had to be folded down.
 
-### 9. Division — *narrow, but some maths needs it*
+### 9. Division: ✅ *shipped*
 
-`mod` and `scale` cover the cyclic cases, so this is mainly for ratios and falloff. Note that no
-ISA here has a cheap integer divide, so it lowers to a host call the way `mod` already does: fine
-on a cold path, questionable per-pixel. Worth documenting that cost at the call site.
+`/` and `%` are operators, at multiplication's precedence. Both lower to a host call the way `mod`
+already did, so the operator costs nothing the capability did not already cost: the divide itself
+is the expense, and it is a host call wherever it appears: fine on a cold path, deliberate
+per-pixel. The parser resolves both through the builtin table (`div`, `mod`) rather than knowing
+either by name, so core stays domain-neutral and a domain that registers neither simply has no
+operator. `mod(a, b)` stays registered: it is the name the cyclic case reads best under.
+
+### 9b. A ScratchBuffer pool handle, ✅ *shipped for particles*
+
+A script sizes its own particle pool with `pool(n)` from `defineControls()`, and the buffers live in
+`MoonLiveParticles` (six `ScratchBuffer`s the binding owns) rather than in the 64-byte arena, which
+would have held about five particles. Sizing is reachable ONLY from that one moment: the sizing sink
+is installed around the `defineControls` run, so `pool()` from `tick()` is a no-op reporting the live
+count and no allocation ever reaches the render path.
+
+Nine builtins, all whole-pool passes: `pool`, `emit`, `gravity`, `drag`, `step`, `age`, `render`,
+`bounce` and `collide`. The last two shipped after measurement: collide is an N-body check (3.2 us
+at 48 particles against 0.1 us without, 53.6 us at 200), so the quadratic is real but the absolute
+cost at ball-pit sizes is not, and the numbers ride the builtin so an author knows what a big pool
+would cost.
+The cost model is the point. `fountain.mle` measures **9 us** on a 128x96 desktop grid against
+`metal.mle`'s **1557 us** on the same grid: the first script vocabulary whose cost scales with the
+OBJECTS rather than with the grid.
+
+**Structs were NOT needed, and that is a finding rather than a deferral.** Every pool operation is
+whole-pool or takes plain scalars, so a script never names a particle field. #10 below is about
+`ball[i].x` INSTEAD of parallel arrays, which a pool removes the need for; #4b is `Coord3D`/`CRGB`
+for per-pixel shader signatures, whose real prerequisite is #2.
+
+Not exposed, each with a reason: `spray`
+(`emit` with a wide cone is one), `spawn` (per-particle in a whole-pool API), `force`/`forceSmall`
+(needs the `acc` buffer for wind nothing needs yet), `attract`, `wrap`, `liveCount`, `clear`.
 
 ### 10. Structs — *readability, once the arena is bigger*
 

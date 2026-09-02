@@ -17,6 +17,12 @@ void MoonLive::freeCode() {
     fn_ = nullptr;
     anim_ = nullptr;
     ctrl_ = nullptr;
+    // Likewise the error position. Only a PARSE failure has one, and it is set by the caller right
+    // after this returns; the later failures (no control memory, codegen refused) have no offset of
+    // their own, and without this they would report the position of whatever failed last. An editor
+    // would then mark a line that has nothing to do with the error on screen.
+    errorPos_ = 0;
+    hasErrorPos_ = false;
     // The entry table describes code that no longer exists. Left behind, entry() would hand a
     // binding an address into a freed block: the same stale-state trap the control arena has.
     entryCount_ = 0;
@@ -50,6 +56,7 @@ void* MoonLive::place(const uint8_t* staged, size_t len) {
     codeCap_ = cap;
     codeLen_ = len;
     error_ = "";
+    errorPos_ = 0;
     return block;
 }
 
@@ -99,7 +106,18 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysV
     // through that name, so a broken script silently unbound the user's own sliders.
     CompileResult cr = compileSource(source, table, sysvars, staging.p, staging.n,
                                      nullptr, nullptr, strings_, CompileResult::kStringPool);
-    if (!cr.ok) { freeCode(); error_ = cr.error; return false; }   // surface the parse diagnostic
+    // The diagnostic AND where it happened: an editor can only mark the line if it is told one,
+    // and the parser has already computed the offset (Parser::fail records lex.col()).
+    // errorCol is ONE-based (Lexer::col() adds 1), and every consumer counts from zero: the editor
+    // slices the source up to this offset to find the line. Converted here, at the boundary between
+    // the compiler's convention and everyone else's, rather than in each reader.
+    if (!cr.ok) {
+        freeCode();
+        error_ = cr.error;
+        errorPos_ = cr.errorCol > 0 ? static_cast<uint16_t>(cr.errorCol - 1) : 0;
+        hasErrorPos_ = true;
+        return false;
+    }
     // Allocate the control arena (fixed address) and seed new slots, BEFORE publishing the control
     // set — ensureArena reads the previous controlCount_ to know which slots are new.
     // Seeded from the MEMBERS, not the controls: a member the UI never shows still has an
@@ -117,7 +135,9 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysV
         const uint8_t n = cr.entries[i].nameLen < kMaxEntryName ? cr.entries[i].nameLen : kMaxEntryName;
         for (uint8_t j = 0; j < n; j++) entryNames_[i][j] = cr.entries[i].name[j];
         entryNames_[i][n] = '\0';
-        entries_[i] = {entryNames_[i], n, cr.entries[i].offset};
+        // The DECLARED return type travels with the entry: without it every function reads as
+        // Void here and runValue refuses to answer for any of them.
+        entries_[i] = {entryNames_[i], n, cr.entries[i].offset, cr.entries[i].ret};
     }
     stringLen_ = cr.stringLen;
     ctrl_ = reinterpret_cast<CtrlFn>(block);
@@ -168,16 +188,22 @@ bool MoonLive::ensureArena(const DeclaredControl* decls, uint8_t count) {
                           prev->name[n] == '\0' &&
                           prev->type == decls[i].type && prev->count == decls[i].count;
         if (!same) {
-            // Seed the member's WHOLE extent: every element, at its width, little-endian to match
-            // every backend's halfword load. Writing only the first element left an ARRAY holding
+            // Seed the member's WHOLE extent: every element, at its width, little-endian to
+            // match every backend's load. Writing only the first element left an ARRAY holding
             // the previous program's bytes from element 1 on, which is what "an array starts at
-            // zero" has to mean; writing only the low byte left a uint16_t's high half stale.
-            const uint8_t w = ctrlWidth(decls[i].type);
+            // zero" has to mean; writing only the low byte left the rest of a wider member stale,
+            // which turned `int neg = -100;` into 156 (the sign bytes never reached the slot).
+            //
+            // A SCALAR is one 4-byte slot; an ARRAY packs at its element width. Both spelled here
+            // as "write w bytes per element", so the two cases are one loop rather than two.
+            const uint8_t w = decls[i].count > 1 ? ctrlWidth(decls[i].type)
+                                                 : ctrlSlotBytes(decls[i].type);
+            const uint32_t v = static_cast<uint32_t>(decls[i].def);
             for (uint16_t e = 0; e < decls[i].count; e++) {
                 const uint16_t at = uint16_t(off + e * w);
                 if (at + w > kCtrlBytes) break;                 // the parser bounds it; belt and braces
-                ctrlArena_[at] = static_cast<uint8_t>(decls[i].def & 0xff);
-                if (w == 2) ctrlArena_[at + 1] = static_cast<uint8_t>(decls[i].def >> 8);
+                for (uint8_t b = 0; b < w; b++)
+                    ctrlArena_[at + b] = static_cast<uint8_t>((v >> (8 * b)) & 0xff);
             }
         }
         if (kept < kMaxCtrls) {

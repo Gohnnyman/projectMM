@@ -1,0 +1,157 @@
+// @module MoonLive
+// @also MoonLiveLayout, MoonLiveEffect, MoonLiveModifier
+
+// Which FILE a script name means.
+//
+// A device keeps factory scripts in `/.moonlive`, downloaded by the UI from the shipped catalog,
+// and the user's own in `/moonlive`. A name can therefore exist in one, the other, or both, and
+// which one wins is what makes editing a factory script a fork rather than a change to it: the
+// user's copy shadows the factory one, and deleting that copy restores the original without
+// needing a network.
+//
+// These pin the three cases plus the one that used to be a bug waiting to happen: both readers
+// (the compiler and the change-detector) must resolve to the SAME file, or a fork would be
+// compiled from one and hashed from the other and recompile on every prepare sweep forever.
+
+#include "doctest.h"
+#include "light/moonlive/MoonLiveScriptFile.h"
+#include "platform/platform.h"
+
+#include <cstdio>
+#include <filesystem>
+#include <system_error>
+#include <cstring>
+#include <string>
+#include <vector>
+
+using namespace mm;
+
+namespace {
+
+/// Write `text` to `dir/name`, and remember it so the test can take it away again.
+void put(const char* dir, const char* name, const char* text) {
+    char path[96];
+    std::snprintf(path, sizeof(path), "%s/%s", dir, name);
+    platform::fsMkdir(dir);
+    REQUIRE(platform::fsWriteAtomic(path, text, std::strlen(text)));
+}
+
+void drop(const char* dir, const char* name) {
+    char path[96];
+    std::snprintf(path, sizeof(path), "%s/%s", dir, name);
+    platform::fsRemove(path);
+}
+
+/// A script that compiles and is trivially told apart from another by its control name, so a test
+/// can prove WHICH file was read rather than merely that something was.
+std::string scriptWith(const char* controlName) {
+    return std::string("class R { byte v = 1; void defineControls() { addControl(\"") + controlName +
+           "\", v, 0, 9); } void tick() { fill(0, 0, 0); } }";
+}
+
+/// An ISOLATED filesystem for one test: its own temp root, torn down after.
+///
+/// The same pattern unit_FileManagerModule uses, and for the reason it records: without a root of
+/// its own a test writes into whatever the process is pointed at, which under a developer's build
+/// is the real device directory. These tests create scripts named for what they check, so they were
+/// leaving files in the user's own `/moonlive` and reading whatever happened to be there.
+struct Rig {
+    char root[256];
+    Rig() {
+        static unsigned counter = 0;
+        std::snprintf(root, sizeof(root), "%s/mm_resolve_test_%u",
+                      std::filesystem::temp_directory_path().string().c_str(), counter++);
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+        std::filesystem::create_directories(root, ec);
+        platform::fsSetRoot(root);
+        platform::fsMount();
+    }
+    // Restore the default root so a later test in the same binary starts from the baseline it
+    // expects. noexcept and error_code-only: this runs while the stack unwinds from a failed CHECK,
+    // and a throw there would terminate the process and lose the failure being reported.
+    ~Rig() noexcept {
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+        platform::fsSetRoot("");
+    }
+};
+
+}  // namespace
+
+// The ordinary case for a script nobody has edited: it lives only in the factory directory, and
+// naming it is enough. Without the fallback every downloaded script would report "script not found".
+TEST_CASE("a factory script resolves when the user has no copy of it") {
+    const char* name = "resolve-factory.mle";
+    Rig rig;
+    put(moonlive::kFactoryScriptDir, name, scriptWith("factory").c_str());
+
+    char path[96];
+    REQUIRE(moonlive::resolveScript(name, path, sizeof(path)));
+    CHECK(std::string(path) == std::string(moonlive::kFactoryScriptDir) + "/" + name);
+}
+
+// THE fork rule. The editor only ever saves to the user directory, so a copy there is the user's
+// edit of a factory script, and it has to win or an edit would appear to do nothing.
+TEST_CASE("a user's copy shadows the factory script of the same name") {
+    const char* name = "resolve-both.mle";
+    Rig rig;
+    put(moonlive::kFactoryScriptDir, name, scriptWith("factory").c_str());
+    put(moonlive::kScriptDir, name, scriptWith("mine").c_str());
+
+    char path[96];
+    REQUIRE(moonlive::resolveScript(name, path, sizeof(path)));
+    CHECK(std::string(path) == std::string(moonlive::kScriptDir) + "/" + name);
+}
+
+// Un-editing, and the reason the two directories exist at all: deleting the fork restores the
+// factory script with no network, where a single directory would need it downloaded again.
+TEST_CASE("deleting a user's copy restores the factory script") {
+    const char* name = "resolve-revert.mle";
+    Rig rig;
+    put(moonlive::kFactoryScriptDir, name, scriptWith("factory").c_str());
+    put(moonlive::kScriptDir, name, scriptWith("mine").c_str());
+
+    char path[96];
+    REQUIRE(moonlive::resolveScript(name, path, sizeof(path)));
+    REQUIRE(std::string(path) == std::string(moonlive::kScriptDir) + "/" + name);
+
+    drop(moonlive::kScriptDir, name);
+
+    REQUIRE(moonlive::resolveScript(name, path, sizeof(path)));
+    CHECK(std::string(path) == std::string(moonlive::kFactoryScriptDir) + "/" + name);
+}
+
+// A name in neither directory is not found, and the path it reports is the USER one: a message
+// naming a place a user would not write to sends them looking in the wrong folder.
+TEST_CASE("a script in neither directory is not found") {
+    const char* name = "resolve-absent.mle";
+    Rig rig;
+
+    char path[96];
+    CHECK_FALSE(moonlive::resolveScript(name, path, sizeof(path)));
+    CHECK(std::string(path) == std::string(moonlive::kScriptDir) + "/" + name);
+}
+
+// The two readers must agree. compileScriptFile reads the text and scriptFileHash answers "has it
+// changed since I compiled it": resolve them differently and a fork compiles from one file while
+// its hash comes from the other, so it looks changed on every prepare sweep and recompiles forever.
+TEST_CASE("the compiler and the change-detector read the same file") {
+    const char* name = "resolve-agree.mle";
+    Rig rig;
+    const std::string factory = scriptWith("factory");
+    const std::string mine    = scriptWith("mine");
+    put(moonlive::kFactoryScriptDir, name, factory.c_str());
+    put(moonlive::kScriptDir, name, mine.c_str());
+
+    uint32_t hash = 0;
+    REQUIRE(moonlive::scriptFileHash(name, hash));
+    // The hash of the USER's text, not the factory one, since that is the file that will compile.
+    CHECK(hash == moonlive::scriptHash(mine.c_str(), mine.size()));
+    CHECK(hash != moonlive::scriptHash(factory.c_str(), factory.size()));
+
+    // And once the fork is gone, both follow to the factory copy together.
+    drop(moonlive::kScriptDir, name);
+    REQUIRE(moonlive::scriptFileHash(name, hash));
+    CHECK(hash == moonlive::scriptHash(factory.c_str(), factory.size()));
+}

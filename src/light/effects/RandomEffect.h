@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/effects/EffectBase.h"
+#include "light/particles.h"   // particles::FrameTime, the shared elapsed-to-scale conversion
 
 namespace mm {
 
@@ -19,7 +20,7 @@ namespace mm {
 /// Effect that fills the layer with animated random colors.
 class RandomEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫"; }  // MoonLight origin
+    const char* tags() const override { return "💫✨"; }  // MoonLight origin
     // D3: the single lit light is picked by flat index over the entire volume, so this effect
     // writes into any z slice — it iterates (addresses) every axis the layer has.
     Dim dimensions() const override { return Dim::D3; }
@@ -27,7 +28,7 @@ public:
     uint8_t fade = 70;  // per-frame fadeToBlackBy amount (0..255)
 
     void defineControls() override {
-        controls_.addUint8("fade", fade, 0, 255);
+        controls_.addControl("fade", fade, 0, 255);
     }
 
     void tick() MM_NONBLOCKING override {
@@ -38,23 +39,35 @@ public:
         // Dim the whole buffer (source: layer->fadeToBlackBy(fade)).
         layer()->fadeToBlackBy(fade);
 
-        // Light one random light to a random palette color (source:
-        // setRGB(random16(nrOfLights), ColorFromPalette(pal, random8()))). The index is a flat
-        // light index — the engine's native light ordering — so the write goes straight into the
-        // buffer at that light, the direct equivalent of MoonLight's index-based setRGB. (There is
-        // no flat-index draw primitive; draw::pixel takes a coordinate, hence the byte write here.)
-        const nrOfLightsType idx = static_cast<nrOfLightsType>(rng_.next16() % n);
-        const RGB c = colorFromPalette(*Palettes::active(), rng_.next8());
+        // Light one random light per REFERENCE FRAME, not per render. The source lights one per
+        // frame, which makes the sparkle rate a property of the hardware: the same effect is a
+        // gentle twinkle at 60 fps and a solid wash at 1200. Carrying the fraction spends whole
+        // lights as time earns them, so the rate is the same on any device and a faster one simply
+        // places them more evenly. See architecture.md, the tick-rate rule.
+        spawnCarry_ += time_.advance(elapsed());
+        uint32_t due = spawnCarry_ / particles::FrameTime::kOne;
+        if (due > 64) due = 64;                     // a long stall tops up, it does not fill the grid
+        spawnCarry_ -= due * particles::FrameTime::kOne;
 
-        const size_t off = static_cast<size_t>(idx) * cpl;
-        if (off + (cpl < 3 ? cpl : 3) > cv.bytes) return;
         uint8_t* d = cv.data;
-        d[off + 0] = c.r;
-        if (cpl >= 2) d[off + 1] = c.g;
-        if (cpl >= 3) d[off + 2] = c.b;
+        for (uint32_t k = 0; k < due; k++) {
+            // The index is a flat light index (the engine's native light ordering) so the write
+            // goes straight into the buffer at that light, the direct equivalent of MoonLight's
+            // index-based setRGB. (There is no flat-index draw primitive; draw::pixel takes a
+            // coordinate, hence the byte write here.)
+            const nrOfLightsType idx = static_cast<nrOfLightsType>(rng_.next16() % n);
+            const RGB c = colorFromPalette(*Palettes::active(), rng_.next8());
+            const size_t off = static_cast<size_t>(idx) * cpl;
+            if (off + (cpl < 3 ? cpl : 3) > cv.bytes) continue;
+            d[off + 0] = c.r;
+            if (cpl >= 2) d[off + 1] = c.g;
+            if (cpl >= 3) d[off + 2] = c.b;
+        }
     }
 
 private:
+    particles::FrameTime time_{60};   // spawn rate is per second, not per frame
+    uint32_t spawnCarry_ = 0;         // sub-frame lights not yet placed
     Random8 rng_;  // per-effect PRNG (deterministic, independent sequence)
 };
 

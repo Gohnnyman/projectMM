@@ -1,6 +1,6 @@
 # projectMM
 
-Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi, Windows, macOS or Linux desktop. One source tree, multiple targets.
+Drive large LED installations and DMX fixtures. One source tree drives ESP32, Teensy, Raspberry Pi, macOS, Windows and Linux.
 
 ![Web UI](docs/assets/ui/ui_theme.gif)
 
@@ -38,9 +38,11 @@ If you like projectMM, give it a ⭐️, fork it, or open an issue or pull reque
 
 🛡️ **Robust to any input**: add, delete, replace, or reconfigure any module in any order, at any grid size, and the device keeps running, degraded or idle, but never crashed. Every crash that's ever found becomes a regression test, so it stays fixed.
 
-🖥️ **One source tree, many targets**: the same code runs on ESP32, Teensy, Raspberry Pi, and macOS / Windows / Linux.
+🖥️ **One source tree, many targets**: the same code runs on ESP32 (Xtensa and RISC-V), Teensy, Raspberry Pi, and macOS / Windows / Linux. On the desktop that means **arm64 and x86-64 alike**: MoonLive's script JIT has a native backend for each, so a script compiles to real machine code on Apple Silicon, on an Intel Mac, and on a Windows or Linux PC.
 
 🎨 **Plug in, open a browser, see lights**: a live 3D preview of every effect, modifier, and layout, controllable from the same tab. The interface renders any module from its declared controls, so adding a module needs zero UI code.
+
+🌗 **MoonBase, the second boot image (4 MB boards)**: instead of spending half a small flash on a second firmware copy, a ~750 KB maintenance image sits in the factory slot and installs updates into one large app slot, one click in the UI covers the whole reboot-install-reboot cycle, and a power cut mid-update lands back in MoonBase, never in a half-written app. See [architecture.md § MoonBase](docs/architecture.md#moonbase-the-second-boot-image-4-mb-boards).
 
 ⚡ **Flash from your browser in seconds**: the web installer picks your device, flashes the matching firmware, and hands WiFi credentials to the device over USB via Improv. No serial monitor, no recompile.
 
@@ -48,9 +50,9 @@ If you like projectMM, give it a ⭐️, fork it, or open an issue or pull reque
 
 🛠️ **ESP-IDF directly, no Arduino**: the ESP32 build is pure ESP-IDF (v6.x): native LED drivers, `esp_http_server`, FreeRTOS, built with `idf.py`, not PlatformIO or the Arduino framework. See [building.md § Why not Arduino](docs/building.md#why-not-arduino).
 
-📦 **No third-party libraries**: no FastLED, no ESPAsyncWebServer, no ArduinoJson. The color math, the HTTP/WebSocket server, and the control storage are all in-tree. A library, when genuinely needed, lives behind the platform boundary in `src/platform/`, never in core. The full rationale + replacements: [building.md § Third-party libraries](docs/building.md#third-party-libraries).
+📦 **No third-party libraries**: no FastLED, no ESPAsyncWebServer, no ArduinoJson. The color math, the HTTP/WebSocket server, and the control storage are all in-tree. A library, when genuinely needed, lives behind the platform boundary in `src/platform/`, never in core. The full rationale + replacements: [building.md § Third-party libraries](docs/building.md#third-party-libraries); why we take the trade at all: [Why we write our own code](docs/why-we-write-our-own.md).
 
-🔬 **Industry standards, our own code**: we study the prior art hard (friend repos, peripheral datasheets, the Art-Net / E1.31 / WS2812 standards), carry its *ideas* forward, and credit it by name; but we write our own code rather than copying theirs or tracing their structure. Each feature is spec'd from the primary source, its behaviour pinned with unit + scenario tests, then written fresh against our own architecture, so the result is independent by construction, not a renamed fork. Textbook algorithm, textbook name, our implementation. The method: [CLAUDE.md § Principles](CLAUDE.md#principles).
+🔬 **Industry standards, our own code**: we study the prior art hard (friend repos, peripheral datasheets, the Art-Net / E1.31 / WS2812 standards), carry its *ideas* forward, and credit it by name; but we write our own code rather than copying theirs or tracing their structure. Each feature is spec'd from the primary source, its behavior pinned with unit + scenario tests, then written fresh against our own architecture, so the result is independent by construction, not a renamed fork. Textbook algorithm, textbook name, our implementation. The method: [CLAUDE.md § Principles](CLAUDE.md#principles); how we tell good theft from bad: [Why we write our own code](docs/why-we-write-our-own.md#good-theft-and-bad-theft).
 
 🧱 **One module model**: every effect, modifier, layout, and driver is a `MoonModule`: one base class, a uniform lifecycle, declared controls. That uniformity is why the UI renders any module with zero per-module code, and why a new capability is a new file, not a new framework. See [architecture.md § MoonModules](docs/architecture.md#moonmodules).
 
@@ -96,14 +98,18 @@ The numbers above are observations. The **contracts** projectMM commits to, what
 
 ![Installer](docs/assets/ui/installer.png)
 
-**Desktop: download and run.** Grab the build for your OS from the [releases page](https://github.com/MoonModules/projectMM/releases):
+**Desktop: download and run.** Grab the build for your OS from the [releases page](https://github.com/MoonModules/projectMM/releases). Step-by-step with screenshots for Windows: [Installing projectMM on a desktop](docs/tutorials/installing-to-desktop.md).
 
-- **macOS arm64:** `projectMM-macos-arm64-vX.Y.Z.tar.gz`: unpack, run `./projectMM`. The binary is unsigned, so Gatekeeper prompts on first run; right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`.
-- **Windows x64:** `projectMM-windows-x64-vX.Y.Z.zip`: unzip, double-click `projectMM.exe`. SmartScreen may warn on first run because the binary is unsigned (More info → Run anyway).
+- **macOS arm64:** `projectMM-macos-arm64-vX.Y.Z.dmg`: open it and drag projectMM to Applications, then launch it like any app. A Terminal window opens showing what it is doing, your browser opens the UI, and closing that window stops it. (`projectMM-macos-arm64-vX.Y.Z.tar.gz` is the same binary without the wrapper, for scripting.) x86-64 macOS is supported and tested, but only the arm64 build is packaged: build from source for an Intel Mac. The binary is ad-hoc signed rather than notarized, so Gatekeeper says it cannot verify the developer; right-click → Open and confirm, or clear the flag with `xattr -dr com.apple.quarantine ./projectMM`.
+- **Windows x64:** `projectMM-windows-x64-vX.Y.Z-setup.exe`: run it and projectMM installs for your user (no admin prompt) with a Start-menu entry and an uninstaller. `projectMM-windows-x64-vX.Y.Z.zip` is the same binary to unzip and run from anywhere, and it carries `Install-projectMM.cmd` if you would rather install it from a script you can read (or if Defender blocks the setup download, which it occasionally does to an unsigned build). Neither is code-signed, so SmartScreen asks you to confirm once: your browser flags the download ("isn't commonly downloaded"), and keeping it there is the trust decision. Walkthrough with screenshots: [Installing projectMM on a desktop](docs/tutorials/installing-to-desktop.md).
+- **Linux x64:** `projectMM-linux-x64-vX.Y.Z.tar.gz`, or `projectmm_X.Y.Z_amd64.deb` on Debian, Ubuntu and Raspberry Pi OS (`sudo apt install ./projectmm_X.Y.Z_amd64.deb` puts it on your PATH).
 
-Then open `http://localhost:8080/`.
+Then open `http://localhost:8080/`. It opens by itself on start; pass `--no-browser` to suppress
+that (a headless server, or a service manager), and `--port <n>` to serve somewhere else.
 
-Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, send it to Art-Net, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source (see [building.md](docs/building.md)), though currently only the macOS, Windows, and ESP32 binaries ship as releases.
+**Your settings live with your user, not beside the executable**, so they survive moving the app, reinstalling, and upgrading: `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, and `$XDG_DATA_HOME/projectMM` on Linux, falling back to `~/.local/share/projectMM` when that is unset. An uninstall leaves them in place; delete that folder to start clean. Set `MM_DATA_DIR` to put them somewhere else. Running from a source checkout keeps using `build/fs/` instead (config under `build/fs/.config/`), so a development tree stays self-contained.
+
+Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, send it to Art-Net, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source (see [building.md](docs/building.md)), though currently only the macOS, Windows, Linux and ESP32 binaries ship as releases.
 
 ### From source
 
@@ -165,13 +171,15 @@ We built, maintained, and contributed to these projects, so projectMM is grounde
 Specific people whose work directly shaped parts of projectMM. We study their thinking with respect and write our own code against our architecture rather than tracing theirs. These credits name the prior art behind a feature:
 
 - **[WLED](https://github.com/wled/WLED) and [WLED-MM](https://github.com/MoonModules/WLED)**: projectMM is born out of WLED, and takes the usermod idea to a new level. Here *everything* is a mod (a MoonModule): effects, drivers, networking, the file system, the system manager. It also integrates tightly with WLED: a projectMM device can act as a WLED device, and it talks to WLED devices (audio sync, discovery, and more).
-- **Frank ([softhack007](https://github.com/softhack007))**: main author of the WLED-MM audio-reactive usermod, the most-used open-source audio-reactive LED implementation. The ideas behind [AudioService](docs/moonmodules/core/moxygen/AudioService.md) (including the adaptive noise-gate concept, analysed with his permission) descend from years of collaboration on WLED-SR / WLED-MM.
+- **Frank ([softhack007](https://github.com/softhack007))**: main author of the WLED-MM audio-reactive usermod, the most-used open-source audio-reactive LED implementation. The ideas behind [AudioService](docs/moonmodules/core/moxygen/AudioService.md) (including the adaptive noise-gate concept, analyzed with his permission) descend from years of collaboration on WLED-SR / WLED-MM. He also inspired the [Flying Toasters](docs/moonmodules/light/effects.md#flyingtoasters) effect and the sprite support behind it.
 - **[troyhacks](https://github.com/troyhacks/WLED)**: reworked the WLED-MM audio-reactive DSP to run on Espressif's [esp-dsp](https://github.com/espressif/esp-dsp) FFT (a low-latency, "stupid fast" alternative to ArduinoFFT); the same esp-dsp FFT choice [AudioService](docs/moonmodules/core/moxygen/AudioService.md) makes. See its Prior art notes.
 - **[hpwit](https://github.com/hpwit) (Yves Bazin)**: the clockless I2S / RMT / Parlio LED-driver techniques and the [ESPLiveScript](https://github.com/hpwit/ESPLiveScript) live-script engine behind the LED drivers and MoonLive.
 - **Christophe Gagnier ([@Moustachauve](https://github.com/Moustachauve))**: author of the native [WLED-Android](https://github.com/Moustachauve/WLED-Android) and [WLED-iOS](https://github.com/Moustachauve/WLED-iOS) apps. Their source let us reverse-engineer exactly what those apps read, so projectMM devices appear in (and are controllable from) the native WLED apps.
 - **The [Improv Wi-Fi](https://github.com/improv-wifi) project**: the open Improv serial provisioning standard ([sdk-cpp](https://github.com/improv-wifi/sdk-cpp) / [sdk-js](https://github.com/improv-wifi/sdk-js)) that the projectMM web installer uses to provision a freshly-flashed device over USB.
 - **[FastLED](https://github.com/FastLED/FastLED)**: the canonical LED-effects library whose conventions the LED-effect world shares. projectMM links no part of FastLED, but it carries forward FastLED's recognisable *names and models* for the color/animation primitives (`scale8`, `sin8`, the gradient-palette model (`CRGBPalette16` / `colorFromPalette`), the `beatsin8` / `inoise8` / `qadd8` family), so a contributor recognises them on sight. The implementations are projectMM's own, integer-only and hot-path-tuned for our render loop; FastLED is the prior art behind the convention, credited here and in each primitive's notes.
 - **[FPP](https://github.com/FalconChristmas/fpp) (Falcon Player)**: the show player that drives LED panel receiver cards from a Raspberry Pi. Seeing an FPP rig feed a wall of HUB75 panels is what prompted [PanelCardDriver](docs/moonmodules/light/drivers.md#panelcard): if a Linux host can send those frames, so can a board that is already rendering them, which removes the host from the installation entirely. FPP is the inspiration, and the reference point for what good looks like here: it sustains 50 fps.
+- **[Tasmota](https://github.com/arendst/Tasmota) and Mathieu Carbou's [MycilaSafeBoot](https://github.com/mathieucarbou/MycilaSafeBoot)**: the safeboot pattern behind [MoonBase](docs/architecture.md#moonbase-the-second-boot-image-4-mb-boards): replacing a small board's second OTA slot with a minimal boot image that installs into one large app slot. Tasmota proved the scheme at scale; MycilaSafeBoot distilled it to a standalone image and set the size bar. MoonBase is our from-scratch minimal take, written directly against ESP-IDF.
+- **Damian Schneider ([dedehai](https://github.com/DedeHai))**: author of the WLED Particle System, whose emitters, forces and walls over one shared pool are the shape our [particle kernel](docs/moonmodules/light/power-functions.md#particles) and the scripted `pool` / `emit` / `step` builtins follow, in our own fixed-point implementation.
 - **wladi ([myhome-control](https://shop.myhome-control.de))**: designer of the [MHC-WLED ESP32-P4 shield](https://shop.myhome-control.de/en/ABC-WLED-ESP32-P4-shield/HW10027), and the source of the hardware and the pinout details that got its **line-in audio** working in [AudioService](docs/moonmodules/core/moxygen/AudioService.md): the onboard PCM1808 I2S ADC (WS 26 / SD 33 / SCK 32 / MCLK 36), the PCM1808's stereo wiring, and its `FMT` format-select jumper (open = I2S/Philips, our default; tie to 3V3 for left-justified), which is what confirmed the standard-I2S path the ADC needs.
 
 ## Contributing

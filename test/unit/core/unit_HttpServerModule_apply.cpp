@@ -8,6 +8,7 @@
 #include "core/JsonSink.h"
 
 #include <cstring>
+#include <string>    // std::string: named explicitly, GCC does not pull it in transitively
 
 // Pins the transport-free apply-core that HttpServerModule exposes — applyAddModule
 // / applySetControl / applyClearChildren / applyOp. These are the operations the
@@ -27,13 +28,19 @@ struct Knob : public mm::MoonModule {
     uint8_t value = 10;
     bool showExtra = false;   // toggling this ADDS/REMOVES a control → a real schema change
     void defineControls() override {
-        controls_.addUint8("value", value, 0, 100);
-        if (showExtra) controls_.addUint8("extra", value, 0, 100);
+        controls_.addControl("value", value, 0, 100);
+        if (showExtra) controls_.addControl("extra", value, 0, 100);
     }
 };
+// A container. Declares the roles it takes, because applyAddModule now enforces that declaration:
+// the rule used to live only in the UI's picker, so the API would happily nest an effect inside a
+// layout, which ticks in the wrong pass and renders its controls on the wrong card.
 struct Box : public mm::MoonModule {
-    // accepts any child (the HTTP role gate lives above the apply-core).
+    const char* acceptsChildRoles() const override { return "generic,effect"; }
 };
+
+// A container that takes NOTHING, so a test can assert the refusal rather than only the accept.
+struct Leaf : public mm::MoonModule {};
 
 // A leaf with a VALIDATED Text control — mirrors SystemModule.deviceModel: the printable-
 // ASCII rule is a per-control validator, so a bad value is rejected on EVERY write path
@@ -61,8 +68,8 @@ struct FakeDrivers : public mm::MoonModule {
     bool on = true;
     uint8_t brightness = 20;
     void defineControls() override {
-        controls_.addBool("on", on);
-        controls_.addUint8("brightness", brightness, 0, 255);
+        controls_.addControl("on", on);
+        controls_.addControl("brightness", brightness, 0, 255);
     }
 };
 
@@ -74,6 +81,7 @@ void registerTestTypes() {
     if (done) return;
     mm::ModuleFactory::registerType<Knob>("Knob");
     mm::ModuleFactory::registerType<Box>("Box");
+    mm::ModuleFactory::registerType<Leaf>("Leaf");
     mm::ModuleFactory::registerType<Tag>("Tag");
     mm::ModuleFactory::registerType<FakeDrivers>("Drivers");
     done = true;
@@ -90,6 +98,36 @@ mm::MoonModule* childNamed(mm::MoonModule* parent, const char* name) {
 }
 
 } // namespace
+
+// A parent's declared child roles are a RULE the device enforces, not advice to the UI. The picker
+// filters by the same declaration, so a user never sees a bad pairing, but the API is reachable
+// without it: an effect nested inside a layout ticks in the wrong pass, and because the UI resolves
+// a card by module name it renders its controls onto the parent's card.
+TEST_CASE("apply-core: a parent refuses a child whose role it does not accept") {
+    registerTestTypes();
+    mm::Scheduler sched;
+    mm::HttpServerModule http;
+    auto* root = new Box();
+    root->setName("Root");
+    sched.addModule(root);
+    http.setScheduler(&sched);
+    sched.setup();
+
+    using OpResult = mm::HttpServerModule::OpResult;
+
+    // Box accepts "generic,effect": a generic Knob is fine.
+    CHECK(http.applyAddModule("Knob", "K", "Root") == OpResult::Ok);
+    CHECK(root->childCount() == 1);
+
+    // Leaf accepts nothing, so nothing may be added under it, whatever its role.
+    CHECK(http.applyAddModule("Leaf", "L", "Root") == OpResult::Ok);
+    CHECK(http.applyAddModule("Knob", "K2", "L") == OpResult::BadRequest);
+    auto* leaf = childNamed(root, "L");
+    REQUIRE(leaf != nullptr);
+    CHECK(leaf->childCount() == 0);   // refused, and nothing leaked into the tree
+
+    sched.release();
+}
 
 TEST_CASE("apply-core: applyAddModule adds a child, idempotent on the id") {
     registerTestTypes();
@@ -551,10 +589,110 @@ TEST_CASE("a burst of file writes costs one re-derive, not one per file") {
     CHECK(root->prepared == before + 1);
 }
 
+TEST_CASE("a replaced module is named by the caller, then by its old custom name, then by its type") {
+    using H = mm::HttpServerModule;
+
+    // A caller that knows what the slot now holds names it. This is what keeps a card swapped to a
+    // different MoonLive script from staying labeled after the old script: the UI asks for the new
+    // script's name, and it wins over both defaults.
+    CHECK(std::string(H::replacementName("dot", "balls", "MoonLive")) == "dot");
+    CHECK(std::string(H::replacementName("dot", "MoonLive", "MoonLive")) == "dot");
+
+    // No request: a name the user or a scenario chose survives a type swap, so the slot keeps its
+    // identity and callers can still address it.
+    CHECK(std::string(H::replacementName(nullptr, "MOD", "Multiply")) == "MOD");
+    CHECK(std::string(H::replacementName("", "MOD", "Multiply")) == "MOD");
+
+    // No request and no custom name: null means "leave it", so the fresh module keeps the default
+    // its OWN type gave it. Without this a Multiply replaced by a Checkerboard would read as a
+    // mislabeled "Multiply".
+    CHECK(H::replacementName(nullptr, "Multiply", "Multiply") == nullptr);
+    CHECK(H::replacementName("", "Multiply", "Multiply") == nullptr);
+}
+
 TEST_CASE("a file write with no scheduler is a no-op, not a crash") {
     // HttpServerModule is constructed before it is wired, and the Improv path builds one without a
     // tree at all. Degrade visibly, never crash (the robustness rule).
     mm::HttpServerModule http;
     http.applyFileChanged("/moonlive/plasma.mle");   // must simply return
     CHECK(true);
+}
+
+// The preview channel's inbound framing: masked client data frames whose payloads are handed on
+// OPAQUELY (the producer owns their meaning). The parser's job is refusal and unmasking: wrong
+// opcode, unmasked, oversized, truncated, all -1, never a read past the buffer.
+TEST_CASE("the preview uplink parser unmasks exactly one small client data frame") {
+    uint8_t out[8];
+    int used = 0;
+    // [0x82 binary][0x82 masked len2][mask 4][0x51^m0][7^m1]
+    uint8_t good[] = {0x82, 0x82, 0x11, 0x22, 0x33, 0x44, static_cast<uint8_t>(0x51 ^ 0x11),
+                      static_cast<uint8_t>(7 ^ 0x22)};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(good, sizeof(good), out, &used) == 2);
+    CHECK(used == 8);
+    CHECK(out[0] == 0x51);
+    CHECK(out[1] == 7);
+
+    // A 3-byte payload (the [0x51][stride][fps] standing request) round-trips too.
+    uint8_t req[] = {0x82, 0x83, 0x11, 0x22, 0x33, 0x44, static_cast<uint8_t>(0x51 ^ 0x11),
+                     static_cast<uint8_t>(4 ^ 0x22), static_cast<uint8_t>(24 ^ 0x33)};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(req, sizeof(req), out, &used) == 3);
+    CHECK(used == 9);
+    CHECK(out[0] == 0x51); CHECK(out[1] == 4); CHECK(out[2] == 24);
+
+    uint8_t unmasked[] = {0x82, 0x02, 0x51, 0x07};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(unmasked, sizeof(unmasked), out, &used) == -1);
+
+    uint8_t ping[] = {0x89, 0x80, 0, 0, 0, 0};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(ping, sizeof(ping), out, &used) == -1);
+
+    CHECK(mm::HttpServerModule::parsePreviewUplink(good, 5, out, &used) == -1);   // truncated
+    CHECK(used == 0);
+}
+
+// TCP coalesces: two requests sent in quick succession can land in ONE read. The parser reports
+// how many bytes a frame occupied so the caller can walk the whole buffer and deliver each
+// payload in arrival order.
+TEST_CASE("the preview uplink parser reports a frame's length so a coalesced read can be walked") {
+    uint8_t two[] = {
+        0x82, 0x82, 0x11, 0x22, 0x33, 0x44, static_cast<uint8_t>(0x51 ^ 0x11),
+        static_cast<uint8_t>(2 ^ 0x22),
+        0x82, 0x82, 0x55, 0x66, 0x77, 0x88, static_cast<uint8_t>(0x52 ^ 0x55),
+        static_cast<uint8_t>(8 ^ 0x66),
+    };
+    uint8_t out[8];
+    int used = 0;
+    CHECK(mm::HttpServerModule::parsePreviewUplink(two, sizeof(two), out, &used) == 2);
+    CHECK(used == 8);
+    CHECK(out[0] == 0x51); CHECK(out[1] == 2);
+    CHECK(mm::HttpServerModule::parsePreviewUplink(two + used, static_cast<int>(sizeof(two)) - used,
+                                                   out, &used) == 2);
+    CHECK(used == 8);
+    CHECK(out[0] == 0x52); CHECK(out[1] == 8);
+
+    // A partial tail consumes nothing, so the walk stops instead of spinning or reading past it.
+    int tail = 0;
+    CHECK(mm::HttpServerModule::parsePreviewUplink(two, 5, out, &tail) == -1);
+    CHECK(tail == 0);
+}
+
+// The request channel takes only SMALL payloads: anything using the WebSocket extended-length
+// forms (126/127) or a plain length over 8 is refused whole, consuming nothing, so a hostile or
+// confused client cannot make the walker misstep into its bytes.
+TEST_CASE("the preview uplink parser refuses oversized and extended-length frames") {
+    uint8_t out[8];
+    int used = 7;
+
+    uint8_t tooLong[6 + 9] = {0x82, static_cast<uint8_t>(0x80 | 9), 1, 2, 3, 4};
+    CHECK(mm::HttpServerModule::parsePreviewUplink(tooLong, sizeof(tooLong), out, &used) == -1);
+    CHECK(used == 0);
+
+    uint8_t ext16[64] = {0x82, static_cast<uint8_t>(0x80 | 126), 0, 20, 1, 2, 3, 4};
+    used = 7;
+    CHECK(mm::HttpServerModule::parsePreviewUplink(ext16, sizeof(ext16), out, &used) == -1);
+    CHECK(used == 0);
+
+    uint8_t ext64[64] = {0x82, static_cast<uint8_t>(0x80 | 127), 0, 0, 0, 0, 0, 0, 0, 20};
+    used = 7;
+    CHECK(mm::HttpServerModule::parsePreviewUplink(ext64, sizeof(ext64), out, &used) == -1);
+    CHECK(used == 0);
 }

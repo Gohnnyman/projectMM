@@ -11,8 +11,12 @@
 
 #include "core/math8.h"    // beatsin16 — the shared time vocabulary
 #include "core/math16.h"   // beat16 / triwave16 — full-range waveforms
+#include "light/shader.h"  // shader::smoothstep, the GLSL vocabulary, already in fixed point
 #include "core/noise.h"    // inoise8 — the shared value-noise field
+#include <cstring>
+#include "core/AudioService.h"   // the audio vocabulary reads the latest frame
 #include "light/draw.h"    // draw::line, the shared 3D Bresenham a script draws with
+#include "light/particles.h" // particles::Pool, the kernel a scripted particle effect drives
 
 // MoonLive — the LIGHT-DOMAIN built-in registration. This is the only place the LED vocabulary
 // lives: the function NAMES (`setRGB`, `fill`, `random16`), their arg counts, and the meaning
@@ -33,6 +37,37 @@ namespace mm::moonlive {
 // division or shift to do that with. Three calls is the shape that works today, and
 // `setRGB(idx, paletteR(i), paletteG(i), paletteB(i))` reads clearly.
 //
+// A value a builtin takes as SIGNED: the script's own 32-bit two's complement, read as itself.
+//
+// This used to fold through a 16-BIT window (`v > 32767 ? v - 65536 : v`), because a script had no
+// way to hold a negative and the convention was that the top half of the 16-bit range meant one.
+// That window was the inverse of uint16_t member truncation, it was written down in neither place,
+// and it is what made `d = 60000` read as -5536: the script author thought in the member's range
+// and the builtin thought in the window's. int16_t members hold a negative directly now, so the
+// window has nothing left to undo and the value passes through.
+inline int32_t signedArg(uintptr_t a) {
+    return static_cast<int32_t>(uint32_t(a));
+}
+
+// A value a builtin takes as a BYTE: clamped to 0..255, not truncated to its low eight bits.
+//
+// `static_cast<uint8_t>` was the obvious spelling and it is the wrong one. A script computing a
+// brightness as `n * 255` means "full", and truncation turns that into an arbitrary walk: n=50
+// gives 206, n=128 gives 128, so the brightness draws its own pattern across the picture while
+// every part of the expression looks right. Saturating is what the author meant in every case,
+// and it is what a hardware byte channel does.
+//
+// Signed on the way in, so a value that went below zero clamps to 0 rather than to whatever its
+// low byte holds.
+//
+// The boundary: this covers the CALL builtins (setPaletteColor, paletteR/G/B). setRGB and fill
+// are inline stores whose channel bytes truncate in the emitted code itself, where a clamp would
+// cost three compares per channel per light on the hottest path there is.
+inline uint8_t byteArg(uintptr_t a) {
+    const int32_t v = signedArg(a);   // one home for the signed reinterpretation of the ABI word
+    return v < 0 ? 0 : (v > 255 ? 255 : static_cast<uint8_t>(v));
+}
+
 // The ACTIVE palette, so a script follows the device's palette control exactly as a compiled
 // effect does — which is the whole point: before this, a script could only hard-code colour.
 //
@@ -41,16 +76,13 @@ namespace mm::moonlive {
 // palette; the exceptions are effects where colour carries meaning, like the axis-identifying
 // red/green/blue in LinesEffect). Giving scripts hsv() would reintroduce it as the easy default.
 extern "C" inline uint32_t mm_light_paletteR(const uintptr_t* args, uint32_t, const uint8_t*) {
-    return colorFromPalette(*Palettes::active(), static_cast<uint8_t>(args[0]),
-                            static_cast<uint8_t>(args[1])).r;
+    return colorFromPalette(*Palettes::active(), byteArg(args[0]), byteArg(args[1])).r;
 }
 extern "C" inline uint32_t mm_light_paletteG(const uintptr_t* args, uint32_t, const uint8_t*) {
-    return colorFromPalette(*Palettes::active(), static_cast<uint8_t>(args[0]),
-                            static_cast<uint8_t>(args[1])).g;
+    return colorFromPalette(*Palettes::active(), byteArg(args[0]), byteArg(args[1])).g;
 }
 extern "C" inline uint32_t mm_light_paletteB(const uintptr_t* args, uint32_t, const uint8_t*) {
-    return colorFromPalette(*Palettes::active(), static_cast<uint8_t>(args[0]),
-                            static_cast<uint8_t>(args[1])).b;
+    return colorFromPalette(*Palettes::active(), byteArg(args[0]), byteArg(args[1])).b;
 }
 
 extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -69,6 +101,7 @@ extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, co
     return n ? (next >> 16) % n : 0u;
 }
 
+
 // mod(a, b) → a % b, the wrap a cyclic animation needs. `t` grows without bound, so every effect
 // that repeats has to fold it back into a range: `mod(t * speed, width)` is a sweep that returns to
 // the start instead of running off the end once and never coming back.
@@ -77,9 +110,207 @@ extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, co
 // all, and emitting a division routine inline would cost more code than the whole script. One host
 // function, called like any other builtin, keeps the emitted code small and the three backends
 // identical. b == 0 returns 0 rather than trapping: a script must degrade, never fault.
+// SIGNED, like `%` in every language a script author already knows. A coordinate is signed now, so
+// an unsigned remainder here would be a bespoke rule with nothing on the page to signpost it: the
+// exact shape of the bugs this whole change set exists to remove.
+//
+// `t` is unsigned time and passes 2^31 after about 25 days, at which point `mod(t, n)` reads it as
+// negative. That is a real edge, and it is not the reason to keep this unsigned: `t` breaks at 2^32
+// regardless, so signedness moves WHEN rather than WHETHER. A wrapping clock needs its own answer,
+// not a modulo that hides it. No shipped script uses mod(t, ...).
 extern "C" inline uint32_t mm_light_mod(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const uint32_t a = uint32_t(args[0]), b = uint32_t(args[1]);
-    return b ? a % b : 0u;
+    const int32_t a = static_cast<int32_t>(uint32_t(args[0]));
+    const int32_t b = static_cast<int32_t>(uint32_t(args[1]));
+    // INT32_MIN % -1 is UB and traps on x86-64 (the other three ISAs quietly wrap, which is why a
+    // bench never shows it). Same stance as b == 0: a script degrades, never faults.
+    if (b == 0 || (a == INT32_MIN && b == -1)) return 0;
+    return static_cast<uint32_t>(a % b);
+}
+
+// div(a, b) → a / b, and what the '/' OPERATOR lowers to. Registered under a name for the same
+// reason mod is: the parser resolves both operators through the builtin table, so core stays
+// domain-neutral and a divide is one host call rather than an instruction no ISA here has.
+// b == 0 SATURATES with the numerator's sign — IEEE 754's ±infinity mapped onto an int, and what
+// libfixmath does on divide overflow. The value is also the visually right one: `k / dist` at
+// dist == 0 is the CENTER of a ripple, where max reads as the peak the eye expects and 0 punched
+// a dark hole exactly there. 0/0 stays 0 (no direction to saturate toward). mod keeps returning
+// 0: there is no "infinite remainder". Either way a script degrades, never faults, and needs no
+// zero-check of its own.
+// SIGNED, for the reason given at mod above: `/` means what it means everywhere else. Scaling a
+// coordinate is the common case and coordinates go negative, so an unsigned divide turned
+// `uvX(...) * zoom / 40` on the left half of a grid into 107361151 rather than -13030.
+extern "C" inline uint32_t mm_light_div(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const int32_t a = static_cast<int32_t>(uint32_t(args[0]));
+    const int32_t b = static_cast<int32_t>(uint32_t(args[1]));
+    if (b == 0)
+        return static_cast<uint32_t>(a > 0 ? INT32_MAX : a < 0 ? INT32_MIN : 0);
+    // INT32_MIN / -1 overflows: UB, and a SIGFPE on x86-64. Returns the saturated value a script
+    // would expect from negating INT32_MIN, rather than 0, which would read as "division broke".
+    if (a == INT32_MIN && b == -1) return static_cast<uint32_t>(INT32_MAX);
+    return static_cast<uint32_t>(a / b);
+}
+
+// fdiv(a, b) → the Q16.16 quotient, what the '/' OPERATOR lowers to when both sides are fixed.
+// A separate host call from div because the numerator must widen: the quotient of two Q16.16
+// values needs (a << 16) / b, and shifting a 32-bit fixed value left by 16 in registers wraps for
+// anything past |128.0| — which is exactly what froze two shipped shaders. int64 in the host is
+// exact over the whole range, and a divide is a host call on every ISA here anyway (libfixmath's
+// fix16_div does the same widening for the same reason).
+// b == 0 saturates with the numerator's sign, matching div; a quotient outside int32 saturates
+// too, rather than wrapping into a number nobody wrote.
+extern "C" inline uint32_t mm_light_fdiv(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const int32_t a = static_cast<int32_t>(uint32_t(args[0]));
+    const int32_t b = static_cast<int32_t>(uint32_t(args[1]));
+    if (b == 0)
+        return static_cast<uint32_t>(a > 0 ? INT32_MAX : a < 0 ? INT32_MIN : 0);
+    const int64_t q = (static_cast<int64_t>(a) << 16) / b;
+    if (q > INT32_MAX) return static_cast<uint32_t>(INT32_MAX);
+    if (q < INT32_MIN) return static_cast<uint32_t>(INT32_MIN);
+    return static_cast<uint32_t>(static_cast<int32_t>(q));
+}
+
+// smoothstep(edge0, edge1, v) → a soft 0..65535 ramp between the edges, GLSL's own and the
+// anti-aliasing workhorse: wherever a script would draw a hard jaggy edge with an `if`, running
+// the distance through this softens it over a width the script picks. `smoothstep(0, w, w - d)`
+// turns a distance into a falloff, which is the difference between a stamp and a light source.
+//
+// A builtin rather than script arithmetic even though '/' now exists: the cubic is two divides
+// and three multiplies, so this folds about five host calls into one on a path that runs per
+// pixel. That is the bar a builtin has to clear now that the operator covers the general case.
+//
+// ALL THREE arguments are signed and re-centered here, exactly as polarA/polarR do: a script's
+// arithmetic is unsigned, so the natural `w - d` arrives as a huge value once d passes w. Without
+// this the outside of a shape reads as fully-inside and the effect renders inverted, a bug that
+// looks like a working effect until the shape moves.
+extern "C" inline uint32_t mm_light_smoothstep(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return shader::smoothstep(signedArg(args[0]), signedArg(args[1]), signedArg(args[2]));
+}
+
+// uvX(px, w, h) / uvY(py, w, h) → SHADER SPACE: the pixel's position centered on the grid and
+// scaled so the SHORT side spans one unit either way, biased at 32768 like sin/cos so 32768 is
+// the origin. This is the mapping every shader starts from, and skipping it is why a design
+// STRETCHES on a non-square panel: on a 48x256 wall `x - width / 2` draws a 5:1 ellipse where the
+// author wrote a circle.
+//
+// TWO builtins because a Call returns one value, the shape paletteR/G/B already established.
+//
+// Scaled so one unit is 8192, not 32768, and biased at 32768. The bias matches sin/cos so
+// `uvX(...) - 32768` feeds polarR/polarA with no adapter, and the coarser unit is what leaves the
+// LONG axis room: normalization is on the SHORT side, so on a 48x256 wall the long axis reaches
+// ±5.3 units and a window that put one unit at 32768 would clip everything past the middle
+// sixth: flattening exactly the panel shape uv exists to preserve. At 8192 the range covers a
+// 16:1 fixture, and beyond that the value saturates rather than wrapping to the opposite edge.
+//
+// ONE axis per call, rather than shader::uv's pair with the other half discarded: that computed two
+// divides per call and a script asking for both paid four per pixel, on the path the builtin exists
+// to make cheap. The 8192 factor is applied before the divide instead of as a shift after it, so
+// there is one rounding step rather than two.
+//
+// The arithmetic is 64-bit and the inputs are read UNSIGNED, because a script's values are unsigned
+// 32-bit and `65535 * 65535` is an expression it can write. Read as int32_t that is a large
+// NEGATIVE number, so a coordinate far off the right of the grid clamped to the LEFT edge, and
+// `px * 2` overflowed a signed 32-bit multiply on the way there. Widening costs one instruction on
+// a path already doing a divide, and it is what makes the saturation below honest.
+extern "C" inline uint32_t mm_light_uvAxis(const uintptr_t* args, bool wantY) {
+    const int64_t px = static_cast<int64_t>(uint32_t(args[0]));
+    const int64_t w  = static_cast<int64_t>(uint32_t(args[1]));
+    const int64_t h  = static_cast<int64_t>(uint32_t(args[2]));
+    const int64_t sw = w < 1 ? 1 : w, sh = h < 1 ? 1 : h;
+    const int64_t s  = sw < sh ? sw : sh;          // normalize on the SHORT side: that is what
+                                                   // keeps a circle circular on a wide panel
+    const int64_t extent = wantY ? sh : sw;
+    // Q16.16: 65536 is 1.0, the scale every `fixed` value in the language uses. Applied before the
+    // divide rather than as a shift after it, so there is one rounding step rather than two.
+    const int64_t v = ((px * 2 - extent + 1) * 65536) / s;
+    // ±4.0, which is well past the ±1 the short side normalizes to: a wide panel's long axis runs
+    // past 1.0 by its aspect ratio, and 4x covers any panel anyone builds.
+    const int64_t c = v < -262144 ? -262144 : (v > 262144 ? 262144 : v);
+    // SIGNED and FIXED, with no bias. A coordinate has an origin: the center of the grid is 0.0,
+    // the left half is negative, and a script holds the result in a `fixed` member and does
+    // ordinary arithmetic on it. The bias this used to add made every consumer write
+    // `uvX(...) - 32768`, and that subtraction is exactly what unsigned arithmetic broke: on the
+    // left half it wrapped to about 4.29 billion and tore the plane into blocks.
+    //
+    // sin/cos/beat KEEP their unsigned 0..65535 convention, deliberately: a wave has no origin,
+    // and `scale(sin(a), width)` sweeping a full axis is the idiom 14 shipped call sites rely on.
+    // A coordinate has an origin, a wave does not.
+    return static_cast<uint32_t>(static_cast<int32_t>(c));
+}
+extern "C" inline uint32_t mm_light_uvX(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return mm_light_uvAxis(args, false);
+}
+extern "C" inline uint32_t mm_light_uvY(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return mm_light_uvAxis(args, true);
+}
+
+// escape(cx, cy, jx, jy, iters) → how many steps z = z*z + c survives before it runs away,
+// scaled to 0..255. The Mandelbrot set when the seed is zero, a Julia set when it is not.
+//
+// A BUILTIN rather than script arithmetic, and this is the one case where that is not a
+// judgement call. The iteration squares a SIGNED fixed-point value, and a script's arithmetic is
+// unsigned 32-bit: `x * x` where x holds the wrapped form of -1 computes 65535 * 65535, not 1.
+// There is no spelling of this loop in the language, at any cost, until signed values land
+// (moonlive-language-roadmap #7). Everything else here stays expressible in script on purpose.
+//
+// Q16.16, the language's `fixed`: 1.0 is 65536, matching uvX/uvY. A script hands over uv
+// coordinates directly, holds them in `fixed` members, and does ordinary arithmetic on them with
+// no rescaling anywhere.
+//
+// The products are int64 and have to be. z*z at the escape radius is 4.0, whose Q32 square is
+// about 7.4e10 — an int32 overflows there and the point reads as escaped when it has not, which
+// draws holes in the middle of the set.
+//
+// `iters` is the detail dial and the cost: the loop is bounded by it, so a script trades
+// definition against frame time directly. Capped at 64, which is where the returned byte stops
+// gaining visible bands on a panel, and it bounds the per-pixel cost no matter what a slider says.
+extern "C" inline uint32_t mm_light_escape(const uintptr_t* args, uint32_t, const uint8_t*) {
+    // Inputs clamped to |8.0| in Q16.16. A coordinate that far out is already deep outside the
+    // escape radius (2.0) and iterates identically after clamping; without the clamp, a script
+    // passing a full int32 makes zx * zx reach 2^62 and the escape test's SUM overflow int64,
+    // which is UB. The clamp is what makes every product below safely wide.
+    const auto qfx = [](uintptr_t a) {
+        const int32_t v = signedArg(a);
+        return v < -524288 ? -524288 : (v > 524288 ? 524288 : v);
+    };
+    const int32_t cx = qfx(args[0]), cy = qfx(args[1]);
+    const int32_t jx = qfx(args[2]), jy = qfx(args[3]);
+    uint32_t iters = uint32_t(args[4]);
+    if (iters > 64) iters = 64;
+    if (iters == 0) return 0;
+
+    // Julia iterates z from the pixel with a FIXED c; Mandelbrot iterates z from zero with c
+    // taken from the pixel. One loop serves both: a zero seed selects Mandelbrot, which is why
+    // the seed is not a separate builtin.
+    const bool julia = (jx != 0 || jy != 0);
+    int64_t zx = julia ? cx : 0, zy = julia ? cy : 0;
+    const int64_t ax = julia ? jx : cx, ay = julia ? jy : cy;
+
+    constexpr int kShift = 16;
+    constexpr int64_t kEscape = int64_t(4) << (kShift * 2);   // |z|^2 > 4.0, in Q32
+
+    uint32_t n = 0;
+    for (; n < iters; ++n) {
+        const int64_t xx = zx * zx, yy = zy * zy;
+        if (xx + yy > kEscape) break;
+        const int64_t nx = ((xx - yy) >> kShift) + ax;
+        zy = ((2 * zx * zy) >> kShift) + ay;
+        zx = nx;
+    }
+    // Inside the set returns 0, so a script can test for it. Outside, the count spreads over the
+    // full byte whatever `iters` is, which keeps the palette mapping independent of the dial.
+    return (n >= iters) ? 0u : (n * 255u) / iters;
+}
+
+// smin(a, b, k) → the smooth minimum of two distances: two shapes FLOW into one another instead of
+// merely overlapping (Quilez). `k` is the blend radius, 0 a plain min. Wraps draw::smin, so a
+// script and a compiled effect melt shapes identically.
+//
+// The distances are signed and re-centered here. draw::smin already widens its intermediates to 64
+// bits, and that is load-bearing: a wrapped smin returns a value larger than BOTH inputs, which
+// inverts the blend rather than degrading it.
+extern "C" inline uint32_t mm_light_smin(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return static_cast<uint32_t>(draw::smin(signedArg(args[0]), signedArg(args[1]),
+                                            static_cast<int32_t>(uint32_t(args[2]))));
 }
 
 // beat(bpm) / beatsin(bpm, low, high) → the TIME vocabulary an animation is actually written in.
@@ -138,21 +369,10 @@ extern "C" inline uint32_t mm_light_noise(const uintptr_t* args, uint32_t, const
 // returns the true distance, not the octagonal approximation, because a visibly non-circular
 // "circle" is exactly what an effect using this would be trying to draw.
 extern "C" inline uint32_t mm_light_polarA(const uintptr_t* args, uint32_t, const uint8_t*) {
-    // A script's arithmetic is unsigned, so `x - cx` for x < cx arrives as a huge value rather
-    // than a negative one. Anything above half the range is that wrap, and subtracting the range
-    // recovers the signed offset the maths needs.
-    int32_t dx = static_cast<int32_t>(uint32_t(args[0]));
-    int32_t dy = static_cast<int32_t>(uint32_t(args[1]));
-    if (dx > 32767) dx -= 65536;
-    if (dy > 32767) dy -= 65536;
-    return static_cast<uint32_t>(atan16(dy, dx));
+    return static_cast<uint32_t>(atan16(signedArg(args[1]), signedArg(args[0])));
 }
 extern "C" inline uint32_t mm_light_polarR(const uintptr_t* args, uint32_t, const uint8_t*) {
-    int32_t dx = static_cast<int32_t>(uint32_t(args[0]));
-    int32_t dy = static_cast<int32_t>(uint32_t(args[1]));
-    if (dx > 32767) dx -= 65536;
-    if (dy > 32767) dy -= 65536;
-    return dist16(dx, dy);
+    return dist16(signedArg(args[0]), signedArg(args[1]));
 }
 
 extern "C" inline uint32_t mm_light_sin(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -251,7 +471,7 @@ using AddLightFn = void (*)(void* ctx, uint16_t x, uint16_t y, uint16_t z);
 /// and a third would mean a genuinely new concurrency story rather than a bigger table.
 struct AddLightSink { AddLightFn fn = nullptr; void* ctx = nullptr; };
 
-/// Where a running `defineControls()` sends each `addUint8` / `addUint16`. Same shape and same
+/// Where a running `defineControls()` sends each `addControl`. Same shape and same
 /// reason as the addLight sink: a builtin has no receiver, so the binding installs one for the
 /// duration of the run and the call reaches the engine through it.
 ///
@@ -259,8 +479,48 @@ struct AddLightSink { AddLightFn fn = nullptr; void* ctx = nullptr; };
 /// arena bytes a write touches. It is checked against the member's own type by the compiler, so
 /// by the time a call arrives here the two already agree.
 using AddControlFn = void (*)(void* ctx, const char* name, uint8_t offset,
-                              uint16_t lo, uint16_t hi, CtrlType type);
+                              int32_t lo, int32_t hi, CtrlType type);
 struct AddControlSink { AddControlFn fn = nullptr; void* ctx = nullptr; };
+
+/// Where fade(amt) sends its request. The binding forwards it to the LAYER rather than to the
+/// buffer, because Layer::tick collects every request into one amount and applies it ONCE per
+/// frame before the effects run: N fading effects on a shared layer cost one buffer pass, and the
+/// gentlest amount wins so the longest trail survives. A builtin that faded the buffer itself
+/// would be N passes AND would fight the other effects sharing that layer.
+using FadeFn = void (*)(void* ctx, uint8_t amt);
+struct FadeSink { FadeFn fn = nullptr; void* ctx = nullptr; };
+
+/// Where setPan/setTilt send their writes. A motion channel is not at a fixed offset the way a
+/// color byte is: WHERE pan lives in a light's bytes comes from the layer's fixture channel map,
+/// which the engine has no notion of, so this cannot be an Inline store like setRGB and goes
+/// through the binding instead.
+///
+/// `axis` selects which channel, so one sink and one host function serve both rather than two of
+/// everything. A light with no such channel is written by nobody: the binding's setPan is already
+/// a no-op there, which is what lets one script run on a moving head and on a plain strip.
+/// Where setXYZ sends a modifier's transformed coordinate.
+///
+/// A Call with a sink rather than the Inline store it used to be, and the reason is width: the
+/// inline form wrote three BYTES into the caller's buffer, so `setXYZ(767 - xPos, …)` on a
+/// 768-wide wall stored 255 and mirrored the light to the wrong place. A layout's addLight was
+/// never affected because it is already a Call taking full-width arguments; this brings setXYZ to
+/// the same footing.
+using CoordFn = void (*)(void* ctx, uint32_t x, uint32_t y, uint32_t z);
+struct CoordSink { CoordFn fn = nullptr; void* ctx = nullptr; };
+
+enum class MotionAxis : uint8_t { Pan = 0, Tilt = 1 };
+using MotionFn = void (*)(void* ctx, MotionAxis axis, uint32_t index, uint8_t value);
+struct MotionSink { MotionFn fn = nullptr; void* ctx = nullptr; };
+
+/// Where pool(n) sends its sizing request, and where the per-frame particle builtins find the pool.
+/// TWO sinks for one feature, deliberately: sizing ALLOCATES, so it is installed only around the
+/// defineControls run (the cold path, once per script edit), while the per-frame calls get a
+/// read-only handle installed around each tick. A script calling pool(400) from tick() therefore
+/// reaches no sizing sink and gets a no-op returning the live count, which is what keeps allocation
+/// off the render path entirely.
+using PoolSizeFn = uint16_t (*)(void* ctx, uint16_t count);
+struct PoolSizeSink { PoolSizeFn fn = nullptr; void* ctx = nullptr; };
+struct PoolSink { particles::Pool* pool = nullptr; uint32_t scale = particles::FrameTime::kOne; };
 
 namespace detail {
 // `owner` is ATOMIC and claimed with compare_exchange: the claim used to be a load then a store,
@@ -271,7 +531,8 @@ namespace detail {
 // addLight sink (a layout run installs it) and the draw canvas (an effect run installs it). A
 // second table would repeat the claim/release machinery for the same lifetime.
 struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; draw::Canvas canvas;
-                  AddControlSink controls; };
+                  AddControlSink controls; FadeSink fade; MotionSink motion; CoordSink coord;
+                  PoolSizeSink poolSize; PoolSink pool; };
 /// Two slots: the render task and whichever task edits a control are the two that ever run a script
 /// at once. A third concurrent runner gets the overflow slot, which holds no sink — so its addLight
 /// calls no-op instead of writing through someone else's context.
@@ -303,11 +564,17 @@ inline SinkSlot* ownedSlot(bool claim) MM_NONBLOCKING {
     }
     return nullptr;
 }
-/// Release only a fully empty slot: the three halves (addLight sink, draw canvas, control sink)
-/// detach independently, and a release while any of them is live would hand this thread's context
-/// to the next claimer, whose script would then reach a dead engine through it.
+/// Release only a fully empty slot: the six halves (addLight sink, draw canvas, control sink, fade
+/// sink, pool sizing sink, pool handle) detach independently, and a release while any of them is
+/// live would hand this thread's context to the next claimer, whose script would then reach a dead
+/// engine through it.
 inline void releaseIfEmpty(SinkSlot* s) MM_NONBLOCKING {
-    if (s && !s->sink.fn && !s->sink.ctx && !s->canvas.data && !s->controls.fn)
+    // EVERY sink the slot carries, motion and coord included: releasing while one is still
+    // installed lets another thread claim the slot and reach a context whose run has ended. Two
+    // were missed when motion/coord were added, which is why this reads as a list rather than a
+    // pair of checks: a new sink that is not named here reintroduces exactly that bug.
+    if (s && !s->sink.fn && !s->sink.ctx && !s->canvas.data && !s->controls.fn && !s->fade.fn &&
+        !s->motion.fn && !s->coord.fn && !s->poolSize.fn && !s->pool.pool)
         s->owner.store(0, std::memory_order_release);
 }
 }  // namespace detail
@@ -331,9 +598,93 @@ inline const AddControlSink& addControlSink() {
     return s ? s->controls : none;
 }
 
-/// Point addUint8 at a consumer for the duration of one defineControls() run; nullptr to detach.
+/// The fade sink for this thread, or an empty one. Reading does not claim a slot, for the same
+/// reason addLightSink() does not.
+inline const FadeSink& fadeSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit FadeSink none{};
+    return s ? s->fade : none;
+}
+
+/// Point fade() at the layer for the duration of one run; nullptr to detach. Installed by the
+/// binding in the same bracket as the draw canvas, so a script calling fade from a layout or a
+/// modifier reaches no sink and does nothing, exactly as line and setPaletteColor already behave.
+inline void setFadeSink(FadeFn fn, void* ctx) MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
+    if (!s) return;
+    s->fade = {fn, ctx};
+    if (!fn) detail::releaseIfEmpty(s);
+}
+
+/// This thread's coordinate sink, or an empty one. Reading does not claim a slot.
+inline const CoordSink& coordSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit CoordSink none{};
+    return s ? s->coord : none;
+}
+
+/// Point setXYZ at the modifier for one run; nullptr to detach.
+inline void setCoordSink(CoordFn fn, void* ctx) MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
+    if (!s) return;
+    s->coord = {fn, ctx};
+    if (!fn) detail::releaseIfEmpty(s);
+}
+
+/// This thread's motion sink, or an empty one. Reading does not claim a slot, as fadeSink does not.
+inline const MotionSink& motionSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit MotionSink none{};
+    return s ? s->motion : none;
+}
+
+/// Point setPan/setTilt at the effect for the duration of one run; nullptr to detach. Installed in
+/// the same bracket as the draw canvas, so a script calling setPan from a layout or a modifier
+/// reaches no sink and does nothing.
+inline void setMotionSink(MotionFn fn, void* ctx) MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
+    if (!s) return;
+    s->motion = {fn, ctx};
+    if (!fn) detail::releaseIfEmpty(s);
+}
+
+/// This thread's pool sizing sink, or an empty one. Reading does not claim a slot.
+inline const PoolSizeSink& poolSizeSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit PoolSizeSink none{};
+    return s ? s->poolSize : none;
+}
+
+/// Point pool(n) at the binding that owns the buffers, for the duration of one defineControls()
+/// run; nullptr to detach. Installed in the same bracket as the control sink, because sizing a pool
+/// and declaring a control are the same moment: after the compile, on the cold path, once per edit.
+inline void setPoolSizeSink(PoolSizeFn fn, void* ctx) {
+    detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
+    if (!s) return;
+    s->poolSize = {fn, ctx};
+    if (!fn) detail::releaseIfEmpty(s);
+}
+
+/// This thread's live pool, or an empty handle. Reading does not claim a slot.
+inline const PoolSink& poolSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit PoolSink none{};
+    return s ? s->pool : none;
+}
+
+/// Point the per-frame particle builtins at the pool for the duration of one run; nullptr to
+/// detach. Installed by the binding in the same bracket as the draw canvas, so a script calling
+/// step() from a layout or a modifier reaches no pool and does nothing.
+inline void setPoolSink(particles::Pool* pool, uint32_t scale) MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(pool != nullptr);
+    if (!s) return;
+    s->pool = {pool, scale};
+    if (!pool) detail::releaseIfEmpty(s);
+}
+
+/// Point addControl at a consumer for the duration of one defineControls() run; nullptr to detach.
 /// False when the two-slot table is full, which the caller must not treat as an installed sink:
-/// every addUint8 would then be a silent no-op and the script would publish no controls at all.
+/// every addControl would then be a silent no-op and the script would publish no controls at all.
 inline bool setAddControlSink(AddControlFn fn, void* ctx) {
     detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
     if (!s) return false;
@@ -362,15 +713,15 @@ inline void setAddLightSink(AddLightFn fn, void* ctx) {
     if (s) s->sink = {fn, ctx};
 }
 
-// addUint8(name, memberOffset, min, max): the run-time half of declaring a control.
+// addControl(name, memberOffset, min, max): the run-time half of declaring a control.
 //
 // The CONTROL RECORD is built by the compiler, which knows the name span and the member's offset,
 // so nothing has to travel through a frame slot into a source buffer that is freed by the time
 // this runs. What is left is the call itself, which exists so that a script declares a control the
 // way a compiled module does: `defineControls()` is an ordinary function the binding calls after a
 // successful compile, and this is an ordinary builtin it calls.
-// Shared by addUint8 and addUint16: identical but for the width they declare, so the bound check
-// and the sink call live once rather than in two copies that could drift.
+// The one control declaration. What kind of control it becomes is read from the MEMBER'S declared
+// type rather than chosen by the call, so a call and a declaration cannot disagree.
 inline uint32_t addControlDecl(const uintptr_t* args, CtrlType type) {
     // args: (name, memberOffset, min, max). The name is a pointer into the compiled program's
     // string pool, which outlives the run; the offset is the member's arena byte, which the
@@ -378,26 +729,28 @@ inline uint32_t addControlDecl(const uintptr_t* args, CtrlType type) {
     const char* name = reinterpret_cast<const char*>(args[0]);
     const AddControlSink s = addControlSink();
     if (!name || !s.fn || !s.ctx) return 0;      // no binding listening: the call is a no-op
-    // The range is an ARBITRARY EXPRESSION, so `addUint8("n", n, 0, x * 64)` can compute past what
-    // the declared width holds. Truncating would publish a slider whose top silently wraps to a
-    // small number; refusing the declaration leaves the control absent, which the user can see.
-    const uintptr_t limit = (type == CtrlType::Uint16) ? 65535u : 255u;
-    if (args[2] > limit || args[3] > limit) return 0;
+    // The range is an ARBITRARY EXPRESSION, so `addControl("n", n, 0, x * 64)` can compute past
+    // what the member's type holds. Truncating would publish a slider whose top silently wraps to
+    // a small number; refusing the declaration leaves the control absent, which the user can see.
+    const int32_t lo = int32_t(args[2]), hi = int32_t(args[3]);
+    const int32_t limit = (type == CtrlType::Byte) ? 255 : (type == CtrlType::Bool) ? 1 : INT32_MAX;
+    if (lo > limit || hi > limit) return 0;
+    // A byte and a bool are UNSIGNED, and the binding casts the range to uint8_t: a negative low
+    // bound became min 251 with max 100, a slider that could reach nothing. The old uintptr_t
+    // compare caught this for free (a negative wrapped huge); with a signed range it needs saying.
+    if ((type == CtrlType::Byte || type == CtrlType::Bool) && lo < 0) return 0;
     // Same stance for an INVERTED range: with min > max the write path's `v < min || v > max` is
     // true for every value, so the slider would appear and then refuse everything the user does to
     // it. Refusing the declaration leaves it absent, which is visible.
-    if (args[2] > args[3]) return 0;
-    s.fn(s.ctx, name, static_cast<uint8_t>(args[1]),
-         static_cast<uint16_t>(args[2]), static_cast<uint16_t>(args[3]), type);
+    if (lo > hi) return 0;
+    s.fn(s.ctx, name, static_cast<uint8_t>(args[1] & 0xff), lo, hi, type);
     return 0;
 }
 
-extern "C" inline uint32_t mm_light_addUint8(const uintptr_t* args, uint32_t, const uint8_t*) {
-    return addControlDecl(args, CtrlType::Uint8);
-}
-
-extern "C" inline uint32_t mm_light_addUint16(const uintptr_t* args, uint32_t, const uint8_t*) {
-    return addControlDecl(args, CtrlType::Uint16);
+// The member's own type decides the control; this call only says "surface it, within this range".
+// The compiler packs both into args[1]: the low byte is the arena offset, the next the CtrlType.
+extern "C" inline uint32_t mm_light_addControl(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return addControlDecl(args, static_cast<CtrlType>((args[1] >> 8) & 0xff));
 }
 
 extern "C" inline uint32_t mm_light_addLight(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -450,9 +803,274 @@ extern "C" inline uint32_t mm_light_setPaletteColor(const uintptr_t* args, uint3
     const uint32_t x = uint32_t(args[0]), y = uint32_t(args[1]);
     if (x >= uint32_t(cv.dims.x) || y >= uint32_t(cv.dims.y)) return 0;
     draw::pixel(cv, Coord3D{lengthType(x), lengthType(y), 0},
-                colorFromPalette(*Palettes::active(),
-                                 static_cast<uint8_t>(args[2]),
-                                 static_cast<uint8_t>(args[3])));
+                colorFromPalette(*Palettes::active(), byteArg(args[2]), byteArg(args[3])));
+    return 0;
+}
+
+/// fade(amt) → dim every light toward black by amt/255, FastLED's fadeToBlackBy under its own
+/// name. The trail primitive: an effect that fades instead of clearing leaves a decaying tail
+/// behind whatever it draws, which is what a spark, a comet or a scanner looks like.
+///
+/// Goes to the LAYER, not to the buffer. Layer::tick collects the requests and applies the
+/// gentlest one ONCE per frame before the effects run, so two fading effects on one layer cost one
+/// pass rather than two, and the longer trail survives. See Layer::fadeToBlackBy.
+///
+/// Reaches nothing from a layout or a modifier, where no sink is installed, so the call is a
+/// no-op there rather than fading a layer the script is not ticking in.
+extern "C" inline uint32_t mm_light_fade(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const FadeSink& f = fadeSink();
+    if (!f.fn) return 0;
+    const uint32_t amt = uint32_t(args[0]);
+    f.fn(f.ctx, static_cast<uint8_t>(amt > 255 ? 255 : amt));
+    return 0;
+}
+
+/// setXYZ(x, y, z) → where this light goes, from a modifier. Full width, unlike the inline store
+/// it replaces: a coordinate on a large wall does not fit in a byte.
+///
+/// A no-op outside a modifier run, where no sink is installed, exactly as fade and setPan are.
+extern "C" inline uint32_t mm_light_setXYZ(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const CoordSink& c = coordSink();
+    if (!c.fn) return 0;
+    c.fn(c.ctx, uint32_t(args[0]), uint32_t(args[1]), uint32_t(args[2]));
+    return 0;
+}
+
+/// The audio vocabulary: what the room sounds like, for a script to paint with.
+///
+/// Reads AudioService's latest frame, the same one every compiled audio-reactive effect uses, so a
+/// script and a compiled effect hear exactly the same thing. Every value is already a small integer
+/// (the frame is pre-scaled for this), so a script does integer maths straight off them.
+///
+/// SILENCE READS ZERO, and that is the contract worth relying on: with no audio module, no
+/// microphone, or a quiet room, every one of these returns 0 and an audio-reactive script simply
+/// renders nothing rather than failing to compile or drawing garbage. A script can therefore be
+/// written once and run on a device that has no audio at all. No null check is needed for that:
+/// latestFrame() hands back a constexpr silent frame when no module holds the seat.
+extern "C" inline uint32_t mm_light_level(const uintptr_t*, uint32_t, const uint8_t*) {
+    return AudioService::latestFrame()->level;
+}
+extern "C" inline uint32_t mm_light_levelSmooth(const uintptr_t*, uint32_t, const uint8_t*) {
+    return AudioService::latestFrame()->levelSmoothed;
+}
+/// band(i) → one of the 16 log-spaced magnitudes, bass at 0 and treble at 15. An out-of-range index
+/// reads 0 rather than wrapping: a script asking for band 20 has a bug, and wrapping would answer it
+/// with a plausible number from the wrong end of the spectrum.
+extern "C" inline uint32_t mm_light_band(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t i = uint32_t(args[0]);
+    return i < 16 ? AudioService::latestFrame()->bands[i] : 0;
+}
+extern "C" inline uint32_t mm_light_peakHz(const uintptr_t*, uint32_t, const uint8_t*) {
+    return AudioService::latestFrame()->peakHz;
+}
+/// beat() → 1 on a transient, 0 otherwise. The SAME test the compiled effects use (the raw level
+/// rising above its own smoothed average by a margin), so "a beat" means one thing across the
+/// project rather than each script inventing a threshold. Silence never beats.
+extern "C" inline uint32_t mm_light_onBeat(const uintptr_t*, uint32_t, const uint8_t*) {
+    const AudioFrame* a = AudioService::latestFrame();
+    constexpr uint16_t kSilence = 8, kBeatMargin = 8;
+    if (a->levelSmoothed < kSilence) return 0;
+    return a->level > a->levelSmoothed + kBeatMargin ? 1 : 0;
+}
+
+/// setPan(index, value) / setTilt(index, value) → aim one moving head.
+///
+/// A NO-OP when the light carries no such channel, which is the property that lets one script run
+/// on a moving head and on an LED strip: the strip has no pan channel, nothing is written, and the
+/// script just paints color. Never scaled by brightness, unlike color, because dimming a rig must
+/// not swing its heads toward 0/0.
+///
+/// A Call rather than an Inline store, unlike setRGB: where pan lives inside a light's bytes comes
+/// from the layer's fixture channel map, and the engine has no notion of one. Motion is written
+/// once per HEAD per frame where color is written per pixel, so the per-call cost is not on the
+/// same path as setRGB's.
+extern "C" inline uint32_t mm_light_set_pan(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const MotionSink& m = motionSink();
+    if (!m.fn) return 0;
+    // byteArg, not a raw widen: a script computing an aim below zero (pan - 50 past the
+    // end) reinterprets as a huge unsigned here and clamped to 255, slamming the head to the
+    // OPPOSITE extreme. byteArg is the one home for the signed reading every other builtin uses.
+    m.fn(m.ctx, MotionAxis::Pan, uint32_t(args[0]), byteArg(args[1]));
+    return 0;
+}
+extern "C" inline uint32_t mm_light_set_tilt(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const MotionSink& m = motionSink();
+    if (!m.fn) return 0;
+    // byteArg, not a raw widen: a script computing an aim below zero (pan - 50 past the
+    // end) reinterprets as a huge unsigned here and clamped to 255, slamming the head to the
+    // OPPOSITE extreme. byteArg is the one home for the signed reading every other builtin uses.
+    m.fn(m.ctx, MotionAxis::Tilt, uint32_t(args[0]), byteArg(args[1]));
+    return 0;
+}
+
+/// pool(n) → size this script's particle pool to n particles, and report what it actually got.
+///
+/// Called from defineControls(), which is the one moment that is after the compile, on the cold
+/// path, and once per script edit. Anywhere else it is a NO-OP that reports the live count: the
+/// sizing sink is installed only around that run, so a script calling pool() every tick allocates
+/// nothing, every frame, forever. That is what keeps a malloc off the render path.
+///
+/// Returning the achieved count is the whole error channel: 0 means the allocation failed, which a
+/// script can see and a device with less PSRAM than the author assumed reports honestly.
+///
+/// A script that never calls pool() allocates nothing at all. There is deliberately no default
+/// pool: a default would give every scripted effect on the device particle buffers it never asked
+/// for, including the ones drawing shaders.
+extern "C" inline uint32_t mm_light_pool(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSizeSink& s = poolSizeSink();
+    if (!s.fn) {
+        const PoolSink& live = poolSink();   // outside defineControls: report, do not resize
+        return live.pool ? live.pool->count : 0u;
+    }
+    const uint32_t n = uint32_t(args[0]);
+    return s.fn(s.ctx, static_cast<uint16_t>(n > 65535u ? 65535u : n));
+}
+
+// --- The particle vocabulary -------------------------------------------------------------------
+//
+// Six calls, and every one is a pass over the WHOLE pool: this is the first script vocabulary whose
+// cost scales with the OBJECTS rather than with the grid. A shader touches every light every frame
+// (metal.mle: ~14 host calls per pixel, 59.6 ms on an 80x48); a particle script makes about nine
+// calls per FRAME and the per-particle work happens inside C++ loops.
+//
+// Coordinates and speeds are in PIXELS, converted to the kernel's sub-pixel units here: a script
+// author thinks in the grid they can see, not in 1/256ths of it.
+//
+// The frame scale rides on the pool handle, so every call is framerate-independent without the
+// script naming time. That is deliberate: it is a property of the system, not a thing an author
+// remembers to type.
+//
+// A call with no pool installed (a layout, a modifier, or a script that never called pool()) does
+// nothing, the same degrade `line` and `setPaletteColor` already have.
+
+/// A moving seed for the emitters. angleEmit hashes (index, seed) into an angle and a speed, so a
+/// seed that does not change makes every frame throw the identical set of sparks.
+///
+/// Atomic for the same reason random16 is: the render task and a control-edit task can both be
+/// inside a script at once, and a lost update would hand two emissions the same pattern.
+inline uint32_t nextEmitSeed() MM_NONBLOCKING {
+    static std::atomic<uint32_t> seed{0x9E3779B9u};
+    return seed.fetch_add(0x9E3779B9u, std::memory_order_relaxed);
+}
+
+/// emit(x, y, angle, speed, n, life, hue) → throw `n` particles from a point.
+///
+/// Wraps angleEmit, which spreads them across a cone and varies each one's speed, so a fountain, a
+/// burst and a spray are the same call with different numbers. The cone and the RNG seed are the
+/// binding's: a script that had to pass a seed would either hard-code one (making every device
+/// identical) or invent one per frame (making the emission jitter).
+extern "C" inline uint32_t mm_light_emit(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    p.pool->angleEmit(draw::toSub(static_cast<lengthType>(uint32_t(args[0]))),
+                      draw::toSub(static_cast<lengthType>(uint32_t(args[1]))),
+                      static_cast<angle16>(uint32_t(args[2])),
+                      static_cast<draw::pos_t>(uint32_t(args[3])),
+                      /*cone*/ 8192,                       // a 45 degree plume: wide enough to read
+                                                           // as a spray, narrow enough to aim
+                      static_cast<uint8_t>(uint32_t(args[4])),
+                      static_cast<uint16_t>(uint32_t(args[5])),
+                      static_cast<uint8_t>(uint32_t(args[6])),
+                      // The seed must MOVE, or every frame emits the same n trajectories and the
+                      // spray reads as a few fixed streams that stack up rather than a plume. A
+                      // per-call counter rather than the clock: two emit() calls in one frame must
+                      // not share a pattern either.
+                      /*seed*/ nextEmitSeed());
+    return 0;
+}
+
+/// gravity(g) → pull every live particle down by `g` sub-pixels per reference frame squared.
+/// The one force that makes matter read as matter.
+extern "C" inline uint32_t mm_light_gravity(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    p.pool->gravity(static_cast<draw::pos_t>(uint32_t(args[0])), p.scale);
+    return 0;
+}
+
+/// drag(k) → bleed speed off every live particle, 0 none and 255 nearly all.
+/// The counterweight to gravity: without it a pool under constant force accelerates until it
+/// teleports, which is the first thing an author hits.
+extern "C" inline uint32_t mm_light_drag(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    p.pool->drag(static_cast<uint8_t>(uint32_t(args[0])), p.scale);
+    return 0;
+}
+
+/// step() → move every live particle by its velocity. The integrator; nothing moves without it.
+///
+/// Also kills anything that has left the grid, which is NOT a separate call on purpose: a particle
+/// outside the fixture draws nothing and holds its slot forever, so leaking them is a bug in every
+/// effect rather than a choice an author should have to opt out of.
+extern "C" inline uint32_t mm_light_step(const uintptr_t*, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    const draw::Canvas& cv = drawCanvas();
+    p.pool->step(p.scale);
+    if (cv.data)
+        p.pool->killOutside(draw::toSub(cv.dims.x), draw::toSub(cv.dims.y), draw::toSub(2));
+    return 0;
+}
+
+/// bounce(e) → reflect every particle off the walls of the grid, keeping `e`/256 of its speed.
+/// 256 is a perfect bounce and lower loses energy on every contact, so a ball settles.
+///
+/// The grid is the canvas, not an argument: a script that had to pass width and height could pass
+/// the wrong ones, and a wall the fixture does not have is not a thing an author wants.
+extern "C" inline uint32_t mm_light_bounce(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    const draw::Canvas& cv = drawCanvas();
+    if (!cv.data) return 0;
+    // The wall is the LAST VALID PIXEL, not the pixel past the end: bounce() clamps a particle to
+    // the coordinate it is given, and toSub(dims.x) is one pixel outside the buffer, so a ball
+    // resting against that wall renders nowhere and the pit looks empty.
+    p.pool->bounce(draw::toSub(static_cast<lengthType>(cv.dims.x - 1)),
+                   draw::toSub(static_cast<lengthType>(cv.dims.y - 1)),
+                   static_cast<uint16_t>(uint32_t(args[0])));
+    return 0;
+}
+
+/// collide(radius) → make particles bounce off EACH OTHER, `radius` being the contact distance in
+/// whole pixels. This is what turns a pool of independent sparks into objects that pile up.
+///
+/// The one call in this vocabulary whose cost is NOT linear: it is an N-body check, so doubling the
+/// pool quadruples the work. Measured on the host at 3.2 us for 48 particles against 0.1 us without
+/// it, and 53.6 us at 200. An S3 is roughly 20-40x slower, so a few dozen balls is comfortable and
+/// a few hundred is not. A script that wants a big pool should not call this.
+///
+/// Call it BEFORE step(): resolving an overlap after integrating can shove a particle outside the
+/// grid the wall pass has already checked.
+extern "C" inline uint32_t mm_light_collide(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    p.pool->collide(draw::toSub(static_cast<lengthType>(uint32_t(args[0]))),
+                    /*restitution*/ 200, nextEmitSeed());
+    return 0;
+}
+
+/// age(rate) → count down every particle's life; a particle reaching zero frees its slot.
+/// Without it the pool fills and emit() silently stops, which is the bug that only shows up after
+/// a minute on the bench.
+extern "C" inline uint32_t mm_light_age(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    p.pool->age(static_cast<uint16_t>(uint32_t(args[0])), p.scale);
+    return 0;
+}
+
+/// render(maxLife) → draw every live particle, dimmed by how much life it has left.
+///
+/// Reads the ACTIVE palette, so a scripted particle effect follows the device's palette control
+/// with no color work in the script at all. Sub-pixel splatting is what makes slow motion smooth
+/// on a coarse grid rather than stepping.
+extern "C" inline uint32_t mm_light_render(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PoolSink& p = poolSink();
+    if (!p.pool || !p.pool->valid()) return 0;
+    const draw::Canvas& cv = drawCanvas();
+    if (!cv.data) return 0;                       // no canvas (a layout, a modifier): draw nothing
+    p.pool->render(cv, static_cast<uint16_t>(uint32_t(args[0])));
     return 0;
 }
 
@@ -485,13 +1103,27 @@ extern "C" inline uint32_t mm_light_line(const uintptr_t* args, uint32_t, const 
 //
 // Adding one is a single line here plus the binding writing its slot.
 enum : uint8_t {
-    kSysWidth  = kCtrlBytes + 0,
-    kSysHeight = kCtrlBytes + 1,
-    kSysDepth  = kCtrlBytes + 2,
-    kSysX      = kCtrlBytes + 3,
-    kSysY      = kCtrlBytes + 4,
-    kSysZ      = kCtrlBytes + 5,
+    kSysWidth  = kCtrlBytes + 0 * kSysVarBytes,
+    kSysHeight = kCtrlBytes + 1 * kSysVarBytes,
+    kSysDepth  = kCtrlBytes + 2 * kSysVarBytes,
+    kSysX      = kCtrlBytes + 3 * kSysVarBytes,
+    kSysY      = kCtrlBytes + 4 * kSysVarBytes,
+    kSysZ      = kCtrlBytes + 5 * kSysVarBytes,
 };
+
+/// Write one system variable into its arena slot, full width.
+///
+/// FOUR bytes, matching kSysVarBytes and the LoadCtrl32 the compiler emits to read it. A byte-wide
+/// write clamped `width` to 255, so a script looping `for (x = 0; x < width; …)` on a 768-wide wall
+/// drew a complete picture into a 255x255 corner and left the rest black.
+///
+/// Unaligned-safe by construction: the block starts at kCtrlBytes (64) and every slot is four bytes
+/// on from it, but the store goes through memcpy rather than a cast so it stays correct if the
+/// layout ever changes.
+inline void writeSysVarSlot(uint8_t* arenaSlot, uint32_t value) MM_NONBLOCKING {
+    if (!arenaSlot) return;
+    std::memcpy(arenaSlot, &value, sizeof(value));
+}
 
 /// The system variables a light script can read. Each binding registers the names it actually
 /// WRITES, so an unwritten name stays unknown rather than reading a silent 0 — a script that asks
@@ -576,11 +1208,68 @@ inline BuiltinTable lightBuiltins() {
     // element 0, which is the whole of what a modifier can do. The two are asked different
     // questions. An effect picks a pixel out of a whole buffer, so its index is the point; a
     // modifier is handed ONE coordinate per call, so there is no index to give.
-    t.add({"setXYZ", 3, /*returns*/ false, BuiltinKind::Inline, nullptr, InlineOp::StoreFirst});
+    t.add({"setXYZ", 3, /*returns*/ false, BuiltinKind::Call, &mm_light_setXYZ, {}});
     // fill(r, g, b)           → write every light. Inline op FillElems.
     t.add({"fill", 3, false, BuiltinKind::Inline, nullptr, InlineOp::FillElems});
+    // fade(amt)              → dim every light toward black, FastLED's fadeToBlackBy. The trail
+    // primitive, collected by the layer so N fading effects cost one pass. See mm_light_fade.
+    t.add({"fade", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_fade, {}});
+    // setPan(index, value) / setTilt(index, value) → aim a moving head. Calls, not Inline stores:
+    // the channel offset comes from the layer's fixture map, which the engine cannot see.
+    // The audio vocabulary. All return 0 without audio, so a script written for a rig with a
+    // microphone still runs on one without: it simply renders nothing rather than failing.
+    // level(): the RAW level, which snaps to a transient. levelSmooth(): the averaged one, which
+    // swells. A punchy effect wants the first, a glowing one the second.
+    // NAMED `audio*`, and the prefix is the point: registering a builtin RESERVES the name, so a
+    // plain `level` would stop every script that declares `byte level = 200` from compiling. That
+    // is exactly the name an author reaches for, and breaking existing scripts to claim it would be
+    // the language taking a word the user had first.
+    t.add({"audioLevel", 0, /*returns*/ true, BuiltinKind::Call, &mm_light_level, {}});
+    t.add({"audioSmooth", 0, /*returns*/ true, BuiltinKind::Call, &mm_light_levelSmooth, {}});
+    t.add({"audioBand", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_band, {}});
+    t.add({"audioPeakHz", 0, /*returns*/ true, BuiltinKind::Call, &mm_light_peakHz, {}});
+    t.add({"audioBeat", 0, /*returns*/ true, BuiltinKind::Call, &mm_light_onBeat, {}});
+    t.add({"setPan", 2, /*returns*/ false, BuiltinKind::Call, &mm_light_set_pan, {}});
+    t.add({"setTilt", 2, /*returns*/ false, BuiltinKind::Call, &mm_light_set_tilt, {}});
+    // pool(n)                → size this script's particle pool, from defineControls(). Returns the
+    // count actually available, 0 when the allocation failed. See mm_light_pool.
+    t.add({"pool", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_pool, {}});
+    // The particle vocabulary: whole-pool passes, one call per FRAME rather than per pixel.
+    // emit(x, y, angle, speed, n, life, hue) → throw n particles from a point.
+    t.add({"emit", 7, /*returns*/ false, BuiltinKind::Call, &mm_light_emit, {}});
+    // gravity(g) / drag(k) → the two forces a first particle effect needs.
+    t.add({"gravity", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_gravity, {}});
+    t.add({"drag", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_drag, {}});
+    // step() → integrate, and kill whatever left the grid. age(rate) → count down life.
+    t.add({"step", 0, /*returns*/ false, BuiltinKind::Call, &mm_light_step, {}});
+    t.add({"age", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_age, {}});
+    // bounce(e) → reflect off the grid walls, keeping e/256 of the speed.
+    t.add({"bounce", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_bounce, {}});
+    // collide(radius) → particles notice each other. NOT linear in pool size; see mm_light_collide.
+    t.add({"collide", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_collide, {}});
+    // render(maxLife) → draw the pool from the active palette.
+    t.add({"render", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_render, {}});
     // mod(value, limit)      → value % limit. The wrap every cyclic animation needs; see above.
+    // Also what the '%' OPERATOR resolves to, which is why the name stays even though `%` reads
+    // better: the parser looks it up here rather than core knowing any function by name.
     t.add({"mod", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_mod, {}});
+    // div(a, b)              → a / b, and what the '/' operator resolves to. See mm_light_div.
+    t.add({"div", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_div, {}});
+    // smoothstep(e0, e1, v)  → a soft 0..65535 ramp between two edges. Turns a distance into a
+    // glow; signed arguments, re-centered like polarA. See mm_light_smoothstep.
+    t.add({"smoothstep", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_smoothstep, {}});
+    // uvX(x, w, h) / uvY(y, w, h) → shader space, centered and short-side normalized so a circle
+    // stays a circle on a wide panel. SIGNED fixed (Q16.16), centered on 0.0, no bias.
+    // See mm_light_uvAxis.
+    t.add({"uvX", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_uvX, {}, /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0, /*fixedReturn*/ true});
+    t.add({"uvY", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_uvY, {}, /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0, /*fixedReturn*/ true});
+    // smin(a, b, k)          → the smooth minimum: two shapes melt into one surface. k = 0 is a
+    // plain union. See mm_light_smin.
+    t.add({"smin", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_smin, {}});
+    // escape(cx, cy, jx, jy, iters) → the escape-time count for z = z*z + c, 0..255, 0 inside.
+    // Mandelbrot with a zero seed, Julia otherwise. The one piece of maths a script cannot
+    // express: it squares SIGNED values and script arithmetic is unsigned.
+    t.add({"escape", 5, /*returns*/ true, BuiltinKind::Call, &mm_light_escape, {}, /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0x0f});
     // beat(bpm, t)           → 0..65535 sawtooth at bpm. The clock an animation is written against.
     t.add({"beat", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_beat, {}});
     // beatsin(bpm, t, high)  → a sine 0..high at bpm. The same shape an effect reaches for.
@@ -609,20 +1298,20 @@ inline BuiltinTable lightBuiltins() {
     t.add({"addLight", 3, /*returns*/ false, BuiltinKind::Call, &mm_light_addLight, {}});
     // line(x1, y1, x2, y2, r, g, b) → a segment on the canvas, via the shared draw::line.
     t.add({"line", 7, /*returns*/ false, BuiltinKind::Call, &mm_light_line, {}});
-    // addUint8(name, member, min, max) → declare a control on a member, the same call a compiled
-    // module makes (`controls_.addUint8("speed", speed, 1, 255)`). Bit 1 of byRef marks the second
-    // argument as the MEMBER, so the compiler passes its arena offset rather than its value, which
-    // is what makes the script read as the reference a compiled module passes.
-    t.add({"addUint8", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addUint8, {},
-           /*byRef*/ 0x2, /*byStr*/ 0x1, /*refType*/ CtrlType::Uint8});
-    // addUint16(name, member, min, max) → the same call against a uint16_t member, so a script can
-    // expose a value a byte cannot hold (a dwell time, a 0..1000 scale) instead of packing it into
-    // two byte controls. Same by-ref/by-str marking: only the declared width differs.
-    t.add({"addUint16", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addUint16, {},
-           /*byRef*/ 0x2, /*byStr*/ 0x1, /*refType*/ CtrlType::Uint16});
+    // addControl(name, member, min, max) → surface a member in the UI, the same shape a compiled
+    // module uses. Bit 1 of byRef marks the second argument as the MEMBER, so the compiler passes
+    // its arena offset (and its type) rather than its value, which is what makes the script read
+    // as the reference a compiled module passes. ONE call for every type: which widget appears
+    // follows from how the member was declared, so the two can no longer disagree.
+    t.add({"addControl", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addControl, {},
+           /*byRef*/ 0x2, /*byStr*/ 0x1});
     // setPaletteColor(x, y, i, bri) → one palette-coloured pixel. The form a script should reach
     // for: one call, one brightness evaluation, and no buffer-layout arithmetic at the call site.
     t.add({"setPaletteColor", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_setPaletteColor, {}});
+    // fdiv(a, b)             → the fixed '/' — see mm_light_fdiv. Both operands and the result
+    // are fixed; resolved by name exactly as div is, so core stays domain-neutral.
+    t.add({"fdiv", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_fdiv, {},
+           /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0x3, /*fixedReturn*/ true});
     // paletteR/G/B(i, bri)    → one channel each, for a script that needs the components. Kept
     // because setPaletteColor writes a pixel and cannot serve a script that wants the value.
     t.add({"paletteR", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_paletteR, {}});
@@ -638,13 +1327,17 @@ inline BuiltinTable lightBuiltins() {
 ///
 /// A compiled module's controls exist because `defineControls()` RAN: the Scheduler calls it on
 /// every module at setup, and again whenever a Select reshapes the visible set. A scripted one
-/// works the same way. This calls the entry point, each `addUint8` inside it reaches the engine
+/// works the same way. This calls the entry point, each `addControl` inside it reaches the engine
 /// through the control sink, and the binding's `rebuildControls()` then finds a populated list.
 ///
 /// Re-runnable, like its compiled counterpart: the list is cleared first, so calling it twice
 /// rebuilds rather than appends. A script that defines no `defineControls()` declares no controls,
 /// which is the honest answer for a script that wants no UI.
-inline void runDefineControls(MoonLive& engine) {
+/// `sizePool` is the binding's pool sizer, or null for a binding with no particles (a layout, a
+/// modifier). Installed and detached in the same bracket as the control sink: sizing a pool and
+/// declaring a control are the same moment, and sharing the bracket means a script's pool cannot
+/// be resized from anywhere else.
+inline void runDefineControls(MoonLive& engine, PoolSizeFn sizePool = nullptr, void* poolCtx = nullptr) {
     // A script with no defineControls() declares no controls, which is the honest answer for one
     // that wants no UI: there is nothing to clear and nothing to run.
     if (!engine.hasEntry(kEntryDefineControls)) return;
@@ -653,14 +1346,16 @@ inline void runDefineControls(MoonLive& engine) {
     // declare nothing. Keeping the previous set is the honest degrade, and the run is skipped
     // rather than executed into a dead sink.
     if (!setAddControlSink([](void* ctx, const char* n, uint8_t off,
-                              uint16_t lo, uint16_t hi, CtrlType type) {
+                              int32_t lo, int32_t hi, CtrlType type) {
             static_cast<MoonLive*>(ctx)->addDeclaredControl(n, off, lo, hi, type);
         }, &engine)) return;
+    if (sizePool) setPoolSizeSink(sizePool, poolCtx);
     engine.clearDeclaredControls();      // re-runnable: rebuild rather than append
     // A one-light scratch buffer: this entry point writes no pixels, but `run` refuses a null or
     // undersized one, and honoring that contract costs less than carving out an exception.
     uint8_t scratch[3] = {};
     engine.run(scratch, 1, 3, 0, kEntryDefineControls);
+    if (sizePool) setPoolSizeSink(nullptr, nullptr);
     setAddControlSink(nullptr, nullptr);
 }
 

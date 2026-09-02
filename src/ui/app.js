@@ -1,11 +1,12 @@
-// projectMM Web UI — all logic in one hand-maintained file per CLAUDE.md.
+// projectMM Web UI: all logic in one hand-maintained file per CLAUDE.md.
 // Loaded as <script type="module"> so it can import the shared install-picker
 // component used by both the device UI (here, OTA flash) and the GitHub Pages
 // installer (first flash via Web Serial). Module loading is deferred by
-// default; entry-point is the WS init at the bottom — no ordering surprises.
+// default; entry-point is the WS init at the bottom: no ordering surprises.
 import { installPicker } from "/install-picker.js";
 import { preview } from "/preview3d.js";
 import { isNewer, parse } from "/semver.js";
+import { applyMigrations, collectFiles, restoreDirs, diffRestore } from "/migrate.js";
 
 // Sections (top to bottom):
 //   1. State + storage
@@ -15,7 +16,7 @@ import { isNewer, parse } from "/semver.js";
 //   5. State patching (no-rebuild contract): updateValues() + updateModuleControls()
 //   6. Type picker
 //   7. Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile)
-//   (3D WebGL preview lives in preview3d.js — imported as `preview`)
+//   (3D WebGL preview lives in preview3d.js: imported as `preview`)
 //   8. Status bar wiring (device name, sys stats, theme, reboot)
 //   9. Boot
 //
@@ -23,7 +24,7 @@ import { isNewer, parse } from "/semver.js";
 //   - dragTs[mid:key] cooldown: ignore WS pushes for a control the user has touched
 //     in the last 1s. Prevents slider snap-back during drag.
 //   - ctrl.hidden: skip rendering hidden controls (plan-10 feature). Persistence still
-//     loads them — toggling visibility doesn't lose state.
+//     loads them: toggling visibility doesn't lose state.
 //   - No-rebuild contract: WS state updates patch values in place via querySelector.
 //     We only rebuild the DOM on structural changes (add/delete/move) and explicit
 //     select-driven defineControls rebuilds.
@@ -40,19 +41,19 @@ const WS_RETRY_MIN_MS = 200;     // first reconnect is quick so a dropped initia
                                  // whose first attempt can lose a contended socket) comes back near-instantly
 let wsRetryMs = WS_RETRY_MIN_MS; // exponential backoff: 200 → 400 → 800 → … → 5000 ceiling
 let wsHeartbeat = null;
-let wsReconnectTimer = null;     // the pending reconnect setTimeout — tracked so pagehide can cancel it
+let wsReconnectTimer = null;     // the pending reconnect setTimeout: tracked so pagehide can cancel it
 let wsPaused = false;            // gated by document.visibilityState
-let wsUnloading = false;         // true once the page starts unloading (refresh/navigate) — suppresses the
+let wsUnloading = false;         // true once the page starts unloading (refresh/navigate): suppresses the
                                  // reconnect on the closing socket so the departing page doesn't error-log
 
 const dragTimers = {};           // per-control debounce timers (clearTimeout handles)
-const dragTs = {};               // per-control last-touched timestamp (ms) — a short post-interaction cooldown
-// Control types whose value the user can edit — updateModuleControls suppresses a
+const dragTs = {};               // per-control last-touched timestamp (ms): a short post-interaction cooldown
+// Control types whose value the user can edit: updateModuleControls suppresses a
 // WS state push for one of these while the user is mid-edit. The read-only types
 // (display/display-int/time/progress) and the composite `list` are absent on
 // purpose: they always reflect the latest push.
 const EDITABLE_CONTROL_TYPES = new Set(
-    ["uint8", "uint16", "int16", "pin", "bool", "text", "textarea", "filepath", "password", "select",
+    ["uint8", "uint16", "int16", "int32", "pin", "bool", "text", "textarea", "filepath", "password", "select",
      "palette", "ipv4"]);
 const TIMING_MODES = ["fps", "ms"];
 
@@ -60,16 +61,16 @@ const TIMING_MODES = ["fps", "ms"];
 const LS_SELECTED  = "mm_selectedRoot";
 const LS_THEME     = "mm_theme";
 const LS_TIMING    = "mm_timing_mode";
-const LS_TABS      = "mm_selectedTabs";   // { [containerName]: childName } — the open tab per container
-const LS_EXPANDED  = "mm_expanded";       // [moduleName, …] — modules whose "controls" <details> is open
-const LS_TA_SIZE   = "mm_textareaSizes";  // { "<module>:<control>": heightPx } — user-dragged textarea heights
-const LS_CARDS_W   = "mm_cardsWidth";     // px — dragged width of the docked card column (right side)
+const LS_TABS      = "mm_selectedTabs";   // { [containerName]: childName }: the open tab per container
+const LS_EXPANDED  = "mm_expanded";       // [moduleName, …]: modules whose "controls" <details> is open
+const LS_TA_SIZE   = "mm_textareaSizes";  // { "<module>:<control>": heightPx }: user-dragged textarea heights
+const LS_CARDS_W   = "mm_cardsWidth";     // px: dragged width of the docked card column (right side)
 
 // The open tab per container, persisted so a reload doesn't dump you back on the first child.
 let selectedTabs = {};
 try { selectedTabs = JSON.parse(lsRead(LS_TABS, "{}")) || {}; } catch { selectedTabs = {}; }
 
-// Which modules have their "controls" disclosure open — VIEW-ONLY state the backend knows nothing about, so
+// Which modules have their "controls" disclosure open: VIEW-ONLY state the backend knows nothing about, so
 // it lives here (like selectedTabs), NOT in the module state. Persisting it means a full-state rebuild (or a
 // page reload) restores the open/closed expander instead of snapping it shut. Value/structure/picker state
 // all come from the backend, so those need no client persistence.
@@ -77,14 +78,14 @@ let expandedSet = new Set();
 try { expandedSet = new Set(JSON.parse(lsRead(LS_EXPANDED, "[]")) || []); } catch { expandedSet = new Set(); }
 function saveExpanded() { localStorage.setItem(LS_EXPANDED, JSON.stringify([...expandedSet])); }
 
-// The height a user dragged each textarea to — again VIEW-ONLY state the backend doesn't own (like the tab
+// The height a user dragged each textarea to: again VIEW-ONLY state the backend doesn't own (like the tab
 // and expander state above), keyed by "<module>:<control>". Persisting it means a resized script/config box
 // keeps its size across a full-state rebuild and a page reload instead of snapping back to the 2-row default.
 let textareaSizes = {};
 try { textareaSizes = JSON.parse(lsRead(LS_TA_SIZE, "{}")) || {}; } catch { textareaSizes = {}; }
 function saveTextareaSize(key, heightPx) { textareaSizes[key] = heightPx; localStorage.setItem(LS_TA_SIZE, JSON.stringify(textareaSizes)); }
 
-// The width the user dragged the docked card column to — VIEW-ONLY state (like the tab/expander/textarea
+// The width the user dragged the docked card column to: VIEW-ONLY state (like the tab/expander/textarea
 // state above). Applied as the --cards-width CSS custom property (the #main flex-basis reads it, clamped in
 // CSS so it can't crowd out the preview or vanish); restored on boot. Only meaningful in docked mode, where
 // the cards sit beside the preview; PiP/narrow mode makes them full-width and hides the handle.
@@ -123,7 +124,7 @@ function setupCardsResize() {
     };
     const onPointerMove = (e) => { if (dragging) onMove(e.clientX); };
     handle.addEventListener("pointerdown", (e) => {
-        // Only resize in docked mode — the handle is CSS-hidden otherwise, but guard anyway.
+        // Only resize in docked mode: the handle is CSS-hidden otherwise, but guard anyway.
         if (!document.querySelector(".workspace")?.classList.contains("mode-docked")) return;
         e.preventDefault();
         dragging = true;
@@ -162,10 +163,10 @@ function connectWs() {
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
-        if (sock !== ws) return;   // a newer socket already took over — ignore this stale open
+        if (sock !== ws) return;   // a newer socket already took over: ignore this stale open
         wsRetryMs = WS_RETRY_MIN_MS;                        // reset backoff
         setWsDot(true);
-        // Keepalive ping every 25s — Safari kills idle WebSockets otherwise
+        // Keepalive ping every 25s: Safari kills idle WebSockets otherwise
         clearInterval(wsHeartbeat);
         wsHeartbeat = setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) ws.send("ping");
@@ -174,6 +175,9 @@ function connectWs() {
 
     ws.onmessage = (e) => {
         if (sock !== ws || wsPaused) return;   // ignore a stale socket's late frame
+        // Binary never arrives here: the preview has its own `/wsp` connection (see
+        // connectPreview below), so this socket carries only control-plane JSON. A binary frame
+        // would mean an older firmware still multiplexing both, so keep handling it.
         if (e.data instanceof ArrayBuffer) {
             preview.onBinaryMessage(e.data);
             return;
@@ -182,37 +186,58 @@ function connectWs() {
             const data = JSON.parse(e.data);
             if (!data) return;
             // The device sends a FULL {modules:[...]} state on connect / after a structural change,
-            // then a {patch:[...]} of only-changed leaves each second (diff-on-the-wire — the whole
-            // module tree is ~34 KB of mostly-unchanging metadata that must NOT be re-serialised every
+            // then a {patch:[...]} of only-changed leaves each second (diff-on-the-wire: the whole
+            // module tree is ~34 KB of mostly-unchanging metadata that must NOT be re-serialized every
             // second on the render thread; see HttpServerModule buildStatePatch). Apply a patch onto
             // the existing `state` in place, then refresh the DOM. A patch before any full state is
             // ignored (we have nothing to patch); the device resyncs on connect so this self-corrects.
             if (Array.isArray(data.patch)) {
-                if (state && Array.isArray(state.modules)) { applyStatePatch(data.patch); updateValues(); }
+                if (state && Array.isArray(state.modules)) {
+                    applyStatePatch(data.patch);
+                    updateValues();
+                    // A targetFps slider move arrives as a PATCH, and the preview controller aims
+                    // at whatever it last heard: without this, the advertised detail/smoothness
+                    // chooser only takes effect on the next reconnect.
+                    preview.setTargetFps(previewTargetFps(state));
+                }
                 return;
             }
             // The same /ws also carries WLED-compatibility {state,info} frames for the native WLED app
-            // (see HttpServerModule's WLED shim). Those aren't our module-state shape — ignore anything
+            // (see HttpServerModule's WLED shim). Those aren't our module-state shape: ignore anything
             // without a `modules` array, or it would clobber `state` and blank the module view.
             if (!Array.isArray(data.modules)) return;
             state = data;
-            renderCards();     // a full state may add/remove/reshape cards (structural resync) — full render
+            // Defer the DOM rebuild while the user is mid-interaction: a full state arrives on every
+            // (re)connect, and rebuilding under an open dropdown makes it unselectable. The state is
+            // already stored above, so updateValues() below still shows fresh values; the structural
+            // render happens on the next full state once the interaction ends.
+            if (userIsEditing()) { updateValues(); preview.setTargetFps(previewTargetFps(state)); return; }
+            restoreSelectedRoot();   // before the render that reads it: this may be the FIRST state
+            renderCards();     // a full state may add/remove/reshape cards (structural resync): full render
             // The nav is built from the same tree, so a structural change (a module added or removed)
             // must rebuild it too, or the sidebar keeps entries the state no longer has. AFTER
             // renderCards, because its fallback may reassign selectedModule and the nav highlights it.
             renderNav();
             updateValues();
+            preview.setTargetFps(previewTargetFps(state));
         } catch {
             // ignore malformed messages
         }
     };
 
     ws.onclose = () => {
-        if (sock !== ws) return;   // a stale socket closing after we already moved on — leave the live one alone
+        if (sock !== ws) return;   // a stale socket closing after we already moved on: leave the live one alone
         clearInterval(wsHeartbeat);
         wsHeartbeat = null;
-        if (wsUnloading) return;   // the page is going away — don't reconnect (and don't touch the DOM)
+        if (wsUnloading) return;   // the page is going away, don't reconnect (and don't touch the DOM)
         setWsDot(false);
+        // A long-dead socket may mean the device switched images under this tab (a suspended
+        // tab restored from memory never re-runs the page-load check). Once the backoff has
+        // ripened, ask; the update overlay owns that conversation during an install, so skip
+        // while it is up.
+        if (wsRetryMs >= 5000 && !document.querySelector(".fw-overlay")) {
+            moonbaseHandoff();   // async; reconnects continue unless it flips the page
+        }
         // Exponential backoff with 5s ceiling; track the timer so pagehide can cancel a pending reconnect.
         wsReconnectTimer = setTimeout(connectWs, wsRetryMs);
         wsRetryMs = Math.min(wsRetryMs * 2, 5000);
@@ -227,15 +252,38 @@ function setWsDot(connected) {
     dot.className = connected ? "ws-dot connected" : "ws-dot disconnected";
 }
 
-// Visibility / bfcache hooks
+// Visibility / bfcache hooks: ONE handler per event (two handlers for the same event is the
+// split-rule trap). wsPaused gates message handling for the interval where a socket is open but
+// the tab just hid.
 document.addEventListener("visibilitychange", () => {
     wsPaused = (document.visibilityState === "hidden");
+    if (document.hidden) {
+        closePreviewSocket();                      // stop the stream and the bad measurements NOW
+        wsHideTimer = setTimeout(() => {
+            hiddenByVisibility = true;
+            wsUnloading = true;                    // suppress the auto-reconnect while hidden
+            // A backoff reconnect armed BEFORE the tab hid would otherwise fire afterwards and
+            // open a fresh control socket on a hidden tab, exactly the work this closes.
+            if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+            if (ws) { try { ws.close(); } catch {} }
+        }, WS_HIDE_GRACE_MS);
+    } else {
+        clearTimeout(wsHideTimer);
+        wsHideTimer = null;
+        if (hiddenByVisibility) {
+            hiddenByVisibility = false;
+            wsUnloading = false;
+            connectWs();                           // control first: the full state repaints the UI
+        }
+        // the preview follows the pane's own wants-frames state
+        if (previewWanted) connectPreview();
+    }
 });
 window.addEventListener("pageshow", (e) => {
     if (e.persisted) {
         // Safari restored from bfcache: re-establish state
         wsPaused = false;
-        wsUnloading = false;   // a bfcache-restored page is live again — allow reconnects
+        wsUnloading = false;   // a bfcache-restored page is live again: allow reconnects
         if (!ws || ws.readyState !== WebSocket.OPEN) connectWs();
     }
 });
@@ -248,6 +296,7 @@ window.addEventListener("pagehide", () => {
     clearInterval(wsHeartbeat);
     if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }   // no reconnect after unload
     if (ws) { try { ws.close(1000); } catch { /* already closing */ } }
+    if (wsPreview) { try { wsPreview.close(1000); } catch { /* already closing */ } }   // same silent handover for /wsp
 });
 
 // ---------------------------------------------------------------------------
@@ -260,53 +309,188 @@ async function init() {
     setupUpdateBadge();
     setupCardsResize();
     // Open the WebSocket FIRST, before any HTTP fetch. The device pushes a full {modules} state on connect
-    // (handleWebSocketUpgrade → requestFullResync), so the WS is the primary state source — the /api/state
+    // (handleWebSocketUpgrade → requestFullResync), so the WS is the primary state source: the /api/state
     // fetch below is only a first-paint shortcut. Connecting first matters most on Safari: it opens more
     // parallel connections up front and is quicker to give up on a contended one, so if the WS is opened
     // LAST (after several awaited fetches + the page's file loads) it lands in the most-saturated moment of
-    // the device's small socket pool and Safari abandons it — the "basic UI shows but the WS never goes
+    // the device's small socket pool and Safari abandons it: the "basic UI shows but the WS never goes
     // live" symptom. Opening it first lets it grab an uncontended slot; Chrome tolerated the old order, so
     // this fixes Safari without regressing Chrome.
     connectWs();
     preview.init();
     preview.setupLayout();
+    // Open the preview channel only while the pane wants frames, and close it the moment it does
+    // not, the device then builds nothing at all for a dismissed preview.
+    // The pull model's uplink: tiny request messages ([0x51][stride][fps] standing,
+    // [0x52][stride] one-shot) on the socket the pane already holds.
+    preview.onSendRequest((bytes) => {
+        if (wsPreview && wsPreview.readyState === WebSocket.OPEN)
+            wsPreview.send(Uint8Array.from(bytes));
+    });
+    preview.onWantsFrames((wanted) => {
+        previewWanted = wanted;
+        if (wanted) { wspRetryMs = WSP_RETRY_MIN_MS; connectPreview(); }
+        else disconnectPreview();
+    });
     // First-paint shortcut: render from a one-shot /api/state so the cards appear immediately instead of
     // waiting for the WS's first full-state push. The WS then keeps everything live. If this fetch fails
-    // (a contended slot), it's non-fatal — the WS full state fills in the moment it lands. Since the WS is
+    // (a contended slot), it's non-fatal: the WS full state fills in the moment it lands. Since the WS is
     // opened FIRST, its full-state push can beat this await; when it has (state already set), DON'T let the
-    // REST snapshot overwrite the newer, live WS state — just skip the commit.
+    // REST snapshot overwrite the newer, live WS state: just skip the commit.
     try {
         const resp = await fetch("/api/state");
+        if (resp.status === 404 && await moonbaseHandoff()) return;
         if (resp.ok && (!state || !Array.isArray(state.modules))) {
             const snap = await resp.json();
             if (snap && Array.isArray(snap.modules)) {
                 state = snap;
-                const savedSel = lsRead(LS_SELECTED, null);
-                if (state.modules.length > 0) {
-                    const exists = savedSel && state.modules.some(m => m.name === savedSel);
-                    // Default to the first root AS LISTED, not as scheduled — otherwise a
-                    // device with no saved selection opens on a card that is not the one the
-                    // nav highlights at the top.
-                    selectedModule = exists ? savedSel : navRoots(state.modules)[0].name;
+                restoreSelectedRoot();
+                // Default to the first root AS LISTED, not as scheduled: otherwise a device with no
+                // saved selection opens on a card that is not the one the nav highlights at the top.
+                if (!selectedModule && state.modules.length > 0) {
+                    selectedModule = navRoots(state.modules)[0].name;
                 }
                 renderNav();
                 renderCards();
                 updateStatusBar();
             }
         }
-    } catch { /* non-fatal — the WS full state renders the UI when it arrives */ }
+    } catch { /* non-fatal: the WS full state renders the UI when it arrives */ }
     // /api/types arrived in plan-11; fetch in parallel. When it arrives, the reset-to-default buttons (whose
-    // defaults come from this payload) need to appear — but a full renderCards() rebuilds the DOM, which
+    // defaults come from this payload) need to appear: but a full renderCards() rebuilds the DOM, which
     // would blow away a control the user is mid-edit (this fires ~1 s after first paint, so that's rare but
     // possible). Skip the re-render while an editable field is focused / a native select is open; the reset
     // buttons then appear on the next structural render instead of interrupting the edit.
     fetch("/api/types").then(r => r.json()).then(j => {
         availableTypes = j.types || [];
-        const el = document.activeElement;
-        const editing = el && (el.matches("input, textarea") || el.closest("select")
-                               || document.querySelector('select[data-open="true"]'));
-        if (state && !editing) renderCards();
+        if (state && !userIsEditing()) renderCards();
     }).catch(() => {});
+}
+
+// The PREVIEW socket, a second connection, deliberately.
+//
+// Preview frames are LOSSY and large (hundreds of KB/s on a big layout); control-plane state is
+// small and must not be delayed. Sharing one TCP connection makes the small messages queue behind
+// the large ones, textbook head-of-line blocking, which showed up as a flickering connection dot
+// and a UI that stopped responding while a big preview streamed. Separate connections is the
+// standard remedy, and it lets the device raise preview resolution instead of capping it to
+// protect the control plane.
+//
+// The device streams only to clients on this channel, so CLOSING this socket stops the work at the
+// source: a dismissed preview costs the device nothing.
+let wsPreview = null;
+let wspRetryTimer = null;   // pending preview reconnect, cancelled on close/hide
+let previewWanted = false;              // does the pane currently want frames?
+const WSP_RETRY_MIN_MS = 1000, WSP_RETRY_MAX_MS = 15000;
+let wspRetryMs = WSP_RETRY_MIN_MS;
+
+// A Select's value is normally the option INDEX, but a label-persisted Select (a NIC list, an
+// audio device list) sends the option STRING; resolve either to the index both render paths
+// need. Unknown label -> 0, so a vanished option shows the first row rather than a blank box.
+function selectIndex(ctrl) {
+    if (typeof ctrl.value === "string") {
+        const i = (ctrl.options || []).indexOf(ctrl.value);
+        return i >= 0 ? i : 0;
+    }
+    return ctrl.value ?? 0;
+}
+
+function connectPreview() {
+    if (wsPreview && (wsPreview.readyState === WebSocket.OPEN ||
+                      wsPreview.readyState === WebSocket.CONNECTING)) return;
+    const p = new WebSocket(`ws://${location.host}/wsp`);
+    wsPreview = p;
+    p.binaryType = "arraybuffer";
+    p.onmessage = (e) => {
+        if (p !== wsPreview || wsPaused) return;   // a stale socket's late frame is a no-op
+        if (e.data instanceof ArrayBuffer) preview.onBinaryMessage(e.data);
+    };
+    // RECONNECT. A dropped preview socket must come back on its own: WiFi hiccups, a device
+    // reboot, or the transient close a browser does when a tab is backgrounded all end the socket
+    // while the pane is still visible, and without a retry the preview stayed dead until the user
+    // pressed refresh (observed on an S3 over WiFi, 2026-08-25). Backoff so a device that REFUSES
+    // the upgrade (its preview cap is full) is not hammered; reset on a successful open.
+    p.onopen = () => {
+        if (p !== wsPreview) return;
+        wspRetryMs = WSP_RETRY_MIN_MS;
+        preview.adaptStart();   // the client-side controller runs only while this socket lives
+    };
+    p.onclose = () => {
+        if (p !== wsPreview) return;   // superseded by a newer socket, nothing to do
+        wsPreview = null;
+        preview.adaptStop();
+        if (!previewWanted) return;    // the pane was dismissed; staying closed is correct
+        // Tracked so closePreviewSocket can cancel it: an untracked retry armed just before a
+        // tab-hide would reopen the preview on a hidden tab and undo the hibernation.
+        wspRetryTimer = setTimeout(() => {
+            wspRetryTimer = null;
+            if (previewWanted && !wsPreview && !document.hidden) connectPreview();
+        }, wspRetryMs);
+        wspRetryMs = Math.min(wspRetryMs * 2, WSP_RETRY_MAX_MS);
+    };
+    p.onerror = () => { try { p.close(); } catch {} };   // onclose above does the retry
+}
+
+/// Close the socket without touching `previewWanted`, the pane's intent survives a tab-hide,
+/// which is what lets the return path reopen it.
+function closePreviewSocket() {
+    if (wspRetryTimer) { clearTimeout(wspRetryTimer); wspRetryTimer = null; }
+    if (!wsPreview) return;
+    const p = wsPreview;
+    wsPreview = null;
+    preview.adaptStop();
+    try { p.close(); } catch {}
+}
+
+function disconnectPreview() {
+    previewWanted = false;    // the pane was dismissed: intent gone too
+    closePreviewSocket();
+}
+
+// TAB VISIBILITY → socket hibernation. A hidden tab must cost the device NOTHING: its throttled
+// timers make it the worst client shape, subscribed but draining at a trickle, and its ~0 fps
+// measurements would coarsen the shared preview for everyone (coarsest request wins). So:
+//   hidden  → the preview socket closes IMMEDIATELY (the expensive stream, and the bad measurer);
+//             the control socket follows after a grace, so a quick alt-tab never pays the ~30 KB
+//             full-state resync. With both closed the device does nothing but render effects.
+//   visible → control reconnects first (the resync repaints the UI), then the preview via the
+//             normal wants-frames path, whose controller restarts fresh at full detail.
+const WS_HIDE_GRACE_MS = 10000;
+let wsHideTimer = null;
+let hiddenByVisibility = false;
+
+
+// The user's Preview targetFps, from the state tree, the client-side controller aims for it.
+function previewTargetFps(st) {
+    let v = 0;
+    const walk = (ms) => { for (const m of ms || []) {
+        if (m.type === "PreviewDriver")
+            for (const c of m.controls || []) if (c.name === "targetFps") v = c.value;
+        walk(m.children);
+    } };
+    walk(st && st.modules);
+    return v;
+}
+
+// Is the user mid-interaction with the page? A full renderCards() rebuilds the DOM, so it destroys
+// an open native select, a field being typed into, or TEXT THE USER HAS SELECTED, the control or
+// the selection vanishes from under the cursor.
+// ONE home for the test, because both re-render triggers need it: the /api/types arrival above and
+// the WebSocket full state. The WS case is the one users hit: a full state is sent on every connect,
+// so a browser that drops and reconnects (a big layout on modest hardware) re-renders repeatedly,
+// and a dropdown can become impossible to click before it disappears.
+//
+// A selection counts because copying a value out of the UI (a device name, an IP, a measurement)
+// is a normal thing to do and rebuilding under it collapses the highlight mid-drag, which reads as
+// the page fighting the user. It is deliberately narrow: a COLLAPSED selection (a plain caret, or
+// the empty range a click leaves behind) is not an interaction and must not park the UI on stale
+// structure. Live VALUES keep flowing either way, since updateValues() patches in place.
+function userIsEditing() {
+    const el = document.activeElement;
+    if (el && (el.matches("input, textarea") || el.closest("select")
+               || document.querySelector('select[data-open="true"]'))) return true;
+    const sel = window.getSelection();
+    return !!(sel && !sel.isCollapsed && sel.rangeCount > 0 && String(sel).length > 0);
 }
 
 // The message for a failed fetch Response: the server's own `{"error": …}` body (JSON, e.g.
@@ -316,16 +500,16 @@ async function errorMessage(res) {
     try {
         const j = await res.json();
         if (j && j.error) return j.error;
-    } catch (_) { /* non-JSON error body — fall through to the status code */ }
+    } catch (_) { /* non-JSON error body: fall through to the status code */ }
     return `HTTP ${res.status}`;
 }
 
 async function sendControl(moduleName, controlName, value) {
-    // Optimistically update the local `state` to what we just sent — the standard controlled-input
+    // Eagerly update the local `state` to what we just sent: the standard controlled-input
     // pattern. Without this, `state` keeps the OLD value until the device echoes the change back in a
     // value patch (up to a tick1s later, or folded into a full resync for a control that triggers a
     // rebuild like a driver's ledsPerPin). In that gap, an unrelated WS frame runs updateModuleControls,
-    // and once the dragTs edit-guard expires (>1s after the last keystroke — trivial if the user pauses)
+    // and once the dragTs edit-guard expires (>1s after the last keystroke: trivial if the user pauses)
     // it writes the stale `state` value straight back into the field the user just changed (the value
     // "reverses"; a manual refresh shows the correct value because it refetches). The client knows what
     // it sent, so update `state` now; any later echo just confirms it.
@@ -334,10 +518,10 @@ async function sendControl(moduleName, controlName, value) {
         const ctrl = mod && Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
         if (ctrl) ctrl.value = value;
     }
-    // Toggling expert mode changes which controls RENDER (the `advanced` ones), not just a value — so
+    // Toggling expert mode changes which controls RENDER (the `advanced` ones), not just a value: so
     // re-render the cards. Structural change, same as an add/remove; the value write above already landed.
     if (moduleName === "System" && controlName === "expertMode") renderCards();
-    // Best-effort by design — failures are not retried here. Non-ok responses +
+    // Best-effort by design: failures are not retried here. Non-ok responses +
     // network errors are logged to console so a user with devtools open can see
     // what went wrong (e.g. a control value the device-side validator rejected).
     try {
@@ -420,9 +604,9 @@ async function listSetField(moduleName, ctrlName, id, field, value) {
         if (!res.ok) { console.warn(`[list] set ${moduleName}.${ctrlName}#${id}.${field} failed (status=${res.status})`); return false; }
         // A FIELD edit does NOT refetch: the value is already applied server-side and the WS push
         // reconciles it, so rebuilding here would collapse the open row and snap an in-progress edit
-        // back (a `channels` change also reshapes the row's fields — that structural update rides the
+        // back (a `channels` change also reshapes the row's fields: that structural update rides the
         // WS push, guarded by the dragTs cooldown, not a rebuild-on-every-keystroke). Structural ops
-        // (add/delete/move) DO refetch — they change the row set. Return true so the caller can decide.
+        // (add/delete/move) DO refetch: they change the row set. Return true so the caller can decide.
         return true;
     } catch (e) {
         console.warn(`[list] set ${moduleName}.${ctrlName}#${id}.${field} failed (error=${e && e.message ? e.message : e})`);
@@ -430,10 +614,17 @@ async function listSetField(moduleName, ctrlName, id, field, value) {
     }
 }
 
-async function addModule(type, parentName) {
-    if (!type) return;
+/// Create a module, optionally under a chosen name, and return the name it got.
+///
+/// `id` names the new module. The endpoint treats it as IDEMPOTENT (a module of that name already
+/// there is success, not a rename), and answers that case without a `name`: so a caller that wants
+/// a fresh module reads the absence of a name as "taken" and asks again with another. Returns null
+/// when nothing was created, for either reason.
+async function addModule(type, parentName, id) {
+    if (!type) return null;
     const body = {type: type};
     if (parentName) body.parent_id = parentName;
+    if (id) body.id = id;
     let name = null;
     try {
         const r = await fetch("/api/modules", {
@@ -441,8 +632,11 @@ async function addModule(type, parentName) {
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify(body)
         });
-        name = (await r.json()).name;   // the created module's final name (post-disambiguation)
+        name = (await r.json()).name || null;   // the created module's final name; absent if taken
     } catch {}
+    // A name already in use: the caller decides whether to retry, and re-fetching state here would
+    // cost a round trip per attempt.
+    if (id && !name) return null;
     // Select the new module's tab BEFORE the re-render so renderCards shows it active (the tab strip
     // reads selectedTabs[parent]); then scroll it into view and focus its first control so a keyboard
     // user lands on it. Without this the view stays on the previously-active tab and the new module
@@ -453,19 +647,20 @@ async function addModule(type, parentName) {
     }
     await refetchState();
     if (name) focusModule(name);
+    return name;
 }
 
 // Bring a module's card into view and focus its first control (added via the "+" flow).
 function focusModule(name) {
     const card = document.querySelector(`.card[data-module="${cssEscape(name)}"]`);
     if (!card) return;
-    // A child card can wrap its controls in a collapsed <details> (.card-controls-collapse) — open it
+    // A child card can wrap its controls in a collapsed <details> (.card-controls-collapse): open it
     // FIRST so the card is at its expanded height, THEN scroll: scrolling a still-collapsed card lands
     // on its pre-expansion geometry and the focused control ends up mispositioned.
     const collapse = card.querySelector("details.card-controls-collapse");
     if (collapse) collapse.open = true;
     card.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    // Focus the first real control input, NOT the tab strip / header buttons — and NOT the status row,
+    // Focus the first real control input, NOT the tab strip / header buttons: and NOT the status row,
     // which is a `.control-row` with only spans (a freshly added driver leads with a status, so picking
     // the first `.control-row` would find no input and focus nothing). Query for the input directly
     // inside any control row so the status row is skipped.
@@ -489,21 +684,31 @@ async function moveModuleTo(name, toIndex) {
 }
 
 // swap a module for another type at the same position. The replacement starts
-// with its own default control values — a clean swap, not a value carry-over.
-async function replaceModule(name, newType) {
+// with its own default control values: a clean swap, not a value carry-over.
+/// Swap a module for another type, optionally renaming it.
+///
+/// `newName` is for a caller that knows what the slot now holds: replacing one script with another
+/// leaves a card labeled after the old script unless the name travels with it. Omitted, the device
+/// keeps a custom name and refreshes a default one, which is what a plain type swap wants.
+async function replaceModule(name, newType, newName) {
     if (!newType) return;
+    const body = {type: newType};
+    if (newName) body.name = newName;
     await fetch("/api/modules/" + encodeURIComponent(name) + "/replace", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({type: newType})
+        body: JSON.stringify(body)
     });
-    refetchState();
+    // AWAITED, because a caller may address the slot straight afterwards: the replace can rename it
+    // (a module still carrying its old type's default name takes the new type's), and only the
+    // refreshed state says what it is called now.
+    await refetchState();
 }
 
 async function rebootDevice() {
     try {
         await fetch("/api/reboot", {method: "POST"});
-    } catch { /* connection may drop mid-response — that's the device restarting */ }
+    } catch { /* connection may drop mid-response: that's the device restarting */ }
     // WS will reconnect on its own via onclose backoff
 }
 
@@ -513,15 +718,15 @@ async function rebootDevice() {
 
 // The order roots are LISTED in, which is deliberately not the order they RUN in.
 //
-// main.cpp orders by dependency — Filesystem before anything that writes a file, System before the
-// modules that read its identity — and that order is load-bearing, so it cannot be reshuffled to
+// main.cpp orders by dependency: Filesystem before anything that writes a file, System before the
+// modules that read its identity: and that order is load-bearing, so it cannot be reshuffled to
 // suit a menu. But it reads as an implementation detail to someone using the device: the first
 // thing they see is System, and the lights are at the bottom.
 //
 // So the nav states its own order, grouped by what a user is looking for: the thing they reach for
-// most (Control), then the light pipeline in pipeline order (where the lights are → what colour →
+// most (Control), then the light pipeline in pipeline order (where the lights are → what color →
 // how it gets out), then the device itself. A root NOT named here still appears, after these, in
-// scheduler order — so adding a module never makes it invisible, it just lands at the end until
+// scheduler order: so adding a module never makes it invisible, it just lands at the end until
 // someone decides where it belongs.
 // GROUPS, not one flat list: the nav draws a rule between them, so the grouping has to be the
 // data rather than an index the renderer counts to.
@@ -543,7 +748,7 @@ function navGroups(modules) {
     return groups.filter(g => g.length);
 }
 
-/// Flat nav order — the same modules navGroups returns, ungrouped. Used where only the ORDER
+/// Flat nav order: the same modules navGroups returns, ungrouped. Used where only the ORDER
 /// matters (picking the default selection), so the two can never disagree about what comes first.
 function navRoots(modules) {
     return navGroups(modules).flat();
@@ -554,7 +759,7 @@ function renderNav() {
     if (!nav || !state) return;
     nav.innerHTML = "";
 
-    // One entry per root module. Clicking selects that root — only the selected
+    // One entry per root module. Clicking selects that root: only the selected
     // root's card subtree is rendered (one root visible at a time).
     const list = document.createElement("div");
     list.className = "nav-list";
@@ -612,7 +817,7 @@ function buildNavFooter() {
     footer.appendChild(links);
 
     // Diagnostic bundle download. Fetches /api/state + /api/system from
-    // the *same* origin we're on (the device itself) — sidesteps Chrome's
+    // the *same* origin we're on (the device itself): sidesteps Chrome's
     // mixed-content blocker that prevents the install page (HTTPS Pages)
     // from doing the same fetch against the device (HTTP LAN). Output is
     // a single JSON blob the user can attach to a bug report.
@@ -684,6 +889,37 @@ function selectModule(name) {
     closeNavDrawer();
 }
 
+/// The module holding `name` as a child, or null at the top level.
+///
+/// Used after a replace to resolve a slot whose name was disambiguated: the parent bounds the
+/// search to the siblings the swap happened among.
+/// Restore the root the user was last on, once the tree is known.
+///
+/// Called from BOTH state arrivals, because either can be first: the WebSocket full state and the
+/// /api/state fetch race on load, and only the fetch used to consult this. When the socket won, the
+/// selection stayed null and renderCards fell back to the first root, so a refresh landed on Control
+/// instead of the Layer or File Manager the user left open. Intermittent exactly as a race is, and
+/// self-correcting after any nav click, which sets the selection in memory.
+///
+/// A saved name that is no longer in the tree is ignored, leaving the fallback to pick.
+function restoreSelectedRoot() {
+    if (selectedModule) return;                       // an explicit choice this session wins
+    if (!state || !Array.isArray(state.modules) || !state.modules.length) return;
+    const saved = lsRead(LS_SELECTED, null);
+    if (saved && state.modules.some(m => m.name === saved)) selectedModule = saved;
+}
+
+function findParentOf(name, modules) {
+    if (!modules) modules = state.modules;
+    for (const m of modules) {
+        const kids = m.children || [];
+        if (kids.some(k => k.name === name)) return m;
+        const found = findParentOf(name, kids);
+        if (found) return found;
+    }
+    return null;
+}
+
 function findModule(name, modules) {
     if (!modules) modules = state.modules;
     for (const m of modules) {
@@ -725,13 +961,13 @@ function renderCards() {
 }
 
 // ============================================================================
-// Surface demo sweep — REMOVABLE BLOCK
+// Surface demo sweep: REMOVABLE BLOCK
 //
 // A hardware control desk sweeps its motorised faders and rings when it powers up, both to show it
 // is alive and to show what it has. This does the same for three seconds after the surface appears.
 //
 // It is deliberately isolated so it can be deleted whole: this block, plus the single
-// `startSurfaceDemo()` call at the end of renderCards(). It is a VIEW-ONLY animation — it never
+// `startSurfaceDemo()` call at the end of renderCards(). It is a VIEW-ONLY animation: it never
 // calls sendControl, so it cannot write a swept value to the device, and the first WebSocket patch
 // after it finishes restores whatever the device actually holds.
 // ============================================================================
@@ -739,7 +975,7 @@ const SURFACE_DEMO_MS = 1000;
 let surfaceDemoUntil = 0;
 /// The module the sweep last ran for. renderCards() fires on every state push and every mutation (a
 /// pad click refetches and re-renders), so "the surface was rendered" is NOT "the surface was
-/// opened" — without this the sweep replayed on every button press.
+/// opened": without this the sweep replayed on every button press.
 let surfaceDemoShownFor = null;
 
 function startSurfaceDemo(root, moduleName) {
@@ -753,7 +989,7 @@ function startSurfaceDemo(root, moduleName) {
     const q = (sel) => [...root.querySelectorAll(sel)];
     // Every bank is re-queried each frame, for the same reason the pads are: a state push mid-sweep
     // re-renders the card and replaces these nodes. A list captured once would keep writing values to
-    // detached elements while the visible controls sat frozen — which is what stopped the knobs and
+    // detached elements while the visible controls sat frozen: which is what stopped the knobs and
     // faders a few hundred ms into a refresh, while the (live-queried) pads ran the full period.
     const liveInputs = () => [
         ...q(".control-encoder .encoder-input"),
@@ -763,7 +999,7 @@ function startSurfaceDemo(root, moduleName) {
     const faders = q(".control-fader .fader-input");
     // Pads are looked up LIVE each frame rather than captured: a state push mid-sweep re-renders the
     // card and replaces these nodes, and a captured list would spend the rest of the run toggling
-    // classes on detached elements — which is why the chase stopped partway through.
+    // classes on detached elements: which is why the chase stopped partway through.
     const livePads = () => q(".list-pad:not(.list-pad-empty)");
     if (!knobs.length && !faders.length && !livePads().length) return;
     surfaceDemoShownFor = moduleName;
@@ -819,11 +1055,11 @@ function renderModuleTree(mod, parentEl, depth) {
 
     // One rule: a TOP-LEVEL module shows its children one at a time behind a tab strip, so its card
     // stays short however many children it has. Deeper levels stack as before. The tabs are derived
-    // from mod.children on every render, so adding a layer adds its tab — there is no tab registry
+    // from mod.children on every render, so adding a layer adds its tab: there is no tab registry
     // to keep in sync, which is the whole of the "dynamic" requirement.
     if (depth === 0) {
-        // The "+" tab takes over the add affordance, so hide the footer's duplicate button — but keep
-        // the footer element itself, because openTypePicker renders the picker into it.
+        // The "+" tab takes over the add affordance, so hide the footer's duplicate button. The
+        // footer element stays: it is what the tab's handler walks up to find this card's mod.
         const addBtn = card.querySelector(".card-footer > .add-btn");
         if (addBtn) addBtn.style.display = "none";
         renderChildTabs(mod, childrenEl, depth);
@@ -834,7 +1070,7 @@ function renderModuleTree(mod, parentEl, depth) {
     }
 }
 
-// Drag a tab onto another to reorder — the tab strip IS the child list, so reordering tabs reorders
+// Drag a tab onto another to reorder: the tab strip IS the child list, so reordering tabs reorders
 // the modules. Deliberately the same insert-semantics + moveModuleTo() call the card drag uses
 // (attachDragHandlers): one reorder path, so a tab drag and a card drag can't drift apart.
 function attachTabDragHandlers(tab, child, parent) {
@@ -853,7 +1089,7 @@ function attachTabDragHandlers(tab, child, parent) {
     tab.addEventListener("dragover", (e) => {
         const src = document.querySelector(".tab.dragging");
         if (!src || src === tab) return;
-        if (src.parentElement !== tab.parentElement) return;   // same strip only — not another container's
+        if (src.parentElement !== tab.parentElement) return;   // same strip only: not another container's
         e.preventDefault();
         tab.classList.add("drag-over");
     });
@@ -876,16 +1112,23 @@ function attachTabDragHandlers(tab, child, parent) {
 // A tab carries its module's fault severity as a dot, because a tab that can HIDE an error is worse
 // than no tab: a driver failing on a background tab must still be visible from the strip.
 function applyTabDot(tab, mod) {
+    // Touch the DOM only when the dot actually changes. This runs for every module on every
+    // state patch (updateTabDot), and removing or inserting a node inside the tab collapses any
+    // selection the user is holding in that card, so an unconditional remove-and-recreate made
+    // text impossible to select and copy: the same rule setText follows for text nodes.
+    const want = (mod.severity === "error" || mod.severity === "warning") ? mod.severity : null;
     const old = tab.querySelector(".tab-dot");
+    const have = old ? old.className.replace("tab-dot tab-dot-", "") : null;
+    if (have === want) return;                  // nothing to do: leave the DOM alone
     if (old) old.remove();
-    if (mod.severity !== "error" && mod.severity !== "warning") return;
+    if (!want) return;
     const dot = document.createElement("span");
-    dot.className = "tab-dot tab-dot-" + mod.severity;
+    dot.className = "tab-dot tab-dot-" + want;
     tab.appendChild(dot);
 }
 
 // Patch-path twin of applyTabDot + the disabled greying: the tab strip is built in renderCards(), which the
-// WS value patch deliberately never re-runs — so without this, a fault (or an enable/disable) on a background
+// WS value patch deliberately never re-runs: so without this, a fault (or an enable/disable) on a background
 // tab would stay invisible until the next full render. (The UI has two render paths; a rule must live in both.)
 function updateTabDot(mod) {
     const tab = document.querySelector(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`);
@@ -908,14 +1151,14 @@ function renderChildTabs(mod, childrenEl, depth) {
     for (const child of mod.children) {
         const tab = document.createElement("button");
         // Grey a disabled child's tab title (mirrors the card's card--disabled), so it reads as inactive
-        // from the strip without opening it. Derived purely from child.enabled — no backend round-trip.
+        // from the strip without opening it. Derived purely from child.enabled: no backend round-trip.
         tab.className = "tab" + (child.name === active ? " tab-active" : "")
                               + (child.enabled === false ? " tab--disabled" : "");
         tab.type = "button";
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", child.name === active ? "true" : "false");
         // Name + the module's own status dot, so a driver erroring on a background tab is still
-        // visible without opening it — a tab that can hide a fault is worse than no tab.
+        // visible without opening it: a tab that can hide a fault is worse than no tab.
         tab.dataset.tabMid = child.name;   // so updateTabDot can find it on the WS patch path
         tab.textContent = child.name;
         applyTabDot(tab, child);
@@ -928,7 +1171,7 @@ function renderChildTabs(mod, childrenEl, depth) {
         strip.appendChild(tab);
     }
 
-    // "+" lives at the END OF THE STRIP, where a new tab appears — not in the card footer below the
+    // "+" lives at the END OF THE STRIP, where a new tab appears: not in the card footer below the
     // panel, which would read as "add something to the open driver" rather than "add a driver".
     // createCard still renders the footer button for non-tabbed containers; here we hide it and put
     // the affordance where the tabs are.
@@ -939,12 +1182,15 @@ function renderChildTabs(mod, childrenEl, depth) {
         addTab.textContent = "+";
         addTab.title = "add " + rolesAcceptedBy(mod).join(" / ");
         addTab.addEventListener("click", () => {
-            // THIS card's own footer — a plain querySelector would match the first .card-footer in the
+            // THIS card's own footer: a plain querySelector would match the first .card-footer in the
             // subtree, which belongs to a nested child's card (Effects would then offer the Layer's
             // effects instead of another layer). Scope to direct children of this card.
             const card = childrenEl.parentElement;
             const footer = [...card.children].find(el => el.classList.contains("card-footer"));
-            if (footer) openTypePicker(mod, footer);
+            // Anchored to the TAB, which is what the user clicked. The footer's own add button
+            // is display:none at this depth (renderModuleTree hides it), and a hidden
+            // element's rect is all zeros, which pinned the modal to the top of the window.
+            if (footer) openTypePicker(mod, addTab);
         });
         strip.appendChild(addTab);
     }
@@ -958,6 +1204,296 @@ function renderChildTabs(mod, childrenEl, depth) {
     if (child) renderModuleTree(child, panel, depth + 1);
 }
 
+// ---- MoonBase update flow ----
+// On a MoonBase device (FirmwareUpdate exposes a `moonbase` control) the app cannot flash itself:
+// one app slot, and it is running from it. Instead it reboots into the MoonBase factory image,
+// which installs into the app slot and reboots back: same IP throughout (same MAC, same DHCP
+// lease). The whole cycle runs behind one full-screen overlay, shown BEFORE the reboot so there
+// is no dead gap. GET /moonbase is the identity probe: MoonBase answers it with its live install
+// status; the app 404s it: so "404 again after an install ran" means the new firmware is up.
+function deviceHasMoonBase(mod) {
+    return (mod.controls || []).some(c => c.name === "moonbase");
+}
+
+function showUpdateOverlay() {
+    const ov = document.createElement("div");
+    ov.className = "fw-overlay";
+    const box = document.createElement("div");
+    box.className = "fw-overlay-box";
+    const h = document.createElement("h2");
+    h.textContent = "Updating firmware\u2026";
+    const msg = document.createElement("p");
+    msg.className = "fw-overlay-msg";
+    const bar = document.createElement("progress");   // no value = indeterminate sweep
+    const dismiss = document.createElement("button");
+    dismiss.textContent = "close";
+    dismiss.style.display = "none";
+    dismiss.addEventListener("click", () => ov.remove());
+    const cancel = document.createElement("button");
+    cancel.textContent = "cancel install";
+    let uploadCtl = null;   // the in-flight file upload's AbortController, set by the flow
+    cancel.addEventListener("click", () => {
+        // A URL install hears POST /cancel; a file upload cancels by dropping its connection
+        // (MoonBase's single-connection server is busy receiving it), so abort the fetch.
+        if (uploadCtl) uploadCtl.abort();
+        fetch("/cancel", { method: "POST" }).catch(() => {});
+    });
+    box.append(h, msg, bar, cancel, dismiss);
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    return {
+        status(text) { msg.textContent = text; },
+        progress(read, total) { if (total > 0) { bar.max = total; bar.value = read; } },
+        fail(text) { msg.textContent = text; bar.remove(); cancel.remove(); dismiss.style.display = ""; },
+        setUpload(ctl) { uploadCtl = ctl; },
+    };
+}
+
+const fwSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Probe GET /moonbase once: "up" (200 + status text), "app" (404: the application is answering),
+// or "silent" (no answer: the device is mid-reboot). Never throws.
+async function probeMoonBase() {
+    // Bounded: against a powered-off device an untimed fetch hangs for up to a minute on the
+    // TCP connect, which starves the poll loop of the very silence it is trying to measure.
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 2500);
+    try {
+        const r = await fetch("/moonbase", { cache: "no-store", signal: ctl.signal });
+        if (r.ok) return { state: "up", text: await r.text() };
+        return { state: "app" };
+    } catch (_) {
+        return { state: "silent" };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// When this app page finds MoonBase answering underneath it (a cached or suspended tab over
+// a device that switched images), say so and load MoonBase's real page: the cache-busting
+// query makes the browser fetch it instead of re-serving this one. True when the handoff ran.
+async function moonbaseHandoff() {
+    if ((await probeMoonBase()).state !== "up") return false;
+    document.body.innerHTML = "";
+    const note = document.createElement("p");
+    note.style.cssText = "font:16px system-ui;margin:3rem auto;max-width:30rem;text-align:center";
+    note.textContent = "This device is in MoonBase (maintenance mode) \u2014 opening its page\u2026";
+    document.body.appendChild(note);
+    setTimeout(() => location.replace("/?" + Date.now()), 1200);
+    return true;
+}
+
+// The one-click cycle. opts is {url} (device installs it unattended off the NVS-staged URL) or
+// {file} (the browser holds the image and pushes it to MoonBase once MoonBase answers).
+const MOONBASE_SILENT_MSG = "MoonBase did not answer. If its WiFi fell back, join the " +
+                            "MoonBase access point and open http://4.3.2.1";
+
+// Poll until MoonBase serves (a 200 on the probe). False on deadline: the device never came up,
+// or came up unreachable (AP fallback).
+async function waitForMoonBase(deadline) {
+    while (Date.now() < deadline) {
+        await fwSleep(2000);
+        if ((await probeMoonBase()).state === "up") return true;
+    }
+    return false;
+}
+
+async function moonbaseUpdateFlow(opts) {
+    const ui = showUpdateOverlay();   // opens before the reboot: no dead gap
+    try {
+        ui.status("Restarting into MoonBase\u2026");
+        // The kickoff response can be cut off by the reboot; a dead socket here is not a failure.
+        let res = null;
+        try {
+            res = opts.url
+                ? await fetch("/api/firmware/url", {
+                      method: "POST", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ url: opts.url }) })
+                : await fetch("/api/firmware/moonbase", { method: "POST" });
+        } catch (_) {}
+        if (res && !res.ok && res.status !== 202) throw new Error(await errorMessage(res));
+
+        if (opts.file) {
+            // The upload needs MoonBase serving before the browser can push the image.
+            if (!(await waitForMoonBase(Date.now() + 120000))) throw new Error(MOONBASE_SILENT_MSG);
+            ui.status(`Installing ${fmSize(opts.file.size)}\u2026`);
+            const uploadCtl = new AbortController();
+            ui.setUpload(uploadCtl);
+            try {
+                const r = await fetch("/install", {
+                    method: "POST", headers: { "Content-Type": "application/octet-stream" },
+                    body: opts.file, signal: uploadCtl.signal });
+                if (!r.ok) throw new Error(await r.text());
+            } catch (err) {
+                if (err instanceof Error && err.name === "AbortError") {
+                    // The user's cancel, not a failure: the dropped connection aborts the
+                    // write on the device, which stays waiting in MoonBase.
+                    ui.fail("Install canceled \u2014 the device is waiting in MoonBase.");
+                    return;
+                }
+                if (err instanceof Error && err.message.startsWith("error")) throw err;
+                // A dead socket mid-upload (power cut, WiFi drop) is not a verdict: the watch
+                // loop below sees where the device lands and retries the upload from there.
+            } finally {
+                ui.setUpload(null);
+            }
+        }
+
+        // Watch until the app answers again. On the unattended URL path MoonBase installs BEFORE
+        // it ever serves, so a successful cycle is silence followed by the new app's 404 on the
+        // probe; MoonBase answering (200) is the upload path's install window, and on the URL
+        // path its failure parking spot (the probe body is its status). The dying OLD app also
+        // 404s the probe for a moment, so "app" only counts as done once the device has been
+        // seen away, or after a grace period long enough that the kickoff reboot must have run.
+        const watchStart = Date.now();
+        let deadline = watchStart + 300000;
+        let sawAway = false;
+        let silentStreak = 0;
+        let retries = 0;
+        while (Date.now() < deadline) {
+            await fwSleep(2000);
+            const probe = await probeMoonBase();
+            if (probe.state !== "silent") silentStreak = 0;
+            if (probe.state === "silent") {
+                sawAway = true;
+                // A reboot is a few silent probes; many in a row is a device that lost power or
+                // the network. Say so instead of freezing on the last byte count.
+                if (++silentStreak >= 4) {
+                    ui.status("The device is not answering \u2014 waiting for it to come back\u2026");
+                }
+            } else if (probe.state === "up" && probe.text === "idle" && sawAway) {
+                // MoonBase is up with NOTHING running after the cycle already started: the
+                // install was interrupted (a power cut lands exactly here: blank otadata boots
+                // MoonBase, and the staged URL was already consumed). The browser still holds
+                // the payload, so the one click survives the cut: hand it over again.
+                if (retries >= 2) throw new Error("the install keeps getting interrupted");
+                retries++;
+                deadline += 180000;   // a retry restarts the ~40 s install; extend the watch
+                ui.status("The install was interrupted \u2014 retrying\u2026");
+                try {
+                    if (opts.url) {
+                        await fetch("/install-url", { method: "POST", body: opts.url });
+                    } else {
+                        await fetch("/install", {
+                            method: "POST", headers: { "Content-Type": "application/octet-stream" },
+                            body: opts.file });
+                    }
+                    // The response itself is not consumed: MoonBase reboots on success and the
+                    // probes below see the outcome either way.
+                } catch (_) {}
+            } else if (probe.state === "up") {
+                sawAway = true;   // MoonBase answering means the old app is gone
+                if (probe.text === "canceled") {
+                    ui.fail("Install canceled \u2014 the device is waiting in MoonBase.");
+                    return;
+                }
+                if (probe.text.startsWith("error")) throw new Error(probe.text);
+                // The unattended install reports "downloading: N of M bytes"; render it the
+                // way the file path reads, with a real bar.
+                const dl = probe.text.match(/downloading: (\d+) of (\d+) bytes/);
+                if (dl) {
+                    const read = parseInt(dl[1], 10), total = parseInt(dl[2], 10);
+                    ui.status(`Installing ${fmSize(total || read)}\u2026`);
+                    ui.progress(read, total);
+                } else {
+                    // "idle" is MoonBase's quiescent state; mid-cycle it means the install
+                    // has not started yet, which deserves better words than "Idle".
+                    ui.status(!probe.text || probe.text === "idle"
+                              ? "Preparing the install\u2026" : probe.text);
+                }
+            } else if (probe.state === "app" && (sawAway || Date.now() - watchStart > 20000)) {
+                ui.status("Done \u2014 reloading\u2026");
+                await fwSleep(1000);
+                location.reload();
+                return;
+            }
+        }
+        throw new Error("timed out waiting for the new firmware");
+    } catch (err) {
+        ui.fail("Update failed: " + err.message);
+    }
+}
+
+// Which surface bank a control belongs to, or null for an ordinary row. A surface strip is
+// inline-flex, so consecutive strips pack onto one line and a wide card would run the switches
+// straight into the encoders; a break closes a bank where the kind changes. BOTH render paths use
+// this (createCard builds a card from scratch, syncVisibleControls rebuilds it live when a hidden
+// flag flips), because a render rule that lives in only one of them is right until the other runs.
+function surfaceBank(ctrl) {
+    return ctrl.switchRow ? "switch" : ctrl.encoder ? "encoder" : ctrl.fader ? "fader" : null;
+}
+
+function surfaceBreak() {
+    const br = document.createElement("div");
+    br.className = "surface-break";
+    return br;
+}
+
+/// The live editors on each module's script, by module name.
+///
+/// A card's status row and its script editor are built independently, so neither can reach the
+/// other directly; this is the seam between them. A SET per module, because a module can have two
+/// editors open on the same file at once (the card's pane and the modal it expands into) and both
+/// have to mark the failing line.
+const mlEditors = new Map();
+
+/// Register an editor under a module, and return its own removal.
+///
+/// Handing back the unregister rather than exposing a remove(name, ed) keeps the two halves from
+/// drifting: the modal in particular learns its module from whoever opened it, and cannot then
+/// unregister under a different name.
+function mlEditorAdd(name, ed) {
+    if (!name) return () => {};
+    if (!mlEditors.has(name)) mlEditors.set(name, new Set());
+    mlEditors.get(name).add(ed);
+    return () => {
+        const set = mlEditors.get(name);
+        if (!set) return;
+        set.delete(ed);
+        if (!set.size) mlEditors.delete(name);
+    };
+}
+
+/// The editors on a module that are still on the page.
+///
+/// The sweep runs from setStatusText, which a card only calls when it HAS a status: a module that
+/// never reports one leaves its detached editors in the map. They are inert (no timers, no DOM
+/// work: painting is driven by the editor's own events), so this is housekeeping rather than a
+/// leak, and the entries go when the module does.
+///
+/// renderCards rebuilds every card by clearing its host, which orphans an inline editor without
+/// ever calling dispose: registering on create with no counterpart leaked one editor per re-render,
+/// and each leaked one kept re-running the highlighter on detached DOM every time a status arrived.
+/// Testing the DOM is what makes that impossible to get wrong, since it asks the only question that
+/// matters (is this editor still showing?) rather than trusting every teardown path to report.
+function mlLiveEditors(name) {
+    const set = mlEditors.get(name);
+    if (!set) return [];
+    for (const ed of set) if (!ed.isMounted()) set.delete(ed);
+    if (!set.size) { mlEditors.delete(name); return []; }
+    return [...set];
+}
+
+/// Write a module's status, and mark the line it names in every editor showing that script.
+///
+/// Both render paths (createCard and updateModuleControls) come here, because a rule that lives in
+/// only one of them is a rule that applies half the time. A compile failure arrives as
+/// "message @<offset>"; an EDITOR turns that into a line and column, since only it holds the text
+/// the offset counts into. Each returns the same rewritten text, so which one supplies it does not
+/// matter; a module with no editor open shows the raw status unchanged.
+function setStatusText(valEl, mod) {
+    // Every editor on this module marks the line; each returns the same rewritten text, since they
+    // hold the same file. Keeping the first answer rather than the last says that plainly: the
+    // string does not depend on which editor supplied it.
+    // Every editor on this module marks the line and returns the SAME rewritten text, since they
+    // hold the same file: so mark them all, and take any one answer.
+    let text = mod.status;
+    for (const ed of mlLiveEditors(mod.name)) text = ed.markError(mod.status);
+    // setText, not a bare assignment: this runs on every state push, and rewriting an unchanged
+    // node throws away a selection the user may be holding on it.
+    setText(valEl, text);
+}
+
 function createCard(mod, depth) {
     const card = document.createElement("div");
     card.className = "card";
@@ -968,7 +1504,7 @@ function createCard(mod, depth) {
     const title = document.createElement("div");
     title.className = "card-title";
 
-    // The enabled toggle is built here but appended later — it joins the
+    // The enabled toggle is built here but appended later: it joins the
     // right-hand action cluster (next to ✎ × ?) rather than sitting at the start
     // of the row, for visual grouping with the other per-card controls.
     // Rendered as a <button> styled as a 26×26 rounded box (matching .card-btn);
@@ -988,7 +1524,7 @@ function createCard(mod, depth) {
         enabled.classList.toggle("module-enabled--off", !on);
         enabled.setAttribute("aria-pressed", on ? "true" : "false");
         card.classList.toggle("card--disabled", !on);
-        // Grey this module's TAB in the same click, alongside its card — so the tab title dims INSTANTLY
+        // Grey this module's TAB in the same click, alongside its card: so the tab title dims INSTANTLY
         // instead of waiting ~1s for the server's full-state round-trip. (updateTabDot still syncs it on the
         // patch path, idempotently, so this just makes the on/off button the immediate driver.) The tab
         // lives in the parent's strip, found by the same data-tab-mid updateTabDot uses.
@@ -1012,7 +1548,7 @@ function createCard(mod, depth) {
     name.textContent = mod.name;
     title.appendChild(name);
 
-    // Emoji tags (role + curated) shown after the name — same set used by the
+    // Emoji tags (role + curated) shown after the name: same set used by the
     // type picker's chip filter, so visual identity is consistent across views.
     const emoji = emojiTagsForMod(mod);
     if (emoji) {
@@ -1027,7 +1563,7 @@ function createCard(mod, depth) {
     spacer.className = "card-spacer";
     title.appendChild(spacer);
 
-    // fps/ms toggle on the stats line — global mode, single click cycles all cards
+    // fps/ms toggle on the stats line: global mode, single click cycles all cards
     const stats = document.createElement("span");
     stats.className = "card-stats";
     stats.dataset.mid = mod.name;
@@ -1038,7 +1574,7 @@ function createCard(mod, depth) {
         const idx = TIMING_MODES.indexOf(timingMode);
         timingMode = TIMING_MODES[(idx + 1) % TIMING_MODES.length];
         localStorage.setItem(LS_TIMING, timingMode);
-        // Refresh every card's stats line in place — no full re-render needed
+        // Refresh every card's stats line in place: no full re-render needed
         document.querySelectorAll(".card-stats[data-mid]").forEach(s => {
             const m = findModule(s.dataset.mid);
             if (m) { s.textContent = formatStats(m); s.title = formatStatsTitle(m); }
@@ -1103,14 +1639,14 @@ function createCard(mod, depth) {
     // Child-hosting modules deeper in the tree (Effects, Layer, Drivers, Layouts)
     // collapse their own controls so the children are the focus by default.
     // Modules that merely host a code-wired child (Network → Improv) keep their
-    // controls expanded — the parent's settings are the main point, the code-wired
+    // controls expanded: the parent's settings are the main point, the code-wired
     // child is informational. Leaf modules render controls inline (no wrapper).
-    // EXCEPTION: a top-level module (depth 0 — the selected root, e.g. System,
+    // EXCEPTION: a top-level module (depth 0: the selected root, e.g. System,
     // Network, or a container like Services/Drivers) never collapses its own
     // controls, even when it accepts children. It's the card the user is looking
     // at, so its settings should be visible, not hidden behind a "controls" disclosure.
     // Use the SAME predicate the row loop renders by (controlRendersGenerically), not a bare
-    // !c.hidden — else the disclosure could open for a module whose only "visible" controls render
+    // !c.hidden: else the disclosure could open for a module whose only "visible" controls render
     // elsewhere (e.g. FileManager's filesystem/lastSaved render inside its own panel, not generically).
     const hasVisibleControls = mod.controls && mod.controls.some(c => controlRendersGenerically(mod, c));
     const wrapInDetails = depth > 0 && acceptsNewChildren(mod) && hasVisibleControls;
@@ -1118,7 +1654,7 @@ function createCard(mod, depth) {
         const d = document.createElement("details");
         d.className = "card-controls-collapse";
         // Restore the open/closed state from localStorage, so a full-state rebuild (or a page reload) keeps
-        // the expander as the user left it instead of snapping shut. Persist it on toggle — same pattern as
+        // the expander as the user left it instead of snapping shut. Persist it on toggle: same pattern as
         // the selected tab (LS_TABS). VIEW-only state; nothing to do with the module's backend state.
         d.open = expandedSet.has(mod.name);
         d.addEventListener("toggle", () => {
@@ -1141,15 +1677,19 @@ function createCard(mod, depth) {
         const val = document.createElement("span");
         val.className = "status-value";
         val.dataset.sev = mod.severity || "status";
-        val.textContent = mod.status;
+        setStatusText(val, mod);
         row.appendChild(label);
         row.appendChild(val);
         controlsHost.appendChild(row);
     }
 
     if (mod.controls) {
+        let bank = null;
         for (const ctrl of mod.controls) {
             if (!controlRendersGenerically(mod, ctrl)) continue;
+            const kind = surfaceBank(ctrl);
+            if (bank && kind !== bank) controlsHost.appendChild(surfaceBreak());
+            bank = kind;
             const row = createControl(mod.name, mod.type, ctrl);
             if (row) controlsHost.appendChild(row);
         }
@@ -1165,16 +1705,16 @@ function createCard(mod, depth) {
     // FirmwareUpdate card hosts the shared install picker. Mount once per
     // card-build. The picker reads SystemModule.firmware (already in
     // /api/state) to filter to OTA-compatible releases. On install, the
-    // device fetches the binary via /api/firmware/url — no browser CORS in
+    // device fetches the binary via /api/firmware/url: no browser CORS in
     // the data path. See docs/architecture.md § Firmware vs board.
     if (mod.type === "FirmwareUpdateModule") {
         // Opening the Firmware card forces a fresh update check (the badge otherwise refreshes
-        // only on the 1 h cache cadence) — so the badge agrees with the picker the user is about
+        // only on the 1 h cache cadence): so the badge agrees with the picker the user is about
         // to use. Fire-and-forget; best-effort.
         checkFirmwareUpdate(true);
         const ownFirmwareKey = (() => {
             // The `firmware` variant key is this module's own control now (moved here from
-            // SystemModule), so read it straight off mod — no cross-module lookup.
+            // SystemModule), so read it straight off mod: no cross-module lookup.
             const fwCtrl = (mod.controls || []).find(c => c.name === "firmware");
             return fwCtrl && fwCtrl.value ? fwCtrl.value : null;
         })();
@@ -1184,11 +1724,29 @@ function createCard(mod, depth) {
         installPicker.init({
             container: mount,
             ownFirmwareKey,
-            // Device already knows its deviceModel (SystemModule) — picker is for
+            // Device already knows its deviceModel (SystemModule): picker is for
             // releases + firmware compatibility only. Showing a board picker
             // here would invite the user to mis-narrow the firmware list.
             enableBoardPicker: false,
-            onInstall: async (_firmware, _manifestUrl, binaryUrl) => {
+            onInstall: async (_firmware, _manifestUrl, binaryUrl, entry) => {
+                // A desktop build has no OTA: it updates by downloading a new release and being
+                // replaced by hand. So hand the browser the file and let it do what it does with a
+                // download, rather than POSTing to a route that would 501 here.
+                if (entry && entry.isDesktop) {
+                    const a = document.createElement("a");
+                    a.href = binaryUrl;
+                    a.rel = "noopener";
+                    a.target = "_blank";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    return;
+                }
+                if (deviceHasMoonBase(mod)) {
+                    // MoonBase device: the whole install runs unattended behind the overlay.
+                    moonbaseUpdateFlow({ url: binaryUrl });
+                    return;
+                }
                 const res = await fetch("/api/firmware/url", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -1199,7 +1757,7 @@ function createCard(mod, depth) {
         });
 
         // Install-from-file: pick a locally-built .bin and stream its bytes to /api/firmware/upload,
-        // which feeds platform::otaWriteStream (esp_ota_write). Complements the release picker above —
+        // which feeds platform::otaWriteStream (esp_ota_write). Complements the release picker above -
         // the release path has the device fetch a URL; this path has the browser push the body, so a
         // dev build that isn't a published release can be flashed straight over the network. The device
         // reboots on success (no response body), so a completed POST that closes mid-flight is success.
@@ -1208,7 +1766,7 @@ function createCard(mod, depth) {
         const upBtn = document.createElement("button");
         upBtn.className = "fm-tool fm-tool--icon";
         upBtn.textContent = "↥";   // same upload glyph as the file-manager toolbar
-        upBtn.title = "Install from file — flash a firmware .bin from your computer over the network (OTA)";
+        upBtn.title = "Install from file: flash a firmware .bin from your computer over the network (OTA)";
         const upStatus = document.createElement("span");
         upStatus.className = "fw-upload-status";
         const upInput = document.createElement("input");
@@ -1219,15 +1777,20 @@ function createCard(mod, depth) {
             const file = (upInput.files || [])[0];
             upInput.value = "";                   // reset so re-picking the same file re-fires change
             if (!file) return;
+            if (deviceHasMoonBase(mod)) {
+                // MoonBase device: reboot into MoonBase, then the browser pushes this file to it.
+                moonbaseUpdateFlow({ file });
+                return;
+            }
             upBtn.disabled = true;
             upStatus.textContent = `uploading ${fmSize(file.size)}…`;
             try {
                 const res = await fetch("/api/firmware/upload", {
                     method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
                 });
-                // The device sends a 200 once the image is committed, THEN reboots — so res.ok is the
+                // The device sends a 200 once the image is committed, THEN reboots: so res.ok is the
                 // real success signal. A 4xx/5xx carries the device's ota error in the JSON body.
-                if (res.ok) upStatus.textContent = "flashed — device rebooting";
+                if (res.ok) upStatus.textContent = "flashed: device rebooting";
                 else throw new Error(await errorMessage(res));
             } catch (err) {
                 // A network error mid-upload is a genuine failure now (the device answers before it
@@ -1241,13 +1804,30 @@ function createCard(mod, depth) {
         fileRow.appendChild(upBtn);
         fileRow.appendChild(upStatus);
         fileRow.appendChild(upInput);
+        // MoonBase devices: open the maintenance image directly: reboot into MoonBase and land
+        // on its page (same address, so a reload gets there once it answers). The way back is
+        // MoonBase's own "Boot the app" button.
+        if (deviceHasMoonBase(mod)) {
+            const mbBtn = document.createElement("button");
+            mbBtn.className = "fm-tool";
+            mbBtn.textContent = "MoonBase";
+            mbBtn.title = "Reboot into MoonBase, the maintenance image, install firmware, then boot back";
+            mbBtn.addEventListener("click", async () => {
+                const ui = showUpdateOverlay();
+                ui.status("Restarting into MoonBase\u2026");
+                try { await fetch("/api/firmware/moonbase", { method: "POST" }); } catch (_) {}
+                if (await waitForMoonBase(Date.now() + 120000)) { location.reload(); return; }
+                ui.fail(MOONBASE_SILENT_MSG);
+            });
+            fileRow.appendChild(mbBtn);
+        }
         controlsHost.appendChild(fileRow);
     }
 
     // -- Children block + footer --
     // The .card-children wrapper lives inside this card so the parent's border
     // encloses its children; renderModuleTree recurses into it. The "+ add module"
-    // footer only appears on parents that accept user-created children — a parent
+    // footer only appears on parents that accept user-created children: a parent
     // hosting only code-wired children (e.g. Network → Improv) renders the
     // children block but no add button.
     let childrenEl = null;
@@ -1265,17 +1845,10 @@ function createCard(mod, depth) {
             addBtn.className = "add-btn";
             addBtn.textContent = "+ add module";
             addBtn.addEventListener("click", () => {
-                // Hide the button while the picker is open (the picker takes its
-                // place); restore it once the picker is removed (cancel/create/Esc).
-                addBtn.style.display = "none";
-                openTypePicker(mod, footer);
-                const obs = new MutationObserver(() => {
-                    if (!footer.querySelector(".type-picker")) {
-                        addBtn.style.display = "";
-                        obs.disconnect();
-                    }
-                });
-                obs.observe(footer, {childList: true});
+                // The picker is a modal, so the button stays where it is: it used to be hidden
+                // and restored through a MutationObserver because the picker was appended into
+                // the footer and took the button's place.
+                openTypePicker(mod, addBtn);
             });
             footer.appendChild(addBtn);
             card.appendChild(footer);
@@ -1295,7 +1868,7 @@ function createCard(mod, depth) {
 // Wire a button as a press-twice confirm: the first click arms it (adds the
 // `armed` class, optional armed label/title), a second click runs `onConfirm`.
 // Disarms after 3s or when the pointer leaves. Used by the delete and reboot
-// buttons — no browser confirm() popup. `armedText` is optional (delete swaps
+// buttons: no browser confirm() popup. `armedText` is optional (delete swaps
 // × → ✓; reboot keeps its glyph). The pre-arm title is captured live so a
 // title updated elsewhere (e.g. reboot's crashed-state text) restores correctly.
 function armPressTwice(btn, onConfirm, opts = {}) {
@@ -1304,7 +1877,7 @@ function armPressTwice(btn, onConfirm, opts = {}) {
     let savedText = "";
     let savedTitle = "";
     const disarm = () => {
-        // Only restore label/title if we actually armed — otherwise a mouseleave before the first
+        // Only restore label/title if we actually armed: otherwise a mouseleave before the first
         // click would write the initial empty savedText/savedTitle over the button, collapsing a
         // text-sized button (e.g. "🗑 delete") to an empty sliver.
         if (!armed) return;
@@ -1329,7 +1902,7 @@ function armPressTwice(btn, onConfirm, opts = {}) {
     btn.addEventListener("mouseleave", disarm);
 }
 
-// Compact byte formatter — "B" under 1 KB, "KB" otherwise (one decimal under 10 KB).
+// Compact byte formatter: "B" under 1 KB, "KB" otherwise (one decimal under 10 KB).
 function fmtBytes(n) {
     if (n < 1024) return n + "B";
     const k = n / 1024;
@@ -1354,7 +1927,7 @@ function formatStats(mod) {
     const dyn = mod.dynamicBytes || 0;
     const mem = "🧠 " + fmtBytes(stat) + (dyn > 0 ? " + " + fmtBytes(dyn) : "");
     // Status chip: emitted by the engine when a module has something to say.
-    // Severity picks the emoji — ℹ️ neutral (Eth: 192.168.1.210), ⚠️ degraded
+    // Severity picks the emoji: ℹ️ neutral (Eth: 192.168.1.210), ⚠️ degraded
     // (buffer reduced), ❌ error (No network). Tooltip carries the full text.
     const sev = mod.severity || "status";
     const sevEmoji = sev === "error" ? "❌" : sev === "warning" ? "⚠️" : "ℹ️";
@@ -1380,13 +1953,13 @@ function createActionButtons(mod) {
     replaceBtn.textContent = "✎";
     replaceBtn.title = "Replace with another type";
     replaceBtn.addEventListener("click", () => {
-        // Anchor the picker to the card so it drops below the card content,
+        // Anchored to the button: the picker is a modal that opens under whatever was clicked,
         // not inside the cramped 26px action-button row.
-        openReplacePicker(mod, replaceBtn.closest(".card"));
+        openReplacePicker(mod, replaceBtn);
     });
     wrap.appendChild(replaceBtn);
 
-    // Delete: press × once to arm, again to confirm — see armPressTwice.
+    // Delete: press × once to arm, again to confirm: see armPressTwice.
     const delBtn = document.createElement("button");
     delBtn.className = "card-btn card-btn-del";
     delBtn.textContent = "×";
@@ -1423,7 +1996,7 @@ function hasNestedChildren(mod) {
 }
 
 // Roles this parent accepts as user-added children, from the device's
-// `acceptsChildRoles` (per-type in /api/types — e.g. Layer → "effect,modifier").
+// `acceptsChildRoles` (per-type in /api/types: e.g. Layer → "effect,modifier").
 // Domain-neutral: the UI no longer hardcodes which module types are containers;
 // the device declares it via MoonModule::acceptsChildRoles(). "" → [] (accepts
 // none), which is also the default for modules whose type isn't loaded yet.
@@ -1433,17 +2006,17 @@ function rolesAcceptedBy(parentMod) {
     return csv ? csv.split(",") : [];
 }
 
-// Whether the "+ add module" affordance applies — derived from acceptsChildRoles
+// Whether the "+ add module" affordance applies: derived from acceptsChildRoles
 // being non-empty, so there's a single source of truth (no separate list).
 function acceptsNewChildren(mod) {
     return rolesAcceptedBy(mod).length > 0;
 }
 
-// The set of child roles ANY loaded type accepts — the union of every type's
+// The set of child roles ANY loaded type accepts: the union of every type's
 // acceptsChildRoles. A module is "user-managed as a child" iff its role is in
 // this set, which is how the UI decides to show delete/replace/drag without
 // hardcoding role names. Code-wired children (ImprovProvisioning,
-// — roles no container declares) correctly fall outside it.
+//: roles no container declares) correctly fall outside it.
 function allAcceptedChildRoles() {
     const roles = new Set();
     for (const t of availableTypes) {
@@ -1456,13 +2029,13 @@ function allAcceptedChildRoles() {
 // Whether the UI shows delete / replace / drag for this module. True when it's
 // a nested module (depth > 0) whose role is one some container accepts AND it
 // hasn't opted out via the device's userEditable=false (e.g. PreviewDriver).
-// Replaces the old hardcoded `role === "effect" || "modifier"` gate — now any
+// Replaces the old hardcoded `role === "effect" || "modifier"` gate: now any
 // add-accepted role (driver, layout, …) is editable, and the child itself can
 // veto via userEditable.
 //
 // We test mod.role against the UNION of all containers' acceptsChildRoles, not
 // against this module's specific parent. That's exact while the role→container
-// mapping is 1:1 (effect→Layer, driver→Drivers, layout→Layouts, layer→Effects) —
+// mapping is 1:1 (effect→Layer, driver→Drivers, layout→Layouts, layer→Effects) -
 // a child of an add-accepted role is always under the one container that
 // accepts it. If a role ever becomes accepted by more than one container, this
 // would need the parent threaded in to scope the check to the actual parent.
@@ -1478,7 +2051,12 @@ function isUserEditableChild(mod, depth) {
 
 // Look up the factory default for a given module type's control. Returns undefined when
 // the type isn't in /api/types yet or the control has no default (display/progress).
-function defaultFor(moduleType, ctrlName) {
+function defaultFor(moduleType, ctrlName, ctrl) {
+    // A default carried ON the control wins: it is the only one that exists for a module whose
+    // controls are declared by data rather than by its C++ type (a MoonLive script's
+    // `uint8_t bpm = 60;`). /api/types probes a fresh instance, which for those has no script and
+    // so declares no controls at all.
+    if (ctrl && ctrl.default !== undefined) return ctrl.default;
     if (!moduleType) return undefined;
     const t = availableTypes.find(t => t.name === moduleType);
     if (!t || !t.defaults) return undefined;
@@ -1493,16 +2071,21 @@ function docPathForType(moduleType) {
     return (t && t.docPath) ? t.docPath : "";
 }
 
-// Curated emoji string for a live module — its role emoji plus the type's
+// Curated emoji string for a live module: its role emoji plus the type's
 // `tags` from /api/types, deduplicated, in role-first order. "" if the type
 // isn't loaded yet. Used on the card title and in the type picker.
+//
+// The INSTANCE's own tags win when it has them. A scripted module answers from the script it
+// loaded, so two MoonLive effects running different scripts read differently while sharing one
+// entry in /api/types: the audio one shows 🎶, the moving-head one 🎯. A compiled module sends
+// nothing here and keeps its type's answer.
 function emojiTagsForMod(mod) {
     if (!mod) return "";
     const t = availableTypes.find(t => t.name === mod.type) || {role: mod.role, tags: ""};
-    return emojiTagsFor(t).join("");
+    return emojiTagsFor(mod.tags ? {...t, tags: mod.tags} : t).join("");
 }
 
-// Whether a control appears in the generic control list — false for controls the module marked
+// Whether a control appears in the generic control list: false for controls the module marked
 // `hidden`. A module that renders a control in its own panel instead (e.g. the File Manager's
 // `filesystem` usage bar + `lastSaved` readout, drawn by renderFileManager) sets the hidden flag on
 // the C++ side, so the generic list skips it and the value never shows twice. Used by BOTH render
@@ -1516,28 +2099,32 @@ function controlRendersGenerically(mod, ctrl) {
 function createControl(moduleName, moduleType, ctrl) {
     const row = document.createElement("div");
     row.className = "control-row";
-    // Expert-only controls (only reachable here when expert mode is on — see controlRendersGenerically)
+    // Expert-only controls (only reachable here when expert mode is on: see controlRendersGenerically)
     // get a distinct treatment so they read as a different tier: a left accent stripe + muted label.
     if (ctrl.advanced) row.classList.add("control-advanced");
+    // A switch-row control renders as a strip like an encoder or fader, so switch N sits in the
+    // same column as encoder N and fader N: a surface reads down a channel, not across a list.
+    if (ctrl.switchRow) row.classList.add("control-switch");
     row.dataset.key = ctrl.name;
 
     const label = document.createElement("label");
     label.className = "control-label";
     // The expertMode toggle itself carries the wrench glyph (via CSS ::before), so it reads as the switch
-    // that governs the 🔧 controls — the toggle is never `advanced` (it must always be reachable), so key
+    // that governs the 🔧 controls: the toggle is never `advanced` (it must always be reachable), so key
     // it by name rather than the flag.
     if (moduleName === "System" && ctrl.name === "expertMode") label.classList.add("control-label--expert");
-    label.textContent = ctrl.name;
+    label.textContent = displayName(ctrl.name);
     row.appendChild(label);
 
     const key = moduleName + ":" + ctrl.name;
-    const def = defaultFor(moduleType, ctrl.name);
+    const def = defaultFor(moduleType, ctrl.name, ctrl);
 
     // numberField: a numeric control that opted out of the slider (server sets it for a value where each
-    // integer is a discrete identity, not a magnitude — a PHY/I2C address, a channel). Render a plain
+    // integer is a discrete identity, not a magnitude: a PHY/I2C address, a channel). Render a plain
     // number input, same shape as the `pin` case, whatever the underlying numeric type. The WS-patch path
     // (updateModuleControls) reads the input by [data-mid][data-key] the same way, so no extra patch case.
-    const isNumericType = ctrl.type === "uint8" || ctrl.type === "uint16" || ctrl.type === "int16";
+    const isNumericType = ctrl.type === "uint8" || ctrl.type === "uint16" || ctrl.type === "int16" ||
+                          ctrl.type === "int32";
     if (ctrl.numberField && isNumericType) {
         const nMin = Number(ctrl.min ?? 0);
         const nMax = Number(ctrl.max ?? 65535);
@@ -1573,11 +2160,11 @@ function createControl(moduleName, moduleType, ctrl) {
             const input = document.createElement("input");
             input.type = "range";
             // A fader is the same range input stood on end (CSS `writing-mode: vertical-lr`), so the
-            // value, the range and the WS live-update path are untouched — only the orientation and
+            // value, the range and the WS live-update path are untouched: only the orientation and
             // the row's layout change. Consecutive faders sit side by side as one bank.
             // An encoder is the same range input drawn as a KNOB: the input itself is hidden and an
             // SVG dial sits on top, so the value, the range, the WS update path and keyboard access
-            // are the range input's — only the appearance changes. Dragging vertically turns it,
+            // are the range input's: only the appearance changes. Dragging vertically turns it,
             // which is the gesture a real encoder takes.
             if (ctrl.encoder) {
                 input.classList.add("encoder-input");
@@ -1590,7 +2177,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 input.classList.add("fader-input");
                 row.classList.add("control-fader");
                 row.appendChild(buildSevenSeg(input));
-                // Right-click a fader to see (and later choose) what it drives — the same
+                // Right-click a fader to see (and later choose) what it drives: the same
                 // configure-on-the-control rule the pads follow.
                 attachTargetPopup(row, input, ctrl);
             }
@@ -1708,14 +2295,24 @@ function createControl(moduleName, moduleType, ctrl) {
             appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
             break;
         }
+        case "int32":
         case "int16": {
-            // ctrl.min/ctrl.max are always present (server sends them). Sentinel
-            // values INT16_MIN (-32768) / INT16_MAX (32767) mean "unbounded" —
-            // fall back to a ±percentage range.
-            const rawMin = Number(ctrl.min ?? -32768);
-            const rawMax = Number(ctrl.max ?? 32767);
-            const min = rawMin <= -32768 ? -100 : rawMin;
-            const max = rawMax >= 32767  ?  200 : rawMax;
+            // ctrl.min/ctrl.max are always present (server sends them). An int16 at the type's
+            // own limit means "unbounded" and falls back to a +-percentage range, since a slider
+            // spanning the full type is useless to drag.
+            //
+            // An int32 does NOT: its range is what the script declared, and narrowing an
+            // unbounded one to -100..200 hid every value outside that window: a control
+            // declared 0..1000 sitting at 900 rendered as a slider pinned to its top with the
+            // real value unreachable. A bounded int32 keeps its bounds; an unbounded one spans
+            // the type, which the number input beside the slider makes usable.
+            const isI32 = ctrl.type === "int32";
+            const lo = isI32 ? -2147483648 : -32768;
+            const hi = isI32 ?  2147483647 :  32767;
+            const rawMin = Number(ctrl.min ?? lo);
+            const rawMax = Number(ctrl.max ?? hi);
+            const min = (!isI32 && rawMin <= lo) ? -100 : rawMin;
+            const max = (!isI32 && rawMax >= hi) ?  200 : rawMax;
             const raw = Number(ctrl.value ?? 0);
             const clamped = Math.max(min, Math.min(max, raw));
             const input = document.createElement("input");
@@ -1780,7 +2377,7 @@ function createControl(moduleName, moduleType, ctrl) {
             input.value = ctrl.value ?? "";
             input.dataset.mid = moduleName;
             input.dataset.key = ctrl.name;
-            // ctrl.readonly is a UI hint (the server still accepts writes — the
+            // ctrl.readonly is a UI hint (the server still accepts writes: the
             // flag exists for values pushed by tooling like MoonDeck or the
             // web installer, where editing in the device UI is by-convention
             // disallowed). `readOnly` lets the user select/copy the text but
@@ -1814,7 +2411,7 @@ function createControl(moduleName, moduleType, ctrl) {
             // event, so a ResizeObserver is the standard way to observe it; store the pixel height keyed by
             // "<module>:<control>". Use the observed height (not the inline style, which the initial observe
             // fire and a layout-driven change wouldn't set), track the last saved value, and write only on a
-            // real change — so the initial fire and idle re-observations don't thrash localStorage. rAF-
+            // real change: so the initial fire and idle re-observations don't thrash localStorage. rAF-
             // coalesced so a drag saves once per frame at most.
             let taRaf = 0, taPrevH = Math.round(savedH > 0 ? savedH : 0);
             const taObserver = new ResizeObserver((entries) => {
@@ -1846,6 +2443,21 @@ function createControl(moduleName, moduleType, ctrl) {
             // No `dir` means the name IS the path: joinFsPath("", n) would return "/n" and point
             // at the filesystem root instead of the file the module named.
             const pathOf = (n) => (n ? (dir ? joinFsPath(dir, n) : n) : "");
+            // Where a script actually IS, which is not always `dir`: a factory script sits in the
+            // catalog's directory until an edit forks it into the user's. The device resolves the
+            // same way (user copy first), so the editor has to look in both or it would open an
+            // empty box for a script that is plainly listed.
+            const scriptPathOf = async (n) => {
+                if (!n || !dir) return pathOf(n);
+                const local = joinFsPath(dir, n);
+                if (!mlGroupForExt(ext)) return local;
+                try {
+                    const here = await fmFetchDir(dir).catch(() => []);
+                    if (here.some(e => !e.isDir && e.name === n)) return local;
+                    const cat = await mlFetchCatalog();
+                    return joinFsPath(cat.dir, n);
+                } catch (_) { return local; }
+            };
 
             const stack = document.createElement("div");
             stack.className = "control-fileedit-stack";
@@ -1854,13 +2466,51 @@ function createControl(moduleName, moduleType, ctrl) {
             const bar = document.createElement("div");
             bar.className = "fileedit-bar";
 
-            // A native <select>: keyboard-accessible, needs no CSS to look right, and matches every
-            // other picker in this UI. Populated from the directory listing, so a file created in
-            // the File Manager shows up on the next render without a reload.
-            const picker = document.createElement("select");
+            // A select-SHAPED button, opening the shared picker. It reads as a select (the current
+            // name, then the ⌄ affordance) and behaves as one, but the list it opens is the same
+            // widget the module picker uses: search, emoji chips, keyboard, one row per script.
+            // A native <select> can only render plain text, so a script's emoji and dimension had
+            // nowhere to go.
+            //
+            // It presents the SAME surface a <select> does (`value`, `options`, `disabled`, and a
+            // `change` event), so everything around it (the fork/share/delete labels, the editor
+            // load, the download-on-pick) is unchanged and unaware.
+            const picker = document.createElement("button");
+            picker.type = "button";
             picker.className = "control-select fileedit-pick";
             picker.dataset.mid = moduleName;
             picker.dataset.key = ctrl.name;
+            // The options, as data. `fillPicker` appends option elements exactly as it did to the
+            // <select>; they are never rendered, they are the list the modal is built from.
+            picker.options = [];
+            picker.appendChild = (o) => { picker.options.push(o); return o; };
+            const paintPicker = () => {
+                const cur = picker.options.find(o => o.value === picker._value);
+                picker.textContent = cur ? cur.textContent : "(none)";
+                const caret = document.createElement("span");
+                caret.className = "fileedit-pick-caret";
+                caret.textContent = "\u2304";        // ⌄, the select affordance
+                picker.append(caret);
+            };
+            Object.defineProperty(picker, "value", {
+                get: () => picker._value ?? "",
+                set: (v) => { picker._value = String(v ?? ""); paintPicker(); },
+            });
+            picker._value = "";
+            // innerHTML = "" is how fillPicker clears the list; keep that meaning.
+            Object.defineProperty(picker, "innerHTML", {
+                set: (v) => { if (v === "") { picker.options = []; picker.replaceChildren(); } },
+                get: () => "",
+            });
+            // Which scripts this picker can offer that are not on the device yet. Names only:
+            // picking one downloads it. Empty for a filepath control that is not a script picker.
+            let remote = [];
+            // Local names that also exist in the catalog: a user edit shadowing a factory script.
+            let forks = new Set();
+            // Every name the catalog ships for this role, whether or not it is on the device.
+            let catalogNames = new Set();
+            // Names in the USER's directory: written or edited here, so worth proposing upstream.
+            let localNames = new Set();
             const fillPicker = async () => {
                 picker.innerHTML = "";
                 const none = document.createElement("option");
@@ -1874,17 +2524,75 @@ function createControl(moduleName, moduleType, ctrl) {
                                        .map(e => e.name);
                     } catch (_) { /* an unreachable directory leaves just "none" */ }
                 }
+                // The user's OWN files, before the factory listing is merged in below: a name here
+                // is something they wrote or edited, which is what the share button offers.
+                localNames = new Set(names);
+                // A script picker also lists the FACTORY directory, where downloads land. A name in
+                // both is the user's edit shadowing the factory copy, which is what the device
+                // resolves too, so it appears once.
+                const group = mlGroupForExt(ext);
+                let cat = null;
+                if (group) {
+                    try {
+                        cat = await mlFetchCatalog();
+                        const factory = await fmFetchDir(cat.dir, true).catch(() => []);
+                        for (const e of factory)
+                            if (!e.isDir && e.name.endsWith(ext) && !names.includes(e.name))
+                                names.push(e.name);
+                    } catch (_) { /* no catalog: the picker still lists what is here */ }
+                }
+                names.sort();
+                // A local name that ALSO exists in the catalog is a fork: the user edited a factory
+                // script, so their copy shadows one that can be restored. Deleting it is a revert,
+                // not a loss, and the delete button says so.
+                // localNames, NOT names: by here `names` also carries the factory listing, so a
+                // script that was downloaded and never touched counted as a fork. It showed the
+                // revert arrow for an edit that does not exist, and reverting it deleted a
+                // /moonlive path with nothing at it.
+                forks = cat ? new Set(((cat[group] || {}).names || []).filter(n => localNames.has(n)))
+                            : new Set();
+                // Everything the catalog offers that is not here yet, listed after the local ones
+                // so a user's own scripts stay at the top of the list.
+                remote = cat ? ((cat[group] || {}).names || []).filter(n => !names.includes(n)) : [];
+                // Every name the library ships for this role, downloaded or not: what the share
+                // button uses to tell a user's own script from one of ours.
+                catalogNames = new Set(cat ? ((cat[group] || {}).names || []) : []);
+
                 // The current value may name a file the listing does not have (deleted underneath,
                 // or a directory that could not be read). Keep it selectable so the card still
                 // shows what the module is pointing at, rather than silently appearing unset.
                 const cur = String(ctrl.value ?? "");
-                if (cur && !names.includes(cur)) names.unshift(cur);
+                if (cur && !names.includes(cur) && !remote.includes(cur)) names.unshift(cur);
+                // What the catalog says each factory script is: its dimension and its own emoji,
+                // read from the script's `int dimensions()` / `string tags()` at build time. So a
+                // row reads like the module picker's rows do, BEFORE the script is downloaded. A
+                // script the catalog does not carry (the user's own) simply has no prefix.
+                const decl = (n) => {
+                    const g = cat && cat[group];
+                    if (!g || !g.names) return "";
+                    const i = g.names.indexOf(n);
+                    if (i < 0) return "";
+                    const marks = [];
+                    if (g.tags && g.tags[i]) marks.push(g.tags[i]);
+                    if (g.dim && DIM_EMOJI[g.dim[i]]) marks.push(DIM_EMOJI[g.dim[i]]);
+                    return marks.length ? marks.join("") + " " : "";
+                };
                 for (const n of names) {
                     const o = document.createElement("option");
-                    o.value = n; o.textContent = n;
+                    o.value = n; o.textContent = decl(n) + n;
+                    picker.appendChild(o);
+                }
+                // Marked, because picking one costs a download and can fail. One list rather than
+                // two groups: to the user it is one library, and where a script happens to live is
+                // the device's business.
+                for (const n of remote) {
+                    const o = document.createElement("option");
+                    o.value = n;
+                    o.textContent = "\u2601 " + decl(n) + n;   // cloud: not on this device yet
                     picker.appendChild(o);
                 }
                 picker.value = cur;
+                refreshDelLabel();
             };
 
             // Save sits with the other file actions rather than in a row of its own: the card is
@@ -1922,12 +2630,94 @@ function createControl(moduleName, moduleType, ctrl) {
             delBtn.className = "card-btn card-btn-del";
             delBtn.textContent = "×";                  // the card's own delete, red on the symbol
             delBtn.title = "Delete this script";
+            // The SAME button reverts a factory script, because it is the same operation: the
+            // editor only ever saves to the user directory, so an edited factory script is a second
+            // file shadowing the first, and removing it brings the original back. Saying "delete"
+            // there would misdescribe it, and a second button would make one act look like two.
+            const shareBtn = document.createElement("button");
+            shareBtn.className = "card-btn";
+            shareBtn.textContent = "\u2197";           // north-east arrow: it leaves for somewhere else
+            shareBtn.title = "Propose this script for the shared library";
+
+            function refreshDelLabel() {
+                const isFork = forks.has(picker.value);
+                delBtn.textContent = isFork ? "\u21ba" : "\u00d7";   // undo arrow, or the delete cross
+                delBtn.title = isFork
+                    ? "Revert to the shipped version (discards your changes)"
+                    : "Delete this script";
+                delBtn.classList.toggle("card-btn-del", !isFork);
+                // Offered for anything the user WROTE, which is a script of their own or a fork of
+                // a shipped one: both are a change worth sending back, and the flow differs only in
+                // which GitHub URL it opens. NOT offered for an untouched factory copy, where the
+                // file on the device is byte-identical to the one in the repo and a pull request
+                // would propose no change at all.
+                const known = catalogNames.has(picker.value);
+                const edited = localNames.has(picker.value);   // it sits in the USER directory
+                shareBtn.hidden = !picker.value || !mlGroupForExt(ext) || !edited;
+                shareBtn.title = known
+                    ? "Propose your changes to the shared library"
+                    : "Propose this script for the shared library";
+            }
+            // Share: open a pull request adding this script to the library.
+            //
+            // GitHub's "new file" URL takes the path and the contents as query parameters and opens
+            // its editor pre-filled, forking the repo on the user's behalf when they propose it. So
+            // a script someone wrote on their own device reaches the library with one click and no
+            // API, no token and nothing stored here.
+            //
+            // Only for scripts a user WROTE: a factory script is already in the library, and a fork
+            // of one would open a PR that recreates a file that exists.
+            shareBtn.addEventListener("click", async () => {
+                const name = picker.value;
+                const group = mlGroupForExt(ext);
+                if (!name || !group) return;
+                await editor.save();                  // propose what is on screen, not the last save
+                // A save that failed leaves the pane dirty, and the read below would then fetch the
+                // PREVIOUS text from the device: the user would be proposing something other than
+                // what they are looking at, which is the one outcome worth refusing outright.
+                if (editor.isDirty()) {
+                    alert("Save the script first: it still has unsaved changes.");
+                    return;
+                }
+                let text = "";
+                try {
+                    const res = await fetch("/api/file?path=" + encodeURIComponent(await scriptPathOf(name)));
+                    if (!res.ok) throw new Error(await errorMessage(res));
+                    text = await res.text();
+                } catch (err) { alert("could not read the script: " + err.message); return; }
+
+                const cat = await mlFetchCatalog().catch(() => null);
+                const folder = cat && cat[group] ? cat[group].folder : group;
+                // A name the library already ships is an EDIT of that file; anything else is a new
+                // one. GitHub has a flow for each, and both fork on the user's behalf when they
+                // propose the change, so neither needs write access to this repo.
+                const repoPath = "moonlive/" + folder + "/" + name;
+                const url = catalogNames.has(name)
+                    ? "https://github.com/MoonModules/projectMM/edit/main/" + repoPath
+                      + "?value=" + encodeURIComponent(text)
+                    : "https://github.com/MoonModules/projectMM/new/main"
+                      + "?filename=" + encodeURIComponent(repoPath)
+                      + "&value=" + encodeURIComponent(text);
+                // The script rides in the query string, and browsers stop honoring a URL somewhere
+                // past ~8 KB. Every shipped script is under 2.5 KB so this is headroom rather than a
+                // real limit, but a long one would otherwise open a truncated editor and look fine.
+                if (url.length > 7000) {
+                    await navigator.clipboard.writeText(text).catch(() => {});
+                    alert("This script is too long to send through a link.\n\n"
+                        + "It has been copied to your clipboard: open\n"
+                        + "github.com/MoonModules/projectMM, add a file under moonlive/" + folder
+                        + "/ and paste it there.");
+                    return;
+                }
+                window.open(url, "_blank", "noopener");
+            });
+
             bar.appendChild(picker);
             const tools = document.createElement("div");
             tools.className = "fileedit-tools";
             tools.appendChild(saveBtn);
             tools.appendChild(popBtn);
-            if (dir) { tools.appendChild(newBtn); tools.appendChild(delBtn); }
+            if (dir) { tools.appendChild(newBtn); tools.appendChild(shareBtn); tools.appendChild(delBtn); }
             bar.appendChild(tools);
             stack.appendChild(bar);
 
@@ -1939,27 +2729,133 @@ function createControl(moduleName, moduleType, ctrl) {
             // module recompiles or reloads on its own. The browser sends nothing extra.
             const editor = fmMountEditor(pane, pathOf(ctrl.value), {
                 sizeKey: key,
+                // The status this module is ALREADY reporting, so a card built while its script is
+                // broken shows the marked line straight away rather than waiting for a recompile.
+                // The EDITOR applies it once the file has loaded: marking at construction would
+                // convert the offset against an empty textarea and put every error on line 1.
+                initialStatus: (findModule(moduleName) || {}).status || "",
                 saveButton: saveBtn,
                 statusEl,
+                // Editing a factory script FORKS it: the read came from the library directory, but
+                // the write goes to the user's, so the shipped copy stays untouched and the new one
+                // shadows it. Without this an edit overwrote the library copy and there was nothing
+                // left to revert to.
+                savePath: (readPath) => {
+                    if (!dir) return readPath;
+                    const base = readPath.slice(readPath.lastIndexOf("/") + 1);
+                    return base ? joinFsPath(dir, base) : readPath;
+                },
+                // A save may have just created the fork, so what the picker thinks is local is out
+                // of date: re-read it, which is also what turns the delete button into revert.
+                onSaved: (written) => {
+                    if (!mlGroupForExt(ext)) return;
+                    if (!written.startsWith(dir + "/")) return;
+                    const sel = picker.value;
+                    fillPicker().then(() => { picker.value = sel; refreshDelLabel(); });
+                },
             });
+            mlEditorAdd(moduleName, editor);
+            // Apply the status the card is ALREADY showing: registration only catches the next one,
+            // so a card rendered while its script is broken would report the error with no line
+            // marked until something recompiled. The modal does the same on open.
+            {
+                const row = document.querySelector(
+                    `[data-status-mid="${cssEscape(moduleName)}"] .status-value`);
+                if (row) editor.markError(row.textContent);
+            }
 
             // Re-read after the modal closes: it edits the same file through the same endpoints, so
             // whatever it saved is what this pane should now show.
+            // One row per script, shaped like a type so the shared picker can render it: the name is
+            // what the control stores, the dimension and emoji come from the catalog, and the role
+            // is what the picker prints on the right.
+            const openScriptPicker = async () => {
+                if (picker.disabled) return;
+                const group = mlGroupForExt(ext);
+                const cat = group ? await mlFetchCatalog().catch(() => null) : null;
+                const g = (cat && cat[group]) || {};
+                const roleWord = group ? group.replace(/s$/, "") : "file";
+                const seen = new Set();
+                const items = [];
+                const add = (n, remoteFlag) => {
+                    if (seen.has(n)) return;
+                    seen.add(n);
+                    const i = (g.names || []).indexOf(n);
+                    items.push({
+                        name: n,
+                        // The cloud marks a script the device does not hold yet: picking it costs a
+                        // download, which is worth knowing before choosing.
+                        displayName: (remoteFlag ? "\u2601 " : "") + n,
+                        role: roleWord,
+                        tags: i >= 0 && g.tags ? (g.tags[i] || "") : "",
+                        dim: i >= 0 && g.dim ? g.dim[i] : 0,
+                    });
+                };
+                for (const o of picker.options) if (o.value) add(o.value, remote.includes(o.value));
+                for (const n of (g.names || [])) add(n, !localNames.has(n) && remote.includes(n));
+                if (!items.length) return;
+                // Anchored to the field itself: the picker opens under it as a modal, sized and
+                // placed by openPicker rather than by whatever element it hangs from.
+                openPicker(picker, {
+                    items,
+                    actionLabel: "use",
+                    currentType: picker.value,
+                    // Route through the <select>'s own change handler, which already downloads a
+                    // remote script, updates the delete label and loads the editor. One path for
+                    // both ways of choosing.
+                    commit: (name) => {
+                        picker.value = name;
+                        picker.dispatchEvent(new Event("change"));
+                    },
+                });
+            };
+            picker.addEventListener("click", openScriptPicker);
+
             popBtn.addEventListener("click", async () => {
                 if (!picker.value) return;
                 // Flush unsaved edits first: the modal loads the file from the device, so opening
                 // it on a dirty pane would show stale bytes and then save them back over the edit.
+                // save() RESOLVES on a failed write (it reports, it does not throw), so the flush is
+                // only trustworthy if the pane came clean: opening anyway would discard the edit.
                 await editor.save();
-                await openFileEditor(pathOf(picker.value));
-                await editor.load(pathOf(picker.value));
+                if (editor.isDirty()) { alert("Not opening: this script still has unsaved changes."); return; }
+                const p = await scriptPathOf(picker.value);
+                await openFileEditor(p, undefined, moduleName);
+                await editor.load(p);
             });
 
             picker.addEventListener("change", async () => {
-                // Same reason as the modal above: switching files discards the edit otherwise.
+                // Same reason as the modal above: switching files discards the edit otherwise, and
+                // a save that failed leaves the pane dirty while resolving normally.
                 await editor.save();
+                if (editor.isDirty()) {
+                    alert("Not switching: this script still has unsaved changes.");
+                    picker.value = String(ctrl.value ?? "");
+                    return;
+                }
+                const chosen = picker.value;
+                // A factory script the device does not hold yet: download it BEFORE selecting it,
+                // so the module never points at a file that is not there. A failure reports and
+                // puts the picker back, rather than leaving the card pointing at nothing.
+                if (remote.includes(chosen)) {
+                    const previous = String(ctrl.value ?? "");
+                    picker.disabled = true;
+                    try {
+                        await mlDownloadScript(chosen, mlGroupForExt(ext));
+                    } catch (e) {
+                        picker.disabled = false;
+                        alert("could not download " + chosen + ": " + (e && e.message ? e.message : e));
+                        picker.value = previous;
+                        return;
+                    }
+                    picker.disabled = false;
+                    await fillPicker();          // it is local now, so it loses its marker
+                    picker.value = chosen;
+                }
+                refreshDelLabel();
                 dragTs[key] = Date.now();
-                sendControl(moduleName, ctrl.name, picker.value);
-                editor.load(pathOf(picker.value));
+                sendControl(moduleName, ctrl.name, chosen);
+                editor.load(await scriptPathOf(chosen));
             });
 
             newBtn.addEventListener("click", async () => {
@@ -1981,25 +2877,55 @@ function createControl(moduleName, moduleType, ctrl) {
             armPressTwice(delBtn, async () => {
                 const victim = picker.value;
                 if (!victim) return;
+                const wasFork = forks.has(victim);
                 try {
-                    const res = await fetch("/api/dir?path=" + encodeURIComponent(pathOf(victim)),
+                    // A fork is deleted from the USER directory, which is the whole revert: the
+                    // factory copy underneath is what resolves afterwards. Anything else is deleted
+                    // where it actually sits, because a downloaded factory script has no user copy
+                    // and a DELETE on /moonlive/<name> would report a failure for a file that was
+                    // never there.
+                    const target = wasFork ? pathOf(victim) : await scriptPathOf(victim);
+                    const res = await fetch("/api/dir?path=" + encodeURIComponent(target),
                                             { method: "DELETE" });
                     if (!res.ok) throw new Error(await errorMessage(res));
-                } catch (err) { alert("delete failed: " + err.message); return; }
+                } catch (err) {
+                    alert((wasFork ? "revert failed: " : "delete failed: ") + err.message);
+                    return;
+                }
                 await fillPicker();
+                if (wasFork) {
+                    // The factory script is what resolves now, so the module keeps running: stay on
+                    // it rather than unsetting the control, which is the whole point of a revert.
+                    picker.value = victim;
+                    refreshDelLabel();
+                    dragTs[key] = Date.now();
+                    sendControl(moduleName, ctrl.name, victim);
+                    await editor.load(await scriptPathOf(victim));
+                    return;
+                }
                 picker.value = "";
+                refreshDelLabel();
                 dragTs[key] = Date.now();
                 sendControl(moduleName, ctrl.name, "");
                 await editor.load("");
-            }, { armedText: "✓", armedTitle: "Click again to delete" });
+            }, { armedText: "✓", armedTitle: "Click again to confirm" });
 
-            fillPicker();
+            // The editor mounted on the USER path above, which is right for a script the user
+            // wrote and wrong for a factory one that has never been edited. Resolving needs the
+            // catalog, so it cannot happen during the synchronous mount: re-point it once the
+            // listing is in, and only when it actually resolves elsewhere.
+            fillPicker().then(async () => {
+                const cur = String(ctrl.value ?? "");
+                if (!cur || !mlGroupForExt(ext)) return;
+                const real = await scriptPathOf(cur);
+                if (real !== pathOf(cur)) await editor.load(real);
+            });
             break;
         }
         case "password": {
             // ctrl.value arrives XOR-obfuscated + base64-encoded (see
             // HttpServerModule PASSWORD_XOR_KEY). Decode it so the input holds
-            // the real stored password — masked by the password input, revealed
+            // the real stored password: masked by the password input, revealed
             // by hold-to-peek. The obfuscation is trivially reversible by design.
             const input = document.createElement("input");
             input.type = "password";
@@ -2011,7 +2937,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, input.value));
             });
             row.appendChild(input);
-            // Hold-to-peek button — reveals the stored password.
+            // Hold-to-peek button: reveals the stored password.
             const peek = document.createElement("button");
             peek.className = "peek-btn";
             peek.type = "button";
@@ -2035,14 +2961,14 @@ function createControl(moduleName, moduleType, ctrl) {
                 const o = document.createElement("option");
                 o.value = i;
                 o.textContent = opt;
-                if (i === ctrl.value) o.selected = true;
+                if (i === selectIndex(ctrl)) o.selected = true;
                 sel.appendChild(o);
             });
             // Protect the dropdown while the user has it open. A native <select>
             // popup stays open for several frames (seconds, if deliberating) while
             // a continuously-refreshed module keeps pushing state over the WS; an
             // unguarded `sel.value = ctrl.value` patch during that window snaps the
-            // menu back to the old option and visibly closes it — the user never
+            // menu back to the old option and visibly closes it: the user never
             // gets to pick. We mark the select "open" on pointerdown (fires BEFORE
             // the popup opens, unlike focus, which some browsers delay or skip) and
             // clear it on change/blur; updateModuleControls skips any select marked
@@ -2060,7 +2986,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 // No refetch/re-render here: blendMode/opacity-style selects don't
                 // change the control SET, and a control that does (a hidden-flag
                 // flip) is reconciled in place by syncVisibleControls on the next
-                // WS push — so the card (and its expanded state) is preserved.
+                // WS push: so the card (and its expanded state) is preserved.
                 // A full refetchState() rebuilt the DOM and collapsed the card.
             });
             row.appendChild(sel);
@@ -2068,7 +2994,7 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         case "palette": {
-            // A color-palette dropdown where EVERY option shows its own gradient — so the colors
+            // A color-palette dropdown where EVERY option shows its own gradient: so the colors
             // are visible before selecting, not just after. A native <select> can't do this
             // (browsers ignore a gradient background on <option>, and the macOS popup is OS-drawn),
             // so this is a custom dropdown: a trigger button (selected swatch + name + caret) that
@@ -2171,7 +3097,22 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         case "display": {
-            // Read-only string. Updates via WS push.
+            // Read-only string. Updates via WS push. A value that IS a url renders as a LINK:
+            // the only reason to show one is to open or copy it. Device-relative ("/hls/...") on
+            // purpose: the anchor resolves it against the page's own origin, so the link works
+            // and copies correctly whatever address the device was reached on, and cannot go
+            // stale when its IP changes.
+            if (isUrlValue(ctrl.value)) {
+                const a = document.createElement("a");
+                a.className = "display control-url";
+                a.dataset.mid = moduleName;
+                a.dataset.key = ctrl.name;
+                a.target = "_blank";
+                a.rel = "noopener";
+                setUrlDisplay(a, ctrl.value);
+                row.appendChild(a);
+                break;
+            }
             const span = document.createElement("span");
             span.className = "display";
             span.dataset.mid = moduleName;
@@ -2195,7 +3136,7 @@ function createControl(moduleName, moduleType, ctrl) {
         }
         case "ipv4": {
             // Editable dotted-quad. Wire format is the same string the user
-            // types — the device parses + validates server-side and rejects
+            // types: the device parses + validates server-side and rejects
             // malformed values with 400. Inline validation on the client is
             // a future enhancement; today an invalid value goes to the
             // server and the response surfaces the rejection.
@@ -2259,7 +3200,7 @@ function createControl(moduleName, moduleType, ctrl) {
             // summary objects; ctrl.detail = parallel array of detail objects (same
             // order). Render one clickable row per summary; clicking toggles a detail
             // panel below it. Self rows (summary.self === true) get a marker. Fully
-            // generic — the engine decides the fields; the UI just renders objects.
+            // generic: the engine decides the fields; the UI just renders objects.
             row.classList.add("control-list-row");
             const rows = Array.isArray(ctrl.value) ? ctrl.value : [];
             const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
@@ -2278,7 +3219,7 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         default:
-            // Unknown control type — skip silently. New types may be added engine-side
+            // Unknown control type: skip silently. New types may be added engine-side
             // without breaking the UI; they just don't render until handled here.
             return null;
     }
@@ -2288,7 +3229,7 @@ function createControl(moduleName, moduleType, ctrl) {
 
 // Rebuild a List control's entries inside `container` from `rows` (summary objects)
 // and `details` (parallel detail objects). `openSet` is a Set<string> of summary
-// texts whose detail panels start expanded — pass `new Set()` for a fresh build, or
+// texts whose detail panels start expanded: pass `new Set()` for a fresh build, or
 // the currently-open set on a live re-render so an expanded row stays open. Shared by
 // createControl (initial) and updateModuleControls (WS live patch) so the two can't drift.
 //
@@ -2298,16 +3239,16 @@ function createControl(moduleName, moduleType, ctrl) {
 // descriptors. When editable is falsy the render is exactly the read-only path (unchanged).
 // Stable key for the open-detail set. An editable row carries a durable `id` (survives
 // field edits: renaming a preset or changing its channel count doesn't change the id), so
-// key on it — otherwise changing a field that shows in the summary label would fold the
+// key on it: otherwise changing a field that shows in the summary label would fold the
 // open row shut (the label-text key no longer matches after the rebuild). A read-only row
 // (e.g. a discovered device) has no `id`; fall back to the summary label, which is stable
-// enough there (identity by display text, the previous behaviour, unchanged for devices).
+// enough there (identity by display text, the previous behavior, unchanged for devices).
 function listRowKey(item, labelText) {
     return (item && item.id != null) ? "#" + item.id : labelText;
 }
 
 // A grid of uniform pads, one per row: the presentation a `pads` list asks for. Rows are unchanged
-// — this is the same data the stacked list renders, laid out for triggering rather than reading.
+//: this is the same data the stacked list renders, laid out for triggering rather than reading.
 // Uniform size on purpose: sizing each pad to its label (as MoonLight does) makes a ragged grid that
 // is harder to scan and to hit; a fixed pad with a truncated label is what a MIDI deck looks like.
 // Long-press as the touch equivalent of a right-click: a touch device has no second button, so the
@@ -2369,9 +3310,9 @@ function openSurfacePopup(anchorEl, title, build) {
 
 // The edit form behind a right-click on a pad: rename, choose what it captures, save over it, or
 // delete. These are the SAME operations the card's bottom controls performed, moved onto the thing
-// they act on — a form at the bottom of the card cannot say which pad it means.
+// they act on: a form at the bottom of the card cannot say which pad it means.
 // What a preset captures: exactly ONE of the four top-level subtrees. A radio group rather than four
-// checkboxes, so "a look" and "a geometry" are the only things expressible — the combinations that
+// checkboxes, so "a look" and "a geometry" are the only things expressible: the combinations that
 // used to be possible were the hard part to explain and the hard part to display.
 function buildCaptureToggles(body, moduleName) {
     const mod = findModule(moduleName);
@@ -2480,16 +3421,16 @@ function openPadEditor(anchorEl, moduleName, ctrlName, item, slot) {
     });
 }
 
-// A rotary knob driving a range input. The input stays in the DOM (hidden) so every other path —
-// the WS live patch, defaults, keyboard — keeps working against it unchanged; this only draws the
+// A rotary knob driving a range input. The input stays in the DOM (hidden) so every other path -
+// the WS live patch, defaults, keyboard: keeps working against it unchanged; this only draws the
 // value and turns drags into value changes.
-/// "What does this strip drive?" — the same popup for an encoder and a fader, since the question and
+/// "What does this strip drive?": the same popup for an encoder and a fader, since the question and
 /// the answer are identical for both. Right-click on a pointer, long-press on touch.
 function attachTargetPopup(row, input, ctrl) {
     const show = () => openSurfacePopup(input, ctrl.name, (body) => {
         const line = document.createElement("div");
         line.className = "surface-popup-row";
-        line.textContent = ctrl.target ? `drives ${ctrl.target}` : "unassigned — no target yet";
+        line.textContent = ctrl.target ? `drives ${ctrl.target}` : "unassigned: no target yet";
         body.appendChild(line);
     });
     row.addEventListener("contextmenu", (e) => { e.preventDefault(); show(); });
@@ -2508,7 +3449,7 @@ function buildKnob(input, ctrl) {
     const NS = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(NS, "svg");
     svg.setAttribute("viewBox", "0 0 40 40");
-    // The arc runs from 7 o'clock to 5 o'clock — the 270° sweep a real encoder cap shows, with the
+    // The arc runs from 7 o'clock to 5 o'clock: the 270° sweep a real encoder cap shows, with the
     // gap at the bottom so the pointer never sits in an ambiguous place.
     const track = document.createElementNS(NS, "circle");
     track.setAttribute("cx", "20"); track.setAttribute("cy", "20"); track.setAttribute("r", "15");
@@ -2541,7 +3482,7 @@ function buildKnob(input, ctrl) {
         pointer.setAttribute("y2", String(20 + 13 * Math.sin(ang)));
     };
     draw();
-    // Redraw when the value changes from anywhere — a drag here, or a WS push patching the input.
+    // Redraw when the value changes from anywhere: a drag here, or a WS push patching the input.
     input.addEventListener("input", draw);
     input.addEventListener("change", draw);
     wrap._redraw = draw;
@@ -2635,7 +3576,7 @@ function buildSevenSeg(input) {
     }
     wrap.appendChild(svg);
     const draw = () => {
-        // Right-aligned, blank-padded: "  7", " 42", "255" — how a 3-digit module displays.
+        // Right-aligned, blank-padded: "  7", " 42", "255": how a 3-digit module displays.
         const txt = String(Math.round(Number(input.value))).padStart(3, " ").slice(-3);
         digits.forEach((map, i) => {
             const on = SEG7[txt[i]] ?? "";
@@ -2690,7 +3631,7 @@ function buildListPads(container, rows, opts) {
             const hole = document.createElement("button");
             hole.type = "button";
             hole.className = "list-pad list-pad-empty";
-            hole.title = `pad ${i + 1} (empty) — click to save the current state here`;
+            hole.title = `pad ${i + 1} (empty): click to save the current state here`;
             hole.addEventListener("click", () => openPadEditor(hole, moduleName, ctrlName, null, i));
             hole.addEventListener("dragover", (e) => {
                 e.preventDefault();
@@ -2806,14 +3747,14 @@ function buildListEntries(container, rows, details, openSet, opts) {
     }
     // Rows live in their own scroll box so a long list (e.g. the seeded fixture presets) caps its
     // height (~5 rows, see .list-scroll in the CSS) and scrolls, instead of eating the whole card.
-    // The "+ Add" button stays OUTSIDE this box, pinned below the scroll area — the standard
+    // The "+ Add" button stays OUTSIDE this box, pinned below the scroll area: the standard
     // scrollable-list-with-fixed-footer pattern.
     const scroll = document.createElement("div");
     scroll.className = "list-scroll";
     container.appendChild(scroll);
     rows.forEach((item, i) => {
         const entry = document.createElement("div");
-        // Row classes: the `self` marker + a generic `severity` marker (rowSeverityClass) — both are
+        // Row classes: the `self` marker + a generic `severity` marker (rowSeverityClass): both are
         // field-name conventions the engine opts into, no per-module UI code.
         const sevClass = rowSeverityClass(item);
         entry.className = "list-entry" + (item && item.self ? " list-self" : "") +
@@ -2823,7 +3764,7 @@ function buildListEntries(container, rows, details, openSet, opts) {
         summary.tabIndex = 0;
         summary.setAttribute("role", "button");
         // Freshness dot (always-visible age at a glance) when the row carries a `*Sec`
-        // duration; colored by ageBucketClass. Generic — no device knowledge here.
+        // duration; colored by ageBucketClass. Generic: no device knowledge here.
         // The age fields (`ageSec`/`cached`) live in the DETAIL object, not the summary,
         // so read the detail for the dot (it also carries `self`); fall back to the
         // summary item when a list has no separate detail.
@@ -2840,17 +3781,17 @@ function buildListEntries(container, rows, details, openSet, opts) {
         summary.appendChild(label);
         const detailPanel = document.createElement("div");
         detailPanel.className = "list-detail";
-        // Keyed via listRowKey (stable `id` for editable rows, else the label text — see the
+        // Keyed via listRowKey (stable `id` for editable rows, else the label text: see the
         // helper) so an expanded row stays expanded across a live re-render, even when the field
         // that changed is shown in the summary label (e.g. a preset's channel count).
         detailPanel.hidden = !openSet.has(listRowKey(item, label.textContent));
         summary.setAttribute("aria-expanded", String(!detailPanel.hidden));
         const locked = !!(item && item.locked);
         if (editable) {
-            // Right-side row actions: delete (✕) then a `⠿` drag-to-reorder handle, in that order —
+            // Right-side row actions: delete (✕) then a `⠿` drag-to-reorder handle, in that order -
             // handles on the RIGHT, after delete, keep every row's controls aligned in one column
             // (the common data-grid layout). A `locked` (seeded) row isn't draggable and has no
-            // delete — the server refuses both, so the UI shows neither, and locked rows have an
+            // delete: the server refuses both, so the UI shows neither, and locked rows have an
             // empty actions area that still aligns. The buttons stop click propagation so they don't
             // toggle the detail panel. entry carries the row id so a drop knows what moved where.
             entry.dataset.rowId = item.id;
@@ -2874,7 +3815,7 @@ function buildListEntries(container, rows, details, openSet, opts) {
                 handle.addEventListener("click", (e) => e.stopPropagation());
                 // The entry is draggable, gated by the SAME mechanism the module-card drag uses
                 // (attachDragHandlers): a capture-phase MOUSEDOWN handler sets `draggable` based on where
-                // the grab landed. HTML5 drag initiates from mousedown, so the flag must be set there —
+                // the grab landed. HTML5 drag initiates from mousedown, so the flag must be set there -
                 // a pointerdown handler runs too late (the browser has already read draggable at
                 // mousedown) and dragstart never fires. Here the row drags ONLY when the grab is on the
                 // handle (a click elsewhere expands the row); the touchstart mirror arms mobile drag.
@@ -2937,7 +3878,7 @@ function buildListEntries(container, rows, details, openSet, opts) {
 
 // Render an editable row's detail: each descriptor in `detail.fields[]` becomes an inline
 // control (text→<input>, uint8→<input type=number>, select→<select>). On change we call
-// listSetField(...) and let the normal refresh reflect the persisted state — no optimistic
+// listSetField(...) and let the normal refresh reflect the persisted state: no eager local
 // local mutation. A field with `readonly:true` renders as a plain read-only value (same look
 // as fillListDetail). Fields carry a dragTs cooldown so a WS state push mid-edit can't revert
 // what's being typed/picked, mirroring the select/text guards in createControl.
@@ -2961,7 +3902,7 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
         } else if (f.type === "button") {
             // A row ACTION rather than a value: the click PATCHes the field like any edit, and the
             // source reads the arrival as "do this to this row" (ControlModule's preset `apply`).
-            // Generic on purpose — a row button is a primitive the list has lacked, not a
+            // Generic on purpose: a row button is a primitive the list has lacked, not a
             // preset-specific affordance. Refetches, because an action typically changes the row set
             // or the wider tree, unlike a field edit which the WS push reconciles.
             const btn = document.createElement("button");
@@ -2979,7 +3920,7 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
             sel.className = "list-field-input";
             sel.dataset.dragkey = dragKey;
             // Options come from the field's inline `options`, or (the common case for a repeated select
-            // like the channel-role pickers) from the list's shared `optionSets` via `optionsRef` — so
+            // like the channel-role pickers) from the list's shared `optionSets` via `optionsRef`: so
             // the option array is sent once per list, not re-inlined in every row (see writeListOptionSets).
             const fieldOptions = f.options || (f.optionsRef ? optionSets[f.optionsRef] : null) || [];
             fieldOptions.forEach((opt, idx) => {
@@ -3009,7 +3950,7 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
             inp.addEventListener("change", () => {
                 dragTs[dragKey] = Date.now();
                 // Guard against empty/invalid entry (parseInt → NaN) and clamp to the control's
-                // range — the HTML min/max attributes don't enforce a hand-typed value, so a stray
+                // range: the HTML min/max attributes don't enforce a hand-typed value, so a stray
                 // "" or out-of-range number would otherwise reach the device as NaN / an overflow.
                 let v = parseInt(inp.value, 10);
                 if (!Number.isFinite(v)) v = f.min ?? 0;
@@ -3037,8 +3978,8 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
     }
 }
 
-// Join a list row's scalar fields into a one-line summary (skips marker fields — `self`, `severity`
-// — that render as row styling rather than text, and any nested objects). Generic: the engine names
+// Join a list row's scalar fields into a one-line summary (skips marker fields: `self`, `severity`
+//: that render as row styling rather than text, and any nested objects). Generic: the engine names
 // the fields.
 function listSummaryText(item) {
     if (!item || typeof item !== "object") return String(item ?? "");
@@ -3051,7 +3992,7 @@ function listSummaryText(item) {
 // Render a list row's detail object as read-only key/value rows. Scalars print as-is;
 // an array of scalars (e.g. a device's `speaks:["http"]` or `via:["mdns","scan"]`)
 // renders as small chips so multi-valued fields like the discovery source are visible
-// at a glance. Nested objects are still skipped (no use case yet). Generic — the engine
+// at a glance. Nested objects are still skipped (no use case yet). Generic: the engine
 // names the fields, so a new array field shows up with no UI change here.
 function fillListDetail(panel, detail) {
     panel.replaceChildren();
@@ -3063,13 +4004,13 @@ function fillListDetail(panel, detail) {
         // exactly one (mutually exclusive in DevicesModule), but skip ageSec when a
         // `cached` key is also present so any other source can't produce two conflicting
         // "last seen" rows. Match the cached branch's render condition, which fires on
-        // key EXISTENCE (`k === "cached"`), not truthiness — so gate on the key being
+        // key EXISTENCE (`k === "cached"`), not truthiness: so gate on the key being
         // present, not on its value. (Robust-to-any-input, generic.)
         if (k === "ageSec" && "cached" in detail) continue;
         const r = document.createElement("div");
         r.className = "list-detail-row";
         const kEl = document.createElement("span");
-        // A `*Sec` field is a duration in seconds (e.g. a device's `ageSec`) — show it
+        // A `*Sec` field is a duration in seconds (e.g. a device's `ageSec`): show it
         // under a plainer label ("last seen") and as a relative time, not a bare count.
         // `cached` is the sibling: a restored device not yet re-seen live → "last seen:
         // cached" rather than a fake recent time.
@@ -3094,7 +4035,7 @@ function fillListDetail(panel, detail) {
             if (ageClass) vEl.classList.add(ageClass);
         } else if (typeof v === "string" && /^https?:\/\//.test(v)) {
             // A value that is an http(s) URL (e.g. a device's `url`) renders as a link that
-            // opens in a new tab — generic, any ListSource detail can surface one. rel
+            // opens in a new tab: generic, any ListSource detail can surface one. rel
             // guards the opened page from reaching back via window.opener.
             const a = document.createElement("a");
             a.href = v;
@@ -3112,9 +4053,9 @@ function fillListDetail(panel, detail) {
 }
 
 // Freshness bucket for a duration-in-seconds (a `*Sec` field): green < 1 min, orange
-// < 1 hour, red beyond. Generic — any duration field a ListSource emits gets the same
+// < 1 hour, red beyond. Generic: any duration field a ListSource emits gets the same
 // scale; nothing device-specific here. (DevicesModule's ageSec is the first user: a
-// device unseen > 24h is aged out of the list entirely, so "red" spans 1h–24h.)
+// device unseen > 24h is aged out of the list entirely, so "red" spans 1h-24h.)
 function ageBucketClass(sec) {
     if (!Number.isFinite(sec) || sec < 0) return "";
     if (sec < 60) return "age-fresh";
@@ -3137,8 +4078,8 @@ function rowAgeClass(item) {
 
 // Severity CSS class from a row's `severity` field ("error"/"warn"), or "" if none/absent. Generic
 // over the field name, exactly like rowAgeClass over `*Sec`: any ListSource that emits a `severity`
-// string gets the same visual (a colored row marker). PinsModule is the first user — it flags a GPIO
-// claim on a reserved/strap/input-only pin — but nothing here is pins-specific; a task in a bad state
+// string gets the same visual (a colored row marker). PinsModule is the first user: it flags a GPIO
+// claim on a reserved/strap/input-only pin: but nothing here is pins-specific; a task in a bad state
 // or a device with an error could emit `severity` and light up the same way.
 function rowSeverityClass(item) {
     if (!item || typeof item !== "object") return "";
@@ -3148,10 +4089,10 @@ function rowSeverityClass(item) {
 }
 
 // Render a seconds-ago count as a short relative time ("just now", "2m ago", "3h ago",
-// "5d ago"). Snapshot at state-push time — it refreshes when the list re-renders, not
+// "5d ago"). Snapshot at state-push time: it refreshes when the list re-renders, not
 // per second. Mirrors the device-side ageSec (now - lastSeenMs); kept simple on purpose.
 function relativeAge(sec) {
-    if (!Number.isFinite(sec) || sec < 0) return "—";
+    if (!Number.isFinite(sec) || sec < 0) return "-";
     if (sec < 10) return "just now";
     if (sec < 60) return `${sec}s ago`;
     if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
@@ -3188,7 +4129,7 @@ function debounceSend(key, ms, fn) {
 
 // Password controls arrive XOR-obfuscated + base64-encoded (see
 // HttpServerModule PASSWORD_XOR_KEY). This reverses it. The XOR key is a fixed
-// shared constant, not a secret — this is obfuscation so the password is not
+// shared constant, not a secret: this is obfuscation so the password is not
 // plainly readable in a raw /api/state response, not real encryption.
 const PW_XOR_KEY = 0x5A;
 function decodePassword(encoded) {
@@ -3227,14 +4168,31 @@ function fmtProgressLabel(ctrl) {
     return Math.round(v / 1024) + "KB / " + Math.round(t / 1024) + "KB";
 }
 
-// "<value> <unit>" — treats null / undefined / 0 as "unavailable" so the
+// "<value> <unit>": treats null / undefined / 0 as "unavailable" so the
 // UI doesn't render bogus "0 dBm" when the device is in a state where the
 // metric isn't meaningful. The device's updateMetrics() writes 0 to rssi /
 // txPower in non-WiFi states; the control is hidden in those states, but
 // if anyone toggles hidden off (DevTools, future code path) the unit-with-
 // zero rendering would still mislead. Real metric values are never zero
-// in practice — RSSI is negative, TX power is 0..127 dBm (zero only on
-// driver-uninitialised reads).
+// in practice: RSSI is negative, TX power is 0..127 dBm (zero only on
+// driver-uninitialized reads).
+// Is a display control's value a url? One predicate, because BOTH render paths (renderCards and
+// updateModuleControls) have to agree on which values become links: a rule applied in only one
+// of them shows a link that the next state push replaces with plain text.
+function isUrlValue(v) {
+    return typeof v === "string" && (v.startsWith("/") || /^https?:\/\//.test(v));
+}
+
+// Point a link at `value` and show it ABSOLUTE. The stored value is device-relative, but a user
+// reading the card wants the address they could paste into a player, and `a.href` resolves that
+// against the current origin for us.
+function setUrlDisplay(a, value) {
+    const v = value ?? "";
+    if (a.getAttribute("href") === v) return;   // unchanged: leave the DOM alone
+    a.setAttribute("href", v);
+    a.textContent = a.href;
+}
+
 function fmtDisplayInt(ctrl) {
     const v = ctrl.value;
     const u = ctrl.unit || "";
@@ -3248,11 +4206,11 @@ function fmtDisplayInt(ctrl) {
 
 // Apply a diff-on-the-wire patch onto the in-memory `state`. Each entry is {path,value} where path is
 // "<module>/<control>" for a control value, or "<module>/@<field>" for a live module-header field
-// (tickTimeUs / dynamicBytes — shown per card). Module names are unique tree-wide (the device dedups
+// (tickTimeUs / dynamicBytes: shown per card). Module names are unique tree-wide (the device dedups
 // them), so the first path segment identifies the module. Mutates `state` in place; the caller then
 // calls updateValues() to refresh the DOM without a rebuild. An unknown path is skipped (a resync will
 // reconcile). List controls: the value is the full summary array (the device sends a changed list's
-// whole value — see the plan), so we replace it wholesale, which updateModuleControls/renderCards read.
+// whole value: see the plan), so we replace it wholesale, which updateModuleControls/renderCards read.
 function applyStatePatch(patch) {
     const byName = new Map(allModules().map(m => [m.name, m]));
     for (const entry of patch) {
@@ -3274,7 +4232,7 @@ function applyStatePatch(patch) {
 
 /// Refresh the decorations drawn ON TOP of a range input (the knob dial, the seven-segment readout).
 ///
-/// A WebSocket patch assigns `input.value` directly, which fires NEITHER `input` NOR `change` — those
+/// A WebSocket patch assigns `input.value` directly, which fires NEITHER `input` NOR `change`: those
 /// only fire for user gestures. Anything listening for them therefore keeps showing the value it was
 /// built with, which is why the readouts read 880/50 while the knobs pointed elsewhere. Call this
 /// wherever a range input's value is set programmatically.
@@ -3285,6 +4243,24 @@ function redrawRangeDecorations(input) {
     }
 }
 
+// Write text only when it actually changed. Assigning textContent REPLACES the text node, which
+// collapses any selection inside it, so an unconditional write once a second makes a value
+// impossible to select and copy: the highlight dies under the cursor. It is also wasted DOM work,
+// since most of these strings are identical from one second to the next.
+// A control's DISPLAY label. The name itself stays the industry-standard word, because it is the
+// API key, the persisted key and the OSC address (`/mm/fader/1`), and a surface built against a
+// standard name is portable where an invented abbreviation is not. But eight of them side by side
+// in a strip have no room for it, so the shortening lives here, in the one place a label is drawn.
+const kShortLabels = {fader: "fad", encoder: "enc", switch: "sw"};
+function displayName(name) {
+    const m = /^([a-z]+)(\d+)$/.exec(name);
+    return m && kShortLabels[m[1]] ? kShortLabels[m[1]] + m[2] : name;
+}
+
+function setText(el, text) {
+    if (el && el.textContent !== text) el.textContent = text;
+}
+
 function updateValues() {
     if (!state || !state.modules) return;
     // Patch each visible card's controls and stats line; never rebuild the DOM here.
@@ -3293,12 +4269,16 @@ function updateValues() {
         updateModuleControls(mod);
         // refresh the stats line for this module if visible
         const statsEl = document.querySelector(`.card-stats[data-mid="${cssEscape(mod.name)}"]`);
-        if (statsEl) { statsEl.textContent = formatStats(mod); statsEl.title = formatStatsTitle(mod); }
-        // refresh status row — insert it if status appeared after card build
+        if (statsEl) {
+            setText(statsEl, formatStats(mod));
+            const t = formatStatsTitle(mod);
+            if (statsEl.title !== t) statsEl.title = t;
+        }
+        // refresh status row: insert it if status appeared after card build
         let statusRow = document.querySelector(`[data-status-mid="${cssEscape(mod.name)}"]`);
         if (mod.status) {
             if (!statusRow) {
-                // Card exists but had no status at build time — insert now before first control.
+                // Card exists but had no status at build time: insert now before first control.
                 const card = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
                 const host = card && (card.querySelector(".card-controls-collapse") || card);
                 if (host) {
@@ -3311,7 +4291,7 @@ function updateValues() {
                     const val = document.createElement("span");
                     val.className = "status-value";
                     val.dataset.sev = mod.severity || "status";
-                    val.textContent = mod.status;
+                    setStatusText(val, mod);
                     statusRow.appendChild(label);
                     statusRow.appendChild(val);
                     // Insert before first .control-row, or append.
@@ -3321,7 +4301,11 @@ function updateValues() {
             } else {
                 statusRow.style.display = "";
                 const val = statusRow.querySelector(".status-value");
-                if (val) { val.textContent = mod.status; val.dataset.sev = mod.severity || "status"; }
+                if (val) {
+                    setStatusText(val, mod);
+                    const sev = mod.severity || "status";
+                    if (val.dataset.sev !== sev) val.dataset.sev = sev;
+                }
             }
         } else if (statusRow) {
             statusRow.style.display = "none";
@@ -3333,7 +4317,7 @@ function updateValues() {
             if (Date.now() - ts > 1000) {
                 const on = (mod.enabled === undefined) ? true : !!mod.enabled;
                 enabledEl.dataset.checked = on ? "true" : "false";
-                enabledEl.textContent = "⏻";
+                setText(enabledEl, "\u23FB");
                 enabledEl.classList.toggle("module-enabled--off", !on);
                 enabledEl.setAttribute("aria-pressed", on ? "true" : "false");
                 const cardEl = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
@@ -3363,29 +4347,29 @@ function allModules() {
 // changed the DOM. No-op (returns false) on the common frame where nothing moved.
 //
 // Position-stable by design: it inserts each newly-visible row at its correct
-// index among the existing control rows and removes rows that became hidden —
+// index among the existing control rows and removes rows that became hidden -
 // it does NOT tear down and re-append every row (that would land them after the
 // card's child-module block / install-picker mount, never converge, and re-fire
-// every WS tick — a render loop that wedges the UI).
+// every WS tick: a render loop that wedges the UI).
 function syncVisibleControls(mod) {
     const card = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
     if (!card) return false;
-    // The controls host is THIS card's own collapse wrapper — must be a DIRECT
+    // The controls host is THIS card's own collapse wrapper: must be a DIRECT
     // child (`:scope >`), not any descendant: a container card (e.g. Effects) nests
     // its child cards (Layer) inside .card-children, and a plain
     // `card.querySelector(".card-controls-collapse")` would reach down and match
     // the CHILD's wrapper. That made Effects adopt Layer's control rows as its own,
     // so both cards saw a control-set mismatch every WS frame and rebuilt each
-    // other's rows in a loop — tearing down (and closing) any open <select>.
+    // other's rows in a loop: tearing down (and closing) any open <select>.
     const host = card.querySelector(":scope > .card-controls-collapse") || card;
 
     const wantNames = mod.controls.filter(c => controlRendersGenerically(mod, c)).map(c => c.name);
     const haveRows = [...host.querySelectorAll(":scope > .control-row[data-key]")];
     const haveNames = haveRows.map(r => r.dataset.key);
     if (wantNames.length === haveNames.length && wantNames.every((n, i) => n === haveNames[i])) {
-        return false;  // unchanged — the common case, so an idle WS push rebuilds nothing
+        return false;  // unchanged: the common case, so an idle WS push rebuilds nothing
     }
-    // The visible-control set genuinely drifted (a hidden flag flipped — e.g. whiteMode appearing when
+    // The visible-control set genuinely drifted (a hidden flag flipped: e.g. whiteMode appearing when
     // the preset changes). Rebuild to reflect it; latest state wins. We don't defer for an in-progress
     // edit: the drift is a consequence of a real change, and suppressing it would hide that change.
 
@@ -3419,6 +4403,19 @@ function syncVisibleControls(mod) {
         }
         host.insertBefore(row, anchor);
     }
+    // Rebuild the bank breaks. This path inserts rows one at a time, so it cannot know where a bank
+    // ends while it works; doing it once at the end, from the same predicate createCard uses, is
+    // what keeps the two paths agreeing. Stale breaks are dropped first: a rebuild that left them
+    // in place would wrap the strips at last render's boundaries.
+    for (const br of host.querySelectorAll(":scope > .surface-break")) br.remove();
+    let bank = null;
+    for (const c of visibleControls) {
+        const kind = surfaceBank(c);
+        const row = host.querySelector(`:scope > .control-row[data-key="${cssEscape(c.name)}"]`);
+        if (!row) continue;
+        if (bank && kind !== bank) host.insertBefore(surfaceBreak(), row);
+        bank = kind;
+    }
     return true;
 }
 
@@ -3428,11 +4425,11 @@ function updateModuleControls(mod) {
     // Conditional controls: a module can flip a control's `hidden` flag at runtime
     // (e.g. RmtLedDriver reveals loopbackRxPin while the test is on, NetworkModule
     // reveals static-IP fields). The value-patch loop below only updates controls
-    // already in the DOM — it can't add or remove one. So first detect whether the
+    // already in the DOM: it can't add or remove one. So first detect whether the
     // set of VISIBLE controls drifted from what's rendered, and if so re-render
     // this card's control rows. Cheap: only fires on the rare frame where a hidden
     // flag actually changed.
-    if (syncVisibleControls(mod)) return;  // re-rendered — values are fresh, skip patch
+    if (syncVisibleControls(mod)) return;  // re-rendered: values are fresh, skip patch
 
     for (const ctrl of mod.controls) {
         const mid = cssEscape(mod.name);
@@ -3445,13 +4442,14 @@ function updateModuleControls(mod) {
         // keystroke / drag within the last second, tracked by dragTs), don't let a
         // WS state push overwrite the field with the value it had before the edit
         // landed. The read-only types (display/display-int/time/progress) and the
-        // composite `list` aren't in this set — they always reflect the latest push.
+        // composite `list` aren't in this set: they always reflect the latest push.
         if (userActive && EDITABLE_CONTROL_TYPES.has(ctrl.type)) continue;
 
         switch (ctrl.type) {
             case "uint8":
             case "uint16":
             case "int16":
+            case "int32":
             case "pin": {   // pin is a plain number input (no slider sibling); patches the same way
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
                 // While the demo sweep animates a control, leave it alone: the sweep restores the
@@ -3502,7 +4500,7 @@ function updateModuleControls(mod) {
                 const sel = document.querySelector(`select[data-mid="${mid}"][data-key="${k}"]`);
                 // Never overwrite a select the user currently has OPEN (popup
                 // showing) or focused. data-open is set on pointerdown/focus and
-                // cleared on change/blur — more reliable than document.activeElement,
+                // cleared on change/blur: more reliable than document.activeElement,
                 // which is ambiguous while a native popup is up (the popup is a
                 // separate OS layer on macOS). The 1s dragTs cooldown is the
                 // additional fallback for the frames right after the popup closes.
@@ -3522,7 +4520,8 @@ function updateModuleControls(mod) {
                             sel.appendChild(o);
                         });
                     }
-                    if (Number(sel.value) !== Number(ctrl.value)) sel.value = ctrl.value;
+                    const want = selectIndex(ctrl);
+                    if (Number(sel.value) !== want) sel.value = want;
                 }
                 break;
             }
@@ -3538,7 +4537,7 @@ function updateModuleControls(mod) {
                     const triSwatch = wrap.querySelector(".palette-trigger .palette-swatch");
                     if (triSwatch) triSwatch.style.background = grad;
                     const triName = wrap.querySelector(".palette-trigger .palette-name");
-                    if (triName) triName.textContent = ((ctrl.options || [])[ctrl.value] || {}).name || String(ctrl.value);
+                    if (triName) setText(triName, ((ctrl.options || [])[ctrl.value] || {}).name || String(ctrl.value));
                     wrap.querySelectorAll(".palette-item.selected").forEach(x => x.classList.remove("selected"));
                     const row = wrap.querySelector(`.palette-item[data-idx="${ctrl.value}"]`);
                     if (row) row.classList.add("selected");
@@ -3546,8 +4545,12 @@ function updateModuleControls(mod) {
                 break;
             }
             case "display": {
+                // A url-valued display is an <a>, not a <span> (see renderControl), so this path
+                // has to know both shapes or the link goes stale on the next push.
+                const link = document.querySelector(`a.control-url[data-mid="${mid}"][data-key="${k}"]`);
+                if (link) { setUrlDisplay(link, ctrl.value); break; }
                 const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
-                if (span) span.textContent = ctrl.value ?? "";
+                if (span) setText(span, String(ctrl.value ?? ""));
                 break;
             }
             case "display-int": {
@@ -3556,7 +4559,7 @@ function updateModuleControls(mod) {
                     // Re-cache the unit in case the device changed it (it
                     // shouldn't, but the WS path is the authority).
                     span.dataset.unit = ctrl.unit ?? span.dataset.unit ?? "";
-                    span.textContent = fmtDisplayInt(ctrl);
+                    setText(span, fmtDisplayInt(ctrl));
                 }
                 break;
             }
@@ -3568,7 +4571,7 @@ function updateModuleControls(mod) {
             }
             case "time": {
                 const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
-                if (span) span.textContent = fmtTime(ctrl.value ?? 0);
+                if (span) setText(span, fmtTime(ctrl.value ?? 0));
                 break;
             }
             case "progress": {
@@ -3578,7 +4581,7 @@ function updateModuleControls(mod) {
                     bar.max = ctrl.total ?? 100;
                 }
                 const lbl = document.querySelector(`span.control-value[data-mid="${mid}"][data-key="${k}.label"]`);
-                if (lbl) lbl.textContent = fmtProgressLabel(ctrl);
+                if (lbl) setText(lbl, fmtProgressLabel(ctrl));
                 break;
             }
             case "list": {
@@ -3588,14 +4591,14 @@ function updateModuleControls(mod) {
                 const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
                 // ONLY REBUILD IF THE LIST ACTUALLY CHANGED. The device pushes full state ~1/sec, so an
                 // unconditional rebuild destroyed + recreated every row (and its inline dropdowns / drag
-                // handlers) every second — collapsing an open dropdown and breaking a drag. Compare the
+                // handlers) every second: collapsing an open dropdown and breaking a drag. Compare the
                 // incoming rows+details against the last rendered snapshot cached on the element; if
                 // identical, do nothing (the common case, and the whole fix). Only a GENUINE change
-                // (someone edited the list) rebuilds — latest state wins, no attempt to protect a stale
+                // (someone edited the list) rebuilds: latest state wins, no attempt to protect a stale
                 // in-progress view (that would suppress the user's own edit from re-rendering). A
                 // rebuild on a real change is momentary and a direct consequence of that change.
                 const sig = JSON.stringify([rows, details]);
-                if (list.dataset.sig === sig) break;   // unchanged — leave the DOM (and any open edit) alone
+                if (list.dataset.sig === sig) break;   // unchanged: leave the DOM (and any open edit) alone
                 list.dataset.sig = sig;
                 // Preserve which detail panels are open across the rebuild. Capture the SAME key
                 // listRowKey emits: the row's stable `id` (on entry.dataset.rowId for editable
@@ -3618,9 +4621,9 @@ function updateModuleControls(mod) {
                 break;
             }
         }
-        // Reset-button state may change as the value drifts in/out of default.
-        // Defaults live in availableTypes (populated from /api/types) keyed by module type.
-        const def = defaultFor(mod.type, ctrl.name);
+        // Reset-button state may change as the value drifts in/out of default. A default on the
+        // control itself wins over the type-level ones from /api/types; see defaultFor.
+        const def = defaultFor(mod.type, ctrl.name, ctrl);
         if (def !== undefined && def !== null) {
             const btn = document.querySelector(`button.reset-btn[data-mid="${mid}"][data-key="${k}.reset"]`);
             if (btn) {
@@ -3653,17 +4656,14 @@ function cssEscape(s) {
 // 6. Type picker
 // ---------------------------------------------------------------------------
 
-// Role → emoji. The role part of the MoonLight emoji-key system
-// (https://moonmodules.org/MoonLight/moonlight/overview/#emoji-key):
-// 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver · 🥞 layer (projectMM
-// addition — every Layer instance, child of the Effects container). The role
-// tag is derived here, not duplicated in every module's tags() string — one
-// source of truth in the UI saves repeating the same character in ~30 module
-// headers and a few bytes per type in /api/types. Each module's tags() then
-// only carries its categorical origin (🐙 WLED · 💫 MoonLight · ⚡️ FastLED)
-// and any feature extras (audio: ♫ FFT · ♪ volume · moving-head: 🚨 color ·
-// 🗼 movement). The dimensional emoji (📏 1D · 🟦 2D · 🧊 3D) is derived from
-// the type's `dim` field. All three are merged in emojiTagsFor().
+// Role → emoji, derived here rather than duplicated in every module's tags(): one home in the UI
+// saves repeating the same character in ~90 module headers and a few bytes per type in /api/types.
+// The dimensional chip comes from the type's `dim` the same way (DIM_EMOJI below), and both are
+// merged with the module's own tags() in emojiTagsFor().
+//
+// What each emoji MEANS is documented once, for the people who read the chips:
+// docs/tutorials/how-projectmm-works.md, "The emoji on every card". Re-listing the vocabulary here
+// is how this comment came to name four emoji no module carries any more.
 const ROLE_EMOJI = {
     effect:     "🔥",
     driver:     "☸️",
@@ -3693,7 +4693,7 @@ function roleHue(roles) {
     return hues.length === 1 ? String(hues[0]) : null;
 }
 
-// Dim int → emoji. Only effects carry `dim` (1/2/3); other modules have dim == 0
+// Dim int → emoji. Effects, layouts and modifiers all carry `dim` (1/2/3); everything else has 0
 // and contribute nothing here. Same MoonLight key. Keeps emojiTagsFor() the
 // single place that assembles the chip set per type.
 const DIM_EMOJI = {
@@ -3716,6 +4716,12 @@ function graphemes(s) {
 
 // All emoji for a type: role first, then dimensional (effects only), then each
 // curated tag emoji from tags(). Deduplicated, order preserved.
+// A script is marked; a compiled module is not. Two chips in the picker filter on this, and the
+// compiled one matches by ABSENCE, so adding it costs no tag on ninety existing modules.
+const SCRIPTED_EMOJI = "\u{1F4DD}";      // 📝 the module runs a MoonLive script
+// Not the gear: that is already the `generic` role's emoji, and reusing it drew the chip twice.
+const COMPILED_EMOJI = "\u{1F4E6}";      // 📦 chip only: never a tag any module carries
+
 function emojiTagsFor(t) {
     const out = [];
     const seen = new Set();
@@ -3731,46 +4737,214 @@ function emojiTagsFor(t) {
 //  - replace: pick a type to swap parentMod for, at the same position.
 // They differ only in the role filter and the commit action; the search box,
 // list, and keyboard nav are shared.
+/// The MoonLive module type that runs a script of this role.
+///
+/// Role, not extension: the picker knows what it is offering, and the catalog is already grouped
+/// the same way. Null for a role with no scripted form.
+function mlTypeForRole(role) {
+    return role === "effect" ? "MoonLiveEffect"
+         : role === "layout" ? "MoonLiveLayout"
+         : role === "modifier" ? "MoonLiveModifier" : null;
+}
+
+/// Every shipped script, as picker rows, for the roles a parent accepts.
+///
+/// One row per script rather than one "MoonLive" row: to a user, `dot` is a thing to add exactly
+/// as `DemoReel` is, and which of the two is compiled is a property, not a category. The scripted
+/// marker rides on the row so the merged list still says which is which, and `script` carries the
+/// file the row would load.
+async function mlScriptItems(roles) {
+    const cat = await mlFetchCatalog().catch(() => null);
+    if (!cat) return [];                       // no catalog: the picker still offers every type
+    // What the device already holds, so a row can say when picking it costs a download. One listing
+    // for every role: the scripts share a directory.
+    const local = new Set((await fmFetchDir(cat.dir).catch(() => [])).map(e => e.name));
+    const out = [];
+    for (const role of roles) {
+        if (!mlTypeForRole(role)) continue;
+        const g = cat[role + "s"] || {};       // "effect" -> catalog group "effects"
+        (g.names || []).forEach((n, i) => {
+            const tags = (g.tags && g.tags[i]) || "";
+            const isRemote = !local.has(n);
+            out.push({
+                name: n,
+                remote: isRemote,
+                // Without the extension: it is the file's business, not the reader's, and it keeps
+                // the row sorting next to the compiled modules rather than in a block of ".mle".
+                displayName: (isRemote ? "\u2601 " : "") + n.replace(/\.ml[elm]$/i, ""),
+                role,
+                // The scripted marker is what makes the row's kind visible, so it is added rather
+                // than assumed: a script whose own tags happen to omit it still reads correctly.
+                tags: tags.includes(SCRIPTED_EMOJI) ? tags : SCRIPTED_EMOJI + tags,
+                dim: (g.dim && g.dim[i]) || 0,
+                script: n,
+            });
+        });
+    }
+    return out;
+}
+
+/// Make sure a picked script is ON the device, downloading it if it is only in the catalog.
+///
+/// Creating or replacing a module before the file exists leaves a card reporting "script not found",
+/// so this runs first on both paths. Returns false when the download failed and the caller must not
+/// proceed; it has already told the user why.
+async function mlEnsureLocal(item) {
+    if (!item.remote) return true;
+    try {
+        await mlDownloadScript(item.script, item.role + "s");
+        return true;
+    } catch (e) {
+        alert("could not download " + item.script + ": " + (e && e.message ? e.message : e));
+        return false;
+    }
+}
+
+/// Add a module for a picked row, whether it is a compiled type or a script.
+///
+/// A script becomes a MoonLive module holding it, named after the script: the user picked `dot`, so
+/// the card says `dot`. `id` is how POST /api/modules names a module, and it is deliberately
+/// idempotent (an existing name is success, not a rename), so a collision is retried with a suffix
+/// rather than silently landing on the module already there.
+/// Point a card at a script, and make sure the card catches up.
+///
+/// The re-render is the point. A card is built BEFORE its script is set (created or replaced first,
+/// pointed at the file second), so its picker reads "(none)" and its editor is blank until something
+/// rebuilds it. A script that COMPILES hides this: defining controls changes the module's schema,
+/// which fires a full resync. A script that FAILS defines nothing, the schema signature is unchanged,
+/// and only the status text arrives, leaving a card that contradicts itself: an error about a script
+/// it claims not to have, correct again after a manual refresh.
+async function setCardScript(moduleName, script) {
+    await sendControl(moduleName, "script", script);
+    await refetchState();
+}
+
+async function addPickedType(item, parentName) {
+    if (!item.script) return addModule(item.name, parentName);
+    const type = mlTypeForRole(item.role);
+    if (!type) return;
+    if (!await mlEnsureLocal(item)) return;
+    // The cloud marker is a property of the row, not of the name the card takes.
+    const base = item.displayName.replace(/^\u2601\s*/, "");
+    for (let n = 1; n <= 20; n++) {
+        const id = n === 1 ? base : `${base}-${n}`;
+        const created = await addModule(type, parentName, id);
+        if (created) {
+            await setCardScript(created, item.script);
+            return created;
+        }
+    }
+    // Twenty siblings of one name, all taken. Unlikely, but silence would leave the user clicking
+    // create and watching nothing happen, which is the one outcome worse than an error.
+    alert(`could not add ${base}: twenty modules of that name already exist here`);
+}
+
 function openTypePicker(parentMod, anchorEl) {
     const roles = rolesAcceptedBy(parentMod);
     // One candidate = no choice to make, so don't stage a picker to ask a question with one answer:
     // "+" on Effects just adds a Layer. (Same filter openPicker uses, so the two can't disagree about
-    // what the candidates are.)
+    // what the candidates are.) Counted over the TYPES alone: the scripts arrive asynchronously, and
+    // a role with one type but many scripts is still a real choice, which the await below sees.
     const candidates = availableTypes.filter(t => roles.includes(t.role));
-    if (candidates.length === 1) {
-        addModule(candidates[0].name, parentMod.name);
-        return;
-    }
-    openPicker(anchorEl, {
-        roles,
-        actionLabel: "create",
-        commit: (type) => addModule(type, parentMod.name)
+    mlScriptItems(roles).then((scripts) => {
+        if (candidates.length === 1 && !scripts.length) {
+            addModule(candidates[0].name, parentMod.name);
+            return;
+        }
+        openPicker(anchorEl, {
+            items: [...candidates, ...scripts],
+            actionLabel: "create",
+            commit: (name, item) => addPickedType(item, parentMod.name),
+        });
     });
 }
 
 // Replace mode: filter to the target module's own role (effect ↔ effect), and
 // pre-select the module's CURRENT type so the cursor lands on it (not the first row).
 function openReplacePicker(targetMod, anchorEl) {
-    openPicker(anchorEl, {
-        roles: [targetMod.role],
-        actionLabel: "replace",
-        currentType: targetMod.type,
-        commit: (type) => replaceModule(targetMod.name, type)
+    const roles = [targetMod.role];
+    // Scripts here for the same reason they are in the add picker: swapping an effect for a script
+    // is the same question as adding one, and a list that offers scripts in one place and not the
+    // other makes the distinction visible again exactly where it should not be.
+    mlScriptItems(roles).then((scripts) => {
+        openPicker(anchorEl, {
+            items: [...availableTypes.filter(t => roles.includes(t.role)), ...scripts],
+            actionLabel: "replace",
+            currentType: targetMod.type,
+            commit: (name, item) => replacePickedType(targetMod, item),
+        });
     });
+}
+
+/// Replace a module with a picked row, whether it is a compiled type or a script.
+///
+/// A script replaces in place: the module becomes the MoonLive type for its role and then loads the
+/// file, so the slot keeps its position in the layer. It is also RENAMED, like the add path: a card
+/// is named after what it runs, so swapping what it runs renames it.
+async function replacePickedType(targetMod, item) {
+    if (!item) return;
+    // A replace ALWAYS renames: a card is named after what it runs, so swapping what it runs renames
+    // it. Simple and predictable, and it is why the device's replace takes a name at all: left to
+    // itself it preserves any name that is not the old type's default, which kept a card auto-named
+    // "MoonLive-3" labeled that after it became a Lissajous.
+    const picked = item.displayName.replace(/^\u2601\s*/, "");
+    if (!item.script) return replaceModule(targetMod.name, item.name, picked);
+    const type = mlTypeForRole(item.role);
+    if (!type) return;
+    if (!await mlEnsureLocal(item)) return;
+    // Named after the script, the same as adding one: a card running dot.mle is called `dot` however
+    // it got there, unless the user named it something of their own. The device disambiguates a
+    // collision, so the name asked for is not always the name given.
+    // WHERE the slot sits, captured BEFORE the replace. Afterwards the module answers to its new
+    // name and the old one is gone, so nothing can be found by it: the position is the only handle
+    // that survives. Looking the parent up afterwards found nothing, and the name asked for could
+    // match a DIFFERENT card when it was already taken, which sent the script to the wrong module.
+    const parent = findParentOf(targetMod.name);
+    const index = parent ? (parent.children || []).findIndex(k => k.name === targetMod.name) : -1;
+    const parentName = parent ? parent.name : null;
+
+    await replaceModule(targetMod.name, type, picked);
+
+    // The slot at that position, in the refreshed state. A replace swaps a child IN PLACE, so the
+    // index is stable and the parent keeps its own name; the device may have suffixed the name it
+    // was given ("dot-2") to keep it unique, which is exactly what the position answers.
+    const after = parentName ? findModule(parentName) : null;
+    const atIndex = after && index >= 0 && after.children ? after.children[index] : null;
+    const slot = atIndex ? atIndex.name : (findModule(picked) ? picked : null);
+    if (slot) await setCardScript(slot, item.script);
 }
 
 function openPicker(anchorEl, opts) {
     // Close any existing picker
+    // Its MODAL, not just the inner block: removing only the picker would leave an open
+    // dialog with an empty backdrop over the page.
+    document.querySelectorAll(".type-picker-modal").forEach(d => d.remove());
     document.querySelectorAll(".type-picker").forEach(p => p.remove());
 
-    // Alphabetical by display name so the picker list is scannable regardless of registration
-    // order (localeCompare — case-insensitive, locale-aware).
-    const filtered = availableTypes
-        .filter(t => opts.roles.includes(t.role))
-        .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
+    // The items are the CALLER's, defaulting to the registered types filtered by role. Everything
+    // below works on {name, displayName, role, tags, dim}, so anything describing itself that way
+    // gets this widget: the MoonLive script picker passes its scripts and inherits the search box,
+    // the emoji chip filter, the keyboard handling and the row layout rather than growing its own.
+    //
+    // Sorting stays here so every picker is ordered the same way, and stays alphabetical by display
+    // name so the list is scannable regardless of registration order (localeCompare:
+    // case-insensitive, locale-aware).
+    const source = opts.items || availableTypes.filter(t => opts.roles.includes(t.role));
+    // Sorted on the NAME, not on any marker in front of it: a row prefixed with the cloud glyph is
+    // still that script alphabetically, and prefixed rows would otherwise collect in a block of
+    // their own instead of sitting where the reader looks for them.
+    const sortKey = (t) => (t.displayName || t.name).replace(/^[^\p{L}\p{N}]+/u, "");
+    const filtered = [...source].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
 
     const picker = document.createElement("div");
     picker.className = "type-picker";
+    // Dismiss: closes the modal when there is one (which removes it), and falls back to removing
+    // the picker itself. One function so every exit path (cancel, Enter, double-click, commit)
+    // dismisses the same way.
+    const closePicker = () => {
+        const dlg = picker.closest("dialog");
+        if (dlg) dlg.close(); else picker.remove();
+    };
 
     const search = document.createElement("input");
     search.type = "text";
@@ -3778,30 +4952,63 @@ function openPicker(anchorEl, opts) {
     search.className = "type-picker-search";
     picker.appendChild(search);
 
-    // Emoji chip filter row — every distinct emoji across the role-filtered types.
+    // Emoji chip filter row: every distinct emoji across the role-filtered types.
     // Toggling chips narrows the list (AND: a type must carry all active chips).
     const activeChips = new Set();
     const chipRow = document.createElement("div");
     chipRow.className = "type-picker-chips";
-    const chipEmoji = [];
     const chipSeen = new Set();
+    const present = [];
     for (const t of filtered) {
         for (const ch of emojiTagsFor(t)) {
-            if (!chipSeen.has(ch)) { chipSeen.add(ch); chipEmoji.push(ch); }
+            if (!chipSeen.has(ch)) { chipSeen.add(ch); present.push(ch); }
         }
     }
-    for (const emoji of chipEmoji) {
-        const chip = document.createElement("button");
-        chip.className = "type-picker-chip";
-        chip.textContent = emoji;
-        chip.addEventListener("click", () => {
-            if (activeChips.has(emoji)) { activeChips.delete(emoji); chip.classList.remove("active"); }
-            else { activeChips.add(emoji); chip.classList.add("active"); }
-            refresh();
-        });
-        chipRow.appendChild(chip);
+    // The compiled chip is not a tag anything carries, so it cannot be discovered from the rows the
+    // way every other chip is: it is offered when the list actually holds both kinds, which is the
+    // only situation where filtering by kind means anything.
+    if (chipSeen.has(SCRIPTED_EMOJI) && filtered.some(t => !emojiTagsFor(t).includes(SCRIPTED_EMOJI))) {
+        present.push(COMPILED_EMOJI);
     }
-    if (chipEmoji.length > 0) picker.appendChild(chipRow);
+    // Grouped rather than in first-seen order, so the row reads as the legend does: the scripted
+    // marker, then what a module IS (role, then dimension), then where it came from, then what it
+    // can do. A chip whose category is unknown falls in the last group rather than vanishing, so a
+    // new emoji is visible before anyone remembers to classify it.
+    const CHIP_GROUPS = [
+        [SCRIPTED_EMOJI, COMPILED_EMOJI],                // what a row IS: scripted or compiled
+        Object.values(ROLE_EMOJI),                       // type
+        Object.values(DIM_EMOJI),                        // dimension
+        ["\u{1F4AB}", "\u{1F319}", "\u{1F419}", "\u26A1\uFE0F"],   // origin
+    ];
+    const groups = CHIP_GROUPS.map(g => present.filter(e => g.includes(e)));
+    const classified = new Set(CHIP_GROUPS.flat());
+    groups.push(present.filter(e => !classified.has(e)));   // capabilities and anything new
+
+    let first = true;
+    for (const group of groups) {
+        if (!group.length) continue;
+        // A separator between groups, never leading or trailing: it marks a boundary, and a
+        // boundary with nothing on one side is just a mark.
+        if (!first) {
+            const sep = document.createElement("span");
+            sep.className = "type-picker-chip-sep";
+            sep.setAttribute("aria-hidden", "true");
+            chipRow.appendChild(sep);
+        }
+        first = false;
+        for (const emoji of group) {
+            const chip = document.createElement("button");
+            chip.className = "type-picker-chip";
+            chip.textContent = emoji;
+            chip.addEventListener("click", () => {
+                if (activeChips.has(emoji)) { activeChips.delete(emoji); chip.classList.remove("active"); }
+                else { activeChips.add(emoji); chip.classList.add("active"); }
+                refresh();
+            });
+            chipRow.appendChild(chip);
+        }
+    }
+    if (present.length > 0) picker.appendChild(chipRow);
 
     const list = document.createElement("div");
     list.className = "type-picker-list";
@@ -3811,7 +5018,7 @@ function openPicker(anchorEl, opts) {
     actions.className = "type-picker-actions";
     const cancelBtn = document.createElement("button");
     cancelBtn.textContent = "cancel";
-    cancelBtn.addEventListener("click", () => picker.remove());
+    cancelBtn.addEventListener("click", () => closePicker());
     const createBtn = document.createElement("button");
     createBtn.className = "create";
     createBtn.textContent = opts.actionLabel;
@@ -3821,6 +5028,7 @@ function openPicker(anchorEl, opts) {
     picker.appendChild(actions);
 
     let selectedType = null;
+    let selectedItem = null;      // the row itself: commit needs more than its name
 
     // Types matching the search box AND all active emoji chips. The query matches
     // against both the raw typeName ("RainbowEffect") and the displayName
@@ -3835,7 +5043,12 @@ function openPicker(anchorEl, opts) {
             }
             if (activeChips.size > 0) {
                 const has = new Set(emojiTagsFor(t));
-                for (const chip of activeChips) if (!has.has(chip)) return false;
+                for (const chip of activeChips) {
+                    // The compiled chip matches what carries NO scripted marker, since a compiled
+                    // module has no tag of its own: the two kind chips are each other's opposite.
+                    const ok = chip === COMPILED_EMOJI ? !has.has(SCRIPTED_EMOJI) : has.has(chip);
+                    if (!ok) return false;
+                }
             }
             return true;
         });
@@ -3867,15 +5080,17 @@ function openPicker(anchorEl, opts) {
                 list.querySelectorAll(".selected").forEach(x => x.classList.remove("selected"));
                 item.classList.add("selected");
                 selectedType = t.name;
+                selectedItem = t;
                 createBtn.disabled = false;
             });
             item.addEventListener("dblclick", () => {
-                opts.commit(t.name);
-                picker.remove();
+                opts.commit(t.name, t);
+                closePicker();
             });
             list.appendChild(item);
         });
-        selectedType = matches.length > 0 ? matches[selIdx].name : null;
+        selectedItem = matches.length > 0 ? matches[selIdx] : null;
+        selectedType = selectedItem ? selectedItem.name : null;
         createBtn.disabled = !selectedType;
         // Scroll the pre-selected row into view (it may be below the fold for a long list).
         const selEl = list.querySelector(".type-picker-item.selected");
@@ -3892,23 +5107,25 @@ function openPicker(anchorEl, opts) {
             if (idx < items.length - 1) {
                 sel?.classList.remove("selected");
                 items[idx + 1].classList.add("selected");
-                selectedType = filteredAt(idx + 1)?.name;
+                selectedItem = filteredAt(idx + 1);
+                selectedType = selectedItem?.name;
             }
         } else if (e.key === "ArrowUp") {
             e.preventDefault();
             if (idx > 0) {
                 sel?.classList.remove("selected");
                 items[idx - 1].classList.add("selected");
-                selectedType = filteredAt(idx - 1)?.name;
+                selectedItem = filteredAt(idx - 1);
+                selectedType = selectedItem?.name;
             }
         } else if (e.key === "Enter") {
             e.preventDefault();
             if (selectedType) {
-                opts.commit(selectedType);
-                picker.remove();
+                opts.commit(selectedType, selectedItem);
+                closePicker();
             }
         } else if (e.key === "Escape") {
-            picker.remove();
+            closePicker();
         }
     });
 
@@ -3918,13 +5135,73 @@ function openPicker(anchorEl, opts) {
 
     createBtn.addEventListener("click", () => {
         if (selectedType) {
-            opts.commit(selectedType);
-            picker.remove();
+            opts.commit(selectedType, selectedItem);
+            closePicker();
         }
     });
 
-    anchorEl.appendChild(picker);
+    // A MODAL, not a block appended to whatever opened it. Appending made the picker inherit its
+    // anchor's width and position: from a card footer it drew at the bottom of the card, far from
+    // the field being changed, and from a toolbar button it collapsed to an unreadable sliver.
+    // A dialog sits above the page at its own size wherever it is opened from.
+    //
+    // The native <dialog>, the same one the File Manager's editor uses: Esc and the backdrop are
+    // the browser's job, so there is no overlay, no focus trap and no scroll lock to maintain here.
+    // Where the anchor sits BEFORE the modal opens: showModal() can move the page under it (the
+    // body's scrollbar goes), so a rect read afterwards describes a layout that has already shifted.
+    const anchorRect = anchorEl && anchorEl.getBoundingClientRect
+        ? anchorEl.getBoundingClientRect() : null;
+
+    const dlg = document.createElement("dialog");
+    dlg.className = "type-picker-modal";
+    dlg.appendChild(picker);
+    document.body.appendChild(dlg);
+    // Esc closes it (the browser fires `close`), and so does clicking the backdrop: the dialog
+    // element itself is the backdrop, so a click that lands on it rather than on the picker inside
+    // is a click outside.
+    dlg.addEventListener("close", () => dlg.remove());
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+    dlg.showModal();
     refresh();
+
+    // Centered over the CARDS column, not the viewport. showModal() centers on the page, which puts
+    // the list far from the card whose control opened it: the eye is on the right-hand column and
+    // the answer appears in the middle of the preview. Falls back to the page center when the
+    // column is absent (the PiP layout, where cards are full width anyway).
+    //
+    // AFTER refresh(): the rows are what give the picker its height, so measuring before them read
+    // an empty list (111px against a real 311px) and the bottom-of-screen clamp never fired.
+    const col = document.getElementById("main");
+    const d = dlg.getBoundingClientRect();
+    const c = col ? col.getBoundingClientRect() : null;
+    if (c && c.width > d.width) {
+        // VERTICALLY the search box lands on what was clicked, so the list opens under the hand
+        // rather than jumping the eye across the screen. Clamped upward when the picker would run
+        // off the bottom, and never above the top edge: on a short window it simply starts at the
+        // top and the list scrolls, which beats a dialog with its buttons out of reach.
+        const margin = 8;
+        // MEASURE FIRST, then write: reading a rect after setting `left`/`margin` reads a box that
+        // has already moved, and using that as an offset walks the dialog down the page.
+        const s = picker.querySelector(".type-picker-search");
+        const inset = s ? s.getBoundingClientRect().top - d.top : 0;   // dialog top to search box
+        // The search box lands just BELOW the control that opened it, so the thing clicked stays
+        // visible above the picker rather than being covered by it.
+        //
+        // Clamped so the whole picker stays on screen: it rises rather than hanging off the bottom.
+        // On a window too short to hold it at all, `max` wins over `min` and it starts at the top
+        // margin with the list scrolling, which beats putting the buttons out of reach.
+        dlg.style.position = "fixed";
+        dlg.style.left = Math.round(c.left + (c.width - d.width) / 2) + "px";
+        dlg.style.margin = "0";
+        // Clamp against the height the dialog has ONCE POSITIONED. `d` was measured while it was
+        // still centered by showModal(), and a fixed dialog lays out to a different height, so
+        // clamping against the stale number let it hang off the bottom of a short window.
+        const h = dlg.getBoundingClientRect().height;
+        let top = (anchorRect ? anchorRect.bottom + margin : d.top) - inset;
+        top = Math.min(top, window.innerHeight - h - margin);
+        top = Math.max(margin, top);
+        dlg.style.top = Math.round(top) + "px";
+    }
     search.focus();
 }
 
@@ -3937,7 +5214,7 @@ function attachDragHandlers(card, mod) {
 
     // Why we toggle `draggable` on mousedown instead of vetoing in dragstart:
     // HTML5 dragstart's `e.target` is always the draggable element (the card),
-    // not the deepest element under the mouse — so closest(".control-row")
+    // not the deepest element under the mouse: so closest(".control-row")
     // never matches. The reliable signal is the *mousedown* target. Disable
     // drag at mousedown when the grab landed on a control, re-enable on
     // mouseup so the next click on the card body can still drag.
@@ -3948,7 +5225,7 @@ function attachDragHandlers(card, mod) {
     card.addEventListener("touchstart", gate, {capture: true, passive: true});
 
     card.addEventListener("dragstart", (e) => {
-        // Innermost card wins — without stopPropagation a nested child's
+        // Innermost card wins: without stopPropagation a nested child's
         // dragstart would bubble to the parent and the parent's listener
         // would overwrite dataTransfer with its own name.
         e.stopPropagation();
@@ -3961,7 +5238,7 @@ function attachDragHandlers(card, mod) {
         document.querySelectorAll(".drag-over").forEach(c => c.classList.remove("drag-over"));
     });
     card.addEventListener("dragover", (e) => {
-        // Only allow drop on a true sibling — same .card-children container.
+        // Only allow drop on a true sibling: same .card-children container.
         // Cards now nest, so equal data-depth is no longer enough: two effects
         // under different Effects share a depth but aren't siblings.
         const src = document.querySelector(".card.dragging");
@@ -3978,7 +5255,7 @@ function attachDragHandlers(card, mod) {
     });
     card.addEventListener("drop", (e) => {
         e.preventDefault();
-        // Innermost card wins — without stopPropagation the drop bubbles to every
+        // Innermost card wins: without stopPropagation the drop bubbles to every
         // ancestor card that also has a drop handler, firing a SECOND move onto
         // the grandparent's child list (e.g. dropping onto Mirror also dropped
         // onto the Layer card → move into Effects, index 0 → undoing the first
@@ -3988,14 +5265,14 @@ function attachDragHandlers(card, mod) {
         const srcName = e.dataTransfer.getData("text/plain");
         if (!srcName || srcName === mod.name) return;
         // Insert semantics (not swap): the dropped item takes the target row's
-        // slot and the others shift to fill — the standard reorderable-list
-        // behaviour (Finder, Trello, VS Code, SortableJS). Because we drop ONTO a
+        // slot and the others shift to fill: the standard reorderable-list
+        // behavior (Finder, Trello, VS Code, SortableJS). Because we drop ONTO a
         // row (not into a between-rows gap), the landing is the target's absolute
         // index: dragging down lands after the target, dragging up lands before
         // it. That's consistent ("take the target's slot"), just not always-before.
         //
         // Compute target absolute index within parent's children. Identify the
-        // drop-target by name, not by object identity — state is replaced on
+        // drop-target by name, not by object identity: state is replaced on
         // every WS push, so `mod` captured at render time is stale within ~1s.
         const parent = findParent(mod.name);
         if (!parent) return;
@@ -4014,7 +5291,7 @@ function setupStatusBarButtons() {
         preview.resetCamera();
     });
 
-    // Reboot: press once to arm, again to confirm — see armPressTwice. The glyph
+    // Reboot: press once to arm, again to confirm: see armPressTwice. The glyph
     // stays (no armedText); only the title changes.
     const rebootBtn = document.getElementById("reboot-btn");
     if (rebootBtn) {
@@ -4024,7 +5301,7 @@ function setupStatusBarButtons() {
         theme = (theme === "dark") ? "light" : "dark";
         localStorage.setItem(LS_THEME, theme);
         applyTheme(theme);
-        // Repaint the preview to the new theme's background — a live preview would
+        // Repaint the preview to the new theme's background: a live preview would
         // pick it up on its next frame, but an idle one (no incoming frames) needs
         // a nudge so the canvas doesn't keep the previous theme's clear color.
         preview.redraw();
@@ -4065,9 +5342,9 @@ function updateStatusBar() {
     const nameCtrl = ctrls.find(c => c.name === "deviceName");
     const nameSpan = document.getElementById("device-name");
     if (nameCtrl && nameSpan && nameCtrl.value) {
-        nameSpan.textContent = nameCtrl.value;
-        if (document.title !== "projectMM — " + nameCtrl.value) {
-            document.title = "projectMM — " + nameCtrl.value;
+        setText(nameSpan, String(nameCtrl.value ?? ""));
+        if (document.title !== "projectMM: " + nameCtrl.value) {
+            document.title = "projectMM: " + nameCtrl.value;
         }
     }
 
@@ -4088,15 +5365,15 @@ function updateStatusBar() {
             parts.push("🧠 " + freeKb + "K");
         }
         // Skip on desktop, where the platform stub reports "0KB" (no real
-        // block measurement / unlimited heap) — same reason heap free above
+        // block measurement / unlimited heap): same reason heap free above
         // only shows when the heap progress control is present.
         if (blockCtrl && blockCtrl.value && blockCtrl.value !== "0KB") {
             parts.push("🧱 " + blockCtrl.value);
         }
-        statsEl.textContent = parts.join(" · ");
+        setText(statsEl, parts.join(" · "));
     }
 
-    // Hide reboot button on desktop builds — platform::reboot() just exits the process,
+    // Hide reboot button on desktop builds: platform::reboot() just exits the process,
     // which is not useful from the UI and can be mistaken for a crash.
     const chipCtrl = ctrls.find(c => c.name === "chip");
     const rebootBtn = document.getElementById("reboot-btn");
@@ -4114,7 +5391,7 @@ function updateStatusBar() {
     }
 
     // Cache-first update check: instant from the localStorage cache, background-fetches only
-    // when stale (>1 h). Fire-and-forget — best-effort, never blocks the status-bar render.
+    // when stale (>1 h). Fire-and-forget: best-effort, never blocks the status-bar render.
     checkFirmwareUpdate(false);
 }
 
@@ -4122,7 +5399,7 @@ function updateStatusBar() {
 // 8b. Firmware-update badge
 // ---------------------------------------------------------------------------
 // Browser-side "a newer firmware is out" check, modelled on ESP32-sveltekit's
-// UpdateIndicator (the upstream firmware lineage) — our own code. The device fetches
+// UpdateIndicator (the upstream firmware lineage): our own code. The device fetches
 // nothing; the browser compares the running version (FirmwareUpdateModule.version, pure
 // semver) against GitHub releases and, when newer AND a compatible .bin exists, shows the
 // status-bar badge. Two channels:
@@ -4137,7 +5414,7 @@ function updateStatusBar() {
 // failure hides the badge, never throws.
 
 const RELEASES_API = "https://api.github.com/repos/MoonModules/projectMM/releases";
-const UPDATE_TTL_MS = 60 * 60 * 1000;                     // 1 h — best-effort, well under GitHub's rate limit
+const UPDATE_TTL_MS = 60 * 60 * 1000;                     // 1 h: best-effort, well under GitHub's rate limit
 const PICKER_RELEASE_KEY = "projectMM.picker.releaseTag"; // install-picker restores from this on init
 
 function safeLocalGet(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
@@ -4172,7 +5449,7 @@ async function cachedJson(url, key, force) {
         } catch (e) {
             // console.debug, not warn: an update check failing is routine and not
             // actionable (the device may simply be offline, or GitHub rate-limited),
-            // so keep it out of the default console — debug is hidden unless the user
+            // so keep it out of the default console: debug is hidden unless the user
             // opts into verbose. Both callers hit api.github.com, which sends
             // Access-Control-Allow-Origin and so reads fine from the device origin;
             // the failure path here is for the no-network / rate-limit case.
@@ -4182,7 +5459,7 @@ async function cachedJson(url, key, force) {
                 try {
                     const obj = JSON.parse(raw);
                     // Refresh the timestamp so the per-tick check doesn't re-attempt a
-                    // failing fetch every second — back off until the next TTL window.
+                    // failing fetch every second: back off until the next TTL window.
                     safeLocalSet(key, JSON.stringify({ ts: Date.now(), data: obj.data }));
                     return obj.data;
                 } catch (_) { /* none */ }
@@ -4190,7 +5467,7 @@ async function cachedJson(url, key, force) {
             // No stale entry to serve: NEGATIVE-CACHE the failure (data:null) with a
             // fresh timestamp so the TTL guard above suppresses the next attempt for
             // the back-off window. Without this, every status-bar render (≈4×/s on
-            // each WS push) re-runs the failing fetch — an error storm in the console
+            // each WS push) re-runs the failing fetch: an error storm in the console
             // whenever the device is offline. A null cache hit returns "no update".
             safeLocalSet(key, JSON.stringify({ ts: Date.now(), data: null }));
             return null;
@@ -4202,6 +5479,21 @@ async function cachedJson(url, key, force) {
     return p;
 }
 
+// Which release asset would UPDATE this machine? An ESP32 installs a firmware-<variant>-<ver>.bin
+// through the Firmware card; a desktop downloads an archive and replaces its own binary by hand.
+// Both still want to be TOLD there is a newer version, which is what the badge is for.
+//
+// A desktop reports firmware "unknown" (there is no variant to name), which is how we tell them
+// apart. Before this, that value was truthy and the check looked for a firmware-unknown-*.bin that
+// no release has ever contained, so a desktop user was never told anything.
+function desktopAssetPrefix() {
+    const p = (navigator.platform || "") + " " + (navigator.userAgent || "");
+    if (/Win/i.test(p)) return "projectMM-windows-x64-v";
+    if (/Mac/i.test(p)) return "projectMM-macos-arm64-v";
+    if (/Linux|X11/i.test(p)) return "projectMM-linux-x64-v";
+    return null;                                   // an OS we do not package: say nothing
+}
+
 // Read the device's running version + firmware-variant key off the FirmwareUpdateModule.
 function deviceFirmwareInfo() {
     if (!state || !state.modules) return null;
@@ -4210,15 +5502,25 @@ function deviceFirmwareInfo() {
     const ctrls = fw.controls || [];
     const version = (ctrls.find(c => c.name === "version") || {}).value;
     const firmware = (ctrls.find(c => c.name === "firmware") || {}).value;
-    return version ? { version, firmware } : null;
+    // "unknown" is what a desktop build reports: no ESP32 variant to name.
+    const isDesktop = !firmware || firmware === "unknown";
+    return version ? { version, firmware: isDesktop ? null : firmware, isDesktop } : null;
 }
 
 // Light the badge for an available update. `tag` is the release the picker should pre-select
 // (a vX.Y.Z stable tag, or "latest"); `label` is what the badge shows.
-function showUpdateBadge(badge, tag, label) {
-    badge.textContent = `⬆ ${label}`;
-    badge.title = `Firmware update available: ${label} — open Firmware to install`;
+function showUpdateBadge(badge, tag, label, isDesktop) {
+    // setText, not a raw write: this runs on every state patch, and rewriting identical text
+    // still destroys a selection inside the element.
+    setText(badge, `⬆ ${label}`);
+    // A desktop cannot install from the Firmware card: it has no OTA, and updating means
+    // downloading an archive and replacing the binary. So the badge sends it to the release page
+    // instead of a card that would offer it nothing.
+    badge.title = isDesktop
+        ? `Update available: ${label}. Open the release page to download`
+        : `Firmware update available: ${label}. Open Firmware to install`;
     badge.dataset.tag = tag;
+    badge.dataset.desktop = isDesktop ? "1" : "";
     badge.hidden = false;
 }
 
@@ -4228,26 +5530,34 @@ async function stableUpdate(dev, force) {
     const rel = await cachedJson(`${RELEASES_API}/latest`, "projectMM.update.latest.v1", force);
     if (!rel || !rel.tag_name) return null;
     const assetNames = (rel.assets || []).map(a => a.name);
-    const hasBinary = !dev.firmware ||
-        assetNames.some(n => n === `firmware-${dev.firmware}-${rel.tag_name}.bin`);
+    const prefix = dev.isDesktop ? desktopAssetPrefix() : null;
+    const hasBinary = dev.isDesktop
+        // A desktop is told about a release that actually ships a build for ITS OS: an archive
+        // named for the platform, rather than a firmware .bin it could not install anyway.
+        ? !!prefix && assetNames.some(n => n.startsWith(prefix))
+        : !dev.firmware ||
+          assetNames.some(n => n === `firmware-${dev.firmware}-${rel.tag_name}.bin`);
     return (isNewer(rel.tag_name, dev.version) && hasBinary) ? rel.tag_name : null;
 }
 
 // For a device already on a -dev build: is the moving `latest` release newer? Returns its
 // version string (e.g. "2.1.0-dev.7") or null. The latest release's tag is "latest"; its
 // version is published as the release `name` (release.yml), which the GitHub API exposes
-// CORS-readably — unlike the manifest-*.json asset, whose release-asset URL redirects to
+// CORS-readably: unlike the manifest-*.json asset, whose release-asset URL redirects to
 // release-assets.githubusercontent.com (no CORS header), so the device-hosted UI can't read it.
 // We also require the matching firmware .bin asset so the badge never points at a build the
 // device can't install.
 async function devUpdate(dev, force) {
-    if (!dev.firmware) return null;                          // can't match an asset without the key
+    if (!dev.firmware && !dev.isDesktop) return null;        // can't match an asset without the key
     const rel = await cachedJson(`${RELEASES_API}/tags/latest`, "projectMM.update.dev.v1", force);
     const v = rel && rel.name;
     if (!v) return null;
     // Assets are versioned, not tagged: the `latest` release ships
     // firmware-<fw>-v<version>.bin (release.yml stages PREFIX="firmware-...-v$V").
-    const hasBinary = (rel.assets || []).some(a => a.name === `firmware-${dev.firmware}-v${v}.bin`);
+    const prefix = dev.isDesktop ? desktopAssetPrefix() : null;
+    const hasBinary = dev.isDesktop
+        ? !!prefix && (rel.assets || []).some(a => a.name.startsWith(prefix))
+        : (rel.assets || []).some(a => a.name === `firmware-${dev.firmware}-v${v}.bin`);
     return (hasBinary && isNewer(v, dev.version)) ? v : null;
 }
 
@@ -4260,14 +5570,14 @@ async function checkFirmwareUpdate(force) {
     if (!dev) { badge.hidden = true; return; }
 
     const stableTag = await stableUpdate(dev, force);
-    if (stableTag) { showUpdateBadge(badge, stableTag, stableTag); return; }
+    if (stableTag) { showUpdateBadge(badge, stableTag, stableTag, dev.isDesktop); return; }
 
     // Only a prerelease (-dev…) build follows the moving latest channel; a stable device is
     // not nudged toward an unreleased build.
     const onPrerelease = (parse(dev.version)?.prerelease.length || 0) > 0;
     if (onPrerelease) {
         const devVer = await devUpdate(dev, force);
-        if (devVer) { showUpdateBadge(badge, "latest", `latest (${devVer})`); return; }
+        if (devVer) { showUpdateBadge(badge, "latest", `latest (${devVer})`, dev.isDesktop); return; }
     }
     badge.hidden = true;
 }
@@ -4278,6 +5588,12 @@ function setupUpdateBadge() {
     const badge = document.getElementById("fw-update-badge");
     if (!badge) return;
     badge.addEventListener("click", () => {
+        if (badge.dataset.desktop) {
+            const tag = badge.dataset.tag || "latest";
+            window.open(`https://github.com/MoonModules/projectMM/releases/tag/${tag}`, "_blank",
+                        "noopener");
+            return;
+        }
         if (badge.dataset.tag) safeLocalSet(PICKER_RELEASE_KEY, badge.dataset.tag);
         selectModule("Firmware");
     });
@@ -4302,6 +5618,65 @@ function fmState(mod) {
 }
 
 // Fetch one directory's children (name/isDir/size) from /api/dir. `hidden` includes dotfiles.
+// The MoonLive factory catalog: which scripts EXIST upstream, as opposed to which are on this
+// device. Cached for the session because it is compiled into the firmware and cannot change while
+// the device runs.
+let mlCatalog = null;
+async function mlFetchCatalog() {
+    if (mlCatalog) return mlCatalog;
+    const res = await fetch("/api/scripts");
+    if (!res.ok) throw new Error(await errorMessage(res));
+    mlCatalog = await res.json();
+    return mlCatalog;
+}
+
+/// Which catalog group a picker's extension belongs to, so a script picker offers only its own role.
+function mlGroupForExt(ext) {
+    return ext === ".mle" ? "effects" : ext === ".mll" ? "layouts" : ext === ".mlm" ? "modifiers" : null;
+}
+
+// Download one factory script and save it to the device.
+//
+// The BROWSER fetches it, not the device: raw.githubusercontent.com sends
+// `access-control-allow-origin: *`, so the page can read it directly, and the device then needs no
+// TLS stack, no certificate bundle and no internet of its own. A rig on an isolated network is
+// served by whatever laptop is looking at its UI. Same approach as WLED-MM's arti-fx.
+//
+// Pinned to the firmware's own tag (the endpoint decides which), so a script always matches the
+// engine that will run it rather than whatever main happens to hold.
+async function mlDownloadScript(name, group) {
+    const cat = await mlFetchCatalog();
+    const folder = (cat[group] || {}).folder;
+    if (!folder) throw new Error("unknown script kind");
+    const url = "https://raw.githubusercontent.com/MoonModules/projectMM/"
+              + encodeURIComponent(cat.tag) + "/moonlive/" + folder + "/" + encodeURIComponent(name);
+    const res = await fetch(url);
+    // A 404 has two causes now. A RELEASE build fetches from its tag, so a missing script means the
+    // release does not carry it. A DEV build fetches from the commit it was built from, so a 404
+    // usually means that commit was never pushed: the scripts exist locally and GitHub has never
+    // seen them. Say which, because the fix differs (wait for a release vs push the branch).
+    if (!res.ok) {
+        if (res.status !== 404) throw new Error("download failed");
+        const dev = !String(cat.tag || "").startsWith("v");
+        throw new Error(dev
+            ? name + " is not on GitHub at commit " + cat.tag + " (push the branch, or the script is new)"
+            : name + " is not in this firmware's release");
+    }
+    const text = await res.text();
+    if (!text.trim()) throw new Error("downloaded script is empty");
+    // The factory directory has to exist first: POST /api/file does not create parents, so on a
+    // device where nothing has been downloaded yet the write fails with "write failed" and no clue
+    // why. mkdir is idempotent, so this costs one request and only on the first download.
+    await fetch("/api/dir?path=" + encodeURIComponent(cat.dir), { method: "POST" }).catch(() => {});
+    // Straight to the factory directory, never the user's: an edit is what puts a copy there, and
+    // that copy is what shadows this one.
+    const save = await fetch("/api/file?path=" + encodeURIComponent(cat.dir + "/" + name), {
+        method: "POST", headers: { "Content-Type": "application/octet-stream" },
+        body: new Blob([text]),
+    });
+    if (!save.ok) throw new Error(await errorMessage(save));
+}
+
 async function fmFetchDir(absPath, hidden) {
     const res = await fetch("/api/dir?path=" + encodeURIComponent(absPath) + (hidden ? "&hidden=1" : ""));
     if (!res.ok) throw new Error(await errorMessage(res));
@@ -4310,7 +5685,7 @@ async function fmFetchDir(absPath, hidden) {
 }
 
 // Render the File Manager panel: a lazy expand/collapse folder tree (the standard VS Code / Explorer
-// shape — an expanded folder's children are loaded from /api/dir), plus a toolbar (show
+// shape: an expanded folder's children are loaded from /api/dir), plus a toolbar (show
 // hidden, new folder, delete on the selected node). Filesystem ops go through the module's controls
 // (path/new folder/delete); browsing is pure UI over /api/dir, so the module stays minimal.
 function renderFileManager(mod, host) {
@@ -4323,7 +5698,7 @@ function renderFileManager(mod, host) {
     const hidden = st.showHidden;
 
     // Render into a single stable panel that we REPLACE on every re-render (expand / collapse /
-    // select / op) — reusing it in place rather than appending, so the tree updates inline instead
+    // select / op): reusing it in place rather than appending, so the tree updates inline instead
     // of stacking a fresh copy below the old one.
     let panel = host.querySelector(":scope > .fm-panel");
     if (panel) panel.replaceChildren();
@@ -4354,14 +5729,14 @@ function renderFileManager(mod, host) {
     panel.appendChild(hiddenRow);
 
     // Select a path level (from a breadcrumb crumb): update the selection, tidy the tree to just the
-    // path, and re-render. "Reveal and collapse siblings" — keep the ancestor chain root→…→crumb
+    // path, and re-render. "Reveal and collapse siblings": keep the ancestor chain root→…→crumb
     // open, fold every other branch AND the clicked node's own descendants. Selecting a directory
     // drives where ＋ folder/＋ file create and what delete targets.
     const selectPath = (absPath, isDir) => {
         st.selected = absPath;
         st.selectedIsDir = isDir;
         // Rebuild `expanded` as the ancestor chain root→…→crumb, plus the clicked node itself when
-        // it's a directory (so you see one level into it) — every other branch and anything deeper
+        // it's a directory (so you see one level into it): every other branch and anything deeper
         // folds. Root is always expanded (the tree shows its children).
         const segs = absPath.split("/").filter(Boolean);   // "/.config/foo" → [".config","foo"]
         st.expanded = new Set(["/"]);
@@ -4374,7 +5749,7 @@ function renderFileManager(mod, host) {
     };
 
     // Breadcrumb of the selected path, on its OWN row above the toolbar (a deep path wraps freely
-    // without crowding the buttons — key on narrow displays). Click a crumb to jump there; `root`
+    // without crowding the buttons: key on narrow displays). Click a crumb to jump there; `root`
     // deselects back to /.
     const crumbs = document.createElement("div");
     crumbs.className = "fm-crumbs";
@@ -4385,11 +5760,11 @@ function renderFileManager(mod, host) {
         b.addEventListener("click", () => selectPath(absPath, isDir));
         return b;
     };
-    // (Re)build the breadcrumb from the current selection, into the stable `crumbs` element — called
+    // (Re)build the breadcrumb from the current selection, into the stable `crumbs` element: called
     // on first render and by refreshSelectionControls() when a file click updates the selection in place.
     const rebuildCrumbs = () => {
         crumbs.replaceChildren();
-        crumbs.appendChild(mkCrumb("root", "/", true));   // always present — the way back to /
+        crumbs.appendChild(mkCrumb("root", "/", true));   // always present: the way back to /
         const segs = st.selected.split("/").filter(Boolean);   // "/.config/foo" → [".config","foo"]
         segs.forEach((s, i) => {
             crumbs.appendChild(document.createTextNode(" / "));
@@ -4414,7 +5789,7 @@ function renderFileManager(mod, host) {
     const bar = document.createElement("div");
     bar.className = "fm-bar";
 
-    // A filesystem op is an HTTP call on /api/dir?path= (POST=mkdir, DELETE=remove) — the path
+    // A filesystem op is an HTTP call on /api/dir?path= (POST=mkdir, DELETE=remove): the path
     // rides the query, so nothing is stored/persisted on the device. On failure, surface the
     // server's error; on success, re-render the tree from disk.
     const runOp = async (op, targetPath) => {
@@ -4433,11 +5808,11 @@ function renderFileManager(mod, host) {
     const createBase = () => (st.selectedIsDir ? st.selected : fmParent(st.selected));
 
     // Icon-only toolbar: each button shows a glyph; the `title` carries the word for the tooltip +
-    // screen readers (the standard icon-button pattern — an icon with an accessible label).
+    // screen readers (the standard icon-button pattern: an icon with an accessible label).
     const newBtn = document.createElement("button");
     newBtn.className = "fm-tool fm-tool--icon";
     newBtn.textContent = "📁";
-    newBtn.title = "New folder — create a folder inside the selected folder";
+    newBtn.title = "New folder: create a folder inside the selected folder";
     newBtn.addEventListener("click", async () => {
         const base = createBase();
         const name = (prompt("New folder name in " + base + ":") || "").trim();
@@ -4447,12 +5822,12 @@ function renderFileManager(mod, host) {
     });
     bar.appendChild(newBtn);
 
-    // New file: no module op needed — the /api/file POST creates a file at a path (empty body), the
+    // New file: no module op needed: the /api/file POST creates a file at a path (empty body), the
     // same endpoint the editor saves through. Then re-render the tree from disk.
     const newFileBtn = document.createElement("button");
     newFileBtn.className = "fm-tool fm-tool--icon";
     newFileBtn.textContent = "📝";
-    newFileBtn.title = "New file — create an empty file inside the selected folder";
+    newFileBtn.title = "New file: create an empty file inside the selected folder";
     newFileBtn.addEventListener("click", async () => {
         const base = createBase();
         const name = (prompt("New file name in " + base + ":") || "").trim();
@@ -4465,12 +5840,12 @@ function renderFileManager(mod, host) {
     bar.appendChild(newFileBtn);
 
     // Upload: pick desktop files and stream them into the selected folder via the same /api/file
-    // POST the drag-drop path uses (fmDropUpload) — a button for people who don't drag. A hidden
+    // POST the drag-drop path uses (fmDropUpload): a button for people who don't drag. A hidden
     // <input type=file multiple> is the recognizable browser file-picker; clicking the button opens it.
     const upBtn = document.createElement("button");
     upBtn.className = "fm-tool fm-tool--icon";
     upBtn.textContent = "↥";   // pairs with the per-row ↓ download glyph
-    upBtn.title = "Upload — upload files from your computer into the selected folder";
+    upBtn.title = "Upload: upload files from your computer into the selected folder";
     const upInput = document.createElement("input");
     upInput.type = "file";
     upInput.multiple = true;
@@ -4489,10 +5864,48 @@ function renderFileManager(mod, host) {
     bar.appendChild(upBtn);
     bar.appendChild(upInput);
 
+    // Backup / Restore: the bulk counterparts of the per-file download/upload. Backup walks the
+    // whole filesystem into one JSON bundle (fmBackupConfig); Restore uploads a bundle back and
+    // reports what didn't carry over (fmRestoreConfig). Restore overwrites config, so it shares
+    // the delete button's armed double-press.
+    const bakBtn = document.createElement("button");
+    bakBtn.className = "fm-tool fm-tool--icon";
+    bakBtn.textContent = "⤓";
+    bakBtn.title = "Backup device config, download every file (config, scripts, presets) as one JSON bundle. Keep it private: it contains the WiFi password.";
+    bakBtn.addEventListener("click", async () => {
+        bakBtn.disabled = true;
+        bakBtn.textContent = "…";   // the walk takes seconds; show work in progress at once
+        try { await fmBackupConfig(); }
+        catch (err) { alert("Backup failed: " + err.message); }
+        finally { bakBtn.disabled = false; bakBtn.textContent = "⤓"; }
+    });
+    bar.appendChild(bakBtn);
+
+    const restInput = document.createElement("input");
+    restInput.type = "file";
+    restInput.accept = ".json,application/json";
+    restInput.style.display = "none";
+    restInput.addEventListener("change", async () => {
+        const file = (restInput.files || [])[0];
+        restInput.value = "";
+        if (!file) return;
+        try { await fmRestoreConfig(file, () => renderFileManager(mod, host)); }
+        catch (err) { alert("Restore failed: " + err.message); }
+    });
+    const restBtn = document.createElement("button");
+    restBtn.className = "fm-tool fm-tool--icon fm-tool--danger";
+    restBtn.textContent = "⟲";
+    restBtn.title = "Restore config from a backup bundle, overwrites the device's files, then reports anything that didn't carry over";
+    armPressTwice(restBtn, () => restInput.click(), { armedText: "✓" });
+    bar.appendChild(restBtn);
+    bar.appendChild(restInput);
+
     const delBtn = document.createElement("button");
     delBtn.className = "fm-tool fm-tool--icon fm-tool--danger";
     delBtn.textContent = "🗑";
-    delBtn.title = "Delete — delete the selected file or empty folder";
+    // A folder goes with everything in it: emptying one by hand before it would delete was busywork
+    // on a folder of scripts. The two-press arm is the confirmation.
+    delBtn.title = "Delete: delete the selected file, or a folder and everything in it";
     delBtn.disabled = st.selected === "/";   // never delete the root
     armPressTwice(delBtn, () => runOp("delete", st.selected), { armedText: "✓" });
     bar.appendChild(delBtn);
@@ -4532,7 +5945,7 @@ function renderFileManager(mod, host) {
             container.appendChild(e);
             return;
         }
-        // Folders first, then files; each alphabetical — the conventional file-manager sort.
+        // Folders first, then files; each alphabetical: the conventional file-manager sort.
         rows.sort((a, b) => (b.isDir - a.isDir) || a.name.localeCompare(b.name));
         for (const entry of rows) {
             const childPath = joinFsPath(dirPath, entry.name);
@@ -4564,7 +5977,7 @@ function renderFileManager(mod, host) {
             rowEl.appendChild(size);
 
             // Per-file download (device → desktop): a plain <a download> on /api/file forces a save
-            // with the right name, every browser, any file type — the portable counterpart to the
+            // with the right name, every browser, any file type: the portable counterpart to the
             // drag-drop upload (a true drag-*out* has no cross-browser API). Folders get no ⤓;
             // folder-as-zip is backlogged (needs a bundled zip lib + recursion).
             if (!entry.isDir) {
@@ -4579,7 +5992,7 @@ function renderFileManager(mod, host) {
             }
 
             // Single-click SELECTS (highlights, sets the op target for delete); a folder also
-            // toggles expand. DOUBLE-click OPENS a file in the editor — the VS Code / Finder /
+            // toggles expand. DOUBLE-click OPENS a file in the editor: the VS Code / Finder /
             // Explorer norm, and it keeps a distinct "selected but not opened" state for future
             // rename / multi-select / context-menu features.
             rowEl.addEventListener("click", (ev) => {
@@ -4587,13 +6000,13 @@ function renderFileManager(mod, host) {
                 st.selected = childPath;
                 st.selectedIsDir = entry.isDir;
                 if (entry.isDir) {
-                    // A folder click also expands/collapses — rows appear/disappear, so a full
+                    // A folder click also expands/collapses: rows appear/disappear, so a full
                     // re-render is needed.
                     if (isOpen) st.expanded.delete(childPath);
                     else st.expanded.add(childPath);
                     renderFileManager(mod, host);
                 } else {
-                    // A file click only moves the selection — update the highlight IN PLACE, never
+                    // A file click only moves the selection: update the highlight IN PLACE, never
                     // re-render. A re-render here would destroy this row mid-gesture, so the dblclick
                     // that follows a double-click would land on a fresh element and openFileEditor
                     // might not fire. Move the --sel class + refresh the selection-dependent controls.
@@ -4610,7 +6023,7 @@ function renderFileManager(mod, host) {
             }
 
             // Drag-drop upload target: dropping desktop files onto a FOLDER row uploads them into
-            // that folder (tier 1: text/config ≤8KB — see fmDropUpload).
+            // that folder (tier 1: text/config ≤8KB: see fmDropUpload).
             if (entry.isDir) fmMakeDropTarget(rowEl, childPath, hidden, () => renderFileManager(mod, host), st);
             container.appendChild(rowEl);
 
@@ -4626,7 +6039,7 @@ function renderFileManager(mod, host) {
 
     renderChildren("/", tree, 0);
 
-    // Filesystem usage bar below the tree — the File Manager's own `filesystem` control (used /
+    // Filesystem usage bar below the tree: the File Manager's own `filesystem` control (used /
     // total bytes from the platform). Absent (e.g. desktop fs total 0) → nothing shown.
     const fsCtrl = fmFilesystemUsage(mod);
     if (fsCtrl) {
@@ -4647,7 +6060,7 @@ function renderFileManager(mod, host) {
         panel.appendChild(usage);
     }
 
-    // "last saved" readout below the usage bar — how long ago config was persisted. The value is
+    // "last saved" readout below the usage bar: how long ago config was persisted. The value is
     // owned by the FilesystemModule engine (non-UI); the File Manager displays it because this is
     // where filesystem state is topical (same reasoning as the usage bar).
     const savedCtrl = (mod?.controls || []).find(c => c.name === "lastSaved");
@@ -4669,7 +6082,7 @@ function fmFilesystemUsage(mod) {
 // Format a file's text for the editor, by extension. JSON is re-indented (2 spaces) so the persisted
 // config files are readable; anything that doesn't parse is shown verbatim rather than erroring.
 // Extension seam for later: MoonLive `.ml` source wants syntax *highlighting* (a color layer over
-// the textarea), not reformatting — that's a bigger editor change, added when MoonLive `.ml` files
+// the textarea), not reformatting: that's a bigger editor change, added when MoonLive `.ml` files
 // land on disk.
 function fmPrettify(text, relPath) {
     if (relPath.endsWith(".json")) {
@@ -4723,8 +6136,154 @@ function fmMakeDropTarget(el, destDir, hidden, rerender, st) {
     });
 }
 
+// ---- Config backup & restore (tier 1: pure browser over the existing file API) ----
+// The engine core (walk, ordering, report) lives in migrate.js so node tests cover it;
+// this is the wiring to the real endpoints plus the download / report UI. Serial requests
+// throughout: the device serves one connection at a time and closes each.
+
+async function fmBackupConfig() {
+    const fetchDir = async (path) => fmFetchDir(path, true);   // hidden=1: .config must list
+    const fetchFile = async (path) => {
+        const res = await fetch("/api/file?path=" + encodeURIComponent(path));
+        if (!res.ok) throw new Error(path + ": HTTP " + res.status);
+        // Not res.text(): that strips a leading UTF-8 BOM, which would both fail the
+        // byte-length check and restore a BOM-prefixed file without its BOM.
+        return new TextDecoder("utf-8", { ignoreBOM: true }).decode(await res.arrayBuffer());
+    };
+    const { files, skipped } = await collectFiles(fetchDir, fetchFile);
+    // Device identity for the filename + header, straight off the live state.
+    let device = location.hostname || "device", firmware = "", build = "";
+    try {
+        const st = await (await fetch("/api/state")).json();
+        (function walk(mods) { for (const m of mods || []) {
+            for (const c of m.controls || []) {
+                if (c.name === "deviceName" && c.value) device = c.value;
+                if (c.name === "firmware") firmware = c.value || "";
+                if (c.name === "build") build = c.value || "";
+            }
+            walk(m.children);
+        }})(st.modules);
+    } catch (_) {}
+    const bundle = {
+        format: "projectMM-config-backup", version: 1,
+        capturedAt: new Date().toISOString(), origin: location.origin,
+        device, firmware, build, files,
+    };
+    // The diagnostics-download tail: Blob, objectURL, a[download], revoke late (Safari races
+    // an immediate revoke against the save dialog).
+    const blob = new Blob([JSON.stringify(bundle, null, 1)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `projectMM-config-${device}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    if (skipped.length) {
+        alert("Backed up. Skipped (not text, the bundle carries text only):\n" + skipped.join("\n"));
+    }
+}
+
+async function fmRestoreConfig(file, refresh) {
+    const bundle = JSON.parse(await file.text());
+    if (bundle.format !== "projectMM-config-backup" || !bundle.files) {
+        throw new Error("not a projectMM config backup");
+    }
+    if (bundle.version !== 1) {
+        throw new Error(`backup version ${bundle.version} is newer than this firmware understands`);
+    }
+    // The rename map first: MIGRATING.md's schema breaks, applied client-side and reported.
+    const { files, report } = applyMigrations(bundle.files);
+    // Directories before files (mkdir is non-recursive); existing dirs answer 500, harmless.
+    for (const dir of restoreDirs(files)) {
+        await fetch("/api/dir?path=" + encodeURIComponent(dir), { method: "POST", body: "" }).catch(() => {});
+    }
+    const failed = [];
+    // Network config last: it applies LIVE, and joining another network mid-restore would cut
+    // off the writes still to come (the AP flow's whole point).
+    const ordered = Object.entries(files).sort(
+        ([a], [b]) => (a.endsWith("/NetworkModule.json") ? 1 : 0) - (b.endsWith("/NetworkModule.json") ? 1 : 0));
+    for (const [path, content] of ordered) {
+        let res = null;
+        // One retry: the device serves a single connection at a time, so a busy moment
+        // drops a socket transiently (seen on the bench); only a retried failure is real.
+        for (let attempt = 0; attempt < 2 && (!res || !res.ok); attempt++) {
+            if (attempt) await new Promise(r => setTimeout(r, 300));
+            res = await fetch("/api/file?path=" + encodeURIComponent(path), {
+                method: "POST", headers: { "Content-Type": "application/octet-stream" },
+                body: new Blob([content]),
+            }).catch(() => null);
+        }
+        if (!res || !res.ok) {
+            failed.push({ kind: "control", where: path, detail: "write failed (" + (res ? res.status : "network") + ")" });
+        }
+    }
+    // The report: what this firmware no longer understands, plus everything the rename map did.
+    let live = [], typeNames = [];
+    try { live = (await (await fetch("/api/state")).json()).modules || []; } catch (_) {}
+    try { typeNames = ((await (await fetch("/api/types")).json()).types || []).map(t => t.name); } catch (_) {}
+    const entries = [...report, ...failed, ...diffRestore(files, live, typeNames)];
+    // Network bring-up is not live-re-appliable (it opts out device-side); its restored file
+    // waits for the next boot, so the dialog offers the restart exactly when that matters.
+    const hasNetwork = Object.keys(files).some(p => p.endsWith("/NetworkModule.json"));
+    fmShowRestoreReport(entries, refresh, hasNetwork);
+}
+
+// The report dialog. Not an alert: the list can be long and deserves reading.
+function fmShowRestoreReport(entries, refresh, offerRestart) {
+    const ov = document.createElement("div");
+    ov.className = "fw-overlay";
+    const box = document.createElement("div");
+    box.className = "fw-overlay-box";
+    const h = document.createElement("h2");
+    h.textContent = "Restore complete";
+    const msg = document.createElement("p");
+    msg.className = "fw-overlay-msg";
+    box.appendChild(h);
+    box.appendChild(msg);
+    if (entries.length === 0) {
+        msg.textContent = "Everything carried over.";
+    } else {
+        msg.textContent = "Carried over with notes (see MIGRATING.md for the breaking-change log):";
+        const list = document.createElement("ul");
+        list.style.cssText = "text-align:left;max-height:14rem;overflow-y:auto;font-size:.85rem";
+        for (const e of entries) {
+            const li = document.createElement("li");
+            li.textContent = `[${e.kind}] ${e.where}: ${e.detail}`;
+            list.appendChild(li);
+        }
+        box.appendChild(list);
+    }
+    // Everything applies live except what the device itself declares boot-only: network
+    // bring-up (its module opts out of the live apply) and the web server's listen port
+    // (binds at boot). The restart button appears exactly when the bundle carried those.
+    const note = document.createElement("p");
+    note.className = "fw-overlay-msg";
+    note.textContent = offerRestart
+        ? "Settings are applied live, except network settings: restart the device to apply them (after the restart it joins the network the backup names)."
+        : "Settings are applied live.";
+    box.appendChild(note);
+    if (offerRestart) {
+        const restart = document.createElement("button");
+        restart.textContent = "restart device";
+        restart.addEventListener("click", async () => {
+            try { await fetch("/api/reboot", { method: "POST" }); } catch (_) {}
+            ov.remove();
+        });
+        box.appendChild(restart);
+    }
+    const close = document.createElement("button");
+    close.textContent = "close";
+    close.addEventListener("click", () => { ov.remove(); if (refresh) refresh(); });
+    box.appendChild(close);
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+}
+
+
 // Upload each dropped file into destDir via /api/file. Returns the names skipped (too big / failed)
-// so the caller can report them. The File blob is sent as the body directly — the browser streams
+// so the caller can report them. The File blob is sent as the body directly: the browser streams
 // its raw bytes (binary-safe), matching the device's streamed, byte-exact write.
 async function fmDropUpload(destDir, files) {
     const skipped = [];
@@ -4759,21 +6318,21 @@ async function fmLoadInto(textarea, relPath, expectedSize, signal) {
         const text = await res.text();
         // Truncation guard: serveFileContents streams the whole file but stops short on a read error
         // (a filesystem fault mid-stream). Saving a short read back would overwrite the file with a
-        // truncated copy — so if the received byte count is under the size the listing reported, load
+        // truncated copy: so if the received byte count is under the size the listing reported, load
         // read-only. TextEncoder gives the byte length (text.length is chars, not bytes).
         if (typeof expectedSize === "number" &&
             new TextEncoder().encode(text).length < expectedSize) {
             textarea.value = text;
-            return { readOnly: true, message: "truncated read — read-only (save would corrupt the file)" };
+            return { readOnly: true, message: "truncated read: read-only (save would corrupt the file)" };
         }
         // The editor is text/config only: a <textarea> can't faithfully round-trip non-text bytes,
-        // so a re-save would corrupt the file. Treat it as binary — read-only — if it has a NUL OR
+        // so a re-save would corrupt the file. Treat it as binary: read-only: if it has a NUL OR
         // if res.text()'s UTF-8 decode left a replacement char (U+FFFD), which means the bytes
         // weren't valid UTF-8 and are already lossy in the textarea. Use the per-row ⤓ to download
         // such files intact.
         if (text.indexOf("\0") !== -1 || text.indexOf("\uFFFD") !== -1) {
             textarea.value = text;
-            return { readOnly: true, message: "binary / non-text file — read-only" };
+            return { readOnly: true, message: "binary / non-text file: read-only" };
         }
         textarea.value = fmPrettify(text, relPath);
         return { readOnly: false, message: "" };
@@ -4829,23 +6388,134 @@ async function fmCreateFile(dir, name, content = "") {
 //
 // `onSaved(relPath)` fires after each successful save. Returns a handle so a caller can point the
 // same pane at a different file without rebuilding it.
+/// Prism's C++ grammar plus the three type names MoonLive adds.
+///
+/// `byte`, `fixed` and `string` are the language's own aliases (a C++ reader would meet uint8_t,
+/// a Q16.16 int and a const char*), so a stock C++ grammar leaves them unpainted beside the `int`
+/// next to them. Extending rather than writing a grammar: everything else in a script IS C++, which
+/// is what test_scripts_are_cpp.py holds each shipped script to.
+///
+/// Built once and cached: the highlighter runs on every keystroke.
+let mlGrammarCache = null;
+function mlGrammar() {
+    if (mlGrammarCache) return mlGrammarCache;
+    // A COPY of the C++ grammar with one rule replaced: its keyword pattern, widened to also match
+    // MoonLive's three type names. Prism.languages.insertBefore was the other route and it is the
+    // wrong tool here (it rebuilds the language in place and expects a rule object, not a bare
+    // RegExp), which silently produced a grammar that highlighted nothing at all.
+    const cpp = Prism.languages.cpp;
+    mlGrammarCache = Object.assign({}, cpp, {
+        keyword: [/\b(?:byte|fixed|string)\b/].concat(cpp.keyword || []),
+    });
+    return mlGrammarCache;
+}
+
 function fmMountEditor(host, relPath, opts = {}) {
-    const { expectedSize, onSaved, sizeKey, saveButton, statusEl } = opts;
+    // `savePath(readPath)` lets a caller WRITE somewhere other than it read. The script picker uses
+    // it: a factory script is read from the read-only library directory, and editing it must create
+    // the user's own copy rather than overwrite what shipped. Defaults to writing back where it
+    // read, which is what every other caller wants.
+    const { expectedSize, onSaved, onDispose, sizeKey, saveButton, statusEl, savePath,
+            initialStatus } = opts;
     const wrap = document.createElement("div");
     wrap.className = "fm-editor-pane";
     // The footer carries Save and the status line, UNLESS the host supplies both: a card already has
     // a toolbar of file actions, so they belong there, and an empty strip under the box is a gap
     // rather than a layout.
-    const ownFooter = !saveButton || !statusEl;
+    // Highlighting is for SCRIPTS: a .mle/.mll/.mlm is MoonLive, which is C++, so Prism's own C++
+    // grammar paints it with nothing of ours to maintain. A .json or a .txt edits as plain text.
+    const hlOn = /\.(mle|mll|mlm)$/i.test(relPath || "");
+
+    // The highlight layer sits BEHIND a transparent textarea, both sharing one box and one set of
+    // font metrics: a textarea cannot color its own text, and this is the standard way around that.
+    // The textarea keeps every editing behavior (caret, selection, undo, IME); the <pre> only paints.
     wrap.innerHTML =
+        '<div class="fm-editor-stack">' +
+        '<pre class="fm-editor-hl" aria-hidden="true"><div class="fm-editor-err" hidden></div><code></code></pre>' +
         '<textarea class="fm-editor-body" spellcheck="false" wrap="off"></textarea>' +
-        (ownFooter
-            ? '<div class="fm-editor-foot">' +
-              (statusEl   ? '' : '  <span class="fm-editor-status"></span>') +
-              (saveButton ? '' : '  <button class="action-btn fm-editor-save">Save</button>') +
-              '</div>'
-            : '');
+        '<div class="fm-editor-grip" title="drag to resize"></div>' +
+        '</div>' +
+        '<div class="fm-editor-foot">' +
+        (statusEl   ? '' : '  <span class="fm-editor-status"></span>') +
+        '  <span class="fm-editor-caret"></span>' +
+        (saveButton ? '' : '  <button class="action-btn fm-editor-save">Save</button>') +
+        '</div>';
     const body = wrap.querySelector(".fm-editor-body");
+    if (!hlOn) wrap.querySelector(".fm-editor-stack").classList.add("plain");
+    let errorLine = -1;                 // 0-based, -1 for none: set by markError below
+
+    /// A character offset as the line and column a person counts in, both 1-based.
+    ///
+    /// The device reports an OFFSET, because that is what the parser has; nobody reads a script by
+    /// offset. The editor holds the same text, so it is the one place that can do the conversion.
+    const lineColAt = (off) => {
+        const upto = body.value.slice(0, Math.max(0, Math.min(off, body.value.length)));
+        const nl = upto.lastIndexOf("\n");
+        return { line: upto.split("\n").length, col: upto.length - nl };
+    };
+    const hl = wrap.querySelector(".fm-editor-hl");
+    const hlCode = hl.querySelector("code");
+    const errBand = hl.querySelector(".fm-editor-err");
+
+    /// Repaint the layer under the caret, and keep it aligned.
+    ///
+    /// Only for a MoonLive script: Prism is given the C++ grammar because that is what the language
+    /// is (test/python/test_scripts_are_cpp.py holds every shipped script to it), so `class`, the
+    /// types and the comments light up with no grammar of our own. Any other file edits as plain
+    /// text, which is what a .json or a .txt should look like.
+    ///
+    /// A trailing newline gets a space: a <pre> collapses the last empty line where a textarea
+    /// keeps it, and without this the two drift by one line at the end of a file.
+    const paintHighlight = () => {
+        if (!hlOn) return;
+        const src = body.value;
+        hlCode.textContent = src.endsWith("\n") ? src + " " : src;
+        if (window.Prism && Prism.languages.cpp) {
+            hlCode.innerHTML = Prism.highlight(hlCode.textContent, mlGrammar(), "cpp");
+        }
+        // The failing line, marked with a BAND positioned over it rather than by wrapping its text.
+        // Wrapping meant splitting Prism's serialized HTML on newlines, which cuts any token that
+        // spans lines (a block comment is one element) in half and leaves unbalanced tags for the
+        // parser to re-balance, shifting the coloring of everything after it. A band cannot touch
+        // the markup at all, and it lands on the same line because both use the same line height.
+        errBand.hidden = errorLine < 0;
+        if (errorLine >= 0) errBand.style.top = `calc(${errorLine} * 1.5em)`;
+        syncHighlightScroll();
+    };
+    /// Move the paint under the text by TRANSFORM rather than by scrolling it: a scrollTop the
+    /// element cannot reach (it has overflow:hidden) is silently clamped, which is what left the
+    /// last lines of a file unreachable.
+    /// Mark the line a compile failed on, and return the status with a readable position.
+    ///
+    /// Converts the device's offset against the text this editor HOLDS, so it must not run before
+    /// the file has loaded: every position would resolve to line 1.
+    const markErrorAt = (statusText) => {
+        errorLine = -1;
+        let shown = statusText || "";
+        // Two forms, because this is called with both: the raw device status "message @<offset>" on
+        // every update, and an ALREADY rewritten "message (line L, col C)" when a second editor
+        // opens on a module whose status was converted before it existed.
+        const at = /@(\d+)\s*$/.exec(shown);
+        const lc = /\(line (\d+), col \d+\)\s*$/.exec(shown);
+        if (at) {
+            const p = lineColAt(Number(at[1]));
+            errorLine = p.line - 1;
+            // The offset is replaced, not appended to: line and column is the only half a person can
+            // act on, and the editor marks the line anyway.
+            shown = shown.slice(0, at.index).trimEnd() + ` (line ${p.line}, col ${p.col})`;
+        } else if (lc) {
+            errorLine = Number(lc[1]) - 1;
+        }
+        paintHighlight();
+        return shown;
+    };
+
+    const syncHighlightScroll = () => {
+        // The band follows VERTICALLY only: it spans the full width, so a horizontal shift would
+        // just walk it off the box while the line it marks stays put.
+        hlCode.style.transform = `translate(${-body.scrollLeft}px, ${-body.scrollTop}px)`;
+        errBand.style.transform = `translateY(${-body.scrollTop}px)`;
+    };
     const status = statusEl || wrap.querySelector(".fm-editor-status");
     const saveBtn = saveButton || wrap.querySelector(".fm-editor-save");
     host.appendChild(wrap);
@@ -4867,17 +6537,46 @@ function fmMountEditor(host, relPath, opts = {}) {
     // an editor a user sized once stays that size. Keyed per control, or per path in the modal.
     const key = sizeKey || ("fm:" + path);
     const savedH = textareaSizes[key];
-    if (typeof savedH === "number" && savedH > 0) body.style.height = savedH + "px";
+    const stack = wrap.querySelector(".fm-editor-stack");
+    if (typeof savedH === "number" && savedH > 0) stack.style.height = savedH + "px";
     let taRaf = 0, taPrevH = Math.round(savedH > 0 ? savedH : 0);
     const taObserver = new ResizeObserver((entries) => {
         const h = Math.round(entries[0].contentRect.height);
         if (taRaf || h <= 0 || h === taPrevH) return;
         taRaf = requestAnimationFrame(() => { taRaf = 0; taPrevH = h; saveTextareaSize(key, h); });
     });
-    taObserver.observe(body);
+    taObserver.observe(stack);
+
+    // Resize by dragging the grip.
+    //
+    // Ours rather than the browser's `resize`, which cannot work here: the textarea is positioned
+    // over the whole stack including the corner the native gesture starts in, so the press lands on
+    // the text and the drag never begins. The handle is a real element above both layers, and
+    // setPointerCapture keeps the drag alive once the pointer leaves those few pixels.
+    const grip = wrap.querySelector(".fm-editor-grip");
+    let dragFrom = 0, dragH = 0;
+    grip.addEventListener("pointerdown", (e) => {
+        dragFrom = e.clientY;
+        dragH = stack.getBoundingClientRect().height;
+        grip.setPointerCapture(e.pointerId);
+        e.preventDefault();                    // no text selection while dragging
+    });
+    grip.addEventListener("pointermove", (e) => {
+        if (!dragFrom) return;
+        // No floor here: the stack's own min-height clamps it, so one rule owns the minimum.
+        stack.style.height = `${dragH + (e.clientY - dragFrom)}px`;
+    });
+    const endDrag = (e) => {
+        if (!dragFrom) return;
+        dragFrom = 0;
+        if (grip.hasPointerCapture(e.pointerId)) grip.releasePointerCapture(e.pointerId);
+        // The ResizeObserver above persists the new height; nothing to store here.
+    };
+    grip.addEventListener("pointerup", endDrag);
+    grip.addEventListener("pointercancel", endDrag);
 
     // Blur, Cmd+S and the Save button all call save(), and a blur fires when the button takes
-    // focus — so without this guard one edit issues overlapping POSTs of the same file. `dirty`
+    // focus: so without this guard one edit issues overlapping POSTs of the same file. `dirty`
     // cannot serve as the guard: it is only cleared after the await, so a second trigger passes
     // the check while the first request is still in flight. Saves are serialized rather than
     // dropped, because the second trigger may carry newer keystrokes than the first.
@@ -4888,20 +6587,39 @@ function fmMountEditor(host, relPath, opts = {}) {
             if (body.readOnly || !dirty || !path) return;   // re-check: a queued save may be moot
             const saved = body.value;                       // what THIS request writes
             status.textContent = "saving…";
-            const r = await fmSaveFrom(body, path);
+            const dest = savePath ? savePath(path) : path;
+            const r = await fmSaveFrom(body, dest);
             status.textContent = r.message;
             // A failed write (no space, a vanished path) must not be silent. The modal shows it on
             // its status line; a host that supplied its own hidden one gets an alert, because the
             // work is still unsaved and the dot alone does not say why.
             if (!r.ok && statusEl && statusEl.hidden) alert(r.message);
-            // Only clear dirty if the body still holds what we just wrote — typing during the
+            // Only clear dirty if the body still holds what we just wrote: typing during the
             // request means there are newer bytes on screen that nobody has saved yet.
-            if (r.ok && body.value === saved) { setDirty(false); if (onSaved) onSaved(path); }
+            if (r.ok && body.value === saved) {
+                setDirty(false);
+                // Report where it LANDED, not where it came from: a caller that refreshes a listing
+                // needs to know a new file now exists in the user's directory.
+                if (onSaved) onSaved(savePath ? savePath(path) : path);
+            }
         });
         return saving;
     };
 
-    body.addEventListener("input", () => { if (!body.readOnly) setDirty(true); });
+    // Where the caret IS, so a reported line and column can be found by moving to it. Updated from
+    // every event that can move a caret; `selectionchange` alone does not fire on a plain textarea
+    // in every browser, so the input and key/click events cover it.
+    const caretEl = wrap.querySelector(".fm-editor-caret");
+    const showCaret = () => {
+        if (!caretEl) return;
+        const at = lineColAt(body.selectionStart);
+        caretEl.textContent = `Ln ${at.line}, Col ${at.col}`;
+    };
+    ["input", "click", "keyup", "select", "focus"].forEach(e => body.addEventListener(e, showCaret));
+
+    body.addEventListener("input", () => { if (!body.readOnly) setDirty(true); paintHighlight(); });
+    // Scroll is not an input event: the layer has to follow the box it sits under.
+    body.addEventListener("scroll", () => syncHighlightScroll());
     body.addEventListener("blur", save);
     body.addEventListener("keydown", (e) => {
         if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "S")) { e.preventDefault(); save(); }
@@ -4910,7 +6628,7 @@ function fmMountEditor(host, relPath, opts = {}) {
 
     // Picking a second file before the first finishes loading must not paint the first file's
     // contents over it. The in-flight request is ABORTED rather than merely ignored, because
-    // fmLoadInto writes the textarea itself — a late response would overwrite the newer file's
+    // fmLoadInto writes the textarea itself: a late response would overwrite the newer file's
     // contents before any check here could run.
     let loadAbort = null;
     const load = async (p, size) => {
@@ -4919,12 +6637,26 @@ function fmMountEditor(host, relPath, opts = {}) {
         loadAbort = ac;
         path = p;
         setDirty(false);
-        if (!path) { body.value = ""; body.readOnly = true; saveBtn.disabled = true; status.textContent = ""; return; }
+        if (!path) {
+            body.value = ""; body.readOnly = true; saveBtn.disabled = true; status.textContent = "";
+            // The mark and the caret readout belong to text that is no longer there: left alone, an
+            // empty pane keeps a red band over nothing and a stale Ln/Col.
+            errorLine = -1;
+            paintHighlight();
+            showCaret();
+            return;
+        }
         const r = await fmLoadInto(body, path, size, ac.signal);
         if (r.aborted || ac !== loadAbort) return;   // a newer load started: that one owns the pane
         body.readOnly = r.readOnly;
         saveBtn.disabled = r.readOnly;
+        paintHighlight();          // the file just arrived: paint what it says
+        showCaret();
         status.textContent = r.message;
+        // A compile error the module was ALREADY reporting when this editor was built. Marked here
+        // rather than at construction, because markError converts an offset against the text: run
+        // before the file arrives and every position resolves to line 1.
+        if (initialStatus) { markErrorAt(initialStatus); initialStatus = null; }
     };
     load(path, expectedSize);
 
@@ -4935,13 +6667,22 @@ function fmMountEditor(host, relPath, opts = {}) {
         // Resolves once any in-flight save has completed, so the caller can safely re-read.
         save,
         isDirty: () => dirty,
-        dispose: () => { taObserver.disconnect(); wrap.remove(); },
+        /// Still on the page? A card rebuild detaches an inline editor without disposing it.
+        isMounted: () => wrap.isConnected,
+        /// Mark the line a compile failed on, from the module's own status.
+        ///
+        /// The device reports "message @<offset>", an offset into the source it compiled, which is
+        /// the only position anyone has: the parser records it and nothing else can reconstruct it.
+        /// Passing "" or a status with no @ clears the mark, so a fixed script stops being flagged
+        /// the moment it compiles.
+        markError: markErrorAt,
+        dispose: () => { taObserver.disconnect(); wrap.remove(); if (onDispose) onDispose(); },
     };
 }
 
 // Open the shared editor in a modal, for the File Manager's tree rows. Uses the native <dialog>,
 // no bespoke overlay code, and mounts exactly the pane a card mounts inline.
-async function openFileEditor(relPath, expectedSize) {
+async function openFileEditor(relPath, expectedSize, moduleName) {
     const dlg = document.createElement("dialog");
     dlg.className = "fm-editor";
     dlg.innerHTML =
@@ -4951,7 +6692,19 @@ async function openFileEditor(relPath, expectedSize) {
         '</form>';
     dlg.querySelector(".fm-editor-path").textContent = relPath;
     document.body.appendChild(dlg);
-    const ed = fmMountEditor(dlg, relPath, { expectedSize });
+    // Registered under the module that opened it, exactly as the card's pane is: the status row is
+    // rendered by the card either way, and setStatusText marks every editor on that module. Without
+    // a module name (the File Manager's own rows) nothing registers and the modal simply highlights.
+    let unregister = () => {};
+    const ed = fmMountEditor(dlg, relPath, { expectedSize, onDispose: () => unregister() });
+    unregister = mlEditorAdd(moduleName, ed);
+    // Mark it NOW, from the status already on the card: registration only catches the next update,
+    // and a compile failure that happened before the modal opened would otherwise show unmarked
+    // until the module recompiles. The row is the card's, so it holds the same text either way.
+    if (moduleName) {
+        const row = document.querySelector(`[data-status-mid="${cssEscape(moduleName)}"] .status-value`);
+        if (row) ed.markError(row.textContent);
+    }
     dlg.showModal();
     // Resolves when the dialog CLOSES, not when it opens: a caller that re-reads the file
     // afterwards (the card's pane shows the same file) would otherwise read it before any edit.

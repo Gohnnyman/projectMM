@@ -73,7 +73,7 @@ int litCount(const std::vector<uint8_t>& b) {
 TEST_CASE("a script renders identical pixels at a squeezed register budget as at the full one") {
     // Enough live values that a nine-register budget cannot hold them all: three independent
     // colour components plus two loop-carried values.
-    const char* src = mmScript("for (i = 0; i < 6; i = i + 1) { setRGB(i, i + 1, i + 2, i + 3); }");
+    const char* src = mmScript("for (int i = 0; i < 6; i = i + 1) { setRGB(i, i + 1, i + 2, i + 3); }");
 
     bool fullOk = false, tightOk = false;
     auto full = renderAt(src, 8, nullptr, fullOk);
@@ -91,8 +91,8 @@ TEST_CASE("a script renders identical pixels at a squeezed register budget as at
 // value — placing lights twice, or not at all. Nested, so the extension has to apply innermost-first.
 TEST_CASE("a nested loop at a squeezed budget places every light exactly once") {
     const char* src =
-        mmScript("for (i = 0; i < 4; i = i + 1) {\n"
-        "  for (j = 0; j < 4; j = j + 1) {\n"
+        mmScript("for (int i = 0; i < 4; i = i + 1) {\n"
+        "  for (int j = 0; j < 4; j = j + 1) {\n"
         "    setRGB(i * 4 + j, 200, 100, 50);\n"
         "  }\n"
         "}\n");
@@ -122,8 +122,8 @@ TEST_CASE("a spilled value survives a host call and is still correct afterwards"
     // `keep` is defined before the call and used after it, so it must be live ACROSS random16 —
     // and at a squeezed budget it is one of the values that has nowhere to live but a slot.
     const char* src =
-        mmScript("uint8_t idx = 5;\n"
-        "for (i = 0; i < 3; i = i + 1) {\n"
+        mmScript("byte idx = 5;\n"
+        "for (int i = 0; i < 3; i = i + 1) {\n"
         "  setRGB(idx + i, random16(1) + 111, i + 1, 222);\n"
         "}\n");
 
@@ -148,8 +148,8 @@ TEST_CASE("a spilled value survives a host call and is still correct afterwards"
 // If it did, a control read after a spill would load from a register holding something else.
 TEST_CASE("a declared control still reads live at a squeezed budget") {
     const char* src =
-        mmScript("uint8_t pos = 0;\n"
-        "for (i = 0; i < 2; i = i + 1) {\n"
+        mmScript("byte pos = 0;\n"
+        "for (int i = 0; i < 2; i = i + 1) {\n"
         "  setRGB(pos + i, 10, 20, 30);\n"
         "}\n");
     uint8_t code[moonlive::kCodeCap];
@@ -183,8 +183,8 @@ TEST_CASE("an impossible register budget refuses the compile instead of emitting
     // A script whose live values genuinely exceed the budgets below, so each really does have to
     // spill and really does have nowhere to put the result.
     const char* src =
-        mmScript("for (i = 0; i < 4; i = i + 1) {\n"
-        "  for (j = 0; j < 4; j = j + 1) {\n"
+        mmScript("for (int i = 0; i < 4; i = i + 1) {\n"
+        "  for (int j = 0; j < 4; j = j + 1) {\n"
         "    setRGB(i * 4 + j, 200, 100, 50);\n"
         "  }\n"
         "}\n");
@@ -297,7 +297,7 @@ TEST_CASE("a system variable read in a loop survives a host call in that loop") 
     // means a loop that runs PAST width still writes 0 there, so the past-width check could not
     // detect the runaway it is named for. A constant 7 fixes both while keeping the call, which is
     // the ingredient this test exists for.
-    const char* src = mmScript("for (x = 0; x < width; x = x + 1) { setRGB(x, random16(256), 7, 0); }\n");
+    const char* src = mmScript("for (int x = 0; x < width; x = x + 1) { setRGB(x, random16(256), 7, 0); }\n");
 
     // At the host's full budget AND at a squeezed one: Xtensa has ten registers where arm64 has
     // fourteen, so the squeezed run is the closest a host test gets to the pressure the device is

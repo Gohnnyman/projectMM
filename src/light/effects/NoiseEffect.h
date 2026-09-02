@@ -17,8 +17,8 @@ public:
     uint8_t bpm = 60;   // beats per minute — scrolls 8 noise cells per beat
 
     void defineControls() override {
-        controls_.addUint8("scale", scale, 1, 32);
-        controls_.addUint8("bpm", bpm, 1, 255);
+        controls_.addControl("scale", scale, 1, 32);
+        controls_.addControl("bpm", bpm, 1, 255);
     }
 
     void tick() MM_NONBLOCKING override {

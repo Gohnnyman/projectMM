@@ -39,17 +39,21 @@ namespace mm {
 /// Modifier carving the layer to a percentage sub-rectangle.
 class RegionModifier : public ModifierBase {
 public:
+    /// Advisory UI chip: what this modifier can work on (clips a box, which is an extent on every axis).
+    /// Nothing branches on it, since extrude reads the EFFECT's dimensions.
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D3; }
     lengthType startX = 0,   startY = 0,   startZ = 0;
     lengthType endX   = 100, endY   = 100, endZ   = 100;
 
     void defineControls() override {
         // Int16 so negative / >100 percentages round-trip; the carve math clamps.
-        controls_.addInt16("startX", startX);
-        controls_.addInt16("startY", startY);
-        controls_.addInt16("startZ", startZ);
-        controls_.addInt16("endX",   endX);
-        controls_.addInt16("endY",   endY);
-        controls_.addInt16("endZ",   endZ);
+        controls_.addControl("startX", startX);
+        controls_.addControl("startY", startY);
+        controls_.addControl("startZ", startZ);
+        controls_.addControl("endX",   endX);
+        controls_.addControl("endY",   endY);
+        controls_.addControl("endZ",   endZ);
     }
 
     void modifyLogicalSize(Coord3D& size) override {

@@ -1,0 +1,64 @@
+# MoonBase's size budget lives here. Measured on the ESP32 classic with WiFi + HTTP + OTA: IDF
+# defaults gave 881 KB, and these settings bring the same functionality to ~590 KB. Nearly 300 KB
+# of the saving is configuration rather than code, which is why this file is part of the design
+# and not an afterthought.
+
+# Size over speed. MoonBase runs for a minute at a time and does one blocking download; there is
+# no hot path to protect. (-O2 -> -Os: 69 KB)
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# Link-time optimisation: cross-module dead-code elimination, the last big lever and the one
+# MycilaSafeBoot also pulls. Costs build time, not runtime.
+CONFIG_COMPILER_OPTIMIZATION_LTO=y
+
+# No log strings, no esp_err_to_name table, no assertion text, no console. Together ~117 KB.
+# The cost is real: a misbehaving MoonBase says nothing over serial. It is accepted because the
+# image is small enough to reason about whole, and because a board that cannot boot MoonBase is a
+# USB recovery either way.
+CONFIG_LOG_DEFAULT_LEVEL_NONE=y
+CONFIG_LOG_MAXIMUM_LEVEL_NONE=y
+CONFIG_ESP_ERR_TO_NAME_LOOKUP=n
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE=y
+CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
+CONFIG_ESP_CONSOLE_NONE=y
+CONFIG_VFS_SUPPORT_TERMIOS=n
+
+# The C library's full printf is for humans reading logs, which MoonBase has none of. (~40 KB)
+CONFIG_LIBC_NEWLIB_NANO_FORMAT=y
+
+# Network features this image will never use. IPv6 (~25 KB), WPA3/enterprise (~25 KB).
+# SoftAP is deliberately KEPT (~35 KB): without it a board with wrong WiFi credentials can only be
+# recovered over USB, which is exactly the situation MoonBase exists to avoid.
+CONFIG_LWIP_IPV6=n
+CONFIG_ESP_WIFI_ENABLE_WPA3_SAE=n
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
+
+# One connection at a time, small buffers: MoonBase serves one page and receives one file.
+CONFIG_LWIP_MAX_SOCKETS=6
+# RX sizing is the install's throughput ceiling (TCP window / RTT): the earlier minimal
+# values capped a LAN download at ~25 KB/s. MoonBase's one job is moving a ~2 MB image, and
+# with no app there is RAM to spare, so receive gets real buffers and a real window.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=24
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=24
+CONFIG_ESP_WIFI_TX_BUFFER_TYPE=0
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+
+# The SAME table the application builds against, so the two images provably agree on where
+# everything lives. MoonBase reads the filesystem (for the stored WiFi credentials) and never
+# writes it, so a half-finished install cannot corrupt user config.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../esp32/partitions/esp32dev_moonbase.csv"
+
+# Plain-HTTP install URLs allowed alongside HTTPS: GitHub releases stay TLS-verified via the cert
+# bundle, but a LAN source (MoonDeck serving a dev build) has no certificate and is inside the
+# user's own network. The staged-URL handoff writes whatever the app was asked to install.
+CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
+
+# The whole of MoonBase runs on the main task (app_main installs, then serves), and a GitHub
+# install rides mbedTLS: certificate-chain verification against the bundle peaks near 8 KB of
+# stack, which overflowed the 3.5 KB default the moment the TLS handshake ran (the plain-HTTP
+# LAN path fit, which is why the bench missed it). RAM is not scarce here; 12 KB buys margin.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288

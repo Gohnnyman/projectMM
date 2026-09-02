@@ -170,7 +170,7 @@ LUT is half desktop size (uint16_t vs uint32_t per entry). The 1:1 (no-modifier)
 | Total tick | ~164 ms / 6 FPS | Dominated by ArtNet at the 8 dBm cap |
 | ArtNetSend | ~93 ms (97 UDP packets) | ~960 µs/packet — slower than full-power WiFi (cf. Olimex `esp32-eth-wifi` at 38 ms) because the cap cuts radio TX margin, association-rate adaptation lands at a lower MCS rate, and packets retry more |
 | Free internal RAM | ~240 KB | The comparable, scarce resource. Stays flat (~238–240 KB) across all grid sizes — the Layer buffer + LUT live in PSRAM, so growing the grid doesn't touch internal RAM. This is the number the README perf table shows for the S3, so devices compare on the same axis. |
-| Free heap (incl. PSRAM) | ~8,163 KB | The PSRAM-merged total (`totalHeap` reports 8 MB combined). Looks huge but isn't the constraint — assume PSRAM is ample for now. |
+| Free heap (incl. PSRAM) | ~8,163 KB | The PSRAM-merged total (`totalHeap` reports 8 MB combined). Looks huge but isn't the constraint: PSRAM is ample; internal RAM is the limit. |
 | maxBlock (internal) | ~164 KB | Internal-RAM largest contiguous block — the scarce-resource KPI. `maxAllocBlock` (any-memory) reports ~8 MB on PSRAM boards and is meaningless as a pressure signal; SystemModule + scenario_runner use `maxInternalAllocBlock` instead. |
 | Layer buffer | 92 KB | In PSRAM (auto by heap_caps preference) |
 | Image | 1,307 KB | ~30% larger than `esp32-eth-wifi` due to USB-Serial-JTAG driver + Improv-dual-transport listener |
@@ -247,6 +247,31 @@ The exec block is the emitted machine code, so it varies by ISA (the RISC-V rows
 **A script calling its own functions** costs what the call costs, and nothing when a script makes none. `crosshair.mlv` (three functions, two calls per frame) ticks at 219 µs on the classic against 204 µs for the same drawing without the recursion guard, so roughly 5-10% on a script that calls. A script with no local call emits no guard code at all, so every shipped script is byte-identical to before: the guard is nine instructions in a function's prologue, emitted only when the program contains a `CallScript`.
 
 The **depth guard** is one arena byte, incremented on entry and decremented in the epilogue. A refused call returns rather than the caller branching around it, which is why the cost sits in the callee and not at every call site. Unbounded recursion therefore degrades instead of resetting: the classic ran a deliberately non-terminating script for 110 s at 109 fps, with the deepest calls doing nothing.
+
+**Two cost models** (2026-08-22, shiffy's 80x48 = 3,840 lights). A shader is a function of position
+and time, so it pays per LIGHT; a particle script pays per OBJECT, with the per-particle work inside
+one C++ loop per call. This is the first script vocabulary where that distinction shows.
+
+| Script | Shape | shiffy 80x48 | desktop 128x96 |
+|---|---|---:|---:|
+| `plasma.mle` | 9 host calls per cell | 16,031 us | |
+| `metal.mle` | ~14 per cell, 3 square roots | 59,600 us | 1,557 us |
+| `fountain.mle` | ~9 per FRAME, 300 particles | 1,093 us | 9 us |
+| `ballpit.mle` | as above plus `collide` over 64 | 5,127 us | |
+
+`metal.mle` against `fountain.mle` is 54x on the same fixture. `polarR` is what makes the shader
+expensive: it wraps a real square root, measured at ~3.5 us per pixel for that one builtin, and
+`metal` calls it three times per pixel. `ballpit` shows `collide`'s N-body cost, which is the one
+call here that is not linear in pool size: 3.2 us at 48 particles against 0.1 us without, 53.6 us at
+200 (host figures; an S3 is 20-40x slower).
+
+**A 1 Hz filesystem scan was stuttering every device.** `FileManagerModule::tick1s()` called
+`esp_littlefs_info`, which walks every block of the partition (~80 ms on an S3), inline on the render
+thread, to feed one progress bar. Frame deltas per second on shiffy went from
+`83 78 80 79 82 66 72` to `83 85 85 83 84 87 85` once it was throttled to once a minute: the dip is
+gone and average throughput rose from ~77 to ~85 fps. It is pre-existing, and particles are what made
+it visible, because a particle INTEGRATES a stall into its trajectory where a shader redraws past it.
+One frame after an 80 ms gap moves every particle 6.7x its usual distance.
 
 **Desktop tick across this cycle:** 150 → 133 µs (6666 → 7518 fps), measured by `collect_kpi.py --commit` at each commit. The gain is not from MoonLive — it tracks the two heap-overrun fixes and the register-reuse work landing earlier in the branch. No scenario `contract` was renegotiated on this branch: all 20 scenarios pass inside their existing budgets, which is the assertion surface this page defers to.
 
@@ -330,6 +355,19 @@ reports ~3 500 B of flash and no static RAM.
 No scenario contract yet: the driver needs a receiver card on the wire, so the numbers above are a
 bench record rather than an asserted ceiling.
 
+## HTTP cost of the P4's WiFi co-processor (`esp32p4rev1-eth-wifi`)
+
+The P4 has no native radio: WiFi comes from an on-board ESP32-C6 over SDIO. Compiling that path in costs HTTP throughput **on an interface it does not carry**, which is why it is measured over Ethernet on both images: same board, same commit, same cable, so the only variable is whether esp_hosted is in the binary.
+
+| build | per-request (`/api/system`) | throughput (76 KB `app.js`) |
+|---|---:|---:|
+| `esp32p4rev1-eth` | 10 ms flat | 1,973 KB/s |
+| `esp32p4rev1-eth-wifi` | 40 ms typical, one 280 ms outlier in 12 | ~980 KB/s |
+
+So roughly **4x per request and 2x on throughput** for having the co-processor compiled in. Render is unaffected (359 fps on the WiFi build), so this is not frame-loop contention: the cost is per-REQUEST rather than per-byte, which points at a periodic blocker a request waits out rather than a slow pipe.
+
+Measured on IDF v6.1-rc1. The penalty was far worse on v6.1-beta1 (33-60x per request, 17x throughput, with requests alternating 0.4/0.8 s); most of that is gone and what remains is tracked in [backlog-core](backlog/backlog-core.md).
+
 ## Multicore: the whole output stage on core 1 (`multicore`, Step 2)
 
 The `multicore` control on the Drivers container runs **every driver's per-frame work** — the LED encode, the ArtNet packet build, the preview frame build — on a **core-1 task**, while the render loop draws the next frame on core 0. A frame costs `max(render, output)` instead of `render + output`. It stacks with the driver's `doubleBuffer` (which hides the WS2812 *wire* behind DMA on one core); this hides the *encode* behind the *render* on the other.
@@ -348,7 +386,9 @@ The `multicore` control on the Drivers container runs **every driver's per-frame
 
 **Calling the network stack from core 1 costs ~100 µs/frame, and it does not matter.** lwIP is pinned to core 0 (`CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0`), so a driver that writes a socket still hands its bytes to the network task there — only the *CPU half* (packet / frame building) offloads. The cross-core lock and cache bouncing show up as Preview 49 → 91 µs and HttpServer 348 → 409 µs. That ~100 µs is set against the ~13,000 µs of output work removed from core 0 — a 130:1 trade, which is why no driver is special-cased: when the split is on, **all** of them move.
 
-**It also fixes the contention that motivated the work.** A ~19 ms inline encode on core 0 previously starved the network stack sharing that core — the LightCrafter 16's W5500 Ethernet dropped its link and HTTP timed out while the render loop kept ticking. With the encode on core 1, an HTTP hammer during a heavy 8192-light encode holds: 77 requests, median 163 ms, one timeout.
+**The pull-model preview transport bounds those Preview numbers from above.** Since the preview became a pull channel (one resumable drain, no socket writes from the encode thread at all), `PreviewDriver::tick` on core 1 only gathers and ARMS a message — every socket byte moves on the transport's tick20ms on core 0, paced by TCP. Two consequences the table rows cannot show: with no standing client request the preview costs **zero** (the tick returns before any work, so an unwatched device spends nothing), and a congested link no longer touches the render path at all — `renderWait` stays at its normal few ms where the prior direct-send path could hold the output stage up to its ~150 ms stall budget (bench-observed as 180,000 µs renderWait spikes on S3/WiFi, gone after the change; four boards then held ~12 minutes of continuous viewing with zero socket closes).
+
+**It also removes a contention.** A ~19 ms inline encode on core 0 starves the network stack sharing that core: the LightCrafter 16's W5500 Ethernet drops its link and HTTP times out while the render loop keeps ticking. With the encode on core 1, an HTTP hammer during a heavy 8192-light encode holds: 77 requests, median 163 ms, one timeout.
 
 **Per-chip `renderWait`** — the read-only KPI reporting the worst core-0 wait at the frame boundary in the last second. It says how much idle time a *second* handoff buffer (the deferred ping-pong step) would recover, so the decision is measured rather than assumed:
 
@@ -479,10 +519,3 @@ These numbers shift with IDF version + sdkconfig — treat as rough proportions.
 
 The default `esp32` carries both the WiFi and Ethernet stacks (1.27 MB); `esp32-eth` is the Ethernet-only build that drops the WiFi stack for ~670 KB less image.
 
-### Size budget for upcoming features
-
-| Feature | Est. | Rationale |
-|---|---|---|
-| Mozilla cert bundle trimmed | −40 KB | `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN` keeps common roots only. `_NONE` saves ~50 KB but breaks TLS. |
-| Static IPv6 | +20 KB | lwIP IPv6 component (off by default). Only if a deployment needs it. |
-| WebSocket TLS (`wss://`) | ~0 KB | Reuses linked mbedTLS; certificate handling adds <5 KB. |

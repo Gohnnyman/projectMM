@@ -125,6 +125,13 @@ public:
     /// The default 0 is never used by a peripheral whose bus is the exact pin count (Parlio,
     /// powerOfTwoBus=false, never pads), so no owner lookup is needed here.
     virtual uint16_t clockPinForBus() const { return 0; }
+    /// Must a spare (unused) bus lane be parked on a REAL GPIO? `esp_lcd` rejects an NC data pin, so
+    /// the i80 backend has to give every lane a pad and parks the spares on WR: a ghost claim that
+    /// drives a pin the board never wired. A backend that owns its own GPIO routing does not pay that
+    /// tax: an unrouted lane simply stays inside the peripheral. Answering false keeps a spare lane
+    /// off the pin map entirely, which is what stops a padded lane from silently driving a pad another
+    /// peripheral owns (an S31's RGMII bus, for one).
+    virtual bool spareLanesNeedPad() const { return true; }
     /// The whole-frame DMA byte budget: 0 = "no bound" (PSRAM-capable). A bounded peripheral (the
     /// classic-ESP32 i80 = internal-RAM-only I2S) returns a positive ceiling. Default: no bound.
     virtual size_t dmaBudgetBytes() const { return 0; }

@@ -5,6 +5,8 @@
 
 #include "core/MoonModule.h"
 
+#include <atomic>
+
 #include <cstddef>
 #include <cstdint>
 
@@ -163,11 +165,30 @@ public:
     /// caller reporting success to a user needs to tell that apart from a real apply.
     bool applySubtree(MoonModule* m, const char* json, const char* prefix = "");
 
+    /// Live reconfiguration for a WRITTEN config file: a `/.config/<Type>.json` upload applies
+    /// onto the running tree through the same `applySubtree` a preset uses, the boot loader's
+    /// rule extended to the file-upload path, so a restored backup needs no reboot. One level
+    /// only: `/.config/presets/*` are apply-on-demand captures, not module files; any other path
+    /// is not config. Returns whether a module matched AND its subtree applied.
+    bool applyConfigFile(const char* path);
+
+    /// The DEFERRED entry the file-upload path uses: queue the module named by a written
+    /// `/.config/<Type>.json`; tick20ms() applies it on the RENDER task. Applying inline on the
+    /// small web-server task crashed the ESP32 (NetworkModule::setup() re-run mid-request), and
+    /// deferring also sends the HTTP response before a network-reconfiguring apply can cut the
+    /// socket. Returns whether the path names a live top-level module (same rules as
+    /// applyConfigFile). Multi-file uploads coalesce to one apply per module.
+    bool requestConfigApply(const char* path);
+
+    void tick20ms() MM_NONBLOCKING override;
+
 private:
     static inline FilesystemModule* instance_ = nullptr;
     Scheduler* scheduler_ = nullptr;
     bool mounted_ = false;
     bool dirtyPending_ = false;
+    int moduleIndexForConfigPath(const char* path);
+    std::atomic<uint32_t> pendingApplyMask_{0};   // bit = scheduler module index; web task sets, render tick consumes
     bool everSaved_ = false;       ///< false until the first successful save
     uint32_t lastDirtyMs_ = 0;
     uint32_t lastSaveMs_ = 0;
@@ -181,8 +202,14 @@ private:
     void updateLastSavedStr();
     static void loadAllHookTrampoline_(Scheduler* s);
     void loadAll(Scheduler* s);
+    static void reapplyValuesHookTrampoline_(Scheduler* s);
+    void reapplyValues(Scheduler* s);
     void loadSubtree(MoonModule* m);
     void applyNode(MoonModule* m, const char* json, const char* prefix);
+    /// Second load pass, values only, run after the tree is prepared: see the definition for why a
+    /// schema that only settles in prepare() (a MoonLive script's declared controls) needs it.
+    void reapplySubtree(MoonModule* m);
+    void reapplyNode(MoonModule* m, const char* json, const char* prefix);
     void applyWiredChildFromJson(MoonModule* wired, const char* json, const char* prefix);
     static bool hasWiredChildOfType(const MoonModule* parent, const char* typeName);
     void overlayControls(MoonModule* m, const char* json, const char* prefix);

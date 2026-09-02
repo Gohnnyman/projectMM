@@ -1,23 +1,24 @@
 // A 3D lattice: stacked layers of a grid, the primitive 3D space of LED strips.
-// `z` is an ordinary axis to a layout -- the shipped 2D layouts simply pass 0 for it.
-// Three nested loops need more registers than Xtensa has, so this runs on P4/S31/desktop
-// but not the S3; two loops (grid.mlv) fit everywhere.
 
 class LatticeLayout {
-  uint8_t cols = 4;
-  uint8_t rows = 3;
-  uint8_t layers = 5;
+  byte cols = 4;
+  byte rows = 3;
+  byte layers = 5;
 
-  defineControls() {
-    addUint8("cols", cols, 1, 32);
-    addUint8("rows", rows, 1, 32);
-    addUint8("layers", layers, 1, 32);
+  int dimensions() { return 3; }
+
+  string tags() { return "💫"; }
+
+  void defineControls() {
+    addControl("cols", cols, 1, 32);                // lights across
+    addControl("rows", rows, 1, 32);                // lights down
+    addControl("layers", layers, 1, 32);            // grids stacked in depth
   }
 
-  placeLights() {
-    for (z = 0; z < layers; z = z + 1) {
-      for (y = 0; y < rows; y = y + 1) {
-        for (x = 0; x < cols; x = x + 1) {
+  void placeLights() {
+    for (int z = 0; z < layers; z = z + 1) {
+      for (int y = 0; y < rows; y = y + 1) {
+        for (int x = 0; x < cols; x = x + 1) {
           addLight(x, y, z);
         }
       }

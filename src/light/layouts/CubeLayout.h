@@ -50,19 +50,20 @@ public:
     bool snakeZ = false;
 
     void defineControls() override {
-        controls_.addInt16("width",  width,  1, 128);
-        controls_.addInt16("height", height, 1, 128);
-        controls_.addInt16("depth",  depth,  1, 128);
+        controls_.addControl("width",  width,  1, 128);
+        controls_.addControl("height", height, 1, 128);
+        controls_.addControl("depth",  depth,  1, 128);
         controls_.addSelect("wiringOrder", wiringOrder, kWiringOrderOptions, kWiringOrderCount);
-        controls_.addBool("X++", incX);
-        controls_.addBool("Y++", incY);
-        controls_.addBool("Z++", incZ);
-        controls_.addBool("snakeX", snakeX);
-        controls_.addBool("snakeY", snakeY);
-        controls_.addBool("snakeZ", snakeZ);
+        controls_.addControl("X++", incX);
+        controls_.addControl("Y++", incY);
+        controls_.addControl("Z++", incZ);
+        controls_.addControl("snakeX", snakeX);
+        controls_.addControl("snakeY", snakeY);
+        controls_.addControl("snakeZ", snakeZ);
     }
 
     const char* tags() const override { return "💫"; }  // MoonLight origin
+    Dim dimensions() const override { return Dim::D3; }
 
     nrOfLightsType lightCount() const override {
         // Solid volume: product of the three edges. Multiply in uint32_t and

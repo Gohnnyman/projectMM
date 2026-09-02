@@ -30,7 +30,7 @@ namespace mm {
 /// Effect: two color fields trading places pixel by pixel, with no per-pixel state.
 class DissolveEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t bpm      = 12;    // how fast one transition completes
@@ -39,10 +39,10 @@ public:
     bool    scatter  = true;  // random order; off gives a positional wipe instead
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 1, 120);
-        controls_.addUint8("spread", spread, 0, 255);
-        controls_.addBool("eased", eased);
-        controls_.addBool("scatter", scatter);
+        controls_.addControl("bpm", bpm, 1, 120);
+        controls_.addControl("spread", spread, 0, 255);
+        controls_.addControl("eased", eased);
+        controls_.addControl("scatter", scatter);
     }
 
     void tick() MM_NONBLOCKING override {

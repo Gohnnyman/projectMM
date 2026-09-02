@@ -1,0 +1,11 @@
+# MoonBase on a 16 MB board: the factory recovery image, ONE app slot, and the flash the second
+# OTA slot used to hold given to the filesystem.
+#
+# The same trade sdkconfig.defaults.moonbase-4mb makes, chosen here rather than forced. Dual-OTA
+# spends half the app area on a second copy of the firmware that sits idle except during an
+# update; MoonBase is a small image that owns the device while the app is replaced, so one app
+# slot is enough and the recovery story is stronger (a power cut mid-install boots MoonBase and
+# the user retries over the network). On 16 MB that returns 4 MB, and it goes to LittleFS:
+# 11264 KB instead of 7168 KB, which is where the space is actually useful (MoonLive scripts,
+# effect assets, captures).
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/ota_16mb_moonbase.csv"

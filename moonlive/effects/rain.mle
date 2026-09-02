@@ -1,0 +1,30 @@
+// Rain: drops falling from anywhere along the top, with wind.
+
+class RainEffect {
+  byte fall = 24;
+  byte wind = 128;
+  byte drops = 3;
+
+  int dimensions() { return 2; }
+
+  string tags() { return "💫✨"; }
+
+  void defineControls() {
+    pool(400);
+    addControl("fall", fall, 4, 80);                // how fast a drop falls
+    addControl("wind", wind, 0, 255);               // which way it blows, 128 is straight down
+    addControl("drops", drops, 1, 12);              // drops emitted per frame
+  }
+
+  void tick() {
+    fade(90);
+
+    emit(random16(width), 0, 16384 + wind * 24 - 3072, fall * height / 8,
+         drops, 120, scale(beat(3, t), 256));
+
+    gravity(fall * height / 24);
+    step();
+    age(1);
+    render(120);
+  }
+}

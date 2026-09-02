@@ -40,10 +40,11 @@ public:
     uint8_t scale = 2;  // 1..10 — spacing multiplier out from each centre
 
     void defineControls() override {
-        controls_.addUint8("scale", scale, 1, 10);
+        controls_.addControl("scale", scale, 1, 10);
     }
 
     const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D2; }
 
     nrOfLightsType lightCount() const override {
         // Count via the exact same emit walk so count and emit never disagree

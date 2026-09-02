@@ -44,7 +44,8 @@ MAX_CCN = 10
 MAX_NLOC = 60
 
 # `src/ui/` is JavaScript served to the browser, not firmware C++.
-LIZARD_ARGS = ["src/", "-l", "cpp", "-x", "src/ui/*"]
+LIZARD_ARGS = ["src/", "-l", "cpp", "-x", "src/ui/*",
+               "-x", "src/platform/desktop/vendor/*"]   # upstream single-header (miniaudio)
 
 
 def measure(extra=None):

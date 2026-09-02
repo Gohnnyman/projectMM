@@ -28,7 +28,7 @@ side is upstream-maintained and stable.
 Recommended developer test before any commit touching:
   - src/core/ImprovFrame.h
   - src/platform/esp32/platform_esp32_improv.cpp
-  - web-installer/index.html
+  - mooninstaller/index.html
   - src/ui/install-picker.js
   - moondeck/build/improv_*.py
 

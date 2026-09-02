@@ -45,7 +45,7 @@ Detail: [technical](moxygen/NetworkModule.md)
 
 ### Improv provisioning
 
-Serial/BLE Improv Wi-Fi provisioning — the web installer hands credentials to a fresh device over this protocol during the flash-and-connect flow.
+Serial/BLE Improv Wi-Fi provisioning: the web installer hands credentials to a fresh device over this protocol during the flash-and-connect flow. [Improv Wi-Fi](https://github.com/improv-wifi) is an open standard, and its [sdk-cpp](https://github.com/improv-wifi/sdk-cpp) / [sdk-js](https://github.com/improv-wifi/sdk-js) are the specification this implements, so any Improv-capable installer can provision a projectMM device.
 
 <img src="../../assets/core/ImprovProvisioningModule.png" width="300" alt="Improv provisioning module controls">
 
@@ -62,6 +62,15 @@ Discovers and lists other projectMM devices on the LAN (the `devices` List contr
 <img src="../../assets/core/DevicesModule.png" width="300" alt="Devices module — discovered LAN devices">
 
 - `devices` — a List control of discovered devices; each row expands to a detail panel. Persistable.
+- `wledCompatible` — announce on WLED's broadcast address as well as the multicast group
+  (**default off**). WLED apps and devices browse the discovery port on **broadcast**, so a
+  projectMM device does not appear in them until this is turned on. Off is the better neighbour
+  on the network: a broadcast wakes every phone, printer and laptop on the LAN to parse a packet
+  none of them want. See [multicast and IGMP snooping](../../architecture.md#multicast-and-igmp-snooping)
+  for when that actually saves traffic.
+
+Presence always goes to the projectMM group `239.255.77.77`, so peers find each other however
+this control is set; `wledCompatible` only adds the broadcast copy.
 
 Detail: [technical](moxygen/DevicesModule.md)
 
@@ -94,7 +103,11 @@ Over-the-air firmware flashing — the one operation that swaps the binary and n
 <img src="../../assets/core/FirmwareUpdateModule.png" width="300" alt="Firmware update module controls">
 
 - `firmware` — the OTA image to flash.
-- read-only — `version`, `build`, `firmwarePartition`, `update_pct` (progress).
+- read-only: `version`, `build`, `firmwarePartition`, `update_pct` (progress; absent on MoonBase
+  devices, where the update overlay carries the progress instead), and on 4 MB
+  boards `moonbase`: the second boot image is present, so installs run through the
+  reboot-into-MoonBase cycle behind one "updating firmware" overlay, and a **MoonBase** button
+  opens the maintenance image directly ([architecture.md § MoonBase](../../architecture.md#moonbase-the-second-boot-image)).
 
 Detail: [technical](moxygen/FirmwareUpdateModule.md)
 
@@ -108,7 +121,9 @@ A boot-wired system tool (distinct from Filesystem, the persistence *engine*): b
 
 <img src="../../assets/core/FileManagerModule.png" width="300" alt="File Manager panel — folder tree + toolbar">
 
-- `file browser` — the panel itself: an expand/collapse folder tree with a toolbar (＋folder / ＋file / delete / refresh / upload) and an inline text editor. The module's main surface (⌄ details for the interactions).
+- `file browser`, the panel itself: an expand/collapse folder tree with a toolbar (＋folder / ＋file / upload / backup / restore / delete / refresh) and an inline text editor. The module's main surface (⌄ details for the interactions).
+- **Backup (⤓)**, download the device's files (config, scripts, presets) as one `.json` bundle: every successfully read file, byte-verified against the directory listing; an unreadable or non-text file is skipped and named, and only a verified-short read aborts the backup. **Keep the file private: it contains the WiFi password.** For a device on firmware from before this button, the [installer page](https://moonmodules.org/projectMM/install/) offers the same backup as a bookmarklet.
+- **Restore (⟲)**, upload a backup bundle (press twice: it overwrites the device's files). Known renames from [MIGRATING.md](../../MIGRATING.md) apply in the browser before upload, then a report lists everything that needs an eye: renamed and mapped entries, values to review, module types or controls this firmware no longer has (per [ADR-0013](../../adr/0013-no-migration-code-robust-persistence-plus-documented-breaks.md) the device itself never migrates). Every file applies to the running device as it lands (live reconfiguration), with two boot-only exceptions the dialog names: network settings (bring-up is not re-runnable live, so the dialog offers the restart that applies them) and the web server's own `port` (binds at boot).
 - `show hidden` — reveal dot-prefixed files/folders (e.g. `.config`); forwarded to `/api/dir` as its `hidden` filter.
 - `filesystem` — read-only usage bar (used / total bytes, from the platform).
 - `lastSaved` — read-only; how long ago config was persisted (read from the Filesystem engine).
@@ -204,7 +219,7 @@ Both can be on at once. Setup walkthrough (including exposing HA to Apple Home v
 The panel is a lazy folder **tree** (each folder loads its children on first expand) plus an inline text editor. Dot-prefixed entries (the `.config` persistence dir) are hidden unless `show hidden` is on.
 
 - Click a folder's row to select it and toggle its expansion (▸/▾); click a selected file to open the editor.
-- The toolbar acts on the selected node: **＋ folder** creates a folder inside it, **＋ file** creates an empty file (click it to edit), **🗑 delete** removes the selected file or empty folder (press-twice to confirm), **⟳** refreshes.
+- The toolbar acts on the selected node: **＋ folder** creates a folder inside it, **＋ file** creates an empty file (click it to edit), **🗑 delete** removes the selected file, or a folder and everything inside it (press-twice to confirm), **⟳** refreshes.
 - **Drag files from the desktop** onto a folder (or the tree) to upload them — the body streams straight to the file (any size, binary-safe; capped only by a sanity limit and the free space, which it reports if short); a per-file **⤓** streams it back to the desktop.
 - The editor loads a file's text, pretty-prints JSON on open, and saves atomically; a binary file (contains a NUL) loads read-only (use ⤓ to fetch it intact). Upload and download both stream, so neither truncates.
 - Create / delete are HTTP calls (`POST` / `DELETE /api/dir?path=`), not controls — the path rides the request, so nothing is stored on the device per op.

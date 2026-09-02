@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>projectMM Installer</title>
+  <link rel="icon" type="image/png" href="./favicon.png">
+
+  <!-- ESP Web Tools dropped in Step 3 of the board-injection plan. EWT 10.x
+       held the SerialPort exclusively and didn't expose its internal
+       ImprovSerial client, which made post-PROVISIONED board injection
+       impossible from this page (and silently broke "Your devices"
+       auto-add since the state-changed event never escaped the dialog's
+       shadow DOM). The install flow is now driven by
+       ./install-orchestrator.js — esptool-js for flash + improv-wifi-serial-sdk
+       for WiFi provisioning, both sharing the SerialPort we own end-to-end.
+       The orchestrator is imported by ./install.js (the page's module script,
+       loaded at the bottom of <body>). -->
+
+  <link rel="stylesheet" href="./install.css">
+</head>
+<body>
+  <!-- Reveal the Windows-CH340 BOOT-button hints (the `.windows-only`
+       paragraphs in the install modal) only on Windows hosts. Defers to
+       DOMContentLoaded so the elements (declared further down) exist by
+       the time the toggle runs. navigator.userAgent's "Windows" substring
+       is the same signal MDN documents for OS detection on the open web —
+       no third-party UA parser pulled in for one boolean. The install
+       modal is hidden by default, so the toggle happens off-screen and
+       there's no flash-of-visible-content concern. -->
+  <main>
+    <h1>projectMM Installer <span class="version-chip" id="version-chip" hidden></span>
+      <a class="help-link" href="https://moonmodules.org/projectMM/gettingstarted.html"
+         target="_blank" rel="noopener" title="Installer help (opens the docs in a new tab)">?</a></h1>
+    <p class="tag">Plug in your ESP32. Pick a release + device. Flash. Get the device on your network. Open it in a browser.</p>
+
+    <div class="card browser-warning" id="browser-warning">
+      <strong>This browser can't flash an ESP32.</strong>
+      Flashing needs Web Serial, which Firefox and Safari don't support. Open this page in
+      <strong>Chrome</strong> or <strong>Edge</strong> on a desktop to flash a board. The
+      release page on GitHub has the same binaries for manual flashing.
+      Downloading the desktop build works in any browser, and is selected above.
+    </div>
+
+    <div class="card">
+      <strong>Step 1 — Pick a release + device and flash.</strong>
+      <p class="note" style="margin-top: 4px">
+        The picker shows stable releases, release candidates (<code>v…-rc…</code>),
+        and a <code>latest</code> build published on every merge to main — all flagged
+        <em>(beta)</em> except stables. Newest stable is the default; pick
+        <code>latest</code> to try the newest unreleased changes.
+      </p>
+      <!-- Port picker — optional pre-pick, matching the install-picker
+           dropdown shape. Populated from navigator.serial.getPorts() (ports
+           the user has previously granted; empty list on first visit). The
+           final "Pick another port…" option triggers the browser's native
+           picker. Web Serial doesn't expose an enumeration API outside the
+           user-gesture picker, so this is as close to a "live dropdown of
+           plugged-in devices" as the platform allows. If the user clicks
+           Install without picking, the orchestrator falls back to its own
+           requestPort() prompt — current behaviour preserved. -->
+      <!-- Picking a port auto-detects the connected chip (ESP Web Tools /
+           ESPHome model: connect and detect are one action) and narrows the
+           board dropdown below to that chip family — no separate Detect button.
+           #detect-status shows the result ("Detected ESP32-S3 — selected …")
+           right under the port row; re-detect = "Pick another port…". This is
+           mooninstaller only; the shared picker module (embedded in firmware,
+           no local serial) carries the narrowing logic but never the port UI. -->
+      <div class="control-row" id="port-row">
+        <span class="control-label">Install to</span>
+        <select id="port-select" class="rp-select"></select>
+      </div>
+      <div class="control-row" id="detect-status-row">
+        <span class="control-label"></span>
+        <span id="detect-status" class="rp-status"></span>
+      </div>
+
+      <!-- Erase opt-in. Lives here in the source DOM (outside the picker
+           mount) so the picker module stays installer-agnostic — its
+           render() does NOT know about erase semantics. The picker hoists
+           this element into its tree just above the Install button row via
+           the `installRowExtras` option below; the picker re-attaches the
+           same node on every re-render (release-list reload, board pick),
+           so the listener wired on the checkbox in index.html keeps firing.
+           Default off because a normal re-flash overwrites
+           bootloader+partition-table+app in place (the regions writeFlash
+           touches) and preserves user state (WiFi credentials, board name)
+           on LittleFS, which is what users usually want. Tick the box when:
+             - switching firmware variants whose partition tables differ
+               (esp32 1.3MB app vs esp32s3-n16r8 16MB flash)
+             - wiping persisted user state (a chip that already has saved
+               WiFi boots into PROVISIONED and the installer can't speak
+               Improv to it; erase first avoids that)
+             - clean-slate testing
+           Costs ~12 s of chip-erase time before the flash starts. -->
+      <div class="erase-row" id="erase-row">
+        <label>
+          <input type="checkbox" id="erase-before-flash">
+          Erase chip first
+          <span class="note erase-note">wipes saved WiFi + board, adds ~12 s. Tick when switching firmware variant, starting clean, or <strong>when a normal update fails</strong> or the device comes back without its settings: the partition layout can change between releases, and only an erase install applies the new one cleanly. Back up first (see below), restore after.</span>
+        </label>
+        <label>
+          <input type="checkbox" id="apply-device-defaults">
+          Apply device defaults
+          <span class="note erase-note">sets this device model's recommended modules/settings. Auto-ticks with erase; untick to keep your current config when re-flashing a configured device.</span>
+        </label>
+      </div>
+
+      <!-- picture board picker. Renders a visual card grid from
+           deviceModels.json (image + product link), and on select drives the shared
+           picker's own (hidden) board <select> so the existing flash flow is
+           reused unchanged. The shared install-picker.js + firmware UI are NOT
+           modified (board images are a Pages-only asset, never flashed). -->
+      <!-- Board picker: a control-row consistent with USB Port / Release /
+           Firmware (left "Device" label + a field). The field is a collapsed
+           summary button; clicking expands the search + card grid full-width
+           below the row. Picking a board collapses it back to the summary.
+           The shared install-picker.js + firmware UI are NOT modified
+           (board images are a Pages-only asset, never flashed). -->
+      <div id="board-grid-card">
+        <div class="control-row">
+          <span class="control-label">Device</span>
+          <button type="button" id="board-summary" aria-expanded="false">
+            <span class="board-summary-left">
+              <span id="board-summary-thumb" class="board-summary-thumb" hidden></span>
+              <span id="board-summary-label">Pick a device</span>
+            </span>
+            <span class="board-summary-caret">▾</span>
+          </button>
+        </div>
+        <div id="board-expand" hidden>
+          <div class="board-grid-controls">
+            <input id="board-search" type="search" placeholder="Search devices…" autocomplete="off" aria-label="Search devices">
+            <button type="button" id="board-clear" class="board-clear">Generic / no device</button>
+          </div>
+          <!-- Shown only when a Detect has narrowed the grid to one chip family;
+               the toggle is the escape hatch if detection was wrong or your board
+               isn't in the detected family. -->
+          <div id="board-filter-notice" class="board-filter-notice" hidden></div>
+          <div id="board-grid"></div>
+        </div>
+      </div>
+
+      <!-- Board-details popup, filled by showBoardDetails() from the card's
+           "details" link. Native <dialog>: backdrop, ESC, focus trap for free. -->
+      <dialog id="board-details">
+        <div class="bd-head">
+          <span class="bd-title" id="bd-title"></span>
+          <button type="button" class="bd-close" id="bd-close" aria-label="Close">✕</button>
+        </div>
+        <div class="bd-body" id="bd-body"></div>
+      </dialog>
+
+      <!-- Picker mounts here. Release (newest-first, RCs flagged) → Board (the
+           board <select> is CSS-hidden; the grid above drives it).
+           Same module the on-device OTA UI uses. The picker slots #erase-row into
+           its tree at render time via the installRowExtras option below. -->
+      <div id="picker-mount"></div>
+
+      <!-- Monitor button: pre/post install serial viewer. Renders as a
+           separate row below the picker so the picker stays installer-
+           agnostic (on-device OTA UI doesn't have Web Serial, so no
+           monitor there). Disabled until a port is picked — same gate
+           the Install button uses (orchestrator falls back to
+           requestPort() if missing, but the monitor needs an existing
+           handle since it doesn't drive a user-gesture-triggered open).
+           Clicking opens #monitor-backdrop. -->
+      <div class="control-row">
+        <span class="control-label"></span>
+        <button id="monitor-btn" class="action-btn" type="button">Monitor serial port</button>
+      </div>
+
+      <!-- Install modal mounts at end of body so it overlays everything.
+           Driven by install-orchestrator.js, opened from the picker's
+           onInstall callback. -->
+
+
+      <p class="note">
+        Ethernet works out of the box for the device you pick — its PHY type and
+        pins come from the catalog, no rebuild. Boards without Ethernet just use
+        WiFi.
+      </p>
+    </div>
+
+    <div class="card">
+      <strong>Step 2 — Get the device on your network.</strong>
+      <ul>
+        <li><strong>Already configured</strong> (Ethernet cable, or WiFi set on a previous flash) — nothing to do. The device joins on boot and appears under "Your devices" below automatically.</li>
+        <li><strong>New, over WiFi</strong> — the installer's <em>Configure Wi-Fi</em> step opens right after flashing: enter SSID + password, click <strong>Connect</strong>.</li>
+        <li><strong>Skipped that step?</strong> The device boots a SoftAP <code>MM-XXXX</code> (4 hex digits from the chip MAC). Join it, open <code>http://4.3.2.1</code>, enter your WiFi credentials, or restore a config backup there instead, which carries them (see "Back up a device's config first" below).</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <strong>Your devices</strong>
+      <p class="note" style="margin-top: 4px">
+        Devices you've provisioned via this page are remembered in this
+        browser. <em>Clear browser data</em> wipes the list.
+      </p>
+      <div id="devices-mount"></div>
+    </div>
+
+    <div class="card">
+      <strong>Back up a device's config first</strong>
+      <p class="note" style="margin-top: 4px">
+        Erasing or migrating a device wipes its WiFi credentials and module config, so
+        save it all first. Backup + restore is also the answer when an update misbehaves.
+        An on-device update that fails, or a device that comes back without its settings,
+        usually means the partition layout changed between releases (right now: 4&nbsp;MB
+        classic boards updating to v4.0+). Back up, erase install, restore. One <code>.json</code> bundle holds everything; keep it
+        private, it contains the WiFi password. Two ways to make one:
+      </p>
+      <ul>
+        <li><strong>Current firmware</strong>: open the device's own page and press
+        <strong>Backup (⤓)</strong> in the File Manager. That is the whole story.</li>
+        <li><strong>Older firmware</strong> (no Backup button yet; any release since
+        v3.0.0, July 2026), or as a browser-side alternative: drag
+        <a id="backup-bookmarklet" href="#">Backup projectMM config</a> to your bookmarks
+        bar, open the device's own page, click the bookmark. No bookmarks bar?
+        <button id="backup-copy" type="button">Copy the snippet</button> and paste it into
+        the browser console (F12) on the device's page. Safari can't drag bookmarklets:
+        copy the snippet into a bookmark's address by hand, typing <code>javascript:</code>
+        in front of it, or use Chrome/Edge (flashing needs them anyway).</li>
+      </ul>
+      <p class="note">
+        After flashing, restore the bundle via the new firmware's File Manager (⟲). The
+        bundle carries the WiFi credentials, so you can even skip the Configure Wi-Fi
+        step: join the device's <code>MM-XXXX</code> access point, open
+        <code>http://4.3.2.1</code>, restore, take the offered restart, and the device
+        comes back on your network.
+      </p>
+    </div>
+
+    <div class="card">
+      <strong>Step 3 — Control your device: browser, phone app, or smart home.</strong>
+      <p class="note">
+        Open the device's own web interface in a browser — at its mDNS name or its IP:
+      </p>
+      <div class="app-badges">
+        <span class="browser-badge">
+          <svg class="browser-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"></circle>
+            <path d="M3 12h18"></path>
+            <path d="M12 3c2.5 2.5 3.8 5.7 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.7-3.8-9S9.5 5.5 12 3z"></path>
+          </svg>
+          <span>Open the web UI</span>
+        </span>
+      </div>
+      <ul>
+        <li><code>http://&lt;devicename&gt;.local</code> — the mDNS hostname tracks the device's name. Out of the box that's <code>MM-XXXX</code> (same 4 hex digits as the SoftAP / the name Improv reports), so <code>http://MM-XXXX.local</code>. Rename the device in its UI and the hostname updates to match. Works on most home networks.</li>
+        <li>or its DHCP-assigned IP, visible in your router's client list.</li>
+      </ul>
+      <p class="note">
+        Prefer your phone, or your smart home? Control it from <strong>WLED Native</strong> or <strong>Home Assistant</strong> — see the <a href="https://moonmodules.org/projectMM/gettingstarted.html" target="_blank" rel="noopener">getting-started guide</a>.
+      </p>
+      <div class="app-badges">
+        <a href="https://apps.apple.com/us/app/wled-native/id6446207239" target="_blank" rel="noopener" title="WLED Native on the App Store">
+          <img src="assets/app-store-badge.svg" alt="Download WLED Native on the App Store" class="store-badge">
+        </a>
+        <a href="https://play.google.com/store/apps/details?id=ca.cgagnier.wlednativeandroid" target="_blank" rel="noopener" title="WLED Native on Google Play">
+          <img src="assets/google-play-badge.png" alt="Get WLED Native on Google Play" class="store-badge">
+        </a>
+        <a href="https://moonmodules.org/projectMM/usecases/home-automation.html" target="_blank" rel="noopener" title="Set up projectMM in Home Assistant" class="ha-badge">
+          <img src="assets/home-assistant-icon.png" alt="" class="ha-icon">
+          <span>Home Assistant</span>
+        </a>
+      </div>
+      <p class="note">
+        <strong>Updating an existing device?</strong> Check the <a href="https://moonmodules.org/projectMM/MIGRATING.html" target="_blank" rel="noopener">migration notes</a> for any breaking change — most updates need nothing, but a few ask you to re-set or re-add a control.
+      </p>
+      <p class="note">
+        Source code and releases:
+        <a href="https://github.com/MoonModules/projectMM" target="_blank" rel="noopener">github.com/MoonModules/projectMM</a>.
+      </p>
+    </div>
+  </main>
+
+  <!-- Credits / acknowledgements. Loaded as CDN ES modules straight from
+       unpkg — pinned versions in install-orchestrator.js. -->
+  <footer class="credits">
+    <p class="note">
+      Powered by
+      <a href="https://github.com/espressif/esptool-js" target="_blank" rel="noopener">esptool-js</a><span id="esptool-version" class="dep-version"></span>
+      (Web Serial flasher),
+      <a href="https://github.com/improv-wifi/sdk-js" target="_blank" rel="noopener">improv-wifi-serial-sdk</a>
+      (WiFi provisioning), and the
+      <a href="https://www.improv-wifi.com/serial/" target="_blank" rel="noopener">Improv-Serial protocol</a>
+      for provisioning and pushing device defaults over USB.
+    </p>
+  </footer>
+
+  <!-- Install modal — driven entirely by JS below. Sections show one at a
+       time via .install-section.active toggling. Empty until the user
+       clicks Install in the picker. -->
+  <div class="install-backdrop" id="install-backdrop">
+    <div class="install-modal">
+      <h2 id="install-title">Installing</h2>
+
+      <div class="install-section" id="section-connecting">
+        <div class="install-status">Connecting to device over Web Serial…</div>
+        <div class="install-status" id="connecting-detail"></div>
+        <!-- Documented Windows DTR/RTS timing issue (espressif/esptool#136,
+             #790): on Windows the auto-reset-into-bootloader sequence
+             dispatches setDTR and setRTS as separate IOCTLs, so the
+             ESP32's EN+IO0 toggle doesn't always land. Chrome's Web Serial
+             API can't tightly batch the two writes the way pyserial /
+             native esptool can. Worse on Windows 11 than Windows 10. The
+             official workaround is the manual BOOT/RST sequence the
+             Espressif docs recommend for any board where auto-reset
+             doesn't fire. Hidden on macOS/Linux. -->
+        <p class="note windows-only" hidden>
+          <strong>Windows users:</strong> if you see "Failed to connect with
+          the device," it's a known Windows timing issue with browser-based
+          flashing. Hold the <code>BOOT</code> (or <code>BUT1</code>) button
+          on the board, tap <code>RST</code> (reset) once, then release
+          <code>BOOT</code> — then click Install again.
+        </p>
+      </div>
+
+      <!-- Shown when the user's picked port doesn't open (probe failed):
+           wrong device (e.g. they picked Bluetooth-Incoming-Port from the
+           OS list) OR a stale handle (device unplugged + replugged since
+           the grant). The OS port picker is modal and covers the install
+           modal, so any guidance written into #connecting-detail and
+           followed immediately by requestPort() is invisible — the user
+           never sees it. This section gates the re-prompt behind a Try
+           again button so the message lands before the OS picker covers
+           the page. -->
+      <div class="install-section" id="section-wrong-port">
+        <div class="install-status">That port didn't respond.</div>
+        <div class="install-status">
+          Pick the USB-Serial entry your ESP32 is on (look for
+          <code>usbmodem…</code> on macOS, <code>COMxx</code> on Windows,
+          <code>ttyUSB…</code> on Linux). Bluetooth ports and debug
+          consoles aren't it.
+        </div>
+        <div class="install-actions">
+          <button type="button" class="primary" id="wrong-port-retry">Try again</button>
+        </div>
+      </div>
+
+      <div class="install-section" id="section-flashing">
+        <div class="install-status" id="flashing-status">Preparing to flash…</div>
+        <div class="install-progress"><div class="install-progress-bar" id="flash-bar"></div></div>
+        <p class="note install-warn">Don't close this window or unplug the device until flash completes — interrupting mid-write leaves the chip in a half-flashed state that needs a full re-flash to recover.</p>
+      </div>
+
+      <!-- WiFi-creds form: rendered LAZILY by buildWifiForm() the first time
+           showSection("wifiForm") runs, NOT in the static HTML.
+           Why: a `<input type="password">` present in the DOM at page load
+           triggers macOS iCloud Passwords / 1Password / LastPass autofill
+           prompts every refresh — even when the install modal isn't open —
+           because those scanners walk the DOM, not the visible region. The
+           `autocomplete="off"` + `data-*-ignore` attributes we used before
+           handle the extension popups but not the OS-level keychain prompt.
+           Deferring the form means the password field doesn't exist until
+           the user is actually mid-install, at which point the prompt is
+           contextually appropriate (it's a password they just typed). -->
+      <div class="install-section" id="section-wifi-form"></div>
+
+      <div class="install-section" id="section-provisioning">
+        <div class="install-status" id="provisioning-status">Connecting to your WiFi…</div>
+      </div>
+
+      <!-- Needs-IP form: shown when the device didn't speak Improv back
+           (alreadyOnline branch, or an Improv-less firmware like esp32-eth).
+           User types the IP/hostname so we can still add the device to
+           "Your devices". (No serial config push happens on this path — the
+           device-model defaults are applied later via MoonDeck on the LAN.)
+           Retry button: cheap second chance at Improv before falling back
+           to manual IP entry. Some boards (LOLIN S3 mini, slow-booting
+           variants) lose the race against the post-flash 2 s reopen window;
+           a click two seconds later usually catches the now-ready UART
+           task. Unlimited clicks — user-driven, no policy. -->
+      <div class="install-section" id="section-needs-ip">
+        <div class="install-status" id="needs-ip-status">
+          Flash done. The device didn't respond over USB — that's normal for
+          Ethernet-only firmware (e.g. <code>esp32-eth</code>) or when the
+          device booted with previously-saved WiFi credentials.
+        </div>
+        <div class="install-status" id="needs-ip-retry-status" hidden>
+          Trying Improv again…
+        </div>
+        <form id="needs-ip-form" class="install-form" onsubmit="return false">
+          <label for="needs-ip-input">Device IP or hostname</label>
+          <input type="text" id="needs-ip-input" autocomplete="off"
+                 placeholder="192.168.1.42 or MM-XXXX.local" required>
+          <p class="note">
+            Find it on your router's admin page or the device's USB serial log
+            (right after boot). Leave blank and Skip to finish without adding
+            the device to <em>Your devices</em>.
+          </p>
+          <div class="install-actions">
+            <button type="button" class="secondary" id="needs-ip-retry">Try Improv again</button>
+            <button type="button" class="secondary" id="needs-ip-skip">Skip</button>
+            <button type="submit" class="primary" id="needs-ip-add">Add device</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="install-section" id="section-done">
+        <div class="install-status" id="done-status">Device is online!</div>
+        <div class="install-done-note" id="done-defaults" hidden></div>
+        <a class="install-success-url" id="done-url" target="_blank" rel="noopener"></a>
+        <a class="install-success-url" id="done-url-mdns" target="_blank" rel="noopener" hidden></a>
+        <div class="install-actions">
+          <button type="button" class="primary" id="done-close">Close</button>
+        </div>
+      </div>
+
+      <div class="install-section" id="section-error">
+        <div class="install-status">Something went wrong.</div>
+        <div class="install-error" id="error-message"></div>
+        <!-- Same Windows DTR/RTS-timing hint as in section-connecting,
+             repeated here because the connecting phase is often too quick
+             to read before the error lands. See the comment in
+             section-connecting for the upstream-issue references. -->
+        <p class="note windows-only" hidden>
+          <strong>Windows users:</strong> if the stage was
+          <code>connect-flash</code>, it's a known Windows timing issue
+          with browser-based flashing. Hold the <code>BOOT</code> (or
+          <code>BUT1</code>) button on the board, tap <code>RST</code>
+          once, release <code>BOOT</code>, then click Install again.
+        </p>
+        <div class="install-actions">
+          <button type="button" class="secondary" id="error-close">Close</button>
+        </div>
+      </div>
+
+      <!-- Log panel — collapsible, shows esptool-js + ImprovSerial chatter.
+           Mostly for diagnosing flash failures; hidden by default to keep
+           the modal compact. -->
+      <div class="install-log-wrap">
+        <button type="button" class="install-log-toggle" id="log-toggle">Show log</button>
+        <pre class="install-log" id="install-log" hidden></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monitor modal — live serial-port viewer. Reuses .install-backdrop /
+       .install-modal CSS so the look matches the install dialog. The
+       monitor opens its own Web Serial read loop (the install flow opens
+       its own); only one consumer at a time can hold a port, so the
+       monitor closes automatically if the user clicks Install while it's
+       running, and vice versa. The Reset button pulses RTS to trigger a
+       device reset so boot logs land in the visible buffer (Web Serial
+       can only see bytes sent AFTER it opens the port — flashing first
+       then opening the monitor would miss the boot log without a reset). -->
+  <div class="install-backdrop" id="monitor-backdrop">
+    <div class="install-modal" style="max-width: 720px;">
+      <h2>Serial monitor</h2>
+      <div class="install-status" id="monitor-status">Opening port…</div>
+      <pre class="install-log" id="monitor-output" style="max-height: 420px; display: block;"></pre>
+      <div class="install-actions" style="margin-top: 12px;">
+        <button type="button" class="secondary" id="monitor-reset">Reset device</button>
+        <button type="button" class="secondary" id="monitor-clear">Clear</button>
+        <button type="button" class="primary" id="monitor-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./install.js"></script>
+</body>
+</html>

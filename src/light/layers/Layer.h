@@ -1,5 +1,6 @@
 #pragma once
 
+#include "light/FixtureChannels.h"   // motion-channel offsets an effect writes through
 #include "light/layers/Buffer.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/EffectBase.h"
@@ -7,6 +8,7 @@
 #include "light/layers/BlendMap.h"   // BlendOp, for blendOp()
 #include "light/modifiers/ModifierBase.h"
 #include "light/draw.h"              // draw::fade — the once-per-frame collected fade (fadeToBlackBy)
+#include "light/particles.h"       // particles::FrameTime, the shared elapsed-to-scale conversion
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -58,7 +60,7 @@ public:
     void defineControls() override {
         static constexpr const char* kBlendModeOptions[] = {"alpha", "additive"};
         controls_.addSelect("blendMode", blendMode, kBlendModeOptions, 2);
-        controls_.addUint8("opacity", opacity, 0, 255);
+        controls_.addControl("opacity", opacity, 0, 255);
         // Cascade to children (effects and modifiers) — preserves the default
         // base behaviour we just overrode.
         MoonModule::defineControls();
@@ -81,7 +83,18 @@ public:
     /// one entry point is what lets effects and draw primitives assume `cpl >= 1`.
     void setChannelsPerLight(uint8_t cpl) { if (cpl > 0) channelsPerLight_ = cpl; }
 
+    /// Where this layer's fixtures keep their motion channels (pan/tilt/zoom/...). Set by whoever
+    /// knows the fixture profile; every offset is absent by default, so an effect's setPan() is a
+    /// harmless no-op on a plain LED strip.
+    void setFixtureChannels(const FixtureChannels& fc) { fixture_ = fc; }
+    const FixtureChannels& fixtureChannels() const { return fixture_; }
+
     void prepare() override {
+        // Restart discards the elapsed gap. Without this the first tick after a re-prepare sees the
+        // whole idle interval as one step and jumps the trail forward: the guarantee
+        // LissajousEffect::prepare used to give for its own trail, now given once for every effect.
+        fadeTime_.reset();
+        fadeCarry_ = 0;
         // Treat "no layouts wired" the same as "every layout child disabled" —
         // either way the Layer should be empty (no LUT, no buffer, zero dims).
         // Returning early here used to leave stale state from a previous build,
@@ -166,7 +179,33 @@ public:
         // (VirtualLayer): effects call layer()->fadeToBlackBy(amt) which MINs into fadeBy_, so N
         // fading effects on one layer cost ONE buffer pass (the gentlest amount wins, preserving the
         // most light / longest trail) instead of each effect fading the whole shared buffer itself.
-        if (fadeBy_ > 0) { draw::fade(buffer_, fadeBy_); fadeBy_ = 0; bufferGen_++; }
+        // Scale the requested RATE by the fraction of a reference frame this frame covered, and
+        // CARRY the remainder rather than flooring it to 1: at high frame rates the per-frame
+        // amount is legitimately below one unit, and a floor of 1 would apply many times the decay
+        // the effect asked for, which is the bug that made trails visibly shorter on a fast device.
+        // ALWAYS advance the clock, even on a frame nobody asked to fade. Only a quarter of the
+        // effects fade at all, so leaving it frozen means the next request sees the whole idle gap
+        // as one step: five seconds away and a gentle trail is wiped black in a single frame. That
+        // is reachable by switching to a fading effect, re-enabling one, or resuming StarField,
+        // whose paused path returns before it asks.
+        const uint32_t frameScale = fadeTime_.advance(elapsed_);
+        if (fadeBy_ > 0) {
+            fadeCarry_ += static_cast<uint32_t>(fadeBy_) * frameScale;
+            uint32_t amt = fadeCarry_ / particles::FrameTime::kOne;
+            fadeBy_ = 0;
+            // A stall TOPS UP, it never bursts: spending a whole gap at once is the wipe described
+            // above. Dropping the remainder with it keeps the next frame from repeating the burst.
+            if (amt > 255) {
+                amt = 255;
+                fadeCarry_ = 0;              // the gap is spent, not banked for the next frame
+            } else {
+                fadeCarry_ -= amt * particles::FrameTime::kOne;
+            }
+            if (amt > 0) {
+                draw::fade(buffer_, static_cast<uint8_t>(amt));
+                bufferGen_++;
+            }
+        }
         // A degenerate grid has nothing to draw. This is orchestration — the Layer owns the
         // decision to run the effect pass at all, the same way it owns the enabled/role gates
         // below — so it is checked ONCE here rather than repeated as a guard clause in every
@@ -319,11 +358,24 @@ public:
     uint8_t channelsPerLight() const { return channelsPerLight_; }
     uint32_t elapsed() const { return elapsed_; }
 
-    // Request a per-frame fade-to-black of amt/255 (a trail/tail). Effects call this instead of fading
-    // the buffer themselves: the Layer collects the amount (MIN across all fading effects — the
-    // gentlest fade wins, so the longest requested trail is honoured) and applies ONE buffer pass at
-    // the start of the next frame, then resets. MoonLight's VirtualLayer::fadeToBlackBy model — N
-    // fading effects on one layer cost one pass, not N, and never fade each other's fresh pixels.
+    // Request a fade-to-black of amt/255 PER REFERENCE FRAME (1/60 s): a trail or tail. Effects call
+    // this instead of fading the buffer themselves: the Layer collects the amount (MIN across all
+    // fading effects, the gentlest fade wins so the longest requested trail is honoured) and applies
+    // ONE buffer pass at the start of the next frame, then resets. MoonLight's
+    // VirtualLayer::fadeToBlackBy model: N fading effects on one layer cost one pass, not N, and
+    // never fade each other's fresh pixels.
+    //
+    // The amount is a RATE, not a per-frame constant. The Layer scales it by the time this frame
+    // actually covered, so a trail is the same length on a 470 fps ESP32 and a 140,000 fps desktop.
+    // Three effects used to carry that conversion themselves and had already drifted into two
+    // different versions of it (one carried the fraction, two floored to 1 and so applied many
+    // times the intended decay at high fps). Owning it here is core enforcing the rule on the path
+    // it already owns rather than every effect re-deriving it. See architecture.md, the tick-rate
+    // rule, and particles::FrameTime for the shared conversion.
+    //
+    // Every amount is a rate, with no exception. An effect that wants the buffer blank NOW calls
+    // draw::fill instead: a clear is not a fast fade, and giving 255 a second meaning put a
+    // discontinuity in kind at the top of six user-facing fade sliders.
     void fadeToBlackBy(uint8_t amt) { fadeBy_ = fadeBy_ ? (amt < fadeBy_ ? amt : fadeBy_) : amt; }
 
     /// How many times anything has written this layer's shared buffer. The buffer PERSISTS between
@@ -589,6 +641,7 @@ private:
     Buffer buffer_;
     MappingLUT lut_;
     uint8_t channelsPerLight_ = 3;
+    FixtureChannels fixture_;
     bool lutSkipped_ = false;
     lengthType physicalWidth_ = 0;
     lengthType physicalHeight_ = 0;
@@ -597,7 +650,9 @@ private:
     lengthType height_ = 0;
     lengthType depth_ = 0;
     uint32_t elapsed_ = 0;
-    uint8_t  fadeBy_ = 0;   // per-frame fade collected from effects (MIN), consumed once at frame start
+    uint8_t  fadeBy_ = 0;   // fade RATE collected from effects (MIN), consumed once at frame start
+    uint32_t fadeCarry_ = 0;               // sub-unit fade remainder, so a high frame rate does not over-fade
+    particles::FrameTime fadeTime_{60};    // elapsed-to-scale, the shared conversion
     uint32_t bufferGen_ = 0;   // bumped by every write to buffer_; see bufferGen()
     char statusBuf_[20] = {};  // "999×999×999" fits; owned (setStatus borrows the pointer)
     bool     hasLive_ = false;          // any enabled modifier animates per frame (gates the live pass)
@@ -614,7 +669,24 @@ private:
         return budget >= bytesNeeded && platform::maxAllocBlock() >= bytesNeeded;
     }
 
+    /// The channel count this layer's fixtures need: RGBW plus one byte per motion role, or 0 when
+    /// nothing in the rig moves. Read from the offsets Drivers derived from the light preset.
+    uint8_t requiredChannels() const {
+        const FixtureChannels& f = fixture_;
+        uint8_t top = 0;
+        for (uint8_t o : {f.pan, f.tilt, f.zoom, f.rotate, f.gobo})
+            if (o != FixtureChannels::kAbsent && o + 1 > top) top = static_cast<uint8_t>(o + 1);
+        return top;
+    }
+
     void allocateBuffer(nrOfLightsType count) {
+        // A light must be wide enough to hold the motion channels the rig's fixtures carry, or an
+        // effect's setPan() writes past the end of the light and is silently dropped. Widening
+        // HERE (cold path, before the allocation) rather than from Drivers is deliberate: changing
+        // the width after the buffer exists resizes it under whoever is holding it, which segfaults.
+        // A rig with no motion is untouched, so a plain LED strip keeps its 3 or 4 bytes per light.
+        if (const uint8_t need = requiredChannels(); need > channelsPerLight_) channelsPerLight_ = need;
+
         // Try to allocate buffer, halve dimensions if needed
         bool reduced = false;
         while (count > 0) {
@@ -657,6 +729,29 @@ inline lengthType EffectBase::width() const { return layer()->width(); }
 inline lengthType EffectBase::height() const { return layer()->height(); }
 inline lengthType EffectBase::depth() const { return layer()->depth(); }
 inline uint8_t EffectBase::channelsPerLight() const { return layer()->channelsPerLight(); }
+
+/// Write one non-color channel of light `index`. Silently does nothing when the fixture has no
+/// such channel (offset absent) or the write would fall outside the light, which is what makes a
+/// moving-head effect harmless on an LED strip. Never scaled by brightness: see architecture.md.
+inline void effectSetChannel(Layer* l, nrOfLightsType index, uint8_t offset, uint8_t value) {
+    if (offset == FixtureChannels::kAbsent || !l) return;
+    const uint8_t cpl = l->channelsPerLight();
+    if (offset >= cpl) return;
+    Buffer& b = l->buffer();
+    if (index >= b.count() || !b.data()) return;
+    b.data()[static_cast<size_t>(index) * cpl + offset] = value;
+}
+
+inline void EffectBase::setPan(nrOfLightsType index, uint8_t value) {
+    effectSetChannel(layer(), index, layer()->fixtureChannels().pan, value);
+}
+inline void EffectBase::setTilt(nrOfLightsType index, uint8_t value) {
+    effectSetChannel(layer(), index, layer()->fixtureChannels().tilt, value);
+}
+inline void EffectBase::setZoom(nrOfLightsType index, uint8_t value) {
+    effectSetChannel(layer(), index, layer()->fixtureChannels().zoom, value);
+}
+inline bool EffectBase::movable() const { return layer()->fixtureChannels().movable(); }
 inline nrOfLightsType EffectBase::nrOfLights() const { return layer()->buffer().count(); }
 inline uint32_t EffectBase::elapsed() const { return layer()->elapsed(); }
 inline draw::Canvas EffectBase::canvas() {

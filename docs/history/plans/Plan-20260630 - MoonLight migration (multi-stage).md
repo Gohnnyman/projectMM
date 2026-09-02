@@ -33,9 +33,62 @@ Two cross-cutting rules govern every stage, from [CLAUDE.md](../../../CLAUDE.md)
 
 No other hidden hard dependencies: our `EffectBase` + extrude (now 1D-along-Y, matching MoonLight) + `Buffer` already provide the render context.
 
+## Status — verified 2026-08-24
+
+Measured against the tree, not inferred from the stages below.
+
+| Stage | State |
+|---|---|
+| 1 — Foundations | **shipped.** `src/light/Palette.h` (16-entry CRGBPalette16 model, gradient stops from MoonLight's palettes.h), `src/light/draw.h`, the FastLED-named primitives, GoL re-port. |
+| 2 — Doc model | **not started.** `docs/moonmodules/` is still `core/` + `light/`; no `effects_<library>.md` pages, `check_specs.py` still on the per-module contract. |
+| 3+ — Effect batches | **partial.** 52 effects, 12 modifiers, 18 layouts registered (baseline was ~21 / 5 / 3). 44 MoonLive scripts, a delivery route this plan did not anticipate. |
+| 4 — Modifiers + layouts | **partial**, counted above. |
+| 5 — Moving heads / DMX | **not started**, and the largest remaining gap. No DMX-512 output driver exists; RS-485 is backlog-only ([backlog-light](../../backlog/backlog-light.md#rs-485-dmx-512-wired-output-future-the-physical-dmx-driver)) and the fixture model is marked long-term and **undesigned** ([backlog-light](../../backlog/backlog-light.md#fixture-model-moving-heads-beams-long-term)). Design precedes the driver here. |
+
+**Release positioning (product owner, 2026-08-24):** v4.0.0 ships as the scripting-and-desktop release and does **not** take the MoonLight name. Replacing MoonLight moves to v5.0.0, gated on four things beyond effect breadth: DMX light bars and moving heads (tested on hardware), the LightsControl module reaching maturity, MoonLive palettes, and a documentation pass.
+
+### MoonLive palettes — how MoonLight does it (research, 2026-08-24)
+
+Our MoonLive palette builtins (`setPaletteColor`, `paletteR/G/B`) all **read** the active palette. Nothing lets a script **define or animate** one. MoonLight has this, and the design is small enough to carry over nearly unchanged.
+
+The mechanism (`ModuleLightsControl.h`, `livescripts/Palettes/`): a palette live script is a file named **`P_*.sc`**. The module walks the filesystem for that prefix and adds each hit to the `palette` control's dropdown under a `LiveScript` category, alongside the built-in gradients. Selecting one instantiates it as a `LiveScriptNode` and calls `setup()`. Two builtins write the 16 entries:
+
+- `setPalEntry(i, r, g, b)`
+- `setPalEntryHSV(i, h, s, v)`
+
+`setup()` alone defines a **static** palette; a `loop()` makes it **animated**. Both shipped examples are tiny and are the whole contract:
+
+```c
+// P_Fire.sc — static, setup() only
+void setup() {
+  setPalEntry(0,   0,   0,   0);
+  setPalEntry(4, 128,   0,   0);
+  setPalEntry(8, 255,  64,   0);
+  setPalEntry(12,255, 200,  40);
+  setPalEntry(15,255, 255, 200);
+}
+
+// P_Shift.sc — animated, loop() shifts hue every frame
+uint8_t hueShift;
+void loop() {
+  for (uint8_t i = 0; i < 16; i++)
+    setPalEntryHSV(i, hueShift + i * 16, 255, 255);
+  hueShift++;
+}
+```
+
+**Why it transfers cheaply:** our `Palette` is already the same 16-entry model (`Palette::kEntries = 16`), and every effect already reads through `colorFromPalette(Palettes::active(), …)`. So a scripted palette needs no effect changes at all — 47 of our 52 effects pick it up for free. What is missing is the two write builtins, a script-kind convention (our `.mle`/`.mll` naming needs a palette equivalent), and the dropdown listing.
+
+**Open design questions**, to settle in the stage plan rather than now:
+- Where an animated palette script is ticked. MoonLight runs it as a node in the layer; our MoonLive scripts are modules, and a palette is global state owned by Drivers, so the tick site is not automatic.
+- Whether animating the active palette every frame is acceptable on the hot path, given the 256-entry expansion our `colorFromPalette` interpolates against.
+- Interaction with the eventual LightsControl hub ([backlog-mixed](../../backlog/backlog-mixed.md)), which is slated to absorb the palette control from Drivers.
+
+Checkout note: the MoonLight tree read for this research was at `65869217` (2026-05-26) and may lag upstream; re-fetch before implementing.
+
 ## Stages
 
-### Stage 1 — Foundations (palette + primitives + GoL re-port)  ← start here
+### Stage 1 — Foundations (palette + primitives + GoL re-port)
 
 The proving-ground stage: build the shared tools, prove them on one hard effect.
 
@@ -53,7 +106,7 @@ The proving-ground stage: build the shared tools, prove them on one hard effect.
 
 Stage-1 exit: palette + primitives compile (-Werror), are unit-tested (each primitive pinned: `beatsin8` range, `inoise8` determinism, `qadd8` saturation, `drawLine` endpoints in 1D/2D/3D), GoL re-port renders correctly + has a scenario, tags legend documented. **No doc explosion yet** (GoL keeps its existing single `.md`; the doc-model change is Stage 2).
 
-### Stage 2 — Doc model: per-library pages
+### Stage 2 — Doc model: per-library pages  ← next
 
 Before migrating dozens of effects (which would create dozens of `.md`s), switch the doc model. The naming + structure is fixed by the [folder-structure decision](../../adr/0015-library-is-a-tag-not-a-folder.md): **`src`/`assets`/`tests` are `domain/type` folders, flat — library is NOT a folder there**, only a `tags()` emoji; **docs** are the one place library splits, as a **page name** (type-first, underscore-joined, matching how you'd read the folder path): `effects_moonlight.md`, `effects_wled.md`, `effects_projectmm.md`, … (and `modifiers_<lib>.md` etc. only where a library has that type — most libraries are effects-only).
 

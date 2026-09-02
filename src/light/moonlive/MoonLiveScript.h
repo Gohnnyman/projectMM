@@ -22,6 +22,19 @@ namespace mm::moonlive {
 /// re-read the file each time. Same question, one answer.
 class MoonLiveScript {
 public:
+    /// The longest status this module reports, "<message> @<offset>" included.
+    ///
+    /// Sized for the longest diagnostic the compiler emits plus the suffix. At 48 the longer
+    /// messages truncated, and once the offset moved into this string a truncation also cost the
+    /// editor the position it marks the failing line from: the errors hardest to read were exactly
+    /// the ones that lost their explanation AND their highlight. Public because a unit test pins it
+    /// against the compiler's own messages, which is what stops the two drifting apart again.
+    static constexpr size_t kMaxStatus = 72;
+
+    /// Let a binding that owns a particle pool size it from the script's defineControls(). Null for
+    /// a binding with no particles, which is every binding but the effect today.
+    void setPoolSizer(PoolSizeFn fn, void* ctx) { sizePool_ = fn; poolCtx_ = ctx; }
+
     /// Re-read the file and recompile IFF its content hash moved.
     ///
     /// Returns true when a NEW program was installed. That return value is load-bearing rather than
@@ -68,7 +81,11 @@ public:
             // Declare the controls the script asks for, the way a compiled module does: by RUNNING
             // defineControls(). Before the binding's rebuildControls(), which turns the declared
             // list into UI cards.
-            runDefineControls(engine_);
+            runDefineControls(engine_, sizePool_, poolCtx_);
+            // What the script SAYS it is, read once per compile rather than per frame. Both are
+            // cold-path questions the host asks about a program, the same two a compiled module
+            // answers with `Dim dimensions()` and `const char* tags()`.
+            readIdentity();
             // A compiled script is not an error, but it has something to say: how big it is, and
             // the one budget it is closest to using up. The card's memory figure is the ALLOCATION,
             // word-rounded, which says nothing about the program itself.
@@ -76,7 +93,23 @@ public:
             owner.setStatus(statusBuf_, MoonModule::Severity::Status);
             compileFailed_ = false;
         } else {
-            owner.setStatus(err, MoonModule::Severity::Error);
+            // "message @<offset>": the message a user reads, and the position the editor marks.
+            // One string because status IS the channel a module reports through, and a second
+            // control for the number would be a field every non-scripted module carries for nothing.
+            // The suffix is machine-read, so it stays a fixed shape rather than a sentence.
+            if (engine_.hasErrorPos()) {
+                std::snprintf(statusBuf_, sizeof(statusBuf_), "%s @%u",
+                              err ? err : "compile failed",
+                              static_cast<unsigned>(engine_.errorPos()));
+                owner.setStatus(statusBuf_, MoonModule::Severity::Error);
+            } else {
+                owner.setStatus(err, MoonModule::Severity::Error);
+            }
+            // Forget what the LAST script said it was. A failed compile has already interned its
+            // strings into the same pool from offset zero, so a tags_ kept from the previous
+            // program now points at whatever those bytes became, and the card would show it.
+            dim_ = Dim::D2;
+            tags_ = nullptr;
             compileFailed_ = true;
             failedHash_ = fileHash;
             failedReadable_ = readable;   // distinguishes "this text is broken" from "no file"
@@ -88,7 +121,14 @@ public:
         // every prepare sweep, which is the cost this comparison exists to avoid.
         compiledHash_ = hash;
         haveCompiled_ = engine_.ok();   // a FAILED compile has no program, whatever the file hashed to
-        owner.setDynamicBytes(engine_.heapBytes());
+        // ADD the engine's heap to whatever else the owner holds, rather than assigning it: a
+        // binding may also own ScratchBuffers (a particle pool), and those report themselves
+        // through the buffer's own delta hook. Assigning here would erase them, which is the
+        // "don't mix addDynamicBytes with setDynamicBytes" contract MoonModule states. Tracking
+        // what this script last reported keeps it a delta rather than a running total.
+        const size_t nowBytes = engine_.heapBytes();
+        owner.setDynamicBytes(owner.dynamicBytes() - reportedBytes_ + nowBytes);
+        reportedBytes_ = nowBytes;
         return true;
     }
 
@@ -106,6 +146,32 @@ public:
         invalidate();
     }
 
+    /// Hand back everything this script reported to its owner. Called from a binding's release(),
+    /// The dimensionality the script declared, or D2 when it declared none.
+    ///
+    /// D2 is the fallback because it is what every script rendered as before scripts could say,
+    /// so a script that stays silent keeps behaving exactly as it did. An out-of-range answer is
+    /// treated the same way: a script cannot make the layer extrude along an axis that does not
+    /// exist.
+    Dim dimensions() const { return dim_; }
+
+    /// The emoji the script declared, or nullptr when it declared none (the binding then keeps its
+    /// own default). Points into the engine's string pool, which lives as long as the compiled
+    /// program, so it stays valid until the next compile replaces it.
+    const char* tags() const { return tags_; }
+
+    /// AFTER engine().free(): the exec block is gone, so the owner's card must stop counting it.
+    ///
+    /// One home for all three bindings rather than two lines each: MoonLive::free() does not touch
+    /// the owner's total, so a binding that forgets this leaves a disabled module reporting memory
+    /// it no longer holds. Subtracting rather than zeroing is what lets a binding own OTHER memory
+    /// too (the effect's particle pool), which a setDynamicBytes(0) would wrongly erase.
+    void releaseReporting(MoonModule& owner) {
+        const size_t held = owner.dynamicBytes();
+        owner.setDynamicBytes(held > reportedBytes_ ? held - reportedBytes_ : 0);
+        reportedBytes_ = 0;
+    }
+
     /// Forget what is compiled, so the next sync() rebuilds. For a module coming back from
     /// disabled, where the engine was released but the name was kept.
     void invalidate() {
@@ -120,27 +186,51 @@ public:
     /// Publish every control the compiled script declared into `controls`, bound by reference to
     /// the engine's live arena slot so a slider write lands where the running native code reads it.
     /// The ONE home for this: all three bindings (effect, layout, modifier) publish identically,
-    /// and the width dispatch below is the kind of reasoning that should be stated once.
+    /// and the type dispatch below is the kind of reasoning that should be stated once.
     void publishDeclaredControls(ControlList& controls) {
         uint8_t n = 0;
         const moonlive::DeclaredControl* decls = engine_.declaredControls(n);
         for (uint8_t i = 0; i < n; i++) {
             uint8_t* slot = engine_.controlSlot(decls[i].offset);
             if (!slot) continue;   // engine not compiled yet — controls appear after prepare
-            // Published at the width the script declared. A uint16_t member reaches the UI as a
-            // 16-bit control writing both its arena bytes; publishing it as a uint8 would drive
-            // only the low one and leave the high half holding whatever it had.
-            if (decls[i].type == moonlive::CtrlType::Uint16) {
-                // Safe to view as a uint16_t: the compiler aligns every wide member to an even
-                // arena offset (two backends cannot encode an odd halfword offset at all), and the
-                // arena base comes from platform::alloc, which is aligned for any fundamental type.
-                controls.addUint16(decls[i].name, *reinterpret_cast<uint16_t*>(slot),
-                                   decls[i].min, decls[i].max);
-            } else {
-                controls.addUint8(decls[i].name, *slot,
-                                  static_cast<uint8_t>(decls[i].min),
-                                  static_cast<uint8_t>(decls[i].max));
+            // Published as the widget the member's TYPE calls for. Every scalar occupies the same
+            // 4-byte slot, so this is no longer a width dispatch: it is the semantic one, and the
+            // storage underneath is identical in all three cases.
+            //
+            // Safe to view the slot as its type: the compiler aligns every member to a 4-byte
+            // arena offset, and the arena base comes from platform::alloc, which is aligned for
+            // any fundamental type.
+            //
+            // byte and bool point at the slot's LOW BYTE, which is only correct because the two
+            // are masked on store: the upper three bytes are always zero, so a 1-byte control
+            // reading and writing that byte sees the member's whole value. On a big-endian target
+            // the low byte would be at offset+3 — no supported target is one.
+            switch (decls[i].type) {
+                case moonlive::CtrlType::Bool:
+                    // NORMALIZED before the byte is ever read as a `bool`. A script's store
+                    // truncates rather than normalizing, so a bool member can legally hold 7
+                    // (`flag = 7;` is ordinary arithmetic to the language), and a C++ bool object
+                    // holding anything but 0 or 1 is undefined behaviour the moment it is read.
+                    // One write at publish time settles it; every later write comes through
+                    // applyControlValue's parseBool, which yields 0 or 1 by construction.
+                    *slot = (*slot != 0) ? 1 : 0;
+                    controls.addControl(decls[i].name, *reinterpret_cast<bool*>(slot));
+                    break;
+                case moonlive::CtrlType::Byte:
+                    controls.addControl(decls[i].name, *slot,
+                                      static_cast<uint8_t>(decls[i].min),
+                                      static_cast<uint8_t>(decls[i].max));
+                    break;
+                default:   // Int; Fixed and Str never reach here (the compiler refuses to bind one)
+                    controls.addControl(decls[i].name, *reinterpret_cast<int32_t*>(slot),
+                                      decls[i].min, decls[i].max);
+                    break;
             }
+            // The member's initializer (`byte bpm = 60;`) IS the control's default, and it is
+            // the only place one exists: /api/types probes a fresh module for defaults, and a
+            // scripted module's controls come from the script, so a probe with no script declares
+            // none. Carried on the control instead, which is what lights the UI's reset button.
+            controls.setDefault(controls.count() - 1, static_cast<int32_t>(decls[i].def));
         }
     }
 
@@ -149,10 +239,30 @@ public:
     bool ok() const { return engine_.ok(); }
 
 private:
+    /// Read what the script says it is, once per compile. Both questions a compiled module answers
+    /// with a member function, asked here the same way: by running the function the script wrote.
+    ///
+    /// A script that declares neither keeps the binding's own defaults, so every script written
+    /// before these existed behaves exactly as it did.
+    void readIdentity() {
+        dim_ = Dim::D2;
+        tags_ = nullptr;
+        // runValue answers only for a function whose DECLARED type matches, so a script that wrote
+        // `void dimensions()` gets the fallback rather than the return register's contents.
+        const uintptr_t d = engine_.runValue("dimensions", moonlive::RetType::Int, 2);
+        if (d >= 1 && d <= 3) dim_ = static_cast<Dim>(d);
+        const uintptr_t s = engine_.runValue("tags", moonlive::RetType::Str, 0);
+        if (s) tags_ = reinterpret_cast<const char*>(s);
+    }
+
     MoonLive engine_;
+    /// What the compiled script declared, cached: both are cold-path answers the host asks once,
+    /// and re-running a script function to answer them per frame would put a call on the tick path.
+    Dim         dim_  = Dim::D2;
+    const char* tags_ = nullptr;
     // Backing store for the status line: MoonModule::setStatus keeps a POINTER, so the text has to
     // outlive the call. The same module-owned pattern NetworkModule uses.
-    char     statusBuf_[48] = {};
+    char     statusBuf_[kMaxStatus] = {};
     // The script's FILE NAME, inside the shared script directory. Empty on a fresh card: it reports
     // "no script" until one is named, rather than every new module compiling the same default.
     char     name_[kMaxScriptName + 1] = "";
@@ -165,6 +275,10 @@ private:
     bool     failedReadable_ = false;   // was there a file at all when it failed?
     uint32_t failedHash_ = 0;
     char     failedScript_[kMaxScriptName + 1] = "";
+
+    size_t     reportedBytes_ = 0;   // what this script last added to the owner's total
+    PoolSizeFn sizePool_ = nullptr;
+    void*      poolCtx_  = nullptr;
 };
 
 }  // namespace mm::moonlive

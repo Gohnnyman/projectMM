@@ -41,13 +41,17 @@ class Scheduler;
 /// stream through a `JsonSink` — no fixed-buffer ceiling, so a tree of any size serializes correctly.
 ///
 /// **WebSocket:** `GET /ws` with `Upgrade: websocket` does the RFC 6455 handshake (SHA-1 +
-/// base64), up to `MAX_WS_CLIENTS` (8) concurrent clients. Binary frames take two paths, both without a frame-sized
-/// buffer: a synchronous stream (`beginBinaryFrame` / `pushBinaryFrame` / `endBinaryFrame`) for a
-/// forward-only producer, and a resumable buffered send (`sendBufferedFrame`) that drains a
-/// memory-adaptive chunk per client per `tick20ms` from a stable caller-owned buffer — so a large
-/// frame is delivered over wall-clock ticks without spinning any loop, yet stays one atomic WS
-/// message. One buffered send is in flight at a time (newest-wins backpressure: a new offer while
-/// one is active is dropped). Clients send nothing back over WS; mutations go through REST.
+/// base64). Two WS channels by traffic class, with separate caps on one lwIP socket budget:
+/// `/ws` carries the control plane (JSON state and patches, `MAX_WS_CLIENTS` = 8) and `/wsp` the
+/// lossy binary preview stream (`MAX_PREVIEW_CLIENTS` = 4). Every binary message takes ONE path:
+/// the resumable buffered send (`sendBufferedFrame`), draining a memory-adaptive chunk per client
+/// per `tick20ms` from a stable caller-owned buffer, so a large frame is delivered over
+/// wall-clock ticks without any loop ever waiting on a socket, yet stays one atomic WS message.
+/// One buffered send is in flight at a time per slot (newest-wins backpressure: a new offer while
+/// one is active is dropped); a client is closed only on a real error or FIN, never for slowness.
+/// Inbound `/wsp` payloads are unmasked and handed opaquely to the registered producer sink; the
+/// producer's vocabulary is `[0x51][stride][fps]` (standing frame request) and `[0x52][stride]`
+/// (one-shot table request). Other mutations go through REST.
 ///
 /// **State push — diff on the wire (the recognizable snapshot-then-patch model, cf. Redux /
 /// Firestore sync, JSON Patch RFC 6902):** the state a client needs is the full module tree
@@ -125,9 +129,6 @@ public:
     /// BinaryBroadcaster — stream one binary WS frame to every connected client, pushed
     /// incrementally so no frame-sized buffer is held. Producers (PreviewDriver) push the
     /// payload bytes; this prepends the WS header. Domain-neutral: no knowledge of the content.
-    void beginBinaryFrame(size_t totalLen) override;
-    void pushBinaryFrame(const uint8_t* data, size_t len) override;
-    bool endBinaryFrame() override;
 
     /// Resumable one-frame send from a stable caller-owned buffer (no copy), drained a bounded chunk
     /// per client per tick20ms (drainPreviewSend) so a large frame stays off this module's hot path;
@@ -135,25 +136,43 @@ public:
     bool sendBufferedFrame(const uint8_t* header, size_t headerLen,
                            const uint8_t* body, size_t bodyLen) override;
     bool bufferedSendIdle() const override { return !previewSend_.active; }
-    // Drop the in-flight buffered send. Frees the body first when the frame OWNS it (a state frame
-    // owns its ~30 KB JSON; a preview frame borrows its pixel buffer) — same rule as release(), so
-    // this is self-safe for any caller, not only ones that know a borrowed frame is in flight.
-    // A cancelled OWNED frame is a state resync that was still draining (a preview-geometry rebuild
-    // can cancel mid-drain); re-arm fullResyncPending_ so the resync is retried on the next push
-    // rather than silently lost — a client that already saw a partial state must not be left stale.
+    // Drop the in-flight buffered preview frame (a geometry rebuild is about to free its body).
+    // A client that already received part of the message has a desynced stream if we just stop -
+    // the next message's bytes get parsed as this one's payload, so the only honest exit for a
+    // mid-frame client is CLOSE (it reconnects and gets the fresh table). Untouched clients keep
+    // their connection.
     void cancelBufferedSend() override {
-        if (previewSend_.ownsBody) {
-            platform::free(const_cast<uint8_t*>(previewSend_.body));
-            previewSend_.body = nullptr;
-            previewSend_.ownsBody = false;
-            fullResyncPending_ = true;   // a state drain was interrupted → retry it
+        if (previewSend_.active) {
+            const size_t total = previewSend_.hdrLen + previewSend_.bodyLen;
+            for (int i = 0; i < MAX_PREVIEW_CLIENTS; i++)
+                if (previewClients_[i].valid() &&
+                    previewSend_.sent[i] > 0 && previewSend_.sent[i] < total) {
+                    previewClients_[i].close();
+                    // Every close site notifies the producer, or the dead slot's standing
+                    // request would keep steering the shared stream until the slot is reused.
+                    if (clientSink_) clientSink_->onClientGone(i);
+                }
         }
         previewSend_.active = false;
     }
-    /// Bumped on each new WS client (see handleWebSocketUpgrade). PreviewDriver watches it to
-    /// re-stream its coordinate table the moment a fresh page connects, so a refresh shows the
-    /// preview immediately.
-    uint32_t clientGeneration() const override { return wsClientGeneration_; }
+
+
+    int subscriberCount() const override {
+        int n = 0;
+        for (const auto& pc : previewClients_) if (pc.valid()) n++;
+        return n;
+    }
+
+    /// Register the producer that receives this channel's inbound client messages (opaque bytes).
+    void setClientMessageSink(ClientMessageSink* sink) override { clientSink_ = sink; }
+
+    /// Parse ONE masked client data frame (text/binary, payload up to 8 bytes) from a /wsp read,
+    /// unmasking the payload into `out`. Returns the payload length (>=0) or -1 when the buffer
+    /// holds no complete parseable frame; `consumed` receives the whole frame's byte length so a
+    /// caller can walk a read that coalesced several frames (0 when nothing was consumed). The
+    /// payload's MEANING belongs to the registered sink; this only does RFC 6455 framing.
+    /// Pure and static so the byte handling is unit-testable without a socket.
+    static int parsePreviewUplink(const uint8_t* buf, int n, uint8_t out[8], int* consumed);
 
     // The cross-core sender lease (see BinaryBroadcaster). Guards previewSend_ + the wsClients_ socket
     // writes against this module's own core-0 drain / state push while an offloaded PreviewDriver
@@ -234,6 +253,17 @@ public:
     /// mkdir/delete). Public + static so it's unit-testable without a socket fixture.
     static bool parseFilePath(const char* query, char* out, size_t cap);
 
+    /// Case-insensitive substring search for a header name in a raw request (RFC 9112: field
+    /// names are case-insensitive: browsers send "Content-Length:", node's undici sends
+    /// "content-length:"; the case-sensitive strstr it replaces silently read a length of 0 and
+    /// committed EMPTY files with a 200). Public + static so it's unit-testable without a socket.
+    static const char* findHeaderCI(const char* hay, const char* needle);
+    /// What a replaced module should be called: requested name, else a custom one, else null
+    /// ("keep the fresh module's own default"). Static and public so the rule is unit-testable:
+    /// it decides what a card is labeled after a swap, which is not something to discover in the UI.
+    static const char* replacementName(const char* requested, const char* current,
+                                       const char* oldDefault);
+
     /// Apply a WLED `{on?, bri?}` state body onto the Drivers `on` / `brightness` controls through
     /// the shared apply-core (`on` and `bri` independent — off preserves the level). The transport-
     /// free entry the HTTP `POST /json/state`, the inbound-`/ws` path, and the unit tests all drive.
@@ -249,6 +279,11 @@ public:
     /// Install the schema-changed hook WITHOUT opening the TCP listener (setup() does both). A unit
     /// test proving the hook fires the resync needs no socket, and binding a port under test is flaky
     /// (a busy port fails the open). release() unwires it the same way as after a real setup().
+    /// The port the live server actually serves on (bound at open, 0 when none is up), NOT the
+    /// mutable `port` control: the one true source for any module that must print its own URL
+    /// (HlsDriver's `url` control).
+    static uint16_t servedPort() { return instance_ ? instance_->boundPort_ : 0; }
+
     void installSchemaHookForTest() {
         instance_ = this;
         MoonModule::setSchemaChangedHook(&HttpServerModule::onSchemaChanged);
@@ -267,18 +302,23 @@ private:
     // is just an fd + a small cursor, so the array stays tiny.
     static constexpr int MAX_WS_CLIENTS = 8;
     platform::TcpConnection wsClients_[MAX_WS_CLIENTS];
-    uint32_t wsClientGeneration_ = 0;   // ++ on each new WS client; see clientGeneration()
 
-    // begin/push/endBinaryFrame stream a binary WS frame straight to every client with NO
-    // frame-sized buffer: the header goes out on begin, each pushed slice is fanned to all
-    // clients, and end reports whether every client got the whole frame. A producer (PreviewDriver
-    // streaming the producer buffer / placeLights) holds no copy. wsFrameAllSent_ tracks the
-    // current frame's all-sent result across the push calls.
-    bool wsFrameAllSent_ = true;
-    // Max TOTAL WouldBlock spins for one span in sendAllOrClose before a stuck client is closed.
-    // Used by the begin/push/end stream (coord table + downsampled color frame); the full-res
-    // color frame goes through the resumable sendBufferedFrame instead, which never spins.
-    static constexpr int kDirectSendSpins = 2000;
+    // `/wsp`, the SECOND channel, for lossy binary streams (the preview). Its own connections, so a
+    // 10 KB preview frame can never delay a state push: they are separate TCP connections, which is
+    // the standard remedy for the head-of-line blocking one socket carrying both traffic classes
+    // produces. `/ws` stays the control plane (JSON state + patches).
+    //
+    // Its cap is DELIBERATELY lower than MAX_WS_CLIENTS. Both arrays draw on one
+    // CONFIG_LWIP_MAX_SOCKETS budget of 16, shared with HTTP, mDNS, Art-Net, MQTT and OTA, a
+    // preview socket per WS client would consume the whole budget at the cap and starve the rest.
+    // 4 is sized from the observed use: one browser almost always, two often enough that it must
+    // just work, more only occasionally, while REST callers (Home Assistant, scripts) never open
+    // a preview socket at all. A refused upgrade costs that client only its preview; its /ws
+    // control connection is untouched.
+    static constexpr int MAX_PREVIEW_CLIENTS = 4;
+    platform::TcpConnection previewClients_[MAX_PREVIEW_CLIENTS];
+
+    ClientMessageSink* clientSink_ = nullptr;   // the producer's inbound-message sink (PreviewDriver)
 
     // Resumable full-frame send (BinaryBroadcaster::sendBufferedFrame). One WS message = a copied
     // header + a pointer into the caller's STABLE body buffer (the PreviewDriver producer buffer),
@@ -288,42 +328,59 @@ private:
     // the in-flight one kept). The caller calls cancelBufferedSend() before freeing/reallocating the
     // body (a geometry rebuild), so a cursor never reads freed memory.
     struct PreviewSend {
-        uint8_t hdr[16] = {};                 // WS + app header, copied (caller's may be a stack local)
+        // 24, not 16: a payload over 64 KB takes the 10-byte WS length form, and the preview app
+        // headers add up to 11 more. 16 silently refused every uncapped-size frame.
+        uint8_t hdr[24] = {};                 // WS + app header, copied (caller's may be a stack local)
         size_t hdrLen = 0;
         const uint8_t* body = nullptr;        // the frame body — see ownsBody for lifetime
         size_t bodyLen = 0;
-        size_t sent[MAX_WS_CLIENTS] = {};     // per-client cursor over [hdr ++ body]; a slow client lags
+        size_t sent[MAX_PREVIEW_CLIENTS] = {};  // per-PREVIEW-client cursor over [hdr ++ body]; a slow client lags
         bool active = false;
-        // Body lifetime: the preview path BORROWS body (PreviewDriver keeps its pixel buffer alive),
-        // so ownsBody is false and the drain frees nothing. The state push builds a fresh JSON buffer
-        // per second that must outlive the chunked drain, so it hands OWNERSHIP (ownsBody true) and the
-        // drain frees it on completion / on release. One slot serves both large-frame producers.
-        bool ownsBody = false;
+        // body is BORROWED: PreviewDriver keeps its pixel buffer alive; prepare() cancels before a
+        // resize frees it. The state push has its own slot (StateSend) since the channel split -
+        // sharing this one routed the full state to /wsp and starved every /ws client of its resync.
     };
     PreviewSend previewSend_;
-    // Guards the WS sender — previewSend_ AND the wsClients_ socket writes — because it has TWO
-    // producers on TWO cores once the multicore split engages: core 0 (this module's tick20ms drain,
-    // the 1 Hz state push, connect/disconnect) and core 1 (the offloaded PreviewDriver's tick, which
-    // arms a frame and directly streams the coordinate table). Without it, core 1's partial-write
-    // stream interleaves with core 0's drain inside one WS frame (corrupt framing) or observes a torn
-    // previewSend_. try_lock only, never a blocking lock: whichever core loses the race SKIPS its
-    // slot (the hot-path rule, CLAUDE.md § Hot path). Preview already has that skip path — it is the
-    // same back-off its adaptive frame rate takes when the link is busy — so a lost race costs one
-    // preview frame, never a stalled render or encode.
+    // Resumable full-state send to the CONTROL channel (`/ws`): same cursor-per-client shape as
+    // PreviewSend, but it drains to wsClients_ and always OWNS its JSON body (built per resync,
+    // freed on drain-complete / release). Each WS message a client receives stays atomic: while
+    // this is active, the patch and WLED pushes to /ws are skipped so nothing interleaves.
+    struct StateSend {
+        uint8_t hdr[16] = {};
+        size_t hdrLen = 0;
+        const uint8_t* body = nullptr;
+        size_t bodyLen = 0;
+        size_t sent[MAX_WS_CLIENTS] = {};
+        bool active = false;
+    };
+    StateSend stateSend_;
+    // Guards the PREVIEW channel's shared state: previewSend_ and the previewClients_ sockets,
+    // which have producers on TWO cores once the multicore split engages. Core 1 (the offloaded
+    // PreviewDriver's tick) arms frames and directly streams the coordinate table; core 0 touches
+    // the same sockets and bookkeeping in drainPreviewSend, the uplink reap and /wsp admission.
+    // Without it, a partial-write stream on one core interleaves with the other inside one WS
+    // frame (corrupt framing), a close lands under a concurrent write on the same fd, or one side
+    // observes a torn previewSend_. The CONTROL channel (wsClients_, stateSend_) is deliberately
+    // outside its scope: every /ws writer runs on core 0. try_lock only, never a blocking lock:
+    // whichever core loses the race SKIPS its slot (the hot-path rule, CLAUDE.md § Hot path); a
+    // lost race costs one preview frame or defers a reap/admission one tick, never a stalled
+    // render or encode.
     mutable TryLock wsLock_;
-    // Queue a TEXT frame (opcode 0x81) whose body this module OWNS, through the same resumable slot the
-    // preview binary send uses — so the (20 KB) state JSON drains in chunks on tick20ms instead of a
-    // blocking write on the render tick. Takes ownership of `ownedBody` (freed on drain-complete /
-    // release). Returns false (and frees ownedBody) if a send is already in flight — drop-new, the next
-    // second's state is fresher. Internal (not the BinaryBroadcaster interface, which stays binary).
+    // Queue a TEXT frame (opcode 0x81) whose body this module OWNS into the STATE slot, the
+    // (20 KB) full-state JSON drains in chunks to /ws clients on tick20ms instead of a blocking
+    // write on the render tick. Takes ownership of `ownedBody` (freed on drain-complete /
+    // release). Returns false (and frees ownedBody) if a state send is already in flight -
+    // drop-new, the next second's state is fresher.
     bool startBufferedTextSend(char* ownedBody, size_t bodyLen);
     // Drain one memory-adaptive chunk per client of the in-flight resumable send; mark it done when
     // every live client has the whole frame, freeing an owned body then. Called from tick20ms. No-op
     // when none is active.
     void drainPreviewSend();
+    // Same, for the in-flight full-state send to /ws clients. Called from tick20ms.
+    void drainStateSend();
     // Largest chunk to push per client per drain tick, derived from free contiguous memory so a
     // tight board takes small bites (bounded tick occupancy) and a roomy board drains fast.
-    size_t previewChunkBytes() const;
+    size_t drainChunkBytes() const;
 
     // All JSON API responses (/api/state, /api/types, /api/system) and the WS
     // state push stream through a JsonSink — no shared fixed-size buffer.
@@ -368,6 +425,7 @@ private:
     // FilesystemModule::noteDirty singleton pattern — set in setup(), cleared in release().
     static void onSchemaChanged();
     static inline HttpServerModule* instance_ = nullptr;
+    uint16_t boundPort_ = 0;   // the port open() actually bound; 0 when no server is live
 
     // XOR key for Password-control obfuscation in /api/state. NOT a secret — the
     // same value lives in src/ui/app.js (PW_XOR_KEY). This only stops the
@@ -388,6 +446,11 @@ private:
     // at the mount) and size-capped. A file body isn't a control value, so these are their own
     // endpoints rather than /api/control.
     void serveFileContents(platform::TcpConnection& conn, const char* query);
+    /// The one streamed-file sender both file routes share: fs path, MIME, extra header lines.
+    void streamFsFile(platform::TcpConnection& conn, const char* path, const char* mime,
+                      const char* extraHeaders);
+    /// One HLS artifact (playlist / segment) from /.hls/, video MIME + no-cache; flat names only.
+    void serveHlsFile(platform::TcpConnection& conn, const char* name);
     // Streamed atomic upload: `initialBody`/`initialLen` are the body bytes already in the request
     // buffer; `contentLen` is the declared total. Pulls any remainder off the socket → fsWriteStream,
     // so an upload of any size streams to the file (rejected if it exceeds kUploadMax or free space).
@@ -454,6 +517,16 @@ private:
     void handleDeleteModule(platform::TcpConnection& conn, const char* moduleName);
     void handleReplaceModule(platform::TcpConnection& conn, const char* moduleName, const char* body);
     void serveTypes(platform::TcpConnection& conn);
+public:
+    /// Delete `path`, and everything under it when it is a directory. Public so the File Manager's
+    /// tests exercise the real recursion rather than a copy of it; the HTTP layer is what a user
+    /// reaches it through. `depth` bounds the walk (see the definition).
+    static bool removeRecursive(const char* path, uint8_t depth = 0);
+private:
+    // GET /api/scripts → the MoonLive script catalog: which factory scripts exist, per role, plus
+    // the repo tag to fetch them from. The UI needs it to offer a script the device does not hold
+    // yet; the catalog is compiled in, so this costs no filesystem access.
+    void serveScriptCatalog(platform::TcpConnection& conn);
 
     /// GET /api/modules/<name> — one module's JSON, byte-identical to its entry in /api/state
     /// (children included). `name` is the raw path segment and may be percent-encoded, since a
@@ -475,9 +548,11 @@ private:
     MoonModule* listMutationModule_ = nullptr;  // module whose list a CRUD op resolved to (for markDirty)
     void afterListMutation();
     void handleReboot(platform::TcpConnection& conn);
-    /// OTA: `POST /api/firmware/url` body=`{"url":"..."}`. Body parsed; URL handed
-    /// to platform::http_fetch_to_ota which spawns a task and returns. Caller
-    /// gets 202 immediately; progress streams via FirmwareUpdateModule controls.
+    void handleBootMoonBase(platform::TcpConnection& conn);
+    /// OTA: `POST /api/firmware/url` body=`{"url":"..."}`. On a MoonBase device the URL is
+    /// staged in NVS and the device reboots into MoonBase, which installs it unattended
+    /// (202 + {"moonbase":true}). Otherwise the URL goes to platform::http_fetch_to_ota,
+    /// which spawns a task and returns: 202 immediately, progress via FirmwareUpdateModule.
     void handleFirmwareUrl(platform::TcpConnection& conn, const char* body);
     void handleFirmwareUpload(platform::TcpConnection& conn, const char* initialBody,
                               size_t initialLen, size_t contentLen);   // POST /api/firmware/upload
@@ -485,13 +560,13 @@ private:
     // -----------------------------------------------------------------------
     // WebSocket
     // -----------------------------------------------------------------------
-    void handleWebSocketUpgrade(platform::TcpConnection& conn, const char* req);
+    /// `previewChannel` = the request arrived on `/wsp`, so the connection joins previewClients_
+    /// (the lossy binary channel) instead of the control plane's wsClients_.
+    void handleWebSocketUpgrade(platform::TcpConnection& conn, const char* req,
+                                bool previewChannel = false);
     void pushStateToWebSockets();
     void pushWledStateToWebSockets();   // WLED-app {state,info} frame on /ws (see impl)
     static bool sendWsTextFrame(platform::TcpConnection& conn, const char* data, int len);
-    // Write the whole span to one client via repeated non-blocking writeSome; close it + return
-    // false if it can't all go (a stuck/too-slow client). The push primitive behind begin/push/end.
-    static bool sendAllOrClose(platform::TcpConnection& ws, const uint8_t* data, size_t len);
 };
 
 } // namespace mm

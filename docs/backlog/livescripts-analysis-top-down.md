@@ -142,7 +142,7 @@ The same shape gives `MoonLiveLayout` (role `Layout`, emits coordinates), `MoonL
 
 So the binding overrides the same hooks any compiled module does; the only difference is that each one delegates to the compiled `MoonLive` instead of hand-written C++.
 
-**Crucially, all of these lifecycle methods live in the *binding* (`MoonLiveEffect`, `src/light/moonlive/`), not in the engine.** `onBuildControls`/`onBuildState`/`onUpdate`/`teardown`, `EffectBase`, `ModuleRole`, `controls_` — every projectMM type — sit on the binding side of the §3.9 seam. The engine (`MoonLive`, `src/core/moonlive/`) sees none of them; the binding reaches it only through a **neutral public API**: `compile(source)`, `run()`, `free()`, `declaredControls()` → a plain list of `{name, type, min, max, default}` structs the engine owns, and `allocForSize(w, h, d)` → plain ints. The binding *translates* — it reads the engine's neutral `declaredControls()` and calls projectMM's `controls_.addUint8(...)`; it maps a grid resize to `allocForSize`. **The engine never takes a `ControlList`, a `Buffer`, or any projectMM type** — so the rich MoonModule lifecycle is entirely a property of the binding, and the engine stays the domain-neutral core §3.9 describes. (This is the seam working as intended: a different host writes its own binding with its own lifecycle against the same neutral engine API.)
+**Crucially, all of these lifecycle methods live in the *binding* (`MoonLiveEffect`, `src/light/moonlive/`), not in the engine.** `onBuildControls`/`onBuildState`/`onUpdate`/`teardown`, `EffectBase`, `ModuleRole`, `controls_` — every projectMM type — sit on the binding side of the §3.9 seam. The engine (`MoonLive`, `src/core/moonlive/`) sees none of them; the binding reaches it only through a **neutral public API**: `compile(source)`, `run()`, `free()`, `declaredControls()` → a plain list of `{name, type, min, max, default}` structs the engine owns, and `allocForSize(w, h, d)` → plain ints. The binding *translates* — it reads the engine's neutral `declaredControls()` and calls projectMM's `controls_.addControl(...)`; it maps a grid resize to `allocForSize`. **The engine never takes a `ControlList`, a `Buffer`, or any projectMM type** — so the rich MoonModule lifecycle is entirely a property of the binding, and the engine stays the domain-neutral core §3.9 describes. (This is the seam working as intended: a different host writes its own binding with its own lifecycle against the same neutral engine API.)
 
 ### 3.4 The host binding — script ⇄ MoonModule (decision 7, the value-add)
 
@@ -160,11 +160,11 @@ The binding is generated *around* the script body — the script never writes `#
 A control is a near-plain top-level variable with a range annotation; the engine derives the `MoonModule` control + UI + persistence:
 
 ```c
-uint8_t speed = 50;      // @control 0..99      → controls_.addUint8("speed", …, 0, 99)
+byte speed = 50;         // @control 0..99      → controls_.addControl("speed", …, 0, 99)
 uint8_t interval = 128;  // @control 1..254
 ```
 
-The front-end collects annotated top-level vars during parsing and the engine exposes them as a neutral `declaredControls()` list (`{name, type, min, max, default}` — no projectMM type); the *binding* reads that list and calls the normal `controls_.add(...)` the rest of projectMM uses (§3.3) — so a scripted control is indistinguishable from a compiled one in the UI, persistence, and the live-reconfig sweep, while the engine stays projectMM-agnostic. Lighter than today's explicit `onBuildControls` + `addUint8` (the engine writes that for you), and copy-paste-friendly: the `uint8_t speed = 50;` line is *already* how RipplesEffect.h declares it. (Exact annotation syntax — `@control`, a trailing comment convention, or a `slider(0,99)` initializer — is settled in the spike; the principle is "declare the var, get the control".)
+The front-end collects annotated top-level vars during parsing and the engine exposes them as a neutral `declaredControls()` list (`{name, type, min, max, default}` — no projectMM type); the *binding* reads that list and calls the normal `controls_.add(...)` the rest of projectMM uses (§3.3) — so a scripted control is indistinguishable from a compiled one in the UI, persistence, and the live-reconfig sweep, while the engine stays projectMM-agnostic. Lighter than today's explicit `onBuildControls` + `addControl` (the engine writes that for you), and copy-paste-friendly: the `uint8_t speed = 50;` line is *already* how RipplesEffect.h declares it. (Exact annotation syntax — `@control`, a trailing comment convention, or a `slider(0,99)` initializer — is settled in the spike; the principle is "declare the var, get the control".)
 
 ### 3.6 Live reconfig + tick-atomic hot-swap (decision: sync)
 
@@ -239,7 +239,7 @@ A C-subset, not full C++, not JS. The type model is exactly what real effects us
 ### 5.2 What's dropped vs lightened (the pragmatic simplifications)
 
 - **Dropped** (file ceremony, zero value in a script): `#pragma once`, `#include`, `namespace`. The engine supplies the surrounding module.
-- **Lightened** (the C++ object model): no `class : public EffectBase`, no `override`, no `controls_.addUint8(...)` host-object dance. The engine synthesizes the `MoonLiveEffect` wrapper (§3.3) around the script body; the role/`dimensions`/controls come from light annotations (§3.5) and the script's `loop()`.
+- **Lightened** (the C++ object model): no `class : public EffectBase`, no `override`, no `controls_.addControl(...)` host-object dance. The engine synthesizes the `MoonLiveEffect` wrapper (§3.3) around the script body; the role/`dimensions`/controls come from light annotations (§3.5) and the script's `loop()`.
 - **Kept verbatim** (the part you iterate on): types, the `loop()` body, all the math, `static_cast`, `RGB c = hsvToRgb(...)`, the loops.
 
 **Why not full C++:** supporting `class`/inheritance/`override`/host-method-binding means implementing a C++ object model (vtables, member-reference binding) in the engine — build cost up front, and the object machinery is the very "object graph in the hot path" the architecture forbids. The wrapper has no runtime value; let the engine write it.
@@ -259,8 +259,8 @@ class RipplesEffect : public EffectBase {              // ← dropped (engine su
     uint8_t speed = 50;                                 // ← kept (becomes a control)
     uint8_t interval = 128;
     void onBuildControls() override {                   // ← dropped (derived from the vars)
-        controls_.addUint8("speed", speed, 0, 99);
-        controls_.addUint8("interval", interval, 1, 254);
+        controls_.addControl("speed", speed, 0, 99);
+        controls_.addControl("interval", interval, 1, 254);
     }
     void loop() override {                              // ← KEPT VERBATIM (the body)
         uint8_t* buf = buffer(); … std::memset(buf, 0, nrOfLights()*cpl);
@@ -423,7 +423,7 @@ This design stands on work others did first; per *Industry standards, our own co
 - **ARTI-FX / ARTI — ewowi.** The author of this analysis also wrote ARTI-FX (the interpreted-effects runtime in WLED MoonModules, on the PEG-grammar ARTI interpreter). It is the prior projectMM-family answer to the same problem and the source of hard-won lessons carried here: the `renderFrame`/`renderLed` per-frame/per-LED split, the host-binding shape (`arti_external_function` / `arti_*_variable`), and — by being the AST-walking, double-everything design — the concrete demonstration of *why* the hot path wants native or VM execution rather than tree-walking. ARTI-FX proved the live-scripting *idea* works end-to-end in this ecosystem (load a script, run it, edit live); this redesign trades its interpreter for native speed, but inherits its product shape and its lessons.
 - **MoonLight — MoonModules.** The [effects tutorial](https://moonmodules.org/MoonLight/moonlight/effects-tutorial/) is the staging spine of §9, and its `setRGB`/`setRGBXY`/`setRGBXYZ` + `addControl` surface is the model for the host binding (§3.4–3.5).
 
-Credits also live in the bottom-up's *Prior art & credits* and the digest [history/hpwit-ESPLiveScript.md](../history/hpwit-ESPLiveScript.md).
+Credits also live in the bottom-up's *Prior art & credits* and the digest [friend-repos/hpwit-ESPLiveScript.md](../friend-repos/hpwit-ESPLiveScript.md).
 
 ### Public credit — to lift into `docs/moonmodules/core/MoonLive.md` when the module spec is written
 

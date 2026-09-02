@@ -54,11 +54,29 @@ public:
     /// recorded, which is why a script may define as many functions as it likes for the cost of one
     /// allocation.
     CtrlFn entry(const char* name) const {
+        const uint8_t* p = entryCode(name);
+        return p ? reinterpret_cast<CtrlFn>(reinterpret_cast<uintptr_t>(p)) : nullptr;
+    }
+
+    /// What a named entry point declared it returns, or Void when the script has no such function.
+    /// Void is the honest answer for both: a function that is absent gives back nothing either.
+    RetType retTypeOf(const char* name) const {
+        if (!name) return RetType::Void;
+        for (uint8_t i = 0; i < entryCount_; i++)
+            if (std::strcmp(entryNames_[i], name) == 0) return entries_[i].ret;
+        return RetType::Void;
+    }
+
+    /// The ADDRESS of a named entry point, with no signature attached. Emitted machine code has no
+    /// C++ type, and it is called through two different ones (CtrlFn for an effect, ValueFn for a
+    /// function that answers), so the lookup hands back the address and each caller reads it as
+    /// what it is calling. One home for the name search and the bounds check.
+    const uint8_t* entryCode(const char* name) const {
         if (!code_ || !name) return nullptr;
         for (uint8_t i = 0; i < entryCount_; i++) {
             if (std::strcmp(entryNames_[i], name) != 0) continue;
             if (entries_[i].offset >= codeLen_) return nullptr;   // a corrupt map is not callable
-            return reinterpret_cast<CtrlFn>(static_cast<uint8_t*>(code_) + entries_[i].offset);
+            return static_cast<const uint8_t*>(code_) + entries_[i].offset;
         }
         return nullptr;
     }
@@ -68,6 +86,15 @@ public:
     const char* entryName(uint8_t i) const { return i < entryCount_ ? entryNames_[i] : nullptr; }
     uint8_t entryCount() const { return entryCount_; }
     const char* error() const { return error_; }
+
+    /// WHERE the last compile failed: a character offset into the source, 0 when it did not.
+    /// The editor turns it into a line to mark; the parser already knows it, and throwing it
+    /// away meant a user was told what was wrong but never where.
+    uint16_t errorPos() const { return errorPos_; }
+    /// Whether errorPos() means anything. Zero is a VALID offset (a failure on the first character),
+    /// so the value cannot also stand for "no position": only a parse failure has one, while the
+    /// later failures (no control memory, codegen refused) do not.
+    bool     hasErrorPos() const { return hasErrorPos_; }
 
     // The hot path: run the compiled routine over the host's buffer. `t` is the host's
     // elapsed() ms; a static routine ignores it, an animated one derives its color from
@@ -102,20 +129,68 @@ public:
         else if (anim_) anim_(buf, nLights, cpl, t);          // hand-encoded animated fill
     }
 
+    /// Run the entry point called `name` and return its answer, or `fallback` when the script did
+    /// not define it.
+    ///
+    /// The COLD path: a script declares what it is (`dimensions()`, `tags()`) once at load, not per
+    /// frame. It takes the same arguments run() does because it is the same emitted block with the
+    /// same prologue: a function that ignores them simply never reads them, and one that reads a
+    /// control still needs the arena.
+    ///
+    /// `fallback` rather than 0 for a missing function, because "the script did not say" and "the
+    /// script said 0" are different answers and only the caller knows what the first one means.
+    uintptr_t runValue(const char* name, RetType want, uintptr_t fallback = 0,
+                       uint8_t* buf = nullptr, uint32_t nLights = 0, uint8_t cpl = 0,
+                       uint32_t t = 0) const {
+        if (!name || !ctrl_ || !ctrlArena_) return fallback;
+        // The DECLARED type decides whether there is a value to read. Calling a `void` function
+        // through ValueFn reads whatever sat in the return register, which is a plausible number
+        // rather than an obvious failure: exactly what the type declaration exists to prevent.
+        if (retTypeOf(name) != want) return fallback;
+        // Through the CODE ADDRESS, not through CtrlFn: casting between two function-pointer types
+        // that differ in return type is what -Wcast-function-type-mismatch exists to catch, and the
+        // compiler is right to ask. The emitted block has no C++ type at all, so the honest route is
+        // to take its address and read it as the signature the call actually uses. Same bytes, same
+        // frame, same arena: only the return register is looked at.
+        const uint8_t* code = entryCode(name);
+        if (!code) return fallback;
+        ValueFn f = reinterpret_cast<ValueFn>(reinterpret_cast<uintptr_t>(code));
+        ctrlArena_[kDepthSlot] = 0;      // same fresh-depth contract as run()
+        return f(buf, nLights, cpl, t, ctrlArena_);
+    }
+
+    /// A member's 4-byte slot, little-endian, which is the layout every backend's 32-bit load and
+    /// store already uses. One home for it: the engine, the seeding pass and the control binding
+    /// all reach a slot through these two rather than each spelling the byte order themselves.
+    int32_t readSlot(uint8_t offset) const {
+        if (!ctrlArena_ || offset + 4 > kArenaBytes) return 0;
+        return int32_t(uint32_t(ctrlArena_[offset]) | (uint32_t(ctrlArena_[offset + 1]) << 8) |
+                       (uint32_t(ctrlArena_[offset + 2]) << 16) |
+                       (uint32_t(ctrlArena_[offset + 3]) << 24));
+    }
+    void writeSlot(uint8_t offset, int32_t v) {
+        if (!ctrlArena_ || offset + 4 > kArenaBytes) return;
+        const uint32_t u = uint32_t(v);
+        ctrlArena_[offset]     = uint8_t(u & 0xff);
+        ctrlArena_[offset + 1] = uint8_t((u >> 8) & 0xff);
+        ctrlArena_[offset + 2] = uint8_t((u >> 16) & 0xff);
+        ctrlArena_[offset + 3] = uint8_t((u >> 24) & 0xff);
+    }
+
     /// Append a control the running `defineControls()` declared. The binding installs a sink that
-    /// lands here, so the control list is built by the script CALLING addUint8, exactly as a
+    /// lands here, so the control list is built by the script CALLING addControl, exactly as a
     /// compiled module's list is built by its defineControls() running.
     ///
     /// `name` must outlive the engine: it points into the string pool this engine owns, which is
     /// what the compiler interned it into.
-    void addDeclaredControl(const char* name, uint8_t offset, uint16_t lo, uint16_t hi,
-                            CtrlType type = CtrlType::Uint8) {
+    void addDeclaredControl(const char* name, uint8_t offset, int32_t lo, int32_t hi,
+                            CtrlType type = CtrlType::Int) {
         if (controlCount_ >= kMaxCtrls || !name || offset >= kArenaBytes) return;
         if (lo > hi) return;
-        // A wide control owns TWO arena bytes, so the second one has to exist. The compiler already
+        // A scalar owns a whole 4-byte SLOT, so all four bytes have to exist. The compiler already
         // aligned and bounded the member; this is the engine refusing to publish a control whose
-        // high byte would sit outside the arena.
-        if (ctrlWidth(type) == 2 && offset + 1 >= kArenaBytes) return;
+        // slot would run past the arena.
+        if (offset + ctrlSlotBytes(type) > kArenaBytes) return;
         // Two controls on one member would give the UI two cards writing the same byte, each
         // overwriting the other, and two labels the same persistence key.
         for (uint8_t i = 0; i < controlCount_; i++)
@@ -129,19 +204,14 @@ public:
         // record. Clamping only the record would leave the out-of-range value driving the effect
         // while the UI showed a slider that could not reach it. This is the one place that knows
         // both the range and the live byte at the same moment.
-        // Read at the DECLARED width, little-endian to match every backend's halfword load, so a
-        // wide control's default is the member's whole value rather than its low byte.
-        uint16_t def = lo;
-        if (ctrlArena_) {
-            def = ctrlArena_[offset];
-            if (ctrlWidth(type) == 2) def |= static_cast<uint16_t>(ctrlArena_[offset + 1]) << 8;
-        }
+        // Read the whole SLOT, little-endian to match every backend's 32-bit load, so the default
+        // is the member's entire value rather than its low byte. Signed: a fixed or int member
+        // legitimately holds a negative one.
+        int32_t def = lo;
+        if (ctrlArena_) def = readSlot(offset);
         if (def < lo) def = lo;
         else if (def > hi) def = hi;
-        if (ctrlArena_) {
-            ctrlArena_[offset] = static_cast<uint8_t>(def & 0xff);
-            if (ctrlWidth(type) == 2) ctrlArena_[offset + 1] = static_cast<uint8_t>(def >> 8);
-        }
+        if (ctrlArena_) writeSlot(offset, def);
         controls_[controlCount_] = {name, lo, hi, def, 0, type, offset};
         // nameLen is what the binding reports; measured here rather than passed, so a caller
         // cannot disagree with the string it handed over.
@@ -270,7 +340,7 @@ private:
     // declared default. 2 bytes per row, 16 across the table.
     struct SeededMember {
         uint8_t  offset = 0;
-        CtrlType type   = CtrlType::Uint8;
+        CtrlType type   = CtrlType::Int;
         uint8_t  count  = 1;
         char     name[kSeedNameLen] = {};
     };
@@ -294,6 +364,8 @@ private:
     AnimFn  anim_ = nullptr;     // animated fill (4-arg, reads t), or nullptr
     CtrlFn  ctrl_ = nullptr;     // front-end-compiled routine (5-arg, reads the controls arena)
     const char* error_ = "";
+    uint16_t    errorPos_ = 0;
+    bool        hasErrorPos_ = false;
 
     // The functions the script defined, with their offsets into `code_`, and their names owned here
     // for the same reason the control names are: a CompileResult's `name` points into source text

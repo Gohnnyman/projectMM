@@ -58,6 +58,17 @@ void Scheduler::setup() {
         modules_[i]->applyState();
     }
 
+    // Phase 5: re-apply saved VALUES, now that every module has prepared. A schema that depends on
+    // prepare()'s own WORK does not exist during phase 2's load: a MoonLive script's declared
+    // controls appear only once the script has compiled, which prepare() just did, so their saved
+    // values had no control to land on and prepare() seeded them from the script's defaults. Values
+    // only, and once: after boot the live values are the truth, and re-reading the file would undo
+    // the edit that triggered any later prepare.
+    if (!valuesReapplied_) {
+        valuesReapplied_ = true;
+        if (reapplyValuesHook_) reapplyValuesHook_(this);
+    }
+
     lastLoop20ms_ = platform::millis();
     lastLoop1s_ = platform::millis();
     lastTimingUpdate_ = platform::millis();
@@ -84,6 +95,10 @@ void Scheduler::tick() MM_NONBLOCKING {
     // gate, that report is the only thing that will say so.
     if (prepareRequested_.exchange(false, std::memory_order_relaxed)) {
         prepareTree();
+        // The runtime twin of boot's phase 5 (see requestValuesReapply): same tick as the
+        // prepare, so the just-restored file cannot be rewritten by a dirty save in between.
+        if (valuesReapplyRequested_.exchange(false, std::memory_order_relaxed) && reapplyValuesHook_)
+            reapplyValuesHook_(this);
     }
 
     // Scheduler gates loop callbacks by `enabled()` — disabled modules don't tick.
@@ -271,6 +286,64 @@ Scheduler::SetControlResult Scheduler::setControl(const char* moduleName,
         return SetControlResult::Ok;
     }
     return SetControlResult::ControlNotFound;
+}
+
+bool Scheduler::getControl(const char* moduleName, const char* controlName,
+                           uint8_t& out) const {
+    if (!moduleName || !controlName) return false;
+    // const_cast: firstByName walks the same tree and only reads it, but the traversal helpers are
+    // non-const because every other caller mutates what they find. Reading is the exception here.
+    MoonModule* target = const_cast<Scheduler*>(this)->firstByName(moduleName);
+    if (!target) return false;
+
+    // The module-level pseudo-control, matching setControl's own special case: a surface switch
+    // bound to "Module.enabled" must read back what it writes.
+    if (std::strcmp(controlName, "enabled") == 0) {
+        out = target->enabled() ? 255 : 0;
+        return true;
+    }
+
+    auto& ctrls = target->controls();
+    for (uint8_t i = 0; i < ctrls.count(); i++) {
+        const auto& c = ctrls[i];
+        if (std::strcmp(c.name, controlName) != 0) continue;
+        if (!c.ptr) return false;
+        switch (c.type) {
+            // A Bool reads back 0 or 255 so a switch and a fader answer in the same units: the
+            // surface then has one number to compare and one to send, whatever it is bound to.
+            case ControlType::Bool:
+                out = *static_cast<const bool*>(c.ptr) ? 255 : 0;
+                return true;
+            case ControlType::Uint8:
+            case ControlType::Select:
+            case ControlType::Palette:
+                out = *static_cast<const uint8_t*>(c.ptr);
+                return true;
+            // Clamped rather than truncated: a surface has 8 bits of travel, and a wider control
+            // reading back its low byte would jump the fader to an unrelated position.
+            case ControlType::Uint16: {
+                const uint16_t v = *static_cast<const uint16_t*>(c.ptr);
+                out = static_cast<uint8_t>(v > 255 ? 255 : v);
+                return true;
+            }
+            case ControlType::Int16: {
+                const int16_t v = *static_cast<const int16_t*>(c.ptr);
+                out = static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
+                return true;
+            }
+            case ControlType::Int32:
+            case ControlType::Pin: {
+                const int32_t v = *static_cast<const int32_t*>(c.ptr);
+                out = static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
+                return true;
+            }
+            // Everything else has no byte reading: text, a file path, a password, a button. A
+            // surface cannot show one, so say so rather than inventing a number.
+            default:
+                return false;
+        }
+    }
+    return false;
 }
 
 void Scheduler::walkAndEnsureUnique(MoonModule* mod) {

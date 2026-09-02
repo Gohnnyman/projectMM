@@ -23,6 +23,8 @@ namespace mm {
 /// Layout of a single ring of evenly-spaced LEDs.
 class RingLayout : public LayoutBase {
 public:
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D2; }
     // MoonLight defaults and ranges, preserved verbatim.
     uint8_t  nrOfLEDs   = 24;    // 1..255
     uint16_t angleFirst = 0;     // 0..359 — angle of the first LED (0 = top)
@@ -31,11 +33,11 @@ public:
     uint8_t  scale      = 1;     // 1..10 — spacing multiplier out from the centre
 
     void defineControls() override {
-        controls_.addUint8("nrOfLEDs",    nrOfLEDs,   1, 255);
-        controls_.addUint16("angleFirst", angleFirst, 0, 359);
-        controls_.addUint16("rotation",   rotation,   0, 360);
-        controls_.addBool("clockwise",    clockwise);
-        controls_.addUint8("scale",       scale,      1, 10);
+        controls_.addControl("nrOfLEDs",    nrOfLEDs,   1, 255);
+        controls_.addControl("angleFirst", angleFirst, 0, 359);
+        controls_.addControl("rotation",   rotation,   0, 360);
+        controls_.addControl("clockwise",    clockwise);
+        controls_.addControl("scale",       scale,      1, 10);
     }
 
     nrOfLightsType lightCount() const override {

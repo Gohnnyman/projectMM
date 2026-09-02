@@ -10,7 +10,7 @@ A scripted effect names a **script file** under `/moonlive/`; the UI loads, edit
 
 ```
 class RandomPixelEffect {
-  tick() {
+  void tick() {
     setRGB(random16(256), 0, 0, 255);   // a random pixel, blue
     setRGB(5, random16(256), 0, 0);     // pixel 5, a random red
   }
@@ -21,7 +21,17 @@ Inside a function the grammar is a sequence of **statements** — a function cal
 
 **A script's role is its extension**: `.mle` an effect, `.mll` a [layout](MoonLiveLayout.md), `.mlm` a [modifier](MoonLiveModifier.md). That is what a card filters its picker on, so an effect card offers effects. The engine is role-blind and runs whichever moment the binding asks for; the extension decides what is OFFERED, not what runs.
 
-**The shipped scripts are the reference**: [`moonlive/`](https://github.com/MoonModules/projectMM/tree/main/moonlive) in the repository holds every script a device ships with, one file per effect, layout and modifier. Read them to see what the language looks like in practice: they are the same text the card edits, and a device keeps its own copies under `/moonlive/`.
+**The shipped scripts are the reference**: [`moonlive/`](https://github.com/MoonModules/projectMM/tree/main/moonlive) in the repository holds every script the library ships, one file per effect, layout and modifier. Read them to see what the language looks like in practice: they are the same text the card edits.
+
+**The library, and how it reaches a device.** A device carries the NAMES of every library script and the text of none, so the picker offers the whole library while flash holds a few KB rather than a few hundred. A name the device does not have yet is marked with a cloud; picking it downloads that one script and it becomes an ordinary local file. A device therefore holds the handful it actually uses, which is the normal case: one layout describes the rig it is wired to and the rest are meaningless on it.
+
+The browser does the downloading, not the device: it reads the script from GitHub and posts it to the device's own file endpoint. So the device needs no internet at any point, and a rig on an isolated network is served by whatever machine is looking at its UI. The script comes from the firmware's own release tag, so it always matches the engine that will run it.
+
+**Two directories, and why.** A downloaded library script lands in `/.moonlive`, hidden the way `/.config` is; your own scripts live in `/moonlive`. The editor only ever saves to `/moonlive`, so **editing a library script forks it**: your copy is a second file of the same name, and it wins. Deleting the fork restores the original, which is why the delete button reads **revert** (`↺`) there. That is a local operation, so getting a shipped script back never needs a network.
+
+**Sending one back.** A script you wrote or changed carries a **`↗`** button beside the editor. It opens GitHub with the script already filled in: a new script as a new file under `moonlive/`, a changed library script as an edit of the one that is there. GitHub forks the repository on your behalf when you propose it, so contributing needs a GitHub account and nothing else. The button appears only for a file in your own directory, since an untouched library copy is byte-identical to what is already upstream.
+
+**`GET /api/scripts`** is what the picker reads: the library's names per role (`effects`, `layouts`, `modifiers`), the tag they are fetched from, and the directory a download lands in. The catalog is compiled into the firmware, generated from `moonlive/` at build time by `catalog_scripts.cmake`, so a script added to the repository reaches devices with no other change.
 
 The **class name is not the file name**. `plasma.mle` may declare `class PlasmaEffect`; the file is what the engine loads, the class is what diagnostics and the module status report. Renaming either leaves the other alone, the same way a C translation unit and the functions inside it are independent.
 
@@ -29,27 +39,27 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 
 ## Controls
 
-- `script`: the script this module runs, picked from `/moonlive/` and **edited on the card itself**. A fresh module has none: it reports `no script — set the script name` and renders nothing, rather than every new module compiling the same default.
+- `script`: the script this module runs, picked from the library or your own files and **edited on the card itself**. A fresh module has none: it reports `no script — set the script name` and renders nothing, rather than every new module compiling the same default.
 
     Type in the box and the script compiles when you click away, press Ctrl/Cmd+S, or press Save; a dot on the Save button marks unsaved work. A valid script swaps in on the next tick. A failed compile frees the old code, shows the diagnostic in the module status, and renders dark until it is fixed, so a typo costs a message rather than a reboot. Fixing it in place is enough: nothing has to be renamed.
 
     The card also creates and deletes scripts (delete asks twice), and the same editor is what the File Manager opens from a file row. The control is [`filepath`](../core/ui.md#control-types), which is generic: the module says only where its files are and which extension they carry.
-- **Scripted controls**: a script declares members, then says which of them the UI shows by calling `addUint8` (or `addUint16`) inside a `defineControls()`, the same call a compiled module makes. Each becomes a real MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
+- **Scripted controls**: a script declares members, then says which of them the UI shows by calling `addControl` inside a `defineControls()`, the same call a compiled module makes. Each becomes a real MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
 
   ```c
   class SpeedyEffect {
-    uint8_t  speed = 50;
-    uint8_t  hue   = 128;
-    uint16_t dwell = 900;       // a value a byte cannot hold
-    uint8_t  phase = 0;         // a member, not a control: the UI never shows it
+    byte speed = 50;
+    byte hue   = 128;
+    int  dwell = 900;           // a value a byte cannot hold
+    byte phase = 0;             // a member, not a control: the UI never shows it
 
-    defineControls() {
-      addUint8("speed", speed, 0, 99);
-      addUint8("hue", hue, 0, 255);
-      addUint16("dwell", dwell, 0, 1000);
+    void defineControls() {
+      addControl("speed", speed, 0, 99);
+      addControl("hue", hue, 0, 255);
+      addControl("dwell", dwell, 0, 1000);
     }
 
-    tick() { setRGB(speed, hue, phase, 255); }
+    void tick() { setRGB(speed, hue, phase, 255); }
   }
   ```
 
@@ -58,13 +68,40 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
   UI shows one is the separate question `defineControls()` answers. A member no control names is
   simply the script's own state.
 
-  The compiled form is the same call with a receiver: `controls_.addUint8("speed", speed, 1, 255)`
-  (and `controls_.addUint16("dwell", dwell, 0, 1000)` for a wide member, which reaches the UI as a
-  16-bit control carrying its full range and value, not a byte). The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addUint8("speed", speed, base, base * 4 + 5)` is valid.
+  The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addControl("speed", speed, base, base * 4 + 5)` is valid.
 
   `defineControls()` runs once after a successful compile, the way the Scheduler runs a compiled module's. Editing a control's slider does **not** recompile: the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Saving the script and re-naming it recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops.
 
-  **The call has to match the member's width**: `addUint8` binds a `uint8_t` and `addUint16` a `uint16_t`. A mismatch is a compile error naming the call to use instead, because the alternative is silent: `addUint8` on a wide member would drive only its low byte, leaving the high half holding whatever it had, so the number the script reads is one nobody chose. A control binds a single member, never an array.
+  **One call for every type**: which widget appears follows from how the member was declared, so a call and a declaration can no longer disagree. A `byte` becomes a 0..255 slider, a `bool` a toggle, an `int` a full-range number. A range the member's type cannot hold is refused rather than truncated (`addControl("n", n, 0, 900)` on a `byte`), because a slider whose top silently wraps is worse than one that never appears. A control binds a single member, never an array, and a `fixed` or `string` member is refused: neither has a widget yet.
+
+### The five types
+
+A type says what a value **means**; the storage is the compiler's business. Every **scalar** occupies the same 4-byte slot whatever its type, and only **arrays** pack by element — which is where the width still earns its keep, since a `byte[]` heat map costs a quarter of an `int[]` one and the classic ESP32 has no PSRAM to absorb the difference.
+
+| Type | Range | For |
+|---|---|---|
+| `int` | −2,147,483,648 … 2,147,483,647 | counts, indices, milliseconds, anything whole |
+| `byte` | 0 … 255 | a channel, a palette index, a heat cell — the LED's own range |
+| `bool` | `true` / `false` | a flag |
+| `fixed` | −32,768.0 … 32,767.99998, in steps of 1/65,536 | coordinates and anything fractional |
+| `string` | one of the script's own literals | a name passed to a builtin |
+
+An initializer is range-checked against its type, so `byte n = 300;` is a compile error naming the member rather than a silent 44. Arrays are declared `byte heat[16];` and start at zero; a `string` array is refused, since there is no runtime string to fill one with.
+
+### `fixed`: fractional arithmetic without a float
+
+`fixed` is Q16.16 — the number is stored scaled by 65,536, which is how every coordinate in the engine has always worked, now spelled the way a script reads it. There is no float anywhere: fixed-point is bit-identical on all four backends, which is also what makes an effect reproducible.
+
+```c
+fixed ux = 0.0;
+ux = uvX(x, width, height);     // uvX and uvY hand back a fixed coordinate
+ux = ux * 2 + 0.5;              // ordinary arithmetic, decimals written as decimals
+setRGB(0, toInt(ux * 100), 0, 255);
+```
+
+**Mixing a whole number and a fixed value is a compile error** naming the conversion to write, because at run time the two are the same 32 bits and a silent mix is a number 65,536 times off with nothing reporting it. `toFixed(v)` and `toInt(v)` convert explicitly, each one instruction.
+
+The exception is an integer **literal**, which adopts the fixed side at a meet point and converts at compile time: `ux * 2`, `if (ux < 0)`, and `ux = 5;` all read naturally and cost nothing at run time. A *variable* never adopts — its scaling is not visible where it is used, so it keeps the explicit rule.
 
 ### System variables — what the engine hands a script
 
@@ -84,6 +121,15 @@ The coordinate is `xPos`/`yPos`/`zPos` rather than `x`/`y`/`z` so that **`x` and
 
 Reserving is what makes the guarantee hold: without it a declaration would silently shadow the value the engine handed in, and the script would disagree with its layer with no error anywhere.
 
+The grid is TOLD to a script; its own dimensionality is DECLARED. `int dimensions() { return 1; }`
+says the script paints a line, `2` an x/y picture, `3` the whole volume, and the Layer extrudes
+whatever it writes across the axes it did not iterate: a D1 script's x=0 column is fanned across the
+width, a D2 script's z=0 slice copied through the depth. That is what lets one script fill a 16x16
+panel and a 1x60x10 tube rig without knowing either shape. A script that declares nothing is treated
+as 2, which is what every script rendered as before it could say. `string tags()` alongside it gives
+the emoji the card and the picker show. Both are read once per compile; the full rules are in
+[the language reference](https://github.com/MoonModules/projectMM/blob/main/moonlive/README.md).
+
 ### The vocabulary — what a script can call
 
 Registered by the light domain, not built into the compiler (the core owns only the grammar and a generic call/inline mechanism), so the list is one edit in `MoonLiveBuiltins_light.h`.
@@ -101,11 +147,40 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `beatsin(bpm, t, high)` | a sine `0..high` at `bpm` |
 | `noise(x, y, z)` | `0..255` value noise at that point — the field behind fire, clouds and plasma |
 | `scale(value, n)` | a `0..65535` value onto `0..n-1` — lands a wave on an axis |
-| `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centred at 32768 |
+| `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centered at 32768 |
 | `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
 | `print(v)` | log a value and return it ([what it costs](writing-scripts.md#debugging-print)) |
+| `a / b`, `a % b` | divide and remainder. Both are host calls: cheap on a cold path, deliberate per light. Dividing by zero **saturates** toward the numerator's sign rather than faulting, so no script needs a zero-check of its own; the remainder is 0 |
+| `toFixed(v)`, `toInt(v)` | convert between a whole number and a `fixed` one, each a single instruction |
+| `smoothstep(e0, e1, v)` | a soft `0..65535` ramp between two edges, the anti-aliasing primitive |
+| `uvX(x, w, h)`, `uvY(y, w, h)` | shader space, as a `fixed` value: centered on 0.0, normalized on the short side so a circle stays round on a wide panel |
+| `smin(a, b, k)` | the smooth minimum of two distances, so shapes melt into one surface rather than overlapping |
+| `fade(amt)` | dim every light toward black, FastLED's `fadeToBlackBy`. The trail primitive |
+| `polarA(dx, dy)`, `polarR(dx, dy)` | angle and distance from a center, for a radial effect |
+| `escape(cx, cy, jx, jy, iters)` | the Mandelbrot/Julia escape count, `0..255`, `0` inside the set. Zero seed = Mandelbrot; the four coordinates are `fixed`, so uv output flows straight in. The one loop a script cannot write: it squares signed values in 64 bits |
+| `setPaletteColor(x, y, index, bri)` | one light from the ACTIVE palette, in one call |
+| `paletteR(i, bri)`, `paletteG`, `paletteB` | one palette channel, when a script needs the value rather than a pixel |
+| `pool(n)` | size this script's particle pool, from `defineControls()`. Returns what it got |
+| `emit(x, y, angle, speed, n, life, hue)` | throw `n` particles from a point |
+| `gravity(g)`, `drag(k)` | the two forces |
+| `step()` | move every particle, and drop what left the grid |
+| `age(rate)` | count down life; a dead particle frees its slot |
+| `bounce(e)` | reflect off the grid walls, keeping `e`/256 of the speed |
+| `collide(radius)` | particles notice each other and pile up. NOT linear in pool size |
+| `render(maxLife)` | draw the pool from the active palette |
 
-`sin`/`cos` return an **unsigned** wave, so a coordinate comes from scaling by the full span and not by half of it: `scale(cos(a), radius * 2 + 1)` sweeps a whole axis, where scaling by `radius` alone would only ever reach one side of centre.
+The particle calls are each ONE PASS OVER THE WHOLE POOL, once per frame rather than once per
+light, so a 300-spark script costs far less than a shader touching every pixel (`fountain.mle`
+measures 1.1 ms on an 80x48 against `metal.mle`'s 59.6 ms). Size the pool from `defineControls()`:
+`pool()` anywhere else reports the live count and allocates nothing, which is what keeps a malloc
+off the render path. `collide()` is the exception to the cost model, being an N-body check: a few
+dozen particles pile convincingly, a few hundred cost more than the rest of the frame. The
+vocabulary follows the [WLED Particle System](https://github.com/wled/WLED) by Damian Schneider
+([@DedeHai](https://github.com/DedeHai)); the fixed-point kernel and this binding are ours.
+
+`sin`/`cos` return an **unsigned** wave centered on 32768, so a coordinate comes from scaling by the full span and not by half of it: `scale(cos(a), radius * 2 + 1)` sweeps a whole axis, where scaling by `radius` alone would only ever reach one side of center. Subtract 32768 for a signed wave when you want one.
+
+`uvX`/`uvY` are the other way round, and the difference is deliberate: they return a **signed** coordinate with the center of the grid at 0 and the left half negative. A coordinate has an origin, so a script uses the number it is given rather than re-centering it; a wave does not, which is why the two conventions differ. They return a **`fixed`** value (Q16.16), so a script holds one in a `fixed` member and does ordinary arithmetic on it; `escape()` takes four of them, which is what lets uv output flow straight into a fractal.
 
 `noise(x, y, z)` takes **16.8 fixed-point** coordinates: the high byte selects the noise cell and the low byte interpolates within it. So `x * zoom` sets how much of the field the fixture spans, and the time axis must be **monotonic** — feeding it a `beat()` sawtooth walks one cell and then snaps back to its start, which reads as a hiccup once per beat. Scaling `t` keeps walking into new cells. 2D is the same call with `z` held constant.
 
@@ -124,7 +199,7 @@ Two rules a script author meets:
 
 ### Wire contract — control declaration
 
-The controls are **declared by the script** (one per `addUint8` call in its `defineControls()`), then **surfaced in `/api/state`**, the device JSON view the integrator consumes, as regular `uint8` controls alongside `script`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line script round-trips through `/api/file`.
+The controls are **declared by the script** (one per `addControl` call in its `defineControls()`), then **surfaced in `/api/state`**, the device JSON view the integrator consumes, as regular controls alongside `script` (a `byte` member as uint8, a `bool` as bool, an `int` as int32). So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line script round-trips through `/api/file`.
 
 ## What the card tells you: size, memory, and how close to a wall
 
@@ -156,7 +231,7 @@ A script can exhaust ten limits, but only five are ones an author can act on:
 | limit | ceiling | what to do |
 |---|---|---|
 | code size | 16 KB | split or simplify the script |
-| controls | 8 | remove an `addUint8` |
+| controls | 8 | remove an `addControl` |
 | members | 8 | shares the budget with controls |
 | functions | 8 | merge two helpers |
 | string bytes | 128 | shorter control labels |

@@ -245,6 +245,15 @@ private:
                             addLaneClaim(static_cast<uint8_t>(pins[p]), m->name(), p);
                 }
             }
+            // Pins the module holds that are not controls: silicon-fixed pads (an EMAC's data bus).
+            // Asked of the module rather than listed here, because which pads and whether they are
+            // held at all are the module's own facts. Gated on `active` like every other claim, so a
+            // disabled interface frees them.
+            if (active) {
+                MoonModule::FixedPin fixed[16];
+                const uint8_t n = m->fixedPins(fixed, 16);
+                for (uint8_t i = 0; i < n; i++) addPinClaim(fixed[i].gpio, m->name(), fixed[i].role);
+            }
             // Always recurse children regardless of this module's flag — a child is judged on its own
             // enabled state, not its parent's.
             for (uint8_t i = 0; i < m->childCount(); i++)

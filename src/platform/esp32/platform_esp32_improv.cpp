@@ -190,10 +190,9 @@ static void improvSendWifiNetworks() {
     // native ESP32/S3 the driver is up by the time a user provisions. On the P4 the
     // radio lives on the C6 and only comes up after the esp_hosted prelude in
     // ensureWifiInit() (triggered by wifiApInit / wifiStaInit). If a scan is ever
-    // requested on a P4 that has not yet initialised WiFi, this returns an error
-    // cleanly (no crash) rather than scanning a cold link — acceptable for now;
-    // bench-verify whether a P4 provisioned from cold needs the link brought up
-    // here first, and if so route through the public wifiAp/wifiSta path.
+    // requested on a P4 that has not initialised WiFi, this returns an error
+    // cleanly (no crash) rather than scanning a cold link. The cold-provision
+    // bench check is filed in docs/backlog/backlog-core.md § Improv-as-REST.
     wifi_scan_config_t scan_cfg = {};
     if (esp_wifi_scan_start(&scan_cfg, true /*block*/) != ESP_OK) {
         improvSendError(improv::ERROR_UNKNOWN);

@@ -5,7 +5,7 @@
 
 // Wrap a bare statement body in the class and entry point a MoonLive script needs.
 //
-// A script is a class: `class T { tick() { … } }`. Nearly every test here is about ONE behavior
+// A script is a class: `class T { void tick() { … } }`. Nearly every test here is about ONE behavior
 // inside that body (a loop counter surviving a call, a control keeping its value, a golden byte
 // sequence), and spelling the enclosing class out at every call site would bury the assertion under
 // four lines of identical ceremony. This puts the ceremony in one place so a test reads as what it
@@ -43,7 +43,26 @@ inline const char* mmScriptAs(const char* entry, const char* body) {
     const char* declEnd = body;
     while (true) {
         while (*p == ' ' || *p == '\t' || *p == '\n') p++;
-        if (std::strncmp(p, "uint8_t", 7) != 0) break;
+        // Every member type the language has, not just one: a test declaring `fixed d = -1.0;`
+        // means a member exactly as `byte speed = 7;` does, and recognising only some of them
+        // silently drops the declaration into the function body, where it is not a member at all.
+        //
+        // The keyword must be followed by a NON-IDENTIFIER character, or a body opening with a
+        // variable called `intensity` would be read as an `int` declaration and swallowed.
+        auto atType = [](const char* q) {
+            static const struct { const char* kw; size_t len; } kTypes[] = {
+                {"int", 3}, {"byte", 4}, {"bool", 4}, {"fixed", 5}, {"string", 6}};
+            for (const auto& t : kTypes) {
+                if (std::strncmp(q, t.kw, t.len) == 0) {
+                    const char c = q[t.len];
+                    const bool identChar = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                                           (c >= '0' && c <= '9') || c == '_';
+                    if (!identChar) return true;
+                }
+            }
+            return false;
+        };
+        if (!atType(p)) break;
         const char* semi = std::strchr(p, ';');
         if (!semi) break;
         const char* eol = std::strchr(semi, '\n');
@@ -58,10 +77,10 @@ inline const char* mmScriptAs(const char* entry, const char* body) {
 
     if (declEnd != body) {
         const int declLen = static_cast<int>(declEnd - body);
-        std::snprintf(wrapped, kSlotBytes, "class T {\n%.*s\n  %s() {\n%s\n  }\n}\n",
+        std::snprintf(wrapped, kSlotBytes, "class T {\n%.*s\n  void %s() {\n%s\n  }\n}\n",
                       declLen, body, entry, declEnd);
     } else {
-        std::snprintf(wrapped, kSlotBytes, "class T {\n  %s() {\n%s\n  }\n}\n", entry, body);
+        std::snprintf(wrapped, kSlotBytes, "class T {\n  void %s() {\n%s\n  }\n}\n", entry, body);
     }
     return wrapped;
 }

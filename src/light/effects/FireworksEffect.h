@@ -27,13 +27,13 @@ namespace mm {
 // Cost: one pass per force over a pool the effect sizes itself, plus a sub-pixel splat per live
 // spark. At the default 120 particles that is well inside the budget on any target.
 //
-// Prior art: the WLED Particle System's firework family (@Brandon502 / WildCats08) for the effect
+// Prior art: the WLED Particle System's firework family (Damian Schneider, @DedeHai) for the effect
 // vocabulary; the physics is the kernel's.
 // @card FireworksEffect.png
 /// Effect: shells that rise, stall, and burst into falling sparks.
 class FireworksEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫✨"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t launchRate = 30;    // how often a new shell goes up
@@ -45,13 +45,13 @@ public:
     uint8_t fade = 25;          // trail length (the Layer's decay, not the pool's)
 
     void defineControls() override {
-        controls_.addUint8("launchRate", launchRate, 1, 255);
-        controls_.addUint8("launchSpeed", launchSpeed, 10, 255);
-        controls_.addUint8("gravity", gravity, 1, 128);
-        controls_.addUint8("sparks", sparks, 1, 64);
-        controls_.addUint8("sparkLife", sparkLife, 10, 255);
-        controls_.addUint8("drag", drag, 0, 64);
-        controls_.addUint8("fade", fade, 1, 255);
+        controls_.addControl("launchRate", launchRate, 1, 255);
+        controls_.addControl("launchSpeed", launchSpeed, 10, 255);
+        controls_.addControl("gravity", gravity, 1, 128);
+        controls_.addControl("sparks", sparks, 1, 64);
+        controls_.addControl("sparkLife", sparkLife, 10, 255);
+        controls_.addControl("drag", drag, 0, 64);
+        controls_.addControl("fade", fade, 1, 255);
     }
 
     void prepare() override {
@@ -90,12 +90,9 @@ public:
         if (scale > 0) {
             frame_++;
             simulate(gy, wSub, hSub, scale);
-            // The trail decays per unit TIME too, scaled the same way, or its length would be a
-            // property of the framerate: erased before the eye sees it on a fast device, smeared on
-            // a slow one.
-            uint32_t f = (static_cast<uint32_t>(fade) * scale) / particles::FrameTime::kOne;
-            if (f == 0) f = 1;
-            layer()->fadeToBlackBy(static_cast<uint8_t>(f > 255 ? 255 : f));
+            // The trail decays per unit TIME, which the Layer now does for every fading effect:
+            // fadeToBlackBy takes a RATE and the Layer scales it by the elapsed frame.
+            layer()->fadeToBlackBy(fade);
         }
 
         pool_.render(cv, sparkLife);

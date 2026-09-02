@@ -11,6 +11,17 @@ Approved feature plans, one per feature, the **design-intent** record: what we s
 
 `Plan-YYYYMMDD - <title>.md`, ISO-8601 date first so the directory sorts chronologically. The outcome rides in the filename as a trailing parenthetical: `… (shipped).md` once the design lands, `… (attempted, abandoned).md` if it was tried and dropped. An unmarked plan is still in flight.
 
+## Where a plan lives
+
+**Top level: in flight.** A plan being worked on, or one whose outcome nobody has judged yet.
+
+**[archive/](archive/): finished.** Once the outcome is in the filename, the plan moves here. It is
+still the design-intent record and still worth reading, but it is no longer a thing to act on, and
+89 finished plans at the top level buried the handful that are.
+
+The move is the only difference: nothing is rewritten, and a shipped plan keeps whatever
+parenthetical it earned.
+
 ## Rules
 
 **Kept, not pruned.** Plans are the permanent design-intent record, they are not deleted when a lesson is absorbed (that is the lessons/ADR rule, not this one). The one exception: a multi-phase effort's per-phase plans may be consolidated into a single `… (shipped).md` once the whole effort lands, provided the consolidated record preserves each phase's intent and outcome.

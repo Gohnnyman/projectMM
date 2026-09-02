@@ -51,7 +51,8 @@ struct Rig {
         fm.defineControls();
         fm.setup();
     }
-    // Restore the DEFAULT root (fsSetRoot("") → "build"), not ".", so a later test in the same
+    // Restore the DEFAULT root (whatever platform.h's fsSetRoot contract resolves "" to; under
+    // ctest that is the pinned MM_DATA_DIR), not ".", so a later test in the same
     // binary starts from the same baseline this Rig assumed, never a leaked "." repo-root.
     // Teardown must never propagate: this Rig is destroyed while the stack unwinds from a failed
     // CHECK, and a throw there terminates the process, losing the very failure being reported.
@@ -213,4 +214,62 @@ TEST_CASE("FileManager: fsWriteStream discards on abort (incomplete upload)") {
     CHECK(!platform::fsWriteStream("/partial.bin", src, &a));   // aborted → false
     CHECK(platform::fsSize("/partial.bin") < 0);                // no file committed
     CHECK(!std::filesystem::exists(std::string(r.root) + "/partial.bin.tmp"));   // temp discarded
+}
+
+TEST_CASE("HTTP header names match case-insensitively, so any client's Content-Length counts") {
+    // The bench-found wipe: node's undici sends `content-length:` lowercase; the case-sensitive
+    // strstr read "no length declared", and an upload committed an EMPTY file with a 200, a
+    // silent config wipe. RFC 9112 makes field names case-insensitive; the finder must too.
+    const char* req = "POST /api/file?path=/x HTTP/1.1\r\ncontent-length: 831\r\n\r\nbody";
+    const char* hit = mm::HttpServerModule::findHeaderCI(req, "Content-Length:");
+    REQUIRE(hit != nullptr);
+    CHECK(std::strncmp(hit, "content-length:", 15) == 0);
+
+    // Canonical and mixed casings resolve to the same header.
+    CHECK(mm::HttpServerModule::findHeaderCI("Content-Length: 5\r\n", "content-length:") != nullptr);
+    CHECK(mm::HttpServerModule::findHeaderCI("CONTENT-LENGTH: 5\r\n", "Content-Length:") != nullptr);
+    // And a request without the header still reads as absent.
+    CHECK(mm::HttpServerModule::findHeaderCI("GET / HTTP/1.1\r\nHost: x\r\n", "Content-Length:") == nullptr);
+
+    // Anchored at line starts: an X-prefixed lookalike is NOT the header.
+    CHECK(mm::HttpServerModule::findHeaderCI("POST / HTTP/1.1\r\nX-Content-Length: 9\r\n\r\n", "Content-Length:") == nullptr);
+    // Bounded by the blank line: a header name inside the BODY is data, not a header.
+    CHECK(mm::HttpServerModule::findHeaderCI("POST / HTTP/1.1\r\nHost: x\r\n\r\nContent-Length: 4", "Content-Length:") == nullptr);
+}
+
+// removeRecursive: the DELETE /api/dir path, exercised directly rather than through a socket.
+//
+// It is public for exactly this, and until now nothing called it: the header claimed the tests
+// exercised the real recursion while none referenced it. These are the behaviors a user reaches
+// by deleting a folder from the File Manager.
+TEST_CASE("removeRecursive deletes a folder and everything under it") {
+    Rig r;
+    std::filesystem::create_directories(std::string(r.root) + "/tree/a/b");
+    writeFile(std::string(r.root) + "/tree/top.txt", "1");
+    writeFile(std::string(r.root) + "/tree/a/mid.txt", "2");
+    writeFile(std::string(r.root) + "/tree/a/b/leaf.txt", "3");
+
+    CHECK(mm::HttpServerModule::removeRecursive("/tree"));
+    CHECK_FALSE(r.onDisk("/tree"));
+}
+
+// The depth bound is what keeps a user-shaped tree from running the stack out. A tree deeper than
+// the bound is REFUSED rather than half-deleted: reporting failure lets the caller delete again and
+// take the next batch, which is the same contract the width cap (DirLevel::kMax) has.
+TEST_CASE("removeRecursive refuses a tree deeper than its bound") {
+    Rig r;
+    std::string deep = std::string(r.root) + "/deep";
+    for (int i = 0; i < 12; i++) deep += "/x";        // past the depth-8 bound
+    std::filesystem::create_directories(deep);
+
+    CHECK_FALSE(mm::HttpServerModule::removeRecursive("/deep"));
+    CHECK(r.onDisk("/deep"));                         // still there, not partly gone
+}
+
+// A single file, which is the case that returns on the first fsRemove without ever listing.
+TEST_CASE("removeRecursive deletes a plain file") {
+    Rig r;
+    CHECK(r.onDisk("/readme.txt"));
+    CHECK(mm::HttpServerModule::removeRecursive("/readme.txt"));
+    CHECK_FALSE(r.onDisk("/readme.txt"));
 }

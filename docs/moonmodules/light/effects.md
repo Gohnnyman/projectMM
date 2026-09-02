@@ -265,7 +265,143 @@ Shells rise, stall, and burst into sparks that arc over and fall. Every stage is
 
 Physics is driven by elapsed time, not frame count, so the same settings behave identically on a desktop at thousands of fps and an ESP32 at a few hundred ([architecture § tick rate](../../architecture.md#effects)).
 
-Origin: projectMM original, on the WLED Particle System's firework family (@Brandon502 / WildCats08)
+Origin: projectMM original, on the WLED Particle System's firework family by Damian Schneider / [@DedeHai](https://github.com/DedeHai)
+
+<a id="fishtank"></a>
+
+### Fish Tank 📊 · 2D
+
+An aquarium on a light wall: fish of three shapes swim across a dark tank, each in its own color from the active palette, tails beating. Movement is a particle-pool entry per fish with constant velocity, respawning at the far edge when it swims off; the shape is drawn through the `draw::sprite` power function. Unlike the other sprite effects, the art carries shade ROLES (body, outline, highlight, fin, eye, band) rather than fixed colors, and each fish fills them from its own place on the palette, so one drawing yields as many colorways as there are fish.
+
+- `fish` — how many broad tropical fish (0-8).
+- `slim` — how many slender fish (0-8).
+- `school` — how many tiny schooling fish (0-8).
+- `speed` — swim rate in body-lengths, so motion reads the same on any grid; each fish varies around it, and the smaller shapes drift slower, which reads as depth.
+- `spriteSize` — integer magnification (crisp nearest-neighbor); 0 = auto, scaling with the grid so a fish reads as a fish on a 16x16 matrix and on a 768-wide desktop grid alike.
+- `soundReactive` — move to the music: each sprite follows its own frequency band, so the scene breathes rather than surging as one block, and silence stands it still. Without an audio source the sprites keep moving normally.
+
+Uses the global palette: every fish takes a body color from it, with its band a paler version of that same color rather than a second pick, which would read as two fish fused together.
+
+Origin: projectMM original; inspired by the aquarium screensavers of the After Dark era, the pixel art drawn fresh for this effect
+
+<a id="flyingtoasters"></a>
+
+### Flying Toasters 🔬📊 · 2D
+
+The classic screensaver on a light wall: chrome toasters with flapping wings and slices of toast drift diagonally across the dark, forever. Each flier is a particle-pool entry with constant velocity (respawning off the upper-right when it leaves the lower-left), rendered through the `draw::sprite` power function; the wing flap runs on a shared BeatPhase with a per-toaster offset so the flock never syncs.
+
+- `toasters` — how many fly (1–12).
+- `toast` — how many slices trail along (0–8).
+- `speed` — drift rate in sprite-widths, so flight reads the same on any grid; each flier varies ±25% around it.
+- `spriteSize` — integer magnification for toasters AND toast (crisp nearest-neighbor); 0 = auto, scaling with the grid so a toaster reads as a toaster on a big wall.
+- `soundReactive` — move to the music: each sprite follows its own frequency band, so the scene breathes rather than surging as one block, and silence stands it still. Without an audio source the sprites keep moving normally.
+
+The sprites carry their own colors (chrome, wing, crust), so the global palette does not apply. Needs a grid at least the toaster's size (12×9).
+
+Origin: projectMM original; inspired by After Dark's Flying Toasters (Berkeley Systems, 1989), suggested by Frank ([softhack007](https://github.com/softhack007)) — the pixel art here is drawn fresh for this effect
+
+<a id="movinghead"></a>
+
+### MovingHead 🔬📊 · 1D
+
+Aims a rig of moving heads as one instrument. Pan and tilt sweep on two sine waves at different
+rates, so a beam traces a path rather than a line, and `formation` decides how the heads relate to
+each other, which is what turns a row of fixtures into a show rather than several fixtures doing
+the same thing.
+
+The first effect that AIMS a fixture rather than only coloring it. It writes pan and tilt through
+the role setters, which do nothing on a light that carries no such channel, so the same effect on
+an LED strip paints the color pattern and moves nothing.
+
+- `formation` — how the heads relate:
+    - **fan** — neighbours differ by a fraction of the sweep, so the beams open and close like a hand.
+    - **mirror** — the halves face each other; the classic look, best on an even-numbered rig.
+    - **chase** — a wave travelling down the row, the same sweep delayed head by head.
+    - **cross** — alternate heads oppose, a tight scissoring that looks fast at a low BPM.
+    - **unison** — every head as one, the reference the others read against.
+- `panBpm` / `tiltBpm` — sweep rates (60 = one sweep a second). Different rates are what turn two
+  sines into a path instead of a diagonal.
+- `panRange` / `tiltRange` — how much of the fixture's travel to use. A head at full pan spends
+  much of its sweep pointing away from the audience, so the default is a band around center.
+- `panCenter` / `tiltCenter` — where the sweep is centered (128 = the fixture's middle).
+- `soundReactive` — move and light with the music: the beam swings wider as the room gets louder,
+  each head takes its brightness from its own frequency band so the rig ripples rather than pulsing
+  as one block, and a beat widens the sweep and flares the color with a short decay so a kick is
+  visible rather than a one-frame flicker. Silence holds the rig still, which is what makes it read
+  as reactive rather than merely animated.
+
+A fixture chain is one-dimensional, so lay the rig out as a **1 x N** grid (width 1, height N):
+extrude duplicates the x=0 column, so N x 1 would copy the first head's aim over every head.
+
+Uses the global palette. Origin: projectMM original
+
+<a id="pacman"></a>
+
+### Pacman 🔬📊 · 2D
+
+The arcade cast crossing a light wall: Pacman chomps his way along while the four ghosts drift past, each in its own color, wrapping around the edges forever. Movement is a particle-pool entry per character and the shapes go through the `draw::sprite` power function; one ghost drawing serves all four colors because the art carries palette slots rather than fixed colors, and a single drawing serves both travel directions because `draw::sprite` can mirror it.
+
+In this first iteration the characters travel independently and do not notice each other. The maze, the pellets and the chase are the next step, built on the shapes and the movement grid this one establishes.
+
+- `pacmen` — how many Pacmen (0-4).
+- `ghosts` — how many ghosts (0-8); the arcade cast is four.
+- `speed` — travel rate in sprite-widths, so motion reads the same on any grid; Pacman runs slightly ahead of the ghosts, as in the original.
+- `spriteSize` — integer magnification (crisp nearest-neighbor); 0 = auto, scaling with the grid so the characters read on a 16x16 matrix and on a 768-wide desktop grid alike.
+- `soundReactive` — move to the music: each sprite follows its own frequency band, so the scene breathes rather than surging as one block, and silence stands it still. Without an audio source the sprites keep moving normally.
+
+Pacman is always his own yellow; the ghosts take their body colors from the active palette, so they stay four distinguishable characters whatever palette is loaded.
+
+Origin: projectMM original; inspired by Namco's Pac-Man (1980), the pixel art drawn fresh for this effect
+
+<a id="spaceinvaders"></a>
+
+### Space Invaders 🔬📊 · 2D
+
+The 1978 formation marching down the wall: five ranks of squid, crab and octopus stepping sideways in the two-frame wiggle, dropping a row and reversing at each wall, and speeding up as the ranks thin. That acceleration is the defining mechanic rather than a flourish, because the arcade original sped up for a mechanical reason (fewer invaders meant a shorter loop for the hardware to draw) and the tension it produced is the reason anyone remembers the game. Invaders fire down, the cannon tracks the lowest one and fires back, and when the formation lands the board resets so the attract loop runs forever.
+
+On a panel narrower than the formation the ranks scroll through the court instead of turning at the walls, so a 16-wide matrix shows the march passing rather than a block stuck at the top.
+
+- `marchBpm` — steps per minute at a full formation; the effective rate rises to four times this as the ranks are cleared.
+- `stepX` — how far a step moves the formation sideways, in pixels.
+- `dropY` — how far a wall turn drops it, in pixels.
+- `size` — integer magnification per art pixel; 1 on a matrix, 2 or more on a wall.
+- `soundReactive` — the beat becomes the clock: the formation steps on transients and stands still in silence, so the march locks to the track.
+
+The invaders take their body color from the active palette. Origin: projectMM original; inspired by Taito's Space Invaders (1978), the pixel art drawn fresh for this effect
+
+<a id="spritefountain"></a>
+
+### Sprite Fountain 🔬📊 · 2D
+
+A fountain that throws the project's whole sprite cast: fish, Pacman and his ghosts, toasters and toast, and the three invaders, launched from the floor on a sweeping nozzle and falling back under gravity. The pixel art is SHARED with the effects that introduced it rather than copied, so a fix to a fish fixes it in both places. The particle pool's one spare byte per particle carries which character a slot is, which is what makes a mixed cast free: widening the pool for a sprite id would cost every particle system in the project memory for a field only this effect reads.
+
+Physics run on elapsed time, not per frame, so the plume looks the same on a 60 fps board and a 1200 fps desktop.
+
+- `lift` — how hard the nozzle throws; scales with the grid, so it fills a small panel and a wall alike.
+- `pull` — gravity. Measured rather than guessed: 3 gives a two-second arc, which is long enough to read a 12x8 toaster.
+- `rate` — sprites launched per beat of the emit clock.
+- `emitBpm` — launches per minute, so the plume's density is a choice rather than a side effect of how fast the device runs.
+- `size` — integer magnification per art pixel.
+- `soundReactive` — one sprite per frequency band, thrown when that band is loud, so the cast maps onto the spectrum in order: the bass bands throw fish, the treble bands throw invaders. Silence throws nothing.
+
+Colors come from the active palette, one entry per sprite, held for its whole flight. Origin: projectMM original
+
+<a id="pong"></a>
+
+### Pong 🔬📊 · 2D
+
+Two paddles rallying a ball across the grid, the attract-mode reading of the 1972 original where both players are the machine. A perfect tracker would rally forever and never look like a game, so each paddle has a reaction delay and a small aiming error, re-rolled every exchange: it starts moving a moment after the ball turns and meets it slightly off center. That is what produces near-misses, edge hits and the occasional point. Where on the paddle the ball lands sets the angle it leaves at, which was the one piece of skill the original had.
+
+The court is fixed point rather than pixels, so the game plays identically on a 16x16 matrix and a 256-wide wall; positions are scaled to the grid only when they are drawn.
+
+- `rallyBpm` — ball crossings per minute, so the rally takes the same wall-clock time on any grid.
+- `paddle` — paddle length as a percentage of the court height; short paddles miss more, which is what makes points happen.
+- `reflex` — how sharply a paddle chases the ball. Below full speed it lags a fast ball, which is where the misses come from.
+- `size` — integer magnification, when the ball is a sprite.
+- `spriteBall` — swap the classic square for a member of the shared sprite cast, re-picked on every hit, so a paddle knocks one character away and another back.
+- `soundReactive` — the ball advances only on the beat, so it crosses the court in time with the track and stands still in silence.
+
+Uses the global palette. Origin: projectMM original; inspired by Atari's Pong (1972)
 
 <a id="ballpit"></a>
 
@@ -282,7 +418,7 @@ Falling balls that pile up and shove each other aside. The heap is emergent: gra
 
 Exercises the half of the particle kernel [Fireworks](#fireworks) leaves untouched: sparks never notice each other, these do. Collisions are the one non-linear part of the kernel, so the pool is deliberately small.
 
-Origin: projectMM original, on the WLED Particle System's ballpit family (@Brandon502 / WildCats08)
+Origin: projectMM original, on the WLED Particle System's ballpit family by Damian Schneider / [@DedeHai](https://github.com/DedeHai)
 
 <a id="dissolve"></a>
 

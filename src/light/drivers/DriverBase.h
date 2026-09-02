@@ -198,6 +198,19 @@ public:
     /// point the encoder/packet tests use in place of the removed shared-pointer setter.
     Correction& correctionForTest() { return correction_; }
 
+    /// The resolved correction, so the light domain can learn where this fixture keeps its motion
+    /// channels. Read-only: the driver owns it and rebuilds it when the preset or sliders change.
+    const Correction& correction() const { return correction_; }
+
+    /// Park or release this driver's motion: the ONE correction field the container sets directly.
+    /// Everything else in there is derived by rebuildCorrection from the preset and the global
+    /// brightness, and a caller reaching in to change those would be overwritten by the next
+    /// rebuild. The hold is different: it is a transmission decision the Drivers container owns and
+    /// re-asserts every second, so it is set rather than derived. Narrow by construction rather than
+    /// by docstring: handing out the whole Correction let a caller mutate a derived field too.
+    void setMotionHeld(bool held) { correction_.motionHeld = held; }
+    bool motionHeld() const { return correction_.motionHeld; }
+
 protected:
     Layer* layer_ = nullptr;
 
@@ -287,7 +300,7 @@ protected:
     /// DriverBase::defineControls template method. The Select is rebuilt from the library on
     /// every defineControls (which re-runs on a control change), so adding/renaming a preset shows up.
     void defineCorrectionControls() {
-        controls_.addUint8("localBrightness", localBrightness_, 0, 255);
+        controls_.addControl("localBrightness", localBrightness_, 0, 255);
         buildPresetOptions();                        // fill presetOptions_ from the library, sync id/sel/ref
         controls_.addSelect("lightPreset", presetSel_, presetOptions_, presetOptionCount_);
         controls_.addSelect("whiteMode", whiteMode_, kWhiteModeOptions, kWhiteModeCount);
@@ -298,17 +311,17 @@ protected:
         auto* lib = LightPresetsModule::active();
         controls_.setHidden(controls_.count() - 1, !(lib && lib->presetHasSynthChannel(presetId_)));
         // Tenths, so the name carries the scale; the floor is 1.0 (off).
-        controls_.addUint8("gamma x10", gamma10_, Correction::kGammaOff, 30);
-        controls_.addUint8("balanceRed", balRed_, 0, 255);
-        controls_.addUint8("balanceGreen", balGreen_, 0, 255);
-        controls_.addUint8("balanceBlue", balBlue_, 0, 255);
+        controls_.addControl("gamma x10", gamma10_, Correction::kGammaOff, 30);
+        controls_.addControl("balanceRed", balRed_, 0, 255);
+        controls_.addControl("balanceGreen", balGreen_, 0, 255);
+        controls_.addControl("balanceBlue", balBlue_, 0, 255);
         // Per CHANNEL at full, because a white die draws about twice a colour one.
         const bool limits = limitsCurrent();
-        controls_.addUint16("maxCurrentMa", budgetMa_, 0, 60000);
+        controls_.addControl("maxCurrentMa", budgetMa_, 0, 60000);
         controls_.setHidden(controls_.count() - 1, !limits);
-        controls_.addUint8("mAPerColorChannel", mAColor_, 1, 60);
+        controls_.addControl("mAPerColorChannel", mAColor_, 1, 60);
         controls_.setHidden(controls_.count() - 1, !limits);
-        controls_.addUint8("mAPerWhiteChannel", mAWhite_, 1, 60);
+        controls_.addControl("mAPerWhiteChannel", mAWhite_, 1, 60);
         controls_.setHidden(controls_.count() - 1, !limits);
         // The durable reference (the preset NAME) persists but isn't shown — the lightPreset Select
         // above is the user-facing control; presetRef_ just carries the reference across a reboot.
@@ -394,8 +407,8 @@ protected:
     /// helper (not auto-added) so a driver opts in by calling it where its other
     /// controls go, keeping control *order* in the driver's hands.
     void addWindowControls() {
-        controls_.addUint16("start", start_);
-        controls_.addUint16("count", count_);
+        controls_.addControl("start", start_);
+        controls_.addControl("count", count_);
     }
 
     /// True if `name` is one of the window controls — a driver folds this into its

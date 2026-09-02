@@ -10,11 +10,13 @@
 
 #include "esp_https_ota.h"
 #include "esp_ota_ops.h"
+#include "esp_partition.h"   // esp_partition_find_first: locating MoonBase
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"   // heap_caps_malloc/free — the upload chunk buffer
 #include "esp_log.h"
+#include "nvs.h"           // moonbaseStageInstallUrl: the URL handoff to MoonBase
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -193,6 +195,7 @@ bool http_fetch_to_ota(const char* url,
     return true;
 }
 
+
 bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
                     char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut) {
     if (!src || !statusBuf || statusBufLen == 0 || !bytesReadOut) return false;
@@ -202,6 +205,24 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
 
     const esp_partition_t* part = esp_ota_get_next_update_partition(nullptr);
     if (!part) { setStatus("error: no OTA partition"); return false; }
+
+    // SINGLE-SLOT GUARD. esp_ota_get_next_update_partition iterates only OTA subtypes and falls
+    // back to the FIRST ota slot it finds, so on a table with one ota_0 (the MoonBase layout) it
+    // hands back the partition we are executing from. Erasing that is a brick mid-flash. IDF also
+    // refuses it inside esp_ota_begin (ESP_ERR_OTA_PARTITION_CONFLICT), but failing here says WHY
+    // and names the fix. On a dual-OTA table this never fires.
+    if (part == esp_ota_get_running_partition()) {
+        setStatus("error: one app slot, reboot to MoonBase first");
+        return false;
+    }
+    // SIZE GUARD. Without it an oversized image fails partway through esp_ota_write, leaving the
+    // target slot half-written and the user staring at a generic write error. Content-Length is
+    // advisory, so this only fires when the caller knows the size.
+    if (contentLen && contentLen > part->size) {
+        setStatus("error: image too large (%u > %u)",
+                  static_cast<unsigned>(contentLen), static_cast<unsigned>(part->size));
+        return false;
+    }
 
     setStatus("flashing");
     esp_ota_handle_t handle = 0;
@@ -272,6 +293,50 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
     // BEFORE the reboot (the caller closes the socket + reboots, same sequence as /api/reboot) —
     // that's what lets the browser see a clean "flashed" response instead of an aborted socket.
     return true;
+}
+
+// Does this device's partition table carry a factory app? True on the MoonBase layout used by
+// the 4 MB boards, false on the dual-OTA tables. The caller uses it to decide whether an update
+// needs the reboot-into-MoonBase hop, and the UI to say which kind of device this is.
+bool otaHasMoonBase() {
+    return esp_partition_find_first(ESP_PARTITION_TYPE_APP,
+                                    ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr) != nullptr;
+}
+
+// Point the bootloader at MoonBase and report whether it took. Returns false when the table has
+// no factory partition, which tells the caller this device updates in place.
+// NB esp_ota_set_boot_partition on a factory partition ERASES otadata rather than writing a
+// sequence number: that is what makes a power cut mid-update land back in MoonBase rather than in
+// a half-written app.
+bool otaBootMoonBase() {
+    const esp_partition_t* part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr);
+    if (!part) return false;
+    return esp_ota_set_boot_partition(part) == ESP_OK;
+}
+
+// Is the device currently executing FROM MoonBase?
+bool otaRunningMoonBase() {
+    const esp_partition_t* run = esp_ota_get_running_partition();
+    return run && run->subtype == ESP_PARTITION_SUBTYPE_APP_FACTORY;
+}
+
+void moonbaseClearStagedUrl() {
+    nvs_handle_t h;
+    if (nvs_open("moonbase", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_erase_key(h, "url");
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+// Stage the install URL in NVS for MoonBase to consume on its next boot (see platform.h).
+bool moonbaseStageInstallUrl(const char* url) {
+    if (!url || !url[0]) return false;
+    nvs_handle_t h;
+    if (nvs_open("moonbase", NVS_READWRITE, &h) != ESP_OK) return false;
+    const bool ok = nvs_set_str(h, "url", url) == ESP_OK && nvs_commit(h) == ESP_OK;
+    nvs_close(h);
+    return ok;
 }
 
 } // namespace mm::platform

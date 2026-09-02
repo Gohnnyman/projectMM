@@ -217,3 +217,78 @@ TEST_CASE("draw: glyph renders upright and un-mirrored (the 'L' probe)") {
         if (!isBlack(at(buf, dims, x, 0, 0))) topLit++;
     CHECK(topLit == 1);     // just the bar at the top
 }
+
+// draw::sprite, the multi-color sibling of glyph: palette-indexed frames with index 0 as the
+// transparent key. These pin the contract a screensaver effect stands on: the right frame at
+// the right place, holes where the key is, silence at the edges and on bad indices.
+TEST_CASE("draw::sprite blits the requested frame with transparent holes") {
+    Buffer buf;
+    Coord3D dims{6, 4, 1};
+    REQUIRE(buf.allocate(static_cast<nrOfLightsType>(dims.x) * dims.y, 3));
+    buf.clear();
+    const draw::Canvas cv = draw::Canvas::of(buf, dims.x, dims.y, 1);
+
+    static constexpr RGB pal[] = {{0, 0, 0}, {10, 20, 30}, {40, 50, 60}};
+    // 2x2, 2 frames: frame 0 all color 1; frame 1 = color 2 with a transparent hole at (1,0).
+    static constexpr uint8_t px[] = {1, 1, 1, 1,   2, 0, 2, 2};
+    constexpr draw::sprites::Sprite s{px, pal, 2, 2, 2, 3};
+
+    draw::sprite(cv, s, 1, 1, 1);
+    CHECK(at(buf, dims, 1, 1, 0).r == 40);          // frame 1's color, not frame 0's
+    CHECK(isBlack(at(buf, dims, 2, 1, 0)));          // the transparent hole
+    CHECK(at(buf, dims, 1, 2, 0).r == 40);
+    CHECK(at(buf, dims, 2, 2, 0).r == 40);
+    CHECK(isBlack(at(buf, dims, 0, 0, 0)));          // untouched background
+}
+
+TEST_CASE("draw::sprite clips at every edge and survives bad frame and palette indices") {
+    Buffer buf;
+    Coord3D dims{4, 4, 1};
+    REQUIRE(buf.allocate(static_cast<nrOfLightsType>(dims.x) * dims.y, 3));
+    buf.clear();
+    const draw::Canvas cv = draw::Canvas::of(buf, dims.x, dims.y, 1);
+
+    static constexpr RGB pal[] = {{0, 0, 0}, {99, 0, 0}};
+    static constexpr uint8_t px[] = {1, 1, 1, 1};   // 2x2, 1 frame, all color 1
+    constexpr draw::sprites::Sprite s{px, pal, 2, 2, 1, 2};
+
+    draw::sprite(cv, s, 0, -1, -1);                  // upper-left: only (0,0) lands
+    CHECK(at(buf, dims, 0, 0, 0).r == 99);
+    draw::sprite(cv, s, 0, 3, 3);                    // lower-right: only (3,3) lands
+    CHECK(at(buf, dims, 3, 3, 0).r == 99);
+    CHECK(isBlack(at(buf, dims, 2, 2, 0)));
+
+    draw::sprite(cv, s, 200, 1, 1);                  // out-of-range frame clamps to the last
+    CHECK(at(buf, dims, 1, 1, 0).r == 99);
+
+    static constexpr uint8_t bad[] = {9, 9, 9, 9};   // indices past the palette: render nothing
+    constexpr draw::sprites::Sprite sBad{bad, pal, 2, 2, 1, 2};
+    buf.clear();
+    draw::sprite(cv, sBad, 0, 1, 1);
+    CHECK(isBlack(at(buf, dims, 1, 1, 0)));
+}
+
+// Art that faces one way serves both: flipX mirrors the sprite's READ, so the blit still lands
+// at the same (x, y) with the same footprint rather than needing a mirrored copy of every frame.
+TEST_CASE("draw::sprite mirrors horizontally without moving the sprite") {
+    Buffer buf;
+    Coord3D dims{4, 2, 1};
+    REQUIRE(buf.allocate(static_cast<nrOfLightsType>(dims.x) * dims.y, 3));
+    buf.clear();
+    const draw::Canvas cv = draw::Canvas::of(buf, dims.x, dims.y, 1);
+
+    // Asymmetric on purpose: one lit pixel at the LEFT of the top row.
+    static constexpr RGB pal[] = {{0, 0, 0}, {10, 20, 30}};
+    static constexpr uint8_t px[] = {1, 0, 0, 0,
+                                     0, 0, 0, 0};
+    constexpr draw::sprites::Sprite s{px, pal, 4, 2, 1, 2};
+
+    draw::sprite(cv, s, 0, 0, 0, 1, /*flipX=*/false);
+    CHECK(at(buf, dims, 0, 0, 0).r == 10);       // unflipped: leftmost column
+    CHECK(isBlack(at(buf, dims, 3, 0, 0)));
+
+    buf.clear();
+    draw::sprite(cv, s, 0, 0, 0, 1, /*flipX=*/true);
+    CHECK(isBlack(at(buf, dims, 0, 0, 0)));      // flipped: the same footprint, mirrored
+    CHECK(at(buf, dims, 3, 0, 0).r == 10);
+}

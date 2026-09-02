@@ -3,10 +3,17 @@
 #include "doctest.h"
 
 #include <cstring>
+#include "light/effects/MovingHeadEffect.h"
+#include "light/layers/Layer.h"
+#include "light/layouts/GridLayout.h"
+#include "light/layouts/Layouts.h"
+#include "light/FixtureChannels.h"
+#include "platform/platform.h"   // setTestNowMs: the sweep needs the clock to move
 #include "light/drivers/Correction.h"
 #include "correction_presets.h"
 
 #include <cstdint>
+#include <vector>
 
 // Pins the per-driver output correction: brightness LUT, channel reorder, and RGBW
 // white derivation. The Drivers container owns a Correction, rebuilds it on a
@@ -43,7 +50,7 @@ TEST_CASE("Correction RGB preset: apply is identity at full brightness") {
     CHECK(c.offWhite == Correction::kAbsent);   // no white channel for the RGB family
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[3] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 10);
     CHECK(out[1] == 20);
     CHECK(out[2] == 30);
@@ -57,7 +64,7 @@ TEST_CASE("Correction GRB preset: channels reordered, 3 output channels") {
     CHECK(c.offWhite == Correction::kAbsent);   // no white channel for the RGB family
     const uint8_t src[3] = {10, 20, 30};  // R=10 G=20 B=30
     uint8_t out[3] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 20);  // G
     CHECK(out[1] == 10);  // R
     CHECK(out[2] == 30);  // B
@@ -69,7 +76,7 @@ TEST_CASE("Correction BGR preset: full reverse") {
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::BGR);
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[3] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 30);  // B
     CHECK(out[1] == 20);  // G
     CHECK(out[2] == 10);  // R
@@ -83,7 +90,7 @@ TEST_CASE("Correction RGBW preset: 4 channels, white = min(r,g,b)") {
     CHECK(c.offWhite == 3);   // white derived into the 4th channel
     const uint8_t src[3] = {10, 20, 30};  // min = 10
     uint8_t out[4] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 10);  // R
     CHECK(out[1] == 20);  // G
     CHECK(out[2] == 30);  // B
@@ -97,7 +104,7 @@ TEST_CASE("Correction GRBW preset: reordered RGB + white") {
     CHECK(c.outChannels == 4);
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[4] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 20);  // G
     CHECK(out[1] == 10);  // R
     CHECK(out[2] == 30);  // B
@@ -111,7 +118,7 @@ TEST_CASE("Correction: brightness applied BEFORE white derivation") {
     mm::test::rebuildFromPreset(c, 128, mm::test::PresetOrder::RGBW);  // half brightness
     const uint8_t src[3] = {100, 200, 60};  // scaled: 50, 100, 30 → min = 30
     uint8_t out[4] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 50);   // (100*128)/255
     CHECK(out[1] == 100);  // (200*128)/255
     CHECK(out[2] == 30);   // (60*128)/255
@@ -142,7 +149,7 @@ TEST_CASE("Correction whiteMode None: white channel forced to 0, RGB intact") {
     c.whiteMode = WhiteMode::None;
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[4] = {0, 0, 0, 77};   // pre-fill W with a stale value from a prior frame
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 10);
     CHECK(out[1] == 20);
     CHECK(out[2] == 30);
@@ -160,7 +167,7 @@ TEST_CASE("Correction whiteMode Accurate: white subtracted from RGB") {
     c.whiteMode = WhiteMode::Accurate;
     const uint8_t src[3] = {10, 20, 30};  // min = 10
     uint8_t out[4] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 0);    // R: 10 - 10
     CHECK(out[1] == 10);   // G: 20 - 10
     CHECK(out[2] == 20);   // B: 30 - 10
@@ -186,7 +193,7 @@ TEST_CASE("Correction roles array: arbitrary Custom wiring derives correct offse
     CHECK(c.briLut[0][255] == 128);   // LUT refreshed (brightness applied)
     const uint8_t src[3] = {200, 100, 60};  // scaled: 100, 50, 30 → min = 30
     uint8_t out[4] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[3] == 100);  // R at channel 3
     CHECK(out[2] == 50);   // G at channel 2
     CHECK(out[1] == 30);   // B at channel 1
@@ -205,7 +212,7 @@ TEST_CASE("Correction roles array: absent color role is not emitted") {
     CHECK(c.outChannels == 2);
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[2] = {0, 0};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 10);   // R
     CHECK(out[1] == 30);   // B — green (20) simply not written
 }
@@ -223,7 +230,7 @@ TEST_CASE("Correction roles array: non-color role reserves a channel apply() ski
     CHECK(c.offBlue == 3);
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[4] = {77, 0, 0, 0};   // channel 0 (Pan) pre-set; apply() must leave it
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 77);   // Pan channel untouched by the RGB path
     CHECK(out[1] == 10);   // R
     CHECK(out[2] == 20);   // G
@@ -244,7 +251,7 @@ TEST_CASE("Correction: WarmWhite/Yellow/UV synthesised from RGB via whiteMode") 
     CHECK(c.offUV == 5);
     const uint8_t src[3] = {40, 100, 200};   // R=40 G=100 B=200
     uint8_t out[6] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 40);   // R
     CHECK(out[1] == 100);  // G
     CHECK(out[2] == 200);  // B
@@ -265,7 +272,7 @@ TEST_CASE("Correction Accurate: Yellow/UV use pre-subtraction RGB, not post-Whit
     c.whiteMode = WhiteMode::Accurate;
     const uint8_t src[3] = {40, 100, 200};   // R=40 G=100 B=200, so w = min = 40
     uint8_t out[6] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     // White = min(R,G,B) = 40, subtracted from RGB → R=0, G=60, B=160.
     CHECK(out[3] == 40);            // White
     CHECK(out[0] == 0);            // R after subtraction
@@ -289,7 +296,7 @@ TEST_CASE("Correction: UV dark on warm colors; whiteMode None zeroes WW/Y/UV") {
     {   // warm color: R,G high, B low → UV = max(0, B-max(R,G)) = 0
         const uint8_t src[3] = {200, 180, 20};
         uint8_t out[6] = {};
-        c.apply(src, out);
+        c.apply(src, out, 3);
         CHECK(out[5] == 0);            // UV dark: no blue excess
         CHECK(out[4] == 180);          // Yellow = min(200,180)
     }
@@ -297,7 +304,7 @@ TEST_CASE("Correction: UV dark on warm colors; whiteMode None zeroes WW/Y/UV") {
         c.whiteMode = WhiteMode::None;
         const uint8_t src[3] = {40, 100, 200};
         uint8_t out[6] = {0, 0, 0, 55, 66, 77};   // stale WW/Y/UV
-        c.apply(src, out);
+        c.apply(src, out, 3);
         CHECK(out[3] == 0);            // WW zeroed
         CHECK(out[4] == 0);            // Yellow zeroed
         CHECK(out[5] == 0);            // UV zeroed
@@ -363,7 +370,7 @@ TEST_CASE("Correction white balance: trimming one channel leaves the others unto
     CHECK(c.briLut[2][255] == 255);   // blue untrimmed
     const uint8_t src[3] = {200, 200, 200};   // a "white" triple the strip would render green-cast
     uint8_t out[3] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 200);
     CHECK(out[1] == 100);             // pulled down to match the weaker channels
     CHECK(out[2] == 200);
@@ -379,7 +386,7 @@ TEST_CASE("Correction white balance: RGBW white is derived from the balanced cha
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGBW);
     const uint8_t src[3] = {200, 200, 200};
     uint8_t out[4] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 200);   // R
     CHECK(out[1] == 200);   // G
     CHECK(out[2] == 100);   // B trimmed
@@ -409,7 +416,7 @@ TEST_CASE("Correction: no budget leaves the frame untouched") {
     c.measure(src, 3, 1);
     CHECK(c.limit == 256);          // unity, so the shift gives the table value back exactly
     uint8_t out[3] = {};
-    c.apply(src, out);
+    c.apply(src, out, 3);
     CHECK(out[0] == 255);
     CHECK(out[1] == 255);
     CHECK(out[2] == 255);
@@ -435,7 +442,7 @@ TEST_CASE("Correction: an over-budget frame is scaled to fit") {
     c.measure(frame, 3, 100);                 // 100 x 3 channels x 8 mA = 2400 mA
     CHECK(c.limit == 128);                    // 1200/2400 -> half
     uint8_t out[3] = {};
-    c.apply(frame, out);
+    c.apply(frame, out, 3);
     CHECK(out[0] == 127);                     // (255 * 128) >> 8
 }
 
@@ -459,4 +466,169 @@ TEST_CASE("Correction: the estimate follows whiteMode, not a per-light constant"
     mm::test::rebuildFromPreset(acc, 255, mm::test::PresetOrder::RGBW);
     acc.measure(frame, 3, 100);               // RGB drops to 0, W alone = 16 mA/light = 1600 mA
     CHECK(acc.limit == 256);                  // inside budget, so untouched
+}
+
+// A fixture with a master dimmer channel must actually be LIT. The dimmer is a real output, not
+// a motion role: a moving head whose preset maps Pan/Tilt/Dimmer/RGBW stayed completely dark on
+// the bench with a perfectly correct color map, because nothing ever wrote its dimmer and a
+// linear dimmer at 0 emits nothing. The pre-existing "IRGB" preset had the same defect.
+TEST_CASE("A preset's master dimmer channel is driven, so the fixture actually lights") {
+    using R = mm::ChannelRole;
+    const R roles[] = {R::Pan, R::None, R::Tilt, R::None, R::None, R::Dimmer,
+                       R::None, R::Red, R::Green, R::Blue, R::White};
+    mm::Correction c;
+    c.rebuild(255, roles, 11);
+
+    const uint8_t src[3] = {200, 100, 50};
+    uint8_t out[11] = {};
+    c.apply(src, out, 3);
+
+    CHECK(out[5] == 255);      // CH6 dimmer: open, or the fixture is dark whatever the colors say
+    CHECK(out[7] == 200);      // CH8 red still lands on its own channel
+    CHECK(out[8] == 100);      // CH9 green
+    CHECK(out[9] == 50);       // CH10 blue
+}
+
+// Motion roles are somebody else's to write: apply() must not touch them, or a future pan/tilt
+// writer would fight the color path every frame.
+TEST_CASE("Pan and tilt channels are left alone by the color path") {
+    using R = mm::ChannelRole;
+    const R roles[] = {R::Pan, R::Tilt, R::Dimmer, R::Red, R::Green, R::Blue};
+    mm::Correction c;
+    c.rebuild(255, roles, 6);
+
+    const uint8_t src[3] = {10, 20, 30};
+    uint8_t out[6] = {77, 88, 0, 0, 0, 0};   // pan/tilt pre-set by their own writer
+    c.apply(src, out, 3);
+
+    CHECK(out[0] == 77);       // pan untouched
+    CHECK(out[1] == 88);       // tilt untouched
+    CHECK(out[2] == 255);      // dimmer open
+}
+
+// Motion channels ride the same buffer as color: a wide light carries pan/tilt at the offsets the
+// preset gives them, and apply() hands those bytes to the fixture untouched.
+TEST_CASE("Motion channels pass through to the fixture, unscaled by brightness") {
+    using R = mm::ChannelRole;
+    const R roles[] = {R::Pan, R::None, R::Tilt, R::None, R::None, R::Dimmer,
+                       R::None, R::Red, R::Green, R::Blue, R::White};
+    mm::Correction c;
+    c.rebuild(64, roles, 11);          // a QUARTER brightness, to catch any scaling of motion
+
+    // Color lives at the START of a light, whatever the fixture's own channel order; motion sits
+    // at the offset the preset gives it, which is where the effect wrote it.
+    uint8_t rgb[11] = {};
+    rgb[0] = 255; rgb[1] = 0; rgb[2] = 0;
+    // Motion goes in the LAYER's slots (packed after RGBW), not at the fixture's channel numbers:
+    // the fixture's pan is CH1, which in a layer light is the red byte.
+    rgb[mm::FixtureChannels::kMotionBase + 0] = 200;   // pan
+    rgb[mm::FixtureChannels::kMotionBase + 1] = 30;    // tilt
+
+    uint8_t out[11] = {};
+    c.apply(rgb, out, 11);
+
+    CHECK(out[c.offPan] == 200);       // aim survives dimming: brightness must not steer the head
+    CHECK(out[c.offTilt] == 30);
+    CHECK(out[c.offRed] < 255);        // color IS dimmed, unlike aim
+    CHECK(out[c.offRed] > 0);
+}
+
+// A fixture with no motion channels must not pay for motion support: the flag is what keeps the
+// hot path a single branch instead of a five-slot scan for every light of every frame.
+TEST_CASE("A plain RGB fixture reports no motion channels") {
+    using R = mm::ChannelRole;
+    const R rgb[] = {R::Red, R::Green, R::Blue};
+    mm::Correction c;
+    c.rebuild(255, rgb, 3);
+    CHECK_FALSE(c.hasMotion);
+
+    const R head[] = {R::Pan, R::Tilt, R::Red, R::Green, R::Blue};
+    c.rebuild(255, head, 5);
+    CHECK(c.hasMotion);
+}
+
+// The layer must be wide enough to hold the motion slots BEFORE it allocates, or an effect's
+// setPan() falls outside the light and the fixture never moves. Modules prepare in registration
+// order with Effects ahead of Drivers, so this only works because Drivers publishes the fixture
+// layout in setup(), which runs for every module before any module's prepare(). Bench-observed
+// before the fix: 12 bytes for 4 lights on a cold boot, and a motionless head until a rebuild.
+TEST_CASE("A motion preset widens the light enough to carry pan and tilt") {
+    using R = mm::ChannelRole;
+    const R roles[] = {R::Pan, R::None, R::Tilt, R::None, R::None, R::Dimmer,
+                       R::None, R::Red, R::Green, R::Blue, R::White};
+    mm::Correction c;
+    c.rebuild(255, roles, 11);
+    REQUIRE(c.hasMotion);
+
+    // Two motion roles, so the layer needs kMotionBase + 2 channels per light.
+    mm::FixtureChannels fc;
+    const bool present[5] = {c.offPan != mm::Correction::kAbsent,
+                             c.offTilt != mm::Correction::kAbsent, false, false, false};
+    uint8_t* const dst[5] = {&fc.pan, &fc.tilt, &fc.zoom, &fc.rotate, &fc.gobo};
+    mm::FixtureChannels::forEachMotionSlot(present,
+        [&](uint8_t role, uint8_t slot) { *dst[role] = slot; });
+
+    CHECK(fc.pan == mm::FixtureChannels::kMotionBase);
+    CHECK(fc.tilt == mm::FixtureChannels::kMotionBase + 1);
+    CHECK(fc.movable());
+}
+
+// The formations are the point of the moving-head effect: the same sweep, different relationships
+// between the heads. A formation that produced identical aim for every head would be `unison`
+// wearing another name, so each one is pinned by what makes it distinguishable on a real rig.
+TEST_CASE("Each moving-head formation aims the rig differently") {
+    mm::Layouts layouts;
+    mm::GridLayout grid;
+    // A 1D layout is width 1 by height N: a rig of 4 heads is 1x4, not 4x1. Extrude duplicates
+    // the x=0 column, so the other way round would copy head 0 over every head.
+    grid.width = 1; grid.height = 4; grid.depth = 1;   // a 4-head chain
+    layouts.addChild(&grid);
+
+    mm::Layer layer;
+    layer.setLayouts(&layouts);
+    layer.setChannelsPerLight(6);                      // RGBW + pan + tilt
+    mm::FixtureChannels fc;
+    fc.pan = mm::FixtureChannels::kMotionBase;
+    fc.tilt = mm::FixtureChannels::kMotionBase + 1;
+    layer.setFixtureChannels(fc);
+
+    mm::MovingHeadEffect fx;
+    layer.addChild(&fx);
+
+    auto aimOf = [&](uint8_t formation) {
+        fx.formation = formation;
+        layer.applyState();
+        // BeatPhase's first advance only establishes the time base, and it accumulates from
+        // elapsed() rather than frame count, so the clock has to MOVE or every head sits at
+        // sin(0) = center and the formations are indistinguishable.
+        mm::platform::setTestNowMs(1);
+        layer.tick();
+        for (int f = 1; f <= 12; f++) { mm::platform::setTestNowMs(1 + f * 400u); layer.tick(); }
+        std::vector<uint8_t> pans;
+        const auto& b = layer.buffer();
+        for (mm::nrOfLightsType i = 0; i < b.count(); i++)
+            pans.push_back(b.data()[i * b.channelsPerLight() + fc.pan]);
+        return pans;
+    };
+
+    // Unison is the reference: every head on the same aim.
+    const auto unison = aimOf(mm::MovingHeadEffect::kUnison);
+    REQUIRE(unison.size() == 4);
+    for (size_t i = 1; i < unison.size(); i++) CHECK(unison[i] == unison[0]);
+
+    // Chase delays each head along the sweep, so neighbours differ.
+    const auto chase = aimOf(mm::MovingHeadEffect::kChase);
+    bool chaseVaries = false;
+    for (size_t i = 1; i < chase.size(); i++) if (chase[i] != chase[0]) chaseVaries = true;
+    CHECK(chaseVaries);
+
+    // Cross opposes alternate heads: 0 and 1 sit on opposite sides of center.
+    const auto cross = aimOf(mm::MovingHeadEffect::kCross);
+    CHECK(cross[0] != cross[1]);
+
+    // Mirror splits the rig in half, so the first and last head oppose.
+    const auto mirror = aimOf(mm::MovingHeadEffect::kMirror);
+    CHECK(mirror[0] != mirror[3]);
+
+    mm::platform::setTestNowMs(0);   // back to the real clock for every later test
 }

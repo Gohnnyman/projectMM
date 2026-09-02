@@ -1,0 +1,20 @@
+// Dot: one green light walking down each tube, everything else black.
+
+class DotEffect {
+  byte bpm = 30;
+
+  int dimensions() { return 2; }
+
+  string tags() { return "💫"; }
+
+  void defineControls() {
+    addControl("bpm", bpm, 1, 240);                 // how fast the dot walks
+  }
+
+  void tick() {
+    fill(0, 0, 0);
+    for (int x = 0; x < width; x = x + 1) {
+      setRGB(x + scale(beat(bpm, t), height) * width, 0, 255, 0);
+    }
+  }
+}

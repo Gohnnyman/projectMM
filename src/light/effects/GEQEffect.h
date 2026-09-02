@@ -28,7 +28,7 @@ namespace mm {
 /// Audio-reactive graphic-equaliser effect: 16 bands as vertical bars.
 class GEQEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🐙📊"; }  // MoonLight origin · 2D · audio
+    const char* tags() const override { return "💫🐙🎶"; }  // MoonLight origin · WLED · audio
     Dim dimensions() const override { return Dim::D2; }      // writes only the z=0 slice; extrude fills z
 
     // Defaults match the WLED/MoonLight GEQ.
@@ -41,10 +41,10 @@ public:
     bool    smoothBars = false; // blend each band with its neighbours for a smoother profile
 
     void defineControls() override {
-        controls_.addUint8("fadeOut", fadeOut, 0, 255);
-        controls_.addUint8("ripple", ripple, 0, 255);
-        controls_.addBool("colorBars", colorBars);
-        controls_.addBool("smoothBars", smoothBars);
+        controls_.addControl("fadeOut", fadeOut, 0, 255);
+        controls_.addControl("ripple", ripple, 0, 255);
+        controls_.addControl("colorBars", colorBars);
+        controls_.addControl("smoothBars", smoothBars);
     }
 
     // One peak tracker per column: previousBarHeight[width]. WLED stores this in the segment's data

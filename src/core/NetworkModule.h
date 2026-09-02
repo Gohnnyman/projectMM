@@ -203,16 +203,21 @@ public:
     /// and become unreachable.
     bool respectsEnabled() const MM_NONBLOCKING override { return false; }
 
+    /// Bring-up (netif create, driver install, the eth→WiFi→AP cascade) runs once at boot and
+    /// is not re-entrant: a live re-setup crashed on hardware. Restored network config lands on
+    /// disk and applies at the next boot (backlog-core: re-entrant network bring-up).
+    bool appliesConfigLive() const override { return false; }
+
     void setup() override {
         // Push the DHCP hostname (option 12) before any bring-up so the device shows
         // its name — not "Unknown" — in the router's client list. Stored once; every
         // netif the platform creates (eth, the wifi cascade, a later reconnect) reads
         // it. Same name as mDNS/SoftAP: deviceName, default MM-XXXX.
         //
-        // Live-rename boundary: setHostname() is single-writer-before-readers by
-        // contract (see platform_esp32.cpp) — NOT safe to re-call after bring-up from
-        // tick1s without platform-side synchronization. And the DHCP hostname only
-        // rides the DISCOVER, so it can't change until the next lease renewal regardless.
+        // Live-rename boundary: setHostname() is mutex-guarded platform-side (see
+        // platform_esp32.cpp), so a re-run of setup() after bring-up (a config-file
+        // restore applying live) is safe. The DHCP hostname still only rides the
+        // DISCOVER, so it can't change until the next lease renewal regardless.
         // So a live deviceName rename updates mDNS immediately (syncMdns re-registers)
         // and the SoftAP SSID on its next start; the DHCP/router-list name follows on the
         // next renewal or reconnect, picking up the new value here. That lag is inherent
@@ -251,6 +256,18 @@ public:
         // Chain to base so children (ImprovProvisioningModule on ESP32) get setup()
         // after we've claimed the network resources we care about.
         MoonModule::setup();
+    }
+
+    /// The EMAC's data pads while Ethernet is the running interface. Not controls: the chip fixed
+    /// them, so there is nothing to set, and a board that is not using Ethernet leaves them free for
+    /// anything else (three of four classic boards in the catalog have no PHY at all).
+    uint8_t fixedPins(FixedPin* out, uint8_t max) const override {
+        // The APPLIED type, not the pending control: see appliedEthType_.
+        if (!out || appliedEthType_ == static_cast<uint8_t>(platform::ethNone)) return 0;
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < platform::ethFixedPadCount && n < max; i++)
+            out[n++] = FixedPin{platform::ethFixedPads[i].gpio, platform::ethFixedPads[i].name};
+        return n;
     }
 
     void defineControls() override {
@@ -299,12 +316,12 @@ public:
             // deviceModels.json catalog injects 8 dBm for brown-out-prone boards.
             // Hidden with the same radioOn gate as the txPower readout above — a WiFi
             // TX-power cap is meaningless on Ethernet / Idle where the radio is off.
-            controls_.addInt16("txPowerSetting", txPowerSetting_, 0, 21);
+            controls_.addControl("txPowerSetting", txPowerSetting_, 0, 21);
             controls_.setHidden(controls_.count() - 1, !radioOn);
             controls_.setAdvanced(controls_.count() - 1);
         }
         // Expert-only: discovery works without it, and the projectMM UI finds devices over UDP.
-        controls_.addBool("mDNS", mdnsEnabled_);
+        controls_.addControl("mDNS", mdnsEnabled_);
         controls_.setAdvanced(controls_.count() - 1);
 
         // addressing goes immediately before the static-IP fields it conditions, so
@@ -340,33 +357,38 @@ public:
             const bool isRmii  = (ethType_ == 1 || ethType_ == 2);
             const bool isSpi   = (ethType_ == 3);
             const bool isRgmii = (ethType_ == 4);
-            // RGMII (S31): the data/clock pins are the chip's fixed IO_MUX pads, set in
-            // ethInitEmac() (not user config); MDC/MDIO come from the per-chip ethConfigDefault
-            // (5/6) via the shared smi_gpio path. Neither needs a UI row, so RGMII shows only
-            // phyAddr + reset (the rest of the RMII rows stay hidden — isRmii-gated below).
+            // RGMII (S31): the data/clock pins are the chip's fixed IO_MUX pads, set in ethInitEmac()
+            // and reported through fixedPins() rather than as controls, since nobody can choose them.
+            // MDC/MDIO are NOT fixed: they ride the shared smi_gpio path on every interface and a
+            // carrier can wire them anywhere, so they stay ordinary controls here.
             const bool isEth   = isRmii || isSpi || isRgmii;
             // GPIO controls use addPin → a plain number input (ControlType::Pin),
             // not a slider: a GPIO has no meaningful range to drag. -1 = unused.
             // phyAddr is a PHY MDIO address (-1 = auto-detect, else 0..31), NOT a GPIO —
-            // so it uses a signed int control (addInt16), not addPin. (A Pin here would
+            // so it uses a signed int16 control, not addPin. (A Pin here would
             // make the pin ownership map report it as a false GPIO claim, since that map
             // reads every ControlType::Pin as a claimed GPIO.) It must be signed: -1 is
             // IDF's ESP_ETH_PHY_ADDR_AUTO sentinel (scan the MDIO bus), the S31's RGMII
             // default — a uint8 mangled -1 to 31 and the PHY never answered.
-            controls_.addInt16("ethPhyAddr", ethPhyAddr_, -1, 31);
+            controls_.addControl("ethPhyAddr", ethPhyAddr_, -1, 31);
             controls_.setNumberField(controls_.count() - 1);   // an MDIO address is an identity, not a magnitude — a number field, not a slider
             controls_.setHidden(controls_.count() - 1, !isEth);
             controls_.addPin("ethRstGpio", ethRstGpio_);
             controls_.setHidden(controls_.count() - 1, !isEth);
+            // MDC/MDIO are the PHY management pair, and every wired PHY needs them: ethInitEmac sets
+            // smi_gpio outside the RMII/RGMII branch, so an RGMII board drives them too. Shown for
+            // both (they are real board wiring a carrier can route differently), which is also what
+            // gets them counted by the pin map: it skips a hidden pin control on the rule that hidden
+            // means unused, so hiding a pin the MAC drives is how a pad goes missing from the map.
             controls_.addPin("ethMdcGpio", ethMdcGpio_);
-            controls_.setHidden(controls_.count() - 1, !isRmii);
+            controls_.setHidden(controls_.count() - 1, !isRmii && !isRgmii);
             controls_.addPin("ethMdioGpio", ethMdioGpio_);
-            controls_.setHidden(controls_.count() - 1, !isRmii);
+            controls_.setHidden(controls_.count() - 1, !isRmii && !isRgmii);
             controls_.addPin("ethClockGpio", ethClockGpio_);
             controls_.setHidden(controls_.count() - 1, !isRmii);
             // Clock direction is a boolean (true = clock IN / board feeds it,
             // false = chip drives it OUT) — a toggle, not a 0..1 slider.
-            controls_.addBool("ethClockExtIn", ethClockExtIn_);
+            controls_.addControl("ethClockExtIn", ethClockExtIn_);
             controls_.setHidden(controls_.count() - 1, !isRmii);
             controls_.addPin("ethSpiMiso", ethSpiMiso_);
             controls_.setHidden(controls_.count() - 1, !isSpi);
@@ -761,10 +783,13 @@ private:
     // ~54 on any ESP32-family chip, so int8 is ample — bound via addPin (Pin control
     // → number input). ethConfigDefault's fields are plain int; the values are all
     // small (≤52 / -1) so the copy into int8_t is lossless.
-    int16_t ethPhyAddr_    = static_cast<int16_t>(platform::ethConfigDefault.phyAddr);  // PHY MDIO addr 0..31, or -1 = auto-detect (scan the bus). Signed (int16, via addInt16) so -1 round-trips — a uint8 cast the platform's -1 to 255 and the 0..31 control showed 31, a fixed address no PHY answered, so the S31's RGMII never linked. NOT a GPIO (deliberately not addPin, or the pin-map would false-claim it).
+    int16_t ethPhyAddr_    = static_cast<int16_t>(platform::ethConfigDefault.phyAddr);  // PHY MDIO addr 0..31, or -1 = auto-detect (scan the bus). Signed (int16) so -1 round-trips — a uint8 cast the platform's -1 to 255 and the 0..31 control showed 31, a fixed address no PHY answered, so the S31's RGMII never linked. NOT a GPIO (deliberately not addPin, or the pin-map would false-claim it).
     int8_t  ethMdcGpio_    = static_cast<int8_t>(platform::ethConfigDefault.mdcGpio);
     int8_t  ethMdioGpio_   = static_cast<int8_t>(platform::ethConfigDefault.mdioGpio);
     int8_t  ethRstGpio_    = static_cast<int8_t>(platform::ethConfigDefault.rstGpio);
+    // The RGMII data pads, mirrored from the platform's one list so they can be PUBLISHED as controls
+    // (read-only): the controls are the registry the pin map reads, so a pad that is not a control is
+    // a pad the map cannot see. Seeded once; nothing writes them.
     int8_t  ethClockGpio_  = static_cast<int8_t>(platform::ethConfigDefault.rmiiClockGpio);
     bool    ethClockExtIn_ = platform::ethConfigDefault.rmiiClockExtIn;
     int8_t  ethSpiMiso_    = static_cast<int8_t>(platform::ethConfigDefault.spiMiso);
@@ -778,6 +803,12 @@ private:
     // valid hash output. setup()'s syncEthConfig() sets it before any compare.
     uint32_t appliedEthSig_ = 0;
     bool ethSigApplied_ = false;
+    // The ethType the DRIVER is running, which is not always the one the control holds: on an
+    // RMII/RGMII board a type change is saved and applied on the next boot (see syncEthLive), so the
+    // EMAC keeps driving its pads meanwhile. fixedPins() reports what the hardware holds, so it must
+    // read this rather than the pending control, or setting the type to None would free a pin the
+    // MAC is still driving and the map would show it available to an LED lane.
+    uint8_t appliedEthType_ = static_cast<uint8_t>(platform::ethNone);
     // Last-applied addressing signature (mode + static octets), same guard shape as ethSig — so
     // syncAddressingLive re-applies only on a real DHCP↔Static / static-field change.
     uint32_t appliedAddressingSig_ = 0;
@@ -822,6 +853,7 @@ private:
             cfg.spiIrq         = ethSpiIrq_;
             platform::setEthConfig(cfg);
             appliedEthSig_ = ethSig();   // mark this config as applied
+            appliedEthType_ = ethType_;  // and WHICH interface the driver now holds pads for
             ethSigApplied_ = true;
         }
     }
@@ -1049,8 +1081,18 @@ private:
         if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) return;   // not connected — keep prior status
         char ipStr[16];
         formatDottedQuad(ipStr, ip);
-        const char* label = (state_ == State::ConnectedEth) ? "Eth" : "WiFi";
-        std::snprintf(statusBuf_, sizeof(statusBuf_), "%s: %s", label, ipStr);
+        if (state_ == State::ConnectedEth) {
+            // Carry the NEGOTIATED speed, not just the address. A gigabit PHY that fell back to
+            // 100M still gets a lease and looks identical here, while the panel-card driver needs
+            // the higher rate to hold its frame timing, so the one line answers both "am I on the
+            // network" and "at what rate".
+            const uint16_t mbps = platform::ethLinkSpeedMbps();
+            if (mbps > 0) std::snprintf(statusBuf_, sizeof(statusBuf_), "Eth: %s (%u Mbit)",
+                                        ipStr, static_cast<unsigned>(mbps));
+            else          std::snprintf(statusBuf_, sizeof(statusBuf_), "Eth: %s", ipStr);
+        } else {
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi: %s", ipStr);
+        }
         setStatus(statusBuf_, Severity::Status);
     }
 

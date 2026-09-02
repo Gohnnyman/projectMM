@@ -34,7 +34,7 @@ namespace mm {
 /// Audio-reactive effect: sawtooth bands driven by the frequency spectrum.
 class FreqSawsEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫📊"; }  // MoonLight origin · audio
+    const char* tags() const override { return "💫🎶"; }  // MoonLight origin · audio
     Dim dimensions() const override { return Dim::D2; }   // writes only the z=0 slice; extrude fills z
 
     // Defaults match MoonLight's FreqSaws exactly.
@@ -47,12 +47,12 @@ public:
     uint8_t method    = 2;     // 0 Chaos, 1 Chaos fix, 2 BandPhases
 
     void defineControls() override {
-        controls_.addUint8("fade", fade, 0, 255);
-        controls_.addUint8("increaser", increaser, 0, 255);
-        controls_.addUint8("decreaser", decreaser, 0, 255);
-        controls_.addUint8("bpmMax", bpmMax, 0, 255);
-        controls_.addBool("invert", invert);
-        controls_.addBool("keepOn", keepOn);
+        controls_.addControl("fade", fade, 0, 255);
+        controls_.addControl("increaser", increaser, 0, 255);
+        controls_.addControl("decreaser", decreaser, 0, 255);
+        controls_.addControl("bpmMax", bpmMax, 0, 255);
+        controls_.addControl("invert", invert);
+        controls_.addControl("keepOn", keepOn);
         static constexpr const char* kMethodOptions[] = {"Chaos", "Chaos fix", "BandPhases"};
         controls_.addSelect("method", method, kMethodOptions, 3);
     }

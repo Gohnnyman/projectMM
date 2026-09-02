@@ -447,6 +447,9 @@ private:
         static constexpr R kIRGB[]   = {R::Dimmer, R::Red, R::Green, R::Blue};                     // CH1 master intensity
         // Moving heads (MoonLight offset maps → dense arrays). N = None.
         static constexpr R N = R::None;
+        // NOTE: two Dimmer roles (CH4 and CH9), probably a master/fine or per-section pair. The
+        // derivation keeps the LAST, so CH9 is driven and CH4 is left at 0. Unverified: no BeeEyes
+        // on the bench. If it comes up dim, CH4 is the first thing to check.
         static constexpr R kMHBeeEyes15[] = {   // 15ch: Pan,Tilt,-,Dim,-,Gobo,-,Zoom,Dim,-,R,G,B,-,-
             R::Pan, R::Tilt, N, R::Dimmer, N, R::Gobo, N, R::Zoom, R::Dimmer, N, R::Red, R::Green, R::Blue, N, N};
         static constexpr R kMHBeTopper32[] = {  // 32ch: Pan,-,Tilt,-,-,Zoom,Dim,-,-,R,G,B,… (RGBW cells → None)
@@ -455,6 +458,13 @@ private:
         static constexpr R kMH19x15W24[] = {    // 24ch: Pan,Tilt,-,Dim,R,G,B,W,…,Zoom@17 (RGBW cells → None)
             R::Pan, R::Tilt, N, R::Dimmer, R::Red, R::Green, R::Blue, R::White,
             N, N, N, N, N, N, N, N, N, R::Zoom, N, N, N, N, N, N};
+        // Mini 10W RGBW moving head, its 11-channel mode (it also has a 13ch mode adding auto/sound
+        // programs). Pan and tilt each carry a fine channel, CH6 is a plain linear dimmer and CH7 a
+        // separate strobe: leaving strobe unmapped holds it at 0, which is what a light driver
+        // wants. CH5 (axis speed) is None too, so movement runs at full speed.
+        // See docs/reference/light-fixtures.md for the full channel table.
+        static constexpr R kMHMini11[] = {      // 11ch: Pan,-,Tilt,-,-,Dim,-,R,G,B,W
+            R::Pan, N, R::Tilt, N, N, R::Dimmer, N, R::Red, R::Green, R::Blue, R::White};
 
         struct Builtin { const char* name; const R* roles; uint8_t channelCount; };
         static constexpr Builtin kBuiltins[] = {
@@ -465,6 +475,7 @@ private:
             {"MH BeeEyes 15", kMHBeeEyes15, 15},
             {"MH BeTopper 32", kMHBeTopper32, 32},
             {"MH 19x15W-24", kMH19x15W24, 24},
+            {"MH Mini 10W 11", kMHMini11, 11},
         };
         // A built-in name that overflows Preset::name would truncate silently (and break a lookup by
         // name), so fail LOUD at BUILD time if one is too long — the fix is a shorter name, not a

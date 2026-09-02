@@ -32,14 +32,14 @@ public:
     static constexpr uint8_t kStartCornerCount = sizeof(kStartCornerOptions) / sizeof(kStartCornerOptions[0]);
 
     void defineControls() override {
-        controls_.addUint16("width", width, 1, 500);
-        controls_.addUint16("height", height, 1, 500);
+        controls_.addControl("width", width, 1, 500);
+        controls_.addControl("height", height, 1, 500);
         controls_.addSelect("startCorner", startCorner, kStartCornerOptions, kStartCornerCount);
-        controls_.addBool("clockwise", clockwise);
+        controls_.addControl("clockwise", clockwise);
         // Off when the corners are four separate strip ends rather than one bent light.
-        controls_.addBool("sharedCorners", sharedCorners);
+        controls_.addControl("sharedCorners", sharedCorners);
         // For a strip that starts partway along an edge instead of at the corner.
-        controls_.addUint16("offset", offset, 0, 1999);
+        controls_.addControl("offset", offset, 0, 1999);
     }
 
     nrOfLightsType lightCount() const override { return perimeter(); }

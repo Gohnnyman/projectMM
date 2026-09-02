@@ -11,12 +11,12 @@ Forward-looking to-build items for the **core / infrastructure** domain (`src/co
 - **ESP32-P4** firmware variant — **`esp32p4rev1-eth` (Ethernet-only) shipped**: in `build_esp32.py`'s `FIRMWARES`, the `deviceModels.json` catalog (Waveshare P4-NANO), and CI builds + publishes it to the web installer + releases. **`esp32p4rev1-eth-wifi` now ships too** (2026-08-19): it boots and associates on IDF v6.1-rc1, so it is out of the experimental set in the installer and carries a normal description. Its open defect is throughput, not shipping — see § ESP32-P4 round 3, open issue 0.
 - **ESP32-S31 web-flash (waiting on esptool-js)** — the `esp32s31` firmware ships (build, catalog, CI matrix, web installer listing), and CLI flashing works (`flash_esp32.py` → esptool.py, which has S31 support since v5.2.0). **Browser flashing does not**: the web installer's `esptool-js` (pinned 0.5.7) has no S31 chip class. Worse than a missing entry — the S31's ROM magic (`15736195`) *collides* with the classic ESP32's; esptool.py disambiguates with secondary register detection (S31 `USES_MAGIC_VALUE=False`), but esptool-js has only the magic table, so it would mis-identify the RISC-V S31 as a classic Xtensa ESP32 and flash the wrong stub/params. `install.js`'s `WEB_FLASH_UNSUPPORTED_CHIPS` guard catches an S31 connect-flash failure and points the user at the CLI. **No upstream timeline**: as of 2026-06 the esptool-js repo has zero S31 issues/PRs/commits and its last release was 2026-03 (it lags esptool.py on new chips by months). **Removal trigger**: when esptool-js ships S31 support *with* the secondary detection (not just a magic-table entry — re-check the chip-detect switch, not the version number), bump the esptool-js pin in `install-orchestrator.js` and drop `ESP32-S31` from `WEB_FLASH_UNSUPPORTED_CHIPS`.
 - **ESP32-P4 v3.x silicon variant (backlog)** — `esp32p4rev1-eth` is built for pre-v3 P4 (`CONFIG_ESP32P4_SELECTS_REV_LESS_V3` + `REV_MIN_0`), because the v6.1 IDF default (v3.1) refused to boot on the bench/field v1.x P4 and rev <3.0 vs >=3.0 are "huge hardware difference" (one binary can't cover both). **DONE (2026-08-19): `esp32p4rev3-eth` and `esp32p4rev3-eth-wifi` ship** (`REV_MIN_300`, which covers v3.0-v3.99), reusing the rev1 board fragment so the partition table and EMAC config stay in one place. **Still open: neither has ever been booted** — both bench boards are v1.3 engineering samples, so the rev3 images are flagged experimental in the installer and need a v3 board to verify. Espressif does not recommend v0.x/v1.x for new designs, so a board bought today is v3.x and needs these.
-- **Linux desktop binary** — third desktop job in `release.yml`, static-linked libstdc++.
 - **Teensy 4.1** — toolchain-file build, `.hex` for Teensy Loader.
 - **Raspberry Pi** — ARM64, cross-built or native.
-- **macOS code-signing** — drops the Gatekeeper "downloaded from internet" prompt.
+- **macOS code-signing (Developer ID)** — the release `.dmg` is now ad-hoc signed, which turns Gatekeeper's outright refusal into the "unidentified developer" prompt a user can accept via right-click Open. A paid Developer ID certificate plus notarization would drop that prompt too.
 - **Windows code-signing** — drops the SmartScreen warning on first run of `projectMM.exe`. Same shape as macOS signing; needs an EV / OV code-signing certificate (Microsoft Trusted Signing is the cheapest current option). Until then, the README notes the SmartScreen prompt.
 - **Live RMII Ethernet reconfigure** — runtime PHY/pin config shipped (`ethType` + pin controls in NetworkModule, per-board defaults in `deviceModels.json`, `platform::setEthConfig`/`ethInit` dispatch). W5500 (SPI) on S3 applies **live** — `ethStop()` tears down the SPI bus and `ethInit()` re-runs on the next `loop1s()` with no reboot. RMII (classic/P4 internal EMAC) still saves config and asks for a restart to apply, because the EMAC bring-up is fiddlier to hot-cycle cleanly. Make RMII live too: a hot `esp_eth_stop` + EMAC/netif teardown + re-init on config change, matching the W5500 path, so every interface honours the no-reboot principle.
+- **GCC below 16 needs four warnings demoted, and nothing exercises those versions** - `-Wnull-dereference`, `-Wrestrict`, `-Wstringop-overflow` and `-Wformat-truncation` fire on provably correct code from GCC 12 through 15 (five of the twelve inside libstdc++ and glibc headers, unreachable from our source), so CMakeLists demotes them to non-fatal there and keeps them fatal on 16+. That unblocks CI and from-source builds on Debian and Raspberry Pi OS alike, but it is a suppression, not an understanding: nobody routinely compiles with 12-15, so a REAL instance of one of these on those versions is now a warning nobody reads. Revisit when the runner's default GCC reaches 16, at which point the whole block can be deleted.
 - **Installer UX polish** — clear "Pre-release (beta)" warning on RC/latest picks, yank-by-asset-tag instead of yank-by-release-deletion.
 - **Offer projectMM/MoonLight as a library** — a downstream sketch where another firmware/app consumes the light pipeline (or a subset) as an embeddable dependency rather than running the whole binary. `library.json` is already a PlatformIO *library* manifest, so the seed exists. When this is designed, give it a small public **identity surface**: one runtime constant the consumer reads (a `kProjectName`, likely a `ProjectInfo` bundle of name + version + url) that the network wire-strings (ArtNet/E1.31 source-name + CID), the UI banner, and any "About" string all *derive from* — the one place a consumer queries "what am I embedding." This is the genuine home for the name-centralisation that the rename ([rename-to-moonlight.md § Phase 1.3](rename-to-moonlight.md)) deliberately *didn't* do: the rename is a one-time sweep (a constant would just split it), but a library consumer references the identity ongoing and widely, which is the test a constant must pass. Build it *then*, against the real library API, not speculatively now.
 - **HTTP: a request whose headers or body arrive a few ms late is dropped, intermittently
@@ -65,10 +65,10 @@ Forward-looking to-build items for the **core / infrastructure** domain (`src/co
   second, uint8 and uint16). Only the re-read after a slot write is still wrong.
 
   **Reproduce** (in `unit_moonlive_fill.cpp`, which has `kCtrlTable`/`kSys` to hand): compile
-  `class T { uint16_t big = 5; defineControls() { addUint16("big", big, 0, 1000); } tick() {
+  `class T { int big = 5; defineControls() { addControl("big", big, 0, 1000); } tick() {
   setRGB(0, big, 0, 0); } }`, `run(..., kEntryTick)` → 5, write the slot to 7, run again → still 5.
 
-  **Impact: desktop only, nothing ships broken.** `addUint16` is hardware-verified on both ISAs
+  **Impact: desktop only, nothing ships broken.** A wide control is hardware-verified on both ISAs
   (S3 Xtensa and S31 RISC-V drive ember's `cycle` to 2000 and back). What is missing is DESKTOP
   coverage of the live-edit loop — the path users touch most — so no host test can pin it and the
   next regression there would surface only on a board. Add the runtime assertion together with the
@@ -97,7 +97,7 @@ Forward-looking to-build items for the **core / infrastructure** domain (`src/co
   RISC-V coprocessor-context save on INTERRUPT ENTRY. That is a symptom of something faulting inside
   an ISR context rather than a bug in the kernel itself, and the P4 is the only RISC-V target with a
   coprocessor, which is why no other board shows it. The prior art at
-  [Plan-20260718](../history/plans/Plan-20260718%20-%20MoonI80%20lapping-v2%20clock-oracle%20ring%20(shipped).md)
+  [Plan-20260718](../history/plans/archive/Plan-20260718%20-%20MoonI80%20lapping-v2%20clock-oracle%20ring%20(shipped).md)
   is a DIFFERENT cause with the same panic name (an ISR reading PSRAM while a flash write disabled
   the cache, fixed with a `spi_flash_cache_enabled()` defer guard) and is worth re-reading first:
   the same shape on another ISR would present exactly like this.
@@ -122,35 +122,220 @@ DevicesModule discovers via **passive UDP presence** (UDP 65506) feeding a [`Dev
 - **Live peer state** — a discovered peer's brightness / on-off shown in our list, refreshed by polling its REST `/json` after discovery gives the IP (discovery = UDP/mDNS, state = REST). The read-side complement to the command half.
 - **Non-IP transports (board-gated, far future)** — Tasmota-MQTT / zigbee2mqtt need an MQTT client; **direct Zigbee/Thread** (S31/C6/H2 802.15.4 radio) makes projectMM the *hub itself*, driving bulbs over the mesh with no gateway — the standout differentiator, the biggest lift. Same plugin philosophy, a transport addition + board gate.
 
-Full design + the reasoned transport split: [Plan-20260629 — UDP device discovery + mDNS advertise-only (shipped)](../history/plans/Plan-20260629%20-%20UDP%20device%20discovery%20%2B%20mDNS%20advertise-only%20%28shipped%29.md).
+Full design + the reasoned transport split: [Plan-20260629 — UDP device discovery + mDNS advertise-only (shipped)](../history/plans/archive/Plan-20260629%20-%20UDP%20device%20discovery%20%2B%20mDNS%20advertise-only%20%28shipped%29.md).
+
+## MoonBase follow-ups
+
+MoonBase v1 ([architecture.md § MoonBase](../architecture.md#moonbase-the-second-boot-image))
+ships exactly one action: install firmware (upload + URL). The name is deliberately broader than
+"recovery", these are the candidate next actions, each solving something only a separate boot
+image can solve. The budget rule from the partition table applies to all of them: the 896 KB slot
+has ~150 KB headroom, sized for one new *component*, so each action must earn its bytes (a few KB
+of code is fine; a new IDF component is the expensive kind).
+
+- **Factory reset**: erase the filesystem (and optionally NVS) from MoonBase's page: recovers a
+  device whose config crashes the app on boot, without a USB cable.
+- **Boot with config disabled**: one-shot flag the app reads at startup to skip loading
+  `/.config`: diagnose "is it my config or the firmware?" without erasing anything.
+- **WiFi re-provisioning**: edit the stored credentials from MoonBase's page (today it only
+  *reads* them; the AP fallback plus the app's provisioning already covers most of this).
+- **Publish SHA-256 sums with release assets**: the Defender false-positive guidance can only
+  say "re-download over HTTPS" today; a checksums file per release lets a user verify a
+  quarantined installer before restoring it. One sha256sum step in the release staging.
+- **Streamed HTTP responses drain across ticks**: serveFileContents/serveHlsFile block the
+  render tick for the whole transfer (a slow player fetching a ~1 MB HLS segment every second
+  can hold it for hundreds of ms), and fsReadAt reopens the file per 1 KB chunk. The named fix
+  is the writeSome/drain pattern preview already uses, plus a larger chunk.
+- **Re-entrant network bring-up**: NetworkModule::setup() (netif create, driver install, the
+  eth→WiFi→AP cascade) runs once at boot and crashes if re-run live, so it opts out of the
+  live config apply (`appliesConfigLive() = false`) and a restored NetworkModule.json waits
+  for the next boot. The real fix is bring-up that reconciles instead of re-creates; until
+  then the restore dialog offers the restart.
+- **Config backup / restore, tiers 2+3**: tier 1 (browser-side bundle over the file API, with
+  the rename map and restore report) ships in the File Manager. Remaining: tier 2, a
+  single-archive device endpoint (one request instead of a walk); tier 3, restore hosted on
+  MoonBase's page, the migration answer for future partition-table moves.
+- **Firmware downgrade guard**: MoonBase installs whatever image it is given; a version display
+  (read from the incoming image's app descriptor) before flashing would make an accidental
+  downgrade visible.
+- **Hardware diagnostics**: chip/flash/PSRAM identification and a minimal pin tester, for
+  triaging a board that misbehaves under the full app.
+- **Ethernet: shipped for classic RMII (2026-08-26)**. MoonBase reads the eth wiring from the
+  same config file as the credentials (ethType gates it) and runs ONE interface at a time in
+  the app's own preference order (eth, else WiFi, else AP), so the browser keeps the address
+  the app had. Still open here: the P4's IP101/managed-component PHY and the S3's SPI W5500,
+  which matter only if MoonBase ever goes beyond the 4 MB classics.
+- **Static IP for MoonBase**: MoonBase always uses DHCP; a venue network without a DHCP server
+  (fixed-address rigs exist) would reach the app (static `addressing`) but not MoonBase. Read
+  the addressing block from the same config scrape when a venue actually asks for it (the app
+  itself applies static addressing to eth already).
+- **MoonBase as the only update mechanism, all boards** (PO, 2026-08-26): would delete the app's
+  whole in-place OTA path (a real subtraction) and grow every app slot, with the stronger
+  power-fail story everywhere. Three deciding factors first: MoonBase Ethernet beyond classic RMII (the P4 has no
+  WiFi of its own and uses a different PHY; the S3 uses SPI W5500), a migration that does not lose config (backup/restore above), and accepting
+  ~45 s of visible downtime per update where dual-OTA installs in the background. Trigger:
+  MoonBase proven in the field on the 4 MB boards.
+
+## Provisioning and live-reconfig gaps (bench, 2026-08-26)
+
+Both surfaced while bringing up MoonBase Ethernet on the migrated Olimex; neither is MoonBase's.
+
+- **A migrated device is not fully provisioned until the deviceModel catalog push is re-applied.**
+  After the MoonBase table migration the board ran for days with `deviceModel` empty and
+  `ethType` 0: Improv/AP provisioning restores WiFi credentials only, and nothing tells the user
+  the catalog half (eth wiring, per-board settings) is missing. Candidates: MoonDeck re-pushes
+  the catalog on discovering a device whose deviceModel is empty, or the UI badges the state.
+- **`ethType` does not apply live.** Setting it to 1 over the API (cable in, pins valid) left
+  Ethernet down; the same config brought it up at the next boot. Every setting applies live is
+  a core principle (architecture.md, Live reconfiguration), so the eth init path is missing from
+  the control's apply/build-state sweep.
 
 ## ESP32 performance and memory
 
-### Flash budget — the 4 MB classic ESP32 is the ceiling (investigation)
+### Size estimates for unbuilt features (reference)
 
-The binary has grown ~1.4 → ~1.48 MB as effects, audio sync, IR, and Ethernet landed. Per-board headroom against the app (OTA) partition slot:
+Estimates, not measurements, so they live here rather than in [performance.md](../performance.md) which carries measured numbers only. (The 4 MB flash-budget investigation these once fed is resolved: MoonBase's single-app-slot layout grew the classic app slot to 2496 KB, see architecture.md § MoonBase.)
 
-| Board | app slot | binary | used |
-|---|---|---|---|
-| **classic esp32 (4 MB)** | 1.75 MB | ~1.48 MB | **~84 %** ⚠️ |
-| esp32s3-n8r8 (8 MB) | 3.00 MB | ~1.48 MB | ~49 % |
-| 16 MB boards | 4.00 MB | ~1.48 MB | ~37 % |
-
-Only the **4 MB classic** is tight (the partition comment itself notes "~200 KB headroom"); the 8/16 MB boards have years of room. So this is a *classic-ESP32-only* constraint, not a global one — the fix should shrink the small-flash build without touching the flagship boards.
-
-Levers, roughly by payoff-per-effort:
-
-1. **`-Os` for the size-bound builds.** The ESP32 build currently runs the IDF default optimization (`CONFIG_COMPILER_OPTIMIZATION_DEBUG`, ~`-Og`), **not** `CONFIG_COMPILER_OPTIMIZATION_SIZE` (`-Os`). Setting size-opt on the classic (and any small-flash) firmware typically buys 5–15 % flash for free — measure the tick/FPS delta, since `-Os` can cost a little hot-path speed; if it does, gate it to the flash-bound firmwares only, not the S3/P4 where headroom is fine.
-2. **`MM_MINIMAL` feature profile for the 4 MB target.** The classic board doesn't need every effect/driver compiled in. A build profile that compiles out heavy optional modules (the same `firmware_cmake_args()` seam the eth/wifi gating already uses) keeps the flagship boards full-featured while the small board ships a curated subset — the standard "small board, smaller build" pattern.
-3. **Repartition the 4 MB classic.** If A/B OTA isn't required on the classic, a single-app-slot layout nearly doubles the app ceiling (1.75 → ~3.5 MB). Trade-off: OTA loses its rollback slot. Decide per-board, not globally.
-
-Start with (1) — it's a one-line sdkconfig change with a measurable payoff and no code churn; (2)/(3) only if (1) plus normal growth still crowds the classic. The UI embed is already gzipped (`app.js` ~140 KB → ~40 KB), so UI growth is cheap in flash; the pressure is C++ `.text`.
+| Feature | Est. | Rationale |
+|---|---|---|
+| Mozilla cert bundle trimmed | −40 KB | `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN` keeps common roots only. `_NONE` saves ~50 KB but breaks TLS. |
+| Static IPv6 | +20 KB | lwIP IPv6 component (off by default). Only if a deployment needs it. |
+| WebSocket TLS (`wss://`) | ~0 KB | Reuses linked mbedTLS; certificate handling adds <5 KB. |
 
 ### E1.31 multicast receive (IGMP join)
 
-NetworkReceiveEffect accepts E1.31 via unicast only — the same scope MoonLight ships. Multicast senders address the per-universe group `239.255.{universe_hi}.{universe_lo}`, which a receiver must join via IGMP; the platform `UdpSocket` has no `IP_ADD_MEMBERSHIP` support yet (lwIP `setsockopt` on ESP32, plain `setsockopt` on desktop, plus a join-per-accepted-universe bookkeeping question). Add when a multicast-only sender actually shows up on a bench; until then the spec documents "point sACN senders at the device's IP".
+NetworkReceiveEffect accepts E1.31 via unicast only — the same scope MoonLight ships. Multicast senders address the per-universe group `239.255.{universe_hi}.{universe_lo}`, which a receiver must join via IGMP. **The platform half of this now exists**: `UdpSocket::joinMulticast()` shipped with the WLED audio-sync work (2026-08-29) and is used in anger there, on both desktop and ESP32. What is left for E1.31 is the join-per-accepted-universe bookkeeping, not the socket support. Add when a multicast-only sender actually shows up on a bench; until then the spec documents "point sACN senders at the device's IP".
 
 **The SEND half is the more interesting one, and it's the honest scale answer.** sACN puts the universe number *in the group address*, so with **IGMP snooping** the switch filters per-universe in hardware — each node's NIC sees only the universes it joined. That is broadcast's send-once efficiency *plus* unicast's selectivity, and it's the one addressing mode that beats per-node unicast when many nodes want overlapping universes. `NetworkSendDriver` already knows its universe range, so the group address is a pure function of `universe_start` — a small increment, not a redesign. **The catch that keeps it off the default path:** without IGMP snooping the switch floods multicast exactly like broadcast (and on WiFi it goes out at the lowest basic rate to every station), so it degrades straight back into the starvation regime — and firmware cannot detect whether the switch snoops. So: unicast stays the portable default; multicast is the opt-in optimization for a network the user controls. Do the receive join and the send group together when it lands.
+
+### A scripted module's DIMENSION chip still comes from its type, not its script
+
+`writeModuleJson` emits an instance's `tags()` (HttpServerModule.cpp), so a MoonLive module shows
+the emoji its loaded script declares. Its DIMENSION does not follow the same path: `/api/types`
+carries `dim` per TYPE, captured at boot from a probe with no script loaded, and the module state
+carries no `dim` at all. So a script declaring `int dimensions() { return 3; }` renders as 🟦 on the
+card while behaving as D3 through `Layer::extrude`: the behavior is right and the chip lies.
+
+The fix is not a line in the serializer. `MoonModule` deliberately has no `dimensions()`:
+`ModuleFactory::registerType` detects one with `if constexpr (requires ...)` on the CONCRETE type
+precisely so the light-domain `Dim` enum stays out of core (ModuleFactory.h). Core holds a
+`MoonModule*` when it writes state, so emitting a per-instance dim means giving `MoonModule` a
+virtual that returns a byte, which puts a light-domain concept on the domain-neutral base for the
+sake of a chip.
+
+Options, cheapest first: a `uint8_t dimByte()` on MoonModule defaulting to 0 (the enum stays in the
+light domain, only the number crosses, mirroring what the probe already does); or leave it and
+accept that a scripted module's dimension chip reflects its type. Worth doing when someone is
+annoyed by the wrong chip, not before.
+
+### British spellings predate the prose gate (118 files)
+
+`check_prose.py` reports on ADDED lines only, so the American-spelling rule has been enforced from
+the day it landed forward, and everything written before it was never swept. 118 files still carry
+`colour`, `centre`, `behaviour`, `recognise`, `initialise` and friends, in comments and in a few
+identifiers.
+
+The gate keeps it from growing, so this is a one-time sweep rather than a leak. It is deliberately
+NOT folded into a feature branch: a whole-repo rename touches more files than any review can read,
+and mixing it with real changes is how a review gets declined for size. Do it as its own commit,
+mechanically, with the gate run over the whole tree afterwards rather than over a diff.
+
+Identifiers first and separately: a rename changes an API, where a comment does not. `centre()` in
+the shipped `crosshair.mle` was one and is already fixed, since a shipped teaching script is the
+highest-value case.
+
+**Now caught going forward for scripts too**: `.mle`/`.mll`/`.mlm` joined the checker's SUFFIXES
+(they were unchecked, which is how `colour` reached ten shipped scripts), so the library cannot
+drift again.
+
+### Multicast discovery has no fallback when the group never arrives
+
+`DevicesModule` announces presence on the multicast group and every device always joins it, so peers
+find each other whatever each has set `wledCompatible` to. The docstring states the worst case as
+"without IGMP snooping a switch floods multicast exactly like broadcast", i.e. it degrades to the
+thing it was avoiding. **Field reports from other projects say the real worst case is stronger:
+multicast sometimes does not arrive at all**, most often when the path bridges physical media
+(a WiFi client talking to a wired one), where consumer access points and switches handle group
+membership least well. Bursty delivery is reported too, packets arriving in clumps rather than at
+the send cadence.
+
+That failure is silent here: peers simply never appear, and the card shows an empty list that looks
+exactly like a healthy single-device setup.
+
+**A periodic broadcast probe is the obvious fix and it is the wrong one.** The trigger would be
+"no peer seen for N seconds", which is the PERMANENT state of every device that has no company,
+and most installs are a single device. Every one of them would broadcast forever, which is the
+chatter multicast was chosen to avoid, and worst on exactly the WiFi networks already struggling.
+A device cannot tell "the group is broken" from "I am alone" by listening: both are silence.
+
+So the fallback needs a trigger that is not silence.
+
+**The shape that works: try broadcast because it is cheap, rather than waiting for silence to mean
+something.** Announce on multicast, listen on BOTH, and let evidence decide. What is detectable is
+not "I heard nothing" but an ASYMMETRY: a peer heard over broadcast that never arrived over
+multicast proves the group is broken, where silence proves nothing. A device that sees that adds
+the broadcast copy to its own announcements and keeps it.
+
+That needs a bootstrap, because two devices both waiting for evidence never produce any: each is
+quiet on broadcast, so neither gives the other the packet that would settle it. **Announce on both
+for a bounded window after boot, then settle to multicast alone unless broadcast proved necessary.**
+The chatter is one-time and bounded rather than permanent, which is what makes it affordable on the
+WiFi networks this exists for.
+
+The control that follows is a mode rather than a compatibility flag: `multicast` (quiet, today's
+default), `multicast + broadcast` (what `wledCompatible = true` does now, and what WLED apps need),
+and `auto` (the rule above). Unicast is deliberately absent: discovery is one-to-many, and there is
+no address to unicast to before anything has been discovered. Document broadcast as the
+WLED-compatible mode rather than naming the flag after WLED.
+
+**It stays on DevicesModule rather than moving up to NetworkModule.** Three places in the codebase
+send to a group, and only one of them is ours to choose: discovery uses projectMM's own
+`239.255.x.x`, audio sync uses WLED's `239.0.0.1`, and sACN send uses the universe-derived
+`239.255.{hi}.{lo}` that E1.31 mandates. A network-level "prefer broadcast" switch could not move
+the latter two without breaking the protocols they speak, so a control there would imply an
+authority it does not have.
+
+**Can a device self-test by hearing its own multicast? Mostly no, and the reason is worth writing
+down.** `IP_MULTICAST_LOOP` is never set anywhere in the platform layer, so it sits at the stack
+default, which is ON for both lwIP and BSD sockets. A device therefore hears its own multicast
+delivered internally, before the packet ever reaches the wire, so the test passes on a network where
+multicast is entirely broken. Turning loopback off makes hearing yourself meaningful, but then the
+test demands that the switch or AP reflect group traffic back to the sending port, which plenty
+deliberately do not do, so healthy networks would fail it.
+
+What the self-test IS good for is the negative case: with loopback on, NOT hearing your own
+multicast means the local join or socket is broken, which is a real and actionable fault. It
+diagnoses the device, not the network. The network half still needs a peer, because "did my packet
+cross this switch" cannot be answered with nothing on the other side.
+
+**Unverified:** the lwIP loopback default above is read from the socket semantics and our own code,
+not measured on a board. Confirm on an ESP32 before building on it.
+
+**Land the diagnosis whatever else happens.** Reporting "joined the group, no peers seen" on the
+card costs almost nothing and turns a silent failure into a legible state, and it is useful even if
+the auto mode is never built.
+
+### ESP32 UDP receive is bounded by PACKET COUNT, not bytes
+
+Reported from other projects working the same ground: the ESP32 family's incoming UDP limit behaves
+as a **mailbox of packets** rather than a memory budget, with a hard numerical ceiling, and the P4
+is no better. The observed shape is perfect reception up to that count and then progressively worse
+loss as universes climb, rather than a clean cliff. Raising it is tunable but bounded, since the raw
+packet buffers are full-frame sized whatever the payload.
+
+Two consequences worth having in mind:
+
+- **Pixels-per-packet is the lever, not bandwidth.** Art-Net is DMX512 on the wire, so it is capped
+  at 512 values per packet whatever the frame size; DDP fills close to a whole MTU. For the same
+  pixel count DDP therefore needs far fewer packets, which is the resource that runs out first.
+  This matches our own measurement that ArtNet is where the WiFi limit bites.
+- **A P4-specific escape exists.** Have the packet handler DMA the payload to PSRAM and release the
+  hardware buffer immediately, then parse from another task, so the mailbox drains at memory speed
+  rather than at parse speed. That is real work and speculative, but it is the shape of a fix rather
+  than a tuning knob.
+
+Unverified on our own bench: this is other people's measurement, recorded so the next receive-path
+investigation starts from it rather than rediscovering it. Confirm before acting on it.
 
 ### WiFi ArtNet performance (pending investigation)
 
@@ -218,6 +403,16 @@ Two improvements when this matters:
 - **Optional bind-to-localhost flag** — `--bind 127.0.0.1` for users who don't want LAN reachability. Default stays "" (all interfaces) since the LAN-reach is the documented design.
 
 Not blocking — MoonDeck is a developer tool, not a production server. Pick this up when MoonDeck is in scope for hardening.
+
+### A tagged release does not reach the web installer until the next main deploy (bug)
+
+`deploy-pages` in `.github/workflows/release.yml` is gated `if: github.ref == 'refs/heads/main'`, because the `github-pages` environment's protection rule only allows main. The installer's release list is **staged into the Pages site at deploy time** (`install.js` self-hosts the last 5 stable + 5 prerelease releases; the release-asset URLs redirect to a host that sends no CORS header, so the browser cannot read them from the Pages origin). Together those mean **pushing a `vX.Y.Z` tag publishes the release but never updates the installer** — the new version reaches the picker only when something later pushes to main.
+
+Hit on v4.0.0 (2026-08-24): the release published at 16:15:59, a main deploy ran at 16:16 and enumerated releases *before* it existed, and the installer offered v3.0.0 as newest for hours. Re-running the workflow with the tag fixed it, and that manual re-run is the current workaround.
+
+Note the device's own OTA picker is unaffected — it reads `api.github.com` live ([app.js](../../src/ui/app.js) `RELEASES_API`), which is why a device could offer v4.0.0 while the installer could not. Two independent paths to the same release list.
+
+`restage-pages-for-tag` in the same workflow already covers this: on a `v*` tag it re-invokes the workflow on `main` with `tag=<the tag>`, so `deploy-pages` runs under the allowed ref and the manifests land in `releases/<tag>/`. The open item is narrower than the symptom suggested — whether the dispatched run can still lose the race, since it is a *second* run whose release enumeration happens later, and whether relaxing the `github-pages` environment's branch policy (needs repo-admin) would remove the indirection entirely.
 
 ### CI: pin GitHub Actions to commit SHAs (supply-chain hardening)
 
@@ -363,13 +558,15 @@ Device-model injection over Improv shipped as **"Improv = REST over serial"** (t
 
 **Open follow-up: closed-loop APPLY_OP pacing (read-back ack + retry).** The installer paces APPLY_OP frames open-loop (`sendApplyOpFrame` waits a fixed ~120 ms between ops) rather than reading the device's ack back, because a Web Serial duplex read while the writer lock is held is awkward. The delay covers the worst-case single-buffer consume window with headroom, and each op is idempotent (a lost op re-applies cleanly on a re-flash), so this is robust today. The closed-loop upgrade — read the RPC response, retry once on error `0x82` (buffer busy) — removes the fixed delay (faster install) and makes op-loss impossible rather than improbable. Worth doing if a real install is ever observed dropping an op, or when the config push grows large enough that the cumulative fixed delay is noticeable. Touches only `install-orchestrator.js`.
 
-**Open follow-up: shared JS helpers across device-UI and web-installer.** `safeLocalGet` / `safeLocalSet` (3-line hostile-storage guards) are duplicated in `src/ui/install-picker.js` (device firmware, embedded as a C string via `embed_ui.cmake`) and `docs/install/devices.js` (web installer page, served from Pages). The two live in different build contexts so the shared extract isn't trivial — it'd need a new `src/ui/safe-storage.js` plus updates to: `embed_ui.cmake` (embed the new file), `ui_embedded.h` generator (new C array), HTTP server file routing (new path served), `release.yml` workflow staging, `preview_installer.py` staging. Five files for one 3-line helper is too much pre-merge. Worth doing when the next shared helper arrives — `relativeTime` and `formatBytes` are candidates. Two helpers earn the build-glue cost; one doesn't.
+**Open follow-up: shared JS helpers across device-UI and mooninstaller.** `safeLocalGet` / `safeLocalSet` (3-line hostile-storage guards) are duplicated in `src/ui/install-picker.js` (device firmware, embedded as a C string via `embed_ui.cmake`) and `mooninstaller/devices.js` (web installer page, served from Pages). The two live in different build contexts so the shared extract isn't trivial — it'd need a new `src/ui/safe-storage.js` plus updates to: `embed_ui.cmake` (embed the new file), `ui_embedded.h` generator (new C array), HTTP server file routing (new path served), `release.yml` workflow staging, `preview_installer.py` staging. Five files for one 3-line helper is too much pre-merge. Worth doing when the next shared helper arrives — `relativeTime` and `formatBytes` are candidates. Two helpers earn the build-glue cost; one doesn't.
+
+**Open follow-up: P4 Improv scan on a cold WiFi link (bench check).** `improvHandleScan` in `src/platform/esp32/platform_esp32_improv.cpp` calls `esp_wifi_scan_start`, which needs the WiFi driver started. On native ESP32/S3 the driver is up by the time a user provisions; on the P4 the radio lives on the C6 and comes up only after the esp_hosted prelude in `ensureWifiInit()` (triggered by `wifiApInit` / `wifiStaInit`). A scan requested on a P4 that has not initialised WiFi returns an error cleanly rather than scanning a cold link, so nothing crashes. The check: bench-verify whether a P4 provisioned from cold needs the link brought up first, and if so route the scan through the public `wifiAp`/`wifiSta` path.
 
 ### Live scripting — author effects/layouts/modifiers/drivers/sensor logic on-device (multi-commit, design phase)
 
 Run user-authored scripts on a running device — a scripted effect, layout, modifier, driver, or core sensor rule, pushed as text and live on the next tick with no reflash/reboot — the leap WLED took with ARTI-FX and the heart of the PixelBlaze product. A scripted module **is** a MoonModule (controls, `loop()`, role, generic UI). The engine lives in core (domain-neutral: also "transform sensor data") and serves the light domain specifically. Targets in order: ESP32 classic + S3 first, then P4/other ESP32, then Teensy, then desktop. Must be blazingly fast (runs in the render hot path at 16K+ lights × 50 FPS), memory-smart (IRAM/PSRAM via `platform::alloc`, compile-once), and synced (Scheduler tick, tick-atomic hot-swap, live reconfig).
 
-The **bottom-up landscape survey** is done — [livescripts-analysis-bottom-up.md](livescripts-analysis-bottom-up.md): deep-reads the [ESPLiveScript fork](https://github.com/ewowi/ESPLiveScript/tree/fix-warnings) (a from-scratch C-like JIT that emits **native Xtensa** machine code — blazingly fast but **Xtensa-only**, so it covers classic+S3 and *not* P4/Teensy/desktop), surveys the field (PixelBlaze bytecode VM + web editor, WLED ARTI-FX AST-walking interpreter, embedded VMs / WASM / lightweight multi-ISA JITs), and extracts the load-bearing decisions (execution strategy, the IR seam ESPLiveScript lacks, the MoonModule binding, the per-pixel contract, memory placement, sync, sandboxing). Its thesis to validate: a **portable bytecode-VM baseline that runs on every target on day one + an optional native back-end for the hot ISAs behind a shared IR**. **Next: the top-down redesign** — the prompt that generates `livescripts-analysis-top-down.md` is at the bottom of the bottom-up doc; it produces the reference architecture + staged spike plan. Implementation is multi-commit, spike-ordered, after the top-down lands. Credits: [history/hpwit-ESPLiveScript.md](../history/hpwit-ESPLiveScript.md).
+The **bottom-up landscape survey** is done — [livescripts-analysis-bottom-up.md](livescripts-analysis-bottom-up.md): deep-reads the [ESPLiveScript fork](https://github.com/ewowi/ESPLiveScript/tree/fix-warnings) (a from-scratch C-like JIT that emits **native Xtensa** machine code — blazingly fast but **Xtensa-only**, so it covers classic+S3 and *not* P4/Teensy/desktop), surveys the field (PixelBlaze bytecode VM + web editor, WLED ARTI-FX AST-walking interpreter, embedded VMs / WASM / lightweight multi-ISA JITs), and extracts the load-bearing decisions (execution strategy, the IR seam ESPLiveScript lacks, the MoonModule binding, the per-pixel contract, memory placement, sync, sandboxing). Its thesis to validate: a **portable bytecode-VM baseline that runs on every target on day one + an optional native back-end for the hot ISAs behind a shared IR**. **Next: the top-down redesign** — the prompt that generates `livescripts-analysis-top-down.md` is at the bottom of the bottom-up doc; it produces the reference architecture + staged spike plan. Implementation is multi-commit, spike-ordered, after the top-down lands. Credits: [friend-repos/hpwit-ESPLiveScript.md](../friend-repos/hpwit-ESPLiveScript.md).
 
 ### Duplicate module names are reachable, and silent (backlog)
 
@@ -404,7 +601,7 @@ module by a path rather than a bare name.
 
 ### HTTP file serving blocks the render tick (backlog)
 
-`HttpServerModule::handleConnection()` serves large embedded files (`app.js`, `style.css`) with the blocking `TcpConnection::write` — a page load can briefly stall `loop20ms`. One-shot per load (lower priority than the per-tick preview issue, which is fixed). Fix: serve large HTTP responses with `writeChunks` (the same non-blocking path used for preview frames).
+`HttpServerModule::handleConnection()` serves large embedded files (`app.js`, `style.css`) with the blocking `TcpConnection::write` — a page load can briefly stall `loop20ms`. One-shot per load (lower priority than the per-tick preview issue, which is fixed). Fix: serve large HTTP responses through a resumable per-client cursor drained on tick20ms (the shape the preview and full-state sends use).
 
 ### Generic control + state topics over MQTT — the automation escape hatch (backlog)
 
@@ -488,8 +685,9 @@ work moved to a worker or made resumable, so each is a design change rather than
 Confirmed by external review (CodeRabbit, PR #56).
 
 **`tick()` — every frame, the sharp ones:**
-- `PreviewDriver::tick` — `sendFrame()` writes a socket synchronously; `buildAndSendCoordTable()`
-  resizes `keptIdx_`. Currently suppressed at the site with the reason.
+- `PreviewDriver::tick` — the socket half is FIXED (the pull-model transport only ARMS a message;
+  every socket byte moves on the transport tick). What remains: `buildCoordTable()` resizes
+  `keptIdx_` and the staging buffer on a rebuild/adopt tick. Suppressed at the site with the reason.
 - `ParallelLedDriver::tick` — `tickSync()`/`tickRing()` reach `busWaitIfBusy()`, which spins for
   the DMA peripheral. Deliberate (the driver owns the bus for the frame) but blocking. Suppressed.
 - `Drivers::tick` — joins/stops the render-split worker synchronously on the timed-out recovery
@@ -603,13 +801,39 @@ the sixth silent-zero this tooling has produced, and each looked like a clean tr
 
 `HttpServerModule`'s resumable preview send (`sendBufferedFrame` / `drainPreviewSend` / `cancelBufferedSend`, the newest-wins drop, the per-client cursor over `[hdr ++ body]`, the memory-adaptive chunk) has no direct unit test because driving it needs real `TcpConnection` clients whose `writeSome` returns partial / WouldBlock under control — and there's no socket-pair test fixture today. The send *contract* is covered indirectly: `unit_PreviewDriver` drives a `CaptureBroadcaster` mock for route-to-buffered / gate-on-idle / cancel-on-rebuild, and the live device sweep exercises the real drain across ticks. A loopback `socketpair()` fixture on the desktop platform (a `TcpConnection` pair where the test reads the bytes the server pushed, and can simulate a stalled receiver by not draining) would let the drain/drop/cancel/over-push paths be pinned host-side. Build it when the next core transport change lands (it'd also serve future WS tests).
 
+### Adopting the v6.x ecosystem changes (plan)
+
+The as-is state of each item is the table in [building.md § Adopting the v6.x ecosystem changes](../building.md#adopting-the-v6x-ecosystem-changes); this entry carries the plan and the triggers.
+
+**Per item, how and when:**
+
+- **EIM** — adopt any time. It shipped *in* v6.0 so it clears the v6.0-floor rule, and it has a headless CI mode. Add EIM as the **preferred** path in `setup_esp_idf.py` (`eim install`), keep `install.sh` as a documented fallback for one release. Keep the exact-commit pin: EIM's multi-version management helps reproducibility, it does not replace the pin.
+- **PSA Crypto** — nothing to migrate while we stay on high-level components. Watch only: if a feature needs hashing or signing directly (signed-OTA verification, a device identity), write it against the **PSA API** from the start, not legacy mbedTLS. Trigger: first direct crypto use.
+- **`network_provisioning`** — adopt to close the phone-app + SoftAP gap. It is in v6.0 (clears the floor) and is the IDF-native standard. Add it as a **sibling provisioning module** beside ImprovProvisioning (both wired-by-code System modules; a device offers whichever transports its chip supports), reusing the same WiFi-credential plumbing. Not a replacement for Improv: they cover different front-ends (browser vs phone-app) and a product can want either. Weigh the BLE-stack cost per chip. Spec before code.
+- **CMake Build System v2** — watch until GA, not while it is a preview: adopting a preview build system is the opposite of common-patterns-first. Trigger: v2 ships as the default. Then dry-run a build under v2, fix any `idf_component_register()` / Kconfig fallout, switch. Low risk given how little custom CMake we have.
+- **Built-in MCP server** — evaluate, do not default to it. The risk is a *second control path* bypassing the script policy, and it is ESP32-only (no desktop), so it cannot be the uniform path. If adopted, wrap it behind a script (`moondeck/run/idf_mcp.py`) so the policy layer still applies. Trigger: a concrete debug workflow the scripts cannot cover.
+
+**Sequence.** Close the v6.0 gaps one at a time as normal feature commits:
+
+1. **EIM installer** — rework `setup_esp_idf.py` to prefer `eim install`, keeping `install.sh` as a one-release fallback. Smallest and lowest-risk (build-path only, no firmware change, no hardware re-test), and EIM's multi-version management is what cleanly supports the v6.0-floor / v6.1-fallback juggling, so it sequences first as an enabler.
+2. **`network_provisioning`** — the headline capability: the phone-app + SoftAP onboarding flow. Its own plan.
+3. The rest (PSA-native crypto, CMake v2, MCP) as their triggers fire.
+
+**Guardrails.** Platform-generic stays intact: these are ESP32-specific gains and none may regress Teensy or the desktop paths, which do not use ESP-IDF at all. An IDF feature is adopted *inside* the ESP32 platform layer / build tooling, never by leaking an IDF assumption into shared `src/` or the desktop build. And the v6.0 floor holds: adopt only what is in v6.0, so the v6.0 fallback keeps working.
+
 ### ESP-IDF version pinning (pending)
 
 The build IDF is `v6.1-dev-399-gd1b91b79b5`, a dev-branch snapshot (2025-11-05) ahead of the v6.0 stable but on the unreleased v6.1 line. The version facts (what v6.0 vs v6.1 changed, the release schedule, the 30-month support policy, how to check for a newer tag) live in [building.md § ESP-IDF version](../building.md#esp-idf-version); this entry tracks only the **open decisions** the doc doesn't make. Being on a dev branch already cost us once — the missing `ESP_ROM_ELF_DIR` in the post-build gdbinit step (fixed in `build_esp32.py`). **Partly landed:** `setup_esp_idf.py` carries `PINNED_IDF_COMMIT`/`PINNED_IDF_VERSION` and **warns on drift** (installed HEAD vs pinned) — it can't `checkout` for you (it doesn't own the clone), but a silent `git pull` or a stray shallow clone is now visible. **Still to do:** (a) a MoonDeck UI banner / status dot surfacing the same drift (the CLI warning only shows during Setup), and (b) the migrate-or-stay call — stay on the pinned commit (chosen for now: it's what all targets incl. P4 were validated against), or move to `v6.1` stable (skipping v6.0, since v6.1 is close); migration is a full re-validation pass across classic/S3/P4, a deliberate task, not a pull. Until then: don't `git pull` the IDF. **Schedule note:** the v6.1-stable target of 2026-07-31 is unlikely to hold — v6.0 slipped ~1 month (planned 2026-02-27, shipped late March), and Espressif minors historically slip 2-6 weeks on the *final* even when betas land on time. So migrate **to the event** (v6.1 stable actually tagging on the releases page), not to the calendar date. `v6.0` stable is the lower-risk fallback if the dev-branch warts (`ESP_ROM_ELF_DIR`, API-churn risk) get worse before v6.1 lands.
 
-### Three-level device model: MCU → Board → Device (config provenance)
+### Clock sync — a shared monotonic clock across devices (committed design, unwired)
 
-The model itself is now a shipped design — see architecture.md § Config provenance (the three levels + the `txPowerSetting` example + "default only at the level that fixes it"). The catalog that carries it is `web-installer/deviceModels.json` (schema). The remaining forward-looking pieces — a `devices.json`/MCU-layer split and annotated-pin images — stay gated by the sequencing rule (no catalog field ahead of a consumer).
+The second half of the core [multi-device runtime](../architecture.md#multi-device-runtime); discovery ships, this does not. The design: one leader broadcasts its elapsed time (millis); followers compute their offset, targeting sub-millisecond accuracy. A shared monotonic clock is the foundation any cross-device coordination builds on, which is why it is core rather than light-domain.
+
+The light-domain payoff is a wall of controllers animating in lockstep: effects already animate off elapsed time, so feeding them the leader's synced clock instead of each device's local one is the whole change on the render side. Device-to-device light *distribution* is a separate topology question and rides the existing ArtNet / E1.31 / DDP standards rather than a bespoke protocol.
+
+### Config provenance: firmware/MCU → deviceModel (catalog follow-ups)
+
+The model itself is now a shipped design; see architecture.md § Config provenance (deviceModel is the one provenance level, the `txPowerSetting` example, and "default only where the hardware actually fixes it"). The catalog that carries it is `mooninstaller/deviceModels.json` (schema). The remaining forward-looking pieces — a `devices.json`/MCU-layer split and annotated-pin images — stay gated by the sequencing rule (no catalog field ahead of a consumer).
 
 ### Persistence overlay: partial-save / schema-change audit (backlog)
 
@@ -629,7 +853,18 @@ Rounds 1 (board + Ethernet-only) and 2 (Parlio LED driver) have landed. Remainin
 
   **Open issues before this is done:**
 
-  0. **The esp_hosted build is ~17x slower on HTTP, with a ~1 s stutter — BISECTED to the hosted link, not to us (2026-08-19).** Same board, same commit, same application code, measured over **Ethernet on both builds** so the radio is not in the path:
+  0. **The esp_hosted build is slower on HTTP — BISECTED to the hosted link, not to us (2026-08-19), and much improved but NOT gone (re-measured 2026-08-21).**
+
+     **Re-measurement on IDF v6.1-rc1**, same board, same commit, same Ethernet interface, same method:
+
+     | build | per-request (`/api/system`) | throughput (76 KB `app.js`) |
+     |---|---|---|
+     | `esp32p4rev1-eth` | 10 ms flat | 1,973 KB/s |
+     | `esp32p4rev1-eth-wifi` | 40 ms typical, one 280 ms outlier in 12 | ~980 KB/s |
+
+     So the penalty is now **4x per-request and 2x throughput**, against 33-60x and 17x when this was written, and **the alternating 0.4/0.8 s pattern is gone** (one outlier in twelve, not every other request). Render is healthy in both (359 fps on the WiFi build). Something between the two IDF versions fixed most of it; what remains is the same shape (per-request, not per-byte) and still worth closing. The original measurement follows.
+
+     **Original (2026-08-19):** Same board, same commit, same application code, measured over **Ethernet on both builds** so the radio is not in the path:
 
      | build | per-request (`/api/system`) | throughput (73 KB `app.js`) |
      |---|---|---|
@@ -780,13 +1015,6 @@ They are **not** CI failures (CI is Debug) and each one inspected so far is a fa
 
 Not done with the multi-destination/tab-UI merge because 17 warnings across four core files is its own change, not a tail on someone else's.
 
-## Preview stream: tail byte-phase desync under backpressure
-
-**Symptom (board B, 2026-07-14):** on a large grid the preview's bottom region (the frame tail) shows per-pixel noise; with a SOLID effect it flickers pure R / pure G / pure B at max brightness. Pure primaries from solid content = the frame bytes read at an offset that is not a multiple of 3 — tearing alone cannot discolor identical frames, so the resumable sender's offset accounting slips. Survives a browser refresh; occurs "occasionally" (per-frame), worst when the device is network-starved.
-
-**Suspect:** `HttpServerModule::sendBufferedFrame` (the zero-copy resumable send whose body is the live producer buffer, draining across transport ticks) — the resume-after-partial-socket-write path. Verify by logging the resume offset vs bytes actually written on EWOULDBLOCK; the fix is offset accounting, plus a resync rule (a client that missed bytes gets a fresh frame header, not a phase-shifted tail — the *robust to any input* bar).
-
-**Not** the shift-register transport bug and **not** buffer corruption: the composite buffer is proven correct (Solid writes every light; the preview alone garbles).
 
 ## MoonLive core/platform layering + JIT sdkconfig scoping (CodeRabbit #29, 4 findings)
 
@@ -820,42 +1048,52 @@ The P4 build runs at **360 MHz** because IDF's `Kconfig.cpu` caps a `SELECTS_REV
 
 Neither ships until a rev-3 P4 can prove 400 runs clean — no untested clock config, per the same rule the S31/320 and this P4/400 bootloop both taught.
 
-## ESP32-S31 RGMII Ethernet: DHCP at 100 Mbps (link-speed Tx-clock mismatch)
+## ESP32-P4: the esp-dsp assembly FFT faults once a second task runs (workaround shipped)
 
-**Found:** bench, 2026-07-26. Design record: [Plan-20260726 - S31 RGMII eth DHCP at 100M](../history/plans/Plan-20260726%20-%20S31%20RGMII%20eth%20DHCP%20at%20100M.md).
+**Found:** bench, 2026-08-28, bringing up HLS on the P4.
 
-The S31's 1 Gb RGMII EMAC (YT8531 PHY) **never** completes DHCP on the bench GL-AR300M (10/100) — and, as of 2026-07-27, **not on the gigabit router either** (see the gigabit result below, which contradicts the earlier reading this item was opened on). Confirmed on hardware that this is **not a regression** — it fails identically at the original S31 bring-up commit `d5ee07c` built against its exact pinned IDF (`0d928780081` / v6.1-dev-5215). The firmware logs `Ethernet no IP (DHCP timeout), cascading` and falls back to WiFi.
+**Symptom:** a crash loop the moment the HLS encode task exists alongside the render loop —
+`Guru Meditation Error: ... (Illegal instruction)` or `(Load access fault)`, the type varying
+between boots, always faulting on the twiddle-table load in `dsps_fft2r_fc32_arp4.S:52`
+(`flw fa0, 0(t3)`) reached from `platform::audioFft`. The LED output freezes after a few frames
+and the board reboots. Present only with audio analysis running AND a second task; either alone
+is stable, which is why it never surfaced before HLS.
 
-**The gigabit test ran (2026-07-27) and Ethernet still does NOT lease — the link-speed theory is in doubt.** This was the decisive experiment this item asked for, and the expected outcome (leases at 1000M, because TXC is already 125 MHz there) did **not** happen. Boot trace on the current branch build, gigabit router:
+**Cause:** the P4's hardware-loop unit has a documented silicon erratum, declared by Espressif's
+own `soc_caps.h`: `SOC_CPU_HAS_HWLOOP_STATE_BUG` — "HWLOOP state doesn't go to DIRTY after
+executing the last instruction of a loop". FreeRTOS saves the HWLP registers lazily and keys that
+save on the DIRTY flag, so a context switch out of the FFT concludes there is nothing to save and
+the loop state is lost; the resumed kernel then reads its table through a stale register. The
+esp-dsp `_arp4` kernel uses `esp.lp.setup` (the hardware-loop instruction), which is why the FFT
+is where it lands. IDF v6.1-rc1 carries workarounds for this erratum at two sites in
+`portasm.S` (lines 217 and 795, gated `ESP32P4_REV_MIN_FULL <= 1`, which our `REV_MIN_FULL=0`
+build satisfies) — **both on the RESTORE side**. The **save** site (~line 676) reads
+`CSR_HWLP_STATE_REG`, skips saving unless it equals `HWLP_DIRTY_STATE`, and carries no erratum
+guard at all. That is precisely what the erratum breaks: a task switched out after a loop's last
+instruction reports non-DIRTY, so its hardware-loop registers are never saved, and the resumed
+FFT reads its twiddle table through a stale register. Restore is patched; save is not.
 
-| t | line | |
-|---|---|---|
-| 1.73 s | `YT8531 RGMII init: auto-nego re-enabled, Rx+Tx delays set` | ✅ |
-| 1.73 s | netif glue attached, eth MAC `32:ed:a0:f3:d4:69` | ✅ |
-| 4.03 s | `Ethernet started` → `Ethernet link up` → DHCP hostname set | ✅ |
-| 4–19 s | DHCP client runs its full 15 s window, no OFFER | ❌ |
-| 19.3 s | `Ethernet no IP (DHCP timeout), cascading` | ❌ |
-| 21.0 s | `WiFi STA got IP: 192.168.1.212`, status *"Ethernet detected: no address assigned"* | (fallback works) |
+**Workaround shipped:** `CONFIG_DSP_ANSI=y` in `sdkconfig.defaults.esp32p4rev1-eth`, which swaps
+esp-dsp's hand-written assembly kernels for portable C. Measured cost on the bench P4: the Audio
+module's tick goes from ~615 us to ~658 us, about 40 us (7%) against 3.3 ms of tick headroom.
+Stability confirmed over a soak with HLS streaming: zero crashes, zero corrupt packets.
 
-**The frames never reach the router.** The device holds two MACs — WiFi `30:ed:a0:f3:d4:68` and Ethernet `32:ed:a0:f3:d4:69`. The host's ARP table lists the **WiFi** MAC and contains **zero** entries for the Ethernet MAC. A DISCOVER that reached the router would leave the eth MAC visible there even without a completed lease, so TX is not arriving — the same data-plane TX conclusion the static-IP test reached at 100M, now reproduced with a gigabit router in the path.
+**Reported upstream:** [esp-idf#19025](https://github.com/espressif/esp-idf/issues/19025)
+(2026-08-28), which names the unguarded save path. Espressif already had the symptom on file from
+another reporter: [esp-dsp#119](https://github.com/espressif/esp-dsp/issues/119) hits the same
+fault at the same instruction on IDF v5.5-beta1 and settles on the same `CONFIG_DSP_ANSI=y`
+workaround at the same ~7% cost, and [esp-dsp#102](https://github.com/espressif/esp-dsp/issues/102)
+tracks P4 hardware loops in general. So the bug is real, reproducible by others, and spans at
+least v5.5-beta1 to v6.1-rc1 - but it is unfixed, and the workaround stays until it is answered.
 
-**Physical-layer caveat, and the most likely explanation:** the jack's **yellow LED is off while green blinks fast**. On most RJ45 jacks yellow is the speed/link indicator, so yellow-off suggests the port did **not** negotiate 1000M and fell back to 100M — which would put this squarely back in the known TXC case rather than disproving it. This is unresolved because the firmware cannot currently report the negotiated speed: IDF logs `working in 100Mbps` / `1000Mbps` at `ESP_LOGD`, filtered out at our log level (exactly the diagnostic gap step (2) below names). **Before drawing any conclusion about the root cause, settle the actual link speed** — read the router's port page, and try a known 4-pair (gigabit-capable) cable, since a 2-pair cable forces 100M regardless of the router.
-
-**Root cause (IDF source-traced).** On RGMII the MAC's Tx clock (TXC) must be 125 MHz at 1000M but **25 MHz at 100M** (`emac_esp32_set_speed`). The MAC is reprogrammed only when the generic 802.3 PHY driver's poll sees a link_status *transition* (`updt_link_dup_spd` → `on_state_changed(ETH_STATE_SPEED)`). Because the YT8531 needs its auto-negotiation manually re-enabled before `esp_eth_start` (it disables it on reset), the first negotiation can latch link-UP before the poll's first read, so the poll sees no transition, so `set_speed(100M)` never runs and TXC stays at its 125 MHz install default. At 100M every Tx frame then clocks out garbled and the switch drops it (Rx still works — it rides the PHY-recovered RXC): link up, DISCOVER sent, no OFFER ever.
-
-**Approaches tried on the bench (neither shipped):**
-- **`esp_eth_stop()` + `esp_eth_start()` bounce after start** — DID produce the first-ever eth lease (`.125`), proving the mechanism, but `esp_eth_stop` tears the netif down (releases the lease, resets dhcpc to INIT, clears the IP), which races the NetworkModule 15 s cascade window and the double `applyHostname` → non-deterministic (sometimes eth, sometimes WiFi; when eth, the netif IP was half-applied).
-- **In-place `link_status = ETH_LINK_DOWN` + `phy->get_link()`** (netif-preserving, from the CONNECTED handler) — ran cleanly (no crash from the re-entrant poll) and forced a second link-up, but eth **still** DHCP-timed-out on the bench. Open question: whether `set_speed` actually fired (the `working in 100Mbps` proof line is `ESP_LOGD`, likely filtered by the esp_eth component log level — absence is not proof).
-
-**Already landed (the link-up half):** `ethYt8531BoardInit` (re-enables the YT8531's auto-negotiation — disabled on reset — plus the RGMII Tx/Rx clock delays) brings the RGMII **link** up (speed/duplex negotiated, activity LED lit); and the `ethPhyAddr` int16 fix (the `-1` auto-detect sentinel a `uint8` mangled to 31, with its regression test) makes the PHY addressable. What remains open is only the **100M Tx-clock (TXC) reconfiguration** so frames actually flow at 100M — the DHCP half below.
-
-**Next (needs hardware) — first, the gigabit test + a scope decision:** test the current firmware on a **1 Gb switch** (confirm `ETH-DIAG` reports "link up at 1000M full", then look for `Ethernet got IP`). At 1000M the MAC's Tx clock is already 125 MHz (the install default), so the 100M-specific TXC bug is absent — eth is expected to lease, matching the earlier field success on gigabit. **If it leases at 1000M, there is a product decision to make: whether to support 100M routers at all**, or to state that the S31 (a 1 Gb board) requires a gigabit switch and close this item as "won't-fix at 100M." Only if 100M support is deemed in-scope do the TXC steps below apply.
-
-**If 100M support is kept** (the TXC path): (1) if it links at 1000M but still no lease, sweep the RGMII delays (`MM_YT8531_{RX,TX}_DELAY`) for this board's trace lengths; (2) for 100M, add a decisive speed-readback diagnostic (`ETH_CMD_G_SPEED` before/after the resync + raise the esp_eth log level) to confirm whether `set_speed` runs; (3) if the in-place `link_status`-reset poke can't trigger `set_speed`, fall back to the stop/start bounce and make it deterministic by widening the S31 eth-DHCP cascade window (> 15 s) and suppressing the double `applyHostname`.
-
-**The failure is data-plane TX corruption, not a DHCP-handshake quirk (bench-confirmed 2026-07-26 via static IP).** Setting a static IP on the S31 at 100M bypasses DHCP entirely, yet the interface is still unreachable: ARP for the device resolves to the eth MAC (`30:ed:a0:f3:d4:68`) — so a broadcast round-trips — but unicast (ping / HTTP) is 100% dropped. That rules out "only the DHCP exchange is broken" and pins it to garbled unicast frames on the 100M Tx path (the TXC issue). So static addressing is NOT a workaround for 100M; the TXC fix (or a gigabit link) is genuinely required. **This is a bug to FIX, never a reason to weaken the AP → STA → ETH promotion cascade** — Ethernet always outranks WiFi when a cable is present, unconditionally. Interim behaviour on the S31 at 100M with a cable in Static mode: it promotes to Ethernet (as it must) but can't pass traffic; the user recovers by unplugging the cable (link-down cascades back to WiFi). Acceptable only as a temporary state for this one board's open bug, not a design.
-
-**Related symptom — the "Ethernet detected: no address assigned" degraded warning is intermittent on the S31.** In DHCP mode, that warning is meant to appear when the eth link is up but leaseless past the 15 s window (`NetworkModule::ConnectedSta`). On the S31 at 100M it shows only *sometimes*, because the marginal 100M link *flaps*: each `ETHERNET_EVENT_DISCONNECTED` makes `tick1s()` reset `ethLinkUpAt_` (the degraded clock), so the 15 s threshold is often never reached. This is the same root cause (a bad 100M physical link), so it resolves when the TXC/link issue is fixed. Two robustness follow-ups if it's ever decoupled: (a) don't reset the degraded clock on a *brief* link blip (debounce link-down), and (b) note that a lower `check_link_period_ms` makes the flapping more visible — the default 2000 ms is deliberately kept (a 500 ms poll surfaced the flaps and suppressed the warning entirely).
+**What is NOT proven:** the save-path gap is read from the source and matches every symptom, but
+it has not been confirmed by instrumenting the switch itself (logging `CSR_HWLP_STATE_REG` on a
+switch out of the FFT), nor reduced to a minimal project. Offered upstream if triage wants it. Ruled out on the bench, so nobody re-treads them: worker stack size (8K -> 16K),
+core placement (worker on core 1 vs core 0), heap corruption (comprehensive heap poisoning reports
+nothing), an unpinned task migrating with coprocessor state (our main task is pinned to core 0),
+an FFT size mismatch (512 <= 1024 <= 4096), and a cross-task race on the single `audioFft` call
+site. **To report upstream** (esp-dsp and/or esp-idf) with the repro above; the workaround stands
+until it is answered, and reverting it needs a bench soak with audio + HLS together.
 
 ## Flaky unit tests: the AudioService sync suite contends on a fixed UDP port
 
@@ -917,6 +1155,27 @@ Art-Net gains the same way (4800 lights 3/6 → 6/6; 1350 pkt/s 2/6 → 4/6) —
 
 Related: WLED is smooth on the same stream because it receives via `AsyncUDP` — packets are consumed in a callback from the lwIP task the instant they arrive, rather than polled once per render tick. Moving to that model is the structural fix, and it needs `staging_` synchronized against the render thread.
 
+## OSC pads and the Open Stage Control session's labels (2026-08-30)
+
+Two gaps found wiring a real control surface to the [OSC module](../moonmodules/core/services.md).
+
+**`/mm/pad/N` has no handler.** The [OSC plan](../history/plans/Plan-20260829%20-%20OSC%20control%20ingest.md)
+lists it (`i 1 -> apply preset in slot 12`), and `OscModule::handle` routes `/mm/fader/`,
+`/mm/encoder/`, `/mm/switch/` and `/mm/control/` but not pads. So a surface can drive every
+continuous control and every switch, but cannot fire a preset, which is the one thing a pad grid
+exists for. The route is small; what needs deciding is what a pad press means when the slot is
+empty, and whether a nonzero value is a press or a press-and-hold.
+
+**The shipped Open Stage Control session renders no labels, and its pad matrix draws nothing.**
+[`docs/reference/examples/open-stage-control.json`](../reference/examples/open-stage-control.json)
+works for every fader, encoder and switch, but the widget names never appear and the `matrix` of
+pads is an empty box. Five attempts at the label property failed (`@{}`, `JS{}`, `#{}` with `unit`,
+an explicit string, omitting it so `"auto"` applies), and notably a session SAVED by Open Stage
+Control itself carries no `label` key on a fader at all, so the name is drawn from something else.
+The session was written by reading a minified app's bundled HTML docs; the reliable fix is to build
+one widget of each kind by hand in its editor, save, and copy the shape it produces. Cosmetic: the
+control path works, only the labels and the pad grid are missing.
+
 ## POST /api/file reports success while writing an empty file (no Content-Length)
 
 **Found:** 2026-08-20, on MM-testbench-S3, while uploading an edited MoonLive script. The upload
@@ -947,3 +1206,79 @@ byte count does not match what was declared. (a) plus (c) is the pair worth doin
 File Manager always sends a length, so this does not affect it — an API caller or a script does.
 
 Pin with a test that a length-less upload does not report success and does not truncate the target.
+
+## repo-health compares numbers from different machines (2026-08-22)
+
+`repo-health.json` records one value per metric with no note of which host produced it, so running the KPI gate on a second machine rewrites the baseline with figures that were never comparable. Measured on the same commit: desktop flash reads 1,060 KB on a Windows/MSVC bench against 1,165 KB recorded on macOS/clang, printed as "−105 KB ✓"; desktop tick reads 368 µs against 179 µs, printed as "+189 µs ⚠". Neither is a change in the code. The firmware rows are now guarded by a freshness rule, which stops a stale binary being re-measured, but freshness cannot detect a different compiler or a different CPU.
+
+The file's own docstring states the property this breaks: "two machines agree and a number never moves for a reason nobody can explain". Two ways out, and it is a design call rather than a bug fix: key the host-dependent metrics by platform (`flash.desktop.windows`, `perf.desktop.macos`) so each machine tracks its own trend, or declare one canonical machine (CI) the only writer and have every other run print the delta without saving it. The second is less data and less honest about a Windows contributor's numbers; the first grows the file, which its "never grows" design resists. Until then, read a cross-host delta as noise.
+
+## MoonDeck scripts crash on Windows when run BY HAND (2026-08-22)
+
+62 of the ~64 scripts print `→ ✓ ⚠ —` or box-drawing characters. Run from a Windows terminal their stdout takes `locale.getpreferredencoding()` — cp1252 — and the first such character raises UnicodeEncodeError, *after* the real work has succeeded: `collect_kpi.py` measures everything, writes the metrics, then dies printing the summary arrow. Every path is now exposed: the gate runner that handed children `PYTHONIOENCODING=utf-8` is gone, so a Windows agent run hits it too, not only the human path MoonDeck exists for.
+
+Per-script `sys.stdout.reconfigure()` is the wrong shape at 62 files: every new script would have to remember, and the one that forgets fails in the field. It wants ONE home — the candidates are a `PYTHONUTF8=1` in whatever env MoonDeck's front ends already establish, or a shared `moondeck/_stdio.py` imported by the handful of scripts that are entry points. Pick when someone next runs a check by hand and it dies on a tick mark.
+
+## `disasm.py` cannot run on Windows (2026-08-21)
+
+The tool shells out to `c++` and `objdump` to build the per-ISA emitter and disassemble its bytes, and a Windows machine carrying only MSVC has neither. That holds for every ISA, not just the new `x86_64` one — but x86-64 is where it bites, because the host it disassembles is now a Windows desktop and the tool is what turns "the script did nothing" into an answer. The x86-64 backend was brought up without it, using byte-pinning tests plus WinDbg on the emitted image; that worked, and was slower than reading the instructions would have been.
+
+Closing it is a compiler/disassembler pair behind the two `subprocess.run` calls: `cl.exe` for the build, and for the disassembly either LLVM's `llvm-objdump` (which understands `-b binary` the way the tool already expects, and ships with the VS "C++ Clang tools" component) or a `.obj` wrapper around `dumpbin /disasm`, which does not. Prefer the former — the flags are already right, so it is a lookup rather than a second code path.
+
+## A non-ASCII Windows profile path defeats the desktop settings directory (2026-08-23)
+
+`std::getenv("LOCALAPPDATA")` returns the ANSI form of the path, so a Windows user whose profile name carries characters outside the system codepage (CJK and Cyrillic on a Western machine; most accented Latin survives cp1252) gets `?` where those characters were. `?` is not legal in a Windows filename, so `create_directories` fails, `fsMount` returns false, and the driver reports `cannot use ..., persistence disabled` naming the mangled path. It degrades visibly rather than corrupting anything, which is the standard Principle 5 asks for, but that user has no working persistence.
+
+Reading the variable wide is only half of it. `toFsPath` composes a `std::filesystem::path`, which stores wide on Windows, but every open in the layer goes back through `.string()` to reach `std::fopen` (fsRead, fsReadAt, fsWriteAtomic, fsWriteStream, and the mount probe), a narrowing the code comments on deliberately at `fsRead`. So a wide `LOCALAPPDATA` alone would produce a correct path that still cannot be opened: the fix is one `_wfopen`-on-Windows helper shared by all five sites, plus a test with a non-ASCII root.
+
+Not done with the per-user data directory because it reverses a documented decision across the whole desktop filesystem layer, four of whose five call sites predate that change. What the change did do is make the root capable of containing a username, where it was previously the literal `build`. Worth closing the next time this file is opened for other reasons.
+
+## Opt-in usage reporting: know which hardware and configurations are actually out there (2026-09-01)
+
+We build for hardware we cannot see. Which chips people actually run, how big their walls are, which drivers and features they enable, and how many are still on an old version are all questions currently answered by whoever happens to speak up on Discord. That is a biased sample: it hears from people with problems and from people who post, and it is silent about the majority who install something and it simply works. Effort therefore goes where the loudest reports are rather than where the users are, and a decision to drop support for something rests on a guess.
+
+**What a report would carry.** Enough to answer "what should we build and what may we stop supporting", and nothing else:
+
+- **The machine.** Chip family and variant for a device (classic ESP32, S3, P4, S31 and so on), flash size, whether PSRAM is present and how much. For a desktop, the OS and architecture instead, which is a question we have no way to answer at all today.
+- **The version.** Firmware or application version, release channel, and on an upgrade the version it came from. Whether this was a fresh install or an upgrade.
+- **The light setup, in shape rather than content.** Total light count, which layouts are in use and their dimensions, which drivers are active, and how many outputs or buses. Not what the wall shows, only how big it is and how it is wired.
+- **Which features are switched on.** The modules present and enabled: audio, MoonLive, MQTT, Art-Net or E1.31 send and receive, panel cards, Ethernet versus WiFi. This is the half that answers "is anyone actually using this", which is what decides whether a feature earns its maintenance.
+- **A country**, derived at the server from the address the request arrives from, so the map is by region rather than by installation.
+
+**What it must never carry**, and this list is a constraint on the design rather than a note on it: device name, IP or MAC address, WiFi credentials, MQTT passwords, any free-text field a user typed, the contents of a layout or a script, and anything that lets two reports be recognized as the same installation. There is no device identifier, which also means no de-duplication: a machine reporting twice counts twice, and that inaccuracy is the price of not being able to track anyone. It is the right trade.
+
+**Consent.** Opt-in, from a prompt shown after a fresh install or an upgrade, with a decline that is as easy to click as the accept and is remembered. One report per install or upgrade, never a heartbeat. A user who declines transmits nothing at all, rather than transmitting a "declined" record.
+
+**The privacy policy already commits to this shape** ([docs/privacy-policy.md](../privacy-policy.md)), including the honest wording about the IP address a server unavoidably sees. Whatever is built has to match what is promised there, and the policy has to be updated with the specifics BEFORE the feature ships, not alongside it.
+
+**Open questions for whoever picks this up.** Where the server runs and who administers it, since it is the first piece of infrastructure this project would own rather than borrow from GitHub. Whether the dashboard is public, which we would want it to be for the same reason the source is. Whether the desktop reports at all or only devices, given the desktop is the half we currently know nothing about. And what happens to a report from a version whose fields have since changed, because a schema that cannot be read a year later answers nothing.
+
+## A driven GPIO the Pins map never sees: bus padding, and a hidden clockPin
+
+**Found:** 2026-08-21, on MM-S31, after a bench session that started as "the LED panel stopped working" and cost hours chasing a firmware regression that did not exist.
+
+An ESP32-S31 driving a ColorLight receiver card over raw Ethernet showed the panel dark while every diagnostic said the transmit path was healthy: link negotiated at 1000 Mbit, ~4600 packets/s, zero drops, and a byte-for-byte dump of a 128x128 frame matched `ColorLight5A75Packet.h` exactly. The card's own activity LED never blinked. Four firmware versions across two ESP-IDF releases behaved identically.
+
+The cause is a **GPIO collision that no part of the system could report**. `ParallelLed` carried `clockPin = 10`, and GPIO 10 is `txd2` on the S31's RGMII bus (`platform_esp32.cpp`: the EMAC's fixed IO_MUX pads are 8-19 plus MDC/MDIO on 5/6). The LED driver drove one of the four Ethernet transmit data lines, so every frame left the MAC counted-as-sent and arrived corrupt. Disabling the LED drivers fixed it instantly; moving the clock to GPIO 21 fixed it with all four drivers running.
+
+Three separate defects made this invisible, and each is worth fixing on its own:
+
+**1. Pins the map cannot see, because nothing declares them.** The shipped conflict soft-flag grades what modules *declare*, so an undeclared pin is invisible to it however hard the silicon drives the pad. Three cases, two now closed:
+
+- ✅ **Bus-padded lanes** (fixed): a one-strand board had seven i80 lanes parked on `clockPin`, driven at bus-clock rate and listed nowhere. `spareLanesNeedPad()` stops the padding on a backend that routes its own GPIOs, so the pin is no longer driven and the map is truthful again.
+- ✅ **RGMII data pads** (fixed): all twelve are now published by NetworkModule as read-only pin controls from one `platform::ethRgmiiPads` list that `ethInitEmac` also reads. Verified on MM-S31: `gpio 10` reports as `ethTxd2`.
+- ✅ **P4 RMII data pins** (fixed): the six lines the EMAC drives are in `platform::ethFixedPads` and reported through `fixedPins()`, same as the S31's RGMII pads. Verified on MM-P4: Network owns all ten of its Ethernet GPIOs (28/29/30/34/35/49 plus MDC 31, MDIO 52, clock 50, reset 51), against four before.
+- ✅ **Classic ESP32 RMII data pins** (fixed): TX_EN 21, TXD0 19, TXD1 22, CRS_DV 27, RXD0 25, RXD1 26, entered as a third `ethFixedPads` branch. Sourced from IDF's own RMII Data Plane GPIO table (`docs/en/api-reference/network/esp_eth.rst`): one IO_MUX choice per signal, which is why `ethInitEmac` never sets them. Verified on MM-Olimex: all ten Ethernet pins claimed, `Eth: 192.168.1.210 (100 Mbit)`.
+- ✅ **MDC/MDIO on the classic ESP32** (fixed): the chip default was `mdc -1, mdio -1`, so `ethInitEmac` skipped the assignment, IDF applied its own 23/18, and the map claimed neither. `ethConfigDefault` now states 23/18, sourced from IDF's own classic default and our QuinLED Dig-Octa entry. Verified on MM-Olimex: `Eth: 192.168.1.210 (100 Mbit)` with `gpio 23 MDC` and `gpio 18 MDIO` in the map. NOTE: a board with -1 already persisted keeps it until those controls are set once or NVS is erased.
+
+**The fix is the RGMII one, extended.** Being fixed in silicon does not make `gpioCapability`'s reserved list the right home: reserved means "routing I/O here corrupts the device" (flash, PSRAM, USB), which is unconditional, while an EMAC pad is only held while that interface runs. With `ethType = None` the init returns false and every one of those GPIOs is free for LEDs, so a static reserved list would permanently forbid pins a WiFi-only board can use. What makes a control the right shape is not that the pin is configurable (it is not) but that the claim is CONDITIONAL: published when the interface is selected, released when it is not, which is exactly what the pin map reads.
+
+So the same `platform::ethRgmiiPads` treatment applies, with one wrinkle. On the **classic ESP32** the RMII data pins are silicon-fixed, so a second per-chip pad list serves them directly. On the **P4** 49/34/35/28/29/30 is the Waveshare NANO's *board* wiring that the IDF macro happens to default to, not a chip constant, so those belong in `deviceModels.json` beside the other per-board eth pins, letting a different P4 carrier declare its own. Both then reach the pin map through the control path already built, rather than a third mechanism.
+
+Lower risk than the RGMII case (six pins rather than twelve, and nothing of ours currently collides), but the failure mode is identical: a driver claims one, the MAC still reports a healthy link, and every frame goes out corrupt.
+
+**2. `busPinList()` pads spare lanes with `clockPin`, and MoonI80 routes them as data.** The i80 bus is always 8 or 16 bits wide (`ParallelLedDriver::busWidthPins`), so a board driving one strand gets seven lanes parked on the clock pin, and `configureGpio` (`platform_esp32_moon_i80.cpp`) routes every entry it is given. The padding exists because `esp_lcd` rejects an NC data pin, but the MoonI80 backend does not have that limit: its own comment says *"pins past `laneCount` go nowhere"*. It is simply never told the real lane count. Passing it would free six or seven GPIOs on every direct-mode board and remove the hidden claim at the source.
+
+**3. `clockPin` defaults to 10 and is hidden.** `MoonLedDriver::clockPin = 10` is a hardcoded default that lands inside the S31's reserved RGMII block, and `addBusControls` hides the control unless `pinExpanderMode()` is on. So on this board the value was invisible on the card, unchangeable through the UI, and still driving a pad. A pin with a real effect must be visible, whatever mode it is in.
+
+**This also closed the S31 Ethernet defect, open since 2026-07-26.** That entry (removed) blamed an RGMII Tx-clock mismatch at 100M for DHCP never completing, and had concluded "the frames never reach the router". The cause was the same collision: `ParallelLed`'s default `clockPin = 10` is `txd2`, so a DHCP DISCOVER was garbled exactly as the panel frames were. With the clock pin moved off the RGMII block the S31 leases normally, verified on the bench at `Eth: 192.168.1.125 (1000 Mbit)`. Two long-standing bugs, one GPIO.

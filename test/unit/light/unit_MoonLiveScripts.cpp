@@ -18,7 +18,10 @@
 #include "core/moonlive/moonlive_emit.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include "light/moonlive/MoonLiveScriptFile.h"   // the role extensions the sweep filters on
+#include "light/moonlive/MoonLiveScript.h"       // kMaxStatus: the status line a failure reports through
+#include "light/moonlive/script_catalog.h"       // generated: what the device offers
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -81,10 +84,11 @@ TEST_CASE("every script in moonlive/ compiles") {
             moonlive::MoonLive engine;
             const bool ok = engine.compile(src.c_str(), moonlive::lightBuiltins(), sys);
             if (!ok) std::printf("FAIL %-28s %s\n", label.c_str(), engine.error());
-            // compile() both PARSES and emits native code, and only the second half needs a backend
-            // for this host's ISA (MM_MOONLIVE_HAS_HOST_JIT — 0 on x86_64, which is what CI runs).
-            // Requiring success there would fail every script for a reason that has nothing to do
-            // with the script, so without a backend the only failure allowed is the codegen one.
+            // compile() both PARSES and emits native code, and only the second half needs a
+            // backend for this host's ISA. arm64 and x86-64 both have one; a --no-jit build and any
+            // other host do not, and there requiring success would fail every script for a reason
+            // that has nothing to do with the script. Without a backend the only failure allowed is
+            // the codegen one.
 #if MM_MOONLIVE_HAS_HOST_JIT
             CHECK(ok);
 #else
@@ -96,6 +100,49 @@ TEST_CASE("every script in moonlive/ compiles") {
     }
     MESSAGE("compiled " << checked << " scripts from moonlive/");
     CHECK(checked > 0);            // a silently empty folder would pass without this
+}
+
+// The catalog is what a DEVICE knows about: it carries these names and fetches a script's text the
+// first time someone picks it. A script in the repo but not in the catalog is invisible on every
+// device, and nothing else would notice, since the build succeeds and the file is right there.
+TEST_CASE("the shipped catalog names every script in moonlive/") {
+    std::vector<std::string> onDisk;
+    for (const char* sub : {"layouts", "effects", "modifiers"})
+        for (const auto& f : scriptsIn(sub)) onDisk.push_back(f.filename().string());
+    std::sort(onDisk.begin(), onDisk.end());
+    REQUIRE(!onDisk.empty());
+
+    // The catalog is three arrays, one per role: the folder a script lives in is implied by its
+    // role and the role by its extension, so neither is stored per entry.
+    std::vector<std::string> inCatalog;
+    for (size_t i = 0; i < moonlive::kEffectCatalogCount; i++)
+        inCatalog.push_back(moonlive::kEffectCatalog[i]);
+    for (size_t i = 0; i < moonlive::kLayoutCatalogCount; i++)
+        inCatalog.push_back(moonlive::kLayoutCatalog[i]);
+    for (size_t i = 0; i < moonlive::kModifierCatalogCount; i++)
+        inCatalog.push_back(moonlive::kModifierCatalog[i]);
+    CHECK(inCatalog.size() == moonlive::kCatalogCount);
+    std::sort(inCatalog.begin(), inCatalog.end());
+
+    for (const auto& n : onDisk)
+        if (!std::binary_search(inCatalog.begin(), inCatalog.end(), n))
+            std::printf("MISSING from catalog: %s\n", n.c_str());
+    CHECK(inCatalog == onDisk);
+
+    // Each array holds only its own role's extension. A modifier listed among the effects would be
+    // offered in an effect picker, compile, and then do nothing.
+    for (size_t i = 0; i < moonlive::kEffectCatalogCount; i++) {
+        const std::string n(moonlive::kEffectCatalog[i]);
+        CHECK(n.substr(n.rfind('.')) == moonlive::kEffectExt);
+    }
+    for (size_t i = 0; i < moonlive::kLayoutCatalogCount; i++) {
+        const std::string n(moonlive::kLayoutCatalog[i]);
+        CHECK(n.substr(n.rfind('.')) == moonlive::kLayoutExt);
+    }
+    for (size_t i = 0; i < moonlive::kModifierCatalogCount; i++) {
+        const std::string n(moonlive::kModifierCatalog[i]);
+        CHECK(n.substr(n.rfind('.')) == moonlive::kModifierExt);
+    }
 }
 
 // Comments are what makes a script in `moonlive/` readable, so the lexer has to treat a plain `//`
@@ -117,10 +164,10 @@ TEST_CASE("every script in moonlive/ compiles") {
 TEST_CASE("every script reads the same system-variable vocabulary") {
     struct Case { const char* src; bool ok; const char* what; };
     const Case cases[] = {
-        {mmScript("for (y = 0; y < 2; y = y + 1) { for (x = 0; x < 3; x = x + 1) { addLight(x, y, 0); } }"),
+        {mmScript("for (int y = 0; y < 2; y = y + 1) { for (int x = 0; x < 3; x = x + 1) { addLight(x, y, 0); } }"),
          true,  "x and y are ordinary loop counters, in EVERY role: they are the names an author "
                 "reaches for, which is why the coordinate is xPos/yPos/zPos instead"},
-        {mmScript("for (i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }"),
+        {mmScript("for (int i = 0; i < width; i = i + 1) { addLight(i, 0, 0); }"),
          true,  "a layout may read width: same name, same meaning, whoever asks"},
         {mmScript("setRGB(width, 0, 0, 0);"),           true,  "an effect reads the layer's width"},
         {mmScript("setXYZ(width - 1 - xPos, yPos, zPos);"),
@@ -128,9 +175,9 @@ TEST_CASE("every script reads the same system-variable vocabulary") {
         {mmScript("setRGB(xPos, 0, 0, 0);"),
          true,  "reading a coordinate outside a modifier is legal and reads 0: no binding writes "
                 "it, so there is nothing to disagree with"},
-        {mmScript("uint8_t width = 16;\nsetRGB(0, 0, 0, 0);"),
+        {mmScript("byte width = 16;\nsetRGB(0, 0, 0, 0);"),
          false, "declaring one is still refused, in every role: that is what keeps a read meaningful"},
-        {mmScript("uint8_t xPos = 3;\nsetRGB(0, 0, 0, 0);"),
+        {mmScript("byte xPos = 3;\nsetRGB(0, 0, 0, 0);"),
          false, "the coordinate names are reserved too, so a modifier cannot shadow what it is handed"},
     };
     uint8_t out[2048];
@@ -139,8 +186,8 @@ TEST_CASE("every script reads the same system-variable vocabulary") {
         auto r = moonlive::compileSource(c.src, moonlive::lightBuiltins(), moonlive::lightSysVars(),
                                          out, sizeof(out));
         // Where a backend exists, a valid script must actually EMIT — accepting kCodegenFailed
-        // everywhere would let a codegen regression pass as a pass. Only a host with no assembler
-        // for its ISA (x86_64, which is what CI runs) is allowed that answer.
+        // everywhere would let a codegen regression pass as a pass. Only a build with no assembler
+        // for its ISA (--no-jit, or an unsupported host) is allowed that answer.
 #if MM_MOONLIVE_HAS_HOST_JIT
         if (c.ok) CHECK(r.ok);
 #else
@@ -169,11 +216,11 @@ TEST_CASE("a comment is whitespace, wherever it appears") {
     const Case cases[] = {
         {mmScript("// leading comment\naddLight(1, 2, 3);"), true, "a comment before the code"},
         {mmScript("addLight(1, 2, 3); // trailing comment"), true, "a comment after the code"},
-        {mmScript("for (i = 0; i < 2; i = i + 1) {\n  // inside the body\n  addLight(i, 0, 0);\n}"), true,
+        {mmScript("for (int i = 0; i < 2; i = i + 1) {\n  // inside the body\n  addLight(i, 0, 0);\n}"), true,
          "a comment inside a loop body"},
         {mmScript("// @control 1..64 is just text now\naddLight(1, 2, 3);"), true,
          "the old annotation is an ordinary comment"},
-        {mmScript("uint8_t n = 4; // anything at all !!\nfor (i = 0; i < n; i = i + 1) { addLight(i, 0, 0); }"),
+        {mmScript("byte n = 4; // anything at all !!\nfor (int i = 0; i < n; i = i + 1) { addLight(i, 0, 0); }"),
          true, "a comment after a member declaration"},
     };
     for (const Case& c : cases) {
@@ -194,10 +241,10 @@ TEST_CASE("a comment changes nothing about what a script does") {
     // with no code emitted, "same length" is two zeroes and proves nothing.
 #if MM_MOONLIVE_HAS_HOST_JIT
     moonlive::MoonLive bare, commented;
-    CHECK(bare.compile(mmScript("for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"),
+    CHECK(bare.compile(mmScript("for (int i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"),
                        moonlive::lightBuiltins(), moonlive::modifierSysVars()));
     CHECK(commented.compile(mmScript("// place three lights in a row\n"
-                            "for (i = 0; i < 3; i = i + 1) {\n"
+                            "for (int i = 0; i < 3; i = i + 1) {\n"
                             "  addLight(i, 0, 0);   // one per step\n"
                             "}"),
                             moonlive::lightBuiltins(), moonlive::modifierSysVars()));
@@ -249,7 +296,7 @@ TEST_CASE("noise is smooth across neighbouring points, and varies across the fie
     // One light per sample: light i gets the noise at x = i * 64, so the 32 lights walk 8 whole
     // cells (256 units each) and the buffer IS a real slice of the field, not a corner of one cell.
     auto r = moonlive::compileSource(
-        mmScript("for (i = 0; i < 32; i = i + 1) { setRGB(i, noise(i * 64, 0, 0), 0, 0); }"),
+        mmScript("for (int i = 0; i < 32; i = i + 1) { setRGB(i, noise(i * 64, 0, 0), 0, 0); }"),
         moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
     REQUIRE(r.ok);
     void* blk = platform::allocExec(r.len);
@@ -289,8 +336,8 @@ TEST_CASE("noise is smooth across neighbouring points, and varies across the fie
 TEST_CASE("mod wraps a sweep, so an animation repeats instead of running off the end") {
     uint8_t code[4096];
     auto r = moonlive::compileSource(
-        mmScript("uint8_t w = 16;\n"
-        "for (yy = 0; yy < w; yy = yy + 1) { setRGB(yy * w + mod(t, w), 255, 0, 0); }"),
+        mmScript("byte w = 16;\n"
+        "for (int yy = 0; yy < w; yy = yy + 1) { setRGB(yy * w + mod(t, w), 255, 0, 0); }"),
         moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
     REQUIRE(r.ok);
     void* blk = platform::allocExec(r.len);
@@ -323,20 +370,110 @@ TEST_CASE("sequential loops reuse the same register, so a script is not billed p
     uint8_t code[8192];
     // Four loops, each with a call in the body — comfortably over budget if counters accumulate.
     auto r = moonlive::compileSource(
-        mmScript("uint8_t w = 16;\n"
-        "for (a = 0; a < w; a = a + 1) { setRGB(a, 255, 0, 0); }\n"
-        "for (b = 0; b < w; b = b + 1) { setRGB(b, 0, 255, 0); }\n"
-        "for (c = 0; c < w; c = c + 1) { setRGB(c, 0, 0, 255); }\n"
-        "for (d = 0; d < w; d = d + 1) { setRGB(d, 255, 255, 0); }"),
+        mmScript("byte w = 16;\n"
+        "for (int a = 0; a < w; a = a + 1) { setRGB(a, 255, 0, 0); }\n"
+        "for (int b = 0; b < w; b = b + 1) { setRGB(b, 0, 255, 0); }\n"
+        "for (int c = 0; c < w; c = c + 1) { setRGB(c, 0, 0, 255); }\n"
+        "for (int d = 0; d < w; d = d + 1) { setRGB(d, 255, 255, 0); }"),
         moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
     if (!r.ok) INFO(r.error);
     // What this pins is REGISTER REUSE, which the front-end does on every host — but proving it
-    // needs code to come out, and only a host with an assembler for its ISA emits any
-    // (MM_MOONLIVE_HAS_HOST_JIT is 0 on x86_64, which is what CI runs). Requiring success there
-    // fails for the one reason that has nothing to do with register reuse.
+    // needs code to come out, and only a host with an assembler for its ISA emits any. On a build
+    // without one (--no-jit, or an unsupported host) requiring success fails for the one reason
+    // that has nothing to do with register reuse.
 #if MM_MOONLIVE_HAS_HOST_JIT
     CHECK(r.ok);
 #else
     CHECK((r.ok || std::string(r.error) == moonlive::kCodegenFailed));
 #endif
+}
+
+// The DOCUMENTATION's script examples compile.
+//
+// A doc example is what a user copies first, so one that no longer parses is worse than no example:
+// it teaches a syntax the engine rejects, and it fails on their device rather than in CI. The
+// language gained declared return types and every example in four files went stale at once, which
+// is exactly the drift this catches.
+//
+// Read from the .md files rather than pasted here: a pasted copy stops being the documented one the
+// first time someone edits the real page.
+TEST_CASE("every compile error fits the status line whole, its position included") {
+    // A failure reaches the UI as ONE string, "<message> @<offset>": the sentence a user reads and
+    // the position the editor marks the failing line from. MoonLiveScript formats it into a fixed
+    // buffer, so a message longer than that buffer loses its explanation, and a slightly longer one
+    // eats the offset and the line marking silently stops working. Both happened.
+    //
+    // Read from the SOURCE rather than a list kept here: a hand-kept copy would agree with the
+    // buffer while the compiler moved on, which is the drift this exists to prevent.
+    const std::filesystem::path repo =
+        std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path();
+    size_t longest = 0;
+    const char* longestText = "";
+    for (const char* rel : {"src/core/moonlive/MoonLiveCompiler.cpp",
+                            "src/core/moonlive/MoonLiveCompiler.h"}) {
+        std::ifstream in(repo / rel);
+        REQUIRE(in.good());
+        std::string line;
+        while (std::getline(in, line)) {
+            // Both shapes a diagnostic is written in: fail("...") and a kName = "..." constant.
+            for (const char* lead : {"fail(\"", "= \""}) {
+                size_t at = 0;
+                while ((at = line.find(lead, at)) != std::string::npos) {
+                    const size_t beg = at + std::strlen(lead);
+                    const size_t end = line.find('"', beg);
+                    if (end == std::string::npos) break;
+                    const size_t len = end - beg;
+                    if (len > longest) { longest = len; }
+                    at = end;
+                }
+            }
+        }
+    }
+    INFO("longest diagnostic is " << longest << " chars");
+    CHECK(longest >= 40);              // a control: a parse that found nothing would pass silently
+    // " @" + up to 5 digits + the terminator, against the buffer MoonLiveScript declares.
+    CHECK(longest + 8 <= mm::moonlive::MoonLiveScript::kMaxStatus);
+    (void)longestText;
+}
+
+TEST_CASE("every script example in the docs compiles") {
+    const std::filesystem::path repo = scriptRoot().parent_path();
+    const std::filesystem::path pages[] = {
+        repo / "moonlive" / "README.md",
+        repo / "docs" / "moonmodules" / "light" / "MoonLiveEffect.md",
+        repo / "docs" / "moonmodules" / "light" / "MoonLiveLayout.md",
+        repo / "docs" / "moonmodules" / "light" / "MoonLiveModifier.md",
+    };
+
+    int checked = 0;
+    for (const auto& page : pages) {
+        INFO("page: ", page.string());
+        REQUIRE(std::filesystem::exists(page));
+        const std::string text = read(page);
+
+        // Every fenced block that declares a class is a script. A fence holding a fragment (a
+        // control table, a shell line) has no `class` and is skipped: the point is to compile what
+        // a reader would paste as a whole script.
+        size_t pos = 0;
+        while ((pos = text.find("\n```", pos)) != std::string::npos) {
+            const size_t bodyStart = text.find('\n', pos + 1);
+            if (bodyStart == std::string::npos) break;
+            const size_t end = text.find("\n```", bodyStart);
+            if (end == std::string::npos) break;
+            const std::string block = text.substr(bodyStart + 1, end - bodyStart - 1);
+            pos = end + 1;
+            if (block.find("class ") == std::string::npos) continue;
+
+            INFO("block: ", block);
+            moonlive::MoonLive eng;
+            // The EFFECT vocabulary for every block: the three role tables are aliases of one light
+            // vocabulary (pinned by "the three roles are handed the same table"), so which one is
+            // passed is documentation rather than a behavioral choice.
+            CHECK(eng.compile(block.c_str(), moonlive::lightBuiltins(), moonlive::effectSysVars()));
+            checked++;
+        }
+    }
+    // A page that stopped holding examples would make this vacuously green.
+    CHECK_MESSAGE(checked > 0, "no doc examples found: the test would pass without checking anything");
+    MESSAGE("compiled " << checked << " script examples from the docs");
 }

@@ -14,6 +14,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/PanelsLayout.h"
+#include "core/JsonSink.h"   // writeControlMetadata: the schema the UI parses
 #include <string>   // status() substring checks
 
 namespace {
@@ -79,6 +80,7 @@ TEST_CASE("PanelCardDriver sends one frame per row then one sync") {
     mm::PanelCardDriver driver;
     Wall wall(64, 4);
     setUp(driver, source, wall, 256);
+    driver.firmware = 1;               // "v13 and newer": acts on the SECOND copy, so both go out
 
     mm::platform::setTestNowMs(1000);
     driver.tick();
@@ -89,6 +91,26 @@ TEST_CASE("PanelCardDriver sends one frame per row then one sync") {
     for (size_t i = 2; i <= 5; i++) CHECK(frameType(i) == mm::COLORLIGHT_TYPE_ROW);
     CHECK(frameType(6) == mm::COLORLIGHT_TYPE_SYNC);
     CHECK(frameType(7) == mm::COLORLIGHT_TYPE_SYNC);
+}
+
+// A card on v12-or-older firmware acts on the FIRST copy and reads a second sync as another latch,
+// aborting the refresh already running: the wall then updates once every few seconds. That
+// generation gets exactly one brightness and one sync, which is also what FPP sends such a card.
+TEST_CASE("PanelCardDriver sends a pre-v13 card one brightness and one sync") {
+    mm::Buffer source;
+    mm::PanelCardDriver driver;
+    Wall wall(64, 4);
+    setUp(driver, source, wall, 256);
+    // No assignment: "v12 and older" is index 0 and the DEFAULT, because the documented path
+    // downgrades the card to clear the v13 flicker. This test also pins that default.
+
+    mm::platform::setTestNowMs(1000);
+    driver.tick();
+
+    REQUIRE(mm::platform::ethTestFrameCount() == 6);   // 1 brightness + 4 rows + 1 sync
+    CHECK(frameType(0) == mm::COLORLIGHT_TYPE_BRIGHTNESS);
+    for (size_t i = 1; i <= 4; i++) CHECK(frameType(i) == mm::COLORLIGHT_TYPE_ROW);
+    CHECK(frameType(5) == mm::COLORLIGHT_TYPE_SYNC);
 }
 
 // A buffer smaller than the wall sends only the rows it covers, then latches — rather than reading
@@ -102,8 +124,8 @@ TEST_CASE("PanelCardDriver stops at the last row its buffer covers") {
     mm::platform::setTestNowMs(1000);
     driver.tick();
 
-    REQUIRE(mm::platform::ethTestFrameCount() == 6);   // 2 brightness + 2 rows + 2 sync, not 8 rows
-    CHECK(frameType(5) == mm::COLORLIGHT_TYPE_SYNC);
+    REQUIRE(mm::platform::ethTestFrameCount() == 4);   // brightness + 2 rows + sync, not 8 rows
+    CHECK(frameType(3) == mm::COLORLIGHT_TYPE_SYNC);
 }
 
 // A row wider than one packet splits into several, each carrying its own pixel offset — the wide-
@@ -117,13 +139,13 @@ TEST_CASE("PanelCardDriver splits a row wider than one packet") {
     mm::platform::setTestNowMs(1000);
     driver.tick();
 
-    REQUIRE(mm::platform::ethTestFrameCount() == 6);   // 2 brightness + 2 row packets + 2 sync
-    // First chunk: offset 0, a full 497 pixels.
-    const uint8_t* a = mm::platform::ethTestFrameData(2);
+    REQUIRE(mm::platform::ethTestFrameCount() == 4);   // brightness + 2 row packets + sync
+    // First chunk: offset 0, a full 497 pixels. Frame 1: one brightness precedes the rows.
+    const uint8_t* a = mm::platform::ethTestFrameData(1);
     CHECK(((a[15] << 8) | a[16]) == 0);
     CHECK(((a[17] << 8) | a[18]) == mm::COLORLIGHT_MAX_PIXELS_PER_PACKET);
     // Second chunk: continues at 497, carrying the remaining 103.
-    const uint8_t* b = mm::platform::ethTestFrameData(3);
+    const uint8_t* b = mm::platform::ethTestFrameData(2);
     CHECK(((b[15] << 8) | b[16]) == mm::COLORLIGHT_MAX_PIXELS_PER_PACKET);
     CHECK(((b[17] << 8) | b[18]) == 600 - mm::COLORLIGHT_MAX_PIXELS_PER_PACKET);
 }
@@ -141,8 +163,8 @@ TEST_CASE("PanelCardDriver puts rendered pixels on the wire") {
     mm::platform::setTestNowMs(1000);
     driver.tick();
 
-    REQUIRE(mm::platform::ethTestFrameCount() == 5);   // 2 brightness + row + 2 sync
-    const uint8_t* row = mm::platform::ethTestFrameData(2);
+    REQUIRE(mm::platform::ethTestFrameCount() == 3);   // brightness + row + sync
+    const uint8_t* row = mm::platform::ethTestFrameData(1);
     CHECK(row[mm::COLORLIGHT_ROW_PREFIX + 0] == 10);
     CHECK(row[mm::COLORLIGHT_ROW_PREFIX + 1] == 20);
     CHECK(row[mm::COLORLIGHT_ROW_PREFIX + 2] == 30);
@@ -161,7 +183,7 @@ TEST_CASE("PanelCardDriver rate-limits to its fps setting") {
     mm::platform::setTestNowMs(1000);
     driver.tick();
     const size_t after1 = mm::platform::ethTestFrameCount();
-    CHECK(after1 == 5);   // 2 brightness + row + 2 sync
+    CHECK(after1 == 3);   // brightness + row + sync
 
     mm::platform::setTestNowMs(1010);   // too soon
     driver.tick();
@@ -203,7 +225,7 @@ TEST_CASE("PanelCardDriver survives a failing link") {
     mm::platform::setTestEthSendFails(false);
     mm::platform::setTestNowMs(1100);
     driver.tick();
-    CHECK(mm::platform::ethTestFrameCount() == 5);   // recovers on the next tick
+    CHECK(mm::platform::ethTestFrameCount() == 3);   // recovers on the next tick
 }
 
 // The correction-applied buffer is sized off the hot path, so tick() never allocates — the same
@@ -294,13 +316,13 @@ TEST_CASE("PanelCardDriver sends the wall a PanelsLayout describes") {
     mm::platform::setTestNowMs(1000);
     driver.tick();
 
-    // 2 brightness + 128 rows (one packet each, 128 <= 497) + 2 sync
-    REQUIRE(mm::platform::ethTestFrameCount() == 132);
+    // brightness + 128 rows (one packet each, 128 <= 497) + sync
+    REQUIRE(mm::platform::ethTestFrameCount() == 130);
     // Rows are numbered across the whole card, not restarted per panel.
-    const uint8_t* firstRow = mm::platform::ethTestFrameData(2);
+    const uint8_t* firstRow = mm::platform::ethTestFrameData(1);
     REQUIRE(firstRow != nullptr);
     CHECK(((firstRow[13] << 8) | firstRow[14]) == 0);
-    const uint8_t* lastRow = mm::platform::ethTestFrameData(129);
+    const uint8_t* lastRow = mm::platform::ethTestFrameData(128);
     REQUIRE(lastRow != nullptr);
     CHECK(((lastRow[13] << 8) | lastRow[14]) == 127);
 }
@@ -338,8 +360,8 @@ TEST_CASE("PanelCardDriver widens the row when a PanelsLayout chains panels acro
     mm::platform::setTestNowMs(1000);
     driver.tick();
 
-    // 2 brightness + 64 rows + 2 sync — still one packet per row, since 256 <= 497.
-    REQUIRE(mm::platform::ethTestFrameCount() == 68);
+    // brightness + 64 rows + sync: still one packet per row, since 256 <= 497.
+    REQUIRE(mm::platform::ethTestFrameCount() == 66);
     const uint8_t* row = mm::platform::ethTestFrameData(2);
     REQUIRE(row != nullptr);
     CHECK(((row[17] << 8) | row[18]) == 256);   // pixels in this packet
@@ -409,7 +431,11 @@ TEST_CASE("PanelCardDriver sends nothing when the buffer covers no row") {
 // re-entered and the guard under test never runs.
 static void wedge(mm::PanelCardDriver& driver, uint32_t fromMs) {
     mm::platform::setTestEthSendFails(true);
-    for (int i = 0; i < 200; i++) {
+    // Enough TICKS to clear the driver's 500-consecutive-failure wedge threshold. Each tick sends
+    // one brightness + rows + one sync, so the frame count per tick depends on the wall: 250 ticks
+    // is comfortably past 500 for the small walls these tests build, with headroom rather than an
+    // exact figure, because the point is that a long run of failures accumulates.
+    for (int i = 0; i < 250; i++) {
         mm::platform::setTestNowMs(fromMs + i * 30);
         driver.tick();
     }
@@ -507,4 +533,231 @@ TEST_CASE("PanelCardDriver counts send failures by cause") {
     uint32_t after = 0;
     mm::platform::ethSendFailCounts(linkDown, after);
     CHECK(after == ringFull);  // a success does not erase the history
+}
+
+// The `interface` Select lists the DETECTED host NICs (none-first) and persists by label, the
+// fix for the Windows index-mismatch trap: whatever the OS or Npcap renumbers, the name the
+// user picked keeps meaning that adapter. Enumeration is faked through the test seam.
+TEST_CASE("the interface Select lists detected NICs, none first, bind names behind the rows") {
+    static const char* kFake[] = {"en-test0", "en-test1"};
+    mm::platform::setTestRawInterfaces(kFake, 2);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+
+    // Find the control and pin its shape: 3 rows (none + 2 NICs), label persistence on.
+    bool found = false;
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        found = true;
+        CHECK(cs[i].max == 3);
+        CHECK(cs[i].persistLabel);
+        auto* options = reinterpret_cast<const char* const*>(cs[i].aux);
+        REQUIRE(options != nullptr);
+        CHECK(std::strcmp(options[0], "none (capture only)") == 0);
+        CHECK(std::strcmp(options[1], "en-test0") == 0);
+    }
+    CHECK(found);
+
+    // The bind name behind each row: none maps to capture (nullptr), rows map to their NIC.
+    CHECK(mm::platform::rawInterfaceName(0) == nullptr);
+    CHECK(std::strcmp(mm::platform::rawInterfaceName(1), "en-test0") == 0);
+    CHECK(std::strcmp(mm::platform::rawInterfaceName(2), "en-test1") == 0);
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);   // restore real enumeration
+}
+
+// A persisted adapter NAME whose NIC is gone must degrade to capture-only without crashing:
+// the label no longer matches any option, the Select stays at row 0 (none), and prepare()'s
+// nullptr bind is today's blank-interface capture path.
+TEST_CASE("a vanished persisted NIC degrades to capture-only, never a crash") {
+    static const char* kFake[] = {"en-test0"};
+    mm::platform::setTestRawInterfaces(kFake, 1);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        // The config remembers an adapter this machine no longer has.
+        const auto r = mm::applyControlValue(cs[i], "{\"interface\":\"en-vanished\"}",
+                                             "interface", mm::ApplyPolicy::Clamp);
+        CHECK(r == mm::ApplyResult::Ok);   // Lenient-shaped: the tree is left alone, no error
+        CHECK(*static_cast<uint8_t*>(cs[i].ptr) == 0);   // still row 0: none (capture only)
+    }
+    CHECK(mm::platform::rawInterfaceName(0) == nullptr);   // and row 0 binds nothing
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+}
+
+// The NIC list is re-enumerated on every rebuild and the OS does not promise a stable order.
+// The selection must follow the ADAPTER, not the row it happened to occupy: a NIC appearing
+// ahead of the chosen one would otherwise silently move panel output to a different adapter.
+TEST_CASE("a reordered NIC list keeps the selected adapter, not its old row") {
+    static const char* kFirst[]  = {"en-alpha", "en-beta"};
+    mm::platform::setTestRawInterfaces(kFirst, 2);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+    {
+        auto& cs = driver.controls();
+        for (uint8_t i = 0; i < cs.count(); i++) {
+            if (std::strcmp(cs[i].name, "interface") != 0) continue;
+            const auto r = mm::applyControlValue(cs[i], "{\"interface\":\"en-beta\"}",
+                                                 "interface", mm::ApplyPolicy::Clamp);
+            CHECK(r == mm::ApplyResult::Ok);
+        }
+    }
+    driver.prepare();   // picking an interface re-prepares, which is what records the choice
+
+    // A NIC is hot-plugged AHEAD of the chosen one, so every later row shifts down.
+    static const char* kAfter[] = {"en-new", "en-alpha", "en-beta"};
+    mm::platform::setTestRawInterfaces(kAfter, 3);
+    driver.defineControls();   // the rebuild that re-enumerates
+
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        const uint8_t sel = *static_cast<uint8_t*>(cs[i].ptr);
+        const char* bound = mm::platform::rawInterfaceName(sel);
+        // Row 0 is "none (capture only)" and binds nothing, so landing there is the failure
+        // this guards against, not a reason to crash the run.
+        REQUIRE(bound != nullptr);
+        CHECK(std::strcmp(bound, "en-beta") == 0);
+    }
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+}
+
+// Interface labels come from the OS, and on Windows they are free-form descriptions. One
+// containing a quote or a backslash must not be able to break the JSON the whole UI loads from.
+TEST_CASE("an interface label with JSON metacharacters keeps the schema parseable") {
+    static const char* kOdd[] = {"Realtek \"Gaming\" 2.5GbE", "Intel\\Wi-Fi 6"};
+    mm::platform::setTestRawInterfaces(kOdd, 2);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        char buf[512];
+        mm::JsonSink sink(buf, sizeof(buf));
+        mm::writeControlMetadata(sink, cs[i]);
+        const std::string json(buf);
+        // Every quote and backslash inside a label must arrive escaped.
+        CHECK(json.find("\\\"Gaming\\\"") != std::string::npos);
+        CHECK(json.find("Intel\\\\Wi-Fi") != std::string::npos);
+    }
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+}
+
+// The documented reset for the test seam is (nullptr, 0); it must clear the override rather
+// than form a range from a null pointer.
+TEST_CASE("resetting the interface test seam with nullptr restores real enumeration") {
+    static const char* kFake[] = {"en-test0"};
+    mm::platform::setTestRawInterfaces(kFake, 1);
+    const char* const* opts = nullptr;
+    CHECK(mm::platform::rawInterfaces(&opts) == 2);   // row 0 + the fake
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+    CHECK(mm::platform::rawInterfaces(&opts) >= 1);   // back to the host's own list
+}
+
+// An interface label carries the adapter's live link speed ("Realtek PCIe GbE, 1 Gb") so a user
+// can tell a 1 Gb NIC from a Wi-Fi radio or a virtual switch. That detail CHANGES: a renegotiated
+// link, or the same cable at 100 Mb, rewrites the label. The selection must survive it, or the
+// driver silently falls back to capture-only the first time a link renegotiates.
+TEST_CASE("a NIC whose link speed changed is still the same NIC") {
+    static const char* kFast[] = {"en-alpha, 1 Gb", "en-beta, 2.5 Gb"};
+    mm::platform::setTestRawInterfaces(kFast, 2);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+    {
+        auto& cs = driver.controls();
+        for (uint8_t i = 0; i < cs.count(); i++) {
+            if (std::strcmp(cs[i].name, "interface") != 0) continue;
+            const auto r = mm::applyControlValue(cs[i], "{\"interface\":\"en-beta, 2.5 Gb\"}",
+                                                 "interface", mm::ApplyPolicy::Clamp);
+            CHECK(r == mm::ApplyResult::Ok);
+        }
+    }
+    driver.prepare();
+
+    // The link renegotiates: same adapter, different speed in its label.
+    static const char* kSlow[] = {"en-alpha, 1 Gb", "en-beta, 100 Mb"};
+    mm::platform::setTestRawInterfaces(kSlow, 2);
+    driver.defineControls();
+
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        const uint8_t sel = *static_cast<uint8_t*>(cs[i].ptr);
+        const char* bound = mm::platform::rawInterfaceName(sel);
+        REQUIRE(bound != nullptr);                    // row 0 binds nothing: the failure case
+        CHECK(std::strncmp(bound, "en-beta", 7) == 0);
+    }
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+}
+
+// The same rule on the APPLY path: a persisted label whose speed has since changed still selects
+// its adapter, so a config restored onto a machine whose link renegotiated keeps working.
+TEST_CASE("a persisted interface label matches its adapter despite a changed speed") {
+    static const char* kNow[] = {"en-alpha, 100 Mb"};
+    mm::platform::setTestRawInterfaces(kNow, 1);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        // The config was written when the link was up at 1 Gb.
+        const auto r = mm::applyControlValue(cs[i], "{\"interface\":\"en-alpha, 1 Gb\"}",
+                                             "interface", mm::ApplyPolicy::Clamp);
+        CHECK(r == mm::ApplyResult::Ok);
+        CHECK(*static_cast<uint8_t*>(cs[i].ptr) == 1);   // row 1, not the capture-only row 0
+    }
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
+}
+
+// An adapter that DISAPPEARS between rebuilds (unplugged USB NIC, a driver uninstall) must not
+// leave the selection pointing at whatever now occupies that row: the driver would send panel
+// data out of a NIC the user never chose. No match means capture-only, explicitly.
+TEST_CASE("a NIC that disappeared falls back to capture-only, not to whoever took its row") {
+    static const char* kBefore[] = {"en-alpha", "en-beta"};
+    mm::platform::setTestRawInterfaces(kBefore, 2);
+
+    mm::PanelCardDriver driver;
+    driver.defineControls();
+    {
+        auto& cs = driver.controls();
+        for (uint8_t i = 0; i < cs.count(); i++) {
+            if (std::strcmp(cs[i].name, "interface") != 0) continue;
+            const auto r = mm::applyControlValue(cs[i], "{\"interface\":\"en-beta\"}",
+                                                 "interface", mm::ApplyPolicy::Clamp);
+            CHECK(r == mm::ApplyResult::Ok);
+        }
+    }
+    driver.prepare();   // records en-beta as the chosen adapter
+
+    // en-beta is gone; en-gamma now sits at the row en-beta used to occupy.
+    static const char* kAfter[] = {"en-alpha", "en-gamma"};
+    mm::platform::setTestRawInterfaces(kAfter, 2);
+    driver.defineControls();
+
+    bool sawInterface = false;
+    auto& cs = driver.controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "interface") != 0) continue;
+        sawInterface = true;
+        CHECK(*static_cast<uint8_t*>(cs[i].ptr) == 0);            // row 0: none (capture only)
+        CHECK(mm::platform::rawInterfaceName(0) == nullptr);      // and it binds nothing
+    }
+    CHECK(sawInterface);
+
+    mm::platform::setTestRawInterfaces(nullptr, 0);
 }

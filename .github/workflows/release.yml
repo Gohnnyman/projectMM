@@ -29,17 +29,21 @@ on:
       - 'test/**'
       - 'esp32/**'
       - 'moondeck/build/**'
+      # package_desktop.py builds and packages the three desktop jobs; without this line a
+      # packaging fix cannot trigger the jobs that run it (the NSIS-escape fix needed a
+      # manual dispatch because only moondeck/ci changed).
+      - 'moondeck/ci/**'
       - 'CMakeLists.txt'
       - 'library.json'
       - '.github/workflows/release.yml'
       # The web installer + docs site are served from Pages by the deploy-pages job
       # below; a change to them must trigger a deploy or it never reaches the live site
       # (the eth-only-provisioning fix shipped a commit that didn't auto-deploy because
-      # web-installer was missing here). src/ui/install-picker*.js is already covered by src/**.
+      # mooninstaller was missing here). src/ui/install-picker*.js is already covered by src/**.
       # docs/** covers every page rendered into the Pages root by MkDocs; mkdocs.yml is
       # the site config (nav/theme) — a nav change with no doc change must still redeploy.
       - 'docs/**'
-      - 'web-installer/**'
+      - 'mooninstaller/**'
       - 'mkdocs.yml'
   workflow_dispatch:
     inputs:
@@ -87,7 +91,7 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: uv run moondeck/ci/verify_version.py --tag "$TAG"
 
-  # The shipping firmware list, read from the generated web-installer/firmwares.json
+  # The shipping firmware list, read from the generated mooninstaller/firmwares.json
   # (projected from build_esp32.py's FIRMWARES dict, drift-guarded by
   # check_firmwares.py). Emitted as a JSON array so build-esp32's matrix can
   # fromJSON() it — GitHub matrices can't read a file at parse time, so a job
@@ -104,7 +108,7 @@ jobs:
       - id: gen
         run: |
           set -euo pipefail
-          echo "list=$(jq -c '[.firmwares[] | select(.ships) | .name]' web-installer/firmwares.json)" >> "$GITHUB_OUTPUT"
+          echo "list=$(jq -c '[.firmwares[] | select(.ships) | .name]' mooninstaller/firmwares.json)" >> "$GITHUB_OUTPUT"
 
   build-esp32:
     needs: [verify-version, firmwares]
@@ -131,6 +135,11 @@ jobs:
           # Bump the suffix when changing the IDF version to invalidate.
           key: esp-idf-v6.1-rc1-${{ runner.os }}-v1
 
+      # The staging step's MoonBase block runs `uv run python` on the RUNNER (the ESP-IDF
+      # docker action only provides Python inside its container), so uv must exist there.
+      # First main run without it: `uv: command not found`, exit 127, three 4 MB variants.
+      - uses: astral-sh/setup-uv@v3
+
       # The release-channel tag burned into the binary as MM_RELEASE (shown by
       # SystemModule alongside the semver). Same resolution as the release
       # job's "Resolve effective tag" step — kept here because this build job
@@ -156,9 +165,7 @@ jobs:
         id: ver
         # The channel (latest vs stable) and the -rc handling both live in
         # compute_version.py — pass only the tag, the helper derives the rest, so
-        # this step and the release job's identical step can't disagree. Raw
-        # `python` (not `uv run`): this job has no setup-uv (the ESP-IDF docker
-        # action provides Python) and the script is stdlib-only.
+        # this step and the release job's identical step can't disagree.
         # Tag passed via env (not inline ${{ }}) so it reaches the script as a
         # plain shell variable, never spliced into the command text — no shell
         # injection from a crafted tag/ref.
@@ -166,7 +173,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          V=$(python moondeck/build/compute_version.py --tag "$TAG")
+          V=$(uv run python moondeck/build/compute_version.py --tag "$TAG")
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Build firmware
@@ -221,6 +228,19 @@ jobs:
           # Per-firmware flasher_args.json — the release job feeds it to
           # generate_manifest.py so offsets come from the real build.
           cp "$B/flasher_args.json"                   "dist/flasher-${{ matrix.firmware }}.json"
+          # MoonBase, the second boot image on the 4 MB tables (built alongside those firmwares
+          # by build_esp32.py): chip-shared, so staged under a shared name like the partition
+          # table. The slot-0 otadata is what makes a fresh install boot the APP with MoonBase
+          # standing by: blank otadata would boot MoonBase. Their manifests reference both
+          # (generate_manifest.py), and install-picker.js excludes them from OTA offers.
+          for MB in build/moonbase-*/projectMM-moonbase.bin; do
+            [ -f "$MB" ] || continue
+            CHIP=$(basename "$(dirname "$MB")"); CHIP=${CHIP#moonbase-}
+            cp "$MB" "dist/shared-moonbase-$CHIP.bin"
+            uv run python -c "import sys; sys.path.insert(0,'moondeck/build'); \
+              import build_esp32, pathlib; \
+              pathlib.Path('dist/shared-ota-data-slot0.bin').write_bytes(build_esp32.otadata_slot0_bytes())"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
@@ -234,12 +254,60 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # Full history: compute_version.py counts commits since the last v* tag.
+          fetch-depth: 0
       # CMakeLists.txt calls find_program(UV_EXECUTABLE … REQUIRED) so the
       # build-host Python (gzip / build_info.h) is reached through uv. The
       # runners don't ship uv by default — install it before package_desktop.
       - uses: astral-sh/setup-uv@v3
+      # Same tag + version resolution as build-esp32 (see the comments there): the computed
+      # semver must reach the DESKTOP binary too, or a desktop build reports library.json's bare
+      # core and the update badge can never see a `latest` (-dev.N) build as newer. shell: bash
+      # keeps the three jobs' copies of this block identical; without it the Windows copy would
+      # run under PowerShell and fail on the bash syntax.
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "$IS_MAIN" = "true" ]; then echo "tag=latest" >> "$GITHUB_OUTPUT"
+          else echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"; fi
+      - name: Compute version
+        id: ver
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          V=$(uv run python moondeck/build/compute_version.py --tag "$TAG")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      # ccache: the macOS runner compiles the whole desktop tree from cold every run (the ESP32
+      # jobs get a prebuilt IDF container; this one gets nothing), which is why it was the slowest
+      # job in the workflow at ~10 min. CMake picks the launcher up from the environment, so the
+      # build script stays unchanged. The key rotates per run and restores from the newest
+      # matching prefix, the standard save-always cache shape for a compiler cache.
+      - name: Install ccache
+        run: brew install ccache
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-macos-14-${{ github.sha }}
+          restore-keys: |
+            ccache-macos-14-
       - name: Build + package macOS arm64
-        run: uv run moondeck/ci/package_desktop.py
+        env:
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+        run: uv run moondeck/ci/package_desktop.py --version "${{ steps.ver.outputs.version }}"
+      - name: ccache stats
+        if: always()
+        run: ccache --show-stats
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-macos
@@ -252,13 +320,92 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      # Same uv prerequisite as build-macos — see the comment there.
+          fetch-depth: 0
+      # Same uv prerequisite as build-macos, see the comment there.
       - uses: astral-sh/setup-uv@v3
+      # Same tag + version resolution as build-esp32 (see the comments there): the computed
+      # semver must reach the DESKTOP binary too, or a desktop build reports library.json's bare
+      # core and the update badge can never see a `latest` (-dev.N) build as newer. shell: bash
+      # keeps the three jobs' copies of this block identical; without it the Windows copy would
+      # run under PowerShell and fail on the bash syntax.
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "$IS_MAIN" = "true" ]; then echo "tag=latest" >> "$GITHUB_OUTPUT"
+          else echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"; fi
+      - name: Compute version
+        id: ver
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          V=$(uv run python moondeck/build/compute_version.py --tag "$TAG")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      # The runner image does NOT ship NSIS (the first release run after the installer merged
+      # proved it: "no makensis on this CI runner"). choco installs it into
+      # Program Files (x86)\NSIS, one of the two locations find_makensis already searches.
+      - name: Install NSIS (the Windows installer compiler)
+        run: choco install nsis --no-progress -y
       - name: Build + package Windows x64
-        run: uv run moondeck/ci/package_desktop.py
+        run: uv run moondeck/ci/package_desktop.py --version "${{ steps.ver.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-windows
+          path: dist/
+
+  build-linux:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # Same uv prerequisite as build-macos, see the comment there.
+      - uses: astral-sh/setup-uv@v3
+      # Builds with the runner's default GCC (13 on ubuntu-24.04). Its four false-positive
+      # warnings are handled in CMakeLists.txt, which demotes them to non-fatal on GCC below
+      # 16 rather than pinning a compiler here: a from-source build on Debian or Raspberry Pi
+      # OS meets the same GCC and deserves the same fix.
+      # Same tag + version resolution as build-esp32 (see the comments there): the computed
+      # semver must reach the DESKTOP binary too, or a desktop build reports library.json's bare
+      # core and the update badge can never see a `latest` (-dev.N) build as newer. shell: bash
+      # keeps the three jobs' copies of this block identical; without it the Windows copy would
+      # run under PowerShell and fail on the bash syntax.
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "$IS_MAIN" = "true" ]; then echo "tag=latest" >> "$GITHUB_OUTPUT"
+          else echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"; fi
+      - name: Compute version
+        id: ver
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          V=$(uv run python moondeck/build/compute_version.py --tag "$TAG")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: Build + package Linux x64
+        run: uv run moondeck/ci/package_desktop.py --version "${{ steps.ver.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
           path: dist/
 
   release:
@@ -266,7 +413,7 @@ jobs:
     # Plain branch push without matching paths is filtered by the top-level `paths:`
     # so the build jobs already won't run; this condition is the belt to their braces.
     if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
-    needs: [build-esp32, build-macos, build-windows]
+    needs: [build-esp32, build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write     # softprops/action-gh-release needs this
@@ -302,6 +449,16 @@ jobs:
           mkdir -p dist
           find artifacts -type f -exec mv {} dist/ \;
           ls -la dist/
+
+      # The Open Stage Control surface, so someone who owns a device can download it beside the
+      # firmware instead of being sent to a path inside the repo. It is a plain session file with
+      # no build step: copied, not generated.
+      - name: Stage the control-surface session
+        run: |
+          set -euo pipefail
+          cp docs/reference/examples/open-stage-control.json \
+             dist/projectMM-control-surface.json
+          ls -la dist/projectMM-control-surface.json
 
       - name: Resolve effective tag
         id: tag
@@ -346,9 +503,9 @@ jobs:
           # — no CORS). The Pages-relative manifests are generated in the
           # deploy-pages job, where the web installer (CORS-bound) consumes them.
           BASE="https://github.com/${REPO}/releases/download/$TAG"
-          # The shipping firmware list — the same web-installer/firmwares.json the
+          # The shipping firmware list — the same mooninstaller/firmwares.json the
           # build matrix reads, so manifests and builds can't drift.
-          for F in $(jq -r '.firmwares[] | select(.ships) | .name' web-installer/firmwares.json); do
+          for F in $(jq -r '.firmwares[] | select(.ships) | .name' mooninstaller/firmwares.json); do
             uv run python moondeck/build/generate_manifest.py \
               --firmware "$F" \
               --version "$V" \
@@ -421,11 +578,15 @@ jobs:
           # is a glob pattern, the action does NOT strip `#` as comment syntax.
           files: |
             dist/firmware-*.bin
-            dist/shared-ota-data.bin
+            dist/shared-*.bin
             dist/partition-table-*.bin
             dist/manifest-*.json
             dist/projectMM-*.tar.gz
             dist/projectMM-*.zip
+            dist/projectMM-control-surface.json
+            dist/projectMM-*.dmg
+            dist/projectMM-*-setup.exe
+            dist/projectmm_*.deb
 
   # Deploy the web installer to GitHub Pages. Separate from `release` because
   # the `github-pages` environment's protection rule only allows `main` — so
@@ -501,11 +662,13 @@ jobs:
               --dir "pages/install/releases/$T" \
               --pattern 'firmware-*.bin' \
               --pattern '*-ota-data.bin' \
-              --pattern 'shared-ota-data.bin' \
+              --pattern 'shared-*.bin' \
               --pattern 'partition-table-*.bin' \
               --pattern 'manifest-*.json' \
               --pattern 'projectMM-*.tar.gz' \
               --pattern 'projectMM-*.zip' \
+              --pattern 'projectMM-*.dmg' \
+              --pattern 'projectmm_*.deb' \
               || echo "  (skip $T — no matching assets)"
             # Rewrite each manifest's part paths to relative basenames (strip the
             # absolute release-asset URL); jq edits in place via a temp file.
@@ -522,9 +685,9 @@ jobs:
           # Install page + the shared install-picker module sit at the root.
           # Each release's binaries + manifests live under releases/<tag>/.
           mkdir -p pages/install
-          cp -r web-installer/. pages/install/
+          cp -r mooninstaller/. pages/install/
           cp src/ui/install-picker.js pages/install/
-          # The board-catalog / chip-detection half of the picker — web-installer
+          # The board-catalog / chip-detection half of the picker — mooninstaller
           # only (not embedded in firmware), imported by index.html. Must ship to
           # Pages alongside install-picker.js or the ES-module import 404s.
           cp src/ui/install-picker-boards.js pages/install/
@@ -538,7 +701,7 @@ jobs:
           mkdir -p pages/install/assets/deviceModels
           # rel is "assets/deviceModels/<slug>.<ext>" (the path served from /install/);
           # the source file lives in docs/<rel> (i.e. docs/assets/deviceModels/...).
-          jq -r '.[].image // empty' web-installer/deviceModels.json | while read -r rel; do
+          jq -r '.[].image // empty' mooninstaller/deviceModels.json | while read -r rel; do
             src="docs/$rel"
             [ -f "$src" ] && cp "$src" "pages/install/$rel" \
               || echo "WARNING: deviceModels.json image not found: $src"

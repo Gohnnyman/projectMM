@@ -665,6 +665,13 @@ body.cards-resizing {
     gap: 4px;
 }
 
+/* `hidden` has to WIN. The UA sheet's [hidden] {display:none} is weaker than any class-level
+   display, and a .card-btn inside a flex row (.fileedit-tools) becomes a flex item regardless, so
+   setting .hidden = true on one did nothing at all: the share button stayed visible for every
+   script. One rule here rather than per button, because the next hidden control in a flex row
+   would hit exactly this. */
+[hidden] { display: none !important; }
+
 .card-btn {
     background: transparent;
     border: 1px solid var(--border);
@@ -852,6 +859,37 @@ body.cards-resizing {
    wide pane from inflating 8 columns into something that pushes the surface off-screen. */
 .card { --surface-col: clamp(26px, 5.2vw, 52px); }
 
+/* The switch strip shares the encoder strip's geometry, so switch N lines up over encoder N and
+   fader N. Only the ORDER differs: a switch has no separate readout, so it is control then name. */
+.control-switch {
+    margin: 0;
+    box-sizing: border-box;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    width: var(--surface-col);
+    vertical-align: top;
+    gap: 2px;
+}
+.control-switch .control-label { flex: 0 0 auto; text-align: center; order: 2; font-size: 10px; }
+/* Ends a bank: a full-width block between two runs of inline-flex strips, so the next bank starts
+   on its own row however wide the card is. Inserted by the control builder after the last strip of
+   a kind, because only it knows where one bank stops and the next begins. */
+.surface-break { display: block; width: 100%; height: 8px; }
+/* The toggle is a fixed 40px pill, but a surface column narrows to 26px on a small card: at that
+   width eight of them overflowed the row and wrapped the encoders onto a second line. Inside a
+   strip the pill follows the column, which is what keeps switch N over encoder N over fader N. */
+.control-switch .switch {
+    order: 1;
+    width: 100%;
+    max-width: var(--surface-col);
+    height: 18px;
+}
+/* The reset arrow a normal row carries would double the strip's height for no gain here. */
+.control-switch .reset-btn { display: none; }
+
+
+
 .control-encoder {
     margin: 0;              /* strips sit in a row; the generic 6px row margin doubled the gaps */
     /* Inline-flex siblings collapse whitespace differently per browser; box-sizing keeps the strip
@@ -1024,6 +1062,7 @@ body.cards-resizing {
    drift out of line with the knobs after a few columns. The strips are inline-flex siblings (each IS
    a .control-row), so their spacing is a margin rather than the grid's gap. */
 .list-pads-fixed { gap: 4px; }
+.control-switch,
 .control-encoder,
 .control-fader { margin-right: 4px; }
 .list-pads-fixed .list-pad {
@@ -1147,6 +1186,10 @@ body.cards-resizing {
 .control-row input[type="password"],
 .control-row input[type="number"]:not(.control-value-input),
 .control-row select,
+/* The script field is a BUTTON that opens the shared picker, because a native <select> renders
+   plain text only and a script row carries its emoji and its dimension. Styled with the selects so
+   the two are indistinguishable: same box, same padding, same caret on the right. */
+.control-row button.control-select,
 .control-row .control-textarea {
     flex: 1;
     background: var(--bg-0);
@@ -1156,6 +1199,19 @@ body.cards-resizing {
     border-radius: 4px;
     font-size: 13px;
 }
+
+/* A read-only url control: rendered as a link rather than a text box, since the reason to show
+   one is to open or copy it. Sits on the same baseline as an input's text so a card mixing the
+   two does not look ragged. */
+.control-row .control-url {
+    flex: 1;
+    color: var(--accent, #7aa2f7);
+    padding: 4px 0;
+    font-size: 13px;
+    text-decoration: none;
+    overflow-wrap: anywhere;   /* a long url wraps rather than widening the card */
+}
+.control-row .control-url:hover { text-decoration: underline; }
 
 /* Palette control: a custom dropdown whose every option shows its gradient (a native <option> can't
    render a gradient). A trigger button + an absolutely-positioned list of gradient rows. */
@@ -1283,7 +1339,7 @@ body.cards-resizing {
     border-radius: 50%;
     background: var(--fg);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    transition: transform 0.15s;
+    transition: left 0.15s, right 0.15s;   /* the checked rule moves the thumb by its insets */
 }
 .switch:has(input:checked) .switch-track {
     /* Light accent tint, not flooded — matches the slider's filled-portion look. */
@@ -1291,8 +1347,13 @@ body.cards-resizing {
     border-color: var(--accent);
 }
 .switch:has(input:checked) .switch-track::after {
-    /* width(40) - thumb(12) - left(2) - right(2) = 24px travel */
-    transform: translateX(24px);
+    /* Park the thumb against the RIGHT inset rather than translating it a fixed distance. The pill
+       is 40px in a normal row but narrows to --surface-col (26px) inside a switch strip, so any
+       constant travel is wrong at one of the two sizes; a percentage is no better, because on a
+       ::after it resolves against the thumb, not the track. Letting layout place it works at both. */
+    left: auto;
+    right: 2px;
+    transform: none;
 }
 .switch:hover .switch-track { border-color: var(--accent); }
 .control-row progress {
@@ -1413,6 +1474,21 @@ body.cards-resizing {
 }
 .add-btn:hover { border-color: var(--accent); background: var(--card-bg-1); }
 
+/* The picker as a MODAL: centered, above the page, at one width wherever it opens from. It used to
+   be appended into whatever opened it, which put the list at the bottom of a card rather than
+   beside the field being changed, and made it as narrow as the element it hung from. */
+.type-picker-modal {
+    border: none;
+    padding: 0;
+    background: transparent;
+    /* Sized in the dialog itself rather than left to the content: a picker is a list of names and
+       a row of chips, and letting it grow to the widest row made the module picker span the page
+       while the script picker stayed narrow. One width for both. */
+    width: min(420px, 92vw);
+}
+.type-picker-modal::backdrop { background: rgba(0, 0, 0, 0.45); }
+.type-picker-modal .type-picker { margin-top: 0; }
+
 .type-picker {
     margin-top: 8px;
     background: var(--bg-1);
@@ -1445,13 +1521,25 @@ body.cards-resizing {
     cursor: pointer;
     line-height: 1.2;
 }
+/* A hairline between chip groups: the row reads role | dimension | origin | capability, and the
+   gap alone was not enough to see the boundary. */
+.type-picker-chip-sep {
+    width: 1px;
+    align-self: stretch;
+    margin: 2px 3px;
+    background: var(--border);
+    flex: 0 0 auto;
+}
 .type-picker-chip:hover { border-color: var(--accent); }
 .type-picker-chip.active {
     background: var(--accent-soft);
     border-color: var(--accent);
 }
 .type-picker-list {
-    max-height: 200px;
+    /* Bounded by the WINDOW as well as by a fixed height: on a short window the fixed 200px plus
+       the search box, chips and buttons is taller than the viewport, and the picker hung off the
+       bottom whatever the positioning did. The list is the part that gives. */
+    max-height: min(200px, calc(100vh - 190px));
     overflow-y: auto;
 }
 .type-picker-item {
@@ -1660,18 +1748,108 @@ body.cards-resizing {
 .fm-editor-path { font-family: ui-monospace, monospace; font-size: 0.9rem; color: var(--fg-muted); }
 .fm-editor-x { background: none; border: none; color: var(--fg-muted); cursor: pointer; font-size: 1rem; }
 .fm-editor-x:hover { color: var(--fg); }
-.fm-editor-body {
-    flex: 1 1 auto; min-height: 240px; margin: 0; padding: 12px 14px;
-    border: none; resize: vertical; font-family: ui-monospace, monospace;
-    font-size: 0.85rem; line-height: 1.5; background: var(--bg-1); color: var(--fg);
+/* The editor is TWO layers in one box: a <pre> that paints the syntax and a textarea that does the
+   editing, the textarea on top with transparent text so the paint shows through its caret and
+   selection. They must agree on every metric that positions a glyph, so the font, size, line
+   height, padding and whitespace handling are declared once and shared: any drift between them and
+   the colors slide off the characters. */
+/* The STACK carries the height and the resize grip, not the textarea inside it. When the textarea
+   owned its own height it could end up shorter than the stack, and every click below its real
+   bottom landed on the stack instead of the text: the editor stopped responding partway down. */
+.fm-editor-stack {
+    position: relative; display: flex; flex: 1 1 auto;
+    min-height: 120px; overflow: hidden;
 }
+/* The resize handle, ours rather than the browser's `resize`. The native gesture cannot work here:
+   the textarea is positioned over the whole stack, corner included, so the press that would start
+   the drag lands on the text instead. This is a real element above both layers, so it both draws
+   the familiar corner strokes and receives the pointer. */
+.fm-editor-grip {
+    position: absolute; right: 0; bottom: 0; width: 18px; height: 18px;
+    z-index: 3; cursor: ns-resize; touch-action: none;
+    background:
+        linear-gradient(135deg, transparent 42%, var(--fg-muted) 42%, var(--fg-muted) 56%, transparent 56%),
+        linear-gradient(135deg, transparent 70%, var(--fg-muted) 70%, var(--fg-muted) 84%, transparent 84%);
+    background-size: 12px 12px; background-position: right 3px bottom 3px;
+    background-repeat: no-repeat;
+    opacity: 0.75;
+}
+.fm-editor-grip:hover { opacity: 1; }
+.fm-editor-body, .fm-editor-hl {
+    margin: 0; padding: 12px 14px; border: none;
+    font-family: ui-monospace, monospace; font-size: 0.85rem; line-height: 1.5;
+    white-space: pre; overflow: auto; tab-size: 4;
+}
+.fm-editor-hl {
+    position: absolute; inset: 0; pointer-events: none;
+    background: var(--bg-1); color: var(--fg);
+    /* The layer never scrolls itself: the textarea owns the scroll and this follows by transform,
+       so the two cannot disagree about a scroll position. `overflow: hidden` also stops it from
+       claiming a scrollbar and shrinking its own content box below the textarea's. */
+    overflow: hidden;
+}
+.fm-editor-body {
+    position: absolute; inset: 0; width: 100%; height: 100%; resize: none;
+    background: transparent; color: transparent; caret-color: var(--fg);
+}
+/* A textarea leaves its RIGHT padding out of scrollWidth where a <pre> includes it, so the two
+   boxes drift by one padding once a line is wider than the box: the caret then sits a character
+   away from the glyph under it. The paint carries its padding on the inner <code> instead, and the
+   layer itself has none, which makes the two geometries identical. */
+.fm-editor-hl { padding: 0; }
+.fm-editor-hl > code {
+    display: block; padding: 12px 14px;
+    font: inherit; line-height: inherit; white-space: pre; tab-size: 4;
+}
+/* The selection has to stay visible through transparent text. */
+.fm-editor-body::selection { background: var(--accent-soft, rgba(122,162,247,0.35)); color: transparent; }
+/* A file with no highlighting (a .json, a .txt) paints nothing, so the textarea shows its own text
+   and the empty layer stays out of the way. The class is set by the editor, which knows the
+   extension: deriving it from the DOM would guess at what the JS already decided. */
+/* The token colors, in the app's OWN palette rather than one of Prism's stock themes: those ship
+   their own background and their own idea of a foreground, and a card that reads as part of this UI
+   is worth more than a familiar-looking editor. Only the roles a MoonLive script actually produces
+   are named; anything else inherits --fg and simply reads as text.
+
+   Comments are muted rather than colored: a script's comments are long by design (one header line
+   and a note per control), and coloring them makes the file harder to scan, not easier. */
+.fm-editor-hl .token.comment { color: var(--fg-muted); font-style: italic; }
+.fm-editor-hl .token.keyword { color: var(--accent); }
+.fm-editor-hl .token.class-name { color: var(--yellow); }
+.fm-editor-hl .token.function { color: #7ec8e3; }
+.fm-editor-hl .token.string { color: var(--green); }
+.fm-editor-hl .token.number { color: #e08a5a; }
+/* The line a compile failed on: a band UNDER the text, not a wrapper around it. Wrapping meant
+   cutting Prism's markup at a newline, which breaks any token spanning lines; a band positioned by
+   line height cannot disturb the markup at all. It sits behind the tokens, so the syntax colors on
+   that line stay readable: the mark says WHERE, the status line says what. */
+.fm-editor-err {
+    position: absolute; left: 0; right: 0; height: 1.5em;
+    margin-top: 12px;                    /* the paint layer's own top padding, so line 0 lines up */
+    background: var(--red-soft, rgba(247,118,142,0.16));
+    box-shadow: inset 2px 0 0 var(--red, #f7768e);
+    pointer-events: none;
+}
+.fm-editor-hl .token.operator,
+.fm-editor-hl .token.punctuation { color: var(--fg-muted); }
+
+.fm-editor-stack.plain .fm-editor-body { background: var(--bg-1); color: var(--fg); }
+.fm-editor-stack.plain .fm-editor-hl { display: none; }
 .fm-editor-body:focus { outline: none; }
-/* wrap="off": code reads by indentation, and a wrapped line hides its structure. The attribute
-   stops the wrapping, this makes the overflow reachable. */
-.fm-editor-body { overflow-x: auto; white-space: pre; }
 .fm-editor-foot {
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
     padding: 10px 14px; border-top: 1px solid var(--border);
+}
+/* A footer holding only the caret readout carries no rule: the row belongs to the editor, but a
+   host that supplied its own save button and status line has nothing here to separate from. */
+.fm-editor-foot:not(:has(.fm-editor-save)):not(:has(.fm-editor-status)) {
+    border-top: none; padding: 4px 14px 6px;
+}
+/* The caret readout: quiet, and on tabular figures so the numbers do not jitter as they change. */
+.fm-editor-caret {
+    margin-left: auto; color: var(--fg-muted);
+    font-family: ui-monospace, monospace; font-size: 0.75rem;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .fm-editor-status { color: var(--fg-muted); font-size: 0.85rem; }
 
@@ -1684,8 +1862,11 @@ body.cards-resizing {
     border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
     background: var(--bg-1);
 }
-/* Shorter than the modal's: a card is one of several on screen, and the grip resizes it. */
-.control-fileedit .fm-editor-body { min-height: 140px; }
+/* The starting height, which the grip then overrides per editor (stored in mm_textareaSizes). On
+   the STACK, not the textarea: the stack owns the height, so a floor on the textarea did nothing.
+   A card is one of several on screen, so it starts shorter than the modal. */
+.fm-editor-stack { height: 240px; }
+.control-fileedit .fm-editor-stack { height: 200px; }
 .control-fileedit .fm-editor-foot { padding: 6px 10px; }
 
 /* Picker row ABOVE the editor, as one column. A .control-row is a flex row, so the two have to be
@@ -1721,6 +1902,20 @@ body.cards-resizing {
    text competed for the row, leaving a dropdown whose own value was invisible. It still grows into
    spare space, but never below a width that shows a file name. */
 .fileedit-pick { flex: 1 1 auto; min-width: 9ch; }
+/* Left-aligned like a select's text, with the caret pushed to the far right. */
+button.fileedit-pick {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    white-space: nowrap;
+}
+button.fileedit-pick:hover { border-color: var(--accent); }
+button.fileedit-pick:disabled { opacity: 0.6; cursor: default; }
+/* The name takes the room; the caret keeps its place at the end. */
+.fileedit-pick-caret { margin-left: auto; flex: 0 0 auto; opacity: 0.7; }
 
 /* Unsaved work, marked the way a modified editor tab is: a dot on the Save button. The button stays
    readable on its own, so the dot is an addition rather than the only signal. */
@@ -1786,3 +1981,28 @@ body.cards-resizing {
         inset 0 1px 0 color-mix(in srgb, #fff 40%, transparent),
         0 0 12px color-mix(in srgb, var(--pad-tint) 55%, transparent);
 }
+
+/* Full-screen firmware-update overlay (MoonBase cycle): opened before the device reboots so the
+   user sees one continuous "updating" experience across reboot -> install -> reboot. */
+.fw-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 10, 20, 0.85);
+}
+.fw-overlay-box {
+    background: var(--card-bg-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2rem 2.5rem;
+    max-width: 26rem;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+.fw-overlay-box progress { width: 100%; }
+.fw-overlay-msg { color: var(--fg-muted); margin: 0; overflow-wrap: anywhere; }

@@ -12,17 +12,17 @@ The script places every light itself, with a loop. That is the difference from a
 
 ```c
 class GridLayout {
-  uint8_t cols = 16;
-  uint8_t rows = 16;
+  byte cols = 16;
+  byte rows = 16;
 
-  defineControls() {
-    addUint8("cols", cols, 1, 64);
-    addUint8("rows", rows, 1, 64);
+  void defineControls() {
+    addControl("cols", cols, 1, 64);
+    addControl("rows", rows, 1, 64);
   }
 
-  placeLights() {
-    for (y = 0; y < rows; y = y + 1) {
-      for (x = 0; x < cols; x = x + 1) {
+  void placeLights() {
+    for (int y = 0; y < rows; y = y + 1) {
+      for (int x = 0; x < cols; x = x + 1) {
         addLight(x, y, 0);
       }
     }
@@ -40,17 +40,17 @@ A few shapes that are one line here and a new class otherwise:
 
 ```c
 // a strand that runs right to left
-for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }
+for (int i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }
 
 // a diagonal
-for (i = 0; i < cols; i = i + 1) { addLight(i, i, 0); }
+for (int i = 0; i < cols; i = i + 1) { addLight(i, i, 0); }
 
 // two rows, stacked
-for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); addLight(i, 1, 0); }
+for (int i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); addLight(i, 1, 0); }
 
 // a circle: lights and grid cells are not the same number
-// (`count` and `radius` are members, surfaced by addUint8 in defineControls)
-for (i = 0; i < count; i = i + 1) {
+// (`count` and `radius` are members, surfaced by addControl in defineControls)
+for (int i = 0; i < count; i = i + 1) {
   addLight(scale(cos(i * turn(count)), radius * 2 + 1),
            scale(sin(i * turn(count)), radius * 2 + 1), 0);
 }
@@ -58,7 +58,7 @@ for (i = 0; i < count; i = i + 1) {
 
 ### What a script can read
 
-A script reads whatever it declares. `uint8_t cols = 16;` is a member the script owns; naming it in `defineControls()` with `addUint8("cols", cols, 1, 64)` also makes it a real slider in the UI, and the loop reads it, which is how a panel gets resized without editing code. A `uint16_t` member is surfaced the same way with `addUint16`, which the call must match. A member no such call names stays private to the script.
+A script reads whatever it declares. `byte cols = 16;` is a member the script owns; naming it in `defineControls()` with `addControl("cols", cols, 1, 64)` also makes it a real slider in the UI, and the loop reads it, which is how a panel gets resized without editing code. A member whose value a byte cannot hold is declared `int` and surfaced by the same call — the widget follows the type, so the two cannot disagree. A member no such call names stays private to the script.
 
 `t` is the one [system variable](MoonLiveEffect.md#system-variables-what-the-engine-hands-a-script) a layout is given, and it is always **0** here: the script runs twice per rebuild (once to count, once to place) and must agree with itself, so it is handed a fixed clock rather than a live one — a moving `t` would let the two passes disagree on how many lights there are. `width`/`height`/`depth` name the grid a layout is *defining*, so asking for one is a compile error rather than a silent zero; `x` and `y` are free to use as loop counters.
 
@@ -82,9 +82,9 @@ So it runs twice. On the first pass `addLight` counts; on the second it emits ea
 A serpentine (every other row reversed) is what `if` makes expressible, and it is the common panel wiring:
 
 ```c
-uint8_t odd = 0;
-for (y = 0; y < rows; y = y + 1) {
-  for (x = 0; x < cols; x = x + 1) {
+byte odd = 0;
+for (int y = 0; y < rows; y = y + 1) {
+  for (int x = 0; x < cols; x = x + 1) {
     if (odd == 0) { addLight(x, y, 0); }
     else { addLight(cols - 1 - x, y, 0); }
   }
@@ -105,9 +105,9 @@ Past half full, the status also names the tightest limit the script is approachi
 
 | control | what it does |
 |---|---|
-| `script` | the file name under `/moonlive/`; naming it (or re-naming it after an edit) recompiles and re-places the lights live |
+| `script` | the script's file name, picked from the [library](MoonLiveEffect.md) or your own; naming it (or re-naming it after an edit) recompiles and re-places the lights live |
 
-Plus one control per `addUint8` / `addUint16` in the script's `defineControls()`.
+Plus one control per `addControl` in the script's `defineControls()`.
 
 Editing any of them rebuilds the pipeline, because every one can change where the lights are. A script that fails to compile leaves a fixture with no lights, shows the parse error on the module, and the device keeps running.
 

@@ -135,7 +135,7 @@ int firstLit(const std::vector<uint8_t>& b) {
 TEST_CASE("MoonLive control: a declared control reads the arena live (no recompile on value change)") {
     uint8_t code[768];
     auto r = moonlive::compileSource(
-        mmScript("uint8_t speed = 50;\nsetRGB(speed, 0, 0, 255);"), kT, kSys, code, sizeof(code));
+        mmScript("byte speed = 50;\nsetRGB(speed, 0, 0, 255);"), kT, kSys, code, sizeof(code));
     REQUIRE(r.ok);
     REQUIRE(r.memberCount == 1);      // the declaration is a member; a control needs defineControls
     void* blk = platform::allocExec(r.len);
@@ -144,12 +144,14 @@ TEST_CASE("MoonLive control: a declared control reads the arena live (no recompi
     auto fn = reinterpret_cast<CtrlFn>(blk);
 
     std::vector<uint8_t> buf(16 * 3, 0);
-    uint8_t arena[1];
+    // A member occupies a whole 4-byte SLOT and is read with a 32-bit load, so the arena has to
+    // hold all four bytes: a one-byte array would have the load reading three bytes past its end.
+    uint8_t arena[4] = {0, 0, 0, 0};
 
     arena[0] = 5;  std::fill(buf.begin(), buf.end(), 0); fn(buf.data(), 16, 3, 0, arena);
     CHECK(firstLit(buf) == 5);                       // control value selects the pixel
     arena[0] = 9;  std::fill(buf.begin(), buf.end(), 0); fn(buf.data(), 16, 3, 0, arena);
-    CHECK(firstLit(buf) == 9);                       // changed the arena byte only — NO recompile
+    CHECK(firstLit(buf) == 9);                       // changed the arena slot only — NO recompile
     arena[0] = 0;  std::fill(buf.begin(), buf.end(), 0); fn(buf.data(), 16, 3, 0, arena);
     CHECK(firstLit(buf) == 0);
     platform::freeExec(blk, r.len);
@@ -160,14 +162,17 @@ TEST_CASE("MoonLive control survives a host call (kArg4 live across random16)") 
     // scratch pool — pins that the call() save-set protects kArg4 (the arena pointer).
     uint8_t code[768];
     auto r = moonlive::compileSource(
-        mmScript("uint8_t idx = 0;\nsetRGB(idx, random16(256), 0, 255);"), kT, kSys, code, sizeof(code));
+        mmScript("byte idx = 0;\nsetRGB(idx, random16(256), 0, 255);"), kT, kSys, code, sizeof(code));
     REQUIRE(r.ok);
     void* blk = platform::allocExec(r.len);
     REQUIRE(blk != nullptr);
     platform::writeExec(blk, code, r.len);
     auto fn = reinterpret_cast<CtrlFn>(blk);
 
-    uint8_t arena[1] = {7};
+    // A member occupies a whole 4-byte SLOT and is read with a 32-bit load, so the arena has to
+    // hold all four bytes: a one-byte array would have the load reading past its end, and the
+    // index would come back as whatever followed it on the stack.
+    uint8_t arena[4] = {7, 0, 0, 0};
     std::vector<uint8_t> buf(16 * 3, 0);
     fn(buf.data(), 16, 3, 0, arena);
     // pixel 7 is lit (its blue channel is 255), and ONLY pixel 7 (the control index held across the call)

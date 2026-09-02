@@ -19,61 +19,113 @@ namespace mm {
 /// HTTP server is a domain-neutral BinaryBroadcaster that just writes the bytes:
 ///
 // --8<-- [start:wire-format]
-///   0x03 coordinate table (sent when the geometry changes — every LUT/layout rebuild
-///        via prepare — and when a new client connects, so a refresh gets it; never
-///        per-frame):
-///        [0x03][count:u32][bx:u8][by:u8][bz:u8][stride:u16][(x,y,z):u8×3 × count]
+///   0x03 coordinate table (sent ONLY in answer to a client's [0x52] request; the client
+///        caches tables per (epoch, stride), so a stride change to a known rung asks nothing):
+///        [0x03][count:u32][bx:u8][by:u8][bz:u8][stride:u16][epoch:u8][(x,y,z):u8x3 x count]
 ///        bx/by/bz = bounding-box extent (for client centring); positions are
-///        1 byte/axis (a layout box ≤255/axis is the realistic case). count is u32 so a
-///        >65535-light panel (big ArtNet/HUB75 walls) isn't capped by the wire format —
-///        it matches nrOfLightsType (u32 on PSRAM boards).
+///        1 byte/axis (scaled when an axis exceeds 255). count is u32 so a >65535-light
+///        panel isn't capped by the wire format; epoch bumps on every geometry rebuild
+///        and keys the client's cache.
 ///
-///   0x02 per-frame channels: [0x02][count:u32][stride:u16][(r,g,b) × count]
-///        RGB by driver index, every `stride`-th light. The browser positions
-///        triple i at coord-table entry i*stride.
+///   0x02 per-frame channels: [0x02][count:u32][stride:u16][epoch:u8][drops:u8][(r,g,b) x count]
+///        RGB of every kept light, in the coord table's order. drops = frames discarded
+///        at the source since the last delivered one, the congestion signal the client's
+///        controller adapts on.
+///
+///   0x04 per-frame AIM, sent only for a rig whose fixtures carry pan/tilt (a moving-head rig);
+///        a plain LED wall never emits it and costs nothing for it:
+///        [0x04][count:u32][stride:u16][epoch:u8][reserved:u8][(pan,tilt):u8x2 x count]
+///        Same order and same (epoch, stride) key as 0x02, so aim[k] belongs to the light the
+///        color frame's k-th entry colors. The BROWSER decides how to draw it (today a beam
+///        line from the fixture): the wire carries where a head points, never a rendered look,
+///        so a richer visual later is a shader change and not a protocol change.
+///
+///   Client requests (masked WS frames, unmasked by core, interpreted only here):
+///        [0x51][stride][fps]  standing frame request (most conservative across viewers wins;
+///                             the targetFps control is the ceiling)
+///        [0x52][stride]       one-shot: send me the coordinate table
 // --8<-- [end:wire-format]
 ///
 /// `count` is the number of points actually kept after lattice downsampling (the
 /// lights whose position satisfies `pos ≡ 0 mod stride`) — a client sizes its buffer
-/// from this `count`, not from the light total. `stride` rises above 1 only when the
-/// point set would exceed the runtime send-buffer cap (`min(display, memory)`); below
-/// the cap every light is sent (stride 1), so a sparse layout streams in full.
+/// from this `count`, not from the light total. `stride` rises above 1 when a client
+/// requests it, or when the memory cap forces a floor; with no cap in play every light
+/// is sent (stride 1), so a sparse layout streams in full.
+/// **Its own channel (`/wsp`), and why.** Preview frames are lossy and large; control-plane state is
+/// small and latency-sensitive. Sharing one WebSocket made the small messages queue behind the big
+/// ones, head-of-line blocking, which users saw as a flickering connection indicator and a UI that
+/// stopped responding while a large layout streamed. Separate TCP connections is the standard remedy
+/// for that mixed-criticality pairing.
+///
+/// **Resolution is client-driven.** The browser reads the drops counter each frame carries (the
+/// device's own congestion signal) and posts the `[0x51][stride][fps]` standing request it wants;
+/// the device serves the most conservative request across viewers. The memory cap
+/// (`maxPreviewPoints()`) is the only floor a request cannot go finer than.
+///
+/// **No request, no work.** `tick()` returns immediately when no standing request exists, so a
+/// dismissed preview pane (or a hidden tab) costs the device nothing, not merely nothing on the
+/// wire.
+///
 /// @card PreviewDriver.png
-class PreviewDriver : public DriverBase {
+class PreviewDriver : public DriverBase, public BinaryBroadcaster::ClientMessageSink {
 public:
     /// The 3D preview the web UI renders streams from this driver. Deleting or
     /// replacing it from the UI would silently kill that preview, so it opts out
     /// of user-editing — it stays a fixed child of Drivers.
     bool userEditable() const override { return false; }
 
-    /// Preview stream rate (Hz), independent of render FPS. User-tunable 1-60. This
-    /// is a *ceiling*: the effective rate self-limits to what the link sustains.
-    uint8_t fps = 24;
+    /// The frame rate the preview aims for (Hz), independent of render FPS. User-tunable 1-60.
+    /// The device never sends faster; the browser's controller trades resolution toward it.
+    uint8_t targetFps = 24;
 
     /// Set the sink each message is pushed to (HttpServerModule, as a
     /// BinaryBroadcaster). Wired in main.cpp. Light depends only on the
-    /// interface, not the concrete HTTP server.
-    void setBroadcaster(BinaryBroadcaster* b) { broadcaster_ = b; }
+    /// interface, not the concrete HTTP server; the driver registers itself
+    /// as the channel's inbound-message sink (the pull model's request path).
+    void setBroadcaster(BinaryBroadcaster* b) {
+        broadcaster_ = b;
+        if (b) b->setClientMessageSink(this);
+    }
 
-    /// Test-only: flip the resumableFrames A/B directly (production toggles it through the control +
-    /// affectsPrepare path). Lets a test drive the buffer alloc/free without a control write.
-    void setResumableFramesForTest(bool on) { resumableFrames = on; }
+    /// The pull protocol, this producer's whole request vocabulary:
+    ///   [0x51][stride][fps]  standing frame request: serve stride s at rate f
+    ///                        (fps 0/absent = the targetFps control's value).
+    ///   [0x52][stride]       one-shot: send me the coordinate table (for the served stride).
+    /// Arrives on the transport thread; single-byte slot fields, so the encode-thread reader
+    /// tolerates the race (lossy-channel rule). Out-of-range bytes are ignored at the store:
+    /// requests aggregate conservatively, so one hostile value must not mask every real one.
+    void onClientMessage(int slot, const uint8_t* payload, int len) override {
+        if (slot < 0 || slot >= kMaxRequestSlots || len < 2) return;
+        if (payload[0] == 0x51) {
+            const uint8_t stride = payload[1];
+            if (stride < 1 || stride > 64) return;
+            reqStride_[slot] = stride;
+            reqFps_[slot] = (len >= 3 && payload[2] >= 1 && payload[2] <= 25) ? payload[2] : 0;
+        } else if (payload[0] == 0x52) {
+            tableRequested_ = true;
+        }
+    }
+    void onClientGone(int slot) override {
+        if (slot < 0 || slot >= kMaxRequestSlots) return;
+        reqStride_[slot] = 0;   // a dead client's request dies with its slot
+        reqFps_[slot] = 0;
+    }
 
-    /// The current adaptive downsample factor (1 = full resolution). Test-only — lets a test pin the
-    /// coarsen (additive) / refine (multiplicative) recovery cadence.
+
+    /// The currently served downsample factor (1 = full resolution). Test-only: lets a test pin
+    /// that the stride mirrors the standing client requests and nothing else.
     nrOfLightsType downscaleForTest() const { return downscale_; }
+
 
     /// Preview shows the raw logical buffer, no correction.
     bool hasCorrectionControls() const override { return false; }
 
-    /// Bind the controls: `fps` (1-60) and `resumableFrames` (the downsampled-frame transport A/B).
-    /// resumableFrames is an EXPERT control — a dev/tuning A/B, not a knob a normal user should touch (its
-    /// ON leg tears the preview until the slot-sharing fix lands), so it shows only when System.expertMode
-    /// is on. It still persists and still accepts API writes; only the default UI hides it.
+    /// Bind the controls: `targetFps` (1-25), the frame rate the preview aims for. The device never
+    /// sends faster, and when the link cannot sustain it the BROWSER trades resolution to get
+    /// closer: a low target keeps full detail at a low rate, a high target accepts a coarser
+    /// preview to stay responsive.
     void defineDriverControls() override {
-        controls_.addUint8("fps", fps, 1, 60);
-        controls_.addBool("resumableFrames", resumableFrames);
-        controls_.setAdvanced(controls_.count() - 1);
+        controls_.addControl("targetFps", targetFps, 1, 25);
     }
 
     /// Point the driver at the sparse driver buffer the LED/ArtNet drivers also read
@@ -86,30 +138,41 @@ public:
     /// A rebuild (layout add/replace/remove, resize, modifier change) ran — the
     /// light set / positions may have changed, so rebuild + broadcast the coordinate
     /// table (the MoonLight "positions once at mapping time"). Cancels any in-flight
-    /// resumable color send *first*: a resize frees+reallocs the producer buffer, so
+    /// color send *first*: a resize frees+reallocs the producer buffer, so
     /// a half-sent frame would read freed memory — a use-after-free guard pinned by a
     /// test. This coupling spans PreviewDriver ↔ HttpServerModule ↔ the Layer buffer.
     void prepare() override {
-        // A resize frees+reallocs the producer buffer, so any in-flight resumable color send holds
+        // A resize frees+reallocs the producer buffer, so any in-flight color send holds
         // a pointer that's about to dangle — cancel it BEFORE the rebuild (the browser discards the
         // half-sent message and gets the fresh table + frame next tick). Guards a use-after-free.
-        // The cancel also covers stage_: with no drain in flight, the grow below can't dangle it.
         if (broadcaster_) broadcaster_->cancelBufferedSend();
-        if (resumableFrames) ensureStage();   // allocate the staging buffer only when the A/B wants it
-        else freePreviewBuffers();            // OFF: release the ~24 KB (readout drops to match)
-        // Re-anchor the LINK-adaptive downsample on a geometry change: a rebuild is a fresh layout, so a
-        // previous grid's link-struggle coarsening must not carry over and hold a now-small grid coarse
-        // (the "add a 16×16 → 4 blobs for ~10 s" bug — it inherited a big config's downscale_). The
-        // memory/display cap in buildAndSendCoordTable still sets the honest floor for THIS grid instantly
-        // (a 90×90 lands at its 1/3 with no ramp), and downscale_ only re-coarsens if this grid's own
-        // frames actually stall. Reset here (the true rebuild seam), NOT in buildAndSendCoordTable, which
-        // the adaptive loop itself calls — resetting there would undo the adaptation mid-flight.
-        downscale_ = 1;
-        slowStreak_ = 0;
-        cleanStreak_ = 0;
-        framesWaiting_ = 0;   // the old grid's drain count must not make the new grid's first frame read slow
-        buildAndSendCoordTable();
-        refreshStatus();   // surface any resumable-path degradation (alloc miss) in the tab
+        else freePreviewBuffers();            // no broadcaster wired: nothing streams, release the buffers
+        // downscale_ is NOT reset here: it is the client's standing request, and tick() mirrors the
+        // standing requests every pass anyway, the client asks finer when the new geometry deserves it.
+        // A rebuild is a NEW epoch: frames start carrying it, every client's table cache misses,
+        // and each asks via [0x52]. The device never volunteers a table (the pull model).
+        epoch_++;
+        buildCoordTable();
+        // Pre-size the staging and index buffers for the FINEST stride this geometry can be
+        // served at (stride 1, bounded by the memory cap). Both are grow-only, so every later
+        // stride adopt on the render tick reuses this capacity and allocates nothing: the one
+        // allocation the tick path could reach moves here, the cold rebuild seam.
+        if (layer_ && layer_->layouts()) {
+            const nrOfLightsType finest = layer_->layouts()->totalLightCount();
+            const nrOfLightsType capPts = maxPreviewPoints();
+            const size_t maxPts = finest < capPts ? finest : capPts;
+            ensureStaging(maxPts * 3u);
+            if (!denseGrid() && keptIdxCap_ < maxPts) {
+                auto* grown = static_cast<nrOfLightsType*>(platform::alloc(maxPts * sizeof(nrOfLightsType)));
+                if (grown) {
+                    if (keptIdx_) platform::free(keptIdx_);
+                    keptIdx_ = grown;
+                    keptIdxCap_ = static_cast<nrOfLightsType>(maxPts);
+                    publishHeapBytes();
+                }
+            }
+        }
+        refreshStatus();   // surface an index-cache alloc miss in the tab
     }
 
     void release() override {
@@ -117,12 +180,9 @@ public:
         DriverBase::release();
     }
 
-    /// The `resumableFrames` A/B flips the transport AND which buffers exist, so a change re-runs prepare
-    /// (which allocates them when ON, frees them when OFF) — the standard "config change applies live"
-    /// path, off the render thread. `fps` doesn't change structure, so it stays a plain control edit.
-    bool affectsPrepare(const char* name) const override {
-        return name && std::strcmp(name, "resumableFrames") == 0;
-    }
+    /// No control changes the transport structure: `targetFps` is a plain value edit, so nothing
+    /// here re-runs prepare. Geometry changes come through onRebuild, not a control.
+    bool affectsPrepare(const char* /*name*/) const override { return false; }
 
     /// Per-tick: (re)stream the coordinate table when the geometry or client set
     /// changed, then stream one color frame if the previous one finished draining.
@@ -130,93 +190,82 @@ public:
     /// spatial resolution via adaptive downscale), so a large grid never stalls the
     /// loop or tears — it always delivers a complete frame.
     // REPORTED AS BLOCKING, deliberately: sendFrame() writes to a socket and
-    // buildAndSendCoordTable() resizes keptIdx_. Both are real and both are on the render path,
+    // buildCoordTable() resizes keptIdx_. Both are real and both are on the render path,
     // so clang-hotpath lists them rather than hiding them. Backlogged (backlog-core: hot path).
     void tick() MM_NONBLOCKING override {
-        if (fps == 0) return;
-        uint32_t now = platform::millis();
-        uint32_t interval = 1000 / fps;
-        if (now - lastSendTime_ < interval) return;  // fps CEILING (max rate); link may be slower
+        // THE PULL MODEL: the device serves standing client requests and volunteers nothing.
+        // No standing request (no viewer, every pane closed, a tab hibernating) means no gather,
+        // no downsample, no send, nothing: closing the preview genuinely frees the device.
+        if (!broadcaster_) return;
+        nrOfLightsType wantStride = 0;
+        uint8_t wantFps = 255;
+        for (int i = 0; i < kMaxRequestSlots; i++) {
+            const uint8_t rs = reqStride_[i];
+            if (!rs) continue;
+            if (rs > wantStride) wantStride = rs;                       // coarsest wins
+            const uint8_t rf = reqFps_[i] ? reqFps_[i] : targetFps;
+            if (rf < wantFps) wantFps = rf;                             // slowest wins
+        }
+        if (wantStride == 0) return;                                    // nobody asked: no work
+        if (wantFps > targetFps) wantFps = targetFps;                   // the control is the ceiling
+        if (wantFps == 0) return;
 
-        // Hold the sender for this WHOLE tick, because under the multicore split this runs on core 1
-        // while the transport drains and pushes state on core 0. The bracket must span the entire
-        // message set below — a coordinate table streams as begin/push/end, and another core's write
-        // landing between those parts would corrupt the WS frame; arming a frame likewise must not
-        // race the drain reading the slot. TRY-acquire (never block: we are on the encode thread) —
-        // busy means the transport is mid-drain, so we SKIP this slot, which is exactly the back-off
-        // the adaptive frame rate already takes when the link is behind. A skipped preview frame is
-        // invisible; a blocked encode thread would stall the LEDs.
+        uint32_t now = platform::millis();
+        if (now - lastSendTime_ < 1000u / wantFps) return;              // rate: the served request
+
+        // Hold the sender for this tick: under the multicore split this runs on core 1 while the
+        // transport drains on core 0, and ARMING a message (the only socket-adjacent thing this
+        // thread ever does now) must not race the drain reading the slot. TRY-acquire, never
+        // block: busy means the transport is mid-drain, so we SKIP this slot, the same back-off a
+        // busy link already gets. A skipped preview frame is invisible; a blocked encode thread
+        // would stall the LEDs.
         SendLease lease{broadcaster_};
         if (!lease) return;
 
-        lastSendTime_ = now;   // only after we own the sender — a skipped slot must retry next tick
+        lastSendTime_ = now;   // only after we own the sender: a skipped slot must retry next tick
 
-        // The coordinate table is (re)streamed only when the geometry changes (prepare — a
-        // resize / LUT rebuild), when a new client connects (clientGeneration bump, so a page
-        // refresh gets positions immediately), when the adaptive factor changes, or while a
-        // previous stream didn't reach every client (coordPending_ retry). NOT per frame: the
-        // color frames below reference the last-streamed positions. coordCount_==0 = cold start.
-        uint32_t gen = broadcaster_ ? broadcaster_->clientGeneration() : 0;
-        if (coordCount_ == 0 || gen != lastClientGen_ || coordPending_) {
-            lastClientGen_ = gen;
-            buildAndSendCoordTable();   // streams positions; sets coordPending_ if not all clients got it
+        // Adopt the served stride. The lattice rebuild is local bookkeeping (counts + index
+        // cache + staging), gated on an idle slot only because the staging buffer must not be
+        // rewritten under a live drain. No table is sent here: frames carrying the new
+        // (epoch, stride) make every client's cache miss, and each asks via [0x52] when it needs
+        // the positions, the pull model's answer to the re-stream storms the push design fed.
+        const bool idle = broadcaster_->bufferedSendIdle();
+        if ((wantStride != downscale_ || coordCount_ == 0) && idle) {
+            downscale_ = wantStride;
+            buildCoordTable();
         }
+        if (coordCount_ == 0) return;   // nothing previewable (empty layout / staging alloc miss)
 
-        // ADAPTIVE FRAME RATE. The full-res color frame streams resumably (sendBufferedFrame drains
-        // across transport ticks), so a frame only starts once the previous one fully drained. We
-        // gate on that: idle → send the next frame now; still draining → skip this slot. The
-        // EFFECTIVE fps therefore self-limits to what the link sustains — fast links hit the fps
-        // ceiling, slow links naturally drop to a few fps, with NO loop stall either way. The slot
-        // we skip is also the "link is slow" signal (framesWaiting_), so we shed frame rate FIRST.
-        bool frameOk = true;
-        bool sentThisSlot = false;
-        bool sentFrameWasSlow = false;
-        if (!coordPending_) {
-            const bool idle = !broadcaster_ || broadcaster_->bufferedSendIdle();
+        // A requested table outranks the next frame for the slot: the asker cannot render one
+        // frame until it lands.
+        // Rebuild before sending: the staging buffer is shared with the frame gather, so the
+        // table's bytes are only valid straight after its build.
+        if (tableRequested_) {
             if (idle) {
-                // The previous frame finished draining. How many fps slots did it take? > a couple
-                // means the link can't sustain this resolution at the requested rate — that frame
-                // was "slow", the resolution signal below.
-                sentFrameWasSlow = framesWaiting_ >= kSlowFrames;
-                frameOk = sendFrame();          // false → a client couldn't take the frame (closed)
-                sentThisSlot = true;
-                framesWaiting_ = 0;
-            } else {
-                if (framesWaiting_ < 255) framesWaiting_++;  // still draining — link behind (saturate, no wrap)
+                buildCoordTable();
+                if (sendCoordTable()) tableRequested_ = false;
             }
+            return;
         }
 
-        // ADAPTIVE RESOLUTION (the deeper fallback, after frame rate). The struggle signal is
-        // LATENCY: the just-completed frame took more than kSlowFrames slots to drain
-        // (sentFrameWasSlow), or a frame/coord table didn't reach a client. This fires even when
-        // frames eventually send (the slow-but-complete case a pure all-sent signal misses — a
-        // full-res 128² frame that delivers at ~2 fps). On a sustained run of slow frames, coarsen
-        // the lattice (downscale_++) so frames shrink and the rate climbs; a sustained run of
-        // prompt, fully-sent frames refines back toward full res (downscale_ >>= 1, halving). The streaks only
-        // advance on slots where a frame completed (sentThisSlot), so a long drain counts as ONE
-        // slow frame, not many — making kDownscaleAfterSlow a count of slow frames, not ticks.
-        // Hysteresis stops oscillation; the factor rides the wire stride field to the status line.
-        const bool linkStruggling =
-            coordPending_ || (sentThisSlot && (!frameOk || sentFrameWasSlow));
-        if (linkStruggling) {
-            cleanStreak_ = 0;
-            if (++slowStreak_ >= kDownscaleAfterSlow && downscale_ < 64) {
-                slowStreak_ = 0;
-                downscale_++;
-                buildAndSendCoordTable();
+        // One frame in the slot at a time (drop-new): a frame offered while one drains is DROPPED
+        // at the source, the frame-dropping every lossy stream does, and the drop is REPORTED in
+        // the next frame's header so the client adapts on the sender's own congestion signal
+        // instead of probing. Rate self-limits to what the link drains; nothing waits, ever.
+        if (idle) {
+            // Color and aim ALTERNATE rather than both going out per tick: the transport keeps one
+            // send in flight and drops a second, so calling them back to back meant every aim frame
+            // was rejected and the beams never moved. Alternating halves each stream's rate, which
+            // a fixture rig can afford (a head sweeps far slower than a pixel changes) and a rig
+            // with no motion never pays, since sendAim declines before claiming a turn.
+            if (aimTurn_ && sendAim()) {
+                aimTurn_ = false;
+            } else {
+                if (!sendFrame() && dropsSinceLast_ < 255) dropsSinceLast_++;
+                aimTurn_ = true;
             }
-        } else if (sentThisSlot) {   // only count a clean run on slots where we actually sent
-            slowStreak_ = 0;
-            if (downscale_ > 1 && ++cleanStreak_ >= kUpscaleAfterFast) {
-                cleanStreak_ = 0;
-                // AIMD-inverse recovery: coarsen ADDITIVELY (+1, gentle — above) but refine
-                // MULTIPLICATIVELY (halve toward 1). A run of prompt frames means the link has plenty
-                // of headroom, so a coarse stride collapses to full res in ~log2 refine events, not one
-                // per unit — the difference between a small grid settling in ~1 s vs. ~10 s. The next
-                // step still measures before refining again, so overshoot re-coarsens by the +1 path.
-                downscale_ >>= 1;   // guarded by downscale_ > 1 above, so this stays >= 1
-                buildAndSendCoordTable();
-            }
+        } else if (dropsSinceLast_ < 255) {
+            dropsSinceLast_++;
         }
     }
 
@@ -225,7 +274,7 @@ public:
     /// memory)`, memory from `maxAllocBlock()` — lights are kept on a spatial lattice
     /// (position ≡ 0 mod stride), sampling positions not indices so there is no moiré.
     /// Public so tests can drive it deterministically.
-    void buildAndSendCoordTable() {
+    void buildCoordTable() {
         coordCount_ = 0;
         if (!layer_ || !layer_->layouts()) return;
         Layouts* layouts = layer_->layouts();
@@ -234,9 +283,9 @@ public:
 
         // Box EXTENT = the maximum coordinate the positions reach, which is (size − 1): placeLights
         // emits x in [0, width−1], so an 8-wide grid spans 0..7 and its extent is 7, NOT 8. The
-        // header carries these extents and the browser centres the cloud by dividing by the largest,
+        // header carries these extents and the browser centers the cloud by dividing by the largest,
         // so they must match the packed coordinates' span exactly — using the size (8) instead drew
-        // the wireframe box one cell too large and shifted the lights off-centre.
+        // the wireframe box one cell too large and shifted the lights off-center.
         auto extent = [](lengthType size) -> lengthType { return size > 0 ? size - 1 : 0; };
         const lengthType ex = extent(layer_->physicalWidth());
         const lengthType ey = extent(layer_->physicalHeight());
@@ -297,8 +346,7 @@ public:
             // memory-driven cap), so sizing it here — not lazily to a stale point-cap — is what keeps
             // keptCount_ == coordCount_ and the per-frame gather complete. An alloc miss leaves the
             // cache too small; the gather then falls back to the full lattice walk (correct, slower).
-            // Only under resumableFrames — the synchronous path pushes as it walks, no index map needed.
-            if (resumableFrames && keptIdxCap_ < coordCount_) {
+            if (keptIdxCap_ < coordCount_) {
                 auto* grown = static_cast<nrOfLightsType*>(platform::alloc(coordCount_ * sizeof(nrOfLightsType)));
                 if (grown) {
                     if (keptIdx_) platform::free(keptIdx_);
@@ -311,38 +359,29 @@ public:
                 }
             }
         }
-        if (coordCount_ == 0) { coordPending_ = false; return; }
+        if (coordCount_ == 0) return;
 
-        // 0x03 app header: [type][count:u32 LE][bx][by][bz][stride:u16 LE] (10 bytes).
-        uint8_t h[10];
-        h[0] = 0x03;
-        h[1] = static_cast<uint8_t>(coordCount_ & 0xFF);
-        h[2] = static_cast<uint8_t>((coordCount_ >> 8) & 0xFF);
-        h[3] = static_cast<uint8_t>((coordCount_ >> 16) & 0xFF);
-        h[4] = static_cast<uint8_t>((coordCount_ >> 24) & 0xFF);
-        h[5] = bx_; h[6] = by_; h[7] = bz_;
-        h[8] = static_cast<uint8_t>(s & 0xFF);
-        h[9] = static_cast<uint8_t>(s >> 8);
-
-        if (!broadcaster_) { coordPending_ = true; return; }
-        broadcaster_->beginBinaryFrame(sizeof(h) + static_cast<size_t>(coordCount_) * 3);
-        broadcaster_->pushBinaryFrame(h, sizeof(h));
-        // Push the kept lights' scaled positions in small slices through a stack scratch. A dense
-        // grid strides its box directly (closed-form, no walk over skipped cells); a sparse/mapped
-        // layout walks placeLights with the lattice predicate. BOTH visit the kept lights in the
-        // SAME order the color pass uses, so color[k] ↔ coord[k] line up. The C callback can't
-        // capture, so it shares PosCtx (used by both the dense loop and the sparse callback).
+        // The table body is built COMPLETE into the staging buffer, ready for sendCoordTable to
+        // hand to the one resumable send when a client asks. The buffer is stable for a drain's
+        // lifetime (freed only behind cancelBufferedSend), and rewriting it is gated on an idle
+        // slot by every caller, so a drain never reads a half-rewritten table.
+        if (!ensureStaging(static_cast<size_t>(coordCount_) * 3)) {
+            coordCount_ = 0;   // alloc miss: nothing previewable until memory frees; retried next adopt
+            return;
+        }
+        // Emit the kept lights' scaled positions. A dense grid strides its box directly
+        // (closed-form, no walk over skipped cells); a sparse/mapped layout walks placeLights with
+        // the lattice predicate. BOTH visit the kept lights in the SAME order the color pass uses,
+        // so color[k] ↔ coord[k] line up. The C callback can't capture, so PosCtx is shared.
         struct PosCtx {
-            PreviewDriver* self; mm::BinaryBroadcaster* bc; nrOfLightsType s;
-            uint8_t buf[1536]; uint16_t fill;
+            PreviewDriver* self; uint8_t* out; size_t at; nrOfLightsType s;
             void emit(lengthType x, lengthType y, lengthType z) {
-                buf[fill++] = self->scaleAxis(x);
-                buf[fill++] = self->scaleAxis(y);
-                buf[fill++] = self->scaleAxis(z);
-                if (fill > sizeof(buf) - 3) { bc->pushBinaryFrame(buf, fill); fill = 0; }
+                out[at++] = self->scaleAxis(x);
+                out[at++] = self->scaleAxis(y);
+                out[at++] = self->scaleAxis(z);
             }
         };
-        PosCtx pc{this, broadcaster_, s, {}, 0};
+        PosCtx pc{this, staging_, 0, s};
         keptCount_ = 0;   // rebuilt below for the sparse path; dense gathers closed-form, no index map
         if (denseGrid()) {
             for (lengthType z = 0; z < az; z += s)
@@ -362,16 +401,109 @@ public:
                 p->emit(x, y, z);
             }, nullptr, &pc});
         }
-        if (pc.fill) broadcaster_->pushBinaryFrame(pc.buf, pc.fill);
-        // The coord table must reach the browser before color frames carrying the new count (the
-        // browser skips a count-mismatched 0x02). endBinaryFrame() reports whether every client got
-        // it; tick() retries while coordPending_ and withholds color frames until it lands.
-        coordPending_ = !broadcaster_->endBinaryFrame();
+        stagingUsed_ = pc.at;   // the built table's byte length, what sendCoordTable ships
+    }
+
+    /// Answer a [0x52] table request: one 0x03 message for the SERVED stride, through the same
+    /// resumable slot as everything else. Returns whether the send was accepted (drop-new: false
+    /// = the slot was busy; the caller keeps the request standing and retries next tick).
+    /// Header: [0x03][count u32 LE][bx][by][bz][stride u16 LE][epoch] (11 bytes).
+    bool sendCoordTable() {
+        if (!broadcaster_ || coordCount_ == 0 || !staging_) return false;
+        uint8_t h[11];
+        h[0] = 0x03;
+        h[1] = static_cast<uint8_t>(coordCount_ & 0xFF);
+        h[2] = static_cast<uint8_t>((coordCount_ >> 8) & 0xFF);
+        h[3] = static_cast<uint8_t>((coordCount_ >> 16) & 0xFF);
+        h[4] = static_cast<uint8_t>((coordCount_ >> 24) & 0xFF);
+        h[5] = bx_; h[6] = by_; h[7] = bz_;
+        h[8] = static_cast<uint8_t>(previewStride_ & 0xFF);
+        h[9] = static_cast<uint8_t>(previewStride_ >> 8);
+        h[10] = epoch_;
+        return broadcaster_->sendBufferedFrame(h, sizeof(h), staging_, stagingUsed_);
     }
 
     /// Stream one per-frame `0x02` RGB message straight from the producer buffer — no
     /// intermediate copy. Returns whether every client got it (false → tick() drives
     /// adaptive downscaling). Public so tests can drive it without tick()'s rate-limit.
+    /// Stream one per-frame `0x04` AIM message, so the preview can draw where each moving head
+    /// points. Returns false when there is nothing to send, which is the ordinary case.
+    ///
+    /// COSTS NOTHING ON A RIG WITHOUT MOTION: the first line is a flag test resolved when the
+    /// fixture layout was published, so an LED wall never builds a payload, never allocates and
+    /// never touches the socket. That is the requirement this feature had to meet, since most
+    /// rigs are strips and panels.
+    bool sendAim() {
+        Layer* l = layer();
+        if (!l) return false;
+        const FixtureChannels& fc = l->fixtureChannels();
+        if (!fc.movable()) return false;                 // the common case: one branch, then out
+        if (!broadcaster_ || !sourceBuffer_ || !sourceBuffer_->data() || coordCount_ == 0) return false;
+
+        const uint8_t* src = sourceBuffer_->data();
+        const uint8_t cpl = sourceBuffer_->channelsPerLight();
+        const nrOfLightsType n = sourceBuffer_->count();
+        if (cpl == 0 || n == 0) return false;
+        // The staging buffer is sized for RGB (3 bytes/light) at the coord-table build, and aim
+        // needs 2, so it always fits. Bail rather than overrun if that ever stops being true.
+        uint8_t header[9];
+        header[0] = 0x04;
+        header[1] = static_cast<uint8_t>(coordCount_ & 0xFF);
+        header[2] = static_cast<uint8_t>((coordCount_ >> 8) & 0xFF);
+        header[3] = static_cast<uint8_t>((coordCount_ >> 16) & 0xFF);
+        header[4] = static_cast<uint8_t>((coordCount_ >> 24) & 0xFF);
+        header[5] = static_cast<uint8_t>(previewStride_ & 0xFF);
+        header[6] = static_cast<uint8_t>(previewStride_ >> 8);
+        header[7] = epoch_;
+        header[8] = 0;   // reserved: keeps the header the same width as 0x02's
+
+        // Gather in the COORD TABLE's order, so aim[k] belongs to the same light color[k] colors.
+        // This must walk the lattice exactly as sendFrame does: a flat `i += stride` agrees only
+        // on a dense 1D buffer, and on a mapped or sparse layout it silently pairs each beam with
+        // a different fixture's aim. A missing axis sends center (128), not 0, which would aim
+        // every such head hard over.
+        // staging_ is sized for RGB (3 bytes/light) and an aim pair needs 2, so this normally fits;
+        // the check is for the alloc-miss case, where skipping a frame is right on a lossy channel.
+        // It also SHARES the buffer the coordinate table is built in, which is safe only because
+        // tick() gates every path on `idle` and sendCoordTable rebuilds immediately before
+        // sending: the table's bytes are live only straight after its build.
+        const size_t bodyBytes = static_cast<size_t>(coordCount_) * 2;
+        if (!staging_ || stagingCap_ < bodyBytes) return false;
+        const nrOfLightsType s = previewStride_;
+        struct AimCtx {
+            uint8_t* out; size_t at; const uint8_t* src; nrOfLightsType n; uint8_t cpl;
+            uint8_t panOff, tiltOff;
+            void emit(nrOfLightsType idx) {
+                const uint8_t* px = (idx < n) ? src + static_cast<size_t>(idx) * cpl : nullptr;
+                out[at++] = (px && panOff  != FixtureChannels::kAbsent && panOff  < cpl)
+                                ? px[panOff]  : 128;
+                out[at++] = (px && tiltOff != FixtureChannels::kAbsent && tiltOff < cpl)
+                                ? px[tiltOff] : 128;
+            }
+        };
+        AimCtx aim{staging_, 0, src, n, cpl, fc.pan, fc.tilt};
+        if (denseGrid()) {
+            const lengthType W = layer_->physicalWidth(), H = layer_->physicalHeight();
+            const lengthType az = layer_->physicalDepth() > 0 ? layer_->physicalDepth() : 1;
+            const lengthType ay = H > 0 ? H : 1, ax = W > 0 ? W : 1;
+            for (lengthType z = 0; z < az; z += s)
+                for (lengthType y = 0; y < ay; y += s)
+                    for (lengthType x = 0; x < ax; x += s)
+                        aim.emit(static_cast<nrOfLightsType>(static_cast<size_t>(z) * H * W
+                                                             + static_cast<size_t>(y) * W + x));
+        } else if (keptIdx_ && keptCount_ == coordCount_) {
+            for (nrOfLightsType k = 0; k < keptCount_; k++) aim.emit(keptIdx_[k]);
+        } else {
+            struct Skip { AimCtx* aim; nrOfLightsType s; } sk{&aim, s};
+            layer_->layouts()->placeLights(CoordSink{[](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
+                auto* p = static_cast<Skip*>(c);
+                if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
+                p->aim->emit(idx);
+            }, nullptr, &sk});
+        }
+        return broadcaster_->sendBufferedFrame(header, sizeof(header), staging_, aim.at);
+    }
+
     bool sendFrame() {
         if (!broadcaster_ || !sourceBuffer_ || !sourceBuffer_->data() || coordCount_ == 0) return false;
         const uint8_t* src = sourceBuffer_->data();
@@ -379,8 +511,11 @@ public:
         const nrOfLightsType n = sourceBuffer_->count();
         const nrOfLightsType s = previewStride_;
 
-        // Header: [0x02][count:u32 LE][stride:u16 LE]  (7 bytes). count = the kept lights.
-        uint8_t header[7];
+        // Header: [0x02][count:u32 LE][stride:u16 LE][epoch][drops] (9 bytes). count = the kept
+        // lights; (epoch, stride) is the client's table-cache key; drops = frames discarded at
+        // the source since the last delivered one, the sender-side congestion signal the client's
+        // controller adapts on.
+        uint8_t header[9];
         header[0] = 0x02;
         header[1] = static_cast<uint8_t>(coordCount_ & 0xFF);
         header[2] = static_cast<uint8_t>((coordCount_ >> 8) & 0xFF);
@@ -388,6 +523,8 @@ public:
         header[4] = static_cast<uint8_t>((coordCount_ >> 24) & 0xFF);
         header[5] = static_cast<uint8_t>(s & 0xFF);
         header[6] = static_cast<uint8_t>(s >> 8);
+        header[7] = epoch_;
+        header[8] = dropsSinceLast_;
 
         if (s == 1 && cpl == 3 && coordCount_ <= n) {
             // FULL RES, RGB: the producer buffer IS the payload. Hand it to the RESUMABLE buffered
@@ -395,49 +532,33 @@ public:
             // transport ticks without a copy and without spinning this loop, the fix for the
             // large-frame stall. The common case (any grid ≤ cap, incl. 16K on a no-PSRAM classic).
             // prepare cancels it before a resize frees the buffer (use-after-free guard).
-            return broadcaster_->sendBufferedFrame(header, sizeof(header),
-                                                   src, static_cast<size_t>(coordCount_) * 3);
+            const bool ok = broadcaster_->sendBufferedFrame(header, sizeof(header),
+                                                            src, static_cast<size_t>(coordCount_) * 3);
+            if (ok) dropsSinceLast_ = 0;
+            return ok;
         }
 
-        // Downsampled (s>1) or non-RGB (cpl≠3): the producer buffer is not the payload, so gather the
-        // kept lights' RGB into the staging buffer and hand THAT to the same RESUMABLE buffered send
-        // the full-res path uses — the gather is a few thousand byte moves (cheap on this thread), and
-        // the socket drain happens on the transport's ticks, not here. Building + pushing this payload
-        // through the synchronous begin/push/end stream instead measured ~17 ms per firing on the
-        // encode worker at 12K lights — a sub-hot-path violation this resumable handoff removes. The
-        // kept subset + order MUST match the coord table's, so color[k] ↔ coord[k] line up (the
-        // browser drops a count/stride-mismatched frame). A dense grid strides its box directly —
-        // light (x,y,z) is at buffer index z·H·W + y·W + x, closed-form, no walk over skipped cells. A
-        // sparse/mapped layout walks placeLights with the same lattice predicate (its index↔position
-        // map is arbitrary — no formula). tick()'s idle gate means no drain holds stage_ right now.
-        // TRANSPORT A/B (resumableFrames): ON gathers into the staging buffer and hands it to the
-        // RESUMABLE sender (drains on tick20ms, off the render thread — the sub-hot-path fix). OFF is
-        // the SYNCHRONOUS begin/push/end stream (blocking socket writes on THIS thread, ~17 ms at 12K
-        // lights), kept as the proven-correct reference to A/B the resumable path against on hardware.
+        // Downsampled (s>1) or non-RGB (cpl≠3): the producer buffer is not the payload, so gather
+        // the kept lights' RGB into the staging buffer (sized at the coord-table build; every
+        // caller gates on an idle slot, so no drain is reading it) and hand THAT to the same
+        // resumable send the full-res path uses. The gather is a few thousand byte moves on this
+        // thread; every socket byte moves on the transport tick. The kept subset + order MUST
+        // match the coord table's, so color[k] ↔ coord[k] line up (the browser drops a
+        // count/stride-mismatched frame). A dense grid strides its box directly: light (x,y,z) is
+        // at buffer index z·H·W + y·W + x, closed-form, no walk over skipped cells. A sparse or
+        // mapped layout walks placeLights with the same lattice predicate.
         const size_t bodyBytes = static_cast<size_t>(coordCount_) * 3;
-        const bool resumable = resumableFrames && stage_ && stageCap_ >= bodyBytes;
-        // The gather sink: the staging buffer (resumable) or, per push, the synchronous stream's chunk
-        // buffer. `emit` is shared; the sink is chosen once here so the walk/loop below is path-agnostic.
+        if (!staging_ || stagingCap_ < bodyBytes) return false;   // alloc miss: skip, lossy channel
         struct ColCtx {
-            mm::BinaryBroadcaster* bc; uint8_t* stage; const uint8_t* src; nrOfLightsType n; uint8_t cpl;
-            bool resumable; uint8_t buf[1536]; uint16_t fill; size_t staged;
-            void put(uint8_t b) {
-                if (resumable) { stage[staged++] = b; return; }
-                buf[fill++] = b;
-                if (fill > sizeof(buf) - 1) { bc->pushBinaryFrame(buf, fill); fill = 0; }
-            }
+            uint8_t* out; size_t at; const uint8_t* src; nrOfLightsType n; uint8_t cpl;
             void emit(nrOfLightsType idx) {
                 const uint8_t* px = (idx < n) ? src + static_cast<size_t>(idx) * cpl : nullptr;
-                put(px ? px[0] : 0);
-                put((px && cpl >= 2) ? px[1] : 0);
-                put((px && cpl >= 3) ? px[2] : 0);
+                out[at++] = px ? px[0] : 0;
+                out[at++] = (px && cpl >= 2) ? px[1] : 0;
+                out[at++] = (px && cpl >= 3) ? px[2] : 0;
             }
         };
-        if (!resumable) {
-            broadcaster_->beginBinaryFrame(sizeof(header) + bodyBytes);
-            broadcaster_->pushBinaryFrame(header, sizeof(header));
-        }
-        ColCtx col{broadcaster_, stage_, src, n, cpl, resumable, {}, 0, 0};
+        ColCtx col{staging_, 0, src, n, cpl};
         if (denseGrid()) {
             const lengthType W = layer_->physicalWidth(), H = layer_->physicalHeight();
             const lengthType az = layer_->physicalDepth() > 0 ? layer_->physicalDepth() : 1;
@@ -460,81 +581,83 @@ public:
                 p->col->emit(idx);
             }, nullptr, &sk});
         }
-        if (resumable) return broadcaster_->sendBufferedFrame(header, sizeof(header), stage_, bodyBytes);
-        if (col.fill) broadcaster_->pushBinaryFrame(col.buf, col.fill);
-        return broadcaster_->endBinaryFrame();
+        const bool ok = broadcaster_->sendBufferedFrame(header, sizeof(header), staging_, col.at);
+        if (ok) dropsSinceLast_ = 0;
+        return ok;
     }
 
 private:
-    /// (Re)size the staging buffer the downsampled/non-RGB color path gathers into — the stable body
-    /// the resumable buffered send drains across transport ticks. Sized to the point cap (grow-only,
-    /// off the hot path, from prepare). An alloc miss degrades to skipped frames, never a stall.
-    /// Free the resumable-path buffers + refresh the memory readout. Cancels any in-flight send first —
-    /// its body IS stage_, so a drain must not outlive it (the use-after-free guard). Shared by release()
-    /// and the resumableFrames-off toggle.
+    /// Free the preview buffers + refresh the memory readout. Cancels any in-flight send first, so
+    /// a drain can never outlive the buffer it reads (the use-after-free guard).
     void freePreviewBuffers() {
         if (broadcaster_) broadcaster_->cancelBufferedSend();
-        if (stage_) { platform::free(stage_); stage_ = nullptr; stageCap_ = 0; }
         if (keptIdx_) { platform::free(keptIdx_); keptIdx_ = nullptr; keptIdxCap_ = 0; keptCount_ = 0; }
+        if (staging_) { platform::free(staging_); staging_ = nullptr; stagingCap_ = 0; }
         publishHeapBytes();
     }
 
-    void ensureStage() {
-        stageAllocFailed_ = false;
-        const size_t bytes = static_cast<size_t>(maxPreviewPoints()) * 3;
-        if (bytes == 0 || stageCap_ >= bytes) return;
-        uint8_t* grown = static_cast<uint8_t*>(platform::alloc(bytes));
-        if (!grown) { stageAllocFailed_ = true; return; }   // degraded — status surfaced in refreshStatus
-        if (stage_) platform::free(stage_);
-        stage_ = grown;
-        stageCap_ = bytes;
-        publishHeapBytes();   // the staging buffer grew — refresh the memory readout
-        // keptIdx_ is sized in buildAndSendCoordTable to the exact per-rebuild coordCount_ — not here,
-        // because the point-cap is an UPPER bound a sparse layout stays under (kept ≤ box-lattice cells).
+    /// Grow-only staging for the coord-table and gathered-frame bodies: the ONE stable buffer the
+    /// resumable drain reads across transport ticks. Rewritten only behind an idle slot; freed only
+    /// behind cancelBufferedSend (freePreviewBuffers).
+    bool ensureStaging(size_t bytes) {
+        if (stagingCap_ >= bytes) return staging_ != nullptr;
+        auto* grown = static_cast<uint8_t*>(platform::alloc(bytes));
+        if (!grown) return false;
+        if (staging_) platform::free(staging_);
+        staging_ = grown;
+        stagingCap_ = bytes;
+        publishHeapBytes();
+        return true;
     }
 
-    /// Publish the preview's operating status: PLAIN "previewing N points" normally, or a WARNING naming
-    /// the degradation when a resumable-path buffer could not allocate (RAM-tight board) so the tab shows
-    /// WHY it fell back — the synchronous send returns (blocking socket writes on the encode thread, the
-    /// LED-hitch this optimization removed) or the sparse gather walks placeLights per frame. Called from
-    /// the cold path (prepare) and refreshed on the coord rebuild, never the render loop.
+
+    /// Publish the preview's operating status: who is watching and at what stride normally, or a
+    /// WARNING when the index cache could not allocate (RAM-tight board), so the tab shows WHY the
+    /// sparse gather fell back to walking placeLights per frame. Called from the cold path
+    /// (prepare) and refreshed on the coord rebuild, never the render loop.
     void refreshStatus() {
-        if (resumableFrames && stageAllocFailed_) {
-            setStatus("preview degraded — staging buffer alloc failed, frames send synchronously "
-                      "(may hitch LEDs); disable resumableFrames or free RAM", Severity::Warning);
-        } else if (resumableFrames && keptIdxAllocFailed_) {
+        if (keptIdxAllocFailed_) {
             setStatus("preview degraded — index cache alloc failed, gathering per frame (slower)",
                       Severity::Warning);
+        } else if (lastClients_ > 0) {
+            // The observability the bench work had to reconstruct with socket probes: who is
+            // watching, and at what resolution they asked to be served.
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "%d watching · 1/%u",
+                          lastClients_, static_cast<unsigned>(downscale_));
+            setStatus(statusBuf_, Severity::Status);
         } else {
             clearStatus();
         }
     }
-    // A/B for the downsampled-frame transport: OFF = synchronous begin/push/end stream (blocking socket
-    // writes on the render thread, proven-correct); ON = gather-then-resumable-send that drains off the
-    // render thread. Defaults OFF: the resumable path shares the single-occupancy send slot with the ~1 Hz
-    // full-state push and the next preview frame, so a preempted mid-drain frame reaches the browser
-    // spliced — a visibly TORN preview (top rows new, the rest stale). The off-thread send is only worth it
-    // to avoid the ~17 ms render hitch at very large grids with the preview open; until the slot-sharing
-    // tear is fixed (give preview its own send slot, or drop a preempted drain cleanly), the correct
-    // synchronous path is the default. Kept in-tree as the A/B reference for that fix.
-    bool resumableFrames = false;
-    bool stageAllocFailed_ = false;    // resumable staging buffer couldn't allocate → synchronous fallback
-    bool keptIdxAllocFailed_ = false;  // index cache couldn't allocate → per-frame lattice walk
-    uint8_t* stage_ = nullptr;   // gathered color payload for the resumable send (see ensureStage)
-    size_t stageCap_ = 0;
+
+    /// Housekeeping cadence: refresh the watcher count in the status when it changes. The change
+    /// guard keeps the common tick at two integer compares.
+    void tick1s() MM_NONBLOCKING override {
+        const int c = broadcaster_ ? broadcaster_->subscriberCount() : 0;
+        if (c != lastClients_ || downscale_ != lastShownStride_) {
+            lastClients_ = c;
+            lastShownStride_ = downscale_;
+            refreshStatus();
+        }
+        MoonModule::tick1s();
+    }
+    int lastClients_ = 0;
+    nrOfLightsType lastShownStride_ = 0;
+    char statusBuf_[40]{};
+    bool keptIdxAllocFailed_ = false;     // index cache couldn't allocate → gather walks per frame
     nrOfLightsType* keptIdx_ = nullptr;   // sparse layouts: kept lights' buffer indices, coord-table order
     nrOfLightsType keptIdxCap_ = 0, keptCount_ = 0;
 
 protected:
     // Matches DriverBase's visibility — a private override would silently hide the hook from any
     // future caller holding a DriverBase*. ParallelLedDriver keeps it protected for the same reason.
-    /// This driver's heap = the base scratch + the two preview buffers (the resumable-send staging buffer
-    /// and the kept-index cache). Both live only under resumableFrames; summed for the per-module memory
-    /// readout (see DriverBase::driverHeapBytes). PreviewDriver holds no wire_ scratch, but chaining to
-    /// the base keeps the rule uniform.
+    /// This driver's heap = the base scratch + the kept-index cache, summed for the per-module
+    /// memory readout (see DriverBase::driverHeapBytes). PreviewDriver holds no wire_ scratch, but
+    /// chaining to the base keeps the rule uniform.
     size_t driverHeapBytes() const override {
-        return DriverBase::driverHeapBytes() + stageCap_
-             + static_cast<size_t>(keptIdxCap_) * sizeof(nrOfLightsType);
+        return DriverBase::driverHeapBytes()
+             + static_cast<size_t>(keptIdxCap_) * sizeof(nrOfLightsType)
+             + stagingCap_;
     }
 
 private:
@@ -543,7 +666,7 @@ private:
     // engages — derived at runtime from free contiguous memory, not a fixed per-board constant
     // (architecture.md § Scaling to available memory: "sizes determined at runtime based on
     // available memory"). There is no per-frame buffer; the cap bounds the transient work the coord
-    // table build (3 bytes/point in flight to the socket) and the resumable color send impose. So
+    // table build (3 bytes/point in flight to the socket) imposes. So
     // a fragmented classic downscales SOONER (less contiguous RAM) while a roomy PSRAM board goes
     // far higher — one rule, every board, measured not assumed. The spatial-lattice downsample is
     // the graceful fallback above the cap.
@@ -557,38 +680,24 @@ private:
     bool denseGrid() const { return layer_ && !layer_->lut().hasLUT(); }
 
     nrOfLightsType maxPreviewPoints() const {
-        // TWO independent bounds, take the smaller:
-        //  (1) DISPLAY cap — a preview is a browser canvas a few hundred px wide; beyond ~4096
-        //      points the lights are sub-pixel and indistinguishable, so MORE points only cost link
-        //      bandwidth (a 16K-point 49 KB frame streams at <1 fps even on Ethernet). Capping to a
-        //      display-sensible count is what makes a big-RAM board (P4) downsample to a frame the
-        //      LINK can actually push fast — the bottleneck here is throughput, not memory. WLED-MM
-        //      caps its live preview the same way. The lattice downsample (and the browser's status)
-        //      handle anything larger gracefully.
-        //  (2) MEMORY cap — derived from maxAllocBlock() so a tight/fragmented board downsamples even
-        //      SOONER than the display cap (architecture.md § Scaling to available memory).
-        // min(display, memory): the display cap normally wins (it's the smaller); the memory cap
-        // only bites on a board too tight to stream even 4096 points.
-        constexpr uint32_t kDisplayCap = 4096;       // visual-resolution ceiling for ANY board
+        // NO display cap: the only bounds are MEMORY (staging + index tables must fit this
+        // board's largest free block) and the index type. Everything else self-degrades where it
+        // actually binds: a link that cannot carry full-res frames reports drops and the client
+        // asks coarser; a browser that cannot RENDER the points measures its own low fps and asks
+        // coarser too. Pre-capping "for the client's sake" only withheld detail from clients that
+        // could take it (deduction: the S31's RAM and a desktop GPU both dwarf any fixed number).
         constexpr size_t kReserve = 32u * 1024u;     // leave this much contiguous headroom
         constexpr size_t kBytesPerPoint = 3u;        // RGB on the wire / position bytes in the table
         constexpr nrOfLightsType kFloor = 1024;      // always previewable (hard-downsampled) on any board
-        const size_t block = platform::maxAllocBlock();
-        // maxAllocBlock() returns 0 = "unlimited / not reported" (desktop, test default): memory is
-        // not the limit there, so the display cap governs.
-        uint32_t memPts;
-        if (block == 0) {
-            memPts = kDisplayCap;
-        } else {
-            const size_t usable = block > kReserve ? block - kReserve : 0;
-            memPts = static_cast<uint32_t>(usable / kBytesPerPoint);
-            if (memPts < kFloor) memPts = kFloor;
-        }
-        uint32_t pts = memPts < kDisplayCap ? memPts : kDisplayCap;
-        // Clamp into the board's nrOfLightsType range (u16 on a no-PSRAM classic).
         constexpr uint32_t kTypeMax = static_cast<uint32_t>(std::numeric_limits<nrOfLightsType>::max());
-        if (pts > kTypeMax) pts = kTypeMax;
-        return static_cast<nrOfLightsType>(pts);
+        const size_t block = platform::maxAllocBlock();
+        // maxAllocBlock() returns 0 = "unlimited / not reported" (desktop, test default).
+        if (block == 0) return static_cast<nrOfLightsType>(kTypeMax);
+        const size_t usable = block > kReserve ? block - kReserve : 0;
+        uint32_t memPts = static_cast<uint32_t>(usable / kBytesPerPoint);
+        if (memPts < kFloor) memPts = kFloor;
+        if (memPts > kTypeMax) memPts = kTypeMax;
+        return static_cast<nrOfLightsType>(memPts);
     }
 
     // Map an axis coordinate into the 0..255 byte range. posScale_ == 0 means
@@ -603,34 +712,28 @@ private:
 
     Buffer* sourceBuffer_ = nullptr;
     BinaryBroadcaster* broadcaster_ = nullptr;
+    bool aimTurn_ = false;          // alternates color/aim so each gets its own send slot
+    uint8_t* staging_ = nullptr;           // stable body for table + gathered frames (see ensureStaging)
+    size_t stagingCap_ = 0;
     nrOfLightsType coordCount_ = 0;        // lights the lattice keeps = the streamed 0x03/0x02 count
     nrOfLightsType previewStride_ = 1;     // wire field: the lattice/downscale factor (1 = full res)
-    bool coordPending_ = false;            // coord table not yet delivered; tick() retries it
     uint8_t bx_ = 0, by_ = 0, bz_ = 0;
     int32_t posScale_ = 0;            // 0 = positions 1:1; else largest box edge (>255) to scale by
     uint32_t lastSendTime_ = 0;
-    uint32_t lastClientGen_ = 0;   // last seen broadcaster_->clientGeneration() — re-send coords on change
+    // The pull model's standing state, written on the transport thread (onClientMessage /
+    // onClientGone), read on the encode thread: single bytes, benign to race on a lossy channel.
+    static constexpr int kMaxRequestSlots = 8;
+    volatile uint8_t reqStride_[kMaxRequestSlots] = {};   // 0 = no standing request in this slot
+    volatile uint8_t reqFps_[kMaxRequestSlots] = {};      // 0 = use the targetFps control
+    volatile bool tableRequested_ = false;                // a [0x52] is owed the table
+    uint8_t epoch_ = 0;             // bumped per geometry rebuild; the table-cache key's half
+    uint8_t dropsSinceLast_ = 0;    // frames discarded at the source since the last delivered one
+    size_t stagingUsed_ = 0;        // byte length of the last-built table in staging_
 
-    // Adaptive downscaling. The preview streams at the finest resolution the link sustains.
-    // The streamed send is all-or-nothing per client, so a frame (color or coord table) that
-    // doesn't reach every client means the link can't keep up at this resolution: coarsen
-    // (downscale_++) after a short run of such frames so the rebuilt lattice sends fewer points.
-    // A sustained run of fully-sent frames refines back toward full resolution (downscale_ >>= 1, halving).
-    // downscale_ is an extra floor on the per-axis lattice stride, composing with the cap
-    // downsample; it rides the wire stride field to the browser's "preview 1/N · link limited"
-    // status. (≥1; 1 = full resolution.) Hysteresis via the streak thresholds stops oscillation.
+    // The served per-axis lattice stride: the coarsest standing client request (1 = full
+    // resolution, the value with no standing request). An extra floor on top of the cap
+    // downsample; rides the wire stride field to the browser's status line.
     nrOfLightsType downscale_ = 1;
-    uint8_t slowStreak_ = 0;       // consecutive struggling frames (latency or not-all-sent)
-    uint8_t cleanStreak_ = 0;      // consecutive prompt, fully-sent frames
-    uint8_t framesWaiting_ = 0;    // fps slots skipped because the previous frame is still draining
-    static constexpr uint8_t kDownscaleAfterSlow = 2;    // coarsen after this many slow frames (fast react)
-    static constexpr uint8_t kUpscaleAfterFast   = 6;    // refine after this many clean frames — then HALVE
-                                                         // downscale_ (multiplicative recovery), so a coarse
-                                                         // stride reaches full res in ~log2 steps, not linearly
-    // A frame still draining after this many fps slots means the link can't sustain even one frame
-    // at this resolution at the slowest useful rate → resolution must drop (not just the rate). Set
-    // above 1 so a normal multi-tick drain on a healthy link isn't mistaken for struggle.
-    static constexpr uint8_t kSlowFrames = 3;
 };
 
 } // namespace mm

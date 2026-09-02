@@ -30,7 +30,7 @@ namespace mm {
 /// Effect: a raymarched 3D scene of melting spheres, lit by a normal derived from the field.
 class RaymarchEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫🖌️"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t bpm      = 10;   // how fast the scene animates
@@ -40,11 +40,11 @@ public:
     bool    showFloor = true;
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 0, 60);
-        controls_.addUint8("steps", steps, 8, 96);
-        controls_.addUint8("blend", blend, 0, 255);
-        controls_.addUint8("cameraY", cameraY, 0, 255);
-        controls_.addBool("showFloor", showFloor);
+        controls_.addControl("bpm", bpm, 0, 60);
+        controls_.addControl("steps", steps, 8, 96);
+        controls_.addControl("blend", blend, 0, 255);
+        controls_.addControl("cameraY", cameraY, 0, 255);
+        controls_.addControl("showFloor", showFloor);
     }
 
     void tick() MM_NONBLOCKING override {

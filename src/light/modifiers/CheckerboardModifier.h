@@ -17,13 +17,16 @@ namespace mm {
 class CheckerboardModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
+    /// Advisory UI chip: what this modifier can work on (walks x, y and z, so it patterns a volume as readily as a panel).
+    /// Nothing branches on it, since extrude reads the EFFECT's dimensions.
+    Dim dimensions() const override { return Dim::D3; }
 
     uint8_t size = 2;       // checker square edge, in lights (≥1)
     bool invert = false;    // flip which squares pass through
 
     void defineControls() override {
-        controls_.addUint8("size", size, 1, 64);
-        controls_.addBool("invert", invert);
+        controls_.addControl("size", size, 1, 64);
+        controls_.addControl("invert", invert);
     }
 
     // A mask leaves the logical box unchanged (no modifyLogicalSize override).

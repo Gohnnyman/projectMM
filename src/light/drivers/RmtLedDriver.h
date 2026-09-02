@@ -112,7 +112,7 @@ public:
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
-        controls_.addBool("loopbackTest", loopbackTest);
+        controls_.addControl("loopbackTest", loopbackTest);
         controls_.setAdvanced(controls_.count() - 1);   // expert-mode: a bench self-test, not a normal-use control
         // loopbackTxPin / loopbackRxPin are always bound (so persistence can load
         // them any time) but only shown while the test mode is on — same always-
@@ -124,7 +124,7 @@ public:
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
         controls_.addPin("loopbackRxPin", loopbackRxPin);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
-        controls_.addBool("loopbackFrame", loopbackFrame);
+        controls_.addControl("loopbackFrame", loopbackFrame);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
     }
 
@@ -265,7 +265,7 @@ public:
         for (nrOfLightsType i = 0; i < n; i++) {
             // Read the windowed light: this driver's slice starts at winStart_. wire_ is sized to
             // outChannels off the hot path (resizeSymbols), so apply() can't overflow it.
-            correction_.apply(src + (winStart_ + i) * srcCh, wire_);
+            correction_.apply(src + (winStart_ + i) * srcCh, wire_, srcCh);
             encodeWs2812Symbols(wire_, outCh, t0h, t1h, period, symbols_ + s);
             s += static_cast<size_t>(outCh) * 8;
         }

@@ -32,9 +32,9 @@ public:
     bool    usePalette      = false; // false → white stars; true → per-star palette color
 
     void defineControls() override {
-        controls_.addUint8("speed", speed, 0, 42);
-        controls_.addUint8("star_fill_ratio", star_fill_ratio, 0, 255);
-        controls_.addBool("usePalette", usePalette);
+        controls_.addControl("speed", speed, 0, 42);
+        controls_.addControl("star_fill_ratio", star_fill_ratio, 0, 255);
+        controls_.addControl("usePalette", usePalette);
     }
 
     // Per-star state on the heap, sized to nb_stars = star_fill_ratio*nrOfLights/10000 + 1. Reallocated

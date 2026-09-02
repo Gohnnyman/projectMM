@@ -1,0 +1,4 @@
+# The Windows install scripts ship inside the release zip and are run by cmd.exe and
+# PowerShell on Windows. cmd.exe has known parser edge cases with LF-only batch files, and
+# the .cmd is the one file every user double-clicks, so these keep CRLF everywhere.
+moondeck/ci/windows/* text eol=crlf

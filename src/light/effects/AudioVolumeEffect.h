@@ -13,12 +13,13 @@ namespace mm {
 /// Audio-reactive effect: drives brightness/color from the overall sound level.
 class AudioVolumeEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔊"; }
+    const char* tags() const override { return "💫🎵"; }
+    Dim dimensions() const override { return Dim::D3; }
 
     uint8_t brightness = 255;   // overall ceiling
 
     void defineControls() override {
-        controls_.addUint8("brightness", brightness, 1, 255);
+        controls_.addControl("brightness", brightness, 1, 255);
     }
 
     void tick() MM_NONBLOCKING override {

@@ -25,6 +25,7 @@ const char* controlTypeName(ControlType t) {
         case ControlType::Uint8:       return "uint8";
         case ControlType::Uint16:      return "uint16";
         case ControlType::Int16:       return "int16";
+        case ControlType::Int32:       return "int32";
         case ControlType::Pin:         return "pin";
         case ControlType::Bool:        return "bool";
         case ControlType::Text:        return "text";
@@ -92,6 +93,10 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
         case ControlType::Int16:
             sink.appendf("%d", *static_cast<int16_t*>(c.ptr));
             return;
+        case ControlType::Int32:
+            // int is 32-bit on every target; int32_t is `long` on Xtensa, so %d alone mismatches.
+            sink.appendf("%d", static_cast<int>(*static_cast<int32_t*>(c.ptr)));
+            return;
         case ControlType::Pin:   // int8_t storage; serialized as a plain integer
             sink.appendf("%d", *static_cast<int8_t*>(c.ptr));
             return;
@@ -115,9 +120,18 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
             sink.appendf("%d", *static_cast<int8_t*>(c.ptr));
             return;
         case ControlType::Select:
+            // persistLabel: the option STRING, for enumerated option lists whose index is not
+            // stable across boots; the apply path matches it back by label. Otherwise the index.
+            if (c.persistLabel && c.aux) {
+                const uint8_t sel = *static_cast<uint8_t*>(c.ptr);
+                auto* options = reinterpret_cast<const char* const*>(c.aux);
+                if (sel < c.max) { sink.writeJsonString(options[sel]); return; }
+            }
+            sink.appendf("%u", *static_cast<uint8_t*>(c.ptr));
+            return;
         case ControlType::Palette:
-            // The selected index — the option strings / swatch colors go in the
-            // metadata block (writeControlMetadata) where the UI also wants them.
+            // The selected index: the swatch colors go in the metadata block
+            // (writeControlMetadata) where the UI also wants them.
             sink.appendf("%u", *static_cast<uint8_t*>(c.ptr));
             return;
         case ControlType::Progress:
@@ -156,10 +170,17 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
 }
 
 void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
+    // Before the switch: every branch below returns, and a declared default belongs to the
+    // control whatever its type is. Emitted only when one was set, so the wire format and every
+    // module that relies on the type-level defaults in /api/types are untouched.
+    if (c.def != ControlDescriptor::kNoDefault) {
+        sink.appendf(",\"default\":%d", static_cast<int>(c.def));
+    }
     switch (c.type) {
         case ControlType::Uint8:
         case ControlType::Uint16:
         case ControlType::Int16:
+        case ControlType::Int32:
         case ControlType::Pin:
             // Numeric controls carry a real [min,max]; the slider types render it
             // as a range, Pin uses it only as a documented valid-GPIO span (the UI
@@ -181,7 +202,11 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
             // counter cannot wrap.
             // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
             for (uint8_t o = 0; o < c.max; o++) {
-                sink.appendf("%s\"%s\"", o > 0 ? "," : "", options[o]);
+                if (o > 0) sink.append(",");
+                // Escaped, not a raw %s: most option lists are our own literals, but the panel-card
+                // interface Select carries OS-supplied adapter descriptions, and one containing a
+                // quote or a backslash would make all of /api/state invalid and blank the UI.
+                sink.writeJsonString(options[o] ? options[o] : "");
             }
             sink.append("]");
             return;
@@ -297,6 +322,13 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             }
             return clampInto(static_cast<int16_t*>(c.ptr), v, c.min, c.max);
         }
+        case ControlType::Int32: {
+            int v = mm::json::parseInt(json, key);
+            if (policy == ApplyPolicy::Strict && (v < c.min || v > c.max)) {
+                return ApplyResult::OutOfRange;
+            }
+            return clampInto(static_cast<int32_t*>(c.ptr), v, c.min, c.max);
+        }
         case ControlType::Pin: {   // int8_t storage; [min,max] = valid-GPIO span
             int v = mm::json::parseInt(json, key);
             if (policy == ApplyPolicy::Strict && (v < c.min || v > c.max)) {
@@ -365,12 +397,32 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             const bool overlong = std::strlen(label) >= sizeof(label) - 1;
             if (label[0]) {
                 auto* options = reinterpret_cast<const char* const*>(c.aux);
-                if (options && !overlong)
+                if (options && !overlong) {
                     for (int i = 0; i <= hi; i++)
                         if (options[i] && std::strcmp(options[i], label) == 0)
                             return clampInto(static_cast<uint8_t*>(c.ptr), i, 0, hi);
+                    // Then on the STABLE HEAD of the label, the part before ", ". An option may
+                    // carry a live detail after that separator (the panel-card NIC list appends a
+                    // link speed, "Realtek PCIe GbE, 1 Gb"), and matching the whole string would
+                    // lose the user's pick the moment that detail changed: a renegotiated link, or
+                    // the same NIC at 100 Mb instead of 1 Gb, would silently fall back to row 0.
+                    // BOTH sides are cut at the separator: the persisted label carries the
+                    // detail it was written with, and the option carries the current one, so
+                    // comparing a whole label against a head never matches.
+                    const char* lsep = std::strstr(label, ", ");
+                    const size_t lhead = lsep ? static_cast<size_t>(lsep - label)
+                                              : std::strlen(label);
+                    for (int i = 0; i <= hi; i++) {
+                        if (!options[i]) continue;
+                        const char* sep = std::strstr(options[i], ", ");
+                        const size_t head = sep ? static_cast<size_t>(sep - options[i])
+                                                : std::strlen(options[i]);
+                        if (head == lhead && std::strncmp(options[i], label, head) == 0)
+                            return clampInto(static_cast<uint8_t*>(c.ptr), i, 0, hi);
+                    }
+                }
                 // A label that names no current option (a peripheral this board can't run, or one too long
-                // to be any real option) is not an error in Lenient policy — the driver keeps its default;
+                // to be any real option) is not an error in Lenient policy: the driver keeps its default;
                 // Strict rejects it.
                 if (policy == ApplyPolicy::Strict) return ApplyResult::OutOfRange;
                 return ApplyResult::Ok;

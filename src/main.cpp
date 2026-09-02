@@ -21,6 +21,8 @@
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/WaveEffect.h"
 #include "light/effects/NoiseEffect.h"
+#include "light/effects/MovingHeadEffect.h"
+#include "light/effects/PacmanEffect.h"
 #include "light/effects/PlasmaEffect.h"
 #include "light/effects/MetaballsEffect.h"
 #include "light/effects/FireEffect.h"
@@ -52,6 +54,11 @@
 #include "light/effects/SpectrumEffect.h"
 #include "light/effects/FireworksEffect.h"
 #include "light/effects/BallpitEffect.h"
+#include "light/effects/FishTankEffect.h"
+#include "light/effects/FlyingToastersEffect.h"
+#include "light/effects/PongEffect.h"
+#include "light/effects/SpaceInvadersEffect.h"
+#include "light/effects/SpriteFountainEffect.h"
 #include "light/effects/TruchetEffect.h"
 #include "light/effects/VectorBallsEffect.h"
 #include "light/effects/RaymarchEffect.h"
@@ -87,6 +94,8 @@
 #include "light/drivers/LightPresetsModule.h"  // the reusable light-preset library (Drivers submodule)
 #include "light/drivers/HueDriver.h"
 #include "light/drivers/NetworkSendDriver.h"
+#include "light/drivers/NdiDriver.h"
+#include "light/drivers/HlsDriver.h"
 #include "light/drivers/PreviewDriver.h"
 // LED drivers are compiled in per chip, gated on the SOC peripheral the driver
 // needs — so a board's binary carries only the drivers its silicon can actually
@@ -136,6 +145,8 @@
 #include "core/Services.h"
 #include "core/AudioService.h"
 #include "core/VideoService.h"
+
+#include "core/OscModule.h"
 #include "core/I2cScanModule.h"
 #include "core/TasksModule.h"
 #include "core/PinsModule.h"
@@ -236,6 +247,13 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::DissolveEffect>("DissolveEffect", "light/effects.md#dissolve");
     mm::ModuleFactory::registerType<mm::SpectrumEffect>("SpectrumEffect", "light/effects.md#spectrum");
     mm::ModuleFactory::registerType<mm::FireworksEffect>("FireworksEffect", "light/effects.md#fireworks");
+    mm::ModuleFactory::registerType<mm::FishTankEffect>("FishTankEffect", "light/effects.md#fishtank");
+    mm::ModuleFactory::registerType<mm::PacmanEffect>("PacmanEffect", "light/effects.md#pacman");
+    mm::ModuleFactory::registerType<mm::MovingHeadEffect>("MovingHeadEffect", "light/effects.md#movinghead");
+    mm::ModuleFactory::registerType<mm::FlyingToastersEffect>("FlyingToastersEffect", "light/effects.md#flyingtoasters");
+    mm::ModuleFactory::registerType<mm::SpaceInvadersEffect>("SpaceInvadersEffect", "light/effects.md#spaceinvaders");
+    mm::ModuleFactory::registerType<mm::SpriteFountainEffect>("SpriteFountainEffect", "light/effects.md#spritefountain");
+    mm::ModuleFactory::registerType<mm::PongEffect>("PongEffect", "light/effects.md#pong");
     mm::ModuleFactory::registerType<mm::BallpitEffect>("BallpitEffect", "light/effects.md#ballpit");
     mm::ModuleFactory::registerType<mm::TruchetEffect>("TruchetEffect", "light/effects.md#truchet");
     mm::ModuleFactory::registerType<mm::VectorBallsEffect>("VectorBallsEffect", "light/effects.md#vectorballs");
@@ -266,6 +284,13 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::HueDriver>("HueDriver", "light/drivers.md#hue");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers.md#networksend");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers.md#preview");
+    // NDI is gated by CAPABILITY, not by firmware: the header compiles everywhere (its platform
+    // calls are declared on every target), and `hasNdi` decides whether the picker offers it. An
+    // `if constexpr` discarded branch must still PARSE, so the include above cannot be gated.
+    if constexpr (mm::platform::hasNdi)
+        mm::ModuleFactory::registerType<mm::NdiDriver>("NdiDriver", "light/drivers.md#ndi");
+    if constexpr (mm::platform::hasHls)
+        mm::ModuleFactory::registerType<mm::HlsDriver>("HlsDriver", "light/drivers.md#hls");
     // Same firmware gate as the include above.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::PanelCardDriver>("PanelCardDriver", "light/drivers.md#panelcard");
@@ -290,6 +315,8 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::Services>("Services", "core/services.md#services");
     mm::ModuleFactory::registerType<mm::AudioService>("AudioService", "core/services.md#audio");
     mm::ModuleFactory::registerType<mm::VideoService>("VideoService", "core/services.md#video");
+
+    mm::ModuleFactory::registerType<mm::OscModule>("OscModule", "core/services.md#osc");
     mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/system.md#i2c-scan");
     mm::ModuleFactory::registerType<mm::TasksModule>("TasksModule", "core/system.md#tasks");
     mm::ModuleFactory::registerType<mm::PinsModule>("PinsModule", "core/system.md#pins");
@@ -624,7 +651,10 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
         uint32_t now = mm::platform::millis();
         if (now - lastLog >= 1000) {
             lastLog = now;
-            if (scheduler.tickTimeUs() == 0) continue; // no measurement yet
+            // `goto`, not `continue`: the loop's pacing lives at its TAIL, so a continue here
+            // skips the yield and spins the core for this pass. Jumping to the pacing point keeps
+            // "skip the logging" from meaning "skip the sleep".
+            if (scheduler.tickTimeUs() == 0) goto paced; // no measurement yet
 
             // The KPI tick line is a plain stdout printf, not an ESP_LOG, so the platform log level
             // doesn't suppress it — we gate it here on the same level. At Info or above it prints; at
@@ -635,7 +665,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
             // ~49.7 days at the millis() wrap). Real ESP_LOGW/ESP_LOGE warnings and errors are a
             // separate stream that setLogLevel governs independently, so they still surface at Warn.
             const bool inBootWindow = !mmIpWindowClosed && (now - bootMillis < 60000);
-            if (systemModule->logLevel() < mm::platform::LogLevel::Info && !inBootWindow) continue;
+            if (systemModule->logLevel() < mm::platform::LogLevel::Info && !inBootWindow) goto paced;
 
             heap = mm::platform::freeHeap();
             std::printf("tick: %uus (FPS: %u)", static_cast<unsigned>(scheduler.tickTimeUs()),
@@ -697,7 +727,16 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
             std::fflush(stdout);
         }
 
+    paced:
+        // Pace the loop instead of spinning. yield() only offers the CPU to another RUNNABLE
+        // thread, so with nothing else to run it returns immediately and this loop burns a whole
+        // core: reported from a Linux bench as "slowly eating more cpu cycles ... maxed out one
+        // core". A sub-millisecond sleep parks the thread instead, which costs no frame rate (the
+        // render tick is tens to hundreds of microseconds and the scheduler paces itself) and lets
+        // the machine idle. yield() stays for the multicore split, whose frame boundary polls it
+        // while waiting on the encode worker and must NOT sleep there.
         mm::platform::yield();
+        mm::platform::pauseLoop();
     }
 
     std::printf("\nShutting down.\n");

@@ -3,6 +3,10 @@
 # cross-domain references travel through the @also list, not the directory.
 add_executable(mm_tests
     # core/
+    unit/core/unit_PartitionTables.cpp
+    unit/core/unit_SpscRing.cpp
+    unit/core/unit_AudioCapture.cpp
+    unit/core/unit_platform_audiofft.cpp
     unit/core/unit_Buffer.cpp
     unit/core/unit_ScratchBuffer.cpp
     unit/core/unit_ActiveInstance.cpp
@@ -20,6 +24,7 @@ add_executable(mm_tests
     unit/core/unit_MqttModule.cpp
     unit/core/unit_FileManagerModule.cpp
     unit/core/unit_Control_apply_absent_key.cpp
+    unit/core/unit_Control_int32.cpp
     unit/core/unit_Control_filepath.cpp
     unit/core/unit_Control_list.cpp
     unit/core/unit_DeviceIdentify.cpp
@@ -47,11 +52,14 @@ add_executable(mm_tests
     unit/core/unit_moonlive_spill.cpp
     unit/core/unit_moonlive_codegen_xtensa.cpp
     unit/core/unit_moonlive_codegen_riscv.cpp
+    unit/core/unit_moonlive_codegen_x86_64.cpp
+    unit/core/unit_moonlive_codegen_arm64.cpp
     unit/core/unit_MoonModule.cpp
     unit/core/unit_MoonModule_control_change_gate.cpp
     unit/core/unit_MoonModule_lifecycle.cpp
     unit/core/unit_MoonModule_movechild.cpp
     unit/core/unit_MoonModule_replacechild.cpp
+    unit/core/unit_MoonBaseContract.cpp
     unit/core/unit_NetworkModule.cpp
     unit/core/unit_NetworkModule_ethernet.cpp
     unit/core/unit_Sort.cpp
@@ -69,6 +77,9 @@ add_executable(mm_tests
     unit/light/unit_AudioBands.cpp
     unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp
     unit/light/unit_NetworkSendDriver_packet.cpp
+    unit/light/unit_NdiDriver.cpp
+    unit/light/unit_HlsDriver.cpp
+    unit/light/unit_MpegTs.cpp
     unit/light/unit_PanelCardDriver.cpp
     unit/light/unit_PanelCardDriver_packet.cpp
     unit/light/unit_WledAudioSyncPacket.cpp
@@ -81,7 +92,9 @@ add_executable(mm_tests
     unit/light/unit_Coord3D.cpp
     unit/light/unit_effects_render.cpp
     unit/light/unit_Effects_gridsweep.cpp
+    unit/core/unit_OscPacket.cpp
     unit/light/unit_Effects_golden.cpp
+    unit/light/unit_SpritePopulation.cpp
     unit/light/unit_Canvas.cpp
     unit/light/unit_Splat.cpp
     unit/light/unit_Sdf.cpp
@@ -94,6 +107,7 @@ add_executable(mm_tests
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
+    unit/light/unit_MovingHeadEffect.cpp
     unit/light/unit_Drivers_container.cpp
     unit/light/unit_Drivers_rendersplit.cpp
     unit/light/unit_LightPresetsModule.cpp
@@ -116,8 +130,11 @@ add_executable(mm_tests
     unit/light/unit_Layer_zero_grid.cpp
     unit/light/unit_Effects_container.cpp
     unit/light/unit_MoonLiveModifier.cpp
+    unit/light/unit_MoonLiveParticles.cpp
     unit/light/unit_MoonLiveLayout.cpp
     unit/light/unit_MoonLiveScripts.cpp
+    unit/light/unit_MoonLiveScriptResolve.cpp
+    unit/light/unit_MoonLiveMotion.cpp
     unit/light/unit_Layouts_container.cpp
     unit/light/unit_Layouts_mutation.cpp
     unit/light/unit_Layouts_toggle_cycle.cpp
@@ -174,6 +191,12 @@ endif()
 add_dependencies(mm_tests effect_sweep_gen)
 
 add_test(NAME unit_tests COMMAND mm_tests)
+
+# Pin the desktop filesystem root into the build tree. ctest runs from the build directory, which
+# is not a repo checkout, so the default would resolve to the OS per-user data directory and any
+# test touching the default root would write into the developer's real settings.
+set_tests_properties(unit_tests PROPERTIES
+    ENVIRONMENT "MM_DATA_DIR=${CMAKE_CURRENT_BINARY_DIR}/fs-root")
 
 # Scenario runner (replays scenario JSON files in-process)
 add_executable(mm_scenarios scenario_runner.cpp)

@@ -22,10 +22,10 @@ public:
     static constexpr uint8_t MAX_BALLS = 8;
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 1, 255);
-        controls_.addUint8("radius", radius, 4, 255);
-        controls_.addUint8("count", count, 1, MAX_BALLS);
-        controls_.addUint8("hue_shift", hue_shift, 0, 255);
+        controls_.addControl("bpm", bpm, 1, 255);
+        controls_.addControl("radius", radius, 4, 255);
+        controls_.addControl("count", count, 1, MAX_BALLS);
+        controls_.addControl("hue_shift", hue_shift, 0, 255);
     }
 
     // Class scope, not function-local: -Wfunction-effects flags ANY static local in a

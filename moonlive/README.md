@@ -13,24 +13,56 @@ A class may also define functions of its own and **call them**, including callin
 
 ```
 class CrosshairEffect {
-  uint8_t bpm = 30;
+  byte bpm = 30;
 
-  defineControls() { addUint8("bpm", bpm, 1, 240); }
+  void defineControls() { addControl("bpm", bpm, 1, 240); }
 
-  column() { for (y = 0; y < height; y = y + 1) { setRGB(y * width + scale(beat(bpm, t), width), 255, 40, 0); } }
-  tick()   { fill(0, 0, 0); column(); }
+  void column() { for (int y = 0; y < height; y = y + 1) { setRGB(y * width + scale(beat(bpm, t), width), 255, 40, 0); } }
+  void tick()   { fill(0, 0, 0); column(); }
 }
 ```
 
 These are real calls, not pasted-in text: the callee gets its own frame when it runs, which is what
-lets one helper call another and lets a function recurse. A function takes no arguments and returns
-nothing yet, so a helper does a whole job rather than computing a value. `effects/crosshair.mle` is
-the worked example.
+lets one helper call another and lets a function recurse. A function takes no arguments yet, so a
+helper is parameterized through the class's members. `effects/crosshair.mle` is the worked example.
 
-**A declaration is a MEMBER; `defineControls()` decides what the UI shows.** `uint8_t bpm = 30;` is
+**A script is C++, and a compiler checks that.** Every shipped script compiles under
+`c++ -std=c++20 -fsyntax-only` (`test/python/test_scripts_are_cpp.py`), so the language cannot drift
+into a dialect one feature at a time: an editor highlights a script correctly, a reader brings their
+C++ intuition, and a script stands a good chance in any engine that speaks the same subset.
+
+One shape difference is deliberate, and the test bridges exactly that one: a class here needs no
+`public:` and no trailing semicolon.
+
+Anything else a compiler rejects is a divergence, and the test is where it surfaces.
+
+**Every function declares what it returns**, the way the compiled module a script stands in for
+does: `void tick()` beside `void tick() override`. Three types, which is all the language has values
+for:
+
+| Type | Means | Example |
+|---|---|---|
+| `void` | it acts, it answers nothing | `void tick() { … }` |
+| `int` | a number: any whole value, and a `fixed` one | `int dimensions() { return 2; }` |
+| `string` | a literal | `string tags() { return "🌀"; }` |
+
+`return` leaves a function, with a value or without one. Inside `tick()` a bare `return;` is an
+early exit, which is what a guard wants:
+
+```
+void tick() {
+  if (width < 2) { return; }        // nothing to draw on a single column
+  fill(0, 0, 0);
+}
+```
+
+`string` names what comes back rather than introducing a string type: a script returns a literal,
+and building, joining or comparing text is out of scope.
+
+**A declaration is a MEMBER; `defineControls()` decides what the UI shows.** `byte bpm = 30;` is
 state the script owns: visible in every function, surviving every tick. Naming it in
-`defineControls()` with `addUint8("bpm", bpm, 1, 240)` also puts it on the UI as a slider, which is
-the same call a compiled module makes. A member no `addUint8` names stays private to the script,
+`defineControls()` with `addControl("bpm", bpm, 1, 240)` also puts it on the UI as a slider, which is
+the same call a compiled module makes. A member no `addControl` names stays private to the script,
 which is how a stateful effect holds a value the user should not see.
 
 The default comes from the declaration, the range from the call, and the quoted name is the UI
@@ -52,14 +84,18 @@ if (heat[i] > 40) { setRGB(i, 255, 90, 0); }
 else { setRGB(i, 0, 0, 0); }
 ```
 
-**Members can be wider than a byte, and can be arrays.** `uint8_t` spans 0..255; `uint16_t` spans
-0..65535, which is what a position on a wall wider than 255 needs. An array is declared with a
-literal length and starts at zero:
+**Members can be wider than a byte, and can be arrays.** `byte` spans 0..255; `int` spans
+-2,147,483,648..2,147,483,647, which is what a position on a wall wider than 255 needs. An array is
+declared with a literal length and starts at zero:
 
 ```c
-uint16_t phase = 900;      // a value a byte cannot hold
-uint8_t  heat[16];         // sixteen elements, all zero to begin with
+int phase = 900;      // a value a byte cannot hold
+byte  heat[16];         // sixteen elements, all zero to begin with
 ```
+
+**Every variable is declared, including a loop's counter.** A member states its type, an assignment
+to a name that was never declared is refused, and a `for` writes `for (int i = 0; ...)`. One rule
+with no exception, and the same line C++ would take.
 
 An index is an arbitrary expression (`heat[i * 2 + 1]`), and an index outside the array is
 **clamped to the last element** rather than refused or allowed through: a script computes indices
@@ -82,6 +118,34 @@ task has a fixed stack, so the alternative to a limit is a device that resets mi
 see if you hit it is the picture being wrong where the recursion stopped, on a device that keeps
 running. Nothing is reported; the exact depth is `kMaxCallDepth`.
 
+**A script says what it is: `dimensions()` and `tags()`.** Both optional, both named after the
+member functions a compiled module declares (`Dim dimensions() const override`,
+`const char* tags() const override`), and both read once when the script compiles.
+
+```
+class RainEffect {
+  int dimensions() { return 2; }        // an x/y picture
+  string tags() { return "✨"; }         // shown on the card and in the picker
+
+  void tick() { fill(0, 0, 40); }
+}
+```
+
+`dimensions()` returns 1, 2 or 3, and it decides how the layer EXTRUDES the script. A script that
+returns 1 paints the x=0 column and the framework fans it across the width; one that returns 2
+paints the z=0 slice and the framework copies it through the depth. So a script fills a rig it never
+indexed, and a wrong answer is visible: declare 1 and paint a picture, and only the first column
+survives. A script that stays silent is treated as 2, which is what every script rendered as before
+this existed.
+
+`tags()` returns the emoji shown beside the script, so a row in the picker reads like a compiled
+effect's. The vocabulary is shared with the compiled modules: 📊 audio-reactive, ✨ particles,
+🎯 aims moving heads. A script that declares none shows 📝, the mark of a scripted effect.
+
+Both reach the picker before a factory script is downloaded, because the build extracts them from
+the source into the catalog. That copy is for display only: once a script is on the device, the
+compiled script is what decides.
+
 **A script's ROLE is its file extension**: `.mle` an effect, `.mll` a layout, `.mlm` a modifier. One
 language, three names, the way GLSL uses `.vert`/`.frag` for one shading language. It is what a card
 filters its picker on, so an effect card offers effects.
@@ -96,7 +160,7 @@ class defining several is still legal.
 | folder | run by | a script writes |
 |---|---|---|
 | `layouts/` | [MoonLiveLayout](../docs/moonmodules/light/MoonLiveLayout.md) | where the lights physically are — `addLight(x, y, z)` |
-| `effects/` | [MoonLiveEffect](../docs/moonmodules/light/MoonLiveEffect.md) | a colour per light: `setRGB(index, r, g, b)`, or a whole shape at once with `line(x1, y1, x2, y2, r, g, b)` |
+| `effects/` | [MoonLiveEffect](../docs/moonmodules/light/MoonLiveEffect.md) | a color per light: `setRGB(index, r, g, b)`, or a whole shape at once with `line(x1, y1, x2, y2, r, g, b)` |
 | `modifiers/` | [MoonLiveModifier](../docs/moonmodules/light/MoonLiveModifier.md) | where one light lands: `setXYZ(xPos, yPos, zPos)` |
 
 Each module ships one of these as its default, so the folder doubles as the reference for what a

@@ -1,0 +1,36 @@
+// Ballpit: balls dropped into a box, falling on each other and piling up.
+
+class BallpitEffect {
+  byte balls = 24;
+  byte size = 2;
+  byte bouncy = 180;
+
+  bool last = false;              // was a ball emitted on the last beat
+
+  int dimensions() { return 2; }
+
+  string tags() { return "💫✨"; }
+
+  void defineControls() {
+    pool(64);
+    addControl("balls", balls, 4, 60);              // how many balls share the pit
+    addControl("size", size, 1, 5);                 // how big each ball is
+    addControl("bouncy", bouncy, 60, 255);          // how much speed a bounce keeps
+  }
+
+  void tick() {
+    fill(0, 0, 0);
+
+    if (scale(beat(600, t), 2) != last) {
+      last = scale(beat(600, t), 2);
+      emit(random16(width), 0, 16384, 30, 1, balls * 5, scale(beat(5, t), 256));
+    }
+
+    gravity(30);
+    collide(size);      // before step(), or a shove can push a ball through a wall
+    step();
+    bounce(bouncy);
+    age(1);
+    render(balls * 5);
+  }
+}

@@ -40,21 +40,21 @@ public:
     uint8_t barLevel = 12;        // a channel at or below this counts as bar; ~5%, for compression noise
 
     void defineControls() override {
-        controls_.addUint8("brightness", brightness, 0, 255);
-        controls_.addUint8("saturation", saturation, 0, 200);
-        controls_.addUint8("smoothing", smoothing, 0, 255);
+        controls_.addControl("brightness", brightness, 0, 255);
+        controls_.addControl("saturation", saturation, 0, 200);
+        controls_.addControl("smoothing", smoothing, 0, 255);
         // A cut is a real jump, and smoothing through it reads as the lights lagging the picture.
-        controls_.addUint8("snapAbove", snapAbove, 0, 255);
+        controls_.addControl("snapAbove", snapAbove, 0, 255);
         controls_.setHidden(controls_.count() - 1, smoothing == 0);
         // Its own control because smoothing lags the COLOUR and this ramps the LEVEL.
-        controls_.addUint16("fadeInMs", fadeInMs, 0, 10000);
-        controls_.addUint8("edgeDepth", edgeDepth, 0, 50); // Hyperion samples ~8%
+        controls_.addControl("fadeInMs", fadeInMs, 0, 10000);
+        controls_.addControl("edgeDepth", edgeDepth, 0, 50); // Hyperion samples ~8%
         // - a letterboxed film puts bars where the top and bottom lights look, so they go dark
         // - edgeDepth cannot help: it widens a zone from the edge, so the bar stays inside it
         // - this moves the zones instead, mapping the lights across the picture it finds
-        controls_.addBool("detectBlackBars", detectBlackBars);
+        controls_.addControl("detectBlackBars", detectBlackBars);
         // Raise it if bars are missed, lower it if dark scenes get cropped; the doc page has why.
-        controls_.addUint8("barLevel", barLevel, 0, 64);
+        controls_.addControl("barLevel", barLevel, 0, 64);
         controls_.setHidden(controls_.count() - 1, !detectBlackBars);
     }
 

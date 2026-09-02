@@ -223,11 +223,11 @@ The render loop (`Scheduler::tick` and everything it calls: every effect, modifi
 
 ## Platform abstraction
 
-Only abstract what you actually need. Currently:
+Only abstract what you actually need:
 
 - **Time**: `millis()`, `micros()`. Monotonic, microsecond resolution. (`esp_timer` / `std::chrono`)
 - **Memory**: `alloc(size)`, `free(ptr)`. Prefers PSRAM on ESP32, falls back to regular heap. `freeHeap()`, `maxAllocBlock()` for diagnostics. (`heap_caps_malloc` / `std::malloc`)
-- **Executable memory**: `allocExec(size)` / `freeExec(ptr, size)` allocate memory the CPU can *fetch and execute* from, and `writeExec(dst, src, len)` copies emitted machine code into it safely. Used by the MoonLive live-script engine (below) to place the native code it compiles. All the W^X / instruction-cache quirks live behind these three functions: ESP32 IRAM via `MALLOC_CAP_EXEC` with 32-bit-aligned stores plus a cache sync so the core fetches fresh code; an `mmap` `PROT_EXEC` page on desktop (macOS-arm64 `MAP_JIT` + a write-protect toggle). (`heap_caps_malloc(MALLOC_CAP_EXEC)` / `mmap`)
+- **Executable memory**: `allocExec(size)` / `freeExec(ptr, size)` allocate memory the CPU can *fetch and execute* from, and `writeExec(dst, src, len)` copies emitted machine code into it safely. Used by the MoonLive live-script engine (below) to place the native code it compiles. All the W^X / instruction-cache quirks live behind these three functions: ESP32 IRAM via `MALLOC_CAP_EXEC` with 32-bit-aligned stores plus a cache sync so the core fetches fresh code; an `mmap` `PROT_EXEC` page on POSIX desktops (macOS-arm64 `MAP_JIT` + a write-protect toggle), a `VirtualAlloc` `PAGE_EXECUTE_READWRITE` page plus `FlushInstructionCache` on Windows. (`heap_caps_malloc(MALLOC_CAP_EXEC)` / `mmap` / `VirtualAlloc`)
 - **Networking**: `UdpSocket` for ArtNet send. `TcpConnection` / `TcpServer` for HTTP + WebSocket; `TcpConnection::writeSome` is a non-blocking partial write (returns bytes written, 0 = would-block) so a backpressured browser can't stall the render loop. (lwIP sockets / BSD sockets)
 - **Scheduling**: `yield()` (cooperative yield to OS/RTOS), `delayMs(ms)` (blocking sleep, off-path only), `delayUs(us)` (microsecond busy-wait, only for sub-millisecond hardware timing a driver owns — e.g. the WS2812 ≥300 µs inter-frame latch in `RmtLedDriver`; never for general pacing, which uses the non-blocking `millis()` gate), `reboot()`. (`vTaskDelay` / `esp_rom_delay_us` / `esp_restart` on ESP32; `std::this_thread::sleep_for` / `std::exit` on desktop)
 - **Platform config**: `platform_config.h` per platform: compile-time constants like `hasPsram` and `hasWiFi`. Each platform provides its own version; `types.h` includes it without `#ifdef`. Core code branches on these via `if constexpr` (e.g. NetworkModule drops its WiFi cascade when `hasWiFi` is false), so the dead branch is removed from the binary with no `#ifdef` outside `src/platform/`.
@@ -259,9 +259,45 @@ Three distinct things, kept distinct in the vocabulary:
 
 **Firmware** is the compiled binary: chip target plus which radios/peripherals/sdkconfig fragments are included. Today's variants: `esp32` (classic, WiFi **and** RMII Ethernet in one binary — Ethernet comes up only when a PHY is present, pins/PHY per deviceModel), `esp32-eth` (classic, Ethernet only, WiFi excluded), `esp32-16mb` (classic with 16 MB flash, WiFi + Ethernet), `esp32s3-n16r8` / `esp32s3-n8r8` (S3 with WiFi + W5500 SPI Ethernet), `esp32p4rev1-eth` (Waveshare ESP32-P4-NANO, Ethernet only), `esp32p4rev1-eth-wifi` (the same P4 hardware with WiFi via its on-board ESP32-C6 over esp_hosted), `esp32p4rev3-eth` / `esp32p4rev3-eth-wifi` (the same two images built for P4 **v3.x** silicon, which is not binary-compatible with rev <3.0 — untested, no v3 board on the bench). Each chip's firmware carries the Ethernet *driver(s)* it can host (RMII EMAC for classic/P4, W5500 SPI for S3); which PHY/pins a deviceModel uses is runtime config. Selected by `build_esp32.py --firmware <key>`, reported by `SystemModule.firmware`, used as the contract target key in scenarios.
 
-**deviceModel** is the physical hardware: chip + PCB + on-board peripherals (PHY, USB-serial, PSRAM, antenna), identified by its product name. Examples: `Olimex ESP32-Gateway Rev G`, `LOLIN D32`, `Generic ESP32 Dev`. A unit cannot identify its own deviceModel (no readable PCB ID on classic ESP32), so MoonDeck deduces it from the firmware where unambiguous (`esp32-eth*` ⇒ Olimex) and otherwise lets the user pick. It is stored on the unit as SystemModule's `deviceModel` Text control (display-only in the UI; HTTP `/api/control` writes still apply). MoonDeck mirrors the picked / deduced value to the unit via `POST /api/control` after each discover and after every dropdown change. The catalog of valid deviceModels lives at [web-installer/deviceModels.json](../web-installer/deviceModels.json), shared between MoonDeck and the web installer: MoonDeck reads it for its dropdown and HTTP push (plain REST on the LAN); the web installer reads it for its picker and pushes the whole entry — deviceModel plus every module/control — over serial during provisioning as REST ops (**"Improv = REST over serial"**, the `APPLY_OP` vendor RPC; see [ImprovProvisioningModule.md](moonmodules/core/moxygen/ImprovProvisioningModule.md)). Pushing over serial sidesteps the mixed-content block that stops an HTTPS installer page from POSTing to an `http://` device; an already-running device is re-configured via MoonDeck on the LAN.
+**deviceModel** is the physical hardware: chip + PCB + on-board peripherals (PHY, USB-serial, PSRAM, antenna), identified by its product name. Examples: `Olimex ESP32-Gateway Rev G`, `LOLIN D32`, `Generic ESP32 Dev`. A unit cannot identify its own deviceModel (no readable PCB ID on classic ESP32), so MoonDeck deduces it from the firmware where unambiguous (`esp32-eth*` ⇒ Olimex) and otherwise lets the user pick. It is stored on the unit as SystemModule's `deviceModel` Text control (display-only in the UI; HTTP `/api/control` writes still apply). MoonDeck mirrors the picked / deduced value to the unit via `POST /api/control` after each discover and after every dropdown change. The catalog of valid deviceModels lives at [mooninstaller/deviceModels.json](../mooninstaller/deviceModels.json), shared between MoonDeck and the web installer: MoonDeck reads it for its dropdown and HTTP push (plain REST on the LAN); the web installer reads it for its picker and pushes the whole entry — deviceModel plus every module/control — over serial during provisioning as REST ops (**"Improv = REST over serial"**, the `APPLY_OP` vendor RPC; see [ImprovProvisioningModule.md](moonmodules/core/moxygen/ImprovProvisioningModule.md)). Pushing over serial sidesteps the mixed-content block that stops an HTTPS installer page from POSTing to an `http://` device; an already-running device is re-configured via MoonDeck on the LAN.
 
 A deviceModel can run multiple firmwares (the Olimex Gateway runs both `esp32-eth` and the default `esp32`); a firmware can run on multiple deviceModels (`esp32` runs on any classic ESP32 dev kit). The `esp32s3-n16r8` firmware is S3-only and does not run on the Olimex Gateway or other classic-ESP32 hardware. The codebase reserves "deviceModel" exclusively for the physical product and "firmware" exclusively for the compiled binary.
+
+### MoonBase: the second boot image
+
+Dual-OTA spends half the app area on a second copy of the firmware that is idle except during an
+update. **MoonBase** replaces it: a small, rarely-changing image in the partition table's
+`factory` slot that owns the device while the application is being replaced, since a board
+cannot rewrite the partition it is executing from. One app slot then suffices, and the flash the
+second slot held goes elsewhere.
+
+A 4 MB board has no choice, having room for one application and not two; its app slot grows by a
+third in exchange. On a **16 MB** board the choice is deliberate rather than forced, and the
+freed 4 MB goes to the filesystem (11 MB rather than 7). Which boards use MoonBase is a
+per-variant decision recorded in `moondeck/build/build_esp32.py`, not a property of flash size:
+today the 4 MB classic, the S3-Zero and `esp32-16mb` do, and it may become the default
+everywhere.
+
+The update cycle: the app stages the install URL in NVS (or nothing, for a browser upload),
+points the bootloader at MoonBase and reboots; MoonBase joins the network with the app's stored
+credentials (AP fallback at 4.3.2.1), installs into the single app slot, from the staged URL
+unattended, or from an upload, and reboots back. The UI covers the whole cycle with one
+"updating firmware" overlay, telling the two images apart via `GET /moonbase` (MoonBase answers
+with its live status; the app 404s it). Pointing the bootloader at a factory partition *erases*
+otadata, so a power cut anywhere mid-install boots MoonBase and the user retries over the
+network, a stronger power-fail story than dual-OTA's. A failed install deliberately stays in
+MoonBase, visibly, rather than silently reverting to the old app; the way back is its explicit
+"Boot the app" action, which only boots an image that validates.
+
+MoonBase is a standalone ESP-IDF project (`moonbase/`, ~750 KB against an 896 KB slot) sharing
+no sources with the app, the deliberate trade for an image that must stay small and, once
+working, hardly change. `moondeck/build/build_esp32.py` builds it alongside every variant that opts in
+and owns the flash-layout helpers every consumer uses (serial flash, mooninstaller manifests,
+release preview, the QEMU image): IDF's own `flasher_args.json` knows nothing of the two-image
+scheme and stages the app at the factory offset, so each of those paths applies the same
+correction from one place. Prior art: Tasmota's safeboot scheme and
+[MycilaSafeBoot](https://github.com/mathieucarbou/MycilaSafeBoot) proved the single-slot +
+recovery-image pattern; MoonBase is our from-scratch, minimal take on it.
 
 ### Config provenance: MCU → deviceModel
 
@@ -274,7 +310,7 @@ So the Ethernet pins live at **both** levels, and that's not a contradiction: th
 
 **The deviceModel is one level — there is no separate per-unit provenance level.** Whether a control is PCB-fixed or user-wired is not a taxonomy the code tracks; it falls out of what the catalog entry lists. A bare dev kit lists few controls (the user wires the rest, so those stay unset); a finished product lists more (its wiring is fixed). Same kind of entry, different completeness, no `kind:` flag.
 
-**The governing rule — "default only where the hardware actually fixes it"** — is the [Defaults rule](coding-standards.md#defaults) applied to pin provenance: an entry defaults a control by *including* it and leaves a user-wired control unset by *omitting* it, so the data carries the rule with no level-tagging. It covers **settings, not just pins**: `txPowerSetting` is set per-entry because whether a rig sustains full-power WiFi TX is a brownout property of the assembly and its power supply, not the chip (the catalog pins `Network.txPowerSetting: 8` for the ESP32-S3 N16R8 Dev, which browns out at full power on typical USB). The catalog is [`web-installer/deviceModels.json`](../web-installer/deviceModels.json) (schema in the [installer README](../web-installer/README.md)).
+**The governing rule — "default only where the hardware actually fixes it"** — is the [Defaults rule](coding-standards.md#defaults) applied to pin provenance: an entry defaults a control by *including* it and leaves a user-wired control unset by *omitting* it, so the data carries the rule with no level-tagging. It covers **settings, not just pins**: `txPowerSetting` is set per-entry because whether a rig sustains full-power WiFi TX is a brownout property of the assembly and its power supply, not the chip (the catalog pins `Network.txPowerSetting: 8` for the ESP32-S3 N16R8 Dev, which browns out at full power on typical USB). The catalog is [`mooninstaller/deviceModels.json`](../mooninstaller/deviceModels.json) (schema in the [installer README](../mooninstaller/README.md)).
 
 ## Services
 
@@ -293,7 +329,7 @@ Services are **user-add/deletable children of the `Services` container** — the
 Two domain-neutral services let several controllers act as one installation. They're core because nothing about them is light-specific; any domain spanning multiple devices uses the same two.
 
 - **Discovery**: devices find each other via mDNS. `NetworkModule` advertises each device today; this is live.
-- **Clock sync**: one leader broadcasts its elapsed time (millis); followers compute their offset, targeting sub-millisecond accuracy. A shared monotonic clock is the foundation any cross-device coordination builds on. The committed design; not yet wired.
+- **Clock sync**: a shared monotonic clock is the foundation any cross-device coordination builds on. The design is filed in [backlog-core](backlog/backlog-core.md).
 
 What the synced clock is *for* is a domain question; the light domain's use of it (synced animation across a wall) is in [§ Multi-device sync](#multi-device-sync).
 
@@ -301,7 +337,7 @@ What the synced clock is *for* is a domain question; the light domain's use of i
 
 A device has **one** network name, `deviceName`, and every name the device presents on the network is that exact string: the mDNS hostname (`<deviceName>.local`), the SoftAP SSID (the captive-portal network shown when unprovisioned), and the DHCP hostname (what the router's client list shows). They are not three settings that happen to match — there is a single source and the others *read* it, so a device shows one identity everywhere and the three can never drift apart.
 
-- **Sole owner: `SystemModule`.** `deviceName` is a control on `SystemModule` (default `MM-XXXX` from the MAC). It is the only place the name is stored or edited. Every consumer reads `SystemModule::deviceName()`; no other module holds a name of its own. `NetworkModule` reads it for the mDNS / AP / DHCP names; `main.cpp` reads it for the `MM_DEVICE=<deviceName>.local` boot-serial token the [web installer](../web-installer/README.md) uses to offer a clickable `.local` link. So to know what name a device advertises, you read one accessor — you never inspect NetworkModule or the platform to discover it.
+- **Sole owner: `SystemModule`.** `deviceName` is a control on `SystemModule` (default `MM-XXXX` from the MAC). It is the only place the name is stored or edited. Every consumer reads `SystemModule::deviceName()`; no other module holds a name of its own. `NetworkModule` reads it for the mDNS / AP / DHCP names; `main.cpp` reads it for the `MM_DEVICE=<deviceName>.local` boot-serial token the [web installer](../mooninstaller/README.md) uses to offer a clickable `.local` link. So to know what name a device advertises, you read one accessor — you never inspect NetworkModule or the platform to discover it.
 - **Always a valid hostname.** Because all three uses are DNS/SSID names, `deviceName` must satisfy the RFC-1123 label rules (`[A-Za-z0-9-]`, no spaces, no leading/trailing hyphen). `SystemModule` enforces this at the source: it runs `mm::sanitizeHostname()` (in `core/Control.h`) on the value in `setup()` and every `tick1s()`, coercing whatever the user typed or persistence restored (`"My Living Room!"` → `"My-Living-Room"`) and falling back to the MAC-derived `MM-XXXX` if the result is empty. Sanitising *at the owner* means every consumer is correct for free — no per-consumer validation, no chance a raw name reaches mDNS. (`unit_sanitizeHostname` pins the rule.)
 - **Follows a live rename.** Renaming the device re-advertises immediately, no reboot — the [live-reconfiguration](#live-reconfiguration-every-change-applies-without-a-reboot) rule applied to identity. `NetworkModule::syncMdns()` (called each `tick1s()`) compares the current name to the last-registered one and re-registers mDNS when it changed, so `<new-name>.local` resolves within a tick.
 
@@ -342,7 +378,11 @@ Modules in the light pipeline can be added, replaced, or removed dynamically at 
 - *Shared-struct (pull):* `Drivers` hands every child driver a `Buffer*` (source) plus a `Correction*` (shared brightness/reorder/white), and `Layer` exposes its pixel buffer to `Drivers` directly on the identity-mapping fast path: each consumer holds a `const`-pointer and reads it per frame. The pointers are **(re)bound on every rebuild**, not just at boot: `Drivers::prepare()` re-resolves the active `Layer` (`Effects::activeLayer()`) and calls `passBufferToDrivers()`, which re-runs `setSourceBuffer()`/`setLayer()` on each child (clearing them to `nullptr` when there is no active Layer). So a held pointer is valid only until the next rebuild — which is exactly why the consumers re-read it each frame and tolerate a null (the [robustness rule](#robustness)): a Layer add/delete/replace re-binds or clears it live, no dangling reference.
 - *Push to a core sink:* `PreviewDriver` owns the preview wire format (a one-time coordinate table + per-frame RGB point list) and pushes the bytes to a `BinaryBroadcaster` (the core HTTP server). The server broadcasts them over WebSocket without knowing they're a preview: the format and the light types stay entirely in the driver. See [PreviewDriver](moonmodules/light/moxygen/PreviewDriver.md).
 
-**Graceful degradation under transport backpressure.** The preview is the transport-side sibling of the memory-side [§ Degradation cascade](#degradation-cascade): when the browser can't keep up with a full-resolution frame (128² = ~49 KB), the producer sheds quality rather than stall the loop, in video-streaming order, frame rate then resolution. The frame streams from the driver buffer with no intermediate copy, a resumable memory-adaptive chunk per tick, and the next frame starts only once the previous drained, so the effective frame rate self-limits to what the link sustains. Only when a single frame can't drain promptly does it downsample via a spatial lattice (the adaptive-bitrate idea behind HLS/DASH, on a binary WebSocket). Each delivered frame is whole (a WebSocket message is atomic), the render loop is charged a bounded slice per tick, and a client blocked past the spin budget is closed and reconnects (a blip, not a freeze). The mechanism is payload-agnostic and lives in [PreviewDriver](moonmodules/light/moxygen/PreviewDriver.md) + `HttpServerModule`, so other bulky streams can ride the same transport.
+**Two WebSocket channels, by traffic class.** `/ws` carries the control plane (JSON state and patches); `/wsp` carries lossy binary streams (the preview). They are separate TCP connections on purpose: preview frames are large and droppable while state messages are small and latency-sensitive, and sharing one connection makes the small ones queue behind the big ones, head-of-line blocking, which surfaced as a flickering connection indicator and an unresponsive UI on large layouts. Separate connections is the standard remedy for that mixed-criticality case.
+
+`BinaryBroadcaster` stays domain-neutral through this: the core still only takes bytes and broadcasts them, with no knowledge that they are a preview. One query serves the producer, `subscriberCount()` for the status line; the work gate is the pull model itself (no standing request, no work). Inbound client frames are unmasked by the transport (framing is its job) and the payload bytes are handed opaquely to the registered `ClientMessageSink`; only the producer knows a `[0x51][stride][fps]` standing request or a `[0x52][stride]` table request from any other bytes. The two channels have separate caps (`MAX_WS_CLIENTS` 8, `MAX_PREVIEW_CLIENTS` 4) because both draw on one `CONFIG_LWIP_MAX_SOCKETS` budget of 16, shared with HTTP, mDNS, Art-Net, MQTT and OTA.
+
+**Graceful degradation under transport backpressure.** The preview is a PULL channel: a client posts a standing `[0x51][stride][fps]` request plus one-shot `[0x52]` table requests, and the device serves the most conservative standing request, building nothing at all when none stands. Every `/wsp` message rides ONE resumable per-client-cursor drain: each socket takes bytes at its own TCP pace on the transport tick, a frame offered while the slot still drains is dropped at the source, and a client is closed only on a real error or FIN, never for slowness. Congestion therefore costs preview frames, never LED time and never a disconnect. Each frame header reports the drops since the last delivered one, and the browser's controller (one pure function in `preview-adapt.js`, unit-tested) reads only that signal: persistent drops coarsen the lattice, drop-free windows refine it a rung at a time, and a refine that brings drops back is taken back with exponentially growing patience (the abandon-fast retry-slowly rule of adaptive-bitrate players). Geometry is cached client-side per (epoch, stride), so a stride change to a known rung costs no table traffic. There is no display cap: the bounds are device memory and the index type, and everything else degrades where it actually binds. The channel machinery is core and domain-neutral (opaque request bytes forwarded to a registered producer sink); `PreviewDriver` is one producer, so other bulky streams can ride the same transport.
 
 **Naming convention.** Capital `Layouts`, `Effects`, `Drivers` are class names (always capitalised when referring to the class). Lowercase "layouts", "layers", "drivers" is the English plural, used freely when context makes it clear. Singular "layout", "layer", "driver" is an individual instance.
 
@@ -454,7 +494,13 @@ See NoiseEffect / MetaballsEffect for the canonical pattern. Animation speed mus
 
 **A faster device renders the same motion more smoothly, not more motion.** The tempting fix — quantise to a fixed 60 Hz and skip the frames in between — is wrong here, because it discards exactly the smoothness the extra frames were rendered for. Instead scale the work by the fraction of a reference frame that actually elapsed, so a device rendering ten times as fast takes ten steps a tenth the size: the same trajectory at ten times the resolution. `particles::FrameTime` is the shared implementation (8.8 fixed point, 256 = one reference frame, whose rate is the constructor's `referenceHz` — 60 by default). It carries the undivided numerator and divides late, for the same reason `BeatPhase` does: one unit is a fraction of a millisecond, so a remainder held in whole milliseconds cannot represent it and the truncated time — which differs by render rate — becomes a framerate dependency of its own.
 
-The check is mechanical: **run the effect at two very different framerates over the same span of simulated time and compare.** If the result differs, something is counting frames.
+The check is mechanical: **run the effect at two very different framerates over the same span of simulated time and compare.** If the result differs, something is counting frames. `unit_Effects_framerate.cpp` runs exactly that sweep over every registered effect at 60 and 1200 fps.
+
+**It applies to modifiers too, and to anything else on the tick path.** A modifier that scrolls, rotates or animates its fold is state advanced per call, so the same rule holds: a scroll driven by a per-tick increment moves at the render rate. Anything whose output changes between two ticks with identical inputs is animating and owes elapsed time; a modifier that only folds coordinates from its controls is a pure function and owes nothing.
+
+**Where the machinery lives, and why it is not in the effects.** A trail fade is the case with the most callers, so it is the worked example: `Layer::fadeToBlackBy` takes a RATE per reference frame and the Layer scales it once, for every effect at once. An effect carrying that conversion itself drifts: a version that carries the fraction and a version that floors to 1 apply different decay at the same rate, which is the duplication the one-home rule exists to prevent. Every amount is a rate, with no exception: an effect that wants the buffer blank NOW calls `draw::fill`, since a clear is not a fast fade. Giving 255 a second meaning put a discontinuity in kind at the top of six user-facing fade sliders.
+
+Two traps worth naming. A quantity already gated by wallclock must not ALSO be scaled: an effect that requests its fade only on stepping frames has the Layer scale each request again, throttling it twice. And a COMPOUNDING spatial operation is not a rate: `draw::blur` applied twice at half strength is not one blur at full strength, so the carry pattern that fits a fade does not transfer to it.
 
 **An effect renders a pattern; it does not transform geometry.** When migrating or adding an effect, strip out anything that is really a *modifier* — mirroring, tiling, rotation, scrolling/offset, a kaleidoscope fold, masking, any remap of *where* pixels land — and add it as a separate [modifier](#modifiers) instead. WLED (and other sources we port from) routinely fold these into the effect's own loop (a "mirror" checkbox, a "2D" rotation, a built-in pinwheel), because WLED has no modifier concept; we do. Keeping them out of the effect is what lets any effect compose with any modifier (the same RotateModifier rotates Fire, Noise, or a network-received frame) instead of every effect re-implementing its own half-baked mirror. The test: an effect's `tick()` should only *write colors into the logical buffer for its own coordinates*; if it's reading or rewriting positions to move/fold/duplicate the image, that behaviour belongs in a modifier. (This is the light-domain face of *Complexity lives in core; domain modules stay simple* — geometry transforms are the modifier's job, shared once, not duplicated into every effect.)
 
@@ -516,6 +562,37 @@ Each driver (a MoonModule) speaks one protocol:
 Each driver child reads from the Drivers container's output buffer. Everything before the Drivers container is platform-independent.
 
 **Output correction** turns logical RGB into the physical signal: **brightness** scaling, channel **reorder** (RGB→GRB via a *light preset*), and **white** derivation for RGBW. The Drivers container owns the global `brightness`; each driver picks its own light preset (its `preset` control) and applies the correction per-light into its own buffer/packet, so two strips on one device can be wired differently. Preview is exempt (it shows the raw logical buffer). The brightness LUT rebuilds on the cheap `onControlChanged` tier ([§ Event triggering](#event-triggering-between-modules)), so the slider stays fluent.
+
+**An effect drives a fixture's non-color channels through role setters.** A light is as wide as its fixture ([§ Buffer types](#buffer-types)), with color at offset 0 and the fixture's other roles wherever its light preset puts them. `setPan()` / `setTilt()` / `setZoom()` write those, and each is a **no-op when the fixture has no such channel**, so one effect is valid on a moving head and on a strip alike: on the strip the pan write does not land and the effect just paints color.
+
+Two rules separate those channels from color, and both matter:
+
+- **Brightness never scales them.** Brightness is a light-output setting; scaling pan by it would swing a moving head toward 0/0 as the rig dims.
+- **They interpolate but never accumulate** (the rule; the additive half is NOT yet implemented, see below). A blend op that INTERPOLATES (opacity, a crossfade) is meaningful on any channel, and on pan it is a genuine feature: the head sweeps smoothly from the old aim to the new one as a layer fades in. A blend op that ACCUMULATES (additive) is meaningful only on emissive channels, where summing two lights models two sources lighting one surface. Summing two aims models nothing, since it points at neither and saturates at hard-over as soon as both layers are positioned, so an accumulating op should fall back to assignment on a motion channel with the topmost writer winning. **Today `blendMap` treats a light as opaque bytes and adds motion channels along with color**; it only bites with two enabled layers on a fixture that carries motion, and the fix is [backlogged](backlog/backlog-light.md).
+
+**DMX fixtures are addressed as a daisy chain of IDENTICAL fixtures**, the same model addressable LEDs already impose: a strip is N identical pixels at a fixed stride, and a DMX run is treated as N identical fixtures at a fixed stride. One light preset describes one fixture, its channel count is the stride, and fixture *n* starts at `start + n x channelCount`. Twenty-five channels per fixture puts them at DMX 1, 26, 51, and so on, and the driver's `count` says how many are on the chain.
+
+This is what makes a moving head reachable by the same pipeline as a pixel: the light domain produces one logical light per fixture, and the driver expands each into that fixture's channel block through the preset. It is also the cheapest thing to configure, since only the start address and the fixture type are needed, never a per-fixture address table.
+
+The trade is deliberate: **a chain must be homogeneous**. Mixing fixture types on one universe, or leaving gaps between fixtures, has no expression in this model, and neither does a fixture whose address does not sit on the stride. Those need a per-fixture address map, which is the fixture-model work ([backlog](backlog/backlog-light.md)); until then, a mixed rig is served by giving each fixture type its own driver instance with its own preset, start address and count.
+
+### Multicast and IGMP snooping
+
+Three things projectMM sends to more than one listener, and they do not all use the same transport, because the protocol's owner decides it and not us:
+
+| | transport | why |
+|---|---|---|
+| WLED audio sync | multicast `239.0.0.1` | WLED's usermod both sends and receives there, never on broadcast |
+| Device discovery | multicast `239.255.77.77`, plus broadcast when `wledCompatible` | WLED apps browse the discovery port on broadcast |
+| E1.31 / sACN output | unicast by default, multicast opt-in | multicast is the spec's native mode, but see below |
+
+**Broadcast** reaches every device on the subnet. Each one takes the interrupt, walks up the stack, finds nothing listening on the port and discards the packet. At LED frame rates that is real work imposed on every phone, laptop and printer on the LAN.
+
+**Multicast** is addressed to a group, and only the devices that joined it (via IGMP) accept the packet. The rest never see it, which is what makes it the better neighbour in principle.
+
+**In principle**, because the win depends on the switch. A switch with **IGMP snooping** watches those join messages and learns which of its ports actually want the group, then forwards the traffic only there: the saving is real and happens in hardware. A switch **without** snooping cannot know, so it does the safe thing and floods the group out of every port, exactly like broadcast. WiFi is worse than that: multicast and broadcast alike go out at the lowest basic rate so every station can hear them, which is far slower than a unicast frame to one associated station.
+
+Firmware cannot detect which kind of network it is on. That is why **multicast is never an automatic upgrade here**: sACN multicast and dropping the discovery broadcast are both opt-in choices for someone who knows their switch, and unicast (or broadcast, where a protocol demands it) stays the portable default.
 
 Network-based drivers (ArtNet, E1.31, DDP) pace their output with a **non-blocking elapsed-time gate**, never a blocking wait (no `delay`/`vTaskDelay` — that would stall the single-threaded tick, the hot-path rule). The gate is the `lastSendTime`/`millis()` pattern: `if (now − lastSendTime < interval) return;` early-exits the tick so every other module's loop keeps running, exactly how FPS limiting works (`NetworkSendDriver`, `fps` control). **Frame-rate pacing is required** and implemented this way. **Inter-packet pacing** (spacing the universes within one frame) uses the same non-blocking gate *if* a receiver drops packets under a burst — it is not needed by default (the bench ArtNet matrix test runs clean bursting the universes), so it is added only when a target requires it, never as a busy-wait between packets.
 
@@ -587,8 +664,8 @@ The architecture does not assume PSRAM is present. Buffer counts and sizes are d
 
 How lighting uses the core [multi-device runtime](#multi-device-runtime) (discovery + clock sync) to drive an installation spanning multiple controllers:
 
-- **Synced visuals from the shared clock.** Effects animate off elapsed time ([§ Effects](#effects)), so feeding them the leader's synced clock instead of each device's local one makes a wall of controllers animate in lockstep, regardless of each one's frame rate. This is the light-domain payoff of the core clock sync.
-- **Light distribution**: one device sending rendered light data to another uses the existing ArtNet / E1.31 / DDP standards (the ArtNet *driver* already sends to fixtures today; device-to-device distribution as a sync topology is the part not yet wired). No bespoke protocol.
+- **Synced visuals from the shared clock.** Effects animate off elapsed time ([§ Effects](#effects)), so a synced clock is what makes a wall of controllers animate in lockstep regardless of each one's frame rate. This is the light-domain payoff of the core clock sync.
+- **Light distribution**: one device sending rendered light data to another uses the existing ArtNet / E1.31 / DDP standards. The ArtNet *driver* sends to fixtures; device-to-device distribution as a sync topology is filed in [backlog-core](backlog/backlog-core.md). No bespoke protocol.
 
 # Web UI
 
@@ -608,14 +685,21 @@ The light domain plugs into the UI at three points: a fixed top-level tree (Layo
 
 ## Tag emoji legend
 
-A module's chips come from three sources, rendered identically on the card and the type picker: a **role** chip (UI-derived from `role`), a **dimensional** chip (UI-derived from `dim`), and the curated **`tags()`** string (a flash literal the module returns; the UI splits it into grapheme clusters, one chip each). Role and dim are *not* repeated in `tags()` — only the categories below are. The `ROLE_EMOJI` / `DIM_EMOJI` maps in `app.js` are the single source of truth for the UI-derived chips; the legend takes [MoonLight](https://github.com/MoonModules/MoonLight)'s set as the canonical basis:
+The legend itself lives with the people who read the chips: [How projectMM works § The emoji on
+every card](tutorials/how-projectmm-works.md#5-the-emoji-on-every-card). What belongs here is the
+mechanism.
 
-| Category | Emoji | Meaning |
-|---|---|---|
-| **Role** (UI-derived) | 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver · 🛰️ service · 🥞 layer · ⚙️ generic | what kind of module (from `role`, via `ROLE_EMOJI`) |
-| **Dimensionality** (UI-derived) | 📏 1D · 🟦 2D · 🧊 3D | native axes (from `dim`) |
-| **Origin / library** (`tags()`) | 💫 MoonLight · 🐙 WLED · ⚡️ FastLED · *(projectMM-native is the default origin — an origin emoji marks a module that came from elsewhere)* | which library the module came from; the migration files docs by this, the emoji filters by it |
-| **Creator** (`tags()`) | 🦅 a named contributor (credited at the introduction site) | individual authorship credit |
-| **Audio** (`tags()`) | 🔊 audio-reactive | reads `AudioService::latestFrame()` |
+A module's chips come from three sources, rendered identically on the card and the type picker: a
+**role** chip and a **dimensional** chip, both UI-derived from `role` and `dim` through the
+`ROLE_EMOJI` / `DIM_EMOJI` maps in `app.js` (the single source of truth for those two), and the
+curated **`tags()`** string, a flash literal the module returns which the UI splits into grapheme
+clusters, one chip each.
 
-`tags()` carries **only** origin + creator + audio (+ any genuinely module-specific marker); a module can carry several (e.g. `💫🦅` = MoonLight origin, a named creator). Role and dim are added by the UI, so a module never duplicates them in its string. When migrating, set each module's `tags()` from this legend so the chip set is consistent across the library.
+**Role and dim are never repeated in `tags()`**: the UI already adds them, and a module that spells
+them again gets the chip twice. `tags()` carries origin, creator, and the capability groups the
+legend lists. An emoji earns its place by GROUPING several modules, which is what the picker's chip
+filter is for: a unique marker per module filters nothing, so a module that fits no group returns
+"".
+
+A scripted module answers the same way a compiled one does: `MoonLiveEffect::tags()` returns what
+the loaded script's `string tags()` declared, so a script's row reads like any other.

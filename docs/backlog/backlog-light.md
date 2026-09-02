@@ -2,6 +2,22 @@
 
 Forward-looking to-build items for the **light domain** (`src/light/`: drivers, effects, layouts, modifiers, preview) and its sensors. The core/infrastructure counterpart is [backlog-core.md](backlog-core.md); cross-domain items are in [backlog-mixed.md](backlog-mixed.md). Index + overview: [README.md](README.md). Completed items are removed.
 
+- ❌ **Cap the particle frame scale** (open): `FrameTime` spends a whole stall in one frame, so an
+  80 ms hiccup moves every particle **6.7x** its usual distance in a single step (measured). That is
+  the rule working as designed, and it keeps the trajectory correct in real time, but a particle
+  INTEGRATES the gap where a shader just redraws from the clock and skips a frame invisibly. So
+  particles are the first effect class that makes system jitter visible, and they did: they exposed
+  a 1 Hz LittleFS scan on the render thread (since fixed) and they still show the previewer's
+  socket write and a UI reload.
+
+  The fix would clamp the scale a pool sees to ~2 reference frames, trading real-time accuracy for
+  smoothness. **Deliberately not done**: it makes motion lie about elapsed time, which
+  [architecture.md's tick-rate rule](../architecture.md) exists to prevent, and every stall it
+  hides is a real defect somewhere else that would stop being visible. WLED-PS takes the opposite
+  side (`ParticleSystem2D::update()` advances a fixed amount per call, with no `millis()` anywhere),
+  so its motion speed is a property of the frame rate. **Build trigger**: a stall we cannot remove
+  at its source, on hardware a user actually has.
+
 ## Drivers
 
 ### MoonI80 streaming ring — 48×256 shipped; open instruments and cleanups
@@ -77,6 +93,109 @@ The shipped render↔encode split (Step 2a, `multicore` control) uses one `Drive
 
 MoonLight targets a fixed 60 fps; projectMM deliberately does not (settled with the PO 2026-07-12). The architecture is *render-uncapped + time-aware effects* (`beatsin8`/`millis()`-driven, a CLAUDE.md hard rule), so a whole-engine fps cap is redundant with that rule and would only *reduce* quality below the hardware ceiling; the LED wire rate already paces render physically (30 µs/light), and UI/WiFi responsiveness comes from the per-tick `vTaskDelay(1)` yield, not frame-rate control. Parked as a ~15-line opt-in (`targetFps=0` = unlimited default) *only if* a genuinely CPU-starved device ever appears.
 
+### Brightness belongs on a fixture's DIMMER channel, not only in the color values (WANTED)
+
+`Correction::apply()` holds a preset's `Dimmer` channel wide open at 255 and puts brightness into
+the R/G/B/W values through `briLut`. That is correct output and it is the only rule that serves
+every fixture (an addressable strip has no dimmer channel), but it is not how a lighting console
+drives a fixture that HAS one, and it costs real quality:
+
+- **Resolution.** At 10% brightness the colors are driven at 0-25, about 25 usable levels instead
+  of 255. A slow fade to black steps visibly; the dimmer channel exists so colors keep full 8-bit
+  range while intensity varies.
+- **Dimming quality.** A moving head's dimmer is often 16-bit or curve-corrected for the LED's
+  response. Linear scaling of 8-bit color values is the crudest dimming there is, and it is worst
+  at the low end where the eye is most sensitive.
+- **Matching.** A PAR with a real dimmer and a strip without one, both at 20%, do not read as the
+  same brightness: one dims in the LED driver, the other in integer arithmetic.
+
+**The rule to implement:** when a preset declares a `Dimmer` role, route the driver's brightness to
+that channel and drive the colors at full saturation; keep today's behavior (scale the colors)
+only where the fixture has no dimmer. The per-light color values still carry the effect's own
+shading, so an effect that paints one light dark stays dark. Watch the one case where fixture and
+light are not 1:1: several light cells behind ONE master dimmer cannot express per-cell brightness
+through it, so those keep the color-scaling path.
+
+Found on the bench 2026-08-28 wiring the first moving head. Note the dimmer was not written AT ALL
+before that day (the shipped `IRGB` preset could never light a fixture); writing it at 255 is the
+fix that made a fixture light, not the finished design.
+
+### Blending adds motion channels, which is meaningless for aim (WANTED)
+
+`blendMap` treats a light as `n` opaque bytes, so ADDITIVE blending sums pan and tilt across
+layers. Two layers driving one moving head aim it at neither position, and saturate to hard-over
+as soon as both are moderately positioned.
+
+Only additive is wrong. **Opacity blending on motion is a feature and must be kept**: it is an
+interpolation, so a layer fading in sweeps the head smoothly from the old aim to the new one,
+which is what a console does and better than a snap. The rule (architecture.md) is that
+interpolating ops are valid on every channel while accumulating ops are valid only on emissive
+ones, so the fix is narrow: in the additive path, ASSIGN motion channels (topmost writer wins)
+instead of summing them, leaving the opacity path alone.
+
+Not yet reachable in a harmful way: it needs two enabled layers on a fixture carrying motion
+channels, and the single-layer path is a memcpy. Worth doing with the motion-writer work, since
+both need `FixtureChannels`' offsets on the blend path.
+
+### Zoom, rotate and gobo have no writer (WANTED)
+
+Pan and tilt now have a writer: an effect sets them through `EffectBase::setPan`/`setTilt` and
+`Correction::apply()` maps the layer slots onto the fixture's channels (`MovingHeadEffect` is the
+worked example, bench-driven). **`Zoom`, `Rotate` and `Gobo` still have none**: a preset can map
+them and `Correction` carries their offsets, but no effect writes them, so they sit at 0.
+
+This is the other half of driving a moving head, and it is a domain question, not a plumbing one: a
+light is a point with a color, while a moving head is a fixture that emits a BEAM in a direction it
+controls live. The backlog's fixture-model item ("moving heads, beams", per-emitter targets) is
+where the model belongs; this entry records the concrete gap in the meantime. Bench fixture and its
+channel map: [light fixtures reference](../reference/light-fixtures.md).
+
+### Pan/tilt travel is hardcoded, and positioning is 8-bit (WANTED)
+
+Two fidelity gaps in how an aim becomes a real beam, both found on the bench 2026-08-29 reviewing
+the preview's beam cones.
+
+**Travel is assumed, not declared.** `EffectBase` and the preview both hardcode *540 degrees of
+pan, 180 of tilt*, which is the common mid-size convention and happens to match the bench fixture.
+Real heads vary: 630 pan on larger bodies, 360 or 530 on compact ones, 270 tilt on beam fixtures.
+Nothing declares which fixture is plugged in, so the preview draws every rig with the bench head's
+travel and silently lies about where a beam points. Zero point varies too (some fixtures put
+mechanical zero at DMX 0 rather than centering at 128), and the axis direction is a setting on the
+fixture's own display (`rPAN` / `rTIL` on the bench head), so even one fixture has no fixed mapping.
+
+**The DMX byte is already the right abstraction, and it is why nothing can over-rotate.** An effect
+never emits an angle: `MovingHeadEffect::axis()` maps its sweep onto a 0..255 byte and clamps, so
+0 and 255 *are* the mechanical stops whatever they are in degrees, and the head cannot be asked
+past its travel. A sweep that reaches a stop flattens there (the beam parks) rather than wrapping,
+which is what the fixture itself does. Degrees exist only for DRAWING.
+
+So the fix is scoped to the preview, and the open question is where travel is declared:
+
+- **`PreviewDriver` controls** (`panTravel`, `tiltTravel` in degrees, sent in the aim message) —
+  small, live-reconfigurable like every other setting, and honest that travel is a property of the
+  fixture someone plugged in. The leanest thing that stops the lie.
+- **The light preset** — correct once two different heads run at once, but a preset is a
+  *channel-role* layout today, and carrying physical travel widens what a preset means. Belongs
+  with the [fixture model](#fixture-model--moving-heads-beams-long-term), not before it.
+
+**Positioning is 8-bit while the fixture offers 16.** The bench head has a fine channel for each
+axis ([light fixtures reference](../reference/light-fixtures.md)); both sit unused, so pan resolves
+to 540/256 = about 2.1 degrees per step. Across a room that is a visible jump on a slow sweep, and
+it is the bigger fidelity win of the two. Needs a 16-bit path from the effect's sweep through
+`FixtureChannels` to the preset's fine-channel roles, so it is the larger job.
+
+### Built-in light presets never reach a device that has a saved config (WANTED)
+
+`LightPresetsModule` seeds its built-ins only when the preset list is empty
+(`if (count_ == 0) seedBuiltins()`), and the persisted list replaces them wholesale. So a newly
+shipped built-in preset appears only on a device that has never saved one: every existing device
+keeps the older set forever. Adding the mini moving head's preset on 2026-08-28 needed a hand-patch
+of the bench device's `Drivers.json`, which does not scale past one board.
+
+**The fix:** merge by name at boot, seeding any built-in the saved list does not already carry, so
+shipping a fixture preset reaches existing devices on their next update. A user's own presets and
+their edits to a built-in must survive that merge untouched.
+
 ### ArtPoll discovery — know which tubes are alive (next increment on NetworkSendDriver)
 
 `NetworkSendDriver` now unicasts to a list of receivers (`ips` + `lightsPerIp`), which is the Art-Net-4-conformant model. What it cannot do is **tell whether a receiver is actually there**: UDP is fire-and-forget, so a dead tube is invisible to the sender. The spec's own answer is discovery — *"The transmitting device must regularly ArtPoll the network to detect any change in devices which are subscribed"* — and it is the natural next increment.
@@ -105,6 +224,90 @@ projectMM already speaks DMX **over the network** (Art-Net / sACN via `NetworkRe
 **Can a board drive XLR fixtures directly? Yes, with an RS-485 transceiver — that's the one required part.** DMX-512 is RS-485: a *differential* pair (D+/D−, ±2–6 V), not the 3.3 V single-ended UART the MCU emits, so an MCU TX pin can NOT wire straight to XLR. A transceiver chip (MAX485 / SN75176 / THVD-class, ~$0.50) sits between the UART and the connector and drives the differential pair; the DE/RE line (the UART-RS485 seam above) flips it Tx↔Rx. **3-pin XLR** carries it: pin 1 = ground, pin 2 = D−, pin 3 = D+. With a transceiver present, daisy-chaining ~10 moving heads (10 × 16 ch = 160, inside one 512-channel universe) over standard DMX in→out is well within the RS-485 limits (32 unit loads / 1200 m); the last fixture wants a 120 Ω terminator (a fixture/cable concern, not the MCU). So whether a catalog board can drive XLR *directly* hinges on one schematic question: does it carry an RS-485 transceiver + XLR/terminal (then yes, direct), or only the WS2812 level-shifted outputs (then a ~$0.50 breakout is needed). Confirm against the [MHC-WLED ESP32-P4 shield](../reference/mhc-wled-esp32-p4-shield.md) schematic before treating direct-XLR as a shipping capability.
 
 Sequencing: it's a **driver** (`src/light/drivers/`) + a platform UART-RS485 seam + a fixture model shared with the Art-Net path — the buffer→channel encode is already done. Plan when a DMX fixture is actually on the bench and a catalog board's `supported`/`planned` list points at wired DMX. The [PinsModule pin-assignment work](backlog-core.md#pinsmodule-strict-reject-on-add-mode-the-one-remaining-increment) covers the RS485/DMX TX/RX/DE slot; this is the driver that consumes it.
+
+## Integration with other LED and visuals tools
+
+Distilled from a Discord thread with panel-card users (2026-08-24), where two people drove ColorLight walls from projectMM and described the pipelines they already run.
+
+### Preview does not resume after a long tab hibernation (observed once, 2026-08-27)
+
+Desktop instance at 1024x1024: after the browser tab sat backgrounded for about an hour, the
+preview pane stayed static on return. PreviewDriver ticked at ~1 us (no standing request served)
+while a FRESH WebSocket client received frames normally, and the Drivers card showed the
+encode-worker-stalled latch. A page refresh reportedly did NOT revive it; toggling `multicore`
+(a Drivers re-prepare) did. Suspects: the tab-hide hibernation path's tracked retry vs the
+wake-up re-request, or per-driver lease state that only prepare() resets. Needs a reproduction
+with the WS uplink logged before it can be fixed.
+
+### HLS upscaling is cache-hostile on large walls (measured, 2026-08-28)
+
+`HlsDriver`'s `scale` control replicates each light into a scale x scale block. Measured on the
+bench P4 at 128x128: **~1 ms per frame at 1:1, ~60 ms at scale 4** (a 512x512 output). The frame
+is 16x larger, so ~16 ms would be the honest cost; the extra 4x is the access pattern. The loop
+walks LIGHTS and writes each block as `scale` separate short rows scattered across a 786 KB
+buffer, so consecutive lights touch distant addresses and every write misses cache, where the
+1:1 path writes straight through sequentially.
+
+**Not urgent, because the default path never hits it:** auto-scale only engages on walls below
+the encoder's 80-pixel floor, where the output is small by construction (a 20x10 wall becomes
+160x80, 38 KB). The expensive case is a manual scale on an already-large wall, which is also
+where upscaling has the least to offer.
+
+**The fix when it earns its place:** iterate the OUTPUT rows rather than the input lights, so
+writes are sequential: for each output row, walk its source row once and emit `scale` copies of
+each light's colour, then `memcpy` that finished row to the remaining `scale - 1` rows of the
+block. Same output, one pass through the destination in address order.
+
+### Sprite follow-ups (draw::sprite + FlyingToasters shipped; [spec + plan](../history/plans/Plan-20260827%20-%20Sprites%20and%20flying%20toasters.md))
+
+Deliberately deferred when sprites landed: P4 PPA acceleration behind the same `draw::sprite`
+signature (the 2D-DMA blitter the WLED-MM-P4 world uses via LovyanGFX; ours would sit in the
+platform layer, no vendored GFX library), Porter-Duff alpha when a real consumer arrives, and
+MoonLive sprite data (needs the stage-3 builtin table + arrays).
+
+### projectMM as a video source — NDI first, Spout/Syphon only if proven (open)
+
+Users asked for projectMM's rendered output to feed *their* tools, not the other way round. One runs OBS → Spout → his own VLAN-tagged card driver; he asked whether projectMM could be a Spout source. Input is not the gap: `NetworkReceiveEffect` already binds Art-Net, E1.31/sACN and DDP at once and answers ArtPoll, so any controller can already drive projectMM.
+
+**NDI is the recommended first implementation.** It is the AV industry's standard for video over IP, one implementation covers Windows, macOS, Linux and ARM, it discovers by name, and it crosses machines. Spout (Windows, DirectX/OpenGL) and Syphon (macOS, Metal/OpenGL) share a GPU texture zero-copy, so they are lower latency and bit-exact, but they are **same-machine only**, are **two** platform implementations, and leave **Linux and the Pi with nothing**. At LED-wall pixel counts (a 256x256 wall is 65K pixels) the latency difference is far below one frame of the render loop, so it does not decide the choice; coverage does. A Spout user is also reachable through NDI in one hop, since OBS, Resolume and TouchDesigner all speak both.
+
+**The licence shapes the design, and the shape is already established here.** projectMM is GPL-3.0 and the NDI runtime is proprietary, so projectMM must not *redistribute* it: bundling would require projectMM's own licence to carry NDI's restrictions downstream, which GPL-3 forbids. The user installs the NDI runtime themselves, exactly as they already install **Npcap** for the panel-card driver, and projectMM calls whatever is present.
+
+That is the arrangement `platform_desktop.cpp` uses for Npcap today: resolve the library with `LoadLibrary`/`dlopen` rather than linking it, declare the handful of functions with the library's own signatures rather than including its headers (so the SDK never becomes a build requirement for CI or contributors), and report the feature unavailable when it is absent instead of failing to link. Two independent installs that talk to each other, like Resolume on the same desktop.
+
+Also note projectMM renders into a CPU buffer, so a Spout/Syphon path would upload to the GPU purely to hand off, spending the zero-copy advantage it was chosen for.
+
+### M5Stack Tab5 as a display target — MIPI-DSI, not the H.264 path (open)
+
+The Tab5 is an ESP32-P4 with a 1280x720 MIPI-DSI panel, and a P4 is already a supported target, so
+the question is what its *screen* would show. The P4's H.264 block does not answer it: that encoder
+exists to compress an incoming MIPI-CSI camera feed, and the P4 has no hardware H.264 **decoder**
+at all (Espressif's own FAQ points at software decode, which will not hold 720p). Driving the panel
+is the **MIPI-DSI** peripheral plus the PPA / 2D-DMA blitter, which take raw pixels and never touch
+a codec. So the three things a Tab5 could be are separate pieces of work, and only the first is free:
+
+- **An HLS source**, like any other P4: it encodes its own rendered grid and streams to a TV. Its
+  panel is incidental, and this needs nothing beyond the P4 HLS work itself.
+- **A local wall preview or touch console** — the interesting one, and the real ask: a `platform::`
+  MIPI-DSI display seam plus a UI on the panel. Related to the PPA acceleration noted under sprite
+  follow-ups above (same 2D-DMA block), and it is a display *output* seam projectMM does not have
+  today; the nearest prior art is the WLED-MM-P4 world's LovyanGFX usage, which we would not vendor.
+- **An HLS/video player**, showing another device's stream: blocked on the missing hardware decoder,
+  so not worth planning.
+
+### Multi-card walls — does a daisy chain work today? (open, ask before building)
+
+The ColorLight format has **no card addressing**: the destination MAC is a fixed constant and every card filters on it, so every card on a segment shows the same image. A user with six cards on a switch observed exactly that.
+
+The industry-standard answer is **daisy-chaining** — a sending card's ports each drive a chain, and each card takes its region by position in the chain. That user works around it with per-card VLANs and a managed switch instead, which he built for throughput and for per-card colour-temperature grouping across mixed panel batches; he described it as his own solution, not a standard.
+
+**Establish first whether a daisy chain already works with projectMM** (one contact has a 96K daisy-chained rig). If the cards self-assign by chain position, the standard multi-card case is already solved and nothing is needed. Only if it does not work is there a feature here, and it should follow the daisy-chain standard rather than the VLAN workaround. 802.1Q tagging is technically a clean fit for a raw-L2 sender (the tag is part of the Ethernet header, the switch strips it before the card, so card firmware is unaffected), but it serves one bespoke architecture.
+
+### Smaller asks from the same thread
+
+- **Read the wall layout from the ColorLight cards.** The cards can report their configuration and at least one user's own tool already does it; it would remove the manual layout step.
+- **Per-card colour temperature and brightness**, via the ColorLight sync-packet bytes, grouped by sync group — used to colour-match mixed panel batches live.
+- **Docker image**, asked for by a user tracking updates in an IoT system. The Linux binary and `.deb` already ship, so this is packaging rather than new capability.
 
 ## Sensors and audio-reactive input
 
@@ -170,6 +373,10 @@ Study the proven audio pipeline in MoonLight / WLED-MM (FFT band layout, AGC, be
 
 DemoReel hosts one effect at a time and drives its `loop()` directly. A hosted **D1/D2** effect only writes its own slice (D1 → the x=0 column; D2 → the z=0 plane), and — unlike a normal Layer child — it does NOT get `Layer::extrude()` applied, so on a 2D/3D grid its output stays on one column/slice instead of spreading. A first fix (call `layer()->extrude(child->dimensions())` after the child's `loop()`, mirroring `Layer::loop`) **crashed the test suite with a heap/vtable smash** — `Layer::extrude` copies within `buffer_` using the Layer's `width_/height_/depth_`, and something in the reel's host path leaves those out of sync with the allocated buffer (root-cause not yet pinned). Redo it carefully: verify the Layer's dims match its buffer at the extrude call, add a bounds guard in `extrude` (or a reel-local extrude that reads the child's real dims/buffer), and pin it with a DemoReel test that hosts a D1 and a D2 effect on a 3D grid and checks the spread. Until then the reel renders D1/D2 hosts on a single slice (visible but not full-grid) — acceptable, not a crash.
 
+### BlurzEffect — a compounding blur has no rate carry (open)
+
+`Layer::fadeToBlackBy` takes a rate per reference frame and the Layer scales it once, the pattern every fade uses ([architecture § Where the machinery lives](../architecture.md)). `draw::blur` does not fit it: blur COMPOUNDS, so applying it twice at half strength is not one blur at full strength, and the fractional carry that makes a fade frame-rate independent produces the wrong result. BlurzEffect is the effect this bites. The open question is what the right construct is — a per-frame blur budget, a single blur at an accumulated strength, or leaving blur explicitly frame-gated and documenting it as not-a-rate.
+
 ### A real 2D/3D PacMan (pending)
 
 The migrated 1D PacMan and 1D Ant effects were removed — a chase rendered on a single strip reads as a blob of moving dots, not a game, so they weren't worth keeping. A proper **2D (or 3D) PacMan** — an actual maze, Pac-Man and ghosts navigating it, power dots, the blue-ghost flee state — would be a genuinely fun signature effect. Build it fresh as a grid game (not a strip port); the WLED/MoonLight 1D versions are reference for the state machine only, not the rendering.
@@ -177,16 +384,6 @@ The migrated 1D PacMan and 1D Ant effects were removed — a chase rendered on a
 ### Add real z-axis variation to 2D effects (pending)
 
 Only **NoiseEffect**, **PlasmaEffect** and **RipplesEffect** have z-aware math. The other honest-D2 effects use `Layer::extrude` to duplicate the z=0 plane, so every z-slice is identical on 3D layers. Candidates for genuine D3 promotion: Metaballs/GlowParticles (add z to blob coordinates), Plasma palette/Spiral (add z-driven phase term), Fire (z-drift heat grid), Rings/LavaLamp/Checkerboard/Particles (add z to each element). Prioritise after seeing real 3D installations; each promoted effect also needs its `dynamicBytes` budget for the full 3D buffer.
-
-### Full-density interpolated preview for large layouts (backlog)
-
-The preview index-downsamples a large layout to fit the WS send budget (e.g. 128×128 = 16384 lights → ~1639 sent at stride 10), so the UI shows a sparse sample, not every light. To show **all** lights at their real positions with **interpolated** colors for the unsent ones:
-
-- Decouple the `0x03` coordinate-table density from the per-frame `0x02` stride. Positions are static and sent once, so the table can carry **all** light coordinates (16384 × 3 = ~48 KB one-time — acceptable off the per-frame path, possibly chunked) while the per-frame RGB stays strided to protect ArtNet/the link.
-- The browser holds the full position set and, per frame, interpolates each unsent light's color from its nearest sent neighbours (the sent indices are known from the stride). True positions, guessed colors — better than the removed dense-box block-replicate because positions are exact.
-- Open questions: 48 KB one-time table vs `MAX_WRITE_CHUNKS` / send-buffer (needs chunked send or a raised cap, with the same partial-write care as `writeChunks`' drain); interpolation cost on a 16384-point cloud each frame in JS; whether nearest-neighbour or weighted is worth it.
-
-Not simple — own planning pass. Until then the preview is a faithful strided *sample* (correct shape/color/motion, not per-pixel). A cheap interim (point-size scaled by stride to fatten samples into their cells) was tried and reverted as not what's wanted — it filled the volume but didn't add real points.
 
 ### Self-describing preview frame header (mid term)
 
@@ -206,16 +403,6 @@ Today a "light" is a point at a static coordinate with a color. A **moving head*
 
 Today each layout child describes one light type (all LED strips, or all par lights), and the current model is one Layouts container per light type. Whether a single Layouts should hold mixed types (LED strips + par lights together), and how the per-channel layout would reconcile across them, isn't designed. Deferred until a concrete need forces it; it's adjacent to the fixture model above (a real fixture/attribute model may reframe how mixed types are expressed). (Moved from architecture.md § What we leave undesigned; a deferred design decision, not a settled 🚧 one.)
 
-### Extract the resumable backpressure transport as a domain-neutral channel (long term)
-
-The preview's transport — resumable cross-tick send from a stable buffer + newest-wins backpressure drop + adaptive graceful degradation (see [architecture.md § graceful degradation under transport backpressure](../architecture.md)) — is **payload-agnostic**: any bulky throttled stream (a future MJPEG/video preview, fixture-state streams, fleet telemetry) could ride it. The *payload* model (count/stride/RGB) is light-specific; the *byte-pump* is not. When a second consumer for this transport appears, promote the pump into a domain-neutral core primitive (a `ThrottledChannel`-style sink) that PreviewDriver becomes *a* producer on, rather than owning the protocol. Concrete-first: extract on the second use, not before — until then the seam stays inside HttpServerModule/PreviewDriver.
-
-### PreviewDriver `resumableFrames` default OFF: fix the tearing, then un-skip the dynamicBytes test
-
-`resumableFrames` (the downsampled-frame transport A/B) now defaults **OFF** because the resumable path visibly **tears the preview**: it shares the single-occupancy WS send slot with the ~1 Hz full-state push and the next preview frame, so a preempted mid-drain frame reaches the browser spliced (top rows new, the rest stale — PO saw it on the wall). OFF uses the proven-correct synchronous transport. Two follow-ups, both small:
-
-1. **The tear itself (the reason to eventually want ON again).** Give the preview send its OWN send slot instead of sharing `previewSend_` with the state push, OR make a preempted drain drop cleanly (versioned frame → the browser discards a spliced one) rather than splicing. Only then is ON safe to default. The off-thread send exists to avoid the ~17 ms render hitch at very large grids with the preview open, so this matters mainly for big walls; until fixed, synchronous is correct.
-2. **The skipped test.** `unit_PreviewDriver.cpp`'s "reports its resumable-path buffers in dynamicBytes" is `doctest::skip()`'d: it was written when `resumableFrames` defaulted ON and its first assertion relied on the rig constructor's `applyState()` allocating the staging buffer via that default. With the flag OFF, toggling it ON post-construction + `prepare()` did not re-allocate the buffers in the test rig the way the constructor path did (the "ON" reads dropped to 0). The *accounting* (`driverHeapBytes` sums `stageCap_` + `keptIdxCap_`) is unchanged and correct; only the test's default assumption broke. Un-skip by rebuilding the rig so it can deterministically allocate the resumable-path buffers with the flag OFF-by-default — likely wiring the flag ON into the rig BEFORE its first `drivers.applyState()` so the same acquire path production uses runs (the post-construction toggle route resisted several attempts; the constructor-time route is the one to nail). Small test-only work.
 
 ## LCD / DMA driver work
 
@@ -292,20 +479,6 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 
 - **A scripted modifier that reshapes the grid** (2026-08-10). `ModifierBase::modifyLogicalSize` lets a modifier change the logical `width`/`height`/`depth` — a Multiply kaleidoscope grows the grid, a crop shrinks it — and a compiled modifier uses it. A SCRIPTED one cannot: system variables are read-only, so `MoonLiveModifier` writes the box in and never reads it back. Needs a writable system variable — the binding reads the slots after the script returns and reports the result through `modifyLogicalSize` — which is a new `SysVarKind` (or a mutable flag on `SysVar`) plus the read-back, not a new builtin. Until then a scripted modifier can fold coordinates but not resize the grid they live in.
 
-- **MoonLive has no x86-64 backend — scripts do not run on Windows** (2026-08-14). The desktop
-  assembler (`moonlive_asm_host.cpp`) is arm64-only, so `MM_MOONLIVE_HAS_HOST_JIT` is 0 on x86-64
-  Windows, x86-64 Linux and Intel macOS. `compileSource` fails cleanly there and scripted modules
-  render dark — no crash, but no MoonLive either, on the desktop platform most users run. Apple
-  Silicon macOS is the only desktop where scripts work today, which is why this stayed invisible:
-  the bench is arm64 and CI's x86-64 runners gate their MoonLive tests on the macro.
-
-  Closing it is one more backend behind the unchanged IR (the seam's whole promise): an
-  `x86_64` branch alongside the three that exist. It is the widest ISA of the four — variable-length
-  encoding, and a different calling convention per OS (System V on Linux/macOS, Microsoft x64 on
-  Windows), so the `call()` save-set and argument registers differ from everything written so far.
-  `disasm.py --isa x86_64` should land with it, since no test executes emitted bytes for any backend
-  but the host's.
-
 - **The compile-failure latch is not provable on the host** (2026-08-18). `MoonLiveScript::sync`
   refuses to re-attempt a script that failed until its (name, content) changes. The latch exists for
   a device-only reason: each attempt is two LittleFS reads (~5 ms on an S3), a layout is asked from
@@ -353,4 +526,3 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
   **What it costs when it comes:** a small preallocated record queue the built-in writes into, drained from a housekeeping path through the existing platform output seam. The budget and the burst-spent message stay as they are; only where the bytes are written moves. Worth doing when a script is left with a print in it on a real fixture, which is the case the cap exists for.
 
 (The shared lane-driver scaffolding extraction — when a 3rd parallel backend lands — is tracked separately under [§ Extract shared lane-driver scaffolding](#extract-shared-lane-driver-scaffolding-when-the-3rd-parallel-backend-lands-deferred) above.)
-

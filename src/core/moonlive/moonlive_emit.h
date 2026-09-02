@@ -3,10 +3,15 @@
 #include <cstdint>
 #include <cstddef>
 
-// MM_MOONLIVE_HAS_HOST_JIT is defined in platform_config.h (per-platform), so the
-// arch check stays behind the platform boundary and this header stays neutral. The macro
-// (not a constexpr) is required because #include-side test files gate whole TEST_CASEs
-// on `#if MM_MOONLIVE_HAS_HOST_JIT`.
+// MM_MOONLIVE_HAS_HOST_JIT is defined in platform_config.h (per-platform), so the arch check stays
+// behind the platform boundary and this header stays neutral.
+//
+// It exists for the TEST HARNESS and nothing else — no shipping code branches on it. A build with
+// no backend degrades at RUN time instead: lowerToBytes returns 0 (moonlive_asm_noarch.cpp),
+// compile() reports the failure, and a scripted module renders dark. But a test that calls
+// render() cannot even be COMPILED there, so ~40 TEST_CASEs are gated on `#if
+// MM_MOONLIVE_HAS_HOST_JIT`. That is why it is a macro rather than a constexpr, and why the
+// noarch path does not make it redundant: one answers the program, the other answers the build.
 #include "platform/platform.h"
 
 // MoonLive — per-ISA code emitter (the backend seam, §3.2 of livescripts-analysis-top-down.md).
@@ -36,6 +41,15 @@ using AnimFn = void (*)(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t)
 // declares no control simply never reads the pointer (it may be nullptr then). This is the
 // signature compileSource()'d code is called through.
 using CtrlFn = void (*)(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t, const uint8_t* ctrls);
+
+/// The SAME emitted function, called for its answer rather than its effect: identical parameters,
+/// identical frame, only the host's view of the return register differs. A script function that
+/// ends in `return <expr>` parks its value there, which is what lets `dimensions()` and `tags()`
+/// report to the host without a second calling convention.
+///
+/// Calling a function that returns nothing through this alias reads whatever the register held, so
+/// the binding calls it only for functions the script actually declared: `hasEntry(name)` first.
+using ValueFn = uintptr_t (*)(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t, const uint8_t* ctrls);
 
 // Emit the fixed-color fill routine's machine code into `out` (capacity `cap` bytes), for
 // the ISA this translation unit was compiled for, with the color baked in. Returns the

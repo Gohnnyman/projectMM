@@ -22,15 +22,22 @@ import subprocess
 import sys
 
 # Files whose prose the standards govern. Not .json or .txt: generated or data.
-SUFFIXES = (".h", ".hpp", ".c", ".cpp", ".inc", ".md", ".py", ".js", ".css", ".html")
+# .mle/.mll/.mlm are MoonLive scripts: shipped, opened in the device's own editor, and read by
+# every user who learns the language, so they are the most user-facing prose in the repo.
+SUFFIXES = (".h", ".hpp", ".c", ".cpp", ".inc", ".md", ".py", ".js", ".css", ".html",
+            ".mle", ".mll", ".mlm")
 
 # Paths exempt, with the reason each earns it.
 EXEMPT = (
+    "docs/friend-repos/", # monthly digests OF OTHER PROJECTS, quoted from their sources
     "docs/history/",      # the record of what was written then; rewriting it falsifies it
     "docs/backlog/",      # same: prior-project digests quoted from their sources
     "docs/metrics/",      # generated
     "docs/tests/",        # generated from test comments (fix the test, not the page)
     "docs/moonmodules/",  # partly generated technical pages
+    "src/platform/desktop/vendor/",   # upstream single-header code (miniaudio): not our prose
+    "src/ui/vendor/",                 # upstream browser code (Prism): not our prose either
+    "moondeck/check/check_prose.py",  # the detector: its rule table spells the very patterns
 )
 
 # The banned character, by CODEPOINT rather than as a literal. Written literally, a sweep that
@@ -42,7 +49,10 @@ EM_DASH = "\u2014"
 # British to American. Substring matches, so a stem covers its inflections.
 SPELLING = {
     "behaviour": "behavior", "colour": "color", "initialis": "initializ",
-    "optimis": "optimiz", "recognis": "recogniz", "analys": "analyz",
+    "optimis": "optimiz", "recognis": "recogniz",
+    # The stem includes the e on purpose: the plain noun ("analysis"/"analyses") is already
+    # US spelling (coding-standards names it a keeper), so only the e-form verbs are flagged.
+    "analys" + "e": "analyze", "analys" + "ing": "analyzing",
     "materialis": "materializ", "normalis": "normaliz", "serialis": "serializ",
     "cancelled": "canceled", "modelling": "modeling", "labelled": "labeled",
     "centre": "center", "licence": "license", "defence": "defense",

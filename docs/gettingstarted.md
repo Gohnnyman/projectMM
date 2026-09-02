@@ -83,7 +83,12 @@ in the UI (that's what Chapter 2 is all about).
 
 Leave **Release** and **Firmware** at their suggested values (the newest stable
 build, and the firmware that matches your device). Tick **Erase chip first** only
-if you're starting clean or switching firmware.
+if you're starting clean, switching firmware, or updating a 4 MB classic board
+(esp32 / wrover / eth) from a release before v4.0. That last update must erase:
+its partition layout changed ([MIGRATING](../MIGRATING.md)), and if the device already holds
+config you care about, back it up first ("Back up a device's config first" on the
+installer page): erasing wipes WiFi credentials and all settings, and the backup
+brings them back after the flash (its report lists anything it could not carry).
 
 ### 4. Click Install
 
@@ -98,7 +103,11 @@ it takes under a minute.
 What happens next depends on your device:
 
 - **WiFi:** enter your network name and password when prompted, then **Connect**.
-  (Click **Skip** to set WiFi up later from the device itself.)
+  (Click **Skip** to set WiFi up later from the device itself.) Restoring a config
+  backup? You can skip this step: join the device's `MM-XXXX` access point, open
+  `http://4.3.2.1`, and restore the backup in the File Manager (⟲), then take the
+  offered restart: the bundle carries the WiFi credentials, so the device joins
+  your network by itself.
 
   ![Entering WiFi credentials](assets/gettingstarted/01-09-wifi-credentials.png)
 
@@ -235,6 +244,8 @@ Get it free for your phone:
 
 - **iPhone / iPad:** [WLED Native on the App Store](https://apps.apple.com/us/app/wled-native/id6446207239)
 - **Android:** [WLED Native on Google Play](https://play.google.com/store/apps/details?id=ca.cgagnier.wlednativeandroid)
+
+WLED Native is by **Christophe Gagnier ([@Moustachauve](https://github.com/Moustachauve))**, who wrote both the [Android](https://github.com/Moustachauve/WLED-Android) and [iOS](https://github.com/Moustachauve/WLED-iOS) apps. Their open source is what let us work out exactly what those apps read, so a projectMM device appears in them without either side needing to know about the other.
 
 For the full picture and controls, the device's web interface is always there at
 `http://<devicename>.local` — WLED Native is the fast everyday remote alongside it.

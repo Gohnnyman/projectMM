@@ -18,6 +18,7 @@ Filters compose:
 import argparse
 import datetime
 import json
+import os
 import platform
 import re
 import subprocess
@@ -68,7 +69,12 @@ _RUNNER_SKIP_PARTS = {"build", "__pycache__", ".git"}
 # rebuilding clears it only until the next firmware build. They are excluded because their mtime
 # carries no information about whether the runner is out of date; a real edit reaches them through
 # their INPUT (src/ui/app.js), which is watched.
-_RUNNER_GENERATED = {"src/ui/ui_embedded.h"}
+# build_info.h belongs here for the same reason and a sharper one: it embeds `git status
+# --porcelain` as a `+` dirty-suffix, so its CONTENT changes the moment the tree goes dirty. A gate
+# run writes scenario baselines and repo-health metrics, which dirties the tree, which flips the
+# suffix, which makes every binary look stale on the NEXT run. A build id is not code, so it cannot
+# make the runner "report on code that is no longer there", which is what this guard is for.
+_RUNNER_GENERATED = {"src/ui/ui_embedded.h", "src/core/build_info.h"}
 
 
 def _stale_runner_reason() -> str:
@@ -146,7 +152,8 @@ def _host_target() -> str:
     )
 
 
-def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> int:
+def _run_one(path: Path, update_contract: bool, update_reason: str | None,
+             no_write: bool = False) -> int:
     """Run one scenario. Always parses MEASURE lines and writes
     observed.<target> blocks back into the scenario JSON (every run produces a
     drift record). With --update-contract, also rewrites the contract.
@@ -170,7 +177,12 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
         print(f"  SKIP  {path.name} (skip_on {target})")
         return 0
     # Capture + tee: stream to stdout while collecting MEASURE lines.
-    proc = subprocess.Popen([str(RUNNER), str(path)], cwd=ROOT,
+    # Pin the runner's filesystem root into the build tree. The runner performs real writes, and
+    # its default root is the OS per-user data directory unless the working directory happens to be
+    # a checkout. Relying on cwd for that would put a test one wrong directory away from
+    # overwriting a developer's own installed-projectMM settings.
+    env = {**os.environ, "MM_DATA_DIR": str(ROOT / "build" / "scenario-fs")}
+    proc = subprocess.Popen([str(RUNNER), str(path)], cwd=ROOT, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1)
     observations: dict[str, dict] = {}  # step-name → {tick_us, free_heap, max_alloc_block}
@@ -208,12 +220,11 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
         name = step.get("name")
         if name not in observations:
             continue
-        # observed.<target> stores a rolling [min, max] range per scalar that
-        # only widens when a fresh measurement falls outside the current bounds
-        # — drops JSON churn on routine runs to near-zero while preserving full
-        # drift visibility. When --update-contract was passed, reset the range
-        # to the current single point (the historical range was for the
-        # previous contract). See moondeck/scenario/_observed.py.
+        # observed.<target> keeps a rolling window of samples per scalar and reports
+        # p50/p95/min/max/n over it: the median is what the step normally costs and p95
+        # is its tail, neither of which a single contended run can move far. When
+        # --update-contract was passed, reset to the current single point (the window
+        # described the PREVIOUS contract). See moondeck/scenario/_observed.py.
         existing_obs = step.get("observed", {}).get(target)
         if update_contract:
             new_obs = _observed.reset(observations[name], today)
@@ -252,10 +263,22 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
             step.setdefault("contract", {})[target] = new_block
             touched_contract += 1
 
+    # --no-write: report the drift, change nothing. A gate must leave the tree exactly as it
+    # found it, or the run invalidates its own result.
+    if no_write:
+        if touched_observed or touched_contract:
+            print(f"  (drift in {path.name}: observed[{target}] x {touched_observed}"
+                  f"{f', contract x {touched_contract}' if touched_contract else ''};"
+                  f" run without --no-write to record it)")
+        return 0
+
     if touched_observed or touched_contract:
+        # Serialize, then put each sample window back on one line: a 32-element array
+        # spread over 32 lines hides the statistics it belongs to (_observed.py).
+        text = _observed.compact_samples(
+            json.dumps(scenario, indent=2, ensure_ascii=False))
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(scenario, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+            f.write(text + "\n")
         what = []
         if touched_observed:
             what.append(f"observed[{target}] × {touched_observed}")
@@ -271,6 +294,12 @@ def main():
                         help="Scenario name (file stem). Runs all if omitted.")
     parser.add_argument("--module", default=None,
                         help="Module filter. Runs only scenarios that match.")
+    parser.add_argument("--no-write", action="store_true",
+                        help="run and report, but do not write observations back into the "
+                             "scenario JSON. What the GATES use: a gate that writes dirties the "
+                             "tree it just checked, which makes it look like it needs running "
+                             "again, and puts an observation diff in every commit. Run without "
+                             "the flag to refresh the recorded numbers.")
     parser.add_argument("--update-contract", action="store_true",
                         help=("Renegotiate the per-step performance contract: write "
                               "observed tick/heap into contract[<host-target>] and "
@@ -299,7 +328,7 @@ def main():
         if module_filter and scenario_file not in test_meta.paths_for_module(module_filter):
             print(f"Scenario {args.name} does not match module {module_filter}.")
             sys.exit(1)
-        sys.exit(_run_one(scenario_file, args.update_contract, args.reason))
+        sys.exit(_run_one(scenario_file, args.update_contract, args.reason, args.no_write))
 
     if module_filter:
         paths = test_meta.paths_for_module(module_filter)
@@ -307,14 +336,16 @@ def main():
             print(f"No scenarios found for module: {module_filter}")
             sys.exit(1)
         print(f"Module filter: {module_filter} ({len(paths)} scenario(s))")
-        failed = sum(1 for p in paths if _run_one(p, args.update_contract, args.reason) != 0)
+        failed = sum(1 for p in paths if _run_one(p, args.update_contract, args.reason,
+                                          args.no_write) != 0)
         sys.exit(1 if failed else 0)
 
     # Run all scenarios. We iterate per-file (instead of letting the C++ runner
     # auto-discover) because _run_one captures MEASURE lines and writes
     # observed.<target> blocks back into each scenario JSON on every run.
     paths = sorted((ROOT / "test" / "scenarios").rglob("scenario_*.json"))
-    failed = sum(1 for p in paths if _run_one(p, args.update_contract, args.reason) != 0)
+    failed = sum(1 for p in paths if _run_one(p, args.update_contract, args.reason,
+                                          args.no_write) != 0)
     sys.exit(1 if failed else 0)
 
 

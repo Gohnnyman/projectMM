@@ -44,11 +44,11 @@ namespace {
 // every S3, so the one worth pinning hardest.
 const char* kGridLayout =
     "class GridLayout {\n"
-    "  uint8_t cols = 16;\n"
-    "  uint8_t rows = 16;\n"
-    "  tick() {\n"
-    "    for (y = 0; y < rows; y = y + 1) {\n"
-    "      for (x = 0; x < cols; x = x + 1) {\n"
+    "  byte cols = 16;\n"
+    "  byte rows = 16;\n"
+    "  void tick() {\n"
+    "    for (int y = 0; y < rows; y = y + 1) {\n"
+    "      for (int x = 0; x < cols; x = x + 1) {\n"
     "        addLight(x, y, 0);\n"
     "      }\n"
     "    }\n"
@@ -59,10 +59,10 @@ const char* kGridLayout =
 // rather than wrapped by a helper: these pin the EXACT bytes a shipped script emits, so the source
 // they are compiled from has to be the source a user would write.
 const char* kEffectSimple =
-    "class SimpleEffect {\n  tick() { setRGB(0, 255, 0, 0); }\n}\n";
+    "class SimpleEffect {\n  void tick() { setRGB(0, 255, 0, 0); }\n}\n";
 const char* kEffectLoop =
     "class LoopEffect {\n"
-    "  tick() { for (i = 0; i < 64; i = i + 1) { setRGB(i, i, 255 - i, 60); } }\n"
+    "  void tick() { for (int i = 0; i < 64; i = i + 1) { setRGB(i, i, 255 - i, 60); } }\n"
     "}\n";
 
 /// Compile for THIS TU's backend. `sysvars` is the ONE light vocabulary; the role-named
@@ -72,7 +72,7 @@ std::vector<uint8_t> emitBytes(const char* src, const mm::moonlive::SysVarTable&
     // Sized the way production sizes it, from the script's own token count — a test that always
     // allocated the sanity bound would pass while a right-sized caller overflowed.
     std::vector<uint8_t> out(mm::moonlive::codeCapFor(mm::moonlive::countTokens(src)));
-    // A string pool, as the engine supplies one: a script with a literal (every `addUint8` name)
+    // A string pool, as the engine supplies one: a script with a literal (every `addControl` name)
     // interns into it, and the emitted code carries pointers there. Static so those pointers stay
     // valid for as long as a test might look at the bytes.
     static char strings[mm::moonlive::CompileResult::kStringPool];
@@ -132,7 +132,7 @@ TEST_CASE("a scripted effect compiles for " MM_ISA_NAME ", straight-line and loo
 // that pushes any backend back over the edge shows up here first.
 TEST_CASE("fill plus a loop on " MM_ISA_NAME " emits what it currently can") {
     bool ok = false;
-    CHECK(emitLen(mmScript("fill(0,0,0);\nfor (y = 0; y < height; y = y + 1) { setRGB(y, 255, 0, 0); }"),
+    CHECK(emitLen(mmScript("fill(0,0,0);\nfor (int y = 0; y < height; y = y + 1) { setRGB(y, 255, 0, 0); }"),
                   mm::moonlive::effectSysVars(), ok) == MM_GOLD_FILLLOOP_LEN);
 }
 
@@ -224,9 +224,9 @@ TEST_CASE("the " MM_ISA_NAME " assembler stays small enough to build on a render
 TEST_CASE("every function in a class starts where a call can reach it, on " MM_ISA_NAME) {
     const char* src =
         "class T {\n"
-        "  first()  { setRGB(1, 7, 8, 9); }\n"
-        "  second() { setRGB(2, 1, 2, 3); first(); }\n"
-        "  tick()   { setRGB(0, 4, 5, 6); first(); second(); }\n"
+        "  void first()  { setRGB(1, 7, 8, 9); }\n"
+        "  void second() { setRGB(2, 1, 2, 3); first(); }\n"
+        "  void tick()   { setRGB(0, 4, 5, 6); first(); second(); }\n"
         "}\n";
     std::vector<uint8_t> out(mm::moonlive::codeCapFor(mm::moonlive::countTokens(src)));
     auto r = mm::moonlive::compileSource(src, mm::moonlive::lightBuiltins(),
@@ -245,6 +245,30 @@ TEST_CASE("every function in a class starts where a call can reach it, on " MM_I
     // second function's frame was simply never established.
     CHECK(r.entries[0].offset != r.entries[1].offset);
     CHECK(r.entries[1].offset != r.entries[2].offset);
+}
+
+// A `return <value>` must park its value in THIS ISA's return register. The register differs per
+// ISA and a wrong one is SILENT: the host reads a plausible number, so `dimensions()` would answer
+// with whatever that register held rather than failing. Nothing else executes these backends, so
+// the encoding is checked by finding the instruction in the emitted bytes.
+//
+// The predicate matches the DESTINATION only. Which register holds the value is the allocator's
+// choice and may change; that it is moved into the ABI's return register is the contract.
+TEST_CASE("a returned value reaches the return register on " MM_ISA_NAME) {
+    bool ok = false;
+    // A function that returns a COMPUTED value: a literal could be materialized straight into the
+    // return register by a smarter path and would not prove the move happens.
+    const auto code = emitBytes("class T {\n"
+                                "  int answer() { return 6 * 7; }\n"
+                                "  void tick() { setRGB(0, 1, 2, 3); }\n"
+                                "}\n",
+                                mm::moonlive::effectSysVars(), ok);
+    REQUIRE(ok);
+    REQUIRE(code.size() > 4);
+    bool found = false;
+    for (size_t i = 0; i + 4 <= code.size(); i += MM_ISA_RET_STRIDE)
+        if (MM_ISA_RET_WRITES_RETREG(&code[i])) { found = true; break; }
+    CHECK(found);
 }
 
 // Every script we SHIP has to compile on every backend, or a user's board choice silently decides

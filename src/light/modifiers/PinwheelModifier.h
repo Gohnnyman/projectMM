@@ -26,22 +26,25 @@ namespace mm {
 class PinwheelModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
+    /// Advisory UI chip: what this modifier can work on (polar around a center in the x/y plane).
+    /// Nothing branches on it, since extrude reads the EFFECT's dimensions.
+    Dim dimensions() const override { return Dim::D2; }
 
     uint8_t petals = 60;
     // Signed: negative values reverse the swirl direction. MoonLight's slider
     // range is -127..127. int16_t because the control system's signed type is
-    // addInt16 (there is no addInt8); the value stays within ±127.
+    // an int16 control (there is deliberately no int8 one — see Control.h); the value stays within ±127.
     int16_t swirl = 30;
     bool reverse = false;
     uint8_t symmetry = 1;
     uint8_t zTwist = 0;
 
     void defineControls() override {
-        controls_.addUint8("petals", petals);
-        controls_.addInt16("swirl", swirl, -127, 127);
-        controls_.addBool("reverse", reverse);
-        controls_.addUint8("symmetry", symmetry);
-        controls_.addUint8("zTwist", zTwist);
+        controls_.addControl("petals", petals);
+        controls_.addControl("swirl", swirl, -127, 127);
+        controls_.addControl("reverse", reverse);
+        controls_.addControl("symmetry", symmetry);
+        controls_.addControl("zTwist", zTwist);
     }
 
     void modifyLogicalSize(Coord3D& size) override {

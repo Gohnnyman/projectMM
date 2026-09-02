@@ -13,7 +13,7 @@ High-performance LED &amp; DMX lighting control for ESP32 and beyond.
 
 projectMM drives large LED installations and DMX fixtures. You build a light show by stacking simple blocks — a **layout** (how the LEDs are arranged), one or more **effects** (what they animate), **modifiers** (mirror, rotate, mask…), and a **driver** (how the pixels reach the hardware). Every setting takes effect live; there is no reboot to apply a change.
 
-It runs on ESP32 (the primary target), and also on Teensy, macOS, Windows, Linux, and Raspberry Pi.
+One source tree drives ESP32, Teensy, Raspberry Pi, macOS, Windows and Linux.
 
 ## Find your way
 
@@ -42,6 +42,12 @@ It runs on ESP32 (the primary target), and also on Teensy, macOS, Windows, Linux
     System design, the module model, and the per-module reference.
 
     [Architecture](architecture.md) · [Core modules](moonmodules/core/supporting.md) · [Light pipeline](moonmodules/light/supporting.md)
+
+-   :material-speedometer: **Numbers and people**
+
+    Measured frame rates per device, how the project works, why the code is ours, and who inspired what.
+
+    [Performance](performance.md) · [Why our own code](why-we-write-our-own.md) · [How we work](https://github.com/MoonModules/projectMM#how-we-work) · [Credits](https://github.com/MoonModules/projectMM#credits)
 
 </div>
 

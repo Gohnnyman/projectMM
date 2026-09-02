@@ -161,6 +161,39 @@ Your settings save themselves and survive a power cycle.
 
 ---
 
+## 5. The emoji on every card
+
+Each card and every row of the picker carries a few emoji. They are a filter, not
+decoration: the picker's chip row lets you narrow a long list to the effects that
+listen to music, or the layouts that build a volume. So an emoji only exists where
+it groups several modules, and a module that fits no group carries none.
+
+Three come from what the module IS, and the interface adds them for you:
+
+| | |
+|---|---|
+| 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver · 🛰️ service · 🥞 layer · ⚙️ generic | what kind of card it is |
+| 📏 1D · 🟦 2D · 🧊 3D | the shape it works in: a line, a picture, a volume |
+
+The rest the module declares about itself:
+
+| | |
+|---|---|
+| 💫 projectMM / MoonLight · 🌙 MoonModules · 🐙 WLED · ⚡️ FastLED | where it came from |
+| 🦅 | a named contributor, credited on the module |
+| 🎵 volume · 🎶 frequency | it listens: one note reacts to how LOUD the room is, two to WHICH notes are playing |
+| 📡 | it takes its picture from the network |
+| ✨ | built from particles: sparks that are born, fall and die |
+| 🎯 | it aims moving heads |
+| 🖌️ | a shader: every pixel computed from its own position, the way a screen shader works |
+| 👾 | pixel art: the games and sprites |
+| 🧬 | a simulation: the picture emerges from cells evolving off their own last frame, rather than being drawn |
+| 📹 | motion-tracking aware: it follows people or objects moving in the room *(reserved, nothing carries it yet)* |
+
+A module can carry several: `💫🎶` is a MoonLight effect that reacts to frequency.
+
+---
+
 ## Where to go next
 
 Now that you know what the cards are, go build something:

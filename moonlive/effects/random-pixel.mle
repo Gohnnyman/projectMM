@@ -1,8 +1,11 @@
-// One random light in a random colour per frame. The shipped default: always visibly alive,
-// and the smallest script that shows the engine running.
+// One random light in a random color per frame. The shipped default: always visibly alive,
 
 class RandomPixelEffect {
-  tick() {
+  int dimensions() { return 1; }
+
+  string tags() { return "💫"; }
+
+  void tick() {
     setRGB(random16(256), random16(256), random16(256), random16(256));
   }
 }

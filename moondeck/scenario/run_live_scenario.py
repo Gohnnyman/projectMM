@@ -759,11 +759,10 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                             print(f"  PASS  max_alloc_block {max_block} >= contract {exp_block} "
                                   f"(within -{heap_tol_pct}% tolerance)")
 
-            # observed.<target> stores a rolling [min, max] range per scalar
-            # that only widens when a fresh measurement falls outside the
-            # current bounds. Routine runs that stay in range produce no JSON
-            # diff. When --update-contract is set, the historical range no
-            # longer reflects the new promise, so reset to the current point.
+            # observed.<target> keeps a rolling window of samples per scalar and
+            # reports p50/p95/min/max/n over it, so a single slow run shifts the tail
+            # rather than the headline. When --update-contract is set, the window
+            # described the PREVIOUS promise, so reset to the current point.
             # See moondeck/scenario/_observed.py.
             sample = {
                 "tick_us": int(tick_us),

@@ -37,7 +37,7 @@ namespace mm {
 /// Effect: randomly-turned arc tiles that join into endless winding paths.
 class TruchetEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫🖌️"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t bpm      = 6;    // how fast the pattern drifts
@@ -48,12 +48,12 @@ public:
     bool    drift    = true; // slide the pattern instead of holding still
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 0, 60);
-        controls_.addUint8("scale", scale, 1, 16);
-        controls_.addUint8("thickness", thickness, 5, 200);
-        controls_.addUint8("softness", softness, 1, 200);
-        controls_.addUint8("shuffle", shuffle, 0, 255);
-        controls_.addBool("drift", drift);
+        controls_.addControl("bpm", bpm, 0, 60);
+        controls_.addControl("scale", scale, 1, 16);
+        controls_.addControl("thickness", thickness, 5, 200);
+        controls_.addControl("softness", softness, 1, 200);
+        controls_.addControl("shuffle", shuffle, 0, 255);
+        controls_.addControl("drift", drift);
     }
 
     void tick() MM_NONBLOCKING override {

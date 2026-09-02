@@ -25,15 +25,15 @@ namespace mm {
 /// 2D value-noise effect.
 class Noise2DEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🌙🐙"; }  // MoonLight origin · MoonModules · 2D
+    const char* tags() const override { return "💫🌙🐙"; }  // MoonLight origin · MoonModules · WLED
     Dim dimensions() const override { return Dim::D2; }
 
     uint8_t speed = 8;    // time-flow rate (0..15); higher = faster morph (divisor is 16-speed)
     uint8_t scale = 64;   // noise zoom (2..255); higher = finer/more-detailed field
 
     void defineControls() override {
-        controls_.addUint8("speed", speed, 0, 15);
-        controls_.addUint8("scale", scale, 2, 255);
+        controls_.addControl("speed", speed, 0, 15);
+        controls_.addControl("scale", scale, 2, 255);
     }
 
     void tick() MM_NONBLOCKING override {

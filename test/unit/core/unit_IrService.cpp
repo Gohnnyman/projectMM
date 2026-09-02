@@ -27,8 +27,8 @@ struct FakeDrivers : public MoonModule {
     uint8_t brightness = 100;
     uint8_t palette = 1;
     void defineControls() override {
-        controls_.addBool("on", on);
-        controls_.addUint8("brightness", brightness, 0, 255);
+        controls_.addControl("on", on);
+        controls_.addControl("brightness", brightness, 0, 255);
         // A Select's max is (optionCount - 1); addSelect binds min 0 / max count-1.
         static const char* kPalettes[] = {"A", "B", "C", "D"};
         controls_.addSelect("palette", palette, kPalettes, 4);

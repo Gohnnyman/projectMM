@@ -50,23 +50,24 @@ public:
 
     void defineControls() override {
         // Panel grid (outer). MoonLight ranges 1..32; clamped to lengthType (int16_t).
-        controls_.addInt16("horizontalPanels", horizontalPanels, 1, 32);
-        controls_.addInt16("verticalPanels",   verticalPanels,   1, 32);
+        controls_.addControl("horizontalPanels", horizontalPanels, 1, 32);
+        controls_.addControl("verticalPanels",   verticalPanels,   1, 32);
         controls_.addSelect("wiringOrderP", wiringOrderP, kWiringOptions, kWiringCount);
-        controls_.addBool("X++P",  incXP);
-        controls_.addBool("Y++P",  incYP);
-        controls_.addBool("snakeP", snakeP);
+        controls_.addControl("X++P",  incXP);
+        controls_.addControl("Y++P",  incYP);
+        controls_.addControl("snakeP", snakeP);
 
         // Per-panel (inner). MoonLight ranges 1..65536; clamped to int16_t max (512-safe).
-        controls_.addInt16("panelWidth",  panelWidth,  1, 512);
-        controls_.addInt16("panelHeight", panelHeight, 1, 512);
+        controls_.addControl("panelWidth",  panelWidth,  1, 512);
+        controls_.addControl("panelHeight", panelHeight, 1, 512);
         controls_.addSelect("wiringOrder", wiringOrder, kWiringOptions, kWiringCount);
-        controls_.addBool("X++",   incX);
-        controls_.addBool("Y++",   incY);
-        controls_.addBool("snake", snake);
+        controls_.addControl("X++",   incX);
+        controls_.addControl("Y++",   incY);
+        controls_.addControl("snake", snake);
     }
 
     const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D2; }
 
     nrOfLightsType lightCount() const override {
         // Total lights = (panels in grid) × (lights per panel). Multiply in

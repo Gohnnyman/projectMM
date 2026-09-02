@@ -35,7 +35,7 @@ namespace mm {
 /// Effect: a rotating 3D object of shaded spheres, drawn with real perspective.
 class VectorBallsEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫🖌️"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t bpm      = 12;   // rotation speed
@@ -45,11 +45,11 @@ public:
     bool    fade     = true; // dim the far balls, which is what reads as depth
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 0, 60);
-        controls_.addUint8("size", size, 1, 12);
-        controls_.addUint8("spread", spread, 20, 255);
-        controls_.addUint8("distance", distance, 40, 255);
-        controls_.addBool("fade", fade);
+        controls_.addControl("bpm", bpm, 0, 60);
+        controls_.addControl("size", size, 1, 12);
+        controls_.addControl("spread", spread, 20, 255);
+        controls_.addControl("distance", distance, 40, 255);
+        controls_.addControl("fade", fade);
     }
 
     void tick() MM_NONBLOCKING override {

@@ -19,6 +19,8 @@ namespace mm {
 /// Layout of parallel LED tubes.
 class TubesLayout : public LayoutBase {
 public:
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D2; }
     // Defaults verbatim from MoonLight (nrOfTubes 4, ledsPerTube 54,
     // tubeDistance 10, reversed off).
     lengthType nrOfTubes = 4;
@@ -30,10 +32,10 @@ public:
         // MoonLight's counterparts are bare "slider" controls (uint8_t, 0..255).
         // These explicit ranges hold the geometry (≥1 tube of ≥1 light,
         // non-negative spacing) while keeping the box bounded.
-        controls_.addInt16("nrOfTubes",    nrOfTubes,    1, 64);
-        controls_.addInt16("ledsPerTube",  ledsPerTube,  1, 255);
-        controls_.addInt16("tubeDistance", tubeDistance, 0, 255);
-        controls_.addBool("reversed", reversed);
+        controls_.addControl("nrOfTubes",    nrOfTubes,    1, 64);
+        controls_.addControl("ledsPerTube",  ledsPerTube,  1, 255);
+        controls_.addControl("tubeDistance", tubeDistance, 0, 255);
+        controls_.addControl("reversed", reversed);
     }
 
     nrOfLightsType lightCount() const override {

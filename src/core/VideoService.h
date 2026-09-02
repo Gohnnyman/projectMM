@@ -78,7 +78,7 @@ public:
         controls_.setReadOnly(controls_.count() - 1, !known);
         // How long a gap in frames is tolerated before the lights go dark. 0 holds the last
         // picture instead, for a source that legitimately stops sending.
-        controls_.addUint16("staleMs", staleMs, 0, 10000);
+        controls_.addControl("staleMs", staleMs, 0, 10000);
         controls_.setHidden(controls_.count() - 1, source != 2);
         MoonModule::defineControls();
     }

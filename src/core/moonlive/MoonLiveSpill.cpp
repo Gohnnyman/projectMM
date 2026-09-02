@@ -57,6 +57,11 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         case IrOp::Mov:
         case IrOp::AddImm:
         case IrOp::Spill:      out[0] = in.a;               return 1;
+        // A `return` reads its value ONLY when it carries one: `imm` says so, because it is not a
+        // register field and the rewriter renumbers every vreg reported here. A bare return reports
+        // nothing, so its `a` stays whatever the emitter left and the lowering never reads it.
+        case IrOp::Ret:        if (!in.imm) return 0;
+                               out[0] = in.a;               return 1;
         case IrOp::LoadCtrl:   out[0] = kArg4;              return 1;   // reads the arena pointer
         // A member STORE reads the VALUE being written, and nothing else. The arena pointer is
         // deliberately NOT reported, for the same reason LoadIdx/StoreIdx do not report it: the
@@ -66,8 +71,8 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         // the allocator rewrites anything. The pointer is reached through host(kArg4) at lowering
         // time and needs no live interval here.
         case IrOp::StoreCtrl:
-        case IrOp::StoreCtrl16: out[0] = in.a; return 1;
-        case IrOp::LoadCtrl16:  out[0] = kArg4;                return 1;   // reads the arena pointer
+        case IrOp::StoreCtrl32: out[0] = in.a; return 1;
+        case IrOp::LoadCtrl32:  out[0] = kArg4;               return 1;   // reads the arena pointer
         // An indexed access reads its INDEX (and, for a store, the value). The arena pointer is
         // deliberately NOT reported: the rewriter below writes sources back POSITIONALLY (src[0]
         // into in.a, src[1] into in.b), so listing kArg4 first would shift every real operand one
@@ -76,9 +81,16 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         // do the same, so kArg4 needs no live interval here either.
         case IrOp::LoadIdx:     out[0] = in.a;               return 1;
         case IrOp::StoreIdx:    out[0] = in.a; out[1] = in.b; return 2;
+        // Shl/Sar carry their shift amount in `imm`, so the vreg source is the value alone; Mulhi
+        // reads both operands exactly as Mul does.
+        case IrOp::Shl:
+        case IrOp::Shr:
+        case IrOp::Sar:        out[0] = in.a;               return 1;
+        case IrOp::Mulhi:      out[0] = in.a; out[1] = in.b; return 2;
         case IrOp::Add:
         case IrOp::Mul:
         case IrOp::BranchGe:
+        case IrOp::BranchGeS:
         case IrOp::BranchNe:   out[0] = in.a; out[1] = in.b; return 2;
         // A Call reads NO registers. Its arguments were staged into consecutive frame slots by the
         // parser, so `imm` is their base and `b` is how MANY there are — a literal count, not a
@@ -104,11 +116,11 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
 // buffer pointer) a spurious live range that the allocator would then try to manage.
 bool writesDst(IrOp op) {
     switch (op) {
-        case IrOp::Label: case IrOp::BranchGe: case IrOp::BranchNe:
+        case IrOp::Label: case IrOp::BranchGe: case IrOp::BranchGeS: case IrOp::BranchNe:
         // A member store writes MEMORY, not a register: its `a` is the value and `imm` the arena
         // offset, so reading its dst as a definition would give vreg 0 a spurious live range.
         case IrOp::StoreCtrl:
-        case IrOp::StoreCtrl16:
+        case IrOp::StoreCtrl32:
         // CallScript writes no dst either: a script function returns nothing today, so the call is
         // a statement rather than an expression. When it gains a return value this moves.
         case IrOp::CallScript:

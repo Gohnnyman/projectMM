@@ -24,9 +24,9 @@ public:
     uint8_t intensity = 200;
 
     void defineControls() override {
-        controls_.addUint8("bpm", bpm, 1, 255);
-        controls_.addUint8("radius", radius, 8, 255);
-        controls_.addUint8("intensity", intensity, 1, 255);
+        controls_.addControl("bpm", bpm, 1, 255);
+        controls_.addControl("radius", radius, 8, 255);
+        controls_.addControl("intensity", intensity, 1, 255);
     }
 
     // Class scope, not function-local: -Wfunction-effects flags ANY static local in a

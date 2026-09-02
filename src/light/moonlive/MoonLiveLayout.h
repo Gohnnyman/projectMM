@@ -37,7 +37,17 @@ namespace mm {
 /// Layout whose physical light positions are a live-authored MoonLive script.
 class MoonLiveLayout : public LayoutBase {
 public:
-    const char* tags() const override { return "📝"; }   // scripted
+    /// Both answered by the SCRIPT when it says, the same delegation MoonLiveEffect does. 📝 marks
+    /// a script that declared nothing of its own: the notepad says "this is scripted", which is all
+    /// a module can say about a program it has not been told about.
+    const char* tags() const override {
+        const char* t = script_.tags();
+        return t ? t : "📝";
+    }
+
+    /// Advisory here rather than functional: extrude reads the EFFECT's dimensions. It is what the
+    /// card and the picker show, so a script that declares 3 stops reading as 2 once it is running.
+    Dim dimensions() const override { return script_.dimensions(); }
 
     void defineControls() override {
         // The script NAME, not the script — the text lives in a file the UI loads and saves
@@ -48,7 +58,7 @@ public:
         // RECEIVE a width: the pipeline derives its bounding box from the coordinates the layouts
         // actually place (Layouts::prepare, "max coordinate + 1 per axis"), so a width handed in
         // from outside would be a second, disagreeing source of truth. A script that wants one
-        // declares it under its OWN name (`addUint8("cols", cols, 1, 64)`) and it becomes a real
+        // declares it under its OWN name (`addControl("cols", cols, 1, 64)`) and it becomes a real
         // slider. Not `width`: that is a system variable the engine writes, so a script cannot
         // declare it and the compiler refuses the name.
         script_.publishDeclaredControls(controls_);
@@ -84,6 +94,7 @@ public:
     void release() override {
         script_.engine().free();
         script_.invalidate();     // forget what was compiled, so re-enabling rebuilds it
+        script_.releaseReporting(*this);
         LayoutBase::release();
     }
 

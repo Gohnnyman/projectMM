@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/ActiveInstance.h"   // the boot-registry seat, so a surface can find this module
+#include "core/ControlSurface.h"
 #include "core/MoonModule.h"
 #include "core/FilesystemModule.h"
 #include "core/JsonSink.h"
@@ -85,18 +87,120 @@ public:
     static_assert(kCapturable[kEffectsRole][0] == 'E' && kCapturable[kEffectsRole][1] == 'f' &&
                   kCapturable[kEffectsRole][6] == 's', "kEffectsRole must index Effects");
 
-    /// How many faders the bank shows. Fixed for now; the surfaces we will map onto this have 8
+    /// How many faders the bank shows. Fixed; the surfaces this maps onto have 8
     /// (X-Touch) or 9 (nanoKONTROL), so the count becomes a control once a second surface needs it.
     static constexpr uint8_t kFaderCount = 8;
     /// A row of rotary encoders above the pads, mirroring where both the X-Touch and the QCon put
-    /// theirs. Unassigned for now: the binding UI is what gives them targets.
+    /// theirs. Unassigned: the binding UI is what gives them targets.
     static constexpr uint8_t kEncoderCount = 8;
 
+    /// The switch row. A desk's channel buttons (mute, solo, select on a Mackie surface) are the
+    /// third control type beside a fader and an encoder, and the one an on/off target needs: a
+    /// fader can express `on` only as 0 or 255, which is a switch pretending to be a slider.
+    /// Unassigned like the others until the target picker lands.
+    static constexpr uint8_t kSwitchCount = 8;
+
+    /// The boot ControlModule (exactly one exists). A transport in another module registers itself
+    /// as a surface through this, the same static seam AudioService and DevicesModule use, rather
+    /// than needing a compile-time pointer to this module's address.
+    static ControlModule* active() { return ActiveInstance<ControlModule>::active(); }
+
+    // --- Control surfaces -------------------------------------------------------------------
+    //
+    // A surface MIRRORS this module's state; it does not own any. Attaching two (a phone running
+    // Open Stage Control, a desk on the rack) keeps both correct, because each is a view of one
+    // state rather than a peer syncing with the other.
+
+    /// Attach a surface. Idempotent, and it seeds the surface with the current values so a client
+    /// that connects mid-show is correct immediately rather than after the first change.
+    void addSurface(ControlSurface* s) {
+        if (!s) return;
+        for (uint8_t i = 0; i < surfaceCount_; i++)
+            if (surfaces_[i] == s) return;
+        if (surfaceCount_ >= kMaxSurfaces) return;
+        surfaces_[surfaceCount_++] = s;
+        // Read the targets BEFORE seeding: a surface that connects between ticks would otherwise be
+        // sent whatever the mirror last held, which on the very first connect is the boot default
+        // rather than what the rig is running. Same correction mirrorToSurfaces does every tick.
+        followTargets();
+        resendTo(s);
+    }
+
+    /// Push EVERY value to one surface, whatever the mirror last sent. For a client that has just
+    /// connected: it knows nothing, and change-detection would leave it wrong until something
+    /// happened to move. Deliberately not `mirrorToSurfaces`, which is the steady-state path and
+    /// would tell every other surface things they already know.
+    void resendTo(ControlSurface* s) {
+        if (!s) return;
+        for (uint8_t i = 0; i < kSwitchCount; i++)
+            s->sendValue(SurfaceControl::Switch, i, switches_[i] ? 255 : 0);
+        for (uint8_t i = 0; i < kEncoderCount; i++) s->sendValue(SurfaceControl::Encoder, i, encoders_[i]);
+        for (uint8_t i = 0; i < kFaderCount; i++)   s->sendValue(SurfaceControl::Fader, i, faders_[i]);
+    }
+
+    /// Detach. A surface MUST do this before it is destroyed: mirrorToSurfaces walks this list from
+    /// the render thread, and a dangling entry is a use-after-free on the next tick.
+    void removeSurface(ControlSurface* s) {
+        for (uint8_t i = 0; i < surfaceCount_; i++) {
+            if (surfaces_[i] != s) continue;
+            surfaces_[i] = surfaces_[--surfaceCount_];
+            surfaces_[surfaceCount_] = nullptr;
+            return;
+        }
+    }
+
+    /// A TURN, not a position. A Mackie encoder sends signed detents rather than an absolute value,
+    /// so the accumulation has to happen here: a transport that only knows "the user moved it one
+    /// click" cannot know where that lands. Clamped, because a knob has no travel limit and a
+    /// control does.
+    void applyEncoderDelta(uint8_t index, int8_t delta) {
+        if (index >= kEncoderCount) return;
+        const int v = static_cast<int>(encoders_[index]) + delta;
+        encoders_[index] = static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
+    }
+
+    /// A hand is on this control. Feedback to it is suppressed while held, or the device fights the
+    /// user: a motorised fader driven to the old value while someone is moving it is the classic
+    /// failure, and the reason a desk reports touch at all.
+    void setTouched(SurfaceControl kind, uint8_t index, bool held) {
+        uint32_t* mask = touchMask(kind);
+        if (!mask || index >= 32) return;
+        if (held) *mask |= (1u << index);
+        else      *mask &= ~(1u << index);
+    }
+
+    /// Push changed values to every attached surface. Called from tick1s rather than from the write
+    /// path on purpose: sending on write would fire on the render thread for every control write,
+    /// INCLUDING the ones a surface just made, which is the echo this design avoids by construction.
+    /// Sampling also means a value that arrived and left between two samples never bounces.
+    void mirrorToSurfaces() {
+        if (surfaceCount_ == 0) return;
+        followTargets();
+        for (uint8_t i = 0; i < kSwitchCount; i++)
+            mirrorOne(SurfaceControl::Switch, i, switches_[i] ? 255 : 0, sentSwitches_[i]);
+        for (uint8_t i = 0; i < kEncoderCount; i++)
+            mirrorOne(SurfaceControl::Encoder, i, encoders_[i], sentEncoders_[i]);
+        for (uint8_t i = 0; i < kFaderCount; i++)
+            mirrorOne(SurfaceControl::Fader, i, faders_[i], sentFaders_[i]);
+    }
+
+    void tick1s() MM_NONBLOCKING override {
+        MoonModule::tick1s();
+        mirrorToSurfaces();
+    }
+
     void defineControls() override {
-        // Encoders first: they sit ABOVE the pads on the surfaces this mirrors, and control order is
+        // The switch row sits at the TOP, above the encoders, matching the surfaces this mirrors
+        // (a channel's buttons are above its knob, which is above its fader). Control order is
+        // render order, so the declaration order IS the layout.
+        for (uint8_t i = 0; i < kSwitchCount; i++) {
+            controls_.addControl(kSwitchNames[i], switches_[i]);
+            controls_.setSwitchRow(controls_.count() - 1, true, switchTarget(i));
+        }
+        // Encoders next: they sit ABOVE the pads on the surfaces this mirrors, and control order is
         // render order.
         for (uint8_t i = 0; i < kEncoderCount; i++) {
-            controls_.addUint8(kEncoderNames[i], encoders_[i]);
+            controls_.addControl(kEncoderNames[i], encoders_[i]);
             controls_.setEncoder(controls_.count() - 1, true, nullptr);
         }
         controls_.addList("presets", *this);
@@ -104,8 +208,8 @@ public:
         // and is settable from anywhere the control system reaches — which is what a MIDI surface
         // will bind to later. Rendered as a bank of vertical sliders by the UI.
         for (uint8_t i = 0; i < kFaderCount; i++) {
-            controls_.addUint8(kFaderNames[i], faders_[i]);
-            controls_.setFader(controls_.count() - 1, true, faderTarget(i));
+            controls_.addControl(kFaderNames[i], faders_[i]);
+            controls_.setFader(controls_.count() - 1, true, surfaceTarget(i));
         }
         // The save form. All HIDDEN: these are what the pad popup drives, not controls a user reads
         // off the card. Shown on the card they were ambiguous — `name` and the capture toggles look
@@ -117,7 +221,7 @@ public:
         // The pad a save is aimed at: transient UI intent, reset at setup (see setup()), never a
         // restored value. The declared max is kMaxPresets-1, so a persisted or API-supplied kNoSlot
         // would clamp to the last pad; savePreset re-checks the range for the same reason.
-        controls_.addUint8("slot", saveSlot_, 0, kMaxPresets - 1);
+        controls_.addControl("slot", saveSlot_, 0, kMaxPresets - 1);
         controls_.setHidden(controls_.count() - 1, true);
         // One flag per capturable subtree rather than a single multi-select: the set is small and
         // fixed, and a checkbox each is what makes "what will this preset contain" readable at a
@@ -131,6 +235,9 @@ public:
     }
 
     void setup() override {
+        // Take the seat before anything looks for us: a transport module registers itself as a
+        // surface through active(), and its own setup may run before or after this one.
+        seat_.claim();
         platform::fsMkdir(kPresetDir);
         // A restored `slot` is meaningless: it is the popup's "save onto this pad" intent for one
         // save, and the persistence load would clamp a stored kNoSlot to the last pad.
@@ -145,7 +252,19 @@ public:
         if (std::strcmp(controlName, "save") == 0) { savePreset(); return; }
         for (uint8_t i = 0; i < kFaderCount; i++) {
             if (std::strcmp(controlName, kFaderNames[i]) != 0) continue;
+            sentFaders_[i] = faders_[i];   // see markSent
             driveFader(i);
+            return;
+        }
+        for (uint8_t i = 0; i < kEncoderCount; i++) {
+            if (std::strcmp(controlName, kEncoderNames[i]) != 0) continue;
+            sentEncoders_[i] = encoders_[i];
+            return;
+        }
+        for (uint8_t i = 0; i < kSwitchCount; i++) {
+            if (std::strcmp(controlName, kSwitchNames[i]) != 0) continue;
+            sentSwitches_[i] = switches_[i] ? 255 : 0;
+            driveSwitch(i);
             return;
         }
     }
@@ -301,14 +420,87 @@ public:
     /// scales by); the rest are unassigned and do nothing until a target picker exists.
     /// What a fader drives, as "Module.control", or null when it drives nothing yet. The UI shows
     /// this in the fader's popup, so the answer comes from the module rather than the UI assuming.
-    static const char* faderTarget(uint8_t index) {
+    static const char* surfaceTarget(uint8_t index) {
         return index == 0 ? "Drivers.brightness" : nullptr;
     }
 
-    /// Drives whatever `faderTarget` declares, so the binding is stated ONCE: the popup and the
+    /// What a switch drives, as "Module.control", or null when it drives nothing yet. Switch 1 is
+    /// the master on/off every driver honours, the natural partner to fader 1's brightness: the two
+    /// controls a lighting desk expects to find first. The rest wait for the target picker, like
+    /// the faders.
+    static const char* switchTarget(uint8_t index) {
+        return index == 0 ? "Drivers.on" : nullptr;
+    }
+
+    /// Drives whatever `switchTarget` declares. A BOOL body, not a number: the target is a bool
+    /// control, and parseBool accepts `true`/`1` but not the 255 a byte path would send.
+    void driveSwitch(uint8_t index) {
+        const char* target = switchTarget(index);
+        if (!target || index >= kSwitchCount) return;
+        const char* dot = std::strchr(target, '.');
+        if (!dot) return;
+        auto* sched = Scheduler::instance();
+        if (!sched) return;
+        char module[24];
+        const size_t n = std::min(static_cast<size_t>(dot - target), sizeof(module) - 1);
+        std::memcpy(module, target, n);
+        module[n] = '\0';
+        char body[32];
+        std::snprintf(body, sizeof(body), "{\"value\":%s}", switches_[index] ? "true" : "false");
+        sched->setControl(module, dot + 1, body);
+    }
+
+    /// Read every bound control back, so a surface FOLLOWS what it drives.
+    ///
+    /// Driving is only half of a control surface. Without this the surface's own value and its
+    /// target's drift apart the moment anything else writes the target: the web UI, a preset
+    /// recall, an audio-reactive effect. They also start out of step, because a surface control's
+    /// default has never met the target's persisted value: switch1 read `off` at boot on a device
+    /// whose `Drivers.on` was on, which is the bug that named this.
+    ///
+    /// Reads through Scheduler::getControl, the mirror of the setControl that writes, so a binding
+    /// costs nothing here. That is what makes this work for the soft-wired controls to come: a
+    /// fader pointed at a different target by the user follows it with no new code.
+    ///
+    /// The TARGET wins on a disagreement. It is the value the device is actually running on, and
+    /// the surface is a view of it: a fader showing something the rig is not doing is the failure
+    /// this exists to prevent. A write from the surface still takes effect immediately (it goes
+    /// straight through driveFader), so this only ever corrects a value nothing on the surface is
+    /// currently moving.
+    void followTargets() {
+        auto* sched = Scheduler::instance();
+        if (!sched) return;
+        for (uint8_t i = 0; i < kFaderCount; i++) pullTarget(SurfaceControl::Fader, i, faders_[i]);
+        for (uint8_t i = 0; i < kSwitchCount; i++) {
+            uint8_t v = switches_[i] ? 255 : 0;
+            if (pullTarget(SurfaceControl::Switch, i, v)) switches_[i] = v != 0;
+        }
+    }
+
+    /// One control's read-back. Splits the target, asks the scheduler, and reports whether `value`
+    /// moved so the caller can store it in whatever the control's own storage is.
+    bool pullTarget(SurfaceControl kind, uint8_t index, uint8_t& value) {
+        const char* target = kind == SurfaceControl::Switch ? switchTarget(index) : surfaceTarget(index);
+        if (!target) return false;                    // unassigned: nothing to follow
+        const char* dot = std::strchr(target, '.');
+        if (!dot) return false;
+        auto* sched = Scheduler::instance();
+        if (!sched) return false;
+        char module[24];
+        const size_t n = std::min(static_cast<size_t>(dot - target), sizeof(module) - 1);
+        std::memcpy(module, target, n);
+        module[n] = '\0';
+        uint8_t live = 0;
+        if (!sched->getControl(module, dot + 1, live)) return false;
+        if (live == value) return false;
+        value = live;
+        return true;
+    }
+
+    /// Drives whatever `surfaceTarget` declares, so the binding is stated ONCE: the popup and the
     /// action cannot disagree, and a fader starts working the moment it gains a target.
     void driveFader(uint8_t index) {
-        const char* target = faderTarget(index);
+        const char* target = surfaceTarget(index);
         if (!target) return;                          // unassigned
         const char* dot = std::strchr(target, '.');
         if (!dot) return;
@@ -725,9 +917,50 @@ private:
     static constexpr const char* kFaderNames[kFaderCount] =
         {"fader1", "fader2", "fader3", "fader4", "fader5", "fader6", "fader7", "fader8"};
     static constexpr const char* kEncoderNames[kEncoderCount] =
-        {"enc1", "enc2", "enc3", "enc4", "enc5", "enc6", "enc7", "enc8"};
+        {"encoder1", "encoder2", "encoder3", "encoder4", "encoder5", "encoder6", "encoder7", "encoder8"};
+    ActiveInstance<ControlModule> seat_{*this};
+
+    /// Attached surfaces. A small fixed array: a rig has a desk and a phone, not thirty.
+    static constexpr uint8_t kMaxSurfaces = 4;
+    ControlSurface* surfaces_[kMaxSurfaces] = {};
+    uint8_t surfaceCount_ = 0;
+    /// The last value KNOWN to a surface, so only changes go out. Written in two places, and both
+    /// are needed: after a push in mirrorOne, and in onControlChanged, which fires for every write
+    /// whatever made it. That second one is the echo guard. Without it a value a surface just sent
+    /// us looks like a change at the next sample and is sent straight back: a fader dragged over
+    /// two seconds gets last second's position pushed back under the user's finger.
+    uint8_t sentSwitches_[kSwitchCount] = {};
+    uint8_t sentEncoders_[kEncoderCount] = {};
+    uint8_t sentFaders_[kFaderCount] = {};
+    /// One bit per control, per bank: a hand is on it. See setTouched.
+    uint32_t touchedSwitches_ = 0, touchedEncoders_ = 0, touchedFaders_ = 0;
+
+    uint32_t* touchMask(SurfaceControl kind) {
+        switch (kind) {
+            case SurfaceControl::Switch:  return &touchedSwitches_;
+            case SurfaceControl::Encoder: return &touchedEncoders_;
+            case SurfaceControl::Fader:   return &touchedFaders_;
+            default: return nullptr;   // a pad has no travel to fight over
+        }
+    }
+
+    /// Push one control if it changed and no hand is on it. `sent` is updated only when the value
+    /// actually goes out, so a touched control resyncs on release rather than being lost.
+    void mirrorOne(SurfaceControl kind, uint8_t index, uint8_t value, uint8_t& sent) {
+        if (value == sent) return;
+        const uint32_t* mask = touchMask(kind);
+        if (mask && index < 32 && (*mask & (1u << index))) return;
+        for (uint8_t s = 0; s < surfaceCount_; s++) surfaces_[s]->sendValue(kind, index, value);
+        sent = value;
+    }
+
+    static constexpr const char* kSwitchNames[kSwitchCount] =
+        {"switch1", "switch2", "switch3", "switch4", "switch5", "switch6", "switch7", "switch8"};
     uint8_t faders_[kFaderCount] = {};
     uint8_t encoders_[kEncoderCount] = {};
+    /// bool, not uint8: a switch is on or off, and the UI renders a checkbox from the type. An
+    /// on/off target set from a 0..255 fader would be a slider with two useful positions.
+    bool switches_[kSwitchCount] = {};
     /// Which pad the next save fills, set by the surface popup. kNoSlot means the save did not name
     /// a pad (a scripted or API save), and assignFreeSlots then places it in the first free cell.
     static constexpr uint8_t kNoSlot = 0xFF;

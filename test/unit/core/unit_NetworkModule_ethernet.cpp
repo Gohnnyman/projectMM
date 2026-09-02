@@ -88,17 +88,17 @@ TEST_CASE("Desktop Ethernet seam is a safe no-op") {
 
 // Regression: the `ethPhyAddr` control MUST be a SIGNED int16 whose range starts at -1 and
 // which renders as a number field (not a slider). -1 is ESP_ETH_PHY_ADDR_AUTO (scan the MDIO
-// bus — the RGMII default). It was once an addUint8(0,31): the uint8 mangled the platform's -1
+// bus — the RGMII default). It was once a uint8 control: the uint8 mangled the platform's -1
 // default to 255 and the 0..31 control clamped it to 31, a fixed address no PHY answered, so
 // the S31's RGMII never linked. This pins the control-metadata contract that fixed it — signed
 // storage so -1 round-trips, min == -1 so the sentinel is in-range, and numberField because an
-// MDIO address is an identity, not a magnitude. Tests the addInt16 + setNumberField seam
+// MDIO address is an identity, not a magnitude. Tests the int16 control + setNumberField seam
 // directly (the NetworkModule control is `if constexpr (hasEthernet)`-gated, absent on desktop),
 // so a future edit that reverts to a slider or an unsigned type fails here, off-hardware.
 TEST_CASE("ethPhyAddr-style control: signed int16, -1 sentinel in range, number field") {
     mm::ControlList controls;
     int16_t phyAddr = -1;   // ESP_ETH_PHY_ADDR_AUTO — must survive as -1, not become 255/31
-    controls.addInt16("ethPhyAddr", phyAddr, -1, 31);
+    controls.addControl("ethPhyAddr", phyAddr, -1, 31);
     controls.setNumberField(controls.count() - 1);
 
     const auto& c = controls[controls.count() - 1];
@@ -181,4 +181,27 @@ TEST_CASE("Static mode pins the static IP during STA bring-up (WaitingSta)") {
         CHECK(mm::platform::testNetStaticApplyCount(mm::platform::NetIface::Sta) > before);
     }
     mm::platform::setTestWifiStaAvailable(false);   // reset — cases stay independent
+}
+
+
+// The pin map must report what the HARDWARE holds, not what the control says. On an RMII/RGMII board
+// a type change is saved and applied on the NEXT BOOT (syncEthLive hot-reinits only W5500), so the
+// EMAC keeps driving its pads after the user selects None. Reading the pending control there frees
+// those pins in the map while the MAC still drives them, and an LED lane could then take one with
+// nothing flagging the collision, which is the failure this whole mechanism exists to prevent.
+//
+// Only the CAPACITY half is checkable here: `hasEthernet` is false on the desktop, so fixedPins
+// returns 0 on both sides of the applied-vs-pending distinction and a host test cannot tell them
+// apart. The distinction is exercised on hardware (an S31 keeps its twelve pads listed while the
+// interface runs) and by the esp32s31/esp32p4rev1-eth firmware builds.
+TEST_CASE("fixedPins never writes past the capacity it is given") {
+    mm::NetworkModule net;
+    net.setup();
+    mm::MoonModule::FixedPin pads[16];
+    // A sentinel past the capacity: the collector passes a real buffer size and a module that wrote
+    // beyond it would corrupt the stack frame above.
+    pads[2].gpio = 0xEE;
+    CHECK(net.fixedPins(pads, 2) <= 2);
+    CHECK(pads[2].gpio == 0xEE);
+    CHECK(net.fixedPins(nullptr, 16) == 0);   // a null sink is answered, not written through
 }

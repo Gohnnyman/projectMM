@@ -31,7 +31,7 @@ namespace mm {
 /// Effect: a propagating water surface where drops ripple, reflect and interfere.
 class WaterRippleEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫🧬"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t speed    = 60;    // simulation steps per second — how fast the water itself moves
@@ -43,13 +43,13 @@ public:
     uint8_t hueSpread = 110;  // how far a crest and a trough reach from it
 
     void defineControls() override {
-        controls_.addUint8("speed", speed, 1, 120);
-        controls_.addUint8("dropRate", dropRate, 0, 255);
-        controls_.addUint8("damping", damping, 1, 64);
-        controls_.addUint8("strength", strength, 1, 255);
-        controls_.addBool("colorByHeight", colorByHeight);
-        controls_.addUint8("hueBase", hueBase, 0, 255);
-        controls_.addUint8("hueSpread", hueSpread, 0, 127);
+        controls_.addControl("speed", speed, 1, 120);
+        controls_.addControl("dropRate", dropRate, 0, 255);
+        controls_.addControl("damping", damping, 1, 64);
+        controls_.addControl("strength", strength, 1, 255);
+        controls_.addControl("colorByHeight", colorByHeight);
+        controls_.addControl("hueBase", hueBase, 0, 255);
+        controls_.addControl("hueSpread", hueSpread, 0, 127);
     }
 
     void prepare() override {

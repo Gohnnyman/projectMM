@@ -2,15 +2,20 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>     // cosf/sinf/sqrtf for the naive desktop DFT (audioFft)
-#include <numbers>   // std::numbers::pi_v — same DFT
+#include <bit>       // std::countr_zero, the radix-2 audioFft's bit-reversal
+#include <cmath>     // cos/sin/sqrt for audioFft's twiddles and magnitudes
+#include <numbers>   // std::numbers::pi_v, same kernel
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
+#ifndef _WIN32
+#include <dlfcn.h>   // dlopen/dlsym — the NDI runtime is resolved on demand, never linked
+#endif
 #include <vector>   // HostBus frame buffers — the memory-backed parallel bus
 #include <thread>
+#include <deque>     // encoder frame queue between the render tick and the writer thread
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
@@ -23,6 +28,8 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <io.h>     // _fileno, _commit (POSIX fileno/fsync equivalents)
+#include <iphlpapi.h>   // GetIfTable2 — real link state + negotiated speed (ethLinkUp)
+#include <netioapi.h>   // MIB_IF_ROW2: sees a NIC a Hyper-V vSwitch hides from GetAdaptersAddresses
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -30,13 +37,19 @@
 #include <netdb.h>      // getaddrinfo — hostname resolution for TcpConnection::connect
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/wait.h>   // waitpid: reaping the spawned ffmpeg (encoderRunning/Stop)
+#include <spawn.h>      // posix_spawn: fd-hygienic, thread-safe child creation (encoderStart)
+extern char** environ;   // posix_spawnp wants the environment explicitly
+#include <csignal>      // SIGPIPE ignore + SIGKILL: the encoder pipe's failure surface
 #include <sys/mman.h>   // mmap/munmap for allocExec (executable pages)
 #include <net/if.h>     // if_nametoindex / ifreq — naming the NIC for raw L2 send
+#include <ifaddrs.h>    // getifaddrs: the raw-interface Select enumerates the host NICs
 #ifdef __linux__
 #include <netpacket/packet.h>   // sockaddr_ll — AF_PACKET raw frames (ethSendRaw)
 #include <net/ethernet.h>       // ETH_P_ALL
 #endif
 #ifdef __APPLE__
+#include <net/if_media.h>   // SIOCGIFMEDIA: the negotiated link rate, for the interface labels
 #include <pthread.h>    // pthread_jit_write_protect_np — macOS arm64 W^X JIT toggle
 #include <sys/ioctl.h>  // BIOCSETIF — binding a BPF device to an interface (ethSendRaw)
 #include <net/bpf.h>
@@ -46,6 +59,32 @@
 namespace mm::platform {
 
 namespace {
+/// Append ", <speed>" to an interface label, in the one format every OS's list uses.
+///
+/// The speed LOOKUP is necessarily per-OS (MIB_IF_TABLE2 on Windows, sysfs on Linux, SIOCGIFMEDIA
+/// on macOS: three APIs, three units), which is what the platform layer is for. The RENDERING is
+/// not, so it lives here once: the label shape is a contract the apply path and the driver's remap
+/// both parse (they split on ", " to recover the adapter's stable identity), and two copies of it
+/// would be two chances to drift out of that agreement.
+///
+/// `mbps` of 0 means the OS would not state a speed (a virtual adapter, a link that is down, or
+/// macOS Wi-Fi reporting only "autoselect"). That appends nothing, rather than a fabricated
+/// "0 Mb". Appends only if the whole suffix fits: a truncated speed reads worse than none, and
+/// the label is what the Select persists by.
+void appendLinkSpeed(char* out, size_t cap, unsigned mbps) {
+    if (!out || mbps == 0) return;
+    const size_t n = std::strlen(out);
+    char speed[24];
+    if (mbps >= 1000 && mbps % 1000 == 0)
+        std::snprintf(speed, sizeof(speed), ", %u Gb", mbps / 1000);
+    else if (mbps >= 1000)
+        std::snprintf(speed, sizeof(speed), ", %u.%u Gb", mbps / 1000, (mbps % 1000) / 100);
+    else
+        std::snprintf(speed, sizeof(speed), ", %u Mb", mbps);
+    if (n + std::strlen(speed) + 1 <= cap) std::snprintf(out + n, cap - n, "%s", speed);
+}
+
+
 // Tiny portability shims so each call site reads as plain code, not `#ifdef` noise.
 // POSIX uses int FDs + errno + read/write/close; Winsock uses SOCKET handles +
 // WSAGetLastError + recv/send/closesocket. Map to a small common surface.
@@ -242,6 +281,24 @@ void delayMs(uint32_t ms) {
 
 void delayUs(uint32_t us) {
     std::this_thread::sleep_for(std::chrono::microseconds(us));
+}
+
+void pauseLoop() {
+    // yield() alone only offers the CPU to another RUNNABLE thread, so on an otherwise idle
+    // machine it returns at once and the caller spins a core flat out (reported from a Linux
+    // bench as the process "slowly eating more cpu cycles ... maxed out one core").
+    //
+    // Sleep to a frame BUDGET rather than a fixed nap. Nothing consumes a desktop render faster
+    // than a display or a driver's own fps limit, so a loop free-running at 2000+ FPS is spending
+    // a core to compute frames no one reads. 4 ms is 250 FPS: far above any output rate we drive,
+    // while leaving the CPU idle in between. A tick that legitimately takes longer than the budget
+    // simply gets no sleep, so a heavy grid still runs as fast as it can.
+    static constexpr auto kFrameBudget = std::chrono::microseconds(4000);
+    static auto lastWake = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    const auto spent = now - lastWake;
+    if (spent < kFrameBudget) std::this_thread::sleep_for(kFrameBudget - spent);
+    lastWake = std::chrono::steady_clock::now();
 }
 
 size_t freeHeap() {
@@ -484,13 +541,68 @@ size_t firmwareSize() { return 0; }
 size_t firmwarePartition() { return 0; }
 size_t flashChipSize() { return 0; }
 
-// Filesystem — std::filesystem rooted at fsRoot_ (default "build", overridable via fsSetRoot).
-// A leading '/' in the API path maps to root-relative. Default lives under build/ so the
-// desktop-created .config/ is gitignored (along with the rest of build/) and doesn't clutter
-// the repo root. Tests override this to a tmpdir via fsSetRoot for isolation.
+// Filesystem: std::filesystem rooted at fsRoot_. A leading '/' in the API path maps to
+// root-relative.
+//
+// The root is a PER-USER data directory, not a path relative to wherever the process happened to
+// start. A shipped binary is launched from a download folder, a Start-menu shortcut, or an
+// installer's program directory, and a relative root fails both ways: it lands somewhere
+// unwritable, so every save fails, or it makes the settings belong to that FOLDER rather than to
+// the user, so moving the exe loses them. Both were seen on a Windows bench.
+//
+// Three sources, in order:
+//   1. MM_DATA_DIR, for tests and for anyone who wants the data somewhere specific.
+//   2. "build", when the working directory is a repo checkout. Keeps the dev loop, the gate
+//      scripts, and a developer's existing .config exactly where they already are.
+//   3. The OS's per-user application-data directory.
 
 namespace {
-std::filesystem::path fsRoot_{"build"};
+
+// The OS convention for per-user application data. Empty when the environment names no home, which
+// is a real case in a bare service account; the caller falls back rather than writing to "/".
+std::filesystem::path userDataDir() {
+#ifdef _WIN32
+    // LOCALAPPDATA, not APPDATA: this is machine-local state and has no business roaming.
+    if (const char* base = std::getenv("LOCALAPPDATA"); base && *base)
+        return std::filesystem::path(base) / "projectMM";
+#elif defined(__APPLE__)
+    if (const char* home = std::getenv("HOME"); home && *home)
+        return std::filesystem::path(home) / "Library" / "Application Support" / "projectMM";
+#else
+    if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg && *xdg)
+        return std::filesystem::path(xdg) / "projectMM";
+    if (const char* home = std::getenv("HOME"); home && *home)
+        return std::filesystem::path(home) / ".local" / "share" / "projectMM";
+#endif
+    return {};
+}
+
+// A checkout is recognized by CMakeLists.txt AND moondeck/ in the working directory. Both, because
+// CMakeLists.txt alone is true in the root of every CMake project there is, and a developer whose
+// shell happens to sit in an unrelated one would get projectMM's settings written into THAT
+// project's build/, which is the per-folder loss this whole change removes.
+//
+// Deliberately the working directory and not the executable's location:
+// `./build/windows/Release/projectMM` run from the repo root is the dev loop this preserves, and an
+// installed copy is never launched that way. In a checkout the root is `build/fs` (config under
+// `build/fs/.config`), a subdirectory rather than the build tree itself: see below.
+std::filesystem::path defaultRoot() {
+    if (const char* env = std::getenv("MM_DATA_DIR"); env && *env)
+        return std::filesystem::path(env);
+    std::error_code ec;
+    if (std::filesystem::exists("CMakeLists.txt", ec) && !ec
+        && std::filesystem::is_directory("moondeck", ec) && !ec)
+        // `build/fs`, not `build`: the device's filesystem is what the File Manager shows as its
+        // root, and rooting it at the build directory listed CMake caches, object archives and
+        // every ESP32 variant's build folder beside the four directories a device actually has.
+        // A subfolder makes the desktop look like a board, which is the point of the desktop
+        // build: what a user sees there has to be what they will see on hardware.
+        return std::filesystem::path("build") / "fs";
+    std::filesystem::path user = userDataDir();
+    return user.empty() ? std::filesystem::path("build") : user;
+}
+
+std::filesystem::path fsRoot_{defaultRoot()};
 
 // Map "/.config/foo.json" → "<root>/.config/foo.json". Strips leading '/'s, normalizes
 // the result, and rejects paths that escape fsRoot_ (e.g. "../../etc/passwd"). Returns
@@ -511,11 +623,34 @@ std::filesystem::path toFsPath(const char* path) {
 }
 
 void fsSetRoot(const char* path) {
-    fsRoot_ = (path && *path) ? std::filesystem::path(path) : std::filesystem::path("build");
+    fsRoot_ = (path && *path) ? std::filesystem::path(path) : defaultRoot();
+}
+
+const char* fsRootPath() {
+    // Refreshed per call rather than cached at set time, so it cannot go stale after fsSetRoot.
+    // Diagnostics only, and the desktop build reports it from one thread.
+    static std::string cached;
+    cached = fsRoot_.string();
+    return cached.c_str();
 }
 
 bool fsMount() {
-    // No mount needed on desktop; OS handles it.
+    // Desktop has no volume to mount, but it DOES have a root that may not exist yet and may not
+    // be writable. Establishing that here is what turns an unusable location into ONE line at
+    // startup instead of one write failure per save, forever.
+    std::error_code ec;
+    std::filesystem::create_directories(fsRoot_, ec);
+    if (!std::filesystem::is_directory(fsRoot_, ec)) return false;
+    // Existence does not imply writability: a read-only extraction, a protected folder, or a
+    // directory owned by another user all exist happily and reject the first write. create_
+    // directories is silent about all three, so probe with the operation that actually matters.
+    const auto probe = fsRoot_ / ".mm-write-probe";
+    std::error_code rm;
+    std::filesystem::remove(probe, rm);
+    FILE* f = std::fopen(probe.string().c_str(), "wb");
+    if (!f) return false;
+    std::fclose(f);
+    std::filesystem::remove(probe, rm);
     return true;
 }
 
@@ -702,8 +837,6 @@ size_t filesystemTotal() {
 void setEthConfig(const EthPinConfig&) {}   // no eth on desktop; ethInit stubs false
 void ethStop() {}                           // no eth on desktop
 bool ethInit() { return false; }
-bool ethLinkUp() MM_NONBLOCKING { return false; }
-bool ethConnected() MM_NONBLOCKING { return false; }
 
 // Raw-frame capture: the desktop half of the ethSendRaw seam. Sending a real L2 frame from a host
 // process needs a raw socket and root, which no test should ask for — so the host RECORDS what the
@@ -737,6 +870,184 @@ bool     ethRestartFails_ = false;   // simulated recovery failure
 // The bound raw socket, or -1 for capture mode (the default, and all any test sees).
 int      ethRawFd_ = -1;
 unsigned ethRawIfIndex_ = 0;         // Linux AF_PACKET needs the index; BPF binds by name
+
+#ifdef _WIN32
+// --- Npcap/WinPcap, loaded at RUN TIME ---------------------------------------------------------
+//
+// Windows has no kernel path for sending a raw L2 frame: it takes a third-party driver, which is
+// what Npcap is and what ColorLight's own LEDVision uses. wpcap.dll is resolved with LoadLibrary
+// rather than linked, and that is deliberate rather than stylistic. mm_platform is a PUBLIC
+// dependency of mm_core, projectMM, mm_tests and mm_scenarios, so linking wpcap would make the
+// Npcap SDK a build requirement for CI and for every contributor, to compile a path most of them
+// never run. Loading on demand means the binary builds and runs identically without Npcap, and
+// reports that raw send is unavailable instead of failing to link.
+//
+// The whole surface is five functions, declared here with pcap's own signatures rather than by
+// including pcap.h, which would reintroduce the SDK dependency this exists to avoid.
+struct PcapIf { PcapIf* next; char* name; char* description; /* remaining fields unused */ };
+using PcapT = struct pcap;
+// pcap's send queue: a preformatted block of (header, bytes) pairs the kernel transmits in one
+// call. Layout must match wpcap's exactly — it is written by pcap_sendqueue_queue and read by
+// pcap_sendqueue_transmit, so these are ABI, not convenience.
+struct PcapSendQueue { unsigned maxlen; unsigned len; char* buffer; };
+struct PcapTimeval { long tv_sec; long tv_usec; };            // Windows long is 32-bit
+struct PcapPktHdr  { PcapTimeval ts; unsigned caplen; unsigned len; };
+using PcapOpenLiveFn    = PcapT* (*)(const char*, int, int, int, char*);
+using PcapSendPacketFn  = int (*)(PcapT*, const unsigned char*, int);
+using PcapCloseFn       = void (*)(PcapT*);
+using PcapFindAllDevsFn = int (*)(PcapIf**, char*);
+using PcapFreeAllDevsFn = void (*)(PcapIf*);
+using PcapQAllocFn      = PcapSendQueue* (*)(unsigned);
+using PcapQQueueFn      = int (*)(PcapSendQueue*, const PcapPktHdr*, const unsigned char*);
+using PcapQTransmitFn   = unsigned (*)(PcapT*, PcapSendQueue*, int);
+using PcapQDestroyFn    = void (*)(PcapSendQueue*);
+
+HMODULE           wpcapLib_ = nullptr;
+PcapOpenLiveFn    pcapOpenLive_ = nullptr;
+PcapSendPacketFn  pcapSendPacket_ = nullptr;
+PcapCloseFn       pcapClose_ = nullptr;
+PcapFindAllDevsFn pcapFindAllDevs_ = nullptr;
+PcapFreeAllDevsFn pcapFreeAllDevs_ = nullptr;
+PcapQAllocFn      pcapQAlloc_ = nullptr;
+PcapQQueueFn      pcapQQueue_ = nullptr;
+PcapQTransmitFn   pcapQTransmit_ = nullptr;
+PcapQDestroyFn    pcapQDestroy_ = nullptr;
+PcapT*            pcapHandle_ = nullptr;   // the open adapter, or null for capture mode
+// The batch ethSendRaw fills and ethFlushRaw hands to the kernel. Allocated once at BIND time, not
+// per frame: ethSendRaw is MM_NONBLOCKING and must not allocate. Null when wpcap is too old to
+// offer the queue API, in which case sends fall back to one syscall per packet.
+PcapSendQueue*    pcapQueue_ = nullptr;
+// Sized for one wall frame with headroom: the widest supported wall is 256 rows, plus brightness
+// and sync frames, at the Ethernet maximum. ~400 KB of one-time allocation on a machine that has
+// just chosen to drive an LED wall.
+constexpr unsigned kSendQueueBytes = 264u * (unsigned)(kEthTestFrameMax + sizeof(PcapPktHdr));
+// The adapter GUID the handle belongs to, so ethLinkUp/ethLinkSpeedMbps report THAT NIC. The GUID
+// rather than the description, because the description is not always THERE: pcap reports none at
+// all for some adapters (a USB NIC on this bench reports none), while `\Device\NPF_{GUID}` is the
+// one identifier every Windows pcap device carries. See winAdapterLink.
+char              boundGuid_[40] = {};   // "{8BB7C86E-E3D1-4842-8333-DAD18FD0ADD5}" + NUL
+
+/// Resolve wpcap.dll once. False when Npcap is not installed, which is an ordinary state.
+bool wpcapLoad() {
+    if (pcapSendPacket_) return true;
+    if (!wpcapLib_) wpcapLib_ = ::LoadLibraryA("wpcap.dll");
+    if (!wpcapLib_) return false;
+    auto sym = [](HMODULE m, const char* n) {
+        return reinterpret_cast<void*>(::GetProcAddress(m, n));
+    };
+    pcapOpenLive_    = reinterpret_cast<PcapOpenLiveFn>(sym(wpcapLib_, "pcap_open_live"));
+    pcapSendPacket_  = reinterpret_cast<PcapSendPacketFn>(sym(wpcapLib_, "pcap_sendpacket"));
+    pcapClose_       = reinterpret_cast<PcapCloseFn>(sym(wpcapLib_, "pcap_close"));
+    pcapFindAllDevs_ = reinterpret_cast<PcapFindAllDevsFn>(sym(wpcapLib_, "pcap_findalldevs"));
+    pcapFreeAllDevs_ = reinterpret_cast<PcapFreeAllDevsFn>(sym(wpcapLib_, "pcap_freealldevs"));
+    // The batch API is OPTIONAL: it is a WinPcap/Npcap extension, absent from some builds. When it
+    // is missing the sends below stay one-syscall-per-packet, which works and merely jitters.
+    pcapQAlloc_    = reinterpret_cast<PcapQAllocFn>(sym(wpcapLib_, "pcap_sendqueue_alloc"));
+    pcapQQueue_    = reinterpret_cast<PcapQQueueFn>(sym(wpcapLib_, "pcap_sendqueue_queue"));
+    pcapQTransmit_ = reinterpret_cast<PcapQTransmitFn>(sym(wpcapLib_, "pcap_sendqueue_transmit"));
+    pcapQDestroy_  = reinterpret_cast<PcapQDestroyFn>(sym(wpcapLib_, "pcap_sendqueue_destroy"));
+    return pcapOpenLive_ && pcapSendPacket_ && pcapClose_ && pcapFindAllDevs_ && pcapFreeAllDevs_;
+}
+
+/// Case-insensitive substring test, so an adapter can be named the way Windows shows it.
+bool containsNoCase(const char* haystack, const char* needle) {
+    if (!haystack || !needle || !*needle) return false;
+    for (const char* h = haystack; *h; h++) {
+        const char* a = h;
+        const char* b = needle;
+        while (*a && *b && std::tolower(static_cast<unsigned char>(*a)) ==
+                           std::tolower(static_cast<unsigned char>(*b))) { a++; b++; }
+        if (!*b) return true;
+    }
+    return false;
+}
+
+/// Case-insensitive equality, for two strings already in the same canonical form.
+bool equalsNoCase(const char* a, const char* b) {
+    for (; *a && *b; a++, b++) {
+        if (std::tolower(static_cast<unsigned char>(*a)) !=
+            std::tolower(static_cast<unsigned char>(*b))) return false;
+    }
+    return !*a && !*b;
+}
+
+/// The `{GUID}` out of a pcap device name (`\Device\NPF_{8BB7C86E-...}`), braces included.
+bool guidFromPcapName(const char* name, char* out, size_t cap) {
+    if (!name || !out || cap == 0) return false;
+    const char* open = std::strchr(name, '{');
+    if (!open) return false;
+    const char* close = std::strchr(open, '}');
+    if (!close) return false;
+    const size_t n = static_cast<size_t>(close - open) + 1;
+    if (n >= cap) return false;
+    std::memcpy(out, open, n);
+    out[n] = '\0';
+    return true;
+}
+
+/// A MIB row's GUID in the spelling pcap uses, so the two can be compared as text.
+void guidToString(const GUID& g, char* out, size_t cap) {
+    std::snprintf(out, cap, "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+                  static_cast<unsigned long>(g.Data1), g.Data2, g.Data3,
+                  g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
+                  g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
+}
+
+/// The description WINDOWS shows for a pcap device, found through the interface table by GUID,
+/// with the adapter's LINK SPEED appended when Windows states one ("Realtek PCIe GbE, 1 Gb").
+/// This exists because pcap's own description can be absent: without it such an adapter is
+/// unnameable, since the only text left to match is a 49-character device path.
+///
+/// The speed rides in the label because the name alone does not say what a picker needs to know:
+/// a panel wall wants the 1 Gb NIC, and a list of plausible-looking names hides which entries are
+/// a 2.5 Gb USB dongle, a Wi-Fi radio, or a Hyper-V virtual switch. Windows reports 0 or ~0 for
+/// an adapter whose speed it will not state (typically one that is down), and those get no suffix
+/// rather than a fabricated "0 Mb".
+/// The interface-table row behind a pcap device, matched on the GUID in its device name. One home
+/// for the walk, because the label and the is-this-a-real-NIC test both need the same row.
+const MIB_IF_ROW2* winRowForPcapName(const MIB_IF_TABLE2* table, const char* pcapName) {
+    if (!table) return nullptr;
+    char want[40];
+    if (!guidFromPcapName(pcapName, want, sizeof(want))) return nullptr;
+    for (ULONG i = 0; i < table->NumEntries; i++) {
+        char have[40];
+        guidToString(table->Table[i].InterfaceGuid, have, sizeof(have));
+        if (equalsNoCase(have, want)) return &table->Table[i];
+    }
+    return nullptr;
+}
+
+/// Can this adapter carry panel frames? Only physical Ethernet can.
+///
+/// IF_TYPE_ETHERNET_CSMACD on its own is not the test: measured on a Windows bench, the Hyper-V
+/// vSwitch ports, every WAN miniport, the network bridge and Bluetooth PAN all report that type
+/// too. HardwareInterface is what separates them from a NIC with a socket on it. Wi-Fi fails the
+/// type test instead (IF_TYPE_IEEE80211), which is the right answer for a card that needs a wire.
+bool winIsPanelCapableNic(const MIB_IF_ROW2* row) {
+    return row && row->Type == IF_TYPE_ETHERNET_CSMACD
+        && row->InterfaceAndOperStatusFlags.HardwareInterface;
+}
+
+bool winDescForPcapName(const MIB_IF_TABLE2* table, const char* pcapName, char* out, size_t cap) {
+    if (!out || cap == 0) return false;
+    const MIB_IF_ROW2* row = winRowForPcapName(table, pcapName);
+    if (!row) return false;
+    // Narrow the wide description as we copy: an adapter description is ASCII.
+    size_t n = 0;
+    for (; n + 1 < cap && row->Description[n]; n++) {
+        out[n] = static_cast<char>(row->Description[n]);
+    }
+    out[n] = '\0';
+    if (n == 0) return false;
+
+    // Same source and the same unknown-speed guard as ethLinkSpeedMbps (winAdapterLink);
+    // converted to Mbit here so the shared formatter takes one unit from every OS.
+    const unsigned long long bps = row->TransmitLinkSpeed;
+    if (bps == 0 || bps == ~0ULL) return true;
+    appendLinkSpeed(out, cap, static_cast<unsigned>(bps / 1000000ULL));
+    return true;
+}
+#endif  // _WIN32
 }  // namespace
 
 // Open a raw L2 socket on `ifName` so a host build drives panels for real — the deployment a Pi or
@@ -744,9 +1055,52 @@ unsigned ethRawIfIndex_ = 0;         // Linux AF_PACKET needs the index; BPF bin
 // need root (or CAP_NET_RAW), so an ordinary test run simply stays in capture mode.
 bool ethBindRawInterface(const char* ifName) {
 #ifdef _WIN32
-    // No raw-L2 send without a third-party driver (WinPcap/Npcap) on Windows; capture mode only.
-    (void)ifName;
-    return false;
+    // Close any previous handle first: `interface` is a live control, so a rebind must not leak
+    // the old adapter (CLAUDE.md, every setting applies live).
+    if (pcapHandle_ && pcapClose_) { pcapClose_(pcapHandle_); }
+    pcapHandle_ = nullptr;
+    if (pcapQueue_ && pcapQDestroy_) { pcapQDestroy_(pcapQueue_); }
+    pcapQueue_ = nullptr;
+    boundGuid_[0] = '\0';
+    if (!ifName || !ifName[0]) return true;   // explicit return to capture mode, as on POSIX
+    if (!wpcapLoad()) return false;           // no Npcap installed: the driver reports it
+
+    // Match the user's string against pcap's device name, pcap's description, and the description
+    // WINDOWS shows for the same adapter — case-insensitively, first hit wins. A pcap device is
+    // `\Device\NPF_{GUID}`, 49 characters against a 16-byte control, so a substring of a
+    // description is the only spelling that fits. The Windows lookup is not a nicety: pcap reports
+    // NO description for some adapters, and for those nothing a user could type would match at all.
+    // An exact device name still matches, which keeps the control meaning the same thing it means
+    // on Linux and macOS: name the interface.
+    PcapIf* devs = nullptr;
+    char err[256] = {};
+    if (pcapFindAllDevs_(&devs, err) != 0 || !devs) return false;
+    MIB_IF_TABLE2* table = nullptr;
+    if (::GetIfTable2(&table) != NO_ERROR) table = nullptr;   // fall back to pcap's own text
+    const PcapIf* hit = nullptr;
+    for (const PcapIf* d = devs; d; d = d->next) {
+        if (containsNoCase(d->name, ifName) || containsNoCase(d->description, ifName)) { hit = d; break; }
+        char desc[256];
+        if (winDescForPcapName(table, d->name, desc, sizeof(desc)) &&
+            containsNoCase(desc, ifName)) { hit = d; break; }
+    }
+    if (table) ::FreeMibTable(table);
+    if (!hit) { pcapFreeAllDevs_(devs); return false; }
+
+    // snaplen 65536, non-promiscuous, 1 ms read timeout. This handle only ever sends; promiscuous
+    // capture would cost interrupts for frames nothing reads.
+    PcapT* h = pcapOpenLive_(hit->name, 65536, 0, 1, err);
+    if (h) {
+        // Keep the GUID, which is what the link-state query matches on. The description was the
+        // old key, and it fell back to the DEVICE NAME when pcap reported none — a string no MIB
+        // row can ever match, so a perfectly bound adapter reported "no ethernet link" forever.
+        guidFromPcapName(hit->name, boundGuid_, sizeof(boundGuid_));
+    }
+    pcapFreeAllDevs_(devs);
+    pcapHandle_ = h;
+    // Allocate the batch here, off the hot path, so ethSendRaw only ever fills it.
+    if (h && pcapQAlloc_ && pcapQQueue_ && pcapQTransmit_) pcapQueue_ = pcapQAlloc_(kSendQueueBytes);
+    return h != nullptr;
 #else
     if (ethRawFd_ >= 0) { ::close(ethRawFd_); ethRawFd_ = -1; }
     ethRawIfIndex_ = 0;
@@ -791,6 +1145,40 @@ bool ethBindRawInterface(const char* ifName) {
 bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
     if (!frame || len == 0) return false;
     if (ethTestSendFails_) { ethSendFails_++; ethFailTotal_++; return false; }   // simulated link-down / full ring
+
+#ifdef _WIN32
+    // Bound adapter: send for real. Unbound (the default, and every unit test) falls through to the
+    // capture ring below, so the Windows path gains sending without changing what tests observe.
+    //
+    // BATCHED when the queue API is available. A wall frame is ~131 packets that must all land
+    // inside the card's inter-frame window, and one pcap_sendpacket per packet is one kernel
+    // transition per packet: measured at 0.9-5.6 ms per frame on a 128x127 wall, a 5x spread that
+    // the cards show as stutter because they latch on the sync frame and have no buffering.
+    // Queuing costs a memcpy and hands the whole burst over in a single call from ethFlushRaw.
+    if (pcapHandle_ && pcapQueue_ && pcapQQueue_) {
+        PcapPktHdr hdr = {};
+        hdr.caplen = static_cast<unsigned>(len);
+        hdr.len    = static_cast<unsigned>(len);
+        // NOTE the streak is not cleared here: queuing a packet into a buffer says nothing about
+        // whether it reached the wire. Only ethFlushRaw, where pcap_sendqueue_transmit reports how
+        // many bytes actually went out, is in a position to say the link is working. Clearing it on
+        // enqueue would keep ethSendFailStreak() at zero forever, and that streak is what the driver
+        // watches to detect a wedged link and call ethRestartTx.
+        if (pcapQQueue_(pcapQueue_, &hdr, frame) == 0) return true;
+        // Queue full: flush what we have and retry once, so an unexpectedly large wall degrades to
+        // two batches rather than dropping the rest of the frame.
+        ethFlushRaw();
+        if (pcapQQueue_(pcapQueue_, &hdr, frame) == 0) return true;
+        ethSendFails_++; ethFailTotal_++;
+        return false;
+    }
+    if (pcapHandle_ && pcapSendPacket_) {
+        const int rc = pcapSendPacket_(pcapHandle_, frame, static_cast<int>(len));
+        if (rc != 0) { ethSendFails_++; ethFailTotal_++; return false; }
+        ethSendFails_ = 0;
+        return true;
+    }
+#endif
 
 #ifndef _WIN32
     if (ethRawFd_ >= 0) {
@@ -853,6 +1241,27 @@ void setTestEthRestartFails(bool fail) { ethRestartFails_ = fail; }
 uint32_t ethRestartCountForTest() { return ethRestarts_; }
 
 // See platform.h: a claim stated by the driver, reference-counted.
+// Hand the batched burst to the kernel. See the header for why this seam exists.
+//
+// A no-op everywhere except a Windows host with the pcap queue API: Linux and macOS already give
+// the frame to the kernel inside ethSendRaw, so there is nothing held back to flush.
+void ethFlushRaw() MM_NONBLOCKING {
+#ifdef _WIN32
+    if (!pcapHandle_ || !pcapQueue_ || !pcapQTransmit_ || pcapQueue_->len == 0) return;
+    // sync=0: transmit at wire speed rather than replaying the queued timestamps. The card wants
+    // the whole burst inside its inter-frame window, which is the opposite of paced playback.
+    const unsigned queued = pcapQueue_->len;
+    const unsigned sent = pcapQTransmit_(pcapHandle_, pcapQueue_, 0);
+    // The one place that knows the burst actually left, so it owns BOTH ends of the streak: a short
+    // write is the failure ethSendFailStreak counts, and a complete one is the only honest reason to
+    // clear it.
+    if (sent < queued) { ethSendFails_++; ethFailTotal_++; }
+    else               { ethSendFails_ = 0; }
+    // Reset for the next frame: the queue is a buffer, and transmit does not rewind it.
+    pcapQueue_->len = 0;
+#endif
+}
+
 void ethClaimRawL2(bool claim) {
     if (claim) ethRawClaims_++;
     else if (ethRawClaims_ > 0) ethRawClaims_--;
@@ -863,7 +1272,61 @@ bool ethRawL2Claimed() MM_NONBLOCKING { return ethRawClaims_ > 0; }
 // The host has no negotiated link. Report gigabit so the driver's speed check passes on desktop and
 // its tests exercise the send path rather than the too-slow branch (which has its own test via
 // setTestEthLinkSpeed).
+// Link state and negotiated speed.
+//
+// On Windows these describe the adapter ethBindRawInterface opened, queried through IPHLPAPI. It
+// matters here rather than being a nicety: PanelCardDriver warns below 1000 Mbit because a
+// ColorLight card has no buffering and no flow control, so a 100 Mbit link tears the panel while
+// every frame still "sends" successfully. A hardcoded 1000 would make that warning inert, which is
+// worse than absent — it would state a fact nobody measured.
+//
+// Elsewhere on the desktop there is no Ethernet peripheral to describe, so these keep the stub
+// values and ethTestLinkSpeed_ lets a test choose what the driver sees.
+#ifdef _WIN32
+namespace {
+/// (linkUp, mbps) for the adapter ethBindRawInterface opened.
+///
+/// Matched on the adapter GUID through GetIfTable2 — NOT through GetAdaptersAddresses, because a
+/// NIC bound to a Hyper-V external vSwitch does not appear there at all: Windows reports the
+/// virtual adapter and hides the physical one the switch owns. Measured here, where pcap opens
+/// `\Device\NPF_{7DD559D5-...}` (the Realtek) and that GUID is in no GetAdaptersAddresses row.
+/// GetIfTable2 lists the physical interface AND carries the same GUID pcap put in the device name,
+/// so one exact key covers both a virtualized NIC and an adapter pcap describes as nothing at all.
+/// The description cannot do that: absent on some adapters, filter-suffixed on others.
+bool winAdapterLink(uint16_t& mbps) {
+    mbps = 0;
+    if (!boundGuid_[0]) return false;
+    MIB_IF_TABLE2* table = nullptr;
+    if (::GetIfTable2(&table) != NO_ERROR || !table) return false;
+    bool up = false;
+    for (ULONG i = 0; i < table->NumEntries; i++) {
+        const MIB_IF_ROW2& row = table->Table[i];
+        char have[40];
+        guidToString(row.InterfaceGuid, have, sizeof(have));
+        if (!equalsNoCase(have, boundGuid_)) continue;
+        up = (row.OperStatus == IfOperStatusUp);
+        const unsigned long long bps = row.TransmitLinkSpeed;
+        mbps = (bps == 0 || bps == ~0ULL) ? 0
+             : static_cast<uint16_t>((bps / 1000000ULL) > 65535ULL ? 65535ULL : (bps / 1000000ULL));
+        break;
+    }
+    ::FreeMibTable(table);
+    return up;
+}
+}  // namespace
+
+bool ethLinkUp() MM_NONBLOCKING { uint16_t m = 0; return winAdapterLink(m); }
+bool ethConnected() MM_NONBLOCKING { return ethLinkUp(); }
+uint16_t ethLinkSpeedMbps() MM_NONBLOCKING {
+    uint16_t m = 0;
+    if (winAdapterLink(m) && m) return m;
+    return ethTestLinkSpeed_;   // unbound, or a speed Windows would not state
+}
+#else
+bool ethLinkUp() MM_NONBLOCKING { return false; }
+bool ethConnected() MM_NONBLOCKING { return false; }
 uint16_t ethLinkSpeedMbps() MM_NONBLOCKING { return ethTestLinkSpeed_; }
+#endif
 
 size_t ethTestFrameCount() { return ethTestCount_; }
 size_t ethTestFrameLength(size_t i) { return i < kEthTestMaxFrames ? ethTestLens_[i] : 0; }
@@ -968,6 +1431,13 @@ bool otaWriteStream(FsWriteSrc /*src*/, void* /*user*/, size_t /*contentLen*/,
     if (bytesReadOut) *bytesReadOut = 0;
     return false;
 }
+
+// No partitions on desktop: there is no recovery image and nothing to boot into.
+bool otaHasMoonBase() { return false; }
+bool otaBootMoonBase() { return false; }
+bool otaRunningMoonBase() { return false; }
+bool moonbaseStageInstallUrl(const char*) { return false; }
+void moonbaseClearStagedUrl() {}
 
 // Outbound HTTP request (plain HTTP, LAN, no TLS) — see platform.h. Blocking, bounded by a
 // receive/send timeout. Builds the request into a stack buffer, connects, sends, reads the
@@ -1200,6 +1670,18 @@ int UdpSocket::recvFrom(uint8_t* buf, size_t maxLen, uint8_t srcIp[4]) {
     return static_cast<int>(n);
 }
 
+// Join an IPv4 multicast group so the bound socket receives datagrams sent to it. WLED audio
+// sync multicasts to 239.0.0.1; without this membership the datagrams never reach the socket.
+// INADDR_ANY as the interface lets the stack pick, which is what a single-homed device wants.
+bool UdpSocket::joinMulticast(const char* group) {
+    if (fd_ < 0 || !group) return false;
+    ip_mreq mreq{};
+    if (::inet_pton(AF_INET, group, &mreq.imr_multiaddr) != 1) return false;
+    mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+    return ::setsockopt(sock(fd_), IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                        reinterpret_cast<const char*>(&mreq), sizeof(mreq)) == 0;
+}
+
 bool UdpSocket::sendToAddr(const uint8_t ip[4], uint16_t port,
                            const uint8_t* data, size_t len) {
     if (fd_ < 0) return false;
@@ -1244,16 +1726,24 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
     // deadline (mirrors the ESP32 impl): this runs on the render thread, and a stalled peer whose TCP
     // receive window is full would otherwise make send() block forever and hang the loop. On timeout,
     // return false so the caller closes that client instead of wedging the device.
-    constexpr uint32_t kWriteDeadlineMs = 2000;
+    // TWO bounds, mirroring the ESP32 impl: the stall bound (progress resets it) lets a
+    // slow-but-steady transfer finish (a total-only bound truncated large assets under a parallel
+    // cold-cache page load); the total bound keeps a byte-trickling peer from holding the loop.
+    constexpr uint32_t kWriteStallMs = 2000;
+    constexpr uint32_t kWriteTotalMs = 8000;
     const uint32_t start = millis();
+    uint32_t lastProgress = start;
     size_t sent = 0;
     while (sent < len) {
         auto n = ::send(sock(fd_), reinterpret_cast<const char*>(data + sent),
                         static_cast<int>(len - sent), 0);
         if (n > 0) {
             sent += static_cast<size_t>(n);
+            lastProgress = millis();
         } else if (sockWouldBlock()) {
-            if (millis() - start >= kWriteDeadlineMs) return false;   // stalled peer — don't hang the loop
+            const uint32_t now = millis();
+            if (now - lastProgress >= kWriteStallMs || now - start >= kWriteTotalMs)
+                return false;   // stalled or crawling peer: close it, never hang the loop
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
 #ifndef _WIN32
         } else if (errno == EINTR) {
@@ -1631,12 +2121,8 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*l
     return {};   // not supported off the P4
 }
 
-// Audio codec — desktop has no codec, so init is a no-op that succeeds (there's
-// nothing to bring up); the inert audioMicInit below is what keeps capture off.
-bool audioCodecInit(CodecType /*type*/, const AudioCodecPins& /*pins*/, uint32_t /*sampleRate*/) {
-    return true;
-}
-void audioCodecDeinit() {}
+// Audio codec + capture live in platform_desktop_audio.cpp (the miniaudio TU): codec is a
+// succeed-no-op (nothing to bring up), the mic seam reads the OS capture device.
 
 // USB video capture — no USB host on desktop, so init fails and VideoService's usb
 // source reports "no capture device" while its other sources keep working.
@@ -1651,33 +2137,47 @@ const uint8_t* videoCaptureFrame(VideoCaptureHandle& /*h*/, uint16_t& /*width*/,
 }
 void videoCaptureDeinit(VideoCaptureHandle& /*h*/) {}
 
-// I2S microphone — no capture on desktop (hasI2sMic == false, AudioService inert),
-// so init fails and read returns nothing.
-bool audioMicInit(AudioMicHandle& /*h*/, uint16_t /*wsPin*/, uint16_t /*sdPin*/,
-                  uint16_t /*sckPin*/, int16_t /*mclkPin*/, uint32_t /*sampleRate*/) {
-    return false;
-}
-size_t audioMicRead(AudioMicHandle& /*h*/, int32_t* /*out*/, size_t /*maxSamples*/) {
-    return 0;
-}
-void audioMicDeinit(AudioMicHandle& /*h*/) {}
-
-// FFT kernel — a real but naive O(n^2) DFT. NOT the production kernel (the ESP32
-// uses esp-dsp's fast radix-2), but a correct reference so the host tests run the
-// genuine magnitude->band path on synthesized signals. n must be a power of two;
-// fills outMag[0..n/2) with the bin magnitudes.
+// FFT kernel: iterative radix-2 Cooley-Tukey (the textbook in-place decimation-in-time
+// form), the production desktop kernel now that live capture runs 512-point blocks ~43x/s
+// on the render tick (the previous naive O(n^2) DFT was, per its own comment, only fast
+// enough for host tests). Identical contract: n a power of two, outMag[0..n/2) filled with
+// unnormalized bin magnitudes sqrt(re^2+im^2); numerically equivalent to the DFT (pinned by
+// unit_platform_audiofft against a DFT reference).
 void audioFft(const float* windowed, size_t n, float* outMag) {
-    if (!windowed || !outMag || n == 0) return;
-    const float twoPiOverN = -2.0f * std::numbers::pi_v<float> / static_cast<float>(n);
-    for (size_t k = 0; k < n / 2; k++) {
-        float re = 0.0f, im = 0.0f;
-        for (size_t t = 0; t < n; t++) {
-            const float a = twoPiOverN * static_cast<float>(k) * static_cast<float>(t);
-            re += windowed[t] * std::cos(a);
-            im += windowed[t] * std::sin(a);
-        }
-        outMag[k] = std::sqrt(re * re + im * im);
+    if (!windowed || !outMag || n == 0 || (n & (n - 1)) != 0) return;
+    constexpr size_t kMaxN = 4096;
+    if (n > kMaxN) return;
+    static float re[kMaxN], im[kMaxN];   // scratch; render-thread only, like the ESP32 kernel's
+
+    // Bit-reversal permutation while loading the input.
+    const int bits = static_cast<int>(std::countr_zero(n));
+    for (size_t i = 0; i < n; i++) {
+        size_t r = 0;
+        for (int b = 0; b < bits; b++) r |= ((i >> b) & 1u) << (bits - 1 - b);
+        re[r] = windowed[i];
+        im[r] = 0.0f;
     }
+
+    // Butterflies: stages of doubling span, twiddles advanced per group.
+    for (size_t len = 2; len <= n; len <<= 1) {
+        const float ang = -2.0f * std::numbers::pi_v<float> / static_cast<float>(len);
+        const float wRe = std::cos(ang), wIm = std::sin(ang);
+        for (size_t i = 0; i < n; i += len) {
+            float curRe = 1.0f, curIm = 0.0f;
+            for (size_t j = 0; j < len / 2; j++) {
+                const size_t a = i + j, b = a + len / 2;
+                const float tRe = re[b] * curRe - im[b] * curIm;
+                const float tIm = re[b] * curIm + im[b] * curRe;
+                re[b] = re[a] - tRe; im[b] = im[a] - tIm;
+                re[a] += tRe;        im[a] += tIm;
+                const float nRe = curRe * wRe - curIm * wIm;
+                curIm = curRe * wIm + curIm * wRe;
+                curRe = nRe;
+            }
+        }
+    }
+
+    for (size_t k = 0; k < n / 2; k++) outMag[k] = std::sqrt(re[k] * re[k] + im[k] * im[k]);
 }
 
 // No I2C bus on the desktop host — report it as unavailable (the sentinel), the same as
@@ -1692,5 +2192,685 @@ size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*ma
 bool irRead(uint16_t /*pin*/, uint32_t& /*codeOut*/) { return false; }
 void irStop() {}   // no IR hardware on desktop
 bool irChannelReady(uint16_t /*pin*/) { return true; }   // no channel to fail on desktop
+
+
+// --- NDI video output ---------------------------------------------------------------------------
+//
+// projectMM as an NDI source (contract + the licensing reason for this shape: platform.h § NDI).
+// The runtime is resolved on demand and NEVER linked, bundled, or its headers included — the same
+// arrangement as the Npcap block above, for the same GPL-3 reason. The user installs the NDI
+// runtime; a machine without it builds and runs identically and reports the feature unavailable.
+//
+// The three declarations below are transcribed from the SDK's own public headers
+// (Processing.NDI.structs.h and Processing.NDI.Send.h). Getting a field's type or ORDER wrong here
+// is a silent crash or a skewed image rather than a compile error, because these are passed by
+// pointer into a binary that was built against the real definitions. They are quoted verbatim in
+// the plan (docs/history/plans) with their source, and must not be "tidied".
+namespace {
+
+using NdiSendInstance = void*;
+
+// Processing.NDI.structs.h — NDIlib_video_frame_v2_t, verbatim field order.
+struct NdiVideoFrameV2 {
+    int         xres, yres;
+    int         FourCC;                 // NDIlib_FourCC_video_type_e — an int-sized enum
+    int         frame_rate_N, frame_rate_D;
+    float       picture_aspect_ratio;
+    int         frame_format_type;      // NDIlib_frame_format_type_e
+    int64_t     timecode;
+    uint8_t*    p_data;
+    union { int line_stride_in_bytes; int data_size_in_bytes; };
+    const char* p_metadata;
+    int64_t     timestamp;
+};
+
+// Processing.NDI.Send.h — NDIlib_send_create_t, verbatim field order.
+struct NdiSendCreate {
+    const char* p_ndi_name;
+    const char* p_groups;
+    bool        clock_video, clock_audio;
+};
+
+// NDI_LIB_FOURCC('B','G','R','X') — X, not A: projectMM has no alpha to send, and an ignored
+// alpha channel is exactly what the X variants mean. Little-endian packing, as the macro builds it.
+constexpr int kFourCCBgrx = 'B' | ('G' << 8) | ('R' << 16) | (static_cast<int>('X') << 24);
+constexpr int kFrameFormatProgressive = 1;   // NDIlib_frame_format_type_progressive
+
+using NdiInitFn       = bool (*)();
+using NdiDestroyFn    = void (*)();
+using NdiSendCreateFn = NdiSendInstance (*)(const NdiSendCreate*);
+using NdiSendVideoFn  = void (*)(NdiSendInstance, const NdiVideoFrameV2*);
+using NdiSendDestroyFn= void (*)(NdiSendInstance);
+
+NdiInitFn        ndiInit_        = nullptr;
+NdiDestroyFn     ndiDestroy_     = nullptr;
+NdiSendCreateFn  ndiSendCreate_  = nullptr;
+NdiSendVideoFn   ndiSendVideo_   = nullptr;
+NdiSendDestroyFn ndiSendDestroy_ = nullptr;
+
+// Test capture (platform.h § NDI test seam). Recording is OFF unless a test turns it on, so a
+// desktop build with a real runtime behaves exactly as it would in production.
+struct NdiCapturedFrame { uint16_t w, h; uint8_t fps; std::vector<uint8_t> rgb; };
+NdiTestMode                  ndiTestMode_ = NdiTestMode::Off;
+std::vector<NdiCapturedFrame> ndiCaptured_;
+std::string                  ndiCapturedName_;
+
+void*           ndiLib_    = nullptr;
+NdiSendInstance ndiSender_ = nullptr;
+std::string     ndiName_;                 // owned: NDIlib_send_create_t holds the pointer, not a copy
+std::vector<uint8_t> ndiFrame_;           // BGRX staging, resized only on a geometry change
+
+/// The runtime's file name per platform, tried in order. The SONAME first, then the plain name a
+/// manual install leaves; Windows resolves through PATH, which the NDI installer sets.
+const char* const kNdiLibNames[] = {
+#if defined(_WIN32)
+    "Processing.NDI.Lib.x64.dll", "Processing.NDI.Lib.x86.dll",
+#elif defined(__APPLE__)
+    // NDI Tools for macOS ships the runtime INSIDE its app bundles rather than installing a
+    // system-wide dylib, so a plain name resolves nothing however complete the install is. The
+    // bundle paths are tried by name (verified to export the send API on a real NDI Tools install);
+    // `libndi_advanced` is the file NDI Tools ships, `libndi` the one bundled with Resolume.
+    "libndi.dylib", "/usr/local/lib/libndi.dylib", "/opt/homebrew/lib/libndi.dylib",
+    "/Applications/NDI Video Monitor.app/Contents/Frameworks/libndi_advanced.dylib",
+    "/Applications/NDI Studio Monitor.app/Contents/Frameworks/libndi_advanced.dylib",
+    "/Applications/NDI Discovery.app/Contents/Frameworks/libndi_advanced.dylib",
+    "/Applications/Resolume Arena/libndi.dylib",
+    "/Applications/Resolume Avenue/libndi.dylib",
+#else
+    "libndi.so.5", "libndi.so.6", "libndi.so",
+#endif
+};
+
+bool ndiLoad() {
+    if (ndiSendVideo_) return true;      // already resolved
+    if (!ndiLib_) {
+        for (const char* name : kNdiLibNames) {
+#if defined(_WIN32)
+            ndiLib_ = reinterpret_cast<void*>(::LoadLibraryA(name));
+#else
+            ndiLib_ = ::dlopen(name, RTLD_LAZY | RTLD_LOCAL);
+#endif
+            if (ndiLib_) break;
+        }
+    }
+    if (!ndiLib_) return false;
+    auto sym = [](void* m, const char* n) -> void* {
+#if defined(_WIN32)
+        return reinterpret_cast<void*>(::GetProcAddress(static_cast<HMODULE>(m), n));
+#else
+        return ::dlsym(m, n);
+#endif
+    };
+    ndiInit_         = reinterpret_cast<NdiInitFn>(sym(ndiLib_, "NDIlib_initialize"));
+    ndiDestroy_      = reinterpret_cast<NdiDestroyFn>(sym(ndiLib_, "NDIlib_destroy"));
+    ndiSendCreate_   = reinterpret_cast<NdiSendCreateFn>(sym(ndiLib_, "NDIlib_send_create"));
+    ndiSendVideo_    = reinterpret_cast<NdiSendVideoFn>(sym(ndiLib_, "NDIlib_send_send_video_v2"));
+    ndiSendDestroy_  = reinterpret_cast<NdiSendDestroyFn>(sym(ndiLib_, "NDIlib_send_destroy"));
+    if (!ndiInit_ || !ndiSendCreate_ || !ndiSendVideo_ || !ndiSendDestroy_) {
+        ndiSendVideo_ = nullptr;         // treat a partial resolve as absent
+        return false;
+    }
+    // NDIlib_initialize returns false when the CPU is unsupported — a real "cannot use it" that
+    // must not read as "installed and working".
+    if (!ndiInit_()) { ndiSendVideo_ = nullptr; return false; }
+    return true;
+}
+
+}  // namespace
+
+bool ndiAvailable() {
+    if (ndiTestMode_ == NdiTestMode::ForceAvailable) return true;
+    if (ndiTestMode_ == NdiTestMode::ForceMissing) return false;
+    return ndiLoad();
+}
+
+bool ndiSenderOpen(const char* name) {
+    if (ndiTestMode_ == NdiTestMode::ForceMissing) return false;
+    if (ndiTestMode_ == NdiTestMode::ForceAvailable) { ndiCapturedName_ = (name && name[0]) ? name : "projectMM"; return true; }
+    if (!ndiLoad()) return false;
+    ndiSenderClose();
+    ndiName_ = (name && name[0]) ? name : "projectMM";
+    NdiSendCreate create{};
+    create.p_ndi_name = ndiName_.c_str();   // the string must outlive the sender, hence ndiName_
+    create.p_groups   = nullptr;
+    // FALSE deliberately: clock_video makes send_send_video_v2 BLOCK to pace the caller, and this
+    // is called from the render thread which must never block. The driver already rate-limits to
+    // its fps control, so the pacing is ours to do.
+    create.clock_video = false;
+    create.clock_audio = false;             // no audio is sent
+    ndiSender_ = ndiSendCreate_(&create);
+    return ndiSender_ != nullptr;
+}
+
+void ndiSenderClose() {
+    if (ndiTestMode_ != NdiTestMode::Off) { ndiCapturedName_.clear(); return; }
+    if (ndiSender_) { ndiSendDestroy_(ndiSender_); ndiSender_ = nullptr; }
+    ndiFrame_.clear();
+    ndiFrame_.shrink_to_fit();
+}
+
+bool ndiSendFrame(const uint8_t* rgb, uint16_t w, uint16_t h, uint8_t fps) {
+    if (!rgb || w == 0 || h == 0) return false;
+    if (ndiTestMode_ == NdiTestMode::ForceAvailable) {
+        // Record what the driver produced, tight RGB, exactly as handed over.
+        NdiCapturedFrame f{w, h, fps, {}};
+        f.rgb.assign(rgb, rgb + static_cast<size_t>(w) * h * 3);
+        ndiCaptured_.push_back(std::move(f));
+        return true;
+    }
+    if (!ndiSender_) return false;
+    const size_t pixels = static_cast<size_t>(w) * h;
+    ndiFrame_.resize(pixels * 4);           // no-op once warm; the only allocation, never per frame
+    // RGB -> BGRX. The 4th byte is the ignored X, written once as 0xFF so a receiver that reads it
+    // as alpha sees opaque rather than transparent.
+    for (size_t i = 0; i < pixels; ++i) {
+        ndiFrame_[i * 4 + 0] = rgb[i * 3 + 2];
+        ndiFrame_[i * 4 + 1] = rgb[i * 3 + 1];
+        ndiFrame_[i * 4 + 2] = rgb[i * 3 + 0];
+        ndiFrame_[i * 4 + 3] = 0xFF;
+    }
+    NdiVideoFrameV2 f{};
+    f.xres = w;
+    f.yres = h;
+    f.FourCC = kFourCCBgrx;
+    f.frame_rate_N = fps ? fps : 30;
+    f.frame_rate_D = 1;
+    f.picture_aspect_ratio = 0.0f;          // 0 = square pixels, which a light grid has
+    f.frame_format_type = kFrameFormatProgressive;
+    f.timecode = INT64_MAX;                 // NDIlib_send_timecode_synthesize: let NDI stamp it
+    f.p_data = ndiFrame_.data();
+    f.line_stride_in_bytes = static_cast<int>(w) * 4;
+    ndiSendVideo_(ndiSender_, &f);          // synchronous, and clocked by clock_video above
+    return true;
+}
+
+void setTestNdiMode(NdiTestMode mode) {
+    ndiTestMode_ = mode;
+    if (mode != NdiTestMode::ForceAvailable) { ndiCaptured_.clear(); ndiCapturedName_.clear(); }
+}
+size_t ndiTestFrameCount() { return ndiCaptured_.size(); }
+uint16_t ndiTestFrameWidth(size_t i)  { return i < ndiCaptured_.size() ? ndiCaptured_[i].w : 0; }
+uint16_t ndiTestFrameHeight(size_t i) { return i < ndiCaptured_.size() ? ndiCaptured_[i].h : 0; }
+uint8_t  ndiTestFrameFps(size_t i)    { return i < ndiCaptured_.size() ? ndiCaptured_[i].fps : 0; }
+const uint8_t* ndiTestFrameData(size_t i) {
+    return i < ndiCaptured_.size() ? ndiCaptured_[i].rgb.data() : nullptr;
+}
+const char* ndiTestSenderName() { return ndiCapturedName_.c_str(); }
+void ndiTestClearFrames() { ndiCaptured_.clear(); }
+
+
+// --- HLS encoder (ffmpeg pipe) -----------------------------------------------------------------
+//
+// One spawned ffmpeg, stdin piped, argv from the driver (platform.h owns the contract). A
+// platform writer thread does the BLOCKING pipe writes on every OS while callers only enqueue
+// whole frames into a fixed reuse ring, so the render tick never touches the pipe and no
+// per-OS non-blocking trickery is needed. POSIX spawns via posix_spawn with default-CLOEXEC;
+// Windows via CreateProcess. Test seam mirrors NdiTestMode so CI never needs an ffmpeg.
+
+namespace {
+// Threading model: encoderStart/Stop/Running are LIFECYCLE calls, made only from the render
+// task (prepare/release/tick1s), so they need no lock among themselves. encoderWrite crosses
+// threads (the encode worker) and the writer thread consumes: those three share encMutex_,
+// which guards only the queue and the dead/stop flags, never a blocking write.
+std::mutex encMutex_;
+std::condition_variable encCv_;
+// A fixed ring of REUSED frame slots, whole frames only (tearing is structurally out): the
+// enqueue path must not heap-allocate per frame (assign() reuses each slot's capacity after
+// the first lap), and 3 slots of burst absorption is the drop-newest boundary.
+constexpr size_t kEncQueueMax = 3;
+std::vector<uint8_t> encSlots_[kEncQueueMax];
+size_t encHead_ = 0;    // slot the writer consumes next
+size_t encCount_ = 0;   // filled slots
+std::thread encWriter_;
+bool encWriterStop_ = false;
+bool encWriterDead_ = false;                  // the writer saw EPIPE/error: the process is gone
+EncoderTestMode encTestMode_ = EncoderTestMode::Off;
+constexpr int kEncTestWriteNormal = 1;   // sentinel: record normally (real results are 0/-1/len)
+int encTestWriteResult_ = kEncTestWriteNormal;
+std::vector<std::vector<uint8_t>> encCaptured_;
+std::string encCapturedArgs_;
+
+#ifdef _WIN32
+HANDLE encProcess_ = nullptr;
+HANDLE encStdin_ = nullptr;
+#else
+pid_t encPid_ = -1;
+int encStdin_ = -1;
+#endif
+}  // namespace
+
+
+// Stop the child and the writer, deadlock-free: signal stop, TERM the child FIRST (a writer
+// blocked in write() only reliably unblocks when the read side dies: EPIPE), join, then close
+// stdin and reap with a short grace before SIGKILL. Called only from the render task.
+static void stopEncoderProcess() {
+    if (encTestMode_ != EncoderTestMode::Off) return;
+    {
+        std::lock_guard<std::mutex> lk(encMutex_);
+        encWriterStop_ = true;
+        // The ring counters are NOT reset here: the writer may be mid-write on the head slot,
+        // and a producer racing this stop must keep seeing that slot as occupied. encoderStart
+        // resets the ring under the lock after the join, when nothing can touch it.
+        encCv_.notify_all();
+    }
+#ifdef _WIN32
+    if (encProcess_) TerminateProcess(encProcess_, 0);
+    if (encWriter_.joinable()) encWriter_.join();
+    if (encStdin_) { CloseHandle(encStdin_); encStdin_ = nullptr; }
+    if (encProcess_) { WaitForSingleObject(encProcess_, 500); CloseHandle(encProcess_); encProcess_ = nullptr; }
+#else
+    if (encPid_ >= 0) ::kill(encPid_, SIGTERM);
+    if (encWriter_.joinable()) encWriter_.join();
+    if (encStdin_ >= 0) { ::close(encStdin_); encStdin_ = -1; }
+    if (encPid_ >= 0) {
+        for (int i = 0; i < 20; i++) {                   // ~200 ms of graceful exit
+            if (::waitpid(encPid_, nullptr, WNOHANG) == encPid_) { encPid_ = -1; break; }
+            ::usleep(10 * 1000);
+        }
+        if (encPid_ >= 0) { ::kill(encPid_, SIGKILL); ::waitpid(encPid_, nullptr, 0); encPid_ = -1; }
+    }
+#endif
+}
+
+// Spawn `argv` (argv[0] resolved via PATH) with its stdin piped from us. The ffmpeg command line
+// is assembled by encoderStart below; this half is pure process plumbing.
+static bool spawnEncoderProcess(const char* const argv[]) {
+    stopEncoderProcess();
+    if (encTestMode_ != EncoderTestMode::Off) {
+        encCapturedArgs_.clear();
+        for (const char* const* a = argv; *a; a++) {
+            if (!encCapturedArgs_.empty()) encCapturedArgs_ += ' ';
+            encCapturedArgs_ += *a;
+        }
+        return encTestMode_ == EncoderTestMode::Record;
+    }
+#ifdef _WIN32
+    // Anonymous pipe, our end non-inheritable; ffmpeg resolved via PATH by CreateProcess.
+    SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+    HANDLE readEnd = nullptr, writeEnd = nullptr;
+    if (!CreatePipe(&readEnd, &writeEnd, &sa, 4 * 1024 * 1024)) return false;
+    SetHandleInformation(writeEnd, HANDLE_FLAG_INHERIT, 0);
+    std::string cmd;
+    for (const char* const* a = argv; *a; a++) {
+        if (!cmd.empty()) cmd += ' ';
+        cmd += '"'; cmd += *a; cmd += '"';
+    }
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = readEnd;
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    PROCESS_INFORMATION pi{};
+    const BOOL ok = CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, TRUE,
+                                   CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    CloseHandle(readEnd);
+    if (!ok) { CloseHandle(writeEnd); return false; }
+    CloseHandle(pi.hThread);
+    encProcess_ = pi.hProcess;
+    encStdin_ = writeEnd;
+#else
+    // posix_spawn, not fork/exec: fork in a threaded process can deadlock on the allocator
+    // lock before exec, and a plain exec would leak every parent fd (the HTTP listen socket,
+    // the Art-Net/DDP ports) into a child that outlives a restart. Everything except the
+    // dup2'd stdin is closed in the child: CLOEXEC_DEFAULT on macOS, closefrom on glibc.
+    int fds[2];
+    if (::pipe(fds) != 0) return false;
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, fds[0], 0);
+    pid_t pid = -1;
+    int rc;
+#ifdef __APPLE__
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
+    rc = ::posix_spawnp(&pid, argv[0], &fa, &attr, const_cast<char* const*>(argv), environ);
+    posix_spawnattr_destroy(&attr);
+#else
+    posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+    rc = ::posix_spawnp(&pid, argv[0], &fa, nullptr, const_cast<char* const*>(argv), environ);
+#endif
+    posix_spawn_file_actions_destroy(&fa);
+    ::close(fds[0]);
+    if (rc != 0) { ::close(fds[1]); return false; }
+    ::signal(SIGPIPE, SIG_IGN);             // a dead ffmpeg surfaces as EPIPE, not a signal
+    encPid_ = pid;
+    encStdin_ = fds[1];
+#endif
+    // The writer thread does the BLOCKING writes: the render tick only ever enqueues, so an
+    // encoder that stops reading for a while (scheduler starvation under a free-running render
+    // loop stalled it >250 ms on the bench) costs queued-then-dropped frames, never a stalled
+    // tick, never a torn frame, and never a false death.
+    {
+        std::lock_guard<std::mutex> lk(encMutex_);   // producers may race this restart
+        encWriterStop_ = false;
+        encWriterDead_ = false;
+        encHead_ = 0;
+        encCount_ = 0;
+    }
+    encWriter_ = std::thread([] {
+        for (;;) {
+            const std::vector<uint8_t>* frame = nullptr;
+            {
+                std::unique_lock<std::mutex> lk(encMutex_);
+                encCv_.wait(lk, [] { return encWriterStop_ || encCount_ > 0; });
+                if (encWriterStop_) return;
+                frame = &encSlots_[encHead_];   // the writer owns the head slot until it advances
+            }
+            size_t off = 0;
+            while (off < frame->size()) {
+#ifdef _WIN32
+                DWORD wrote = 0;
+                if (!WriteFile(encStdin_, frame->data() + off,
+                               static_cast<DWORD>(frame->size() - off), &wrote, nullptr)) {
+                    std::lock_guard<std::mutex> lk(encMutex_);
+                    encWriterDead_ = true;
+                    return;
+                }
+                off += wrote;
+#else
+                const ssize_t n = ::write(encStdin_, frame->data() + off, frame->size() - off);
+                if (n < 0 && errno == EINTR) continue;
+                if (n <= 0) {
+                    std::printf("encoder: pipe closed at %zu/%zu bytes\n", off, frame->size());
+                    std::lock_guard<std::mutex> lk(encMutex_);
+                    encWriterDead_ = true;   // EPIPE etc.: the process is gone
+                    return;
+                }
+                off += static_cast<size_t>(n);
+#endif
+            }
+            {
+                std::lock_guard<std::mutex> lk(encMutex_);
+                encHead_ = (encHead_ + 1) % kEncQueueMax;
+                encCount_--;
+            }
+        }
+    });
+    return true;
+}
+
+// The ffmpeg invocation IS the desktop encode contract: raw RGB in at the grid size and rate,
+// zerolatency x264 out, 1 s segments on a short rolling playlist (the live tuning that puts
+// glass-to-glass at 2-5 s), segments deleted as they fall off it.
+bool encoderStart(const EncoderConfig& cfg) {
+    char geo[16], rate[8], gop[8], bv[12], out[192];
+    std::snprintf(geo, sizeof(geo), "%ux%u", static_cast<unsigned>(cfg.width),
+                  static_cast<unsigned>(cfg.height));
+    std::snprintf(rate, sizeof(rate), "%u", static_cast<unsigned>(cfg.fps));
+    std::snprintf(gop, sizeof(gop), "%u", static_cast<unsigned>(cfg.fps));
+    std::snprintf(bv, sizeof(bv), "%uk", static_cast<unsigned>(cfg.bitrateKbit));
+    std::snprintf(out, sizeof(out), "%s/stream.m3u8", cfg.outDir);
+
+    // Assembled by index so the x264-only tuning flags stay off other encoders
+    // (h264_videotoolbox rejects -tune) without duplicated slots.
+    // Size the frame slots HERE, off the render tick: encoderWrite's assign() would otherwise
+    // allocate on its first lap, and the tick path must not allocate at all. A frame is
+    // width*height*3 (tight RGB, the driver's packing); a failure here fails the start, where
+    // the driver already reports it, rather than throwing from a later write.
+    const size_t frameBytes = static_cast<size_t>(cfg.width) * cfg.height * 3;
+    // Stop FIRST, then resize. The previous writer thread reads a slot's data pointer in its
+    // blocking write loop WITHOUT encMutex_ held, so reserving under it is both a data race and,
+    // once a geometry or scale change grows frameBytes, a reallocation that frees the buffer the
+    // writer is still reading. spawnEncoderProcess stops again below; that call is then a no-op.
+    stopEncoderProcess();
+    try {
+        for (auto& slot : encSlots_) slot.reserve(frameBytes);
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+
+    const char* encoder = cfg.encoderName ? cfg.encoderName : "libx264";
+    const bool x264 = std::strcmp(encoder, "libx264") == 0;
+    const char* argv[40];
+    size_t i = 0;
+    auto add = [&](const char* a) { if (i + 1 < sizeof(argv) / sizeof(argv[0])) argv[i++] = a; };
+    for (const char* a : std::initializer_list<const char*>{
+             "ffmpeg", "-hide_banner", "-loglevel", "error",
+             "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", geo,
+             "-r", rate, "-i", "-",
+             "-c:v", encoder }) add(a);
+    if (x264) { add("-preset"); add("veryfast"); add("-tune"); add("zerolatency"); }
+    for (const char* a : std::initializer_list<const char*>{
+             "-g", gop, "-b:v", bv,
+             "-f", "hls", "-hls_time", "1", "-hls_list_size", "6",
+             "-hls_flags", "delete_segments+temp_file", out }) add(a);   // temp_file: the playlist lands by RENAME, never served half-written
+    argv[i] = nullptr;
+    return spawnEncoderProcess(argv);
+}
+
+// ffmpeg writes the playlist and segments to disk itself, so there is nothing in RAM to serve and
+// the HTTP server uses its normal file path.
+bool hlsSegment(const char*, const uint8_t**, size_t*) { return false; }
+void hlsSegmentRelease() {}
+
+int encoderWrite(const uint8_t* data, size_t len) {
+    std::lock_guard<std::mutex> lock(encMutex_);
+    if (encTestMode_ == EncoderTestMode::Record) {
+        if (encTestWriteResult_ != kEncTestWriteNormal) return encTestWriteResult_;
+        encCaptured_.emplace_back(data, data + len);
+        return static_cast<int>(len);
+    }
+    if (encWriterDead_) return -1;
+    if (encCount_ >= kEncQueueMax) return 0;   // encoder behind: drop-newest, stay live
+    // assign() into the reused slot. The capacity was reserved by encoderStart, so this copies
+    // without allocating -- including the first lap, which is why the reserve is there.
+    encSlots_[(encHead_ + encCount_) % kEncQueueMax].assign(data, data + len);
+    encCount_++;
+    encCv_.notify_one();
+    return static_cast<int>(len);
+}
+
+bool encoderRunning() {
+    if (encTestMode_ != EncoderTestMode::Off) return encTestMode_ == EncoderTestMode::Record;
+    {
+        std::lock_guard<std::mutex> lock(encMutex_);
+        if (encWriterDead_) return false;
+    }
+#ifdef _WIN32
+    if (!encProcess_) return false;
+    return WaitForSingleObject(encProcess_, 0) == WAIT_TIMEOUT;
+#else
+    if (encPid_ < 0) return false;
+    int status = 0;
+    const pid_t r = ::waitpid(encPid_, &status, WNOHANG);
+    if (r == encPid_) {
+        std::printf("encoder: process exited (status %d)\n", status);
+        encPid_ = -1;
+        return false;
+    }
+    if (r < 0 && errno == ECHILD) { encPid_ = -1; return false; }   // reaped elsewhere: a stale
+                                                                    // pid must never be SIGKILLed
+    return true;   // running, or EINTR (a signal is not an exit)
+#endif
+}
+
+void encoderStop() {
+    stopEncoderProcess();
+}
+
+void setTestEncoderMode(EncoderTestMode mode) {
+    encTestMode_ = mode;
+    encTestWriteResult_ = kEncTestWriteNormal;
+    if (mode == EncoderTestMode::Off) { encCaptured_.clear(); encCapturedArgs_.clear(); }
+}
+void setTestEncoderWriteResult(int result) { encTestWriteResult_ = result; }
+size_t encoderTestFrameCount() { return encCaptured_.size(); }
+size_t encoderTestFrameSize(size_t i) { return i < encCaptured_.size() ? encCaptured_[i].size() : 0; }
+const uint8_t* encoderTestFrameData(size_t i) {
+    return i < encCaptured_.size() ? encCaptured_[i].data() : nullptr;
+}
+const char* encoderTestArgs() { return encCapturedArgs_.c_str(); }
+void encoderTestClearFrames() { encCaptured_.clear(); }
+
+
+// --- Raw-interface enumeration (the panel-card `interface` Select) --------------------------
+//
+// Labels for humans, bind names for ethBindRawInterface, entry 0 always the capture-only row.
+// Windows: pcap_findalldevs, labeled by the adapter's friendly description (the pcap device
+// name is a GUID nobody recognizes); POSIX: getifaddrs, where the name IS the label.
+
+namespace {
+// FIXED storage, refilled in place: a Select's aux keeps pointing at these arrays across
+// re-enumerations, so two panel-card instances rebuilding in one sweep can never dangle each
+// other's option pointers (rows update under a stale aux, which is harmless; freed rows would
+// not be). 16 NICs + the capture row cover any sane host.
+constexpr size_t kRawIfMax = 17;
+char rawIfLabels_[kRawIfMax][64];
+char rawIfNames_[kRawIfMax][64];
+const char* rawIfOptions_[kRawIfMax];
+size_t rawIfCount_ = 0;
+std::vector<std::string> rawIfTest_;   // test seam: label == bind name
+
+void rawIfPush(const char* label, const char* name) {
+    if (rawIfCount_ >= kRawIfMax) return;
+    // 63 not 64: the Select apply path rejects labels that FILL its 64-byte buffer as
+    // overlong, so a row must persist at <= 62 chars or the pick dies on reboot.
+    std::snprintf(rawIfLabels_[rawIfCount_], 63, "%s", label);
+    std::snprintf(rawIfNames_[rawIfCount_], sizeof(rawIfNames_[0]), "%s", name);
+    rawIfCount_++;
+}
+}  // namespace
+
+void setTestRawInterfaces(const char* const* names, size_t count) {
+    // The documented reset is (nullptr, 0), and `names + count` on a null pointer is undefined
+    // even when count is zero, so the reset is its own path rather than a degenerate range.
+    if (!names || count == 0) { rawIfTest_.clear(); return; }
+    rawIfTest_.assign(names, names + count);
+}
+
+size_t rawInterfaces(const char* const** optionsOut) {
+    rawIfCount_ = 0;
+    rawIfPush("none (capture only)", "");
+    if (!rawIfTest_.empty()) {
+        for (const auto& n : rawIfTest_) rawIfPush(n.c_str(), n.c_str());
+    } else {
+#ifdef _WIN32
+        if (wpcapLoad()) {
+            PcapIf* devs = nullptr;
+            char err[256] = {};
+            if (pcapFindAllDevs_(&devs, err) == 0 && devs) {
+                MIB_IF_TABLE2* table = nullptr;
+                if (::GetIfTable2(&table) != NO_ERROR) table = nullptr;
+                for (const PcapIf* d = devs; d; d = d->next) {
+                    // Show only what could carry panel frames. The POSIX branch below does the
+                    // same job with a virtual-name blocklist; Windows names tell you nothing, so
+                    // the interface table answers it instead. Skipped ONLY when the table was
+                    // read: without it every row would be filtered out and the picker would be
+                    // an empty dead end on a machine whose NICs are perfectly usable.
+                    if (table && !winIsPanelCapableNic(winRowForPcapName(table, d->name))) continue;
+                    char desc[256] = {};
+                    const char* label = nullptr;
+                    if (winDescForPcapName(table, d->name, desc, sizeof(desc))) label = desc;
+                    else if (d->description && d->description[0]) label = d->description;
+                    else label = d->name;   // pcap reports no description for some adapters
+                    char row[64];
+                    std::snprintf(row, sizeof(row), "%s", label);
+                    // Two identical adapters would collide as Select rows: suffix the device
+                    // name's tail so each row stays a distinct, matchable label.
+                    for (size_t i = 1; i < rawIfCount_; i++) {
+                        if (std::strcmp(rawIfLabels_[i], row) == 0) {
+                            const char* tail = d->name + (std::strlen(d->name) > 8 ? std::strlen(d->name) - 8 : 0);
+                            std::snprintf(row, sizeof(row), "%s (%s)", label, tail);
+                            break;
+                        }
+                    }
+                    rawIfPush(row, d->name);
+                }
+                if (table) ::FreeMibTable(table);
+                pcapFreeAllDevs_(devs);
+            }
+        }
+#else
+        // The OS's virtual plumbing can never reach a panel card and only buries the real
+        // NICs: loopback plus the well-known virtual prefixes (macOS: VPN tunnels, the
+        // AirDrop/AirPlay radios, Apple-silicon debug, bridges; Linux: container veths).
+        static constexpr const char* kVirtualPrefixes[] = {
+            "lo", "utun", "awdl", "llw", "anpi", "bridge", "gif", "stf", "ap", "pktap",
+            "veth", "docker", "br-", "virbr",
+        };
+            // The adapter's negotiated link speed in Mbit, or 0 when the OS will not state one
+            // (a virtual interface, a link that is down, Wi-Fi on macOS which reports only
+            // "autoselect"). Rides in the label for the same reason as the Windows branch: the
+            // name alone does not say which entry is the 1 Gb NIC and which is a tunnel.
+            auto linkMbps = [](const char* ifname) -> unsigned {
+#ifdef __linux__
+                // sysfs states it directly, in Mbit. Absent or -1 for a virtual or down link.
+                char path[128];
+                std::snprintf(path, sizeof(path), "/sys/class/net/%s/speed", ifname);
+                FILE* f = std::fopen(path, "r");
+                if (!f) return 0;
+                long v = 0;
+                const bool ok = std::fscanf(f, "%ld", &v) == 1;
+                std::fclose(f);
+                return (ok && v > 0) ? static_cast<unsigned>(v) : 0;
+#elif defined(__APPLE__)
+                // macOS has no speed field: the negotiated rate is encoded as the media
+                // SUBTYPE, so map the ones that name a rate. Wi-Fi and "autoselect" report no
+                // subtype we can turn into a number, which is exactly when 0 is the honest
+                // answer rather than a guess.
+                const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+                if (fd < 0) return 0;
+                ifmediareq req{};
+                std::snprintf(req.ifm_name, sizeof(req.ifm_name), "%s", ifname);
+                unsigned mbps = 0;
+                if (::ioctl(fd, SIOCGIFMEDIA, &req) == 0 && (req.ifm_status & IFM_ACTIVE)) {
+                    switch (IFM_SUBTYPE(req.ifm_active)) {
+                        case IFM_10_T:   mbps = 10;    break;
+                        case IFM_100_TX: mbps = 100;   break;
+                        case IFM_1000_T: mbps = 1000;  break;
+                        case IFM_2500_T: mbps = 2500;  break;
+                        case IFM_5000_T: mbps = 5000;  break;
+                        case IFM_10G_T:  mbps = 10000; break;
+                        default: break;
+                    }
+                }
+                ::close(fd);
+                return mbps;
+#else
+                (void)ifname;
+                return 0;
+#endif
+            };
+
+        auto isVirtual = [](const char* n) {
+            for (const char* p : kVirtualPrefixes) {
+                const size_t l = std::strlen(p);
+                if (std::strncmp(n, p, l) == 0 && (n[l] == 0 || (n[l] >= '0' && n[l] <= '9')))
+                    return true;
+            }
+            return false;
+        };
+        ifaddrs* addrs = nullptr;
+        if (::getifaddrs(&addrs) == 0 && addrs) {
+            for (const ifaddrs* a = addrs; a; a = a->ifa_next) {
+                if (!a->ifa_name || !(a->ifa_flags & IFF_UP)) continue;
+                if ((a->ifa_flags & IFF_LOOPBACK) || isVirtual(a->ifa_name)) continue;
+                bool seen = false;
+                for (size_t i = 1; i < rawIfCount_; i++)
+                    if (std::strcmp(rawIfNames_[i], a->ifa_name) == 0) { seen = true; break; }
+                if (seen) continue;   // getifaddrs lists one row per address family
+                // Label carries the speed, bind name does not: the name is the adapter's
+                // identity and the speed changes when a link renegotiates (platform.h § raw
+                // interfaces). Same "NAME, N Gb" shape as the Windows branch.
+                char label[64];
+                std::snprintf(label, sizeof(label), "%s", a->ifa_name);
+                appendLinkSpeed(label, sizeof(label), linkMbps(a->ifa_name));
+                rawIfPush(label, a->ifa_name);
+            }
+            ::freeifaddrs(addrs);
+        }
+#endif
+    }
+    for (size_t i = 0; i < rawIfCount_; i++) rawIfOptions_[i] = rawIfLabels_[i];
+    if (optionsOut) *optionsOut = rawIfOptions_;
+    return rawIfCount_;
+}
+
+const char* rawInterfaceName(size_t i) {
+    if (i == 0 || i >= rawIfCount_) return nullptr;   // row 0: capture only
+    return rawIfNames_[i];
+}
 
 } // namespace mm::platform

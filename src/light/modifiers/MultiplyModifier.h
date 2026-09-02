@@ -23,6 +23,9 @@ namespace mm {
 class MultiplyModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
+    /// Advisory UI chip: what this modifier can work on (tiles on all three axes; on a 2D grid the z factor is simply 1).
+    /// Nothing branches on it, since extrude reads the EFFECT's dimensions.
+    Dim dimensions() const override { return Dim::D3; }
 
     // Tiles per axis. 1 = no multiplication on that axis. All default to 2 (tile on every
     // axis the layout has); on a 2D grid multiplyZ clamps to 1 (a no-op), so it only tiles
@@ -40,12 +43,12 @@ public:
     void defineControls() override {
         // 1–64 tiles per axis. More tiles than the grid has pixels just yields
         // 1-pixel tiles (the effective multiplier clamps to the axis extent).
-        controls_.addUint8("multiplyX", multiplyX, 1, 64);
-        controls_.addUint8("multiplyY", multiplyY, 1, 64);
-        controls_.addUint8("multiplyZ", multiplyZ, 1, 64);
-        controls_.addBool("mirrorX", mirrorX);
-        controls_.addBool("mirrorY", mirrorY);
-        controls_.addBool("mirrorZ", mirrorZ);
+        controls_.addControl("multiplyX", multiplyX, 1, 64);
+        controls_.addControl("multiplyY", multiplyY, 1, 64);
+        controls_.addControl("multiplyZ", multiplyZ, 1, 64);
+        controls_.addControl("mirrorX", mirrorX);
+        controls_.addControl("mirrorY", mirrorY);
+        controls_.addControl("mirrorZ", mirrorZ);
     }
 
     void modifyLogicalSize(Coord3D& size) override {

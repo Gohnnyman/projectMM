@@ -63,6 +63,17 @@ const GridCase kGrids[] = {
     {1, 1, 1, "1x1x1 (single light)"},
     {1, 16, 1, "1x16x1 (one strand)"},
     {16, 1, 1, "16x1x1 (one row)"},
+    // A DEPTH axis, which every case above leaves at 1. A tube rig is the real shape that has one:
+    // 1 x 60 x 10 is ten 60-light tubes, so the layer is 1 wide and the lights run down y and z.
+    // An effect indexing by `x + y * width` alone lands entirely in the first tube, and a D1 or D2
+    // effect relies on extrude to fill the z slices behind it.
+    {1, 60, 10, "1x60x10 (ten tubes of 60)"},
+    // The same rig read the other way round, so an effect that assumes depth is the SMALL axis is
+    // caught too.
+    {1, 10, 60, "1x10x60 (sixty tubes of 10)"},
+    // A cube: all three axes real at once, which is what separates "handles depth" from "handles
+    // depth only when the other axes are 1".
+    {8, 8, 8, "8x8x8 (a cube)"},
 };
 
 // Drive one effect through one grid: build the layer, tick it twice, then tear down.
@@ -266,4 +277,89 @@ TEST_CASE("every effect owns its background rather than inheriting the last fram
         audited++;
     });
     MESSAGE("audited " << audited << " effects against a dirty buffer");
+}
+
+// A TUBE RIG: 1 wide, 60 down y, 10 deep. Ten tubes of sixty lights, which is a real installation
+// shape and the one geometry where the depth axis carries the fixtures rather than being 1.
+//
+// "Survives" is a lower bar than "renders": the sweep above proves an effect holds together on
+// this grid, and this proves its output REACHES the rig. An effect that indexes by `x + y * width` alone
+// writes only the first tube and leaves the other nine dark, which reads on the bench as nine dead
+// fixtures rather than as a bug in the effect.
+//
+// The mechanism that makes it work is extrude (Layer::tick): a D1 effect paints the x=0 column down
+// y, a D2 effect paints the z=0 slice, and the framework duplicates that across the remaining
+// depth. So every effect fills the rig whatever its own dimensionality, and this pins that.
+TEST_CASE("an effect reaches past the first tube of a 1x60x10 rig") {
+    constexpr mm::lengthType kW = 1, kH = 60, kD = 10;
+    int audited = 0, painted = 0;
+
+    mm::forEachEffect([&](const char* name, auto make) {
+        const std::string effectName(name);
+        // Same two exemptions the background audit takes, for the same reasons: DemoReel delegates
+        // to a child it does not have here, and NetworkReceive blocks waiting for a packet.
+        if (effectName == "DemoReelEffect" || effectName == "NetworkReceiveEffect") return;
+        audited++;
+
+        mm::Layouts layouts;
+        auto* grid = new mm::GridLayout();
+        grid->width = kW; grid->height = kH; grid->depth = kD;
+        layouts.addChild(grid);
+
+        mm::Layer layer;
+        layer.setLayouts(&layouts);
+        layer.setChannelsPerLight(3);
+        mm::MoonModule* effect = make();
+        effect->defineControls();
+        layer.addChild(effect);
+        layouts.applyState();
+        layer.applyState();
+
+        // Several effects seed on their first tick and draw from the second; a few are beat-driven,
+        // so the clock has to move for them to paint anything at all.
+        for (int f = 1; f <= 8; f++) {
+            mm::platform::setTestNowMs(static_cast<uint32_t>(f) * 40u);
+            layer.tick();
+        }
+
+        const uint8_t* buf = layer.buffer().data();
+        const auto lights = layer.buffer().count();
+        REQUIRE(buf != nullptr);
+        REQUIRE(lights == static_cast<mm::nrOfLightsType>(kW * kH * kD));
+
+        // How many of the ten tubes have at least one lit light. An effect that paints only the
+        // first tube scores 1; one that fills the rig scores 10.
+        int litTubes = 0;
+        for (mm::lengthType z = 0; z < kD; z++) {
+            bool lit = false;
+            for (mm::lengthType y = 0; y < kH && !lit; y++) {
+                const size_t i = (static_cast<size_t>(z) * kH + y) * 3;
+                if (buf[i] || buf[i + 1] || buf[i + 2]) lit = true;
+            }
+            if (lit) litTubes++;
+        }
+
+        CAPTURE(effectName);
+        CAPTURE(litTubes);
+        // What this test catches is an effect CONFINED to the first tube: the signature of indexing
+        // by `x + y * width` and ignoring z, which on this rig leaves nine fixtures dark.
+        //
+        // Reaching SOME tubes is enough, because several effects are legitimately sparse: Random
+        // lights one light per frame, StarSky places a finite pool of stars, SphereMove lights only
+        // the surface of a shell. On 600 lights in eight frames those genuinely have not reached
+        // every tube yet, and demanding a full fill would fail correct effects.
+        //
+        // An effect that paints nothing at all is reported rather than failed: a few are
+        // input-driven (audio, a received frame) and render black in a silent test rig.
+        if (litTubes > 0) {
+            CHECK_MESSAGE(litTubes > 1,
+                          effectName << " lit only " << litTubes << " of " << kD
+                                     << " tubes: it looks confined to the first slice");
+            painted++;
+        }
+        delete effect;
+    });
+
+    CHECK_MESSAGE(audited > 0, "no effects audited: the test would pass without testing anything");
+    MESSAGE("audited " << audited << " effects, " << painted << " painted the rig");
 }

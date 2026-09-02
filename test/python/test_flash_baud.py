@@ -41,7 +41,10 @@ def test_firmware_only_falls_back_to_lowest_sibling():
     # No deviceModel known (a plain --firmware flash): take the lowest flashBaud among
     # models sharing the firmware, so an opt-down still protects an unidentified board.
     assert _catalog_flash_baud("esp32") == 460800          # LOLIN's 460800 protects
-    assert _catalog_flash_baud("esp32-eth") == 921600      # no sibling opt-down → fast
+    # esp32-eth gained the Olimex's opt-down (its USB bridge dies at 921600), so it now
+    # protects too; the S3 firmwares have no opted-down sibling and stay fast.
+    assert _catalog_flash_baud("esp32-eth") == 460800
+    assert _catalog_flash_baud("esp32s3-n16r8") == 921600  # no sibling opt-down, fast
 
 
 def test_unknown_model_falls_through_to_firmware():

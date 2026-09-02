@@ -16,10 +16,10 @@ import { dirname, join } from "node:path";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const orchestrator = readFileSync(
-    join(ROOT, "web-installer", "install-orchestrator.js"), "utf8"
+    join(ROOT, "mooninstaller", "install-orchestrator.js"), "utf8"
 );
 const boards = JSON.parse(
-    readFileSync(join(ROOT, "web-installer", "deviceModels.json"), "utf8")
+    readFileSync(join(ROOT, "mooninstaller", "deviceModels.json"), "utf8")
 );
 
 // The standard esptool bauds a board may declare — keep in step with

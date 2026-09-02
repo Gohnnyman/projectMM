@@ -80,6 +80,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <mutex>     // hostname store: writer (config apply) and reader (link-up events) race
 #include <unistd.h>
 
 namespace mm::platform {
@@ -198,6 +199,11 @@ void yield() {
 
 void delayMs(uint32_t ms) {
     vTaskDelay(pdMS_TO_TICKS(ms));
+}
+
+void pauseLoop() {
+    // Nothing: yield() here is vTaskDelay(1), which already yields to the idle task for a tick.
+    // A further sleep would come straight out of the render budget.
 }
 
 void delayUs(uint32_t us) {
@@ -472,16 +478,17 @@ static bool netifInitDone_ = false;
 // netif before its DHCP client starts (see setHostname's contract in platform.h).
 // 32 = the ESP-IDF lwIP hostname cap; empty means "leave the IDF default".
 //
-// Threading / ordering contract: setHostname() is called from the app task in
-// NetworkModule::setup(), BEFORE ethInit() / wifiStaInit() bring an interface up.
-// applyHostname() (the only reader) runs later — from the eth link-up event handler
-// or right after esp_wifi_start — so hostname_[] is fully written before any reader
-// can execute, and no lock is needed. Do NOT call setHostname() concurrently with, or
-// after, bring-up (e.g. from another task or an event callback) without adding a
-// mutex / std::atomic; the single-writer-before-readers ordering is the whole safety.
+// Threading contract: writer and reader run on DIFFERENT tasks once the system is
+// live. At boot setHostname() is called from the app task before bring-up, but a
+// config-file restore re-runs NetworkModule::setup() from the web-server task while
+// applyHostname() can fire from a link-up event handler, so both sides copy under a
+// mutex (a task-context lock; neither runs in an ISR). The reader takes a snapshot
+// first: esp_netif calls inside the lock would nest into the event loop.
 static char hostname_[32] = {};
+static std::mutex hostnameMutex_;
 
 void setHostname(const char* name) {
+    std::lock_guard<std::mutex> lock(hostnameMutex_);
     if (!name) { hostname_[0] = 0; return; }
     std::strncpy(hostname_, name, sizeof(hostname_) - 1);
     hostname_[sizeof(hostname_) - 1] = 0;
@@ -496,11 +503,16 @@ void setHostname(const char* name) {
 // fresh DISCOVER then carries option 12. Stopping an already-stopped client is a
 // benign ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED, which we ignore. No-op when unset.
 static void applyHostname(esp_netif_t* netif) {
-    if (!netif || !hostname_[0]) return;
+    char name[sizeof(hostname_)];
+    {
+        std::lock_guard<std::mutex> lock(hostnameMutex_);
+        std::memcpy(name, hostname_, sizeof(name));
+    }
+    if (!netif || !name[0]) return;
     esp_netif_dhcpc_stop(netif);    // must be stopped for set_hostname to take; ignore ALREADY_STOPPED
-    esp_err_t e = esp_netif_set_hostname(netif, hostname_);
-    if (e != ESP_OK) ESP_LOGW(NET_TAG, "set_hostname('%s') failed: %s", hostname_, esp_err_to_name(e));
-    else ESP_LOGI(NET_TAG, "DHCP hostname: %s", hostname_);
+    esp_err_t e = esp_netif_set_hostname(netif, name);
+    if (e != ESP_OK) ESP_LOGW(NET_TAG, "set_hostname('%s') failed: %s", name, esp_err_to_name(e));
+    else ESP_LOGI(NET_TAG, "DHCP hostname: %s", name);
     // Restart the DHCP client and check the result — if it fails, the interface has
     // no DHCP client and will never acquire an IP, so surface it rather than silently
     // leaving the device offline. (Don't return on stop/set failure above: we still
@@ -685,11 +697,30 @@ static bool ethInitEmac() {
     // a non-IO_MUX pin fails "invalid ... GPIO number"). They also match the CoreBoard
     // schematic wiring (docs/reference/esp32-s31-coreboard.md). Passing GPIO_NUM_MAX (-1)
     // here would make IDF pick these same defaults; we list them explicitly for clarity.
-    emac_config.clock_config.rgmii.clock_tx_gpio = 13;
-    emac_config.clock_config.rgmii.clock_rx_gpio = 14;
+    // A pad's GPIO by signal name. constexpr-evaluable, so a name that is not in the list fails the
+    // build rather than silently wiring pad 0.
+    constexpr auto rgmiiPad = [](const char* want) -> int {
+        for (uint8_t i = 0; i < ethFixedPadCount; i++) {
+            const char* n = ethFixedPads[i].name;
+            const char* w = want;
+            while (*n && *n == *w) { ++n; ++w; }
+            if (*n == 0 && *w == 0) return ethFixedPads[i].gpio;
+        }
+        return -1;   // not found: IDF rejects it loudly at eth init
+    };
+    // Looked up BY NAME out of platform::ethFixedPads, the ONE list of these pads: NetworkModule
+    // reports the same entries through fixedPins() so the pin map can show what the MAC holds. By
+    // name rather than by index so reordering that list cannot silently rewire the MAC, and a typo
+    // is a compile error rather than a scrambled bus.
+    emac_config.clock_config.rgmii.clock_tx_gpio = rgmiiPad("ethTxClk");
+    emac_config.clock_config.rgmii.clock_rx_gpio = rgmiiPad("ethRxClk");
     emac_config.emac_dataif_gpio.rgmii = eth_mac_rgmii_gpio_config_t{
-        /*tx_ctl*/ 12, /*txd0*/ 8, /*txd1*/ 9, /*txd2*/ 10, /*txd3*/ 11,
-        /*rx_ctl*/ 15, /*rxd0*/ 19, /*rxd1*/ 18, /*rxd2*/ 17, /*rxd3*/ 16,
+        /*tx_ctl*/ rgmiiPad("ethTxCtl"),
+        /*txd0*/   rgmiiPad("ethTxd0"), /*txd1*/ rgmiiPad("ethTxd1"),
+        /*txd2*/   rgmiiPad("ethTxd2"), /*txd3*/ rgmiiPad("ethTxd3"),
+        /*rx_ctl*/ rgmiiPad("ethRxCtl"),
+        /*rxd0*/   rgmiiPad("ethRxd0"), /*rxd1*/ rgmiiPad("ethRxd1"),
+        /*rxd2*/   rgmiiPad("ethRxd2"), /*rxd3*/ rgmiiPad("ethRxd3"),
     };
 #else
     emac_config.clock_config.rmii.clock_mode =
@@ -1098,6 +1129,10 @@ bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
     return true;
 }
 
+// The MAC takes each frame as ethSendRaw hands it over, so no burst is held back and there is
+// nothing to flush. Present because the seam is platform-wide (see platform.h).
+void ethFlushRaw() MM_NONBLOCKING {}
+
 void ethSendFailCounts(uint32_t& linkDown, uint32_t& ringFull) MM_NONBLOCKING {
     linkDown = ethFailLinkDown_.load(std::memory_order_relaxed);
     ringFull = ethFailRingFull_.load(std::memory_order_relaxed);
@@ -1153,6 +1188,7 @@ bool ethLinkUp() MM_NONBLOCKING                        { return false; }
 bool ethConnected() MM_NONBLOCKING                     { return false; }
 void ethGetIPv4(uint8_t out[4]) MM_NONBLOCKING         { out[0] = out[1] = out[2] = out[3] = 0; }
 bool ethSendRaw(const uint8_t*, size_t) MM_NONBLOCKING { return false; }   // no MAC to hand a frame to
+void ethFlushRaw() MM_NONBLOCKING                      {}                  // nothing batched
 void ethClaimRawL2(bool)                               {}                  // no link to claim
 bool ethRawL2Claimed() MM_NONBLOCKING                  { return false; }
 bool ethRestartTx()                                    { return false; }   // no driver to restart
@@ -1960,6 +1996,17 @@ int UdpSocket::recvFrom(uint8_t* buf, size_t maxLen, uint8_t srcIp[4]) {
     return static_cast<int>(n);
 }
 
+// Join an IPv4 multicast group so the bound socket receives datagrams sent to it. WLED audio
+// sync multicasts to 239.0.0.1; without this membership the datagrams never reach the socket.
+// INADDR_ANY as the interface lets lwip pick the default route's netif.
+bool UdpSocket::joinMulticast(const char* group) {
+    if (fd_ < 0 || !group) return false;
+    ip_mreq mreq{};
+    if (inet_pton(AF_INET, group, &mreq.imr_multiaddr) != 1) return false;
+    mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+    return setsockopt(fd_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) == 0;
+}
+
 bool UdpSocket::sendToAddr(const uint8_t ip[4], uint16_t port,
                            const uint8_t* data, size_t len) {
     if (fd_ < 0) return false;
@@ -2003,15 +2050,26 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
     // device — observed as a WS client connect making the board reboot every few seconds. So bound the wait
     // by a wall-clock deadline well above a healthy drain (µs) and well below the WDT: on timeout, return
     // false so the caller closes that client (the browser reconnects) instead of taking the device down.
-    constexpr uint32_t kWriteDeadlineMs = 2000;
+    // TWO bounds. The stall bound (progress resets it) is what lets a slow-but-steady transfer
+    // finish: bounding only the total truncated large assets mid-body on a cold-cache page load
+    // (six parallel responses contending on WiFi), which broke the UI's module imports until a
+    // refresh. The TOTAL bound is what keeps this loop off the task WDT (12 s, panic): a peer
+    // trickling one byte per stall window would otherwise hold the render thread indefinitely,
+    // a remotely triggerable reboot. Generous total, still far under the WDT.
+    constexpr uint32_t kWriteStallMs = 2000;
+    constexpr uint32_t kWriteTotalMs = 8000;
     const uint32_t start = millis();
+    uint32_t lastProgress = start;
     size_t sent = 0;
     while (sent < len) {
         auto n = lwip_write(fd_, data + sent, len - sent);
         if (n > 0) {
             sent += static_cast<size_t>(n);
+            lastProgress = millis();
         } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            if (millis() - start >= kWriteDeadlineMs) return false;   // stalled peer — don't hang the render loop
+            const uint32_t now = millis();
+            if (now - lastProgress >= kWriteStallMs || now - start >= kWriteTotalMs)
+                return false;   // stalled or crawling peer: close it, never hang the render loop
             vTaskDelay(pdMS_TO_TICKS(1)); // wait for send buffer space
         } else {
             return false; // real error

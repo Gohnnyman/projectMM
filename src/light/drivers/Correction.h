@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "light/ChannelRole.h"
+#include "light/FixtureChannels.h"   // kMotionBase + forEachMotionSlot: the layer-slot packing
 
 namespace mm {
 
@@ -78,6 +79,37 @@ struct Correction {
     // achromatic extraction, subtraction-aware); Yellow/UV are targetable emitters an effect should
     // drive DIRECTLY via the fixture model, not synthesize from RGB. See backlog-light § fixture model.
     uint8_t offWarmWhite = kAbsent;
+    // A fixture's MASTER DIMMER channel (moving heads, and any "intensity + RGB" light). Held
+    // fully open, because the per-light brightness is already in the color values via briLut:
+    // dimming twice would darken the fixture as the square of the setting. It must be WRITTEN
+    // though, since a linear dimmer left at 0 means the fixture emits nothing at all however
+    // correct its color channels are (bench: a moving head stayed dark with a perfect RGB map).
+    uint8_t offDimmer = kAbsent;
+    // The FIXTURE's motion channels (pan/tilt/zoom/rotate/gobo), which are not where the layer
+    // keeps them: apply() maps the layer's packed slots onto these. Never scaled by briLut, since
+    // brightness is a light-output setting and scaling pan by it would swing a moving head toward
+    // 0/0 as the rig dims. They come from the effect (setPan and friends) rather than being
+    // synthesized from color, which is the whole point of a wide light: one buffer carries aim too.
+    uint8_t offPan = kAbsent, offTilt = kAbsent, offZoom = kAbsent;
+    uint8_t offRotate = kAbsent, offGobo = kAbsent;
+    // "This fixture has at least one motion channel", resolved once at rebuild so the hot path
+    // never scans the five offsets to discover they are all absent.
+    bool hasMotion = false;
+    /// Hold the rig's aim: motion stops being written to the wire, so a fixture keeps the last
+    /// position it was sent. Set while the rig has been powered off long enough to be considered
+    /// parked (Drivers::motionHold), and cleared the moment power returns.
+    ///
+    /// Here rather than upstream because this is where motion reaches the wire at all: the effect
+    /// keeps running and the buffer keeps changing, so the show stays on its clock and the rig
+    /// rejoins it where it now is. Freezing the WRITE instead would have stopped the show and left
+    /// the buffer holding a stale cue.
+    /// Written by Drivers::updateMotionHold on the render thread, read by apply() which in split
+    /// mode runs on the core-1 encode task. A plain bool rather than an atomic: it is byte-sized on
+    /// every supported target so a read cannot tear, and the only cost of observing the previous
+    /// value is that a park or release lands one frame late against a timeout measured in tens of
+    /// seconds. An atomic load here would sit in the per-light loop, which is the one place this
+    /// project does not spend cycles for a race whose worst outcome is 20 ms of latency.
+    bool motionHeld = false;
     uint8_t offYellow = kAbsent;
     uint8_t offUV = kAbsent;
     uint8_t outChannels = 3;        // bytes emitted per light (= channelsPerLight of the wiring)
@@ -128,10 +160,17 @@ struct Correction {
         }
     }
 
+    // Cold path: refresh the brightness LUT and DERIVE the color-role offsets from the light's
+    // channel-role array (`roles`, `nChannels` entries: the driver's dynamic array, canonical).
+    // A role appearing at channel i sets that color's offset to i; a color role not present stays
+    // kAbsent (apply() skips it). outChannels becomes the channel count. Motion roles set the
+    // motion offsets and hasMotion, which is what apply() reads to decide whether to remap.
     void rebuild(uint8_t brightness, const ChannelRole* roles, uint8_t nChannels) {
         rebuildBrightness(brightness);
         offRed = offGreen = offBlue = offWhite = kAbsent;
-        offWarmWhite = offYellow = offUV = kAbsent;
+        offWarmWhite = offYellow = offUV = offDimmer = kAbsent;
+        offPan = offTilt = offZoom = offRotate = offGobo = kAbsent;
+        hasMotion = false;
         for (uint8_t i = 0; i < nChannels; i++) {
             switch (roles[i]) {
                 case ChannelRole::Red:       offRed = i;       break;
@@ -141,9 +180,17 @@ struct Correction {
                 case ChannelRole::WarmWhite: offWarmWhite = i; break;
                 case ChannelRole::Yellow:    offYellow = i;    break;
                 case ChannelRole::UV:        offUV = i;        break;
-                default: break;   // None or a fixture motion role (pan/tilt/…) — apply() ignores it
+                case ChannelRole::Dimmer:    offDimmer = i;    break;
+                case ChannelRole::Pan:       offPan = i;       break;
+                case ChannelRole::Tilt:      offTilt = i;      break;
+                case ChannelRole::Zoom:      offZoom = i;      break;
+                case ChannelRole::Rotate:    offRotate = i;    break;
+                case ChannelRole::Gobo:      offGobo = i;      break;
+                default: break;   // ChannelRole::None: a channel this fixture does not use
             }
         }
+        hasMotion = offPan != kAbsent || offTilt != kAbsent || offZoom != kAbsent ||
+                    offRotate != kAbsent || offGobo != kAbsent;
         outChannels = nChannels;
     }
 
@@ -176,13 +223,53 @@ struct Correction {
         if (demandMa > budgetMa) limit = static_cast<uint16_t>((budgetMa * 256u) / demandMa);
     }
 
-    // Hot path: transform one source light (3-channel RGB at `src`) into `out`
-    // (`outChannels` bytes). Brightness via LUT, then place each present color role at
-    // its derived offset, then synthesize white per whiteMode. No allocation, integer-only.
-    // A color role the light doesn't carry (offset == kAbsent) is simply not written — so
-    // a wiring that omits, say, red just doesn't emit it. Channels holding non-color roles
-    // (pan/tilt) are left for their own writers; apply() never touches them.
-    inline void apply(const uint8_t* src, uint8_t* out) const {
+    /// Hot path: transform one source light (`srcChannels` bytes at `src`) into `out`
+    /// (`outChannels` bytes). Brightness via LUT, then place each present color role at its
+    /// derived offset, then synthesize white per whiteMode. No allocation, integer-only.
+    /// A color role the light doesn't carry (offset == kAbsent) is simply not written, so a
+    /// wiring that omits, say, red just doesn't emit it.
+    ///
+    /// `srcChannels` is the SOURCE light's width. Every driver passes the width it has; whether
+    /// motion is carried is decided HERE, from `hasMotion` (derived in rebuild from the fixture's
+    /// own roles). A sink with no motion channels never enters that branch, so it needs no say in
+    /// the matter: the preset describes the fixture, and the pipeline carries whatever it declares.
+    /// That is also what lets a moving-head preset be driven by an LED driver, which emits its
+    /// motion bytes like any other channel: unusual, but the honest result of the wiring asked for.
+    ///
+    /// This is a REMAP, not a copy: motion is read from the LAYER's packed slots (kMotionBase
+    /// onward, in pan/tilt/zoom/rotate/gobo order) and written to the FIXTURE's own offsets, which
+    /// are usually different. On the mini moving head the fixture's pan is CH1 while the layer
+    /// keeps it at slot 4, because a layer light always begins with RGB(W) and CH1 there is the
+    /// red byte. Two layouts, mapped here. 0 means an RGB(W)-only source: no motion to carry.
+    inline void apply(const uint8_t* src, uint8_t* out, uint8_t srcChannels) const {
+        // Master dimmer wide open: brightness lives in the color values below, and a fixture whose
+        // dimmer sits at 0 is simply dark. Written every frame like any other role, so a preset
+        // that declares one cannot be silently unlit.
+        if (offDimmer != kAbsent) out[offDimmer] = 255;
+        // Motion passes through UNSCALED and by ASSIGNMENT, never additively. Two rules, both
+        // borrowed from MoonLight's compositeTo ("additive semantics don't apply to positional
+        // signals"): brightness must not touch these, or dimming the rig would drag every head
+        // toward 0/0; and adding two layers' pan values would aim at neither of them.
+        // hasMotion is precomputed at rebuild, so a fixture WITHOUT motion channels (every LED
+        // strip and PAR) pays exactly one predictable branch here, not a five-slot scan per light
+        // per frame. Motion support must cost nothing on the rigs that do not use it.
+        // `motionHeld` parks the rig: skipping the remap leaves the fixture on its last aim, which
+        // is what makes a device that has been switched off go quiet instead of sweeping in the
+        // dark. Costs nothing on a rig with no motion, which never enters this branch anyway.
+        if (hasMotion && srcChannels != 0 && !motionHeld) {
+            // Read the LAYER slot, write the FIXTURE channel. The layer packs motion after RGBW in
+            // a fixed order (FixtureChannels::kMotionBase); the fixture puts it wherever its preset
+            // says. Two layouts, mapped here, which is what keeps an effect's pan write off the red
+            // byte it would otherwise share.
+            const bool present[5] = {offPan != kAbsent, offTilt != kAbsent, offZoom != kAbsent,
+                                     offRotate != kAbsent, offGobo != kAbsent};
+            const uint8_t chan[5] = {offPan, offTilt, offZoom, offRotate, offGobo};
+            FixtureChannels::forEachMotionSlot(present, [&](uint8_t role, uint8_t slot) {
+                if (slot < srcChannels) out[chan[role]] = src[slot];
+            });
+        }
+        // Brightness, gamma and the per-channel balance come from the one table; `limit` is
+        // 256 unless measure() found the frame over the current budget.
         uint8_t r = static_cast<uint8_t>((briLut[0][src[0]] * limit) >> 8);
         uint8_t g = static_cast<uint8_t>((briLut[1][src[1]] * limit) >> 8);
         uint8_t b = static_cast<uint8_t>((briLut[2][src[2]] * limit) >> 8);

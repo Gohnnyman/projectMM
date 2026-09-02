@@ -744,6 +744,49 @@ inline void lineAA(const Canvas& cv, Coord3D a, Coord3D b, RGB c) {
     }
 }
 
+namespace sprites {
+/// A small movable bitmap: palette-indexed pixels (index 0 = the transparent key, the classic
+/// key-color scheme), frames stacked vertically (frame f = rows [f*h, (f+1)*h)). Carried as
+/// constexpr data, the fonts.h shape. Full alpha (Porter-Duff over) stays deferred until a
+/// consumer needs it; a transparent index is what classic sprites used and what LED walls need.
+struct Sprite {
+    const uint8_t* pixels;    // w * h * frames bytes, palette-indexed
+    const RGB* palette;       // the sprite's own colors; index 0 is never read
+    uint8_t w, h, frames, paletteCount;
+};
+}  // namespace sprites
+
+/// Blit one sprite frame at pixel (x, y): the multi-color sibling of `glyph`. Index 0 skips
+/// (transparent), an out-of-range palette index renders nothing (visible degrade, never UB),
+/// `frame` clamps to the last one. `scale` is nearest-neighbor integer magnification (each
+/// sprite pixel becomes a scale x scale block), which keeps pixel art crisp on a big grid.
+/// `flipX` mirrors the sprite horizontally, so art drawn facing one way serves both directions
+/// without a second copy of every frame.
+/// Every write goes through draw::pixel, so clipping at all four edges is offsetOf's sentinel,
+/// exactly as glyph clips.
+inline void sprite(const Canvas& cv, const sprites::Sprite& s, uint8_t frame,
+                   lengthType x, lengthType y, uint8_t scale = 1, bool flipX = false) {
+    if (!s.pixels || !s.palette || s.w == 0 || s.h == 0 || s.frames == 0 || scale == 0) return;
+    if (frame >= s.frames) frame = static_cast<uint8_t>(s.frames - 1);
+    const uint8_t* rows = s.pixels + static_cast<size_t>(frame) * s.w * s.h;
+    for (uint8_t ry = 0; ry < s.h; ry++) {
+        for (uint8_t rx = 0; rx < s.w; rx++) {
+            // flipX mirrors the READ, not the write, so the sprite still lands at (x, y) with the
+            // same footprint. Art that faces one way (a fish, a car, a walking figure) otherwise
+            // needs a second copy of every frame purely to face the other, which doubles the art
+            // and its maintenance for a transform this costs one subtraction.
+            const uint8_t sx0 = flipX ? static_cast<uint8_t>(s.w - 1 - rx) : rx;
+            const uint8_t idx = rows[static_cast<size_t>(ry) * s.w + sx0];
+            if (idx == 0 || idx >= s.paletteCount) continue;
+            const RGB c = s.palette[idx];
+            for (uint8_t sy = 0; sy < scale; sy++)
+                for (uint8_t sx = 0; sx < scale; sx++)
+                    pixel(cv, {static_cast<lengthType>(x + rx * scale + sx),
+                               static_cast<lengthType>(y + ry * scale + sy), 0}, c);
+        }
+    }
+}
+
 /// Blit one glyph on a Canvas — the Canvas form of `glyph`. Same MSB-first column order and the
 /// same clipping; only the pixel writer differs.
 inline void glyph(const Canvas& cv, const fonts::Font& font, char ch, lengthType x, lengthType y, RGB c) {

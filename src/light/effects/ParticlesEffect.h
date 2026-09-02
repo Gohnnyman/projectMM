@@ -10,7 +10,7 @@ namespace mm {
 /// @card ParticlesEffect.png
 class ParticlesEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step
+    const char* tags() const override { return "💫🦅✨"; }  // MoonLight origin · David Jupijn / Rising Step
     // Iterates y and x only; Layer::extrude fills z on 3D layers. The trail
     // buffer is sized to the z=0 plane (w*h*cpl), not the full 3D buffer.
     Dim dimensions() const override { return Dim::D2; }
@@ -23,10 +23,10 @@ public:
     uint8_t hue_shift = 0;
 
     void defineControls() override {
-        controls_.addUint8("count", count, 1, 255);
-        controls_.addUint8("speed", speed, 1, 255);
-        controls_.addUint8("fade", fade, 1, 255);
-        controls_.addUint8("hue_shift", hue_shift, 0, 255);
+        controls_.addControl("count", count, 1, 255);
+        controls_.addControl("speed", speed, 1, 255);
+        controls_.addControl("fade", fade, 1, 255);
+        controls_.addControl("hue_shift", hue_shift, 0, 255);
     }
 
     void prepare() override {

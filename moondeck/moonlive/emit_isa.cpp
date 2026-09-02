@@ -24,9 +24,26 @@
 #elif defined(MM_EMIT_ARM64)
 #define __aarch64__ 1
 #include "platform/desktop/moonlive_asm_host.h"
-#include "platform/desktop/moonlive_asm_host.cpp"
+#include "platform/desktop/moonlive_asm_arm64.cpp"
+#elif defined(MM_EMIT_X86_64)
+// No macro to define: the desktop backend's x86-64 branch is selected by the HOST's own
+// `__x86_64__` / `_M_X64`, so this ISA reads what the machine already compiles. That also means
+// it only works ON an x86-64 host: the arm64 branch above it wins on an Apple Silicon machine,
+// and a native architecture macro cannot be undefined. The device ISAs cross-emit because they
+// are gated on macros no host defines; this one does not, which is the honest trade for having
+// the same file serve as both the host backend and a tool target.
+//
+// REFUSED rather than silently wrong on any other host. Without this, an arm64 machine compiles
+// the arm64 branch, disasm.py hands the bytes to objdump as i386:x86-64, and the output is a
+// plausible-looking x86-64 listing of arm64 instructions: the exact "the tool answered, and the
+// answer was fiction" failure this tool exists to end.
+#if !defined(__x86_64__) && !defined(_M_X64)
+#error "MM_EMIT_X86_64 requires an x86-64 host; run --isa x86_64 on an x86-64 machine"
+#endif
+#include "platform/desktop/moonlive_asm_host.h"
+#include "platform/desktop/moonlive_asm_x86_64.cpp"
 #else
-#error "define MM_EMIT_XTENSA, MM_EMIT_RISCV or MM_EMIT_ARM64"
+#error "define MM_EMIT_XTENSA, MM_EMIT_RISCV, MM_EMIT_ARM64 or MM_EMIT_X86_64"
 #endif
 
 // The lowerer body, with the emit seam it expects.
@@ -37,14 +54,14 @@
 // backend could drift from the backend's own.
 #include "core/moonlive/moonlive_emit.h"
 
+// Each backend now carries its own lowerToBytes, INSIDE its arch guard and beside the assembler
+// it names, so including the asm file above already brought it in. There is nothing more to
+// include here; only the arch macros this file forced still have to come back off.
 #if defined(MM_EMIT_XTENSA)
-#include "platform/esp32/moonlive_lower_xtensa.cpp"
 #undef __XTENSA__
 #elif defined(MM_EMIT_RISCV)
-#include "platform/esp32/moonlive_lower_riscv.cpp"
 #undef __riscv
 #elif defined(MM_EMIT_ARM64)
-#include "platform/desktop/moonlive_lower_host.cpp"
 #undef __aarch64__
 #endif
 
@@ -67,7 +84,7 @@ int main(int argc, char** argv) {
     const auto sysvars = std::strcmp(binding, "modifier") == 0 ? moonlive::modifierSysVars()
                        : std::strcmp(binding, "effect")   == 0 ? moonlive::effectSysVars()
                                                                : moonlive::layoutSysVars();
-    // A string pool, as the engine supplies one: `addUint8("name", ...)` interns its label there
+    // A string pool, as the engine supplies one: `addControl("name", ...)` interns its label there
     // and the emitted code carries a pointer to it. Static so the pointers stay valid while the
     // bytes below are dumped.
     static char strings[moonlive::CompileResult::kStringPool];

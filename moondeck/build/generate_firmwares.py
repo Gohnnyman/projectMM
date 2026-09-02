@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate web-installer/firmwares.json from the FIRMWARES dict.
+"""Generate mooninstaller/firmwares.json from the FIRMWARES dict.
 
 The firmware-variant list was hand-copied across the CI matrix, the two ESP Web
 Tools manifest loops, MoonDeck, and the docs — six copies that drifted (MoonDeck's
@@ -17,7 +17,7 @@ check_firmwares.py guards the committed file against drift from FIRMWARES.
 physical hardware). See docs/architecture.md § Firmware vs board.
 
 Inputs:
-  --out <path>   — firmwares.json destination (web-installer/firmwares.json).
+  --out <path>   — firmwares.json destination (mooninstaller/firmwares.json).
 """
 
 import argparse
@@ -73,7 +73,10 @@ def main() -> int:
     # ensure_ascii=False keeps the em-dashes in descriptions literal (readable
     # diffs), matching the hand-authored deviceModels.json sibling.
     doc = build_doc()
-    args.out.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+    # encoding pinned for the same reason ensure_ascii=False is set: this writes non-ASCII, and
+    # an unnamed encoding falls back to the platform default, which on Windows is cp1252 and
+    # raises UnicodeEncodeError. The MoonLive catalog generator failed this way in CI.
+    args.out.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     # Count what was WRITTEN, not len(FIRMWARES): build_doc drops non-installable
     # variants, so the raw dict size contradicts check_firmwares.py's count.
     print(f"generate_firmwares: wrote {args.out} ({len(doc['firmwares'])} variants)")

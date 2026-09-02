@@ -23,7 +23,7 @@ namespace mm {
 /// Audio-reactive effect: a noise field modulated by sound level.
 class NoiseMeterEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🐙📊"; }   // WLED origin · audio
+    const char* tags() const override { return "🐙🎵"; }   // WLED origin · audio
     Dim dimensions() const override { return Dim::D1; }    // writes the x=0 column; extrude fans x and z
 
     // Defaults match WLED's Noisemeter exactly.
@@ -31,8 +31,8 @@ public:
     uint8_t width    = 128;   // level→length gain: how much of the column a given level fills (0..255)
 
     void defineControls() override {
-        controls_.addUint8("fadeRate", fadeRate, 200, 254);
-        controls_.addUint8("width", width, 0, 255);
+        controls_.addControl("fadeRate", fadeRate, 200, 254);
+        controls_.addControl("width", width, 0, 255);
     }
 
     void tick() MM_NONBLOCKING override {

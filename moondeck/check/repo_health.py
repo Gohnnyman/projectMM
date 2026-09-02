@@ -36,6 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 # (see merge_carry_forward). Same single source of truth check_firmwares.py reads.
 sys.path.insert(0, str(ROOT / "moondeck" / "build"))
 from build_esp32 import FIRMWARES  # noqa: E402
+from build_desktop import desktop_binary  # noqa: E402 (one definition of where it lands)
 HEALTH_FILE = ROOT / "docs" / "metrics" / "repo-health.json"
 # The same snapshot as a table a human reads: units applied, ratios as percentages, areas
 # grouped. The JSON stays the source the delta is computed from; this is the view. Both
@@ -76,6 +77,10 @@ def measure_loc():
     for area, prefix in AREAS.items():
         total = 0
         for f in _git_files(prefix):
+            # vendor/ holds upstream single-header code (miniaudio); its ~96k lines are not
+            # our repo's size and would drown every LOC trend they sit in.
+            if "/vendor/" in f.as_posix():
+                continue
             if f.suffix in CODE_SUFFIXES and f.is_file():
                 total += _read(f).count("\n")
         loc[area] = total
@@ -93,6 +98,8 @@ def measure_comments():
     for area, prefix in AREAS.items():
         comment_lines = code_lines = 0
         for f in _git_files(prefix):
+            if "/vendor/" in f.as_posix():
+                continue   # upstream single-header code (miniaudio): not our comments
             if f.suffix not in CODE_SUFFIXES or not f.is_file():
                 continue
             for line in _read(f).splitlines():
@@ -109,24 +116,105 @@ def measure_comments():
     return out
 
 
-def measure_flash():
-    """Built firmware size per variant, in bytes.
+# Firmwares whose binary was actually measured this run, as opposed to carried forward from the
+# previous one. Without this the report cannot tell "built, and unchanged" from "not built", and a
+# carried-forward row reads as a result: exactly the false reassurance the freshness rule exists
+# to prevent, moved one step later.
+MEASURED_THIS_RUN = set()
 
-    Only variants present in build/ are reported. A variant that was not built this run
-    carries its previous number forward (see merge_carry_forward) rather than vanishing:
-    a docs-only commit genuinely did not change any firmware size.
+
+def app_partition_bytes(firmware):
+    """The app slot's size for `firmware`, from the partition CSV its build actually used.
+
+    The ceiling a firmware is measured against is not a constant: the variants use different
+    tables (4 MB classic, 8 MB S3, 16 MB OTA), so a raw KB number says nothing about how close
+    to full a target is. Read from the GENERATED sdkconfig rather than the defaults fragments,
+    because that is what the build resolved after layering them. Returns 0 when it cannot be
+    determined, and the caller then simply omits the capacity rather than guessing one.
     """
+    cfg = ROOT / "build" / f"esp32-{firmware}" / "sdkconfig"
+    if not cfg.exists():
+        return 0
+    name = ""
+    for line in cfg.read_text(errors="ignore").splitlines():
+        if line.startswith("CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="):
+            name = line.split("=", 1)[1].strip().strip('"')
+            break
+    csv = ROOT / "esp32" / name if name else None
+    if not csv or not csv.exists():
+        return 0
+    # The OTA slot, not merely the first app row: the MoonBase tables put a small `factory`
+    # recovery image first (896 KB), and measuring the firmware against THAT reports a target
+    # as 196% full when it is comfortably inside its real 2496 KB slot. The ota_0 slot is where
+    # the firmware actually lands, and ota_1 equals it by construction.
+    factory = 0
+    for line in csv.read_text(errors="ignore").splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        parts = [c.strip() for c in line.split(",")]
+        if len(parts) >= 5 and parts[1] == "app":
+            try:
+                size = int(parts[4], 0)
+            except ValueError:
+                continue
+            if parts[2].startswith("ota_"):
+                return size
+            factory = factory or size
+    return factory   # a single-app table has no ota_ slot; its factory slot IS the ceiling
+
+
+def measure_flash():
+    """Built firmware size per variant, in bytes — STALE BINARIES EXCLUDED.
+
+    Only variants whose binary is newer than the sources are reported. A variant that was
+    not built this run carries its previous number forward (see merge_carry_forward) rather
+    than vanishing: a docs-only commit genuinely did not change any firmware size.
+
+    The freshness rule is what makes the carry-forward honest. Reporting whatever `.bin`
+    happens to sit in a build dir means a months-old artifact is re-measured as if it were
+    this commit's, and the delta printed against the baseline is then pure noise. On a bench
+    holding five old firmwares that produced "−230 KB ✓", "−193 KB ✓", "−279 KB ✓" in one run,
+    for firmwares nobody had rebuilt, because the baseline had been recorded on a different
+    machine. A metric that moves when nothing was built is worse than a missing one: it is
+    read as a result. Same predicate as check_esp32_built.py, imported rather than restated.
+    """
+    sys.path.insert(0, str(ROOT / "moondeck" / "check"))
+    from check_esp32_built import newest_source, compiled_sources
+
     flash = {}
     build = ROOT / "build"
     if not build.exists():
         return flash
     for d in sorted(build.glob("esp32-*")):
         binary = d / "projectMM.bin"
-        if binary.exists():
-            flash[d.name.replace("esp32-", "", 1)] = binary.stat().st_size
-    desktop = ROOT / "build" / "projectMM"
-    if desktop.exists():
-        flash["desktop"] = desktop.stat().st_size
+        if not binary.exists():
+            continue                       # never built here: carry the previous number forward
+        firmware = d.name.replace("esp32-", "", 1)
+        # One stat, so the size recorded and the timestamp judged describe the same file even if
+        # a build lands mid-loop. STRICTLY newer: equal mtimes mean a source was written in the
+        # same filesystem tick as the binary, and which came first is unknowable, so the honest
+        # reading is "might be stale" rather than "fresh".
+        st = binary.stat()
+        _, newest = newest_source(compiled_sources(firmware))
+        if st.st_mtime <= newest:
+            continue
+        flash[firmware] = st.st_size
+        MEASURED_THIS_RUN.add(firmware)
+    # The desktop binary, located by build_desktop.desktop_binary() so this and collect_kpi.py
+    # cannot name different files in the same run. A bare build/projectMM matched nothing off
+    # macOS, so this metric silently carried a foreign machine's number forward while reading as
+    # a measurement: the same defect the firmware freshness rule above exists to prevent.
+    #
+    # Held to the SAME freshness rule as the firmwares rather than trusting the build gate to have
+    # just built it. That gate does, but `collect_kpi.py --commit` is also run standalone, where
+    # nothing builds first, and a rule that holds only inside one caller is not a rule.
+    desktop = desktop_binary()
+    if desktop:
+        st = desktop.stat()
+        _, newest = newest_source()
+        if st.st_mtime > newest:
+            flash["desktop"] = st.st_size
+            MEASURED_THIS_RUN.add("desktop")   # same rule as the firmwares: measured, so say so
     return flash
 
 
@@ -357,6 +445,13 @@ def _arrow(new, old, key, fmt=str, lower_is_better=True):
     return f"{fmt(new)} ({sign}{fmt(abs(diff))}){mark}"
 
 
+# Columns of the scenario matrix, in fleet order. A fixed list rather than whatever the data
+# happens to carry: a new target should be a deliberate addition, and "unknown" (a scenario run
+# before targets were named) is a data defect, not a device.
+MATRIX_TARGETS = ("desktop-macos", "desktop-windows", "esp32", "esp32s3-n16r8",
+                  "esp32p4rev1-eth", "esp32s31", "esp32-eth", "esp32-eth-wifi")
+
+
 def render_markdown(new, old):
     """The snapshot as a table, with units and per-metric deltas against the last commit."""
     o = old or {}
@@ -371,19 +466,100 @@ def render_markdown(new, old):
          "growth visible, the judgment stays human.", ""]
 
     if new.get("flash"):
-        L += ["## Firmware size", "", "| Target | Flash |", "|---|---:|"]
+        # "Built" is its own column because a carried-forward number is indistinguishable from a
+        # genuinely unchanged one, and reads as "no growth" when it may mean "not measured".
+        # "Capacity" is the app slot from that firmware's partition table: KB alone does not say
+        # whether a target is comfortable or nearly full, and the variants differ (4/8/16 MB).
+        L += ["## Firmware size", "",
+              "| Target | Flash | Capacity | Used | Built |", "|---|---:|---:|---:|:--:|"]
         for k, v in sorted(new["flash"].items()):
-            L.append(f"| {k} | {_arrow(v, o.get('flash'), k, _kb)} |")
-        L.append("")
+            cap = app_partition_bytes(k) if k.startswith("esp32") else 0
+            cap_s = _kb(cap) if cap else "-"
+            used = f"{(100.0 * v / cap):.0f}%" if cap else "-"
+            built = "yes" if k in MEASURED_THIS_RUN else "carried"
+            L.append(f"| {k} | {_arrow(v, o.get('flash'), k, _kb)} | {cap_s} | {used} | {built} |")
+        L += ["",
+              ("`Built: carried` means that firmware was NOT rebuilt this run and its number is "
+               "the previous one, so an absent delta says nothing about the change. `Used` is "
+               "against the app slot in the firmware's own partition table."), ""]
 
     if new.get("perf"):
         L += ["## Render performance", "", "| Target | Tick | FPS |", "|---|---:|---:|"]
         for k, v in sorted(new["perf"].items()):
+            # `scenario_matrix` rides in the perf block but is the matrix's own data, not a target:
+            # rendering it as a row printed a "0 µs" device that does not exist.
+            if k == "scenario_matrix" or not isinstance(v, dict) or "tick_us" not in v:
+                continue
             prev = (o.get("perf") or {}).get(k, {})
             tick = _arrow(v.get("tick_us", 0), prev, "tick_us", lambda n: f"{n:,} µs")
             fps = _arrow(v.get("fps") or 0, prev, "fps", lambda n: f"{n:,}", lower_is_better=False)
             L.append(f"| {k} | {tick} | {fps} |")
         L.append("")
+
+        # The full matrix: every scenario's worst step, per target, as p50. One row per scenario,
+        # one column per device, so a board's cost for a given pipeline is readable across the
+        # fleet and a regression on one target stands out from a change that moved all of them.
+        matrix = (new.get("perf") or {}).get("scenario_matrix") or {}
+        if matrix and any(matrix.values()):
+            # MATRIX_TARGETS fixes the column ORDER (desktop first, then the boards); a target it
+            # does not name still gets a column, appended, rather than being dropped without a
+            # word -- a new board on the bench must show up here the day it first reports.
+            seen = {c for per in matrix.values() for c in per}
+            cols = ([c for c in MATRIX_TARGETS if c in seen]
+                    + sorted(c for c in seen if c not in MATRIX_TARGETS))
+            prevm = ((o.get("perf") or {}).get("scenario_matrix") or {})
+            L += ["### Scenario tick by target (p50 of each sample window)", "",
+                  "| Scenario | " + " | ".join(cols) + " |",
+                  "|---" * (len(cols) + 1) + "|"]
+            for name in sorted(matrix):
+                cells = []
+                for c in cols:
+                    st = matrix[name].get(c)
+                    if not st:
+                        cells.append("-")
+                        continue
+                    # A single sample is not a percentile ("n=1 is a first impression, not a
+                    # baseline" -- _observed.py), so mark it rather than print it as measured.
+                    mark = "" if st.get("n", 0) >= 4 else " ?"
+                    prev = (prevm.get(name) or {}).get(c) or {}
+                    cells.append(_arrow(st.get("p50", 0), prev, "p50",
+                                        lambda n: f"{n:,}") + mark)
+                L.append(f"| {name} | " + " | ".join(cells) + " |")
+            cells = max(1, len(matrix) * len(cols))  # max(): the percentages below divide by it
+            have = sum(1 for per in matrix.values() for c in cols if c in per)
+            solid = sum(1 for per in matrix.values() for c in cols
+                        if (per.get(c) or {}).get("n", 0) >= 4)
+            L += ["", ("Microseconds. `?` marks a cell backed by fewer than 4 samples, which is a "
+                       "first impression rather than a percentile; several are months old and "
+                       "were captured during a network reconfigure, so they read as whole "
+                       "milliseconds. `-` means that target has never run that scenario."), "",
+                  (f"**Coverage: {have}/{cells} cells measured ({100 * have // cells}%), "
+                   f"{solid} of them with 4+ samples ({100 * solid // cells}%).** The blanks are "
+                   "the point: a target that has never run a scenario cannot regress in it, and "
+                   "cannot be compared against the others. Filling the matrix means running the "
+                   "scenario suite on each bench board, which is a standing task rather than a "
+                   "one-off."), ""]
+
+        # Named scenarios beside the summary figure. The Tick column above is the max over every
+        # measure step of every scenario, so it moves when a scenario is added or a heavier one
+        # joins the set: useful as a ceiling, useless for comparing one commit to the next. These
+        # are a fixed pair that instantiate none of the optional modules, reported as the p50 of
+        # each one's own 32-sample window, so the same pipeline is compared each time.
+        for k, v in sorted(new["perf"].items()):
+            if not isinstance(v, dict):
+                continue
+            per = v.get("scenario_p50") or {}
+            if not per:
+                continue
+            prevper = ((o.get("perf") or {}).get(k, {}) or {}).get("scenario_p50") or {}
+            L += [f"### {k}: isolated scenarios (p50 of the sample window)", "",
+                  "| Scenario | p50 | p95 | n |", "|---|---:|---:|---:|"]
+            for name, st in sorted(per.items()):
+                p50 = _arrow(st.get("p50", 0), prevper.get(name, {}), "p50", lambda n: f"{n:,} µs")
+                L.append(f"| {name} | {p50} | {st.get('p95', 0):,} µs | {st.get('n', 0)} |")
+            L += ["", ("These build a bare pipeline with no optional modules, so a change here is "
+                       "a change in the pipeline itself rather than in what was measured. A new "
+                       "module belongs in an advanced scenario, which keeps its own numbers."), ""]
 
     L += ["## Code", "", "| Area | Lines | Comments | Comment share |", "|---|---:|---:|---:|"]
     for area in new.get("loc", {}):

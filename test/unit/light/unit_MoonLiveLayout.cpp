@@ -31,9 +31,9 @@ using namespace mm;
 
 
 // Every case here compiles a script and runs the emitted native code, so all of them need a JIT
-// backend for the host ISA. `MM_MOONLIVE_HAS_HOST_JIT` is 0 on x86_64 — which is what CI runs — and
-// there a layout reports zero lights for a reason that has nothing to do with the layout. Gated as a
-// block, the same way unit_moonlive_fill / unit_moonlive_ir do it.
+// backend for the host ISA. arm64 and x86-64 both have one; a --no-jit build does not, and there a
+// layout reports zero lights for a reason that has nothing to do with the layout. Gated as a block,
+// the same way unit_moonlive_fill / unit_moonlive_ir do it.
 #if MM_MOONLIVE_HAS_HOST_JIT
 
 namespace {
@@ -58,10 +58,10 @@ std::vector<Coord3D> place(const char* script) {
 TEST_CASE("the default script lays out a grid, one light per cell") {
     // The shape almost every panel is, and the script that ships: a nested loop calling addLight.
     const std::vector<Coord3D> p = place(
-        mmScriptAs("placeLights", "uint8_t cols = 4;\n"
-        "uint8_t rows = 2;\n"
-        "for (yy = 0; yy < rows; yy = yy + 1) {"
-        "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }"));
+        mmScriptAs("placeLights", "byte cols = 4;\n"
+        "byte rows = 2;\n"
+        "for (int yy = 0; yy < rows; yy = yy + 1) {"
+        "  for (int xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }"));
     REQUIRE(p.size() == 8);
     CHECK(p[0] == Coord3D{0, 0, 0});
     CHECK(p[3] == Coord3D{3, 0, 0});
@@ -74,10 +74,10 @@ TEST_CASE("the light count is known before any coordinate is asked for") {
     // placeLights. A count that came from the walk would arrive too late to be useful.
     MoonLiveLayout l;
     l.defineControls();
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 5;\n"
-                "uint8_t rows = 3;\n"
-                "for (yy = 0; yy < rows; yy = yy + 1) {"
-                "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "byte cols = 5;\n"
+                "byte rows = 3;\n"
+                "for (int yy = 0; yy < rows; yy = yy + 1) {"
+                "  for (int xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }")));
     l.prepare();
     CHECK(l.lightCount() == 15);           // answered without anyone calling placeLights
 }
@@ -86,7 +86,7 @@ TEST_CASE("the count and the coordinates always agree, because one script produc
     // The property SphereLayout names: count and emit run the same code, so they cannot drift.
     MoonLiveLayout l;
     l.defineControls();
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 7; i = i + 1) { addLight(i, 0, 0); }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 7; i = i + 1) { addLight(i, 0, 0); }")));
     l.prepare();
 
     std::vector<Coord3D> seen;
@@ -102,7 +102,7 @@ TEST_CASE("a scripted layout allocates nothing, like every other layout") {
     // have. The script calls out per light instead, so the only heap here is the compiled program.
     MoonLiveLayout l;
     l.defineControls();
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 4096; i = i + 1) { addLight(i, 0, 0); }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 4096; i = i + 1) { addLight(i, 0, 0); }")));
     l.prepare();
     CHECK(l.lightCount() == 4096);
     // dynamicBytes is the JIT'd program only — no coordinate storage grows with the light count.
@@ -112,8 +112,8 @@ TEST_CASE("a scripted layout allocates nothing, like every other layout") {
 TEST_CASE("a script places lights wherever it likes, which is the point of scripting one") {
     // A strand that runs right to left: one line here, a new C++ class otherwise.
     const std::vector<Coord3D> p = place(
-        mmScriptAs("placeLights", "uint8_t cols = 4;\n"
-        "for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }"));
+        mmScriptAs("placeLights", "byte cols = 4;\n"
+        "for (int i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }"));
     REQUIRE(p.size() == 4);
     CHECK(p[0] == Coord3D{3, 0, 0});
     CHECK(p[3] == Coord3D{0, 0, 0});
@@ -121,7 +121,7 @@ TEST_CASE("a script places lights wherever it likes, which is the point of scrip
 
 TEST_CASE("a script can place a shape no rectangular layout can express") {
     // A diagonal — light i at (i, i).
-    const std::vector<Coord3D> p = place(mmScriptAs("placeLights", "for (i = 0; i < 4; i = i + 1) { addLight(i, i, 0); }"));
+    const std::vector<Coord3D> p = place(mmScriptAs("placeLights", "for (int i = 0; i < 4; i = i + 1) { addLight(i, i, 0); }"));
     REQUIRE(p.size() == 4);
     CHECK(p[0] == Coord3D{0, 0, 0});
     CHECK(p[3] == Coord3D{3, 3, 0});
@@ -132,7 +132,7 @@ TEST_CASE("a broken script leaves an empty fixture rather than taking the pipeli
     // fixture reports no lights, the module carries the diagnostic, and the device keeps running.
     MoonLiveLayout l;
     l.defineControls();
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 4; i = i + 1) { addLight(i, i")));   // unclosed
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 4; i = i + 1) { addLight(i, i")));   // unclosed
     l.prepare();
     CHECK(l.lightCount() == 0);
     CHECK(l.severity() == MoonModule::Severity::Error);
@@ -142,11 +142,11 @@ TEST_CASE("editing the script changes the fixture") {
     // The live-edit loop: the same module, a new script, a different physical shape.
     MoonLiveLayout l;
     l.defineControls();
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }")));
     l.prepare();
     CHECK(l.lightCount() == 4);
 
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 2; i = i + 1) { addLight(i, 0, 0); }")));
     l.prepare();
     CHECK(l.lightCount() == 2);
 }
@@ -157,21 +157,21 @@ TEST_CASE("editing the script changes the fixture") {
 TEST_CASE("the scripts the documentation shows all compile") {
     const char* fromDocs[] = {
         // the default
-        mmScriptAs("placeLights", "uint8_t cols = 16;\n"
-        "uint8_t rows = 16;\n"
-        "for (yy = 0; yy < rows; yy = yy + 1) {"
-        "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }"),
+        mmScriptAs("placeLights", "byte cols = 16;\n"
+        "byte rows = 16;\n"
+        "for (int yy = 0; yy < rows; yy = yy + 1) {"
+        "  for (int xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }"),
         // right to left
-        mmScriptAs("placeLights", "uint8_t cols = 8;\n"
-        "for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }"),
+        mmScriptAs("placeLights", "byte cols = 8;\n"
+        "for (int i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }"),
         // a diagonal
-        mmScriptAs("placeLights", "uint8_t cols = 8;\n"
-        "for (i = 0; i < cols; i = i + 1) { addLight(i, i, 0); }"),
+        mmScriptAs("placeLights", "byte cols = 8;\n"
+        "for (int i = 0; i < cols; i = i + 1) { addLight(i, i, 0); }"),
         // two rows, stacked
-        mmScriptAs("placeLights", "uint8_t cols = 8;\n"
-        "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); addLight(i, 1, 0); }"),
+        mmScriptAs("placeLights", "byte cols = 8;\n"
+        "for (int i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); addLight(i, 1, 0); }"),
         // print wrapping an argument
-        mmScriptAs("placeLights", "for (i = 0; i < 2; i = i + 1) { addLight(print(i), 0, 0); }"),
+        mmScriptAs("placeLights", "for (int i = 0; i < 2; i = i + 1) { addLight(print(i), 0, 0); }"),
     };
     for (const char* s : fromDocs) {
         MoonLiveLayout l;
@@ -191,7 +191,7 @@ TEST_CASE("the scripts the documentation shows all compile") {
 TEST_CASE("a layout answers count and coordinates every time it is asked") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }")));
     l.prepare();
 
     CHECK(l.lightCount() == 6);
@@ -222,13 +222,13 @@ TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
     MoonLiveLayout l;
     l.defineControls();
     // 10 - 4 must be 6 lights. A widened -1 makes the bound enormous and the count is not 6.
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 10 - 4; i = i + 1) { addLight(i, 0, 0); }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 10 - 4; i = i + 1) { addLight(i, 0, 0); }")));
     l.prepare();
     CHECK(l.lightCount() == 6);
 
     // And a subtraction inside the placement, where the coordinate is the observable.
-    std::vector<Coord3D> p = place(mmScriptAs("placeLights", "uint8_t cols = 4;\n"
-                                   "for (i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }"));
+    std::vector<Coord3D> p = place(mmScriptAs("placeLights", "byte cols = 4;\n"
+                                   "for (int i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }"));
     REQUIRE(p.size() == 4);
     CHECK(p[0] == Coord3D{3, 0, 0});      // 4 - 1 - 0
     CHECK(p[3] == Coord3D{0, 0, 0});      // 4 - 1 - 3
@@ -246,31 +246,31 @@ TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
 TEST_CASE("a scripted control keeps its live value when the script is edited") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 16;\n"
-                "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "byte cols = 16;\n"
+                "for (int i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }")));
     l.prepare();
     CHECK(l.lightCount() == 16);
 
     // A second script declaring cols at the same offset inherits the live 16, not its own 8.
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 8;\n"
-                "for (i = 0; i < cols; i = i + 1) { addLight(i, 1, 0); }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "byte cols = 8;\n"
+                "for (int i = 0; i < cols; i = i + 1) { addLight(i, 1, 0); }")));
     l.prepare();
     CHECK(l.lightCount() == 16);
 
     // A member INSERTED ABOVE cols shifts cols to the next arena byte, so the byte cols used to
     // own now belongs to `pad`. Identity is the name at an offset, not the declaration position:
     // pad must take its own 4 rather than inherit the 16 the user had dialed into cols.
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t pad = 4;\n"
-                "uint8_t cols = 7;\n"
-                "for (i = 0; i < pad; i = i + 1) { addLight(i, 2, 0); }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "byte pad = 4;\n"
+                "byte cols = 7;\n"
+                "for (int i = 0; i < pad; i = i + 1) { addLight(i, 2, 0); }")));
     l.prepare();
     CHECK(l.lightCount() == 4);
 
     // A script whose first control is a NEW slot gets its own initialiser: nothing to inherit.
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 16;\n"
-                "uint8_t rows = 3;\n"
-                "for (yy = 0; yy < rows; yy = yy + 1) {"
-                "  for (xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "byte cols = 16;\n"
+                "byte rows = 3;\n"
+                "for (int yy = 0; yy < rows; yy = yy + 1) {"
+                "  for (int xx = 0; xx < cols; xx = xx + 1) { addLight(xx, yy, 0); } }")));
     l.prepare();
     CHECK(l.lightCount() == 48);          // 16 inherited, rows 3 its own
 }
@@ -284,8 +284,8 @@ TEST_CASE("a scripted control keeps its live value when the script is edited") {
 // the behaviour: a nested loop places every light of the grid it describes.
 TEST_CASE("a nested loop lays out a full grid, on every target's register budget") {
     const std::vector<Coord3D> p = place(
-        mmScriptAs("placeLights", "for (yy = 0; yy < 3; yy = yy + 1) {"
-        "  for (xx = 0; xx < 5; xx = xx + 1) { addLight(xx, yy, 0); } }"));
+        mmScriptAs("placeLights", "for (int yy = 0; yy < 3; yy = yy + 1) {"
+        "  for (int xx = 0; xx < 5; xx = xx + 1) { addLight(xx, yy, 0); } }"));
     REQUIRE(p.size() == 15);               // 3 rows x 5 columns, none dropped
     CHECK(p[0]  == Coord3D{0, 0, 0});
     CHECK(p[4]  == Coord3D{4, 0, 0});      // end of the first row
@@ -305,7 +305,7 @@ TEST_CASE("a loop counter survives the body that uses it") {
     SUBCASE("through a call — addLight") {
         MoonLiveLayout l;
         l.defineControls();
-        l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 6; i = i + 1) { addLight(i, i, 0); }")));
+        l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 6; i = i + 1) { addLight(i, i, 0); }")));
         l.prepare();
         CHECK(l.lightCount() == 6);      // a clobbered counter gives some other number
     }
@@ -315,7 +315,7 @@ TEST_CASE("a loop counter survives the body that uses it") {
         // — addLight is a Call and takes a different path — so this drives the emitted code and
         // checks every light was written, which is what a wrong counter changes.
         uint8_t code[4096];
-        auto r = moonlive::compileSource(mmScriptAs("placeLights", "for (i = 0; i < 6; i = i + 1) { setRGB(i, 200, 0, 0); }"),
+        auto r = moonlive::compileSource(mmScriptAs("placeLights", "for (int i = 0; i < 6; i = i + 1) { setRGB(i, 200, 0, 0); }"),
                                          moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
         REQUIRE(r.ok);
         void* blk = platform::allocExec(r.len);
@@ -339,7 +339,7 @@ TEST_CASE("a loop counter survives the body that uses it") {
 TEST_CASE("a stray character in a for header is rejected, not spun on") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 4; i = i @ 1) { addLight(i, 0, 0); }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 4; i = i @ 1) { addLight(i, 0, 0); }")));
     l.prepare();                                    // must return — a hang fails by timeout
     CHECK(l.severity() == MoonModule::Severity::Error);
     CHECK(l.lightCount() == 0);
@@ -357,7 +357,7 @@ TEST_CASE("two threads can run scripts at once without stealing each other's sin
         MoonLiveLayout l;
         l.defineControls();
         char src[128];
-        std::snprintf(src, sizeof(src), mmScriptAs("placeLights", "for (i = 0; i < %d; i = i + 1) { addLight(i, 0, 0); }"), cols);
+        std::snprintf(src, sizeof(src), mmScriptAs("placeLights", "for (int i = 0; i < %d; i = i + 1) { addLight(i, 0, 0); }"), cols);
         l.setScript(mmWriteScript(src));
         l.prepare();
         for (int r = 0; r < reps; r++)
@@ -378,18 +378,31 @@ TEST_CASE("two threads can run scripts at once without stealing each other's sin
 // reading. A scripted module owns two heap blocks — the emitted code and the control-values arena —
 // and dynamicBytes counted only the first, so every scripted card under-reported. It also read 0
 // whenever the script failed to compile, while the arena was still allocated.
+// ...and hands it all back when disabled. MoonLive::free() drops the exec block but does not touch
+// the owner's counter, so a binding that forgets to report the release leaves a disabled module's
+// card claiming memory nobody holds. All three scripted bindings share one helper for this.
+TEST_CASE("a disabled scripted layout stops reporting the memory it freed") {
+    MoonLiveLayout l;
+    l.defineControls();
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }")));
+    l.prepare();
+    REQUIRE(l.dynamicBytes() > 0);
+    l.release();
+    CHECK(l.dynamicBytes() == 0);
+}
+
 TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not") {
     MoonLiveLayout l;
     l.defineControls();
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "uint8_t cols = 4;\n"
-                "for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }")));
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "byte cols = 4;\n"
+                "for (int i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); }")));
     l.prepare();
     const size_t compiled = l.dynamicBytes();
     CHECK(compiled > 0);
     CHECK(l.lightCount() == 4);
 
     // A broken script frees the code but keeps the arena, so the figure drops without reaching zero.
-    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 4; i = i + 1) { addLight(i, i")));   // unclosed
+    l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 4; i = i + 1) { addLight(i, i")));   // unclosed
     l.prepare();
     CHECK(l.severity() == MoonModule::Severity::Error);
     CHECK(l.dynamicBytes() < compiled);      // the code block is gone
@@ -411,9 +424,9 @@ TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
     // layout to resize. A member alone would not appear on the module, so this one is surfaced.
     layout.setScript(mmWriteScript(
         "class GrowLayout {\n"
-        "  uint8_t cols = 4;\n"
-        "  defineControls() { addUint8(\"cols\", cols, 1, 64); }\n"
-        "  placeLights() { for (i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); } }\n"
+        "  byte cols = 4;\n"
+        "  void defineControls() { addControl(\"cols\", cols, 1, 64); }\n"
+        "  void placeLights() { for (int i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); } }\n"
         "}\n"));
     layout.prepare();
     // The script's own controls (`cols`) exist only once it has COMPILED, and a module starts with
@@ -458,13 +471,13 @@ TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
 TEST_CASE("naming a different script through the control actually swaps the program") {
     MoonLiveLayout l;
     l.defineControls();
-    const char* four = mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }"));
+    const char* four = mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }"));
     l.setScript(four);
     l.prepare();
     REQUIRE(l.lightCount() == 4);
 
     // Write the OTHER script the way the API does: straight into the bound control buffer.
-    const char* nine = mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 9; i = i + 1) { addLight(i, 0, 0); }"));
+    const char* nine = mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 9; i = i + 1) { addLight(i, 0, 0); }"));
     const auto& cs = l.controls();
     for (uint8_t i = 0; i < cs.count(); i++)
         if (cs[i].name && std::strcmp(cs[i].name, "script") == 0)
@@ -503,7 +516,7 @@ TEST_CASE("a layout whose script is missing reports it without retrying forever"
 
     // A working script after a failed one must still compile — the give-up is per script name, not
     // permanent, or fixing a typo would need a reboot.
-    const char* good = mmScriptAs("placeLights", "for (i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }");
+    const char* good = mmScriptAs("placeLights", "for (int i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }");
     l.setScript(mmWriteScript(good));
     l.prepare();
     // The COUNT needs an emitting backend; the give-up-is-per-name behaviour above does not, so
@@ -535,7 +548,7 @@ TEST_CASE("a layout that starts empty still compiles the first script it is give
     // Write the control the way the UI does — straight into the bound buffer, then
     // onControlChanged — because addText binds `script_` directly and setScript() is NOT called on
     // that path. That is exactly how a device sets a script, and where the latch survived.
-    const char* name = mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }"));
+    const char* name = mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }"));
     auto& cs = l.controls();
     for (uint8_t i = 0; i < cs.count(); i++)
         if (cs[i].name && std::strcmp(cs[i].name, "script") == 0)
@@ -628,11 +641,11 @@ TEST_CASE("a serpentine layout places every light exactly once") {
     MoonLiveLayout l;
     l.defineControls();
     l.setScript(mmWriteScript(mmScriptAs("placeLights",
-        "uint8_t cols = 4;\n"
-        "uint8_t rows = 3;\n"
-        "uint8_t odd = 0;\n"
-        "for (y = 0; y < rows; y = y + 1) {\n"
-        "  for (x = 0; x < cols; x = x + 1) {\n"
+        "byte cols = 4;\n"
+        "byte rows = 3;\n"
+        "byte odd = 0;\n"
+        "for (int y = 0; y < rows; y = y + 1) {\n"
+        "  for (int x = 0; x < cols; x = x + 1) {\n"
         "    if (odd == 0) { addLight(x, y, 0); }\n"
         "    else { addLight(cols - 1 - x, y, 0); }\n"
         "  }\n"
@@ -652,7 +665,7 @@ TEST_CASE("editing a script's text recompiles it, without renaming the file") {
     MoonLiveLayout l;
     l.defineControls();
     const char* name = mmWriteScript(mmScriptAs("placeLights",
-        "for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"));
+        "for (int i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"));
     l.setScript(name);
     l.prepare();
     CHECK(l.lightCount() == 3);
@@ -661,7 +674,7 @@ TEST_CASE("editing a script's text recompiles it, without renaming the file") {
     char path[96];
     std::snprintf(path, sizeof(path), "%s/%s", mm::moonlive::kScriptDir, name);
     const std::string edited = mmScriptAs("placeLights",
-        "for (i = 0; i < 7; i = i + 1) { addLight(i, 0, 0); }");
+        "for (int i = 0; i < 7; i = i + 1) { addLight(i, 0, 0); }");
     REQUIRE(mm::platform::fsWriteAtomic(path, edited.c_str(), edited.size()));
 
     l.prepare();
@@ -709,7 +722,7 @@ TEST_CASE("a broken script fixed in place compiles, without being renamed") {
     char path[96];
     std::snprintf(path, sizeof(path), "%s/%s", mm::moonlive::kScriptDir, name);
     const std::string fixed = mmScriptAs("placeLights",
-        "for (i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }");
+        "for (int i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }");
     REQUIRE(mm::platform::fsWriteAtomic(path, fixed.c_str(), fixed.size()));
 
     CHECK(l.lightCount() == 5);          // the content moved, so the failure latch released
@@ -758,9 +771,9 @@ TEST_CASE("a disabled scripted module publishes no controls bound to freed memor
     // A script with its OWN control, which is what binds a pointer into the engine's arena.
     l.setScript(mmWriteScript(
         "class T {\n"
-        "  uint8_t cols = 7;\n"
-        "  defineControls() { addUint8(\"cols\", cols, 1, 64); }\n"
-        "  placeLights() { for (x = 0; x < cols; x = x + 1) { addLight(x, 0, 0); } }\n"
+        "  byte cols = 7;\n"
+        "  void defineControls() { addControl(\"cols\", cols, 1, 64); }\n"
+        "  void placeLights() { for (int x = 0; x < cols; x = x + 1) { addLight(x, 0, 0); } }\n"
         "}\n"));
     l.prepare();
 
@@ -793,13 +806,13 @@ TEST_CASE("a disabled scripted module publishes no controls bound to freed memor
 TEST_CASE("naming a different script through the control actually swaps the program") {
     MoonLiveLayout l;
     l.defineControls();
-    const char* four = mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }"));
+    const char* four = mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 4; i = i + 1) { addLight(i, 0, 0); }"));
     l.setScript(four);
     l.prepare();
     REQUIRE(l.lightCount() == 4);
 
     // Write the OTHER script the way the API does: straight into the bound control buffer.
-    const char* nine = mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 9; i = i + 1) { addLight(i, 0, 0); }"));
+    const char* nine = mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 9; i = i + 1) { addLight(i, 0, 0); }"));
     const auto& cs = l.controls();
     for (uint8_t i = 0; i < cs.count(); i++)
         if (cs[i].name && std::strcmp(cs[i].name, "script") == 0)
@@ -838,7 +851,7 @@ TEST_CASE("a layout whose script is missing reports it without retrying forever"
 
     // A working script after a failed one must still compile — the give-up is per script name, not
     // permanent, or fixing a typo would need a reboot.
-    const char* good = mmScriptAs("placeLights", "for (i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }");
+    const char* good = mmScriptAs("placeLights", "for (int i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }");
     l.setScript(mmWriteScript(good));
     l.prepare();
     // The COUNT needs an emitting backend; the give-up-is-per-name behaviour above does not, so
@@ -870,7 +883,7 @@ TEST_CASE("a layout that starts empty still compiles the first script it is give
     // Write the control the way the UI does — straight into the bound buffer, then
     // onControlChanged — because addText binds `script_` directly and setScript() is NOT called on
     // that path. That is exactly how a device sets a script, and where the latch survived.
-    const char* name = mmWriteScript(mmScriptAs("placeLights", "for (i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }"));
+    const char* name = mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }"));
     auto& cs = l.controls();
     for (uint8_t i = 0; i < cs.count(); i++)
         if (cs[i].name && std::strcmp(cs[i].name, "script") == 0)
@@ -963,11 +976,11 @@ TEST_CASE("a serpentine layout places every light exactly once") {
     MoonLiveLayout l;
     l.defineControls();
     l.setScript(mmWriteScript(mmScriptAs("placeLights",
-        "uint8_t cols = 4;\n"
-        "uint8_t rows = 3;\n"
-        "uint8_t odd = 0;\n"
-        "for (y = 0; y < rows; y = y + 1) {\n"
-        "  for (x = 0; x < cols; x = x + 1) {\n"
+        "byte cols = 4;\n"
+        "byte rows = 3;\n"
+        "byte odd = 0;\n"
+        "for (int y = 0; y < rows; y = y + 1) {\n"
+        "  for (int x = 0; x < cols; x = x + 1) {\n"
         "    if (odd == 0) { addLight(x, y, 0); }\n"
         "    else { addLight(cols - 1 - x, y, 0); }\n"
         "  }\n"
@@ -987,7 +1000,7 @@ TEST_CASE("editing a script's text recompiles it, without renaming the file") {
     MoonLiveLayout l;
     l.defineControls();
     const char* name = mmWriteScript(mmScriptAs("placeLights",
-        "for (i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"));
+        "for (int i = 0; i < 3; i = i + 1) { addLight(i, 0, 0); }"));
     l.setScript(name);
     l.prepare();
     CHECK(l.lightCount() == 3);
@@ -996,7 +1009,7 @@ TEST_CASE("editing a script's text recompiles it, without renaming the file") {
     char path[96];
     std::snprintf(path, sizeof(path), "%s/%s", mm::moonlive::kScriptDir, name);
     const std::string edited = mmScriptAs("placeLights",
-        "for (i = 0; i < 7; i = i + 1) { addLight(i, 0, 0); }");
+        "for (int i = 0; i < 7; i = i + 1) { addLight(i, 0, 0); }");
     REQUIRE(mm::platform::fsWriteAtomic(path, edited.c_str(), edited.size()));
 
     l.prepare();
@@ -1044,7 +1057,7 @@ TEST_CASE("a broken script fixed in place compiles, without being renamed") {
     char path[96];
     std::snprintf(path, sizeof(path), "%s/%s", mm::moonlive::kScriptDir, name);
     const std::string fixed = mmScriptAs("placeLights",
-        "for (i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }");
+        "for (int i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }");
     REQUIRE(mm::platform::fsWriteAtomic(path, fixed.c_str(), fixed.size()));
 
     CHECK(l.lightCount() == 5);          // the content moved, so the failure latch released

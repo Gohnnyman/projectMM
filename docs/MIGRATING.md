@@ -4,6 +4,8 @@ The log of **breaking changes** — what changed between versions, and the actio
 
 projectMM ships **no migration code**: the persistence layer is robust by default (an absent key keeps the control's default, a stale value clamps to the new bounds, an unknown key is ignored), which absorbs almost all schema drift with zero migration-specific code. The rare change that a robust reader *cannot* absorb is **documented here instead of migrated** — see [ADR-0013](adr/0013-no-migration-code-robust-persistence-plus-documented-breaks.md) for the decision and its rationale.
 
+**The File Manager's Backup (⤓) / Restore (⟲) carries config across these breaks.** [src/ui/migrate.js](https://github.com/MoonModules/projectMM/blob/main/src/ui/migrate.js) is the **authoritative, dated log of every machine-mappable break** (file, type, control, and value renames): Restore applies it in the browser and reports what did not carry over, so entries below describe only what a map cannot express, behavior changes, semantics to re-check, and erase-flash moves. It works even on a freshly erased device: join its `MM-XXXX` SoftAP, open `http://4.3.2.1`, restore there, and take the offered restart; the bundle carries the WiFi credentials, so the device comes back on your network. For a device still on old firmware (no Backup button yet), the [installer page](https://moonmodules.org/projectMM/install/) offers the same backup as a bookmarklet.
+
 **Read this when upgrading a device that already holds persisted state.** Entries are newest first. Each says what changed and what to do; most need nothing at all, because the lost value re-populates on next use.
 
 **MoonLive is exempt until it launches.** Nobody is running scripts on a device yet, so a break in the script language or its storage cannot strand anyone, and an entry here would describe an upgrade path no user can take. Its breaking changes are recorded in the commit and PR record instead. This exemption ends at the first release that ships MoonLive as a supported feature; from then it follows the same rule as everything else.
@@ -22,6 +24,140 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### The desktop build keeps its files in `build/fs`, not `build`
+
+**Action: move your data, or lose your settings.** Affects the DESKTOP build only, and only a
+developer running it from a repository checkout; devices are unaffected.
+
+A desktop install used the build directory itself as the device's filesystem, so the File Manager's
+root listed CMake caches, object archives and every ESP32 variant's build folder alongside the four
+directories a device actually has. It now roots at `build/fs`, so what the desktop shows is what a
+board shows.
+
+An existing checkout starts with an empty-looking device, because its `.config` is one level up.
+Move what you want to keep:
+
+```sh
+mkdir -p build/fs
+mv build/.config build/moonlive build/.hls build/fs/ 2>/dev/null
+```
+
+Nothing is deleted if you skip this: the old directories stay where they are, and the device simply
+starts fresh. `MM_DATA_DIR` still overrides the location, and a packaged desktop install (which uses
+the per-user data directory) is unchanged.
+
+### projectMM no longer appears in WLED apps by default
+
+Device discovery now announces on the multicast group `239.255.77.77` and, by default, **not** on
+the broadcast address WLED apps and devices browse. A projectMM device therefore stops showing up
+in them until you turn on `wledCompatible` in the Devices module.
+
+projectMM devices still find each other either way: presence always goes to the group and every
+device always joins it, so a fleet can mix the setting freely.
+
+The reason for the default: a broadcast at discovery cadence makes every phone, printer and laptop
+on the LAN take an interrupt and parse a packet none of them want. Multicast reaches only the
+devices that joined the group. See
+[multicast and IGMP snooping](architecture.md#multicast-and-igmp-snooping) for when that saving is
+real (a switch that snoops) and when it is not.
+
+### A light preset's Dimmer channel is now driven
+
+A preset that declares a `Dimmer` role previously left that channel at 0, because nothing ever
+wrote it: `Correction` resolved only the color roles. A fixture on such a preset therefore emitted
+nothing at all, whatever its color channels said. The shipped `IRGB` preset ("CH1 master
+intensity") could never light a fixture.
+
+The dimmer is now held open (255) every frame, with per-light brightness staying in the color
+values as before. **If you drive a fixture on `IRGB` or another dimmer-carrying preset, it will
+light up where it previously stayed dark.** Nothing to change; the previous behavior was a defect.
+
+Routing brightness to the dimmer channel rather than holding it open is the better model and is
+[backlogged](backlog/backlog-light.md), so this value will change again.
+
+
+### esp32-16mb moves to the MoonBase partition table (2026-08-28)
+
+**Action: erase flash** (USB re-flash). Back up first (File Manager, or the installer's
+bookmarklet on older firmware); restore after the install brings WiFi, config and scripts back.
+
+`esp32-16mb` replaces its dual-OTA layout with
+[MoonBase](architecture.md#moonbase-the-second-boot-image), the same trade the 4 MB variants
+made in the entry below, taken here by choice rather than necessity: the second app slot was
+idle except during an update, so the filesystem grows 7168 to 11264 KB and the device gains
+MoonBase's stronger recovery story (a power cut mid-install boots MoonBase and the user retries
+over the network). One app slot remains, at its full 4096 KB.
+
+Every partition moves, so the existing filesystem volume is not where the new table looks:
+without a backup, WiFi credentials, module config and scripts all re-enter through provisioning.
+A partition table only changes over USB, so an OTA update leaves a device on the old layout.
+
+### 4 MB boards move to the MoonBase partition table (2026-08-26)
+
+**Action: erase flash** (USB re-flash). Back up first (File Manager ⤓, or the installer's
+bookmarklet on older firmware); restore after the install brings WiFi, config and scripts back.
+
+The 4 MB variants (`esp32`, `esp32-wrover`, `esp32-eth`) replace the dual-OTA layout with
+[MoonBase](architecture.md#moonbase-the-second-boot-image): the app slot grows
+1856 → 2496 KB and the filesystem 256 → 548 KB, but the filesystem moves (0x3B0000 → 0x360000),
+so the existing volume is not where the new table looks; without a backup, WiFi credentials,
+module config and scripts all re-enter through provisioning. A partition table only changes over USB: a device
+still on the old table keeps OTA-updating *within* that table for as long as the app fits its
+1856 KB slot; the web installer is the migration path. 8/16 MB boards are unaffected.
+
+### PreviewDriver's `fps` becomes `targetFps`, and now trades resolution (2026-08-25)
+
+The control is renamed and its meaning changed, so the rename is the point rather than cosmetic.
+
+**Before:** `fps` was a ceiling. The driver never exceeded it, but a link that could not sustain the rate simply delivered fewer frames and the control did nothing about it.
+
+**Now:** `targetFps` is the rate you *want*. The driver still never exceeds it, and when the link cannot keep up it **trades preview resolution** to get closer, lower it for full detail at a slower rate, raise it for a smoother but coarser preview. That makes the slider the place where you choose between detail and smoothness, which is what users were reaching for.
+
+**Action: none required.** The preview is a view, not output. A device that had a non-default `fps` saved falls back to the default 24 on first boot with this firmware, because the persisted key changed; set `targetFps` if you had tuned it. Mixed versions degrade soft: an old UI against new firmware sends no detail request and gets full detail (capped by memory); a new UI against old firmware sends an uplink message the device ignores.
+
+### A module declares every control with `addControl` (2026-08-24)
+
+`addUint8`, `addUint16`, `addInt16`, `addInt32` and `addBool` are replaced by one overloaded
+`addControl(name, variable, min, max)`. The widget follows the variable's own type, which the
+compiler already knows, so the name no longer repeats a width the declaration states:
+
+```cpp
+controls_.addUint8("speed", speed_, 1, 255);     // before
+controls_.addControl("speed", speed_, 1, 255);   // after
+```
+
+This is the same call a MoonLive script makes, which is the point: someone who has written a
+script can read a compiled module, and someone who has read a module can write a script.
+
+The **widget-specific** adders keep their names — `addPin`, `addSelect`, `addPalette`, `addText`,
+`addTextArea`, `addFilePath`, `addPassword`, `addIPv4`, `addReadOnly`, `addReadOnlyInt`,
+`addProgress`, `addList`, `addButton`. Those name a widget rather than a width, and the intent is
+not recoverable from the C++ type: `uint8_t` backs a slider, a dropdown *and* a palette picker, and
+an `int8_t` silently becoming a Pin would register as a claimed GPIO in the pin map. `addControl`
+on an `int8_t` is deliberately deleted, with a diagnostic naming the two real options.
+
+**Action: *nothing* for a device.** No control name, type, range, wire format or persisted value
+changes — a renamed call produces a byte-identical descriptor, which is why nothing on the device
+can notice.
+
+**Action for a third-party module: *recompile*.** Rename the five calls to `addControl`; the
+arguments are unchanged. A missed one is a compile error, never a silent behaviour change: the
+overloads bind by exact reference type, so a call that compiles produces the widget it always did.
+
+
+### Desktop settings move to a per-user directory (2026-08-23)
+
+The desktop build wrote its configuration to `build/.config`, resolved against whatever directory the process happened to start in. That is a source-checkout layout, and it shipped: a downloaded binary either could not write there at all, failing every save and logging one line per save, or it wrote settings that belonged to that *folder* rather than to the user, so moving the executable lost them.
+
+Settings now live with the user: `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, and `$XDG_DATA_HOME/projectMM` on Linux, falling back to `~/.local/share/projectMM` when that is unset. `MM_DATA_DIR` overrides it. **A source checkout is unchanged** and still uses `build/.config`, so a development tree and every gate script behave exactly as before.
+
+**Action: *nothing*, unless your settings actually persisted before.** The old behavior had two modes, and only one of them leaves anything to move:
+
+- **Saves were failing.** The log showed `write failed for /.config/...` on every change and nothing survived a restart. Nothing to carry across.
+- **Saves were succeeding, per folder.** They are in a `build/.config` folder beside wherever you launched from: the folder you unzipped into on Windows and Linux, and `~/build/.config` on macOS, because the `.app` launcher starts in your home directory. **Action: *move a folder*.** Move the `.config` directory itself into the new per-user directory, so it lands as `<data directory>/.config` rather than spilling its files into the root. Or leave it and reconfigure from scratch.
+
+ESP32 is unaffected: LittleFS mounts at a fixed partition and never used this path.
+
 ### The `Layers` container is renamed to `Effects` (2026-08-08)
 
 The three top-level light containers are now **Layouts, Effects, Drivers** — L.E.D. The old name sat one character from its own child (`Layers` holding `Layer`s) and read as a near-twin of `Layouts`, which is the pair a newcomer actually has to tell apart. The tree is unchanged in shape: `Effects` → `Layer`s → effects and modifiers.
@@ -36,8 +172,6 @@ The type name is the persisted filename and the preset capture key, so two thing
 | Presets that capture the look | A preset file records `"captures": "Layers"`, a name no module now answers to | Re-save each preset once the tree is rebuilt |
 
 A preset also records the ROLE it covers, and that role is now named after the container rather than after a module inside it: `"layer"` becomes `"effects"`. A preset carrying the old role still loads, but shows no tint on its pad until it is re-saved — the UI has no `layer` role to colour it by.
-
-Renaming the file on the device works if you would rather not rebuild by hand: `Layers.json` → `Effects.json`, and inside each `/.config/presets/*.json` both `"Layers"` → `"Effects"` (the captured container) and `"layer"` → `"effects"` (the role, which is what tints the pad). Nothing else in either file changes.
 
 The child `Layer` keeps its name, as does everything under it.
 
@@ -70,13 +204,7 @@ The `peripheral` dropdown no longer says `i80` / `MoonI80`. "i80" is the Intel 8
 
 ### The per-driver `preset` control is renamed to `lightPreset` (2026-07-23)
 
-The correction Select every driver exposes (channel order / RGBW synthesis) is renamed `preset` → `lightPreset`, so the UI label reads unambiguously next to a driver's other controls.
-
-| Old | New |
-|---|---|
-| control `preset` | `lightPreset` |
-
-**Action: nothing.** The saved value survives the rename (see the `lightPreset` [persistence contract](moonmodules/light/drivers.md#led-driver-details) for how a driver's preset reference is stored and re-resolved). Only an external script or automation that POSTs the control by name (`/api/control` with `"control":"preset"`) must switch to `lightPreset`.
+**Action: nothing** on-device (the saved value survives, see the `lightPreset` [persistence contract](moonmodules/light/drivers.md#led-driver-details)). Only an external script or automation that POSTs the control by name (`/api/control` with `"control":"preset"`) must switch to `lightPreset`.
 
 ### `AudioService`: the `sync` control becomes `mode` + `send audio`, and `simulate` is renumbered (2026-07-22)
 
@@ -129,12 +257,6 @@ This rename left `RmtLedDriver` untouched, and `ParlioLedDriver` untouched *at t
 ## Earlier
 
 These pre-date this log and were recorded in ADR-0013's Consequences list. A device that persisted state on an older build and loads a newer one loses only the noted value, which re-populates on next use.
-
-### Container config filenames (`LayoutGroup.json` → `Layouts.json`)
-
-`.config/LayoutGroup.json` → `Layouts.json`, `.config/DriverGroup.json` → `Drivers.json` (container type rename). The stale files are ignored (unknown-type config isn't loaded); they linger harmlessly on disk until a flash erase.
-
-**Action: nothing.** Lost: the container's `enabled` flag (defaults back on).
 
 ### UI last-selected module (`mm.selectedModule` → `mm_selected`)
 

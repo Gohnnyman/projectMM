@@ -1,18 +1,17 @@
 // A red column and a green row sweeping the grid, each drawn as ONE line() call.
-// `width`/`height` come from the LAYER. The fill clears last frame.
-//
-// line(x1, y1, x2, y2, r, g, b) is the seven-argument draw builtin: the script names the
-// endpoints and the shared draw::line walks the pixels, replacing the per-cell loop this
-// script used to spell out.
 
 class LinesEffect {
-  uint8_t bpm = 30;
+  byte bpm = 30;
 
-  defineControls() {
-    addUint8("bpm", bpm, 1, 240);
+  int dimensions() { return 2; }
+
+  string tags() { return "💫"; }
+
+  void defineControls() {
+    addControl("bpm", bpm, 1, 240);                 // how fast the cross sweeps
   }
 
-  tick() {
+  void tick() {
     fill(0, 0, 0);
 
     line(scale(beat(bpm, t), width), 0,

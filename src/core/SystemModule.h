@@ -205,7 +205,7 @@ public:
         // Expert mode: reveals controls tagged `advanced` (ring diagnostics, tuning knobs) across the UI.
         // Persisted so it survives a reboot; the UI honors it client-side (see the `advanced` flag on
         // Control) — nothing in the firmware reads it, so it needs no rebuild trigger.
-        controls_.addBool("expertMode", expertMode_);
+        controls_.addControl("expertMode", expertMode_);
         // Serial log level: how chatty the device is on the UART. Default Warn keeps the once-a-second
         // KPI tick line off (a status LED that blinks on serial TX rests quiet) while real warnings and
         // errors still print. Applied to the platform logger on change (see applyLogLevel); the KPI line

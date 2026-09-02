@@ -23,15 +23,15 @@ namespace mm {
 /// @card RipplesEffect.gif
 class RipplesEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🟦🦅"; }  // MoonLight origin · water-ripple
+    const char* tags() const override { return "💫🦅"; }  // MoonLight origin · water-ripple
     Dim dimensions() const override { return Dim::D3; }
 
     uint8_t speed = 50;     // 0 = stopped, 99 = fast
     uint8_t interval = 128; // wavefront spacing: low = tight rings, high = wide
 
     void defineControls() override {
-        controls_.addUint8("speed", speed, 0, 99);
-        controls_.addUint8("interval", interval, 1, 254);
+        controls_.addControl("speed", speed, 0, 99);
+        controls_.addControl("interval", interval, 1, 254);
     }
 
     void tick() MM_NONBLOCKING override {

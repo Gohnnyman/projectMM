@@ -55,6 +55,13 @@ public:
     using LoadAllFn = void(*)(Scheduler*);
     void setLoadAllHook(LoadAllFn fn) { loadAllHook_ = fn; }
 
+    /// Hook invoked ONCE after the first prepareTree(), for a module whose control set is not final
+    /// until then: a MoonLive script's declared controls exist only after the script compiles, which
+    /// is prepare()'s work, so the load pass above ran before they existed and their saved values had
+    /// nowhere to land. Values only; the tree shape was settled by the load pass. Same decoupling as
+    /// setLoadAllHook. No-op if unset.
+    void setReapplyValuesHook(LoadAllFn fn) { reapplyValuesHook_ = fn; }
+
     /// Hook invoked after a control mutation so the persistence layer can schedule a
     /// debounced save (FilesystemModule::noteDirty). Same decoupling as setLoadAllHook —
     /// Scheduler stays independent of FilesystemModule's type. No-op if unset.
@@ -80,6 +87,12 @@ public:
     /// Ask for a rebuild at the next frame boundary, on the render thread. Cheap and safe to call
     /// from any task — it sets a flag; tick() does the work.
     void requestPrepareTree() { prepareRequested_.store(true, std::memory_order_relaxed); }
+
+    /// Ask for a values-only reapply right after the NEXT requested prepareTree(): the runtime
+    /// twin of boot's phase 5: a config-file restore can carry values for controls that exist
+    /// only once prepare() has run (a MoonLive script's declared controls), so the reapply must
+    /// follow that prepare, in the same tick (before any dirty save can rewrite the file).
+    void requestValuesReapply() { valuesReapplyRequested_.store(true, std::memory_order_relaxed); }
 
     uint32_t tickTimeUs() const { return tickTimeUs_; }
     uint32_t fps() const { return tickTimeUs_ > 0 ? 1000000 / tickTimeUs_ : 0; }
@@ -130,6 +143,23 @@ public:
     SetControlResult setControl(const char* moduleName, const char* controlName,
                                 const char* valueJson);
 
+    /// Read one control's value as a BYTE: the mirror of setControl, and the other half of what a
+    /// control surface needs. A surface that only writes drifts the moment anything else moves the
+    /// target (the web UI, a preset recall, an audio-reactive effect), and starts out of step at
+    /// boot, where the surface's own default has never met the target's persisted value.
+    ///
+    /// A byte because that is the unit every surface control speaks (a fader's travel, a switch's
+    /// on/off, an encoder's position), and the scaling to a wire lives in the transport. A Bool
+    /// reads back 0 or 255 so a switch and a fader answer in the same units.
+    ///
+    /// Deliberately generic rather than a per-target accessor: the bindings are hard-wired today
+    /// (fader1 to brightness, switch1 to on), and the point of routing through the same primitive
+    /// setControl uses is that a soft-wired binding needs no new code here.
+    ///
+    /// Returns false when the module or control does not exist, or its type has no byte reading
+    /// (a text or file-path control); `out` is untouched then.
+    bool getControl(const char* moduleName, const char* controlName, uint8_t& out) const;
+
 private:
     void walkAndEnsureUnique(MoonModule* mod);
     static MoonModule* firstInTree(MoonModule* mod, const char* name);
@@ -141,6 +171,9 @@ private:
     // plain bool is a data race — and a lost request means a script edit silently never applies.
     std::atomic<bool> prepareRequested_{false};   // asked for off-thread; tick() honours it
     LoadAllFn loadAllHook_ = nullptr;
+    LoadAllFn reapplyValuesHook_ = nullptr;
+    bool valuesReapplied_ = false;   // the hook fires once, after the first prepareTree()
+    std::atomic<bool> valuesReapplyRequested_{false};   // one-shot, consumed with the next requested prepare
     NoteDirtyFn noteDirtyHook_ = nullptr;
     uint32_t startTime_ = 0;
     uint32_t lastLoop20ms_ = 0;

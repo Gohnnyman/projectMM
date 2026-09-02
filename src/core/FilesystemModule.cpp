@@ -22,6 +22,7 @@ void FilesystemModule::setScheduler(Scheduler* s) {
     instance_ = this;
     if (s) {
         s->setLoadAllHook(&loadAllHookTrampoline_);
+        s->setReapplyValuesHook(&reapplyValuesHookTrampoline_);
         // Scheduler::setControl calls this after a mutation so a control set from anywhere
         // (IR, WLED bridge, /api/control) schedules the same debounced save. noteDirty is a
         // static, so a plain function pointer suffices — no trampoline needed.
@@ -30,12 +31,21 @@ void FilesystemModule::setScheduler(Scheduler* s) {
 }
 
 void FilesystemModule::setup() {
+    // Both failures below name the directory, because the useful question when settings do not
+    // persist is always "which location did it try". Reported ONCE here rather than as a write
+    // error per save: an unusable root produces one failed save per module per change, and that
+    // stream buries the one fact that explains it.
     if (!platform::fsMount()) {
-        std::printf("FilesystemModule: mount failed — persistence disabled\n");
+        std::printf("FilesystemModule: cannot use %s, persistence disabled\n",
+                    platform::fsRootPath());
+        return;
+    }
+    if (!platform::fsMkdir(CONFIG_DIR)) {
+        std::printf("FilesystemModule: cannot create %s%s, persistence disabled\n",
+                    platform::fsRootPath(), CONFIG_DIR);
         return;
     }
     mounted_ = true;
-    platform::fsMkdir(CONFIG_DIR);
     std::printf("FilesystemModule: mounted, %zu / %zu bytes used\n",
                 platform::filesystemUsed(), platform::filesystemTotal());
 }
@@ -112,13 +122,17 @@ void FilesystemModule::loadAllHookTrampoline_(Scheduler* s) {
     if (instance_) instance_->loadAll(s);
 }
 
+void FilesystemModule::reapplyValuesHookTrampoline_(Scheduler* s) {
+    if (instance_) instance_->reapplyValues(s);
+}
+
 void FilesystemModule::loadAll(Scheduler* s) {
     if (!mounted_) {
         // setup() hasn't run yet (we're in phase 2, before phase 3 setup). Mount now
         // so we can read; setup() later calls fsMount again (idempotent).
         if (!platform::fsMount()) return;
+        if (!platform::fsMkdir(CONFIG_DIR)) return;   // setup() reports it; stay unmounted
         mounted_ = true;
-        platform::fsMkdir(CONFIG_DIR);
     }
     for (uint8_t i = 0; i < s->moduleCount(); i++) {
         MoonModule* m = s->module(i);
@@ -127,23 +141,138 @@ void FilesystemModule::loadAll(Scheduler* s) {
     }
 }
 
-// ---- Load ----
-void FilesystemModule::loadSubtree(MoonModule* m) {
+// Re-apply saved VALUES after the tree has been prepared, for a module whose control set is not
+// final until then. `applyNode`'s two-pass overlay covers a schema that depends on a control VALUE
+// (ParallelLedDriver's `peripheral` swapping the backend-owned controls), because rebuildControls()
+// alone re-derives it. It cannot cover a schema that depends on WORK: a MoonLive script's declared
+// controls exist only once the script has COMPILED, which is prepare()'s job and runs after load.
+// So at load time `cols`/`rows` are not in the list, overlayControls skips them, and prepare() then
+// seeds them from the script's own defaults: the saved values are read and dropped.
+//
+// Values only, and no tree reconciliation: the shape was settled by the first pass, so this pass
+// must not add, remove or re-enable anything. Cold path, once per boot, and it re-reads rather than
+// holding every node's JSON until prepare() (memory on every module for a case that is three).
+void FilesystemModule::reapplyValues(Scheduler* s) {
+    if (!mounted_ || !s) return;
+    for (uint8_t i = 0; i < s->moduleCount(); i++) {
+        MoonModule* m = s->module(i);
+        if (!m || m == this) continue;
+        reapplySubtree(m);
+    }
+}
+
+void FilesystemModule::reapplySubtree(MoonModule* m) {
     char path[MAX_PATH];
     if (!pathFor(m, path, sizeof(path))) return;
-    // Read the WHOLE file into a heap buffer sized to it — no fixed ceiling, so a large saved config
-    // (many light presets, a wide fixture) loads in full instead of being truncated to a fixed buffer
-    // and failing to parse. Mirrors the streaming save (saveSubtree): both sides are cap-free.
     const long size = platform::fsSize(path);
     if (size <= 0) return;
     char* buf = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
-    if (!buf) { std::printf("FilesystemModule: out of memory loading %s (%ld bytes)\n", path, size); return; }
+    if (!buf) return;                    // out of memory on a cold path: the first pass already ran
     const int n = platform::fsRead(path, buf, static_cast<size_t>(size) + 1);
-    if (n > 0) {
-        buf[n] = '\0';                   // applyNode parses buf as a C-string
-        applyNode(m, buf, "");
-    }
+    if (n > 0) { buf[n] = '\0'; reapplyNode(m, buf, ""); }
     platform::free(buf);
+}
+
+// Walk the same prefix scheme applyNode uses, overlaying values onto whatever controls exist NOW.
+void FilesystemModule::reapplyNode(MoonModule* m, const char* json, const char* prefix) {
+    if (!m) return;
+    overlayControls(m, json, prefix);
+    char childPrefix[MAX_PATH];
+    for (uint8_t i = 0; i < m->childCount(); i++) {
+        MoonModule* c = m->child(i);
+        if (!c) continue;
+        std::snprintf(childPrefix, sizeof(childPrefix), "%s%u.", prefix, static_cast<unsigned>(i));
+        reapplyNode(c, json, childPrefix);
+    }
+}
+
+// ---- Load ----
+
+// Read a WHOLE file into a heap buffer sized to it (caller frees), no fixed ceiling, so a large
+// saved config (many light presets, a wide fixture) loads in full instead of being truncated to a
+// fixed buffer and failing to parse. Mirrors the streaming save (saveSubtree): both sides cap-free.
+static char* readWholeFileAlloc(const char* path) {
+    const long size = platform::fsSize(path);
+    if (size <= 0) return nullptr;
+    char* buf = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
+    if (!buf) { std::printf("FilesystemModule: out of memory loading %s (%ld bytes)\n", path, size); return nullptr; }
+    const int n = platform::fsRead(path, buf, static_cast<size_t>(size) + 1);
+    if (n <= 0) { platform::free(buf); return nullptr; }
+    buf[n] = '\0';                       // parsed as a C-string
+    return buf;
+}
+
+void FilesystemModule::loadSubtree(MoonModule* m) {
+    char path[MAX_PATH];
+    if (!pathFor(m, path, sizeof(path))) return;
+    if (char* buf = readWholeFileAlloc(path)) {
+        applyNode(m, buf, "");
+        platform::free(buf);
+    }
+}
+
+// The shared resolution: "/.config/<Type>.json", one level deep, to the scheduler index of the
+// live top-level module of that type. -1 when the path is not a config file or no module matches.
+int FilesystemModule::moduleIndexForConfigPath(const char* path) {
+    if (!scheduler_ || !path) return -1;
+    constexpr const char* kPrefix = "/.config/";
+    constexpr size_t kPrefixLen = 9;
+    if (std::strncmp(path, kPrefix, kPrefixLen) != 0) return -1;
+    const char* stem = path + kPrefixLen;
+    const size_t stemLen = std::strlen(stem);
+    constexpr size_t kExtLen = 5;   // ".json"
+    if (stemLen <= kExtLen || std::strcmp(stem + stemLen - kExtLen, ".json") != 0) return -1;
+    if (std::memchr(stem, '/', stemLen) != nullptr) return -1;   // one level: presets/ etc. skip
+    char type[64];
+    const size_t typeLen = stemLen - kExtLen;
+    if (typeLen >= sizeof(type)) return -1;
+    std::memcpy(type, stem, typeLen);
+    type[typeLen] = '\0';
+    for (uint8_t i = 0; i < scheduler_->moduleCount(); i++) {
+        MoonModule* m = scheduler_->module(i);
+        // m != this: the engine itself has no controls and never persists a file, same
+        // exclusion the flush loop makes.
+        if (m && m != this && std::strcmp(m->typeName(), type) == 0)
+            return m->appliesConfigLive() ? i : -1;   // opted out: the file applies at next boot
+    }
+    return -1;   // no module of this type (a foreign file named like one): leave the tree alone
+}
+
+// See the header. The path names the module: the filename stem IS the top-level typeName (the same
+// contract pathFor writes with).
+bool FilesystemModule::applyConfigFile(const char* path) {
+    const int idx = moduleIndexForConfigPath(path);
+    if (idx < 0) return false;
+    MoonModule* m = scheduler_->module(static_cast<uint8_t>(idx));
+    char* buf = readWholeFileAlloc(path);
+    if (!buf) return false;
+    const bool applied = applySubtree(m, buf);
+    platform::free(buf);
+    // Controls that appear only at prepare() (a script's declared controls) could not
+    // take their values yet: reapply after the prepare this write requested.
+    if (applied) scheduler_->requestValuesReapply();
+    return applied;
+}
+
+// See the header: queue for the render task; one bit per top-level module coalesces a
+// multi-file upload to one apply each.
+bool FilesystemModule::requestConfigApply(const char* path) {
+    const int idx = moduleIndexForConfigPath(path);
+    if (idx < 0 || idx >= 32) return false;
+    pendingApplyMask_.fetch_or(1u << idx, std::memory_order_relaxed);
+    return true;
+}
+
+void FilesystemModule::tick20ms() MM_NONBLOCKING {
+    uint32_t mask = pendingApplyMask_.exchange(0, std::memory_order_relaxed);
+    if (!mask || !scheduler_) return;
+    for (uint8_t i = 0; i < 32 && mask; i++, mask >>= 1) {
+        if (!(mask & 1)) continue;
+        MoonModule* m = scheduler_->module(i);
+        char path[MAX_PATH];
+        if (m && pathFor(m, path, sizeof(path))) applyConfigFile(path);
+    }
+    scheduler_->requestPrepareTree();   // one sweep for the whole batch, next tick
 }
 
 // Overlay every persistable control's saved value onto the module's current control list, in list order.
@@ -311,6 +440,14 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
             } else {
                 m->addChild(created);
             }
+            // A freshly created module carries the factory's display name, so restoring one config
+            // while another tree already holds that name leaves TWO modules answering to it. The
+            // boot path gets this from deduplicateNamesInTree, but a config applied after boot (a
+            // card saved, a preset recalled) reached the live tree without it: a MoonLiveLayout and
+            // a MoonLiveEffect were then both "MoonLive", and every lookup that resolves a module by
+            // name (parent_id on an add, the UI's card selector) found whichever came first, so the
+            // effect's controls rendered on the layout's card.
+            if (auto* sched = Scheduler::instance()) sched->ensureUniqueName(created);
         }
 
         char childPrefix[MAX_KEY];

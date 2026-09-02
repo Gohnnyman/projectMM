@@ -20,9 +20,9 @@ public:
     void release() override { releaseCalled = true; }
 
     void defineControls() override {
-        controls_.addUint8("brightness", brightness, 0, 255);
-        controls_.addUint8("speed", speed, 1, 255);
-        controls_.addBool("enabled", enabled);
+        controls_.addControl("brightness", brightness, 0, 255);
+        controls_.addControl("speed", speed, 1, 255);
+        controls_.addControl("enabled", enabled);
     }
 };
 
@@ -134,7 +134,7 @@ public:
     char opt1[16] = "beta";
     const char* options[2] = {opt0, opt1};
     void defineControls() override {
-        controls_.addUint8("value", value, 0, 255);
+        controls_.addControl("value", value, 0, 255);
         controls_.addSelect("preset", sel, options, 2);
     }
 };
@@ -235,7 +235,7 @@ TEST_CASE("Module enabled property") {
     CHECK(mod.enabled() == true);
 }
 
-// addBool binds a bool field — toggling the field updates control.ptr's view.
+// a bool addControl binds a bool field — toggling the field updates control.ptr's view.
 TEST_CASE("Bool control binding") {
     TestModule mod;
     mod.defineControls();

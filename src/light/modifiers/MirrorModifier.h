@@ -28,6 +28,9 @@ namespace mm {
 class MirrorModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
+    /// Advisory UI chip: what this modifier can work on (mirrorX/Y/Z: each axis is independently foldable).
+    /// Nothing branches on it, since extrude reads the EFFECT's dimensions.
+    Dim dimensions() const override { return Dim::D3; }
 
     // Mirror across the box centre on this axis. Enabling an axis the layout
     // doesn't use (e.g. Z on a 2D grid, size.z == 1) is a no-op: (1+1)/2 == 1
@@ -37,9 +40,9 @@ public:
     bool mirrorZ = true;
 
     void defineControls() override {
-        controls_.addBool("mirrorX", mirrorX);
-        controls_.addBool("mirrorY", mirrorY);
-        controls_.addBool("mirrorZ", mirrorZ);
+        controls_.addControl("mirrorX", mirrorX);
+        controls_.addControl("mirrorY", mirrorY);
+        controls_.addControl("mirrorZ", mirrorZ);
     }
 
     void modifyLogicalSize(Coord3D& size) override {

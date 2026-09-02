@@ -57,6 +57,13 @@ enum class IrOp : uint8_t {
     Add,       // dst = a + b
     AddImm,    // dst = a + imm
     Mul,       // dst = a * b
+    Mulhi,     // dst = the SIGNED high 32 bits of a * b. With Mul it spells a Q16.16 multiply:
+               // the 64-bit product's middle word is (Mulhi << 16) | (Mul >>> 16).
+    Shl,       // dst = a << imm — also how toFixed(v) is spelled (imm 16)
+    Shr,       // dst = a >> imm, LOGICAL (zero-filling). The low word of a 64-bit product is
+               // unsigned, so a fixed multiply needs this rather than Sar for its bottom half.
+    Sar,       // dst = a >> imm, ARITHMETIC (sign-filling) — toInt(v) is this with imm 16.
+               // Logical would turn every negative fixed value into a large positive int.
     Call,      // dst = (*callFn)(&frame[imm], b, arena) — call a host-registered function.
                // `imm` is the frame slot where the arguments start and `b` is how many there are:
                // the parser stages every argument into consecutive slots, so a call carries a
@@ -93,12 +100,14 @@ enum class IrOp : uint8_t {
                // op hands the emitted code a pointer that outlives it.
     Inline,    // a host-registered inline op (inlineOp tag); operands a/b/c/d (op-specific)
     LoadCtrl,  // dst = ((const uint8_t*)kArg4)[imm] — read a control value byte at offset imm
-    LoadCtrl16,  // dst = *(uint16_t*)((const uint8_t*)kArg4 + imm): read a WIDE member.
-                 // Separate ops rather than a width field on LoadCtrl/StoreCtrl: every backend
-                 // switch is exhaustive over IrOp, so a new op makes a backend that forgot the
-                 // width fail to COMPILE, where a field it silently ignored would emit a byte
-                 // access against a two-byte member and lose the high half at run time.
-    StoreCtrl16, // *(uint16_t*)((uint8_t*)kArg4 + imm) = a: write a WIDE member.
+    LoadCtrl32,  // dst = *(int32_t*)((const uint8_t*)kArg4 + imm): read a member's whole 4-byte
+                 // SLOT. Every scalar occupies one, whatever its type: byte and bool are masked
+                 // on the way in, so the slot's upper bytes are already what the type promises,
+                 // and fixed and int are the raw word. Signed because that is the only reading
+                 // that serves all four: a byte or bool slot never has bit 31 set.
+    StoreCtrl32, // *(int32_t*)((uint8_t*)kArg4 + imm) = a: write a member's whole slot. Takes the
+                 // offset as an IMMEDIATE, unlike StoreCtrl which burns a movImm into
+                 // a scratch register first — the load path's shape, and one instruction shorter.
     LoadIdx,   // dst = arena[base + a * width]: read an ARRAY element, index in vreg `a`.
     StoreIdx,  // arena[base + a * width] = b: write an ARRAY element, index in vreg `a`.
                // base, width and count are PACKED INTO `imm` (idxPack/idxBase/idxWidth/idxCount),
@@ -124,7 +133,26 @@ enum class IrOp : uint8_t {
     Label,     // a branch target; `imm` is the label id. Emits no instruction.
     BranchGe,  // if (a >= b) goto label `imm` — UNSIGNED. The loop's ENTRY guard: skip a loop
                // whose range is empty, which is also what makes `for (i = 0; i < 0; …)` correct.
+               //
+               // STAYS unsigned, and BranchGeS is a separate op rather than a replacement, because
+               // three of its users need unsigned and would break: the array-index clamp
+               // (moonlive_lower.h) reads a negative index as a huge value so ONE branch catches
+               // both ends of the range, the element-store bounds check does the same, and the
+               // recursion-depth guard counts a byte. A loop counter is a count, so parseFor uses
+               // this one too. Only a script's own comparison is signed.
+    BranchGeS, // if (a >= b) goto label `imm`, SIGNED: the comparison a script writes. Separate
+               // from BranchGe per the note above; every backend switch is exhaustive over IrOp,
+               // so a backend that forgets it fails to COMPILE rather than silently comparing the
+               // wrong way, which is why a width lives in its own op rather than a field.
     BranchNe,  // if (a != b) goto label `imm` — the BACKWARD edge that closes the loop.
+    Ret,       // return from the enclosing function, with the value in `a` when `imm` is 1.
+               //
+               // Does NOT emit a bare return instruction: the epilogue also decrements the recursion
+               // depth counter, so an early exit that jumped straight to `ret` would leak a level
+               // per call. This lowers to a jump to the function's ONE exit, which the lowering
+               // binds ahead of that decrement, so every path out of a function unwinds the same
+               // way. A value is parked in the ABI's return register first (retValue), because the
+               // teardown is what makes that register visible to the caller.
     Spill,     // frame slot `imm` = a   — a value the register file could not hold, parked
     Reload,    // dst = frame slot `imm` — the same value brought back for one use
 };
@@ -150,7 +178,7 @@ struct IrInst {
     InlineOp inlineOp{};                   // Inline: the neutral opcode tag
 };
 
-// A control a script declared (`addUint8("speed", speed, 0, 99)`). Neutral: the core
+// A control a script declared (`addControl("speed", speed, 0, 99)`). Neutral: the core
 // knows {name, a neutral type, range, default, and the byte offset into the run-time controls
 // arena it lives at}. The light-domain binding turns this into a real MoonModule control bound to
 // the arena slot. `type` is a neutral kind — Uint8 only in Stage 1 — NOT a projectMM ControlType.
@@ -161,18 +189,19 @@ struct IrInst {
 
 struct DeclaredControl {
     const char* name = nullptr;        // script-declared name (points into the source buffer)
-    // The UI range, as wide as the widest member a control can bind: addUint8 declares 0..255 and
-    // addUint16 the full 16-bit span, so the field has to hold the wider one.
-    uint16_t    min = 0, max = 255;
+    // The UI range, as wide as the widest member a control can bind: a byte declares 0..255 and
+    // an int member the full 32-bit span, so the field has to hold the wider one.
+    int32_t     min = 0, max = 255;
     // The initializer, wide enough for the widest member type. Separate from the range because a
-    // member may be seeded to a value outside what its slider spans.
-    uint16_t    def = 0;
+    // member may be seeded to a value outside what its slider spans. Signed and 32-bit because a
+    // scalar occupies a 4-byte slot: an `int` member's range and default span the whole type.
+    int32_t     def = 0;
     uint8_t     nameLen = 0;           // length (the source is not NUL-terminated per token)
-    CtrlType    type = CtrlType::Uint8;
+    CtrlType    type = CtrlType::Int;
     // Byte offset into the controls arena, assigned as a running CURSOR in declaration order. Not
-    // the declaration index: a Uint16 costs two bytes and an array costs count * width, so the
-    // n-th member is no longer at byte n. Everything downstream (the bindings' cached slot
-    // pointers, persistence, addUint8's by-reference argument) already keys on this offset, which
+    // the declaration index: a scalar costs a whole 4-byte slot and an array costs count * element
+    // width, so the n-th member is no longer at byte n. Everything downstream (the bindings'
+    // cached slot pointers, persistence, addControl's by-reference argument) keys on this offset,
     // is why widening a member does not reach any of them.
     uint8_t     offset = 0;
     // Elements: 1 for a scalar, the length for an array. Total bytes is count * ctrlWidth(type).
@@ -189,10 +218,6 @@ constexpr uint8_t idxBase(int32_t p)  { return uint8_t(p & 0xff); }
 constexpr uint8_t idxWidth(int32_t p) { return uint8_t((p >> 8) & 0xff); }
 constexpr uint8_t idxCount(int32_t p) { return uint8_t((p >> 16) & 0xff); }
 
-/// Bytes a whole member occupies (its elements, at its width).
-constexpr uint16_t ctrlBytes(const DeclaredControl& d) {
-    return uint16_t(d.count) * ctrlWidth(d.type);
-}
 
 /// Branch targets one IR program may use. Two per `for` (entry guard + back edge), and the counter
 /// runs for the whole program rather than per scope — a label is never reused once a loop closes —

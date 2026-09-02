@@ -1,7 +1,7 @@
 // LittleFS partition mount + the `fs*` / `filesystem*` API on ESP32.
 //
 // Cut out of platform_esp32.cpp (plan-23) for size + readability. The
-// file owns its private state (FS_TAG, FS_PARTITION_LABEL, FS_MOUNT_POINT,
+// file owns its private state (FS_TAG, FS_LABELS, FS_MOUNT_POINT,
 // fsMounted_) and the path-translation helper; the rest of the platform
 // layer talks to it only through the public mm::platform::fs* and
 // filesystem* symbols declared in platform.h. Move was a code-organisation
@@ -10,6 +10,7 @@
 #include "platform/platform.h"
 
 #include "esp_littlefs.h"
+#include "esp_partition.h"   // esp_partition_find_first: probing which FS label this table uses
 #include "esp_log.h"
 
 #include <cerrno>
@@ -23,7 +24,16 @@ namespace mm::platform {
 
 // LittleFS state
 static constexpr const char* FS_TAG = "mm_fs";
-static constexpr const char* FS_PARTITION_LABEL = "spiffs";  // partition label kept for tooling compat; contents are LittleFS
+// The volume has always held LittleFS. Tables written from 2026-08 say so properly: partition
+// `littlefs` with the littlefs subtype (0x83). Older tables (and the 8/16 MB ones until they
+// migrate) call the same volume `spiffs` with the spiffs subtype, a legacy misnomer. Both are
+// tried in order, so a device that keeps its old table across an OTA still finds its config.
+struct FsCandidate { esp_partition_subtype_t subtype; const char* label; };
+static constexpr FsCandidate FS_CANDIDATES[] = {
+    {ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, "littlefs"},
+    {ESP_PARTITION_SUBTYPE_DATA_SPIFFS,   "spiffs"},
+};
+static const char* fsLabelInUse_ = nullptr;
 static constexpr const char* FS_MOUNT_POINT = "/littlefs";    // VFS mount point; not exposed in API paths
 static bool fsMounted_ = false;
 
@@ -44,28 +54,47 @@ void fsSetRoot(const char* /*path*/) {
     // prefix is hard-coded. Provided only so test code can call it portably.
 }
 
+const char* fsRootPath() { return FS_MOUNT_POINT; }
+
 bool fsMount() {
     if (fsMounted_) return true;
 
-    esp_vfs_littlefs_conf_t conf = {};
-    conf.base_path = FS_MOUNT_POINT;
-    conf.partition_label = FS_PARTITION_LABEL;
-    conf.format_if_mount_failed = true;
-    conf.dont_mount = false;
-
-    esp_err_t err = esp_vfs_littlefs_register(&conf);
+    // Try each known label. format_if_mount_failed is OFF for every attempt but the last that
+    // actually has a partition: a formatting mount against the wrong label would erase a volume
+    // that the next label would have opened, taking the user's config with it. "Last" must mean
+    // last EXISTING, not last in the array: a MoonBase table carries only `littlefs`, and
+    // gating the format on the absent `spiffs` entry left a fresh board unformatted, so it ran
+    // with persistence disabled.
+    esp_err_t err = ESP_FAIL;
+    constexpr size_t kCandidates = sizeof(FS_CANDIDATES) / sizeof(FS_CANDIDATES[0]);
+    size_t lastPresent = kCandidates;
+    for (size_t i = 0; i < kCandidates; i++) {
+        const auto& c = FS_CANDIDATES[i];
+        if (esp_partition_find_first(ESP_PARTITION_TYPE_DATA, c.subtype, c.label)) lastPresent = i;
+    }
+    for (size_t i = 0; i < kCandidates; i++) {
+        const auto& c = FS_CANDIDATES[i];
+        if (!esp_partition_find_first(ESP_PARTITION_TYPE_DATA, c.subtype, c.label)) continue;
+        esp_vfs_littlefs_conf_t conf = {};
+        conf.base_path = FS_MOUNT_POINT;
+        conf.partition_label = c.label;
+        conf.format_if_mount_failed = (i == lastPresent);
+        conf.dont_mount = false;
+        err = esp_vfs_littlefs_register(&conf);
+        if (err == ESP_OK) { fsLabelInUse_ = c.label; break; }
+    }
     if (err != ESP_OK) {
         ESP_LOGE(FS_TAG, "LittleFS mount failed: %s", esp_err_to_name(err));
         return false;
     }
     fsMounted_ = true;
-    ESP_LOGI(FS_TAG, "LittleFS mounted at %s (partition: %s)", FS_MOUNT_POINT, FS_PARTITION_LABEL);
+    ESP_LOGI(FS_TAG, "LittleFS mounted at %s (partition: %s)", FS_MOUNT_POINT, fsLabelInUse_);
     return true;
 }
 
 void fsUnmount() {
     if (!fsMounted_) return;
-    esp_vfs_littlefs_unregister(FS_PARTITION_LABEL);
+    if (fsLabelInUse_) esp_vfs_littlefs_unregister(fsLabelInUse_);
     fsMounted_ = false;
 }
 
@@ -223,14 +252,15 @@ void fsList(const char* dir, FsListCb cb, void* user) {
 size_t filesystemUsed() {
     if (!fsMounted_) return 0;
     size_t total = 0, used = 0;
-    if (esp_littlefs_info(FS_PARTITION_LABEL, &total, &used) != ESP_OK) return 0;
+    if (!fsLabelInUse_) return 0;
+    if (esp_littlefs_info(fsLabelInUse_, &total, &used) != ESP_OK) return 0;
     return used;
 }
 
 size_t filesystemTotal() {
     if (!fsMounted_) return 0;
     size_t total = 0, used = 0;
-    if (esp_littlefs_info(FS_PARTITION_LABEL, &total, &used) != ESP_OK) return 0;
+    if (esp_littlefs_info(fsLabelInUse_, &total, &used) != ESP_OK) return 0;
     return total;
 }
 

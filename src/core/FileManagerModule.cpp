@@ -11,7 +11,7 @@ void FileManagerModule::defineControls() {
     // mkdir/delete OPS are their own HTTP endpoints (POST/DELETE /api/dir?path=) — not persisted
     // controls — so a create/delete carries its path in the request, not in device storage. The
     // `show hidden` flag keeps it bound for the API while the generic control list skips it.
-    controls_.addBool("show hidden", showHidden_);      // reveal dot-prefixed entries (e.g. .config)
+    controls_.addControl("show hidden", showHidden_);      // reveal dot-prefixed entries (e.g. .config)
     controls_.setHidden(controls_.count() - 1, true);
     // Filesystem-usage gauge (used / total bytes), read from the platform. Shown below the tree in
     // the panel — the File Manager is where filesystem space is relevant, so it owns the control.
@@ -42,7 +42,20 @@ void FileManagerModule::defineControls() {
 }
 
 void FileManagerModule::tick1s() MM_NONBLOCKING {
-    if (totalBytes_ > 0) usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
+    // ONCE A MINUTE, not once a second. `filesystemUsed()` is `esp_littlefs_info`, which walks every
+    // block of the partition to count what is in use: measured at ~80 ms on an S3, and tick1s runs
+    // INLINE on the render thread, so at 1 Hz it stuttered the fixture once a second. A particle
+    // effect made it obvious where a shader had hidden it: a shader redraws each frame from the
+    // clock and simply misses one, while a particle integrates the stall into its trajectory and
+    // visibly jumps (FrameTime spends the whole gap, by design).
+    //
+    // The value feeds one progress bar on this card, so a minute-old figure is no worse to a reader
+    // and the scan stops being a per-second cost. Anything needing an exact figure should read it
+    // directly rather than this cache.
+    if (totalBytes_ == 0) return;
+    if (++secondsSinceScan_ < 60) return;
+    secondsSinceScan_ = 0;
+    usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
 }
 
 void FileManagerModule::setup() {

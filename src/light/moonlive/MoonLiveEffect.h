@@ -3,6 +3,7 @@
 #include "light/effects/EffectBase.h"
 #include "core/moonlive/MoonLive.h"
 #include "light/moonlive/MoonLiveScript.h"
+#include "light/moonlive/MoonLiveParticles.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include <cstring>
 #include <cstdio>
@@ -22,11 +23,23 @@ namespace mm {
 /// Effect whose render is a live-authored MoonLive script.
 class MoonLiveEffect : public EffectBase {
 public:
-    const char* tags() const override { return "📝"; }   // scripted
-    Dim dimensions() const override { return Dim::D2; }
+    /// Both answered by the SCRIPT when it says, and by the binding when it stays silent.
+    ///
+    /// 📝 marks a script that declared no tags of its own: the notepad says "this is scripted",
+    /// which is all a module can say about a program it has not been told about. A script that
+    /// declares `string tags()` replaces it, so its row reads like any other effect's.
+    const char* tags() const override {
+        const char* t = script_.tags();
+        return t ? t : "📝";
+    }
+
+    /// The layer EXTRUDES on this (Layer::tick), so a script declaring 1 paints one column and the
+    /// framework fills the rest, exactly as a compiled D1 effect does. A script that declares
+    /// nothing stays D2, which is what every script rendered as before it could say.
+    Dim dimensions() const override { return script_.dimensions(); }
 
     // The effect carries its script's NAME as an editable, persisted text control, plus a control
-    // for every control the script declared (`addUint8("speed", speed, 0, 99)`). The
+    // for every control the script declared (`addControl("speed", speed, 0, 99)`). The
     // engine exposes the declared list after a compile; each becomes a real uint8 control bound by
     // reference to the engine's live control-arena slot, so a slider write lands in the slot the
     // next render tick reads, with no recompile (the live-edit guarantee). Naming a different
@@ -60,6 +73,10 @@ public:
     // unchanged script costs a read rather than a re-JIT. It reports the status and the dynamic
     // bytes itself, which is why nothing here repeats that.
     void prepare() override {
+        // The script sizes its own pool from defineControls(), which sync() runs after a compile.
+        script_.setPoolSizer([](void* ctx, uint16_t n) -> uint16_t {
+            return static_cast<MoonLiveEffect*>(ctx)->particles_.resize(n);
+        }, this);
         script_.sync(moonlive::effectSysVars(), *this);
         // The compile re-derives the declared-control set, so rebuild the control list to surface
         // it (the same rebuildControls() pattern NetworkModule uses when a state change reshapes
@@ -85,17 +102,42 @@ public:
         // installed for exactly one run and detached after, so a script can only ever draw into
         // the layer it is ticking in.
         moonlive::setDrawCanvas(canvas());
+        // fade(amt) asks the LAYER, which collects the request and applies it once per frame.
+        // Installed in the same bracket as the canvas so it detaches on the same path.
+        moonlive::setFadeSink([](void* ctx, uint8_t amt) {
+            if (Layer* l = static_cast<MoonLiveEffect*>(ctx)->layer()) l->fadeToBlackBy(amt);
+        }, this);
+        // setPan/setTilt reach the fixture's motion channels, whose offsets live in the layer's
+        // channel map. Routed through EffectBase's own setters, so a script aims a head by exactly
+        // the path a compiled effect does, including the no-op on a light that has no such channel.
+        moonlive::setMotionSink([](void* ctx, moonlive::MotionAxis axis, uint32_t index,
+                                   uint8_t value) {
+            auto* self = static_cast<MoonLiveEffect*>(ctx);
+            const auto i = static_cast<nrOfLightsType>(index);
+            if (axis == moonlive::MotionAxis::Pan) self->setPan(i, value);
+            else                                   self->setTilt(i, value);
+        }, this);
+        // The particle builtins reach this effect's own pool, with the frame scale the binding
+        // computed: framerate independence is the system's property, not the script author's.
+        if (particles_.count() > 0)
+            moonlive::setPoolSink(&particles_.pool(), particles_.advance(elapsed()));
         // The frame moment: run `tick` if the script defined one. A script that defines only
         // `modifyLogical` renders nothing here and folds coordinates instead, which is the author's
         // choice rather than an error.
         if (script_.engine().hasEntry(moonlive::kEntryTick))
             script_.engine().run(buffer(), nrOfLights(), cpl, elapsed(), moonlive::kEntryTick);
+        moonlive::setPoolSink(nullptr, 0);
+        moonlive::setMotionSink(nullptr, nullptr);
+        moonlive::setFadeSink(nullptr, nullptr);
         moonlive::setDrawCanvas({});
     }
 
     void release() override {
+        particles_.release();      // zero the pool BEFORE the base frees its buffers, or it would
+                                   // be left naming freed memory
         script_.engine().free();   // release the exec block: the destructor role
         script_.invalidate();     // and forget what was compiled, so re-enabling rebuilds it
+        script_.releaseReporting(*this);
         EffectBase::release();
     }
 
@@ -106,11 +148,10 @@ public:
     void setScript(const char* name) { script_.setName(name); }
 
 private:
-    // Publish one system variable into its arena slot, saturating to the uint8 a slot holds: a
-    // layer wider than 255 reports 255 rather than wrapping to a small number and drawing garbage.
-    void writeSysVar(uint8_t offset, uint16_t value) {
-        if (uint8_t* slot = script_.engine().controlSlot(offset))
-            *slot = static_cast<uint8_t>(value > 255 ? 255 : value);
+    // Publish one system variable into its arena slot, FULL WIDTH. It used to saturate to a byte,
+    // which is what made a 768-wide wall report 255 and every 2D script paint a corner.
+    void writeSysVar(uint8_t offset, uint32_t value) {
+        moonlive::writeSysVarSlot(script_.engine().controlSlot(offset), value);
     }
 
 
@@ -118,6 +159,7 @@ private:
     // that decides whether a prepare has anything to do. A fresh card starts with NO script and
     // renders nothing until one is named, rather than every new module compiling the same effect.
     moonlive::MoonLiveScript script_;
+    moonlive::MoonLiveParticles particles_{*this};
 };
 
 }  // namespace mm

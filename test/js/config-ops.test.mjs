@@ -16,10 +16,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { planConfigOps } from "../../web-installer/config-ops.js";
+import { planConfigOps } from "../../mooninstaller/config-ops.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const catalog = JSON.parse(readFileSync(join(ROOT, "web-installer", "deviceModels.json"), "utf8"));
+const catalog = JSON.parse(readFileSync(join(ROOT, "mooninstaller", "deviceModels.json"), "utf8"));
 
 // Indices of the first op of each kind, so we can assert global ordering.
 const firstIndex = (ops, pred) => ops.findIndex(pred);

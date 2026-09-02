@@ -24,14 +24,16 @@ namespace mm {
 /// Layout winding LEDs up a conical spiral.
 class SpiralLayout : public LayoutBase {
 public:
+    const char* tags() const override { return "💫"; }
+    Dim dimensions() const override { return Dim::D3; }
     lengthType ledCount = 640;      // total lights along the spiral
     lengthType bottomRadius = 10;   // radius at the base, in light-units
     lengthType height = 25;         // vertical rise from base to tip
 
     void defineControls() override {
-        controls_.addInt16("ledCount",     ledCount,     1, 2048);
-        controls_.addInt16("bottomRadius", bottomRadius, 1, 100);
-        controls_.addInt16("height",       height,       1, 200);
+        controls_.addControl("ledCount",     ledCount,     1, 2048);
+        controls_.addControl("bottomRadius", bottomRadius, 1, 100);
+        controls_.addControl("height",       height,       1, 200);
     }
 
     nrOfLightsType lightCount() const override {

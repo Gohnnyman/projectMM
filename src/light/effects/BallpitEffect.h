@@ -23,13 +23,13 @@ namespace mm {
 // `collide` is called once per frame before the move. At 40 balls that is 780 pair checks, nearly
 // all of them rejected on the X test alone.
 //
-// Prior art: the WLED Particle System's ballpit family (@Brandon502 / WildCats08); the impulse
+// Prior art: the WLED Particle System's ballpit family (Damian Schneider, @DedeHai); the impulse
 // response and the single-particle overlap push are the kernel's.
 // @card BallpitEffect.png
 /// Effect: falling balls that pile up and push each other aside.
 class BallpitEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔬"; }   // power-function showcase
+    const char* tags() const override { return "💫✨"; }   // power-function showcase
     Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
 
     uint8_t balls    = 30;   // how many balls share the pit
@@ -40,12 +40,12 @@ public:
     uint8_t drag     = 6;    // damping, so the heap settles instead of sloshing forever
 
     void defineControls() override {
-        controls_.addUint8("balls", balls, 1, kPool);
-        controls_.addUint8("gravity", gravity, 0, 64);
-        controls_.addUint8("size", size, 1, 8);
-        controls_.addUint8("bounce", bounce, 0, 255);
-        controls_.addUint8("tilt", tilt, 0, 255);
-        controls_.addUint8("drag", drag, 0, 64);
+        controls_.addControl("balls", balls, 1, kPool);
+        controls_.addControl("gravity", gravity, 0, 64);
+        controls_.addControl("size", size, 1, 8);
+        controls_.addControl("bounce", bounce, 0, 255);
+        controls_.addControl("tilt", tilt, 0, 255);
+        controls_.addControl("drag", drag, 0, 64);
     }
 
     void prepare() override {

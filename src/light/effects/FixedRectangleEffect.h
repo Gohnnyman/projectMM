@@ -43,17 +43,17 @@ public:
     bool alternateWhite = false;
 
     void defineControls() override {
-        controls_.addUint8("red",   red);
-        controls_.addUint8("green", green);
-        controls_.addUint8("blue",  blue);
-        controls_.addUint8("white", white);
-        controls_.addInt16("X position", rectX, 0, INT16_MAX);
-        controls_.addInt16("Y position", rectY, 0, INT16_MAX);
-        controls_.addInt16("Z position", rectZ, 0, INT16_MAX);
-        controls_.addInt16("Rectangle width",  rectW, 1, INT16_MAX);
-        controls_.addInt16("Rectangle height", rectH, 1, INT16_MAX);
-        controls_.addInt16("Rectangle depth",  rectD, 1, INT16_MAX);
-        controls_.addBool("alternateWhite", alternateWhite);
+        controls_.addControl("red",   red);
+        controls_.addControl("green", green);
+        controls_.addControl("blue",  blue);
+        controls_.addControl("white", white);
+        controls_.addControl("X position", rectX, 0, INT16_MAX);
+        controls_.addControl("Y position", rectY, 0, INT16_MAX);
+        controls_.addControl("Z position", rectZ, 0, INT16_MAX);
+        controls_.addControl("Rectangle width",  rectW, 1, INT16_MAX);
+        controls_.addControl("Rectangle height", rectH, 1, INT16_MAX);
+        controls_.addControl("Rectangle depth",  rectD, 1, INT16_MAX);
+        controls_.addControl("alternateWhite", alternateWhite);
     }
 
     void tick() MM_NONBLOCKING override {

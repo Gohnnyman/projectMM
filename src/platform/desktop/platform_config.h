@@ -24,6 +24,14 @@ constexpr bool isEsp32P4 = false;
 // of the two real constraints.
 constexpr uint8_t rmtTxChannels = 4;
 
+// A host has no EMAC and no fixed pads: its Ethernet is a named interface, not wired signals. The
+// count is 0 so the same NetworkModule code publishes nothing here; the array still holds one dummy
+// element because a zero-size array is a GCC/Clang extension MSVC refuses, and this header is
+// compiled by MSVC on the Windows CI job. See the ESP32 config for what this is for.
+struct EthFixedPad { const char* name; uint8_t gpio; };
+constexpr EthFixedPad ethFixedPads[] = {{"", 0}};
+constexpr uint8_t ethFixedPadCount = 0;
+
 // Lane counts the parallel backends report on desktop. NOT zero, deliberately: everything in the
 // repo runs on the desktop build — the platform layer just has no hardware behind the call. A
 // zero here makes every backend's lanesAvailable() report "not my silicon", so ParallelLedDriver
@@ -49,12 +57,16 @@ constexpr uint8_t parlioLanes = 16;
 constexpr uint8_t i2sLanes = 0;
 
 // No I2S microphone — AudioService guards on this and is inert on desktop. The
-// audioFft seam still has a (naive-DFT) desktop implementation so the audio
-// band math runs end-to-end in host tests; only live capture is absent.
+// No pin-wired I2S peripheral on a desktop host; live audio comes from OS capture
+// devices instead (hasAudioCapture below), through the same audioMicRead seam.
 constexpr bool hasI2sMic = false;
 
 // No USB host on desktop; VideoService keeps its test-pattern and file sources.
 constexpr bool hasUsbVideo = false;
+
+// OS audio capture (microphone / loopback devices) via the vendored miniaudio backend in
+// platform_desktop_audio.cpp. The device is picked by AudioService's `device` control.
+constexpr bool hasAudioCapture = true;
 
 // Audio-codec config type — desktop has no codec (audioCodecInit stubs to true),
 // but platform.h declares audioCodecInit(CodecType, const AudioCodecPins&, …) for
@@ -91,6 +103,25 @@ constexpr bool hasEthernet = false;
 // True on desktop, false on a microcontroller with a single MAC, where the name would be a control
 // that does nothing. Drivers use it to hide the field rather than to choose behaviour.
 constexpr bool hasNamedNetInterfaces = true;
+
+// hasNdi — the host can be an NDI video source. True on desktop, false on every ESP32: the NDI
+// runtime is a desktop shared library with no microcontroller build, and the per-frame encode does
+// not belong on one. Gates NdiDriver's registration, so the type picker only offers it where it can
+// actually run. The runtime itself is loaded on demand and is NOT redistributed (see
+// platform_desktop.cpp), so this flag says "the platform supports it", not "it is installed".
+constexpr bool hasNdi = true;
+
+// hasHls: the host can stream its rendered output as H.264/HLS by piping raw frames to the
+// ffmpeg found on PATH (a runtime dependency of the user's, like the NDI runtime and Npcap).
+// True on desktop and the Pi; the encoder process seam lives in the platform layer.
+constexpr bool hasHls = true;
+// hasEncoderChoice: ffmpeg offers several H.264 encoders (software and per-vendor hardware), so
+// the pick is the user's. False where the platform has exactly one encoder, which hides the
+// control rather than offering a choice of one.
+constexpr bool hasEncoderChoice = true;
+// hasFsSegments: ffmpeg writes the playlist and segments to disk, so the driver manages that
+// directory and the HTTP server serves it as files. False where segments live in RAM (the P4).
+constexpr bool hasFsSegments = true;
 // Some-IP-stack flag (WiFi OR Ethernet) — mirrors the esp32 config so shared code
 // (WLED audio sync, UDP interop) gates on "has network" uniformly. True on desktop
 // via the WiFi stubs (UdpSocket has a desktop implementation).
@@ -137,18 +168,18 @@ constexpr bool hasImprov = false;
 } // namespace mm::platform
 
 // MM_MOONLIVE_HAS_HOST_JIT — 1 when this desktop host has BOTH the emit blob AND the general
-// assembler (moonlive_asm_host.cpp) available. Both are arm64-only today; x86_64 Windows/Linux/
-// Intel-macOS desktops ship without a backend and MoonLive::compile / compileSource fail
-// cleanly (scripted modules render dark). Tests and scenarios that presuppose a working JIT
-// gate on this macro. Kept in platform_config.h (not core) per the platform-boundary rule:
+// assembler (moonlive_asm_host.cpp) available. Both arm64 and x86-64 are supported; the x86-64
+// backend switches internally on _WIN32 between Microsoft x64 (Windows) and System V (Linux /
+// Intel-macOS). Any other host ISA falls through here and MoonLive::compile / compileSource
+// fail cleanly (scripted modules render dark). Tests and scenarios that presuppose a working
+// JIT gate on this macro. Kept in platform_config.h (not core) per the platform-boundary rule:
 // no `#if defined(__aarch64__)` outside src/platform/. A #define (not constexpr) so #include-
 // side test files can use it in `#if` — CLAUDE.md's `if constexpr` preference is for runtime
 // branches inside code, not preprocessor gating around whole TEST_CASEs.
-// MM_MOONLIVE_FORCE_NO_HOST_JIT makes an arm64 machine build as a backend-less one
-// (build_desktop.py --no-jit). Every x86-64 desktop already is one, so a test that wrongly
-// presumes a compile succeeds passes on an arm64 bench and fails only once CI runs it. The
-// override lets that be caught before a push instead of after.
-#if defined(__aarch64__) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
+// MM_MOONLIVE_FORCE_NO_HOST_JIT makes a JIT-capable machine build as a backend-less one
+// (build_desktop.py --no-jit) — useful for testing the dark-render path on the same box that
+// normally has a live backend.
+#if (defined(__aarch64__) || defined(__x86_64__) || defined(_M_X64)) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
     #define MM_MOONLIVE_HAS_HOST_JIT 1
 #else
     #define MM_MOONLIVE_HAS_HOST_JIT 0

@@ -26,7 +26,7 @@ namespace mm {
 /// Audio-reactive effect: blurred dots positioned by frequency band.
 class BlurzEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🐙📊"; }  // WLED-lineage · audio
+    const char* tags() const override { return "🐙🎶"; }  // WLED-lineage · audio
     Dim dimensions() const override { return Dim::D2; }
 
     // MoonLight/WLED defaults (fadeRate 48, blur 127). fadeRate 48 fades the trail fast enough that
@@ -38,10 +38,10 @@ public:
     bool    geqScanner = false;  // steady sweep across the strip (vs. random jump) when freqMap is off
 
     void defineControls() override {
-        controls_.addUint8("fadeRate", fadeRate, 1, 255);
-        controls_.addUint8("blur", blur, 1, 255);
-        controls_.addBool("freqMap", freqMap);
-        controls_.addBool("geqScanner", geqScanner);
+        controls_.addControl("fadeRate", fadeRate, 1, 255);
+        controls_.addControl("blur", blur, 1, 255);
+        controls_.addControl("freqMap", freqMap);
+        controls_.addControl("geqScanner", geqScanner);
     }
 
     // WLED clears the segment once on the first call (SEGENV.call == 0 → fadeToBlackBy(255), a full

@@ -42,6 +42,7 @@ namespace mm {
 class NetworkReceiveEffect : public EffectBase {
 public:
     const char* tags() const override { return "📡🌙"; }  // network input · MoonLight / v1 lineage
+    Dim dimensions() const override { return Dim::D3; }
 
     uint16_t universeStart = 0;        // mirrors the sender's universe_start (ArtNet/E1.31)
     // Bytes each universe maps to in the buffer. 510 = whole RGB lights per
@@ -52,8 +53,8 @@ public:
     uint16_t channelsPerUniverse = static_cast<uint16_t>(MAX_CHANNELS_PER_UNIVERSE);
 
     void defineControls() override {
-        controls_.addUint16("universe_start", universeStart);
-        controls_.addUint16("channels_per_universe", channelsPerUniverse);
+        controls_.addControl("universe_start", universeStart);
+        controls_.addControl("channels_per_universe", channelsPerUniverse);
     }
 
     void release() override {

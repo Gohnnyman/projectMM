@@ -57,11 +57,17 @@ namespace mm {
 ///
 /// ## Running this on a host
 ///
-/// The desktop build sends real frames too, via `platform::ethBindRawInterface` (Linux AF_PACKET,
-/// macOS BPF) — so a Raspberry Pi or a mini-PC running projectMM is a panel controller, which is
-/// the deployment this replaces. Raw L2 needs root or CAP_NET_RAW; without it, or with `interface`
-/// left blank, the host records frames instead of sending them, which is what lets the unit tests
-/// pin the wire format with no hardware and no privileges.
+/// The desktop build sends real frames too, via `platform::ethBindRawInterface` — so a Raspberry
+/// Pi, a Mac or a Windows PC running projectMM is a panel controller, which is the deployment this
+/// replaces. Linux uses AF_PACKET and macOS BPF, both needing root or CAP_NET_RAW; Windows has no
+/// kernel path for raw L2 at all and goes through Npcap, resolved at run time so the binary still
+/// builds and runs without it. Without the privilege or the driver, or with `interface` left blank,
+/// the host records frames instead of sending them, which is what lets the unit tests pin the wire
+/// format with no hardware and no privileges.
+///
+/// `interface` names the NIC: the kernel name on Linux and macOS (`eth0`, `en0`), and on Windows any
+/// distinctive part of the adapter description (`Realtek`), because a capture device there is spelled
+/// `\Device\NPF_{GUID}` and does not fit a control a human types into.
 ///
 /// On ESP32 `interface` is ignored: the chip has one MAC.
 ///
@@ -93,6 +99,10 @@ namespace mm {
 /// Huidu is the one to approach with care: its controllers are largely asynchronous, playing from
 /// onboard storage rather than being fed live, which is a different product category from a
 /// real-time sender.
+// Prior art: FPP (Falcon Player), the show player that drives these receiving cards from a
+// Raspberry Pi. Seeing an FPP rig feed a wall of panels is what prompted this driver: a board
+// already rendering those frames can send them itself, which removes the host from the
+// installation. The wire format is the ColorLight 5A-75 documented byte layout, not FPP's code.
 class PanelCardDriver : public DriverBase {
 public:
     bool limitsCurrent() const override { return true; }
@@ -113,9 +123,41 @@ public:
 
     /// Wire format (index into kFormatOptions).
     uint8_t format = 0;
-    /// Host NIC to send from ("eth0", "en0"). Ignored on ESP32, which has one MAC. Blank on a host
-    /// means capture-only: nothing reaches the wire and the status says so.
-    char interface[16] = {};
+
+    /// Card firmware generation. v13 and newer act on the SECOND copy of the brightness and sync
+    /// frames, so both go out twice; v12 and older act on the FIRST and take the second sync as
+    /// another latch, aborting a refresh already in progress. Measured on a 5A-75 v8.0 downgraded
+    /// to 11.09: the panel updated once every few seconds until the duplicate was dropped.
+    ///
+    /// A control rather than a probe because THIS DRIVER is send-only, not because the protocol is.
+    /// The cards do answer: a discovery reply carries the major version in `data[2]`, which is how
+    /// FPP auto-detects it and how ColorLight's own LEDUpgrade reports a card as "5A 13.17". Probing
+    /// needs a receive seam beside platform::ethSendRaw, which does not exist yet. FPP keeps the
+    /// manual setting regardless, as its FIRST source, falling back to discovery only when unset.
+    /// v12-and-older FIRST, and the default. A stock card ships on v13, but v13 on v8.x hardware
+    /// has a flicker defect with no sending-side workaround, so the documented path is to downgrade
+    /// the card (tutorials/panel-cards.md). Defaulting to the generation the guide leaves you on
+    /// means the setting is already right when you finish, rather than being the last unexplained
+    /// step between a downgraded card and a wall that updates once every few seconds.
+    static constexpr const char* kFirmwareOptions[] = {"v12 and older", "v13 and newer"};
+    static constexpr uint8_t kFirmwareCount = 2;
+
+    /// Card firmware generation (index into kFirmwareOptions): 0 is v12-and-older, 1 is v13+.
+    uint8_t firmware = 0;
+    /// Host NIC to send from: a Select over the DETECTED interfaces (platform::rawInterfaces),
+    /// row 0 = capture-only. Persisted by LABEL, not index: a NIC keeps its identity across
+    /// reboots and Npcap reinstalls (the index-mismatch trap a Windows tester reported). Old
+    /// configs that stored a typed name load unchanged: the Select apply path matches labels.
+    /// Not built on ESP32, which has one MAC and nothing to pick.
+    uint8_t interfaceSel_ = 0;
+    /// The LABEL behind interfaceSel_, so a re-enumeration that reorders the list can restore the
+    /// same NIC rather than whatever now sits at that index. Sized to the enumeration's own cap.
+    char chosenIf_[64] = {};
+    /// The row the last rebuild settled on. Its only job is to distinguish a user's pick (the
+    /// index moved) from an OS re-enumeration (the index did not), which decides whether the
+    /// label above may overrule the index. Starts equal to interfaceSel_, so the first rebuild
+    /// reads as "nothing picked yet".
+    uint8_t lastResolvedSel_ = 0;
     /// Send-rate ceiling (Hz); tick() rate-limits so a fast render tick doesn't saturate the link.
     uint8_t fps = 40;
 
@@ -123,13 +165,61 @@ public:
     /// driver card: format, panel geometry, the host interface, the shared window, then the cap.
     void defineDriverControls() override {
         controls_.addSelect("format", format, kFormatOptions, kFormatCount);
-        controls_.addText("interface", interface, sizeof(interface));
-        // Desktop/Raspberry-Pi only: which host NIC to open a raw socket on. An ESP32 has one MAC
-        // and ignores it, so an empty box there would invite input that does nothing.
-        if constexpr (!platform::hasNamedNetInterfaces)
-            controls_.setHidden(controls_.count() - 1, true);
+        controls_.addSelect("firmware", firmware, kFirmwareOptions, kFirmwareCount);
+        // Desktop/Raspberry-Pi only: which host NIC to open a raw socket on, re-enumerated on
+        // every rebuild so a hot-plugged NIC appears (the audio device Select's pattern).
+        if constexpr (platform::hasNamedNetInterfaces) {
+            const char* const* ifOptions = nullptr;
+            const size_t n = platform::rawInterfaces(&ifOptions);
+            // The list is re-enumerated on every rebuild, and the OS does not promise a stable
+            // order: a hot-plugged NIC can shift the rest. So the remembered LABEL re-points the
+            // index before the Select binds to it. Persisting by label (below) covers reboots;
+            // this covers the same list changing under a running session, which would otherwise
+            // silently send panel data out of a different adapter.
+            //
+            // But only ONE of those two things can have moved, and restoring in the wrong case is
+            // destructive rather than merely useless. Which moved is knowable: the index changing
+            // since we last resolved one means the USER picked a row, while the index standing
+            // still means the list did. Without this test the restore reverted every pick to the
+            // previously remembered adapter, prepare() then rewrote the label from that, and the
+            // wrong value became self-sustaining. Measured on a Windows bench: no selection could
+            // be made at all, the field springing back to "none (capture only)" every time.
+            const bool userPicked = (interfaceSel_ != lastResolvedSel_);
+            if (!userPicked && chosenIf_[0] && ifOptions) {
+                // Compare the STABLE HEAD, the part before ", ": a label may carry the adapter's
+                // live link speed after it ("Realtek PCIe GbE, 1 Gb"), and a renegotiated link
+                // would otherwise read as a different NIC and drop the selection to row 0.
+                const char* mySep = std::strstr(chosenIf_, ", ");
+                const size_t mine = mySep ? static_cast<size_t>(mySep - chosenIf_)
+                                          : std::strlen(chosenIf_);
+                // Back to capture-only FIRST: if the remembered adapter is gone, the old index
+                // now points at whatever took its place, and the driver would send panel data
+                // out of a NIC the user never chose. No match means no NIC, explicitly.
+                interfaceSel_ = 0;
+                for (size_t i = 0; i < n && i < 255; i++) {
+                    if (!ifOptions[i]) continue;
+                    const char* sep = std::strstr(ifOptions[i], ", ");
+                    const size_t head = sep ? static_cast<size_t>(sep - ifOptions[i])
+                                            : std::strlen(ifOptions[i]);
+                    if (head == mine && std::strncmp(ifOptions[i], chosenIf_, head) == 0) {
+                        interfaceSel_ = static_cast<uint8_t>(i);
+                        break;
+                    }
+                }
+            }
+            // Record what this rebuild settled on, so the next one can tell a pick from a
+            // re-enumeration, and keep the remembered label in step with it. prepare() writes the
+            // same label; doing it here too means a rebuild that never reaches prepare (a pick on
+            // a disabled driver) still leaves the two agreeing.
+            lastResolvedSel_ = interfaceSel_;
+            if (ifOptions && interfaceSel_ < n && ifOptions[interfaceSel_])
+                std::snprintf(chosenIf_, sizeof(chosenIf_), "%s", ifOptions[interfaceSel_]);
+            controls_.addSelect("interface", interfaceSel_, ifOptions,
+                                static_cast<uint8_t>(n < 255 ? n : 255));
+            controls_.setPersistLabel(controls_.count() - 1);
+        }
         addWindowControls();   // start / count — which slice of the shared buffer this sink sends
-        controls_.addUint8("fps", fps, 1, 120);
+        controls_.addControl("fps", fps, 1, 120);
     }
 
     /// Geometry and the window change how much of the buffer is corrected, so both re-run the
@@ -168,8 +258,34 @@ public:
         // to capture-only rather than leaving the last interface bound until release(). A bind
         // failure is a Warning rather than an Error: the driver still runs and still records frames,
         // which is what a test or a dry run wants — it just is not driving panels.
-        if (!platform::ethBindRawInterface(interface[0] ? interface : nullptr)) {
-            setStatus("cannot open interface (needs root?)", Severity::Warning);
+        const char* ifName = nullptr;
+        if constexpr (platform::hasNamedNetInterfaces) {
+            // Remember the adapter behind the current row, so a later rebuild that re-enumerates
+            // in a different order can find this same NIC again rather than trusting the index.
+            const char* const* ifOptions = nullptr;
+            const size_t n = platform::rawInterfaces(&ifOptions);
+            // chosenIf_ and lastResolvedSel_ are a PAIR: together they say "this row, by this
+            // name, is what we last settled on". Writing one without the other is what makes a
+            // later rebuild misread a re-enumeration as a fresh pick, or the reverse. A pick
+            // re-prepares (affectsPrepare) without necessarily rebuilding the controls, so this
+            // is a place the pair has to be kept in step, not only defineDriverControls().
+            lastResolvedSel_ = interfaceSel_;
+            if (ifOptions && interfaceSel_ < n && ifOptions[interfaceSel_])
+                std::snprintf(chosenIf_, sizeof(chosenIf_), "%s", ifOptions[interfaceSel_]);
+            ifName = platform::rawInterfaceName(interfaceSel_);
+        }
+        if (!platform::ethBindRawInterface(ifName)) {
+            // Two very different causes reach here and the fixes are opposite: a name that matches
+            // no adapter (a typo, or an OS naming the NIC differently) versus the privilege raw L2
+            // needs. Blaming root for a typo sends the reader to sudo, which cannot help. Name the
+            // string we failed to match so the likelier cause is the one they read first.
+            if (ifName) {
+                std::snprintf(statusBuf_, sizeof(statusBuf_),
+                              "cannot open '%s' - no adapter matches, or needs root", ifName);
+                setStatus(statusBuf_, Severity::Warning);
+            } else {
+                setStatus("cannot open interface (needs root?)", Severity::Warning);
+            }
             return;
         }
 
@@ -225,7 +341,8 @@ public:
             uint8_t* dst = corrected_.data();
             correction_.measure(src + static_cast<size_t>(winStart) * srcCh, srcCh, nLights);
             for (nrOfLightsType i = 0; i < nLights; i++) {
-                correction_.apply(src + (winStart + i) * srcCh, dst + i * outCh);
+                // srcCh carries a wide light's motion channels through, as NetworkSendDriver does.
+                correction_.apply(src + (winStart + i) * srcCh, dst + i * outCh, srcCh);
             }
             data = dst;
             stride = outCh;
@@ -239,18 +356,22 @@ public:
         // pair on the wire, so a misconfigured window is silent rather than emitting frames per tick.
         if (nLights < static_cast<nrOfLightsType>(wallW)) return;
 
+        // How many copies of the brightness and sync frames this card wants: see `firmware`. Sending
+        // two to a card that acts on the first is not harmless, which is why this is a choice and
+        // not a constant.
+        // Index 1 is v13-and-newer, which acts on the SECOND copy, so it needs both sent.
+        const int frameCopies = (firmware == 1) ? 2 : 1;
+
         // Brightness first, ahead of the rows — the order the cards expect. Advisory: older card
         // firmware ignores it, and the driver never depends on it having landed (our own Correction
         // has already applied brightness to the pixel data, so this only sets the card's own gain).
         {
             const size_t len = buildColorLightBrightnessPacket(packet_, kCardGain);
-            // Sent TWICE, like the sync below. Card firmware v13+ acts on the second copy only;
-            // older firmware ignores the duplicate, so sending both costs one frame and works on
-            // every version rather than making the behaviour depend on a firmware probe we do not do.
+            // Once or twice, per `firmware` (frameCopies above).
             //
             // Counted like the rows: `dropped` and the platform's per-cause totals must describe the
             // SAME set of frames, or comparing them tells you nothing.
-            for (int i = 0; i < 2; i++) {
+            for (int i = 0; i < frameCopies; i++) {
                 if (platform::ethSendRaw(packet_, len)) framesSent_++;
                 else framesDroppedTotal_++;
             }
@@ -287,12 +408,18 @@ public:
         // latching an empty frame would blank the panels on a misconfigured window.
         if (anyRowSent) {
             const size_t len = buildColorLightSyncPacket(packet_, kCardGain);
-            // Twice, for the same firmware reason as the brightness frame above.
-            for (int i = 0; i < 2; i++) {
+            // Same copy count as the brightness frame above, and this is the one that matters: a
+            // second sync is a second LATCH, not a harmless repeat.
+            for (int i = 0; i < frameCopies; i++) {
                 if (platform::ethSendRaw(packet_, len)) framesSent_++;
                 else framesDroppedTotal_++;
             }
         }
+        // One wall frame is complete: hand the whole burst to the wire. Where a platform batches
+        // (a Windows host, via the pcap send queue) this is the single call that transmits it,
+        // and the cards need the burst inside one inter-frame window rather than trickled. A
+        // no-op where each frame already went out as it was handed over.
+        platform::ethFlushRaw();
     }
 
     /// Report what the wire is doing: no link, a link too slow for the cards, or the packet rate
@@ -352,7 +479,22 @@ public:
         }
 
         if (!platform::ethLinkUp()) {
-            setStatus("no ethernet link", Severity::Warning);
+            // On a host the same "link down" reads back for an unplugged cable AND for an `interface`
+            // that matches no adapter, which is the far more common mistake and is invisible from the
+            // status alone. Name the field in that case so the message carries its own fix; an ESP32
+            // has one MAC and no such ambiguity, so it keeps the plain wording.
+            if constexpr (platform::hasNamedNetInterfaces) {
+                const char* boundName = platform::rawInterfaceName(interfaceSel_);
+                if (!boundName) {
+                    setStatus("no ethernet link - pick an 'interface' adapter", Severity::Warning);
+                } else {
+                    std::snprintf(statusBuf_, sizeof(statusBuf_),
+                                  "no ethernet link - cable, or no adapter matches '%s'", boundName);
+                    setStatus(statusBuf_, Severity::Warning);
+                }
+            } else {
+                setStatus("no ethernet link", Severity::Warning);
+            }
             framesReported_ = framesSent_;
             return;
         }

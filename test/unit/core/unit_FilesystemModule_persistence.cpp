@@ -21,6 +21,106 @@
 #include <string>
 #include <fstream>
 
+// The settings directory is created when the filesystem mounts, not left for the first save to
+// discover. A shipped binary starts in a directory that has never held one, and before this the
+// first WRITE was what failed, then every write after it, once per save, forever.
+TEST_CASE("A settings directory that does not exist yet is created when the filesystem mounts") {
+    char root[256];
+    std::snprintf(root, sizeof(root), "/tmp/mm_root_new_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(root);
+    REQUIRE_FALSE(std::filesystem::exists(root));
+
+    mm::platform::fsSetRoot(root);
+    CHECK(mm::platform::fsMount());
+    CHECK(std::filesystem::is_directory(root));
+    // Reported back, so a failure can name the directory it actually tried.
+    CHECK(std::string(mm::platform::fsRootPath()) == root);
+
+    mm::platform::fsSetRoot("");
+    std::filesystem::remove_all(root);
+}
+
+// A root that exists and is a directory can still reject writes, which is the case the probe
+// exists for and the one a read-only extraction produces. A DIRECTORY where the probe file belongs
+// blocks its creation while leaving the root itself perfectly valid, so this reaches the probe
+// instead of failing earlier at the is_directory check the case above covers.
+TEST_CASE("A settings directory that rejects a write fails the mount, not just a missing one") {
+    char root[256];
+    std::snprintf(root, sizeof(root), "/tmp/mm_root_probe_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(root);
+    std::error_code ec;
+    const auto blocker = std::filesystem::path(root) / ".mm-write-probe";
+    std::filesystem::create_directories(blocker, ec);
+    // Non-empty, so the pre-remove cannot clear it out of the way either.
+    { std::ofstream f(blocker / "occupied.txt"); f << "x"; }
+    REQUIRE(std::filesystem::is_directory(root));
+    REQUIRE(std::filesystem::is_directory(blocker));
+
+    mm::platform::fsSetRoot(root);
+    CHECK_FALSE(mm::platform::fsMount());
+
+    mm::platform::fsSetRoot("");
+    std::filesystem::remove_all(root);
+}
+
+// MM_DATA_DIR wins over every other rule. This is the contract the test suite itself relies on:
+// ctest sets it so a test can never write into the developer's real settings directory.
+TEST_CASE("MM_DATA_DIR chooses the settings directory over any other rule") {
+    const char* prior = std::getenv("MM_DATA_DIR");
+    const std::string saved = prior ? prior : "";
+
+    char want[256];
+    std::snprintf(want, sizeof(want), "/tmp/mm_root_env_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+#ifdef _WIN32
+    _putenv_s("MM_DATA_DIR", want);
+#else
+    setenv("MM_DATA_DIR", want, 1);
+#endif
+    // Empty restores the DEFAULT, which is where the resolution rule is applied.
+    mm::platform::fsSetRoot("");
+    CHECK(std::string(mm::platform::fsRootPath()) == want);
+
+    // Restore what ctest pinned. Leaving this set would hand every later case a root of its own
+    // choosing, quietly undoing the isolation this very case exists to prove.
+#ifdef _WIN32
+    _putenv_s("MM_DATA_DIR", saved.c_str());
+#else
+    if (saved.empty()) unsetenv("MM_DATA_DIR");
+    else                setenv("MM_DATA_DIR", saved.c_str(), 1);
+#endif
+    mm::platform::fsSetRoot("");
+    // Not an equality check against `saved`: with the variable unset the root correctly falls
+    // through to the next rule, so the thing worth asserting is that the override is gone.
+    CHECK(std::string(mm::platform::fsRootPath()) != want);
+    std::filesystem::remove_all(want);
+}
+
+// An unusable location is refused at mount, which is what lets the caller say "persistence
+// disabled" once instead of emitting a failed save per module per change. A plain file where the
+// directory belongs stands in for the real cases (a read-only extraction, a protected folder, a
+// directory owned by someone else): every one of them accepts the path and rejects the writes.
+TEST_CASE("A settings location that cannot be written to fails the mount, not every later save") {
+    char root[256];
+    std::snprintf(root, sizeof(root), "/tmp/mm_root_blocked_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(root);
+    // ofstream does not create parents, and on Windows "/tmp" is <drive>:\tmp, which need not
+    // exist. Without this the case depends on another test having created it first.
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(root).parent_path(), ec);
+    { std::ofstream f(root); f << "a file, not a directory"; }
+    REQUIRE(std::filesystem::is_regular_file(root));
+
+    mm::platform::fsSetRoot(root);
+    CHECK_FALSE(mm::platform::fsMount());
+
+    mm::platform::fsSetRoot("");
+    std::filesystem::remove_all(root);
+}
+
 // Persistence round-trip: set deviceName → save → recreate Scheduler+modules → load → assert.
 // Uses fsSetRoot to isolate the test from any real /.config/ on disk.
 // A control change (deviceName) saved with flush() reappears on the next boot once a fresh Scheduler loads the same path.
@@ -364,7 +464,7 @@ TEST_CASE("FilesystemModule round-trips a config larger than the old 2 KB cap") 
         scheduler.addModule(lp);
         scheduler.setup();
 
-        CHECK(lp->listRowCount() == 28);   // 13 built-ins + 15 custom, all restored
+        CHECK(lp->listRowCount() == 29);   // 14 built-ins + 15 custom, all restored
         mm::Correction c;
         REQUIRE(lp->deriveCorrection(markerId, 255, c));   // the marker preset resolves after reload
         CHECK(c.outChannels == 24);                        // its 24-channel width survived
@@ -494,7 +594,7 @@ struct ModeDependentMock : public mm::MoonModule {
         controls_.addSelect("mode", mode, kModes, 2);
         // `param` binds to a DIFFERENT variable depending on mode — exactly like clockPin binding to
         // whichever peripheral backend is live. A rebuild after `mode` changes re-binds it.
-        controls_.addUint8("param", mode == 0 ? paramA : paramB, 0, 255);
+        controls_.addControl("param", mode == 0 ? paramA : paramB, 0, 255);
     }
 };
 }  // namespace
@@ -777,4 +877,67 @@ TEST_CASE("FilesystemModule skips an unknown type mid-list and keeps the user mo
     scheduler.release();
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(".");
+}
+
+// A module whose CONTROL SET only exists after prepare() has done work: the MoonLive bindings, whose
+// scripted controls (`cols`, `rows`, an effect's `speed`) are declared by the script and therefore
+// appear only once it has COMPILED, which is prepare()'s job. Boot order is defineControls → load →
+// prepareTree, so at load time those controls are in no list at all and their saved values have
+// nowhere to land; prepare() then seeds them from the script's own defaults. Symptom on the bench:
+// a scripted grid layout came back 16x16 however it had been set, while .config/Layouts.json held
+// the right numbers all along.
+namespace {
+class LateSchemaModule : public mm::MoonModule {
+public:
+    uint8_t always = 1;
+    uint8_t late = 16;        // stands in for a script's declared control
+    bool prepared = false;
+
+    void defineControls() override {
+        mm::MoonModule::defineControls();
+        controls_.addControl("always", always, 0, 255);
+        // Only published once prepare() has run, exactly as publishDeclaredControls is empty until
+        // the engine holds a compiled program.
+        if (prepared) controls_.addControl("late", late, 0, 255);
+    }
+    void prepare() override {
+        prepared = true;
+        rebuildControls();
+    }
+    /// Derived from the late control, read on demand: the shape MoonLiveLayout has, where
+    /// lightCount() runs the script each call rather than caching anything at prepare time.
+    uint16_t derived() const { return static_cast<uint16_t>(late) * 2; }
+};
+}  // namespace
+
+TEST_CASE("FilesystemModule restores a control that only exists after prepare()") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_lateschema_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    {
+        std::ofstream f(std::string(tmpRoot) + "/.config/LateSchemaModule.json");
+        f << "{\"enabled\":true,\"always\":7,\"late\":42}";
+    }
+
+    mm::Scheduler scheduler;
+    auto* fs = new mm::FilesystemModule();
+    fs->setTypeName("FilesystemModule");
+    fs->setScheduler(&scheduler);
+
+    auto* late = new LateSchemaModule();
+    late->setTypeName("LateSchemaModule");
+    scheduler.addModule(late);
+    scheduler.addModule(fs);
+    scheduler.setup();
+
+    CHECK(late->always == 7);    // an ordinary control: the first load pass carried it
+    CHECK(late->late == 42);     // and one that did not exist until prepare() ran
+    // And the state DERIVED from it, not just the backing member: a value restored after phase 4
+    // is still the one the pipeline reads, because derived state here is computed on demand.
+    CHECK(late->derived() == 84);
+    mm::platform::fsSetRoot(".");
+    std::filesystem::remove_all(tmpRoot);
 }

@@ -21,7 +21,7 @@ namespace mm {
 /// Effect of a moving sine wave across the layer.
 class SineEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🌀"; }
+    const char* tags() const override { return "💫"; }
     Dim dimensions() const override { return Dim::D3; }
 
     uint8_t frequency = 1;     // spatial frequency (waves across the box), 1..20
@@ -29,9 +29,9 @@ public:
     uint8_t bpm = 30;          // scroll speed (reshuffles per minute of the phase)
 
     void defineControls() override {
-        controls_.addUint8("frequency", frequency, 1, 20);
-        controls_.addUint8("amplitude", amplitude, 0, 255);
-        controls_.addUint8("bpm", bpm, 1, 255);
+        controls_.addControl("frequency", frequency, 1, 20);
+        controls_.addControl("amplitude", amplitude, 0, 255);
+        controls_.addControl("bpm", bpm, 1, 255);
     }
 
     void tick() MM_NONBLOCKING override {

@@ -10,7 +10,7 @@ name: Test
 # New Python/JS unit suites land under test/python and test/js and run here.
 
 # Paths cover every input to the host-side tests: the Python/JS sources under test
-# (scripts, web-installer), the test files themselves, AND the device-side C++ frame
+# (scripts, mooninstaller), the test files themselves, AND the device-side C++ frame
 # contract (src/core/Improv*.h + the platform handler) — a wire-format change in the
 # firmware must run the cross-language golden-vector tests so it can't drift from the
 # Python/JS builders silently. pull_request gates every PR; push runs main only (a
@@ -20,12 +20,22 @@ on:
   pull_request:
     paths: &test-paths
       - 'moondeck/**'
-      - 'web-installer/**'
+      - 'mooninstaller/**'
       - 'src/core/ImprovFrame.h'
       - 'src/core/ImprovOpReassembler.h'
       - 'src/platform/esp32/platform_esp32_improv.cpp'
       - 'test/python/**'
       - 'test/js/**'
+      # A MoonLive script IS the subject of test_scripts_are_cpp.py: editing one is exactly when
+      # the "this is a subset of C++" claim needs re-checking.
+      - 'moonlive/**'
+      - 'src/light/moonlive/MoonLiveBuiltins_light.h'
+      # The sanitizer jobs below compile the WHOLE C++ suite, so they have to run when any of it
+      # changes. Without these, a C++ change could break them with no run at all, and the fix could
+      # not prove itself either: exactly what happened to a missing <string> in a unit test.
+      - 'src/**'
+      - 'test/unit/**'
+      - 'CMakeLists.txt'
       - '.github/workflows/test.yml'
   push:
     branches:
@@ -50,8 +60,18 @@ jobs:
       # against Python-Markdown's real toc slugify. `wled` is the frenck/python-wled
       # library HA's WLED integration uses; test_wled_json_shape.py parses the
       # device /json vector through its Device.from_dict to pin the wire contract.
+      # The MoonLive scripts compile as C++ FIRST, and by name: it is the one suite whose subject is
+      # the shipped content rather than the tooling, so "all 34 scripts are valid C++" should be
+      # readable in the log instead of folded into a single count. Named here rather than split into
+      # its own step so the compiler still runs exactly once.
+      - name: every MoonLive script is valid C++
+        run: uv run --with pytest pytest test/python/test_scripts_are_cpp.py -v
+      # The rest, quietly. This directory is excluded because the step above already ran it: a bare
+      # `pytest test/python` here would compile all 34 scripts a second time.
       - name: pytest
-        run: uv run --with pytest --with pyserial --with markdown --with wled pytest test/python -q
+        run: >
+          uv run --with pytest --with pyserial --with markdown --with wled
+          pytest test/python -q --ignore=test/python/test_scripts_are_cpp.py
 
   js:
     runs-on: ubuntu-latest

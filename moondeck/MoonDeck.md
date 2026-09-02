@@ -18,7 +18,7 @@ Below: the UI behaviours common to every card, described once, then one section 
 - **Tab persistence** — selected tab survives page refresh.
 - **Process detection** — on page load, checks if projectMM or idf.py is already running and shows Stop button.
 - **Network bar** (top of the sidebar): switch between known networks. Each network holds its own device list, last-used serial port, and WiFi credentials (consumed by Improv). On startup, MoonDeck auto-selects the network whose subnet matches the host's current LAN — moving the laptop between networks usually requires no clicks. Manual override (the dropdown) pins the selection until the pinned network's subnet stops matching the host. Add / Rename buttons next to the dropdown manage the catalog. State persisted in `moondeck/moondeck.json` under `networks` + `active_network`.
-- **Device-model picker** on each device row: dropdown of device models from [web-installer/deviceModels.json](../web-installer/deviceModels.json) — the same catalog the web installer uses. When the device's firmware uniquely identifies one deviceModel (e.g. `esp32-eth` → Olimex Gateway), MoonDeck auto-deduces and mirrors the value to the device's `deviceModel` control on [SystemModule](../docs/moonmodules/core/SystemModule.md) via `POST /api/control` on next discover. For firmwares with no unique deviceModel (`esp32` runs on multiple), the user picks; MoonDeck pushes that value too. A device-reported deviceModel not in the catalog still shows up as `<key> (unknown)` so the value survives. MoonDeck's picker is a **text dropdown for an already-running device** — distinct from the web installer's flash-time *picture* deviceModel picker; both read the same catalog, but MoonDeck doesn't need the per-deviceModel `image`/`url` fields (those are installer-picker UX). Selecting a deviceModel pushes its full catalog config — each entry is a list of `{type, id, parent_id?, controls?}` module units (the [nested catalog schema](../web-installer/README.md), add-then-configure), so MoonDeck adds the deviceModel's modules (`POST /api/modules`) then sets their controls (`POST /api/control`); see `_push_device` in [moondeck.py](moondeck.py).
+- **Device-model picker** on each device row: dropdown of device models from [mooninstaller/deviceModels.json](../mooninstaller/deviceModels.json) — the same catalog the web installer uses. When the device's firmware uniquely identifies one deviceModel (e.g. `esp32-eth` → Olimex Gateway), MoonDeck auto-deduces and mirrors the value to the device's `deviceModel` control on [SystemModule](../docs/moonmodules/core/SystemModule.md) via `POST /api/control` on next discover. For firmwares with no unique deviceModel (`esp32` runs on multiple), the user picks; MoonDeck pushes that value too. A device-reported deviceModel not in the catalog still shows up as `<key> (unknown)` so the value survives. MoonDeck's picker is a **text dropdown for an already-running device** — distinct from the web installer's flash-time *picture* deviceModel picker; both read the same catalog, but MoonDeck doesn't need the per-deviceModel `image`/`url` fields (those are installer-picker UX). Selecting a deviceModel pushes its full catalog config — each entry is a list of `{type, id, parent_id?, controls?}` module units (the [nested catalog schema](../mooninstaller/README.md), add-then-configure), so MoonDeck adds the deviceModel's modules (`POST /api/modules`) then sets their controls (`POST /api/control`); see `_push_device` in [moondeck.py](moondeck.py).
 ## Desktop Tab
 
 
@@ -54,6 +54,22 @@ uv run moondeck/test/test_desktop.py
 
 Runs `./build/<host>/test/mm_tests -s` (doctest with all test cases shown) — same per-host build dir as the desktop build above.
 
+### test_host
+
+Run the host test suites: the Python ones and the JS ones.
+
+```bash
+uv run moondeck/test/test_host.py            # both
+uv run moondeck/test/test_host.py --python   # just Python
+uv run moondeck/test/test_host.py --js       # just JS
+```
+
+The tests the C++ binary cannot reach: the cross-language contracts (the Improv frame's wire format,
+WLED's `/json` shape), the MoonDeck scripts themselves, the browser code under `src/ui`, and the
+claim that every shipped MoonLive script is valid C++ (`test_scripts_are_cpp.py` hands each one to a
+real compiler). The commit gate and CI run the same two commands; this is the card in front of them.
+JS reports SKIP rather than failing when node is absent, since a Python-only bench is a normal setup.
+
 ### run_desktop
 
 Launch the desktop executable as a detached background process and exit. The app keeps running across other MoonDeck scripts and outlives MoonDeck itself — the same model as flashing an ESP32, where the device runs independently of this console.
@@ -66,13 +82,37 @@ Re-running is idempotent: any existing `projectMM` instance is stopped first, th
 
 While the app is running, MoonDeck shows the button as **Stop** (a 5-second poll on `/api/running` detects the live process via `process_name`). Pressing Stop terminates the app; pressing Run again restarts it. From the CLI: `pkill -f build/<host>/projectMM` (or `pkill projectMM` if you don't have multiple host builds active).
 
+### run_open_stage_control
+
+Launch [Open Stage Control](https://openstagecontrol.ammd.net/) as a control surface for the running
+device: eight faders, eight encoders and eight switches, wired to the
+[OSC module](../docs/moonmodules/core/services.md) in both directions.
+
+```bash
+uv run moondeck/run/run_open_stage_control.py                   # device on this machine
+uv run moondeck/run/run_open_stage_control.py --host 192.168.1.42
+```
+
+Then open **http://127.0.0.1:8088**. Nothing needs typing into Open Stage Control's settings panel:
+the session, the send address and the listen port are all command-line arguments, and the session's
+own `autosync` widget asks the device for its current state on every page load, so the widgets are
+correct immediately rather than showing the layout file's defaults.
+
+On the device, the OSC module needs `listen` and `feedback` on.
+
+It runs headless (a web server, no desktop window), which is what makes the surface reachable from a
+phone or another laptop on the same network. Options: `--host` / `--port` for the device,
+`--listen` for where feedback arrives (the device's `feedbackPort`), `--ui-port` for the surface
+itself, and `--app` when the binary is not on PATH or in the usual place. Install Open Stage Control
+first; it is a free download.
+
 ### preview_installer
 
 ![Installer](../docs/assets/ui/installer.png)
 ![Installer2](../docs/assets/ui/installer2.png)
 ![Installer3](../docs/assets/ui/installer3.png)
 
-Locally preview the web installer page at <https://moonmodules.org/projectMM/install/> without tagging a release. Stages `web-installer/index.html` + `src/ui/install-picker.js` into `build/install-preview/` and serves them via Python's `http.server` on port 8421.
+Locally preview the web installer page at <https://moonmodules.org/projectMM/install/> without tagging a release. Stages `mooninstaller/index.html` + `src/ui/install-picker.js` into `build/install-preview/` and serves them via Python's `http.server` on port 8421.
 
 ```bash
 uv run moondeck/run/preview_installer.py
@@ -81,7 +121,7 @@ uv run moondeck/run/preview_installer.py
 
 Long-running — MoonDeck shows **Stop** while the server is up. Two modes, picked automatically:
 
-- **Render-only.** When no `build/esp32-*/projectMM.bin` is present, the picker populates against the real GitHub Releases API and dropdowns work, but clicking **Install** fails because the local server has no `releases/` tree. Useful for iterating on HTML / CSS / JS without burning a build. Equivalent to "Recipe A" in [web-installer/README.md](../web-installer/README.md).
+- **Render-only.** When no `build/esp32-*/projectMM.bin` is present, the picker populates against the real GitHub Releases API and dropdowns work, but clicking **Install** fails because the local server has no `releases/` tree. Useful for iterating on HTML / CSS / JS without burning a build. Equivalent to "Recipe A" in [mooninstaller/README.md](../mooninstaller/README.md).
 - **Flash-ready.** When at least one ESP32 build exists, the script additionally stages every `build/esp32-*/projectMM.bin` it finds into `releases/local-dev/` and generates matching Pages-relative manifests via the same `generate_manifest.py` the release workflow uses. The picker shows `local-dev` as the newest tag; clicking **Install** flashes a USB-connected ESP32 and hands off to the repository's custom orchestrator UI (Improv-Serial provisioning + SET_DEVICE_MODEL + control fan-out, all in `install-orchestrator.js` — not ESP Web Tools). End-to-end, same code paths as the public installer. This is the developer's test ground for the install flow before deploying to GitHub Pages: Web Serial works on `http://localhost` without the secure-origin requirement that gates the public site.
 
 Add `?nocache=1` to the URL to bypass the picker's 5-minute sessionStorage cache while editing.
@@ -126,30 +166,11 @@ Check that a firmware binary exists and is newer than every source that feeds it
 uv run moondeck/check/check_esp32_built.py --firmware esp32s3-n16r8
 ```
 
-The cheap stand-in for a full `idf.py build` in the commit and merge gates. Freshness is measured against the **sources**, not the clock: a wall-clock rule ("built in the last hour") passes a binary that predates an edit made twenty minutes ago, which is the stale-artifact trap that sends debugging at the wrong image. On failure it names the newer file and prints the rebuild command. `--max-age-hours N` adds an optional age rule on top; the default (0) disables it.
-
-### event_precommit / event_premerge / event_prerelease
-
-Run the gate list for one lifecycle event ([CLAUDE.md § The Process](../CLAUDE.md#the-process)).
-
-```bash
-uv run moondeck/event/precommit.py                    # commit event
-uv run moondeck/event/precommit.py --build-esp32      # …compiling the firmware for real
-uv run moondeck/event/precommit.py --firmware esp32   # pick the ESP32 variant
-uv run moondeck/event/premerge.py                     # merge event (branch diff vs main)
-uv run moondeck/event/prerelease.py                   # release event (diff vs previous tag)
-```
-
-Each gate carries an objective trigger read from the changed-file set, so a docs-only change runs the spec check and skips the rest, while a `src/` change runs the full list. Every gate reports **PASS** (ran, succeeded), **FAIL** (ran, failed), **SKIP** (trigger did not match) or **MANUAL** (a human decision — hardware, review, release criteria — listed, never auto-failed). Gates do not stop at the first failure: one pass gives the whole picture, and the run ends with a `DONE` line so a long run's finish is unambiguous. The scripts are **product-owner initiated** and never commit, merge, or tag.
-
-**The commit list is built to stay under ~10 seconds**, because a gate list nobody runs protects nothing. Two steps that would otherwise dominate it are deliberately cheap:
-
-- **ESP32 is a freshness check, not a compile** — [check_esp32_built](#check_esp32_built) instead of a cold `idf.py build`. `--build-esp32` compiles for real; `prerelease.py` always does, since that is the event where the binary ships; CI builds every variant on every PR regardless.
-- **KPI skips the live serial capture** — the gate passes `--no-live-capture` (see [collect_kpi](#collect_kpi)), so it needs no bench board and costs seconds.
+The cheap stand-in for a full `idf.py build` in the commit and merge checks. Freshness is measured against the **sources**, not the clock: a wall-clock rule ("built in the last hour") passes a binary that predates an edit made twenty minutes ago, which is the stale-artifact trap that sends debugging at the wrong image. On failure it names the newer file and prints the rebuild command. `--max-age-hours N` adds an optional age rule on top; the default (0) disables it.
 
 ### check_devices
 
-Validate the installer device-model catalog (`web-installer/deviceModels.json`).
+Validate the installer device-model catalog (`mooninstaller/deviceModels.json`).
 
 ```bash
 uv run moondeck/check/check_devices.py
@@ -159,7 +180,7 @@ Checks each entry's required fields, that `firmwares` is a non-empty list, every
 
 ### check_firmwares
 
-Verify the firmware projection (`web-installer/firmwares.json`) matches the `FIRMWARES` source.
+Verify the firmware projection (`mooninstaller/firmwares.json`) matches the `FIRMWARES` source.
 
 ```bash
 uv run moondeck/check/check_firmwares.py
@@ -1104,7 +1125,7 @@ Exit codes: `0` = all checks passed, `1` = device-side failure (probe or provisi
 
 - [src/core/ImprovFrame.h](../src/core/ImprovFrame.h) — the on-device parser
 - [src/platform/esp32/platform_esp32_improv.cpp](../src/platform/esp32/platform_esp32_improv.cpp) — the UART listener task
-- [web-installer/index.html](../web-installer/index.html) — the web installer page
+- [mooninstaller/index.html](../mooninstaller/index.html) — the web installer page
 - [src/ui/install-picker.js](../src/ui/install-picker.js) — the picker driving the install flow
 - [moondeck/build/improv_*.py](build/) — the host-side framing helpers
 

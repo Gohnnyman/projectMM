@@ -357,7 +357,7 @@ public:
         // ensurePeripheralMatchesSelection so a peripheral CHANGE evaluates the visibility against the NEW
         // backend. The saved value stays bound, so it survives a round-trip through a single-buffer-only
         // peripheral and re-engages when a peripheral that supports it is selected again.
-        controls_.addBool("doubleBuffer", doubleBuffer);
+        controls_.addControl("doubleBuffer", doubleBuffer);
         controls_.setHidden(controls_.count() - 1, !(peripheral_ && peripheral_->supportsDoubleBuffer()));
         // The bus pins sit UNDER the peripheral selector because they ARE peripheral-specific: for a driver
         // that owns its own GPIO routing they are '595 pins: MoonI80 routes WR only when a shift register
@@ -372,7 +372,7 @@ public:
         // a hardware limit, see supportsPinExpander). The '595's width (8) is the chip's, not a setting,
         // so the toggle is a plain checkbox; latchPin is bound always (a saved value survives a
         // round-trip through direct mode) but shown only when the expander is on.
-        controls_.addBool("pinExpander", pinExpander);
+        controls_.addControl("pinExpander", pinExpander);
         controls_.setHidden(controls_.count() - 1, !(peripheral_ && peripheral_->supportsPinExpander()));
         controls_.addPin("latchPin", latchPin);
         controls_.setHidden(controls_.count() - 1, !pinExpanderMode());
@@ -381,7 +381,7 @@ public:
         if (peripheral_) peripheral_->addRingControls(controls_);
         // The on-device loopback self-test + its wiring — a dev/bring-up instrument (jumper a lane to the
         // rx pin), not a casual-user setting, so the whole cluster is expert-only.
-        controls_.addBool("loopbackTest", loopbackTest);
+        controls_.addControl("loopbackTest", loopbackTest);
         controls_.setAdvanced(controls_.count() - 1);
         // Always bound, shown only in test mode — the conditional-control shape.
         controls_.addPin("loopbackTxPin", loopbackTxPin);
@@ -395,11 +395,11 @@ public:
         controls_.setAdvanced(controls_.count() - 1);
         // Which strand carries the pattern — shift mode only (in direct mode it is always lane 0).
         // Lets the jumper come off ANY '595 output, including a spare one that drives no panel.
-        controls_.addUint8("loopbackStrand", loopbackStrand, 0, kMaxStrands - 1);
+        controls_.addControl("loopbackStrand", loopbackStrand, 0, kMaxStrands - 1);
         controls_.setHidden(controls_.count() - 1, !loopbackTest || !pinExpanderMode());
         controls_.setAdvanced(controls_.count() - 1);
         // Intrusive: ride the live pipeline instead of a private replica (see the member doc).
-        controls_.addBool("loopbackIntrusive", loopbackIntrusive);
+        controls_.addControl("loopbackIntrusive", loopbackIntrusive);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
         controls_.setAdvanced(controls_.count() - 1);
     }
@@ -1020,7 +1020,7 @@ public:
                 // The source (snapshot or live) holds RAW srcCh bytes, so correction runs here per light —
                 // one pass, whether the frame was snapshotted (immutable copy) or read live.
                 correction_.apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
-                                   wire + lane * stride);
+                                  wire + lane * stride, srcCh);
             }
             const uint64_t mask = maskLo32 | (static_cast<uint64_t>(maskHi32) << 32);   // constant shift: cheap
             if (shift) {
@@ -1155,7 +1155,7 @@ public:
     /// read `outChannels` through this instead of inheriting `correction_` directly.
     const Correction& correction() const { return correction_; }
     /// Mutable reference to the ring-snapshot A/B knob, for a backend's addRingControls to bind
-    /// (`controls.addBool("ringSnapshot", owner_->ringSnapshotRef())`) — addBool binds by reference,
+    /// (`controls.addControl("ringSnapshot", owner_->ringSnapshotRef())`) — a bool addControl binds by reference,
     /// so the control needs the member's address, not a copy.
     bool& ringSnapshotRef() { return ringSnapshot; }
     /// The ring snapshot buffer (null when unallocated / off the ring path) — a backend's KPI refresh
@@ -1619,7 +1619,7 @@ public:
     /// below — the bus-geometry accessors a backend needs are public, everything else in this block stays
     /// protected (this driver's own cold-path config machinery).
     const uint16_t* busPinList() {
-        const uint8_t width = busWidthPins();
+        const uint8_t width = busPinCount();
         const uint16_t clockPin = peripheral_ ? peripheral_->clockPinForBus() : laneList_[0];
         for (uint8_t i = 0; i < width && i < kMaxLanes; i++) {
             if (i < physPins_)                        busPinBuf_[i] = laneList_[i];   // data
@@ -1628,7 +1628,20 @@ public:
         }
         return busPinBuf_;
     }
-    uint8_t busPinCount() const { return busWidthPins(); }
+    /// How many lanes the PERIPHERAL is handed. The bus is 8 or 16 bits wide whatever the board wires,
+    /// but only a backend that cannot leave a lane unconnected needs a pad for the spares: `esp_lcd`
+    /// rejects an NC data pin and parks them on WR, while MoonI80 routes its own GPIOs and simply does
+    /// not connect them (spareLanesNeedPad). Handing MoonI80 only the real lanes is what keeps a
+    /// one-strand board from driving six or seven GPIOs it never asked for, one of which, on an S31,
+    /// is an Ethernet transmit line.
+    uint8_t busPinCount() const {
+        const uint8_t width = busWidthPins();
+        if (peripheral_ && !peripheral_->spareLanesNeedPad()) {
+            const uint8_t real = static_cast<uint8_t>(physPins_ + (pinExpanderMode() ? 1 : 0));
+            return real < width ? real : width;
+        }
+        return width;
+    }
     // Bus clock: a '595 must be fed kPinExpanderOutputs shift cycles per WS2812 slot, so the bus clocks
     // that much faster to hold the same 375 ns slot on the wire. The platform picks the exact rate
     // its clock tree can divide to (see platform_esp32_i80.cpp); this is the multiplier.

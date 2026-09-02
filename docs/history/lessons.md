@@ -547,3 +547,102 @@ evidence which *looks* most authoritative here is the evidence that lies.
   hypotheses. hpwit's `new-parser` hits the identical wall and leaves it unhandled, which is
   confirmation the question is real rather than self-inflicted. **Assemble the case before
   theorising about it.**
+
+## Lessons from the particles branch
+
+- **A stateful effect is a jitter meter; a stateless one hides the same fault.** A shader recomputes
+  every pixel from `t`, so a late frame is simply skipped and the next one is correct. A particle's
+  position is the previous position plus velocity, and `FrameTime` deliberately spends a whole stall
+  at once to keep the trajectory true in real time, so one frame after an 80 ms gap moves every
+  particle **6.7x its usual distance** (measured). The first particle effect on the branch therefore
+  exposed a 1 Hz `esp_littlefs_info` scan running inline on the render thread that had been there all
+  along and that no shader had ever revealed. **When motion starts stuttering after a change that
+  should not have touched timing, suspect a pre-existing periodic cost, and measure the frame deltas
+  before theorising.** The reverse also holds: a smooth shader is not evidence that the render loop
+  is clean.
+
+- **Standardising a duplicated sentence requires deciding which version is TRUE first.** Three front
+  pages had drifted into four orderings of the same six platforms, so a check was written to hold
+  them to one wording. The wording picked was the most formal-looking existing one, which happened
+  to demote five of the six targets to secondary and was simply wrong. Enforcing it would have
+  spread a false claim to every file the check covered. **A consistency check is only as good as the
+  value it pins; establish the fact, then enforce it.**
+
+- **A test that passes with the bug reintroduced is worse than no test.** Three separate tests on
+  this branch (the fade idle-gap, the collide spread, the filesystem throttle) were each written,
+  seen green, and then found to pass with their own defect deliberately restored. Two were deleted
+  and one was rewritten. The habit that catches it is cheap: **sabotage the fix and confirm the test
+  goes red before believing it.** Two of those three had also been failing for a reason unrelated to
+  what they claimed to assert, which the control check surfaced immediately.
+
+- **A build script that does not build what the next command tests produces a confident false
+  green.** `build_desktop.py` builds `projectMM` but not `mm_tests`/`mm_scenarios` unless given
+  `--tests`, so `ctest` straight after it runs whatever binary was there before. It reported "1377
+  passed" against a test binary two hours old, on a change whose new option string was not even
+  present in it. The tell is cheap and worth the habit: **after changing code, confirm the test
+  binary actually contains the change** (a `grep` for a new string, or a run of just the new case)
+  before believing a green suite. The staleness guards in `run_scenario.py` exist for exactly this
+  and are why the scenario half never went unnoticed; the unit half has no such guard.
+
+- **A freshness guard keyed on mtime must exclude files the build itself rewrites.** The same guard
+  then cried wolf: `build_info.h` embeds a `+` when `git status` reports a dirty tree, and a gate run
+  dirties the tree by writing its own scenario baselines and metrics. So every gate run left the
+  next one reporting a stale runner, a self-inflicted loop that reads exactly like a real staleness
+  failure. **Generated build metadata is not source**, and a guard that cannot tell them apart
+  teaches people to ignore it.
+
+- **An ISA-guarded test is not run by the machine that wrote it, and a JIT's bytes are only true
+  where they execute.** The MoonLive backends are `#if`-guarded per architecture, so an arm64 bench
+  compiles neither the x86-64 encoder tests nor the x86-64 emitted code — a whole backend can be
+  wrong while the local suite is green and confident. A Q16.16 multiply that borrowed a register the
+  allocator hands out returned garbage on every x86-64 desktop; 1458 local tests passed, and CI is
+  where it surfaced. Two smaller defects hid in the same blind spot: a one-byte arena where the code
+  now does a 32-bit load, and an unmigrated type keyword in a test file arm64 never compiles.
+
+  **On an Apple Silicon machine that blind spot is one command wide:** `cmake -B build/x86
+  -DCMAKE_OSX_ARCHITECTURES=x86_64` then `arch -x86_64 ./build/x86/test/mm_tests`. Rosetta runs the
+  emitted x86-64 instructions for real, so the tests that only exist on that host actually execute.
+  Worth doing on any change to a backend, an encoder, or the register allocator — it is minutes,
+  and it is the difference between finding these locally and finding them in CI.
+
+## A lossy channel never closes a client for slowness (2026-08-25)
+
+The preview transport spent a bench day being patched before the pattern surfaced: every
+symptom (reconnect storms, blank refreshes, renderWait spikes charged to the LEDs) traced to a
+synchronous send path that treated a slow socket as a fault, spinning up to a stall budget on
+the output core and then **closing the client**. That converts ordinary congestion into
+disconnects, disconnects into re-primed state, and re-primed state into more congestion, a
+feedback loop.
+
+The rule that replaced it, and holds generally: **on a lossy stream, drop at the source and let
+TCP pace the rest.** Write only what the socket takes now (`writeSome`, never a wait), skip the
+frame when the previous one has not drained, report the skip to the receiver (its one honest
+congestion signal), and close only on a real error or FIN. The receiver steers quality from the
+drop reports. Every give-up budget that remains must bound *lack of progress*, never elapsed
+total, or slow-but-healthy transfers get truncated.
+
+
+## A test that does not reproduce the user's conditions proves nothing (2026-09-01)
+
+Two wrong conclusions in one session, from the same root, on the Windows install work.
+
+**The environment differed.** A script was going to ship inside a downloaded zip, so it had to run
+under the default PowerShell policy. It ran fine when tested, and would have shipped. It only
+failed once the policy was forced explicitly: `Get-ExecutionPolicy -List` showed `Process: Bypass`,
+set by the agent's own shell, silently overriding the `RemoteSigned` a user actually has. Under the
+real policy a downloaded, unsigned script is refused outright, so the deliverable would have failed
+for exactly the person it was written for. **Print the setting your test depends on, rather than
+inferring it from the outcome.**
+
+**The path differed.** The same session declared a Defender false positive "cleared" because a
+download succeeded. It had not cleared: the download used a different client. A browser download
+was still being blocked while a scripted one of identical bytes was only *detected* and left on
+disk. The test resembled the failing path without exercising it, so it could not have detected the
+problem it was run to check.
+
+The general form, and the reason both slipped through: **a green result only means something if the
+test could have gone red.** Before believing one, name what would have to be true for it to fail,
+and confirm that condition is actually present. An agent's shell is a particularly bad witness here,
+because it routinely runs with policies, permissions and paths that no user has. Sibling of the
+sabotage rule above: there, force the failure to prove the test sees it; here, prove the test is
+standing in the place where the failure lives.

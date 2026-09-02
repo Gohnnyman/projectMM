@@ -1,32 +1,31 @@
 // Ember: a fire that simulates rather than draws. Each cell holds a heat value that decays and
-// re-ignites at random, so this frame depends on the last one — `heat` is the state that makes
-// it a simulation rather than a formula.
 
 class EmberEffect {
-  uint8_t  cool = 30;
-  uint8_t  spark = 60;
-  uint8_t  cycle = 20;
-  uint8_t  heat[16];
+  byte  cool = 30;
+  byte  spark = 60;
+  byte  cycle = 20;
+  byte  heat[16];
 
-  defineControls() {
-    addUint8("cool", cool, 1, 120);
-    addUint8("spark", spark, 0, 200);
-    addUint8("cycle", cycle, 1, 120);
+  int dimensions() { return 1; }
+
+  string tags() { return "💫"; }
+
+  void defineControls() {
+    addControl("cool", cool, 1, 120);              // how fast a cell loses heat
+    addControl("spark", spark, 0, 200);            // how fiercely new embers catch
+    addControl("cycle", cycle, 1, 120);            // how often the fire re-ignites
   }
 
-  tick() {
-    for (i = 0; i < 16; i = i + 1) {
+  void tick() {
+    for (int i = 0; i < 16; i = i + 1) {
       if (heat[i] > cool) { heat[i] = heat[i] - cool; } else { heat[i] = 0; }
     }
 
-    // Ignition breathes: strongest at the start of each cycle, fading to nothing by its end.
-    // `cycle` is a BPM because beat() takes one; a wider slider would truncate to a byte and
-    // read back as a different, non-monotonic speed.
-    for (j = 0; j < 16; j = j + 1) {
+    for (int j = 0; j < 16; j = j + 1) {
       if (random16(256) < scale(spark, 65535 - beat(cycle, t))) { heat[j] = 255; }
     }
 
-    for (k = 0; k < 16; k = k + 1) {
+    for (int k = 0; k < 16; k = k + 1) {
       setRGB(k, paletteR(heat[k], heat[k]), paletteG(heat[k], heat[k]),
                 paletteB(heat[k], heat[k]));
     }

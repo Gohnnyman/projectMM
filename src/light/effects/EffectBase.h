@@ -120,6 +120,20 @@ public:
     /// layer at that moment, which is the contract effects already follow (dimensions can change
     /// between frames, so nothing may cache them across ticks).
     mm::draw::Canvas canvas();
+
+    /// Aim a fixture. `index` is the light, `value` the raw DMX byte for that axis (0..255 over
+    /// the fixture's full travel: 540 degrees of pan, 180 of tilt on a typical head).
+    ///
+    /// Each is a NO-OP when the light carries no such channel, which is what lets one effect run
+    /// on a moving head and on an LED strip: the strip has no pan channel, so nothing is written
+    /// and the effect just paints color. Never scaled by brightness, unlike color: dimming the rig
+    /// must not swing a head toward 0/0.
+    void setPan(nrOfLightsType index, uint8_t value);
+    void setTilt(nrOfLightsType index, uint8_t value);
+    void setZoom(nrOfLightsType index, uint8_t value);
+
+    /// True when the lights carry pan or tilt, so an effect can skip motion maths on a strip.
+    bool movable() const;
 };
 
 } // namespace mm
