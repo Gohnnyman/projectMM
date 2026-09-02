@@ -54,6 +54,12 @@ struct Rig {
     // applyState() re-runs prepare(), which un-primes the smoother and makes every frame jump.
     // Anything testing the SMOOTHING has to tick without it.
     void tickOnly() { layer.tick(); }
+    /// A tick with a NEW frame behind it — the effect skips a repeated one, so anything measuring
+    /// per-frame behaviour has to advance the source too, as the scheduler does.
+    void tickOnly(VideoService& source) {
+        source.tick();
+        layer.tick();
+    }
     const uint8_t* px(int x, int y) const {
         return layer.buffer().data() + (static_cast<size_t>(y) * grid.width + x) * 3;
     }
@@ -239,13 +245,13 @@ TEST_CASE("AmbilightEffect: a heavily smoothed light converges exactly, rising a
 
     // Falling: drive the target down and let it smooth in.
     rig.fx.brightness = 8;
-    for (int i = 0; i < 2000; i++) rig.tickOnly();
+    for (int i = 0; i < 2000; i++) rig.tickOnly(src.svc);
     const uint8_t dim = rig.px(4, 0)[0];
     CHECK(dim < bright / 2);
 
     // Rising back to where it started must land on the SAME value, not one short.
     rig.fx.brightness = 255;
-    for (int i = 0; i < 2000; i++) rig.tickOnly();
+    for (int i = 0; i < 2000; i++) rig.tickOnly(src.svc);
     CHECK(rig.px(4, 0)[0] == bright);
 }
 
@@ -272,7 +278,7 @@ TEST_CASE("AmbilightEffect: fadeInMs ramps the first frames up from black") {
     rig.render();
 
     const uint8_t first = rig.px(4, 0)[0];
-    for (int i = 0; i < 50; i++) rig.tickOnly();
+    for (int i = 0; i < 50; i++) rig.tickOnly(src.svc);
     const uint8_t later = rig.px(4, 0)[0];
 
     CHECK(later >= first); // never goes backwards
@@ -401,8 +407,8 @@ TEST_CASE("AmbilightEffect: the top light escapes the letterbox once bars are de
     rig.fx.detectBlackBars = true;
     rig.render();
 
-    CHECK(rig.px(4, 0)[1] == 0);                 // first frame: still inside the bar
-    for (int i = 0; i < 60; i++) rig.tickOnly(); // past the hysteresis window
+    CHECK(rig.px(4, 0)[1] == 0);                       // first frame: still inside the bar
+    for (int i = 0; i < 60; i++) rig.tickOnly(src.svc); // past the hysteresis window
     CHECK(rig.px(4, 0)[1] > 100);                // now reading the green picture
 }
 
@@ -416,7 +422,7 @@ TEST_CASE("AmbilightEffect: a frame that fills the picture reports no bars") {
     armed.fx.detectBlackBars = true;
     plain.render();
     armed.render();
-    for (int i = 0; i < 60; i++) armed.tickOnly();
+    for (int i = 0; i < 60; i++) armed.tickOnly(src.svc);
     CHECK(std::memcmp(plain.px(4, 0), armed.px(4, 0), 3) == 0);
 }
 
@@ -479,4 +485,23 @@ TEST_CASE("AmbilightEffect: a border layout paints its perimeter and skips the i
             const uint8_t* p = rig.px(x, y);
             CHECK((p[0] | p[1] | p[2]) == 0);
         }
+}
+
+
+// --- Skipping a repeated frame -----------------------------------------------------------------
+// The render loop outruns the source — 60 Hz against 30 fps video, or a still picture — and
+// re-averaging a frame already on the strip buys nothing. What the effect advances then runs at the
+// source's rate, which is the rate it should run at.
+
+// A skipped tick must leave the strip exactly as it was, not half-painted or cleared.
+TEST_CASE("AmbilightEffect: a repeated frame leaves the strip untouched") {
+    PatternSource src;
+    Rig rig(8, 8);
+    rig.fx.saturation = 100;
+    rig.render();
+
+    uint8_t before[3];
+    std::memcpy(before, rig.px(4, 0), 3);
+    for (int i = 0; i < 5; i++) rig.tickOnly();   // no new frame published
+    CHECK(std::memcmp(before, rig.px(4, 0), 3) == 0);
 }

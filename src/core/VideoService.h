@@ -34,8 +34,8 @@ public:
     // persisted index keeps its meaning.
     uint8_t source = 0;
     char file[64] = "/frame.ppm";
-    uint8_t usbFormat = 0; // index into the device's advertised list; the only USB setting persisted
-    uint16_t staleMs = 2000;   // 0 = hold the last frame forever
+    uint8_t usbFormat = 0;   // index into the device's advertised list; the only USB setting persisted
+    uint16_t staleMs = 2000; // 0 = hold the last frame forever
 
     static constexpr const char* kSourceOptions[] = {"test pattern", "file", "usb"};
     // A target with no High-Speed USB host or no JPEG decoder cannot capture, so it is not offered
@@ -99,9 +99,9 @@ public:
     /// Cold path: size the frame buffer for the selected source and fill it once, so a frame exists
     /// before the first tick rather than one tick later.
     void prepare() override {
-        seat_.claim(); // re-take after a disable/enable cycle — release() vacated it
+        seat_.claim();                          // re-take after a disable/enable cycle — release() vacated it
         platform::videoCaptureDeinit(capture_); // a source switch releases the device
-        if (source >= kSourceCount) source = 0;   // a config restored from a capture-capable board
+        if (source >= kSourceCount) source = 0; // a config restored from a capture-capable board
         if (source == 2) {
             // The first open doubles as a probe: a device only lists its formats once it
             // enumerates, which happens inside init — so open, learn what is really on offer, and
@@ -133,8 +133,12 @@ public:
         // Take an EMPTY seat, so deleting the elected source while a second one runs hands over
         // rather than going permanently dark. claim() only fills an empty seat, never yanks one.
         seat_.claim();
-        if (source == 0 && buf_.data()) renderPattern();
-        else if (source == 2) readCapture();
+        if (source == 0 && buf_.data())
+            renderPattern();
+        else if (source == 1 && buf_.data())
+            publish();
+        else if (source == 2)
+            readCapture();
         MoonModule::tick();
     }
 

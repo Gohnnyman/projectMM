@@ -105,6 +105,10 @@ public:
             return;
         }
 
+        // The frame already on the strip
+        if (frame->seq == lastSeq_) return;
+        lastSeq_ = frame->seq;
+
         const lengthType lightsX = width(), lightsY = height();
         if (lightsX <= 0 || lightsY <= 0) return;
 
@@ -269,8 +273,10 @@ private:
         int begin = static_cast<int>((static_cast<long>(lightId) * pixels) / lightsSize);
         int end = static_cast<int>((static_cast<long>(lightId + 1) * pixels) / lightsSize);
         if (deep > 0) {
-            if (lightId == 0) end = deep;                                 // down/right, inward
-            else if (lightId == lightsSize - 1) begin = pixels - deep;    // up/left, inward
+            if (lightId == 0)
+                end = deep; // down/right, inward
+            else if (lightId == lightsSize - 1)
+                begin = pixels - deep; // up/left, inward
         }
         if (begin < 0) begin = 0;
         if (begin >= pixels) begin = pixels - 1;
@@ -291,8 +297,8 @@ private:
                 sb += px[2];
             }
         }
-        const uint32_t pixels = static_cast<uint32_t>(rows.end - rows.begin) *
-                                static_cast<uint32_t>(cols.end - cols.begin);
+        const uint32_t pixels =
+            static_cast<uint32_t>(rows.end - rows.begin) * static_cast<uint32_t>(cols.end - cols.begin);
         return {static_cast<uint8_t>(sr / pixels), static_cast<uint8_t>(sg / pixels),
                 static_cast<uint8_t>(sb / pixels)};
     }
@@ -368,6 +374,7 @@ private:
 
     ScratchBuffer<uint16_t> state_{*this}; // 8.8 per channel per light position, while smoothing is on
     bool primed_ = false;                  // false until one frame has been written
+    uint32_t lastSeq_ = 0;                 // the frame already on the strip
     uint32_t fadeStart_ = 0;               // millis() when the current picture first arrived
 };
 
