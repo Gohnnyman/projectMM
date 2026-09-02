@@ -7,6 +7,7 @@
 #include "light/layouts/Layouts.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 // Pins the frame → light mapping end to end, through the real static seam: a live VideoService
@@ -315,4 +316,85 @@ TEST_CASE("AmbilightEffect: edgeDepth leaves interior positions alone") {
     for (int y = 1; y < 7; y++)
         for (int x = 1; x < 7; x++)
             CHECK(std::memcmp(plain.px(x, y), deep.px(x, y), 3) == 0);
+}
+
+
+// --- Black bars --------------------------------------------------------------------------------
+// A letterboxed film puts bars exactly where the top and bottom lights look, so those lights go
+// dark while the picture is bright. Detection moves the zones past the bar. edgeDepth cannot do
+// this: it widens a zone from its edge, so the bar stays inside it.
+
+namespace {
+
+// A VideoService reading a P6 PPM written here: `bar` black rows top and bottom, green between.
+// Written to a file because that is the seam the file source actually uses.
+struct Letterbox {
+    VideoService svc;
+    char path[64] = {};
+    Letterbox(int w, int h, int bar) {
+        // The desktop filesystem is rooted at fsRoot_ ("build"), so the service resolves a bare
+        // name under there — write it to the same place rather than to the real /tmp.
+        std::snprintf(path, sizeof(path), "mm_letterbox_%dx%d_%d.ppm", w, h, bar);
+        char real[128];
+        std::snprintf(real, sizeof(real), "build/%s", path);
+        std::FILE* f = std::fopen(real, "wb");
+        REQUIRE(f != nullptr);
+        std::fprintf(f, "P6\n%d %d\n255\n", w, h);
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                const bool picture = y >= bar && y < h - bar;
+                const uint8_t px[3] = {0, picture ? uint8_t(200) : uint8_t(0), 0};
+                std::fwrite(px, 1, 3, f);
+            }
+        std::fclose(f);
+        svc.source = 1;
+        std::strncpy(svc.file, path, sizeof(svc.file) - 1);
+        svc.applyState();
+    }
+    ~Letterbox() {
+        char real[128];
+        std::snprintf(real, sizeof(real), "build/%s", path);
+        std::remove(real);
+    }
+};
+
+} // namespace
+
+// Off by default: no scan, no shift, identical to before the feature existed.
+TEST_CASE("AmbilightEffect: blackBars off maps across the whole frame") {
+    PatternSource src;
+    Rig plain(8, 8), off(8, 8);
+    plain.fx.saturation = 100;
+    off.fx.saturation = 100;
+    off.fx.detectBlackBars = false;
+    plain.render();
+    off.render();
+    CHECK(std::memcmp(plain.px(4, 0), off.px(4, 0), 3) == 0);
+}
+
+// The top light sits in the bar and reads black; with detection it reads the picture instead.
+TEST_CASE("AmbilightEffect: the top light escapes the letterbox once bars are detected") {
+    Letterbox src(64, 64, 16);   // a quarter of the height black at each end
+    Rig rig(8, 8);
+    rig.fx.saturation = 100;
+    rig.fx.detectBlackBars = true;
+    rig.render();
+
+    CHECK(rig.px(4, 0)[1] == 0);                    // first frame: still inside the bar
+    for (int i = 0; i < 60; i++) rig.tickOnly();    // past the hysteresis window
+    CHECK(rig.px(4, 0)[1] > 100);                   // now reading the green picture
+}
+
+// The pattern's centre is black and its edges are coloured — the OPPOSITE of a letterbox. Nothing
+// must be detected in it, or a picture that fills the frame would get cropped.
+TEST_CASE("AmbilightEffect: a frame that fills the picture reports no bars") {
+    PatternSource src;
+    Rig plain(8, 8), armed(8, 8);
+    plain.fx.saturation = 100;
+    armed.fx.saturation = 100;
+    armed.fx.detectBlackBars = true;
+    plain.render();
+    armed.render();
+    for (int i = 0; i < 60; i++) armed.tickOnly();
+    CHECK(std::memcmp(plain.px(4, 0), armed.px(4, 0), 3) == 0);
 }

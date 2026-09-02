@@ -818,6 +818,12 @@ Paints the layer with the live frame from the [Video](../core/services.md#video)
 
 - `brightness` — scales the sampled colour. Dims *the video*, unlike the driver's brightness which dims everything.
 - `saturation` — how far each channel is pushed from its zone's luma, as a percentage (100 = the mean untouched). Averaging mixes hues, so screen-follow lighting reads washed out without a boost.
+- `smoothing` — how much of the gap to a light's new colour is closed each frame. 0 follows the picture exactly; ~200 is Hyperion's default feel (about 200 ms to settle). The top of the range is a slow colour wash rather than an ambilight.
+- `snapAbove` — a channel moving further than this jumps instead of easing. A scene cut is a real jump, and smoothing through it reads as the lights lagging the picture.
+- `fadeInMs` — ramps the output up from black when a picture arrives after a gap: boot, a console waking, a grabber replugged. 0 lands it at full immediately.
+- `edgeDepth` — how far into the picture the **outermost** lights look, as a percentage. Their own share is 1/height of the frame — a sliver at the very edge, where compression is worst. Hyperion samples ~8%. 0 keeps the plain division, which is what a video wall wants.
+- `detectBlackBars` — find the letterbox and map the lights across the **picture** instead of the frame. Without it, a 2.35:1 film puts bars exactly where the top and bottom lights look and they go dark while the screen is bright. `edgeDepth` cannot fix that: it widens a zone from the edge, so the bar stays inside it.
+- `barLevel` — how dark a pixel must be to count as bar, 0–64. Not 0, because compression leaves ringing at the bar/picture boundary. The default 12 (about 5%) matches Hyperion and suits MJPEG, which is conventionally full-range so black arrives near 0. **If bars are never detected, suspect a grabber passing limited range through** — black then sits at 16 and nothing below 12 ever matches; raise this above 16. Lower it if dark scenes get cropped instead. A reading is adopted only after 30 frames agree, and anything deeper than 40% of the axis is refused as a scene rather than a bar.
 
 **The layout decides the shape.** The effect fills a logical box and knows nothing else. On a [Rectangle](layouts.md#rectangle) the interior maps to no LED, so a border strip shows the frame's border; on a [Grid](layouts.md#grid) the same effect is a video wall. Where your strip starts and which way it runs are `startCorner` and `clockwise` on the layout, not settings here.
 

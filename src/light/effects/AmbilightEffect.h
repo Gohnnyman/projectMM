@@ -17,8 +17,8 @@ namespace mm {
 //   DESTINATION  the layer's logical box, counted in          lightsX x lightsY
 //                LIGHT POSITIONS
 //
-// The source is far the bigger — e.g. a 640x480 picture onto a strip of 60 positions — so each light
-// position owns a whole rectangle of pixels and shows their average. That rectangle is a Zone.
+// The source is far the bigger — e.g. a 640x480 picture onto a strip of 60 positions — so each
+// light position owns a whole rectangle of pixels and shows their average.
 //
 // It fills the box uniformly and never asks which positions actually reach an LED; that is the
 // layout's business. On a RectangleLayout the interior maps to nothing, so a border strip shows the
@@ -29,12 +29,14 @@ class AmbilightEffect : public EffectBase {
 public:
     Dim dimensions() const override { return Dim::D2; } // a frame is flat; the Layer extrudes z
 
-    uint8_t brightness = 255; // dims THE VIDEO; the driver's brightness dims everything
-    uint8_t saturation = 130; // percent of the distance from grey; 100 = the mean untouched
-    uint8_t smoothing = 0;    // 0 = follow the frame exactly; higher = slower to move
-    uint8_t snapAbove = 80;   // jump rather than smooth when a channel moves further than this; 0 = never
-    uint16_t fadeInMs = 0;    // ramp up from black over this long when a picture first arrives; 0 = off
-    uint8_t edgeDepth = 0;    // percent of the frame the OUTERMOST positions look in; 0 = their own share
+    uint8_t brightness = 255;     // dims THE VIDEO; the driver's brightness dims everything
+    uint8_t saturation = 130;     // percent of the distance from grey; 100 = the mean untouched
+    uint8_t smoothing = 0;        // 0 = follow the frame exactly; higher = slower to move
+    uint8_t snapAbove = 80;       // jump rather than smooth when a channel moves further than this; 0 = never
+    uint16_t fadeInMs = 0;        // ramp up from black over this long when a picture first arrives; 0 = off
+    uint8_t edgeDepth = 0;        // percent of the frame the OUTERMOST positions look in; 0 = their own share
+    bool detectBlackBars = false; // find the letterbox and map the lights across the picture
+    uint8_t barLevel = 12;        // a channel at or below this counts as bar; ~5%, for compression noise
 
     void defineControls() override {
         controls_.addUint8("brightness", brightness, 0, 255);
@@ -45,10 +47,14 @@ public:
         controls_.setHidden(controls_.count() - 1, smoothing == 0);
         // Its own control because smoothing lags the COLOUR and this ramps the LEVEL.
         controls_.addUint16("fadeInMs", fadeInMs, 0, 10000);
-        // How deep the outermost positions look into the picture. 0 = their own share,
-        // 50 = the outer half of the picture
-        // Hyperion samples ~8%
-        controls_.addUint8("edgeDepth", edgeDepth, 0, 50);
+        controls_.addUint8("edgeDepth", edgeDepth, 0, 50); // Hyperion samples ~8%
+        // - a letterboxed film puts bars where the top and bottom lights look, so they go dark
+        // - edgeDepth cannot help: it widens a zone from the edge, so the bar stays inside it
+        // - this moves the zones instead, mapping the lights across the picture it finds
+        controls_.addBool("detectBlackBars", detectBlackBars);
+        // Raise it if bars are missed, lower it if dark scenes get cropped; the doc page has why.
+        controls_.addUint8("barLevel", barLevel, 0, 64);
+        controls_.setHidden(controls_.count() - 1, !detectBlackBars);
     }
 
     /// Turning smoothing on or off allocates or frees the accumulators, so it has to re-run
@@ -79,22 +85,19 @@ public:
         const lengthType lightsX = width(), lightsY = height();
         if (lightsX <= 0 || lightsY <= 0) return;
 
-        const size_t needed = static_cast<size_t>(lightsX) * static_cast<size_t>(lightsY) * 3u;
-        const bool canSmooth = smoothing != 0 && state_ && state_.count() >= needed;
+        const Region region = regionFor(*frame);
+        if (region.width <= 0 || region.height <= 0) return;
 
+        const bool canSmooth = smootherReady(lightsX, lightsY);
         if (!primed_) fadeStart_ = elapsed(); // a picture arriving after a gap restarts the ramp
         const uint16_t level = fadeLevel();
 
-        // Pixels, not percent, so the divide happens twice a frame rather than twice a position.
-        const int deepX = (frame->width * edgeDepth) / 100;
-        const int deepY = (frame->height * edgeDepth) / 100;
-
         for (lengthType y = 0; y < lightsY; y++) {
-            const Span rows = spanFor(y, lightsY, frame->height, deepY); // constant down the row
+            const Span rows = region.rows(y, lightsY); // constant down the row
             for (lengthType x = 0; x < lightsX; x++) {
-                const Span cols = spanFor(x, lightsX, frame->width, deepX);
+                const Span cols = region.cols(x, lightsX);
                 const size_t lightId = static_cast<size_t>(y) * lightsX + x;
-                RGB color = adjust(meanOf(*frame, {cols, rows}));
+                RGB color = adjust(meanOf(*frame, cols, rows));
                 if (canSmooth) color = smooth(lightId, color);
                 if (level != 256) color = dim(color, level);
                 draw::pixel(out, {x, y, 0}, color);
@@ -107,12 +110,107 @@ private:
     /// Half-open range of SOURCE pixels `[begin, end)` along one axis.
     struct Span {
         int begin, end;
+        Span shifted(int by) const { return {begin + by, end + by}; }
     };
 
-    /// The block of source pixels ONE light position owns, and averages down to its colour.
-    struct Zone {
-        Span cols, rows;
+    // The actual region of the source frame that the lights cover.
+    // Could be smaller than the full frame if black bars are detected.
+    struct Region {
+        int left = 0, top = 0; // where the picture starts inside the frame
+        int width = 0, height = 0;
+        int deepX = 0, deepY = 0; // edgeDepth in pixels, so the divide is not per position
+
+        /// Which source pixels one light position covers — its share of the picture, shifted back
+        /// into frame coordinates. Every input lives here, so the loop only asks.
+        Span cols(int x, int lightsX) const { return spanFor(x, lightsX, width, deepX).shifted(left); }
+        Span rows(int y, int lightsY) const { return spanFor(y, lightsY, height, deepY).shifted(top); }
     };
+
+    Region regionFor(const VideoFrame& frame) MM_NONBLOCKING {
+        const Bars bars = trackBars(frame);
+        Region r;
+        r.left = bars.left;
+        r.top = bars.top;
+        r.width = frame.width - bars.left - bars.right;
+        r.height = frame.height - bars.top - bars.bottom;
+        r.deepX = (r.width * edgeDepth) / 100;
+        r.deepY = (r.height * edgeDepth) / 100;
+        return r;
+    }
+
+    /// Whether this frame can be smoothed: turned on, and the accumulators are there and big enough.
+    bool smootherReady(lengthType lightsX, lengthType lightsY) const MM_NONBLOCKING {
+        return smoothing != 0 && state_ &&
+               state_.count() >= static_cast<size_t>(lightsX) * static_cast<size_t>(lightsY) * 3u;
+    }
+
+    /// How thick the bar at each edge is, in pixels
+    struct Bars {
+        int top = 0, bottom = 0, left = 0, right = 0;
+        bool operator==(const Bars& o) const {
+            return top == o.top && bottom == o.bottom && left == o.left && right == o.right;
+        }
+    };
+
+    static constexpr int kProbes = 8;         // sample points per scanned line
+    static constexpr int kMaxBarPercent = 40; // a "bar" deeper than this is a dark scene
+    static constexpr uint8_t kStableFrames = 30;
+
+    /// Which edge a bar is being measured from. Top and Bottom scan rows, Left and Right columns.
+    enum class Edge : uint8_t { Top, Bottom, Left, Right };
+
+    static bool scansRows(Edge e) MM_NONBLOCKING { return e == Edge::Top || e == Edge::Bottom; }
+    static bool scansFromEnd(Edge e) MM_NONBLOCKING { return e == Edge::Bottom || e == Edge::Right; }
+
+    /// Is this line dark all the way across? Sampled at a few evenly spaced points rather than
+    /// every pixel — a bar is uniform, so a handful of probes settles it for a fraction of the cost.
+    bool lineIsDark(const VideoFrame& frame, int line, Edge edge) const MM_NONBLOCKING {
+        const bool horizontal = scansRows(edge);
+        const int along = horizontal ? frame.width : frame.height;
+        for (int i = 0; i < kProbes; i++) {
+            const int v = along * (2 * i + 1) / (2 * kProbes); // midpoints, so the corners are skipped
+            const int x = horizontal ? v : line;
+            const int y = horizontal ? line : v;
+            const uint8_t* px = frame.rgb + (static_cast<size_t>(y) * frame.width + x) * 3;
+            if (px[0] > barLevel || px[1] > barLevel || px[2] > barLevel) return false;
+        }
+        return true;
+    }
+
+    /// How many dark lines run inward from one edge, capped so a dark SCENE cannot be mistaken for
+    /// a bar and blank the strip.
+    int barFrom(const VideoFrame& frame, Edge edge) const MM_NONBLOCKING {
+        const int extent = scansRows(edge) ? frame.height : frame.width;
+        const int limit = extent * kMaxBarPercent / 100;
+        for (int i = 0; i < limit; i++) {
+            const int line = scansFromEnd(edge) ? extent - 1 - i : i;
+            if (!lineIsDark(frame, line, edge)) return i;
+        }
+        return limit;
+    }
+
+    /// Scan this frame and return the bars IN EFFECT — which is not necessarily what was just
+    /// seen. A reading is adopted only once kStableFrames of them agree: bars come and go at scene
+    /// changes, and a mapping that follows every dark frame twitches worse than one that ignores
+    /// them. Hence the state; the return value is what the caller should actually map across.
+    Bars trackBars(const VideoFrame& frame) MM_NONBLOCKING {
+        if (!detectBlackBars) {
+            bars_ = Bars{};
+            return bars_;
+        }
+        Bars found;
+        found.top = barFrom(frame, Edge::Top);
+        found.bottom = barFrom(frame, Edge::Bottom);
+        found.left = barFrom(frame, Edge::Left);
+        found.right = barFrom(frame, Edge::Right);
+        if (!(found == candidate_)) {
+            candidate_ = found;
+            stable_ = 0;
+        } else if (stable_ < kStableFrames && ++stable_ == kStableFrames) {
+            bars_ = found;
+        }
+        return bars_;
+    }
 
     /// Which source pixels light position `lightId` covers along one axis.
     /// - `pixels` shared evenly among `lightsSize` positions, cut at the edges so ranges meet exactly
@@ -124,27 +222,33 @@ private:
         int end = static_cast<int>((static_cast<long>(lightId + 1) * pixels) / lightsSize);
         if (end <= begin) end = begin + 1;
         if (end > pixels) end = pixels;
-        if (lightId == 0) end = std::max(end, deep);                             // down/right, inward
-        if (lightId == lightsSize - 1) begin = std::min(begin, pixels - deep);   // up/left, inward
+        if (lightId == 0) end = std::max(end, deep);                           // down/right, inward
+        if (lightId == lightsSize - 1) begin = std::min(begin, pixels - deep); // up/left, inward
         return {begin, end};
     }
 
-    /// Mean colour of one zone — the box filter Hyperion uses. uint32 accumulators because
-    /// 640x480 into 32x18 is ~520 pixels a zone, and 520 x 255 overflows 16 bits several times.
-    static RGB meanOf(const VideoFrame& frame, const Zone& zone) {
+    /// Mean of one light position's pixels — the box filter Hyperion uses. uint32 accumulators
+    /// because 640x480 onto 32x18 is ~520 pixels each, and 520 x 255 overflows 16 bits several times.
+    static RGB meanOf(const VideoFrame& frame, Span cols, Span rows) {
         uint32_t sr = 0, sg = 0, sb = 0;
-        for (int py = zone.rows.begin; py < zone.rows.end; py++) {
-            const uint8_t* px = frame.rgb + (static_cast<size_t>(py) * frame.width + zone.cols.begin) * 3;
-            for (int pxX = zone.cols.begin; pxX < zone.cols.end; pxX++, px += 3) {
+        for (int py = rows.begin; py < rows.end; py++) {
+            const uint8_t* px = frame.rgb + (static_cast<size_t>(py) * frame.width + cols.begin) * 3;
+            for (int pxX = cols.begin; pxX < cols.end; pxX++, px += 3) {
                 sr += px[0];
                 sg += px[1];
                 sb += px[2];
             }
         }
-        const uint32_t pixels = static_cast<uint32_t>(zone.rows.end - zone.rows.begin) *
-                                static_cast<uint32_t>(zone.cols.end - zone.cols.begin);
+        const uint32_t pixels = static_cast<uint32_t>(rows.end - rows.begin) *
+                                static_cast<uint32_t>(cols.end - cols.begin);
         return {static_cast<uint8_t>(sr / pixels), static_cast<uint8_t>(sg / pixels),
                 static_cast<uint8_t>(sb / pixels)};
+    }
+
+    /// Move one channel `saturation` percent of the way out from `luma`, clamped to a byte.
+    uint8_t stretch(uint8_t v, int luma) const MM_NONBLOCKING {
+        const int out = luma + ((static_cast<int>(v) - luma) * static_cast<int>(saturation)) / 100;
+        return static_cast<uint8_t>(out < 0 ? 0 : (out > 255 ? 255 : out));
     }
 
     /// Saturation runs on the RAW mean, before brightness: stretching around an already-dimmed luma
@@ -202,15 +306,13 @@ private:
         return {out[0], out[1], out[2]};
     }
 
+    Bars bars_;      // in effect
+    Bars candidate_; // seen most recently
+    uint8_t stable_ = 0;
+
     ScratchBuffer<uint16_t> state_{*this}; // 8.8 per channel per light position, while smoothing is on
     bool primed_ = false;                  // false until one frame has been written
     uint32_t fadeStart_ = 0;               // millis() when the current picture first arrived
-
-    /// Move one channel `saturation` percent of the way out from `luma`, clamped to a byte.
-    uint8_t stretch(uint8_t v, int luma) const MM_NONBLOCKING {
-        const int out = luma + ((static_cast<int>(v) - luma) * static_cast<int>(saturation)) / 100;
-        return static_cast<uint8_t>(out < 0 ? 0 : (out > 255 ? 255 : out));
-    }
 };
 
 } // namespace mm
