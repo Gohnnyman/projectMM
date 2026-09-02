@@ -200,8 +200,10 @@ private:
 
     platform::VideoCaptureHandle capture_;
 
-    // Derived from the selected row, never typed — what actually gets requested of the device.
-    uint16_t usbWidth = 640;
+    // Derived from the selected row, never typed — what actually gets requested of the device, and
+    // the opening bid before one has listed its formats. 16:9 on purpose: a 4:3 capture makes a
+    // 16:9 source letterbox into it, and the border zones then average bars instead of picture.
+    uint16_t usbWidth = 848;
     uint16_t usbHeight = 480;
     uint8_t usbFps = 60;
 
