@@ -3,18 +3,25 @@
 #include "core/VideoService.h"
 #include "light/effects/EffectBase.h"
 
+#include <cstring>
+
 namespace mm {
 
 // Screen-follow ambient light: paints the layer with the live video frame, so lights around a
 // display glow the colour of the picture nearest them (the Ambilight / Hyperion behaviour).
 //
-// - Reads its pixels instead of generating them. Pulled from VideoService::latestFrame()
+// TWO SPACES, and every name below says which one it is in:
 //
-// - Averages a rectangle per output cell
+//   SOURCE       the video frame, counted in PIXELS           frame.width x frame.height
+//   DESTINATION  the layer's logical box, counted in          lightsX x lightsY
+//                LIGHT POSITIONS
 //
-// - Fills the whole logical box uniformly and never asks which cells reach an LED — that is the
-//   layout's business. On a RectangleLayout the interior maps to nothing, so a border strip shows
-//   the frame's border for free; on a GridLayout the same effect is a video wall.
+// The source is far the bigger — e.g. a 640x480 picture onto a strip of 60 positions — so each light
+// position owns a whole rectangle of pixels and shows their average. That rectangle is a Zone.
+//
+// It fills the box uniformly and never asks which positions actually reach an LED; that is the
+// layout's business. On a RectangleLayout the interior maps to nothing, so a border strip shows the
+// frame's border for free; on a GridLayout the same effect is a video wall.
 
 /// Effect that paints the layer with the live video frame (screen-follow ambient light).
 class AmbilightEffect : public EffectBase {
@@ -23,78 +30,112 @@ public:
 
     uint8_t brightness = 255; // dims THE VIDEO; the driver's brightness dims everything
     uint8_t saturation = 130; // percent of the distance from grey; 100 = the mean untouched
+    uint8_t smoothing = 0;    // 0 = follow the frame exactly; higher = slower to move
+    uint8_t snapAbove = 80;   // jump rather than smooth when a channel moves further than this; 0 = never
+    uint16_t fadeInMs = 0;    // ramp up from black over this long when a picture first arrives; 0 = off
 
     void defineControls() override {
         controls_.addUint8("brightness", brightness, 0, 255);
         controls_.addUint8("saturation", saturation, 0, 200);
+        controls_.addUint8("smoothing", smoothing, 0, 255);
+        // A cut is a real jump, and smoothing through it reads as the lights lagging the picture.
+        controls_.addUint8("snapAbove", snapAbove, 0, 255);
+        controls_.setHidden(controls_.count() - 1, smoothing == 0);
+        // Its own control because smoothing lags the COLOUR and this ramps the LEVEL.
+        controls_.addUint16("fadeInMs", fadeInMs, 0, 10000);
+    }
+
+    /// Turning smoothing on or off allocates or frees the accumulators, so it has to re-run
+    /// prepare() — without this the buffer stays empty and the setting does nothing.
+    bool affectsPrepare(const char* name) const override { return std::strcmp(name, "smoothing") == 0; }
+
+    /// One 8.8 accumulator per channel, allocated only while smoothing is on.
+    void prepare() override {
+        // lengthType is signed: a stray negative would cast to a colossal size_t, not to nothing.
+        const lengthType w = width(), h = height();
+        const bool sized = smoothing != 0 && w > 0 && h > 0;
+        state_.resize(sized ? static_cast<size_t>(w) * static_cast<size_t>(h) * 3u : 0);
+        primed_ = false;
     }
 
     void tick() MM_NONBLOCKING override {
-        const VideoFrame* f = VideoService::latestFrame();
-        const draw::Canvas cv = canvas();
+        const VideoFrame* frame = VideoService::latestFrame();
+        const draw::Canvas out = canvas();
 
-        // No source: paint black rather than return.
-        // Returning would leave the PREVIOUS effect's picture frozen on the strip
-        // A dropped frame never reaches here: VideoService keeps its buffer, so `rgb` stays readable.
-        if (!f->rgb || f->width == 0 || f->height == 0) {
-            draw::fill(cv, {0, 0, 0});
+        // No source: paint black rather than return, or the PREVIOUS effect's picture stays frozen
+        // on the strip. A merely dropped frame never lands here — VideoService keeps its buffer.
+        if (!frame->rgb || frame->width == 0 || frame->height == 0) {
+            draw::fill(out, {0, 0, 0});
+            primed_ = false; // so the next frame lands whole instead of creeping up out of black
             return;
         }
-        const lengthType dstWidth = width(), dstHeight = height();
-        if (dstWidth <= 0 || dstHeight <= 0) return;
 
-        // Meaning each zone in one destination Cell
-        for (lengthType y = 0; y < dstHeight; y++) {
-            for (lengthType x = 0; x < dstWidth; x++) {
-                const Zone z = zoneFor(x, y, dstWidth, dstHeight, *f);
-                draw::pixel(cv, {x, y, 0}, adjust(meanOf(*f, z)));
+        const lengthType lightsX = width(), lightsY = height();
+        if (lightsX <= 0 || lightsY <= 0) return;
+
+        const size_t needed = static_cast<size_t>(lightsX) * static_cast<size_t>(lightsY) * 3u;
+        const bool canSmooth = smoothing != 0 && state_ && state_.count() >= needed;
+
+        if (!primed_) fadeStart_ = elapsed(); // a picture arriving after a gap restarts the ramp
+        const uint16_t level = fadeLevel();
+
+        for (lengthType y = 0; y < lightsY; y++) {
+            for (lengthType x = 0; x < lightsX; x++) {
+                const Zone zone = zoneFor(x, y, lightsX, lightsY, *frame);
+                const size_t light = static_cast<size_t>(y) * lightsX + x;
+                RGB color = adjust(meanOf(*frame, zone));
+                if (canSmooth) color = smooth(light, color);
+                if (level != 256) color = dim(color, level);
+                draw::pixel(out, {x, y, 0}, color);
             }
         }
+        primed_ = true;
     }
 
 private:
-    /// Half-open range of source pixels `[begin, end)` along one axis.
+    /// Half-open range of SOURCE pixels `[begin, end)` along one axis.
     struct Span {
         int begin, end;
     };
 
-    /// The source rectangle one logical cell owns, and averages down to its colour.
+    /// The block of source pixels ONE light position owns, and averages down to its colour.
     struct Zone {
         Span cols, rows;
     };
 
-    /// Split one axis of `srcLen` source pixels across `cells` cells.
-    /// - From the cell EDGES, so consecutive spans meet exactly: every source pixel belongs to one
-    ///   cell, none to two, none to nothing.
-    /// - An empty span widens to one shared pixel, so a layer finer than the source still writes
-    ///   every light instead of leaving some unset.
-    static Span spanFor(int index, int dstLen, int srcLen) {
-        const int begin = static_cast<int>((static_cast<long>(index) * srcLen) / dstLen);
-        int end = static_cast<int>((static_cast<long>(index + 1) * srcLen) / dstLen);
+    /// Which source pixels light position `light` covers, along one axis. `pixels` of them are
+    /// divided evenly among `lights` positions.
+    /// - Cut at the edges, so consecutive ranges meet exactly: every pixel belongs to one position,
+    ///   none to two, none to nothing.
+    /// - An empty range widens to one shared pixel, so a strip finer than the picture still lights
+    ///   every position instead of leaving some dark.
+    static Span spanFor(int light, int lights, int pixels) {
+        const int begin = static_cast<int>((static_cast<long>(light) * pixels) / lights);
+        int end = static_cast<int>((static_cast<long>(light + 1) * pixels) / lights);
         if (end <= begin) end = begin + 1;
-        return {begin, end < srcLen ? end : srcLen};
+        return {begin, end < pixels ? end : pixels};
     }
 
-    static Zone zoneFor(int x, int y, int w, int h, const VideoFrame& f) {
-        return {spanFor(x, w, f.width), spanFor(y, h, f.height)};
+    static Zone zoneFor(int x, int y, int lightsX, int lightsY, const VideoFrame& frame) {
+        return {spanFor(x, lightsX, frame.width), spanFor(y, lightsY, frame.height)};
     }
 
-    /// Mean colour of one zone — the box filter, the same per-zone computation Hyperion performs.
-    /// uint32 accumulators: 640x480 into 32x18 is ~520 pixels per zone, and 520 x 255 overflows 16
-    /// bits several times over.
-    static RGB meanOf(const VideoFrame& f, const Zone& z) {
+    /// Mean colour of one zone — the box filter Hyperion uses. uint32 accumulators because
+    /// 640x480 into 32x18 is ~520 pixels a zone, and 520 x 255 overflows 16 bits several times.
+    static RGB meanOf(const VideoFrame& frame, const Zone& zone) {
         uint32_t sr = 0, sg = 0, sb = 0;
-        for (int y = z.rows.begin; y < z.rows.end; y++) {
-            const uint8_t* px = f.rgb + (static_cast<size_t>(y) * f.width + z.cols.begin) * 3;
-            for (int x = z.cols.begin; x < z.cols.end; x++, px += 3) {
+        for (int py = zone.rows.begin; py < zone.rows.end; py++) {
+            const uint8_t* px = frame.rgb + (static_cast<size_t>(py) * frame.width + zone.cols.begin) * 3;
+            for (int pxX = zone.cols.begin; pxX < zone.cols.end; pxX++, px += 3) {
                 sr += px[0];
                 sg += px[1];
                 sb += px[2];
             }
         }
-        const uint32_t n = static_cast<uint32_t>(z.rows.end - z.rows.begin) *
-                           static_cast<uint32_t>(z.cols.end - z.cols.begin);
-        return {static_cast<uint8_t>(sr / n), static_cast<uint8_t>(sg / n), static_cast<uint8_t>(sb / n)};
+        const uint32_t pixels = static_cast<uint32_t>(zone.rows.end - zone.rows.begin) *
+                                static_cast<uint32_t>(zone.cols.end - zone.cols.begin);
+        return {static_cast<uint8_t>(sr / pixels), static_cast<uint8_t>(sg / pixels),
+                static_cast<uint8_t>(sb / pixels)};
     }
 
     /// Saturation runs on the RAW mean, before brightness: stretching around an already-dimmed luma
@@ -113,6 +154,48 @@ private:
         }
         return c;
     }
+
+    /// How far up the ramp this frame is, 256 (unity) once it is over or when fadeInMs is 0.
+    /// Unsigned subtraction, so the millisecond counter wrapping costs one frame at full level.
+    uint16_t fadeLevel() const MM_NONBLOCKING {
+        if (!fadeInMs) return 256;
+        const uint32_t since = elapsed() - fadeStart_;
+        return since < fadeInMs ? static_cast<uint16_t>((since * 256u) / fadeInMs) : 256;
+    }
+
+    /// Scale by `level`/256, the fade-in envelope.
+    static RGB dim(RGB c, uint16_t level) MM_NONBLOCKING {
+        return {static_cast<uint8_t>((c.r * level) >> 8), static_cast<uint8_t>((c.g * level) >> 8),
+                static_cast<uint8_t>((c.b * level) >> 8)};
+    }
+
+    /// Walk each channel a fraction of the way toward `color`. The state is 8.8 so the fraction of
+    /// a step survives between frames — in whole bytes a slow setting rounds every step to zero.
+    RGB smooth(size_t light, RGB color) MM_NONBLOCKING {
+        const uint8_t target[3] = {color.r, color.g, color.b};
+        const int32_t step = 256 - smoothing;                      // gap closed per frame, of 256
+        const int32_t snap = static_cast<int32_t>(snapAbove) << 8; // 8.8, to compare against delta
+        uint8_t out[3];
+        for (uint8_t ch = 0; ch < 3; ch++) {
+            const size_t slot = light * 3 + ch; // three accumulators per position, row-major
+            const int32_t held = state_[slot];
+            const int32_t want = static_cast<int32_t>(target[ch]) << 8;
+            const int32_t delta = want - held;
+            // The first frame after a gap, and any move big enough to be a cut, land whole.
+            const bool jump = !primed_ || (snapAbove && (delta > snap || delta < -snap));
+            // >> floors, so without the nudge a rising channel stalls one count short for ever
+            // (white would render as 254) while a falling one arrives.
+            int32_t move = (delta * step) >> 8;
+            if (move == 0 && delta != 0) move = delta > 0 ? 1 : -1;
+            state_[slot] = static_cast<uint16_t>(jump ? want : held + move);
+            out[ch] = static_cast<uint8_t>(state_[slot] >> 8);
+        }
+        return {out[0], out[1], out[2]};
+    }
+
+    ScratchBuffer<uint16_t> state_{*this}; // 8.8 per channel per light position, while smoothing is on
+    bool primed_ = false;                  // false until one frame has been written
+    uint32_t fadeStart_ = 0;               // millis() when the current picture first arrived
 
     /// Move one channel `saturation` percent of the way out from `luma`, clamped to a byte.
     uint8_t stretch(uint8_t v, int luma) const MM_NONBLOCKING {

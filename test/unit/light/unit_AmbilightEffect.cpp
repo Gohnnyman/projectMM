@@ -7,6 +7,7 @@
 #include "light/layouts/Layouts.h"
 
 #include <cstdint>
+#include <cstring>
 
 // Pins the frame → light mapping end to end, through the real static seam: a live VideoService
 // publishes a frame, the effect renders it, the buffer is read back. The checks are about
@@ -43,6 +44,9 @@ struct Rig {
         layer.addChild(&fx);
     }
     void render() { layer.applyState(); layer.tick(); }
+    // applyState() re-runs prepare(), which un-primes the smoother and makes every frame jump.
+    // Anything testing the EASING has to tick without it.
+    void tickOnly() { layer.tick(); }
     const uint8_t* px(int x, int y) const {
         return layer.buffer().data() + (static_cast<size_t>(y) * grid.width + x) * 3;
     }
@@ -177,4 +181,95 @@ TEST_CASE("AmbilightEffect: no video source paints black, never the previous eff
     CHECK(rig.px(2, 2)[0] == 0);
     CHECK(rig.px(2, 2)[1] == 0);
     CHECK(rig.px(2, 2)[2] == 0);
+}
+
+// --- Smoothing ---------------------------------------------------------------------------------
+// The accumulators are 8.8 precisely so a slow setting still ARRIVES: in whole bytes every step
+// rounds to zero and the light stalls short of its target forever. These check that it converges,
+// and that a big move still lands at once.
+
+// Off must be bit-identical to no smoothing at all, since it is the default.
+TEST_CASE("AmbilightEffect: smoothing off follows the frame exactly") {
+    PatternSource src;
+    Rig plain(8, 8), off(8, 8);
+    plain.fx.saturation = 100;
+    off.fx.saturation = 100;
+    off.fx.smoothing = 0;
+    plain.render();
+    off.render();
+    CHECK(std::memcmp(plain.px(4, 0), off.px(4, 0), 3) == 0);
+}
+
+// The first frame after a gap must land immediately — creeping up from black would show as a fade-in
+// every time the source reconnects.
+TEST_CASE("AmbilightEffect: the first frame lands whole, not smoothed up out of black") {
+    PatternSource src;
+    Rig fast(8, 8), slow(8, 8);
+    fast.fx.saturation = 100;
+    slow.fx.saturation = 100;
+    slow.fx.smoothing = 240;   // very slow, so a smoothed first frame would be nearly black
+    fast.render();
+    slow.render();
+    CHECK(std::memcmp(fast.px(4, 0), slow.px(4, 0), 3) == 0);
+}
+
+// The one that 8-bit state would fail: with heavy smoothing every per-frame step is a fraction of
+// a byte, so the value only moves if those fractions are kept between frames. Checked in BOTH
+// directions — >> floors, so a rising channel and a falling one converge by different routes and
+// only the falling one works by accident.
+TEST_CASE("AmbilightEffect: a heavily smoothed light converges exactly, rising and falling") {
+    PatternSource src;
+    Rig rig(8, 8);
+    rig.fx.saturation = 100;
+    rig.fx.smoothing = 250;   // a step of ~6/256 of the remaining distance
+    rig.fx.snapAbove = 0;     // never jump, so only the smoothing can get it there
+    rig.render();             // primes on the first frame, so this one lands whole
+
+    const uint8_t bright = rig.px(4, 0)[0];
+    REQUIRE(bright > 8);      // the band has somewhere to fall from
+
+    // Falling: drive the target down and let it smooth in.
+    rig.fx.brightness = 8;
+    for (int i = 0; i < 2000; i++) rig.tickOnly();
+    const uint8_t dim = rig.px(4, 0)[0];
+    CHECK(dim < bright / 2);
+
+    // Rising back to where it started must land on the SAME value, not one short.
+    rig.fx.brightness = 255;
+    for (int i = 0; i < 2000; i++) rig.tickOnly();
+    CHECK(rig.px(4, 0)[0] == bright);
+}
+
+// The soft start rides OUTSIDE the smoother: the accumulators keep tracking the true picture while
+// only the emitted level ramps. Off by default, so the picture lands at full the moment it arrives.
+TEST_CASE("AmbilightEffect: fadeInMs off means the first picture lands at full level") {
+    PatternSource src;
+    Rig instant(8, 8), faded(8, 8);
+    instant.fx.saturation = 100;
+    faded.fx.saturation = 100;
+    faded.fx.fadeInMs = 0;
+    instant.render();
+    faded.render();
+    CHECK(std::memcmp(instant.px(4, 0), faded.px(4, 0), 3) == 0);
+}
+
+// With a ramp set, the first frame must be dark and later frames brighter — the whole point being
+// that a room does not jump to full brightness the instant a console wakes up.
+TEST_CASE("AmbilightEffect: fadeInMs ramps the first frames up from black") {
+    PatternSource src;
+    Rig rig(8, 8);
+    rig.fx.saturation = 100;
+    rig.fx.fadeInMs = 4000;   // long, so the first ticks land near the bottom of the ramp
+    rig.render();
+
+    const uint8_t first = rig.px(4, 0)[0];
+    for (int i = 0; i < 50; i++) rig.tickOnly();
+    const uint8_t later = rig.px(4, 0)[0];
+
+    CHECK(later >= first);    // never goes backwards
+    // And it does reach full: the reference rig has no ramp, so its value is the target.
+    Rig reference(8, 8);
+    reference.fx.saturation = 100;
+    reference.render();
+    CHECK(later <= reference.px(4, 0)[0]);
 }
