@@ -45,7 +45,7 @@ struct Rig {
     }
     void render() { layer.applyState(); layer.tick(); }
     // applyState() re-runs prepare(), which un-primes the smoother and makes every frame jump.
-    // Anything testing the EASING has to tick without it.
+    // Anything testing the SMOOTHING has to tick without it.
     void tickOnly() { layer.tick(); }
     const uint8_t* px(int x, int y) const {
         return layer.buffer().data() + (static_cast<size_t>(y) * grid.width + x) * 3;
@@ -106,8 +106,8 @@ TEST_CASE("AmbilightEffect: every light is written, none left dark by an empty z
     }
 }
 
-// More lights than source pixels: neighbouring cells must SHARE one rather than resolve to an
-// empty zone. The pattern is 64 wide, so a 128-wide layer forces the guard.
+// More lights than source pixels: neighbouring positions must SHARE one rather than resolve to
+// an empty zone. The pattern is 64 wide, so a 128-wide layer forces the guard.
 TEST_CASE("AmbilightEffect: a layer finer than the frame still writes every light") {
     PatternSource src;
     Rig rig(128, 4);
@@ -214,9 +214,9 @@ TEST_CASE("AmbilightEffect: the first frame lands whole, not smoothed up out of 
 }
 
 // The one that 8-bit state would fail: with heavy smoothing every per-frame step is a fraction of
-// a byte, so the value only moves if those fractions are kept between frames. Checked in BOTH
-// directions — >> floors, so a rising channel and a falling one converge by different routes and
-// only the falling one works by accident.
+// a byte, so the value only moves if those fractions are kept between frames. Both directions,
+// because >> floors: a falling channel's last steps round away from zero and a rising one's round
+// to it, so they arrive by different routes and only one of them for free.
 TEST_CASE("AmbilightEffect: a heavily smoothed light converges exactly, rising and falling") {
     PatternSource src;
     Rig rig(8, 8);
@@ -272,4 +272,47 @@ TEST_CASE("AmbilightEffect: fadeInMs ramps the first frames up from black") {
     reference.fx.saturation = 100;
     reference.render();
     CHECK(later <= reference.px(4, 0)[0]);
+}
+
+// --- edgeDepth ---------------------------------------------------------------------------------
+// A border light's own share is 1/height of the frame — a sliver at the very edge. edgeDepth lets
+// the outermost positions reach further in without changing how many of them there are.
+
+// Off is the default, so it must be the plain division exactly.
+TEST_CASE("AmbilightEffect: edgeDepth 0 leaves the zones as the plain division") {
+    PatternSource src;
+    Rig plain(8, 8), zero(8, 8);
+    plain.fx.saturation = 100;
+    zero.fx.saturation = 100;
+    zero.fx.edgeDepth = 0;
+    plain.render();
+    zero.render();
+    CHECK(std::memcmp(plain.px(4, 0), zero.px(4, 0), 3) == 0);
+}
+
+// The point of the control: the top row must see further down the picture than its own 1/8 share.
+TEST_CASE("AmbilightEffect: edgeDepth makes the outer row sample deeper") {
+    PatternSource src;
+    Rig shallow(8, 8), deep(8, 8);
+    shallow.fx.saturation = 100;
+    deep.fx.saturation = 100;
+    deep.fx.edgeDepth = 50;   // half the frame, so it reaches well past the top band
+    shallow.render();
+    deep.render();
+    CHECK(std::memcmp(shallow.px(4, 0), deep.px(4, 0), 3) != 0);
+}
+
+// Only the outermost ring moves. An interior position has no edge to reach in from, so a video
+// wall is unaffected even with the control turned up.
+TEST_CASE("AmbilightEffect: edgeDepth leaves interior positions alone") {
+    PatternSource src;
+    Rig plain(8, 8), deep(8, 8);
+    plain.fx.saturation = 100;
+    deep.fx.saturation = 100;
+    deep.fx.edgeDepth = 50;
+    plain.render();
+    deep.render();
+    for (int y = 1; y < 7; y++)
+        for (int x = 1; x < 7; x++)
+            CHECK(std::memcmp(plain.px(x, y), deep.px(x, y), 3) == 0);
 }

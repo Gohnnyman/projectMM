@@ -3,6 +3,7 @@
 #include "core/VideoService.h"
 #include "light/effects/EffectBase.h"
 
+#include <algorithm> // std::max / std::min
 #include <cstring>
 
 namespace mm {
@@ -33,6 +34,7 @@ public:
     uint8_t smoothing = 0;    // 0 = follow the frame exactly; higher = slower to move
     uint8_t snapAbove = 80;   // jump rather than smooth when a channel moves further than this; 0 = never
     uint16_t fadeInMs = 0;    // ramp up from black over this long when a picture first arrives; 0 = off
+    uint8_t edgeDepth = 0;    // percent of the frame the OUTERMOST positions look in; 0 = their own share
 
     void defineControls() override {
         controls_.addUint8("brightness", brightness, 0, 255);
@@ -43,6 +45,10 @@ public:
         controls_.setHidden(controls_.count() - 1, smoothing == 0);
         // Its own control because smoothing lags the COLOUR and this ramps the LEVEL.
         controls_.addUint16("fadeInMs", fadeInMs, 0, 10000);
+        // How deep the outermost positions look into the picture. 0 = their own share,
+        // 50 = the outer half of the picture
+        // Hyperion samples ~8%
+        controls_.addUint8("edgeDepth", edgeDepth, 0, 50);
     }
 
     /// Turning smoothing on or off allocates or frees the accumulators, so it has to re-run
@@ -79,12 +85,17 @@ public:
         if (!primed_) fadeStart_ = elapsed(); // a picture arriving after a gap restarts the ramp
         const uint16_t level = fadeLevel();
 
+        // Pixels, not percent, so the divide happens twice a frame rather than twice a position.
+        const int deepX = (frame->width * edgeDepth) / 100;
+        const int deepY = (frame->height * edgeDepth) / 100;
+
         for (lengthType y = 0; y < lightsY; y++) {
+            const Span rows = spanFor(y, lightsY, frame->height, deepY); // constant down the row
             for (lengthType x = 0; x < lightsX; x++) {
-                const Zone zone = zoneFor(x, y, lightsX, lightsY, *frame);
-                const size_t light = static_cast<size_t>(y) * lightsX + x;
-                RGB color = adjust(meanOf(*frame, zone));
-                if (canSmooth) color = smooth(light, color);
+                const Span cols = spanFor(x, lightsX, frame->width, deepX);
+                const size_t lightId = static_cast<size_t>(y) * lightsX + x;
+                RGB color = adjust(meanOf(*frame, {cols, rows}));
+                if (canSmooth) color = smooth(lightId, color);
                 if (level != 256) color = dim(color, level);
                 draw::pixel(out, {x, y, 0}, color);
             }
@@ -103,21 +114,19 @@ private:
         Span cols, rows;
     };
 
-    /// Which source pixels light position `light` covers, along one axis. `pixels` of them are
-    /// divided evenly among `lights` positions.
-    /// - Cut at the edges, so consecutive ranges meet exactly: every pixel belongs to one position,
-    ///   none to two, none to nothing.
-    /// - An empty range widens to one shared pixel, so a strip finer than the picture still lights
-    ///   every position instead of leaving some dark.
-    static Span spanFor(int light, int lights, int pixels) {
-        const int begin = static_cast<int>((static_cast<long>(light) * pixels) / lights);
-        int end = static_cast<int>((static_cast<long>(light + 1) * pixels) / lights);
+    /// Which source pixels light position `lightId` covers along one axis.
+    /// - `pixels` shared evenly among `lightsSize` positions, cut at the edges so ranges meet exactly
+    /// - an empty range widens to one pixel, so a strip finer than the picture still lights up
+    /// - a position ON an edge then reaches `deep` pixels in from it, never less than its own share
+    /// - `deep` of 0 leaves the plain division; interior positions are on no edge either way
+    static Span spanFor(int lightId, int lightsSize, int pixels, int deep) {
+        int begin = static_cast<int>((static_cast<long>(lightId) * pixels) / lightsSize);
+        int end = static_cast<int>((static_cast<long>(lightId + 1) * pixels) / lightsSize);
         if (end <= begin) end = begin + 1;
-        return {begin, end < pixels ? end : pixels};
-    }
-
-    static Zone zoneFor(int x, int y, int lightsX, int lightsY, const VideoFrame& frame) {
-        return {spanFor(x, lightsX, frame.width), spanFor(y, lightsY, frame.height)};
+        if (end > pixels) end = pixels;
+        if (lightId == 0) end = std::max(end, deep);                             // down/right, inward
+        if (lightId == lightsSize - 1) begin = std::min(begin, pixels - deep);   // up/left, inward
+        return {begin, end};
     }
 
     /// Mean colour of one zone — the box filter Hyperion uses. uint32 accumulators because
@@ -171,13 +180,13 @@ private:
 
     /// Walk each channel a fraction of the way toward `color`. The state is 8.8 so the fraction of
     /// a step survives between frames — in whole bytes a slow setting rounds every step to zero.
-    RGB smooth(size_t light, RGB color) MM_NONBLOCKING {
+    RGB smooth(size_t lightId, RGB color) MM_NONBLOCKING {
         const uint8_t target[3] = {color.r, color.g, color.b};
         const int32_t step = 256 - smoothing;                      // gap closed per frame, of 256
         const int32_t snap = static_cast<int32_t>(snapAbove) << 8; // 8.8, to compare against delta
         uint8_t out[3];
         for (uint8_t ch = 0; ch < 3; ch++) {
-            const size_t slot = light * 3 + ch; // three accumulators per position, row-major
+            const size_t slot = lightId * 3 + ch; // three accumulators per position, row-major
             const int32_t held = state_[slot];
             const int32_t want = static_cast<int32_t>(target[ch]) << 8;
             const int32_t delta = want - held;
