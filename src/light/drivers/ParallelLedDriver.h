@@ -62,6 +62,8 @@ namespace mm {
 /// and an i80 bus word have the same meaning.
 class ParallelLedDriver : public DriverBase {
 public:
+    bool limitsCurrent() const override { return true; }
+
     /// Test-only: swap in a peripheral backend for a test mock. Deinits + drops any existing peripheral
     /// first (a rebuild-from-scratch, same as a real reinit would need). The caller retains ownership —
     /// this borrows the pointer, exactly like a registered driver's own owned backend does not need a
@@ -595,6 +597,21 @@ public:
     // Synchronous single-buffer path — the ORIGINAL tick, verbatim: encode buffer 0, transmit, wait
     // right here. One DMA buffer, no alternation, no deferred-wait bookkeeping, 0 added latency. This
     // is the default (doubleBuffer OFF) and its timing is exactly the pre-double-buffer driver's.
+    /// Price the frame against the current budget, before encodeRows forks across both cores.
+    /// - once, on the calling thread, so both halves read a `limit` that is already settled
+    /// - `src` is resolved exactly as encodeRows does: a snapshot is bias-corrected by -winStart_,
+    ///   so the same base serves either source
+    /// - laneStart_ is a running sum of laneCounts_, so the lanes tile from winStart_ and one flat
+    ///   walk of their total covers precisely the lights the encode will touch
+    void measureFrame() {
+        if (!sourceBuffer_ || !sourceBuffer_->data()) return;
+        const uint8_t* src = encodeSrc_ ? encodeSrc_ : sourceBuffer_->data();
+        const uint8_t srcCh = sourceBuffer_->channelsPerLight();
+        nrOfLightsType lights = 0;
+        for (uint8_t lane = 0; lane < laneCount_; lane++) lights += laneCounts_[lane];
+        correction_.measure(src + static_cast<size_t>(winStart_) * srcCh, srcCh, lights);
+    }
+
     /// Blocking path (doubleBuffer OFF): encode the frame, send it, and wait out the wire before
     /// returning — so a tick costs encode + wire. One DMA buffer, no output latency.
     void tickSync(uint8_t outCh) {
@@ -604,6 +621,7 @@ public:
         if (!busWaitIfBusy(0)) return;
         uint8_t* buf = peripheral_->busBuffer(0);
         if (!buf) return;
+        measureFrame();
         // Branch on the BUS WIDTH (slotBytes), not the strand count — with a '595 expander the
         // strands ride the shift cycles, so 48 strands on 6 pins is still an 8-bit bus.
         if (slotBytes() == 1) encodeRows<uint8_t>(outCh, buf);
@@ -638,6 +656,7 @@ public:
         // 2. Fused per-ROW encode into buffer `active_`, one branch on the bus width (see encodeRows).
         uint8_t* buf = peripheral_->busBuffer(active_);
         if (!buf) return;
+        measureFrame();
         // Branch on the BUS WIDTH (slotBytes), not the strand count — with a '595 expander the
         // strands ride the shift cycles, so 48 strands on 6 pins is still an 8-bit bus.
         if (slotBytes() == 1) encodeRows<uint8_t>(outCh, buf);
