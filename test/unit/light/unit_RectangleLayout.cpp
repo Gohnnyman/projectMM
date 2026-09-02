@@ -183,3 +183,73 @@ TEST_CASE("RectangleLayout: a zero-sided box emits no lights") {
     CHECK(r.lightCount() == 0);
     CHECK(walk(r).empty());
 }
+
+// --- Four separate strips (sharedCorners off) ---------------------------------------------------
+// One strip bent around a frame has ONE light in each corner. Four strips have their own end there,
+// so the count is the plain sum of the edges and two lights share each corner coordinate.
+
+TEST_CASE("RectangleLayout: unshared corners count every edge in full") {
+    RectangleLayout r;
+    r.width = 20; r.height = 10;
+    r.sharedCorners = false;
+    CHECK(r.lightCount() == 60);   // 20 + 20 + 10 + 10, no corners deducted
+    CHECK(walk(r).size() == 60);
+
+    r.sharedCorners = true;
+    CHECK(r.lightCount() == 56);   // the same box, four corners folded away
+}
+
+// The extra lights must land ON the corners, not past them: an edge running its full length is one
+// step from walking outside the box, which would inflate the Layer's bounding box.
+TEST_CASE("RectangleLayout: unshared corners double the corner cells and stay in the box") {
+    RectangleLayout r;
+    r.width = 4; r.height = 3;
+    r.sharedCorners = false;
+    const auto pts = walk(r);
+    REQUIRE(pts.size() == 14);
+
+    int corners = 0;
+    for (const auto& p : pts) {
+        CHECK(p.first >= 0);
+        CHECK(p.first < 4);
+        CHECK(p.second >= 0);
+        CHECK(p.second < 3);
+        const bool onCorner = (p.first == 0 || p.first == 3) && (p.second == 0 || p.second == 2);
+        if (onCorner) corners++;
+    }
+    CHECK(corners == 8);   // four corners, two lights each
+}
+
+// --- offset --------------------------------------------------------------------------------------
+// A strip rarely starts exactly at a corner. offset slides where index 0 sits WITHOUT moving any
+// light: the same coordinates come out, rotated in the wiring order.
+
+TEST_CASE("RectangleLayout: offset rotates the wiring and emits the same coordinates") {
+    RectangleLayout plain, shifted;
+    plain.width = shifted.width = 7;
+    plain.height = shifted.height = 5;
+    shifted.offset = 3;
+
+    const auto a = walk(plain);
+    const auto b = walk(shifted);
+    REQUIRE(a.size() == b.size());
+    CHECK(a != b);                                   // the order moved
+    CHECK(b[0] == a[3]);                             // by exactly three steps
+    CHECK(std::set<std::pair<int, int>>(a.begin(), a.end()) ==
+          std::set<std::pair<int, int>>(b.begin(), b.end()));   // the shape did not
+}
+
+// A full lap is a no-op, and anything beyond it wraps — the walk is modular, so an offset larger
+// than the perimeter must not run off the end of it.
+TEST_CASE("RectangleLayout: an offset of a full lap or more wraps") {
+    RectangleLayout plain, lap;
+    plain.width = lap.width = 7;
+    plain.height = lap.height = 5;
+    lap.offset = static_cast<uint16_t>(plain.lightCount());
+    CHECK(walk(lap) == walk(plain));
+
+    lap.offset = static_cast<uint16_t>(plain.lightCount() + 2);
+    RectangleLayout two;
+    two.width = 7; two.height = 5; two.offset = 2;
+    CHECK(walk(lap) == walk(two));
+}
