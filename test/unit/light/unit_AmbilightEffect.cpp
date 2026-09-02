@@ -464,7 +464,16 @@ TEST_CASE("AmbilightEffect: a border layout paints its perimeter and skips the i
     const uint8_t* top = rig.px(4, 0);
     CHECK((top[0] | top[1] | top[2]) != 0);
 
-    // The interior reaches none. Left black by the clear, never averaged.
+    // The interior reaches none. Never averaged, never written — it holds the black that
+    // Layer::prepare() left in the buffer on the rebuild the effect's own prepare() rode in on.
+    for (int y = 1; y < 7; y++)
+        for (int x = 1; x < 7; x++) {
+            const uint8_t* p = rig.px(x, y);
+            CHECK((p[0] | p[1] | p[2]) == 0);
+        }
+
+    // And it stays black across further frames, rather than only on the first.
+    for (int i = 0; i < 5; i++) rig.layer.tick();
     for (int y = 1; y < 7; y++)
         for (int x = 1; x < 7; x++) {
             const uint8_t* p = rig.px(x, y);

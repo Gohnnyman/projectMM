@@ -62,13 +62,35 @@ public:
     /// prepare() — without this the buffer stays empty and the setting does nothing.
     bool affectsPrepare(const char* name) const override { return std::strcmp(name, "smoothing") == 0; }
 
-    /// One 8.8 accumulator per channel, allocated only while smoothing is on.
+    /// Cold path. applyState() prepares a parent before its children, so the Layer's mapping is
+    /// already built when buildLitList() reads it.
     void prepare() override {
         // lengthType is signed: a stray negative would cast to a colossal size_t, not to nothing.
         const lengthType w = width(), h = height();
-        const bool sized = smoothing != 0 && w > 0 && h > 0;
-        state_.resize(sized ? static_cast<size_t>(w) * static_cast<size_t>(h) * 3u : 0);
+        const size_t positions = (w > 0 && h > 0) ? static_cast<size_t>(w) * static_cast<size_t>(h) : 0;
+
+        state_.resize(smoothing != 0 ? positions * 3u : 0); // 8.8 per channel, only while smoothing
         primed_ = false;
+        buildLitList(positions);
+    }
+
+    /// The positions that reach an LED, packed y<<16|x, so tick() walks only those — a few hundred
+    /// of tens of thousands on a border layout.
+    void buildLitList(size_t positions) {
+        litCount_ = 0;
+        const MappingLUT& lut = layer()->lut();
+        // A table-free (identity) mapping lights every position, so the list would be 0,1,2,3...
+        // — 4 bytes a position to say "all of them", where the plain loop needs none.
+        allLit_ = !lut.hasLUT();
+        if (allLit_ || positions == 0) {
+            lit_.resize(0);
+            return;
+        }
+        if (!lit_.resize(positions)) return; // no list: tick() falls back to painting the whole box
+        const lengthType w = width();
+        for (size_t i = 0; i < positions; i++)
+            if (lut.hasDestination(static_cast<nrOfLightsType>(i)))
+                lit_[litCount_++] = static_cast<uint32_t>((i / w) << 16 | (i % w));
     }
 
     void tick() MM_NONBLOCKING override {
@@ -93,23 +115,28 @@ public:
         if (!primed_) fadeStart_ = elapsed(); // a picture arriving after a gap restarts the ramp
         const uint16_t level = fadeLevel();
 
-        // Black first, then only the positions that reach an LED are painted. The skipped ones
-        // would be discarded by the mapping anyway; clearing keeps the raw-buffer preview honest
-        // about which of them are actually lit.
-        const MappingLUT& lut = layer()->lut();
-        draw::fill(out, {0, 0, 0});
-
-        for (lengthType y = 0; y < lightsY; y++) {
-            const Span rows = region.rows(y, lightsY); // constant down the row
-            for (lengthType x = 0; x < lightsX; x++) {
-                const size_t lightId = static_cast<size_t>(y) * lightsX + x;
-                if (!lut.hasDestination(static_cast<nrOfLightsType>(lightId))) continue;
-                const Span cols = region.cols(x, lightsX);
-                RGB color = adjust(meanOf(*frame, cols, rows));
-                if (canSmooth) color = smooth(lightId, color);
-                if (level != 256) color = dim(color, level);
-                draw::pixel(out, {x, y, 0}, color);
-            }
+        // Three ways to reach the same set of positions, cheapest first.
+        if (allLit_) {
+            // Nothing to skip: the plain box, no clear, no mapping queries.
+            for (lengthType y = 0; y < lightsY; y++)
+                for (lengthType x = 0; x < lightsX; x++)
+                    paint(out, *frame, region, x, y, lightsX, lightsY, canSmooth, level);
+        } else if (lit_) {
+            // The list. Unlit positions are never written, so they keep the black
+            // Layer::prepare() left on the rebuild this effect's prepare() rode in on — BlendMap
+            // never reads them, but PreviewDriver shows the raw buffer and must not see a ghost.
+            for (size_t i = 0; i < litCount_; i++)
+                paint(out, *frame, region, static_cast<lengthType>(lit_[i] & 0xFFFF),
+                      static_cast<lengthType>(lit_[i] >> 16), lightsX, lightsY, canSmooth, level);
+        } else {
+            // The list could not be allocated. Same output, asking the mapping per position —
+            // which is the cost the list exists to avoid.
+            const MappingLUT& lut = layer()->lut();
+            draw::fill(out, {0, 0, 0});
+            for (lengthType y = 0; y < lightsY; y++)
+                for (lengthType x = 0; x < lightsX; x++)
+                    if (lut.hasDestination(static_cast<nrOfLightsType>(y * lightsX + x)))
+                        paint(out, *frame, region, x, y, lightsX, lightsY, canSmooth, level);
         }
         primed_ = true;
     }
@@ -133,6 +160,16 @@ private:
         Span cols(int x, int lightsX) const { return spanFor(x, lightsX, width, deepX).shifted(left); }
         Span rows(int y, int lightsY) const { return spanFor(y, lightsY, height, deepY).shifted(top); }
     };
+
+    /// One light position: average its pixels, correct, smooth, level, write.
+    void paint(const draw::Canvas& out, const VideoFrame& frame, const Region& region, lengthType x,
+               lengthType y, lengthType lightsX, lengthType lightsY, bool canSmooth,
+               uint16_t level) MM_NONBLOCKING {
+        RGB color = adjust(meanOf(frame, region.cols(x, lightsX), region.rows(y, lightsY)));
+        if (canSmooth) color = smooth(static_cast<size_t>(y) * lightsX + x, color);
+        if (level != 256) color = dim(color, level);
+        draw::pixel(out, {x, y, 0}, color);
+    }
 
     Region regionFor(const VideoFrame& frame) MM_NONBLOCKING {
         const Bars bars = trackBars(frame);
@@ -324,6 +361,10 @@ private:
     Bars bars_;      // in effect
     Bars candidate_; // seen most recently
     uint8_t stable_ = 0;
+
+    ScratchBuffer<uint32_t> lit_{*this}; // packed y<<16|x, the positions that reach an LED
+    size_t litCount_ = 0;
+    bool allLit_ = true; // no list: the mapping lights every position
 
     ScratchBuffer<uint16_t> state_{*this}; // 8.8 per channel per light position, while smoothing is on
     bool primed_ = false;                  // false until one frame has been written
