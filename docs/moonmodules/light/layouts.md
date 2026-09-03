@@ -213,6 +213,20 @@ Detail: [technical](moxygen/GridBlacksLayout.md)
 
 [Tests](../../tests/unit-tests.md#gridblackslayout)
 
+<a id="rectangle"></a>
+
+### Rectangle
+
+Lights around the **perimeter** of a `width` x `height` box, nothing inside it: the strip-around-a-frame primitive. A box one light thick degenerates to a plain line. Use [Grid](#grid) when the interior has LEDs too.
+
+- `width` / `height`: box extent in lights along each edge (1 to 500); 32x18 default is 16:9.
+- `startCorner`: which corner light 0 sits at, top-left / top-right / bottom-right / bottom-left.
+- `offset`: lights past that corner where the strip actually begins, for a run that starts partway along an edge.
+- `clockwise`: direction the indices run from that corner.
+- `sharedCorners`: on (default), one light sits in each corner and the count is `2·(width + height) − 4`, a single strip bent around a frame. Off, each edge keeps its own end and the count is the plain sum `2·(width + height)`: four separate strips, two lights on each corner coordinate. A 20x10 box is 56 lights shared, 60 unshared.
+
+`startCorner`, `offset` and `clockwise` describe the **wiring, not the shape**: they reorder indices while every coordinate stays identical, so set them to match your build and an effect's "top edge" lights the physical top edge. Same split [Single Row](#singlerow) draws with `reversed order` and [Grid](#grid) with `serpentine`. `sharedCorners` is the exception, since it changes how many lights there are.
+
 <a id="sphere"></a>
 
 ### Sphere

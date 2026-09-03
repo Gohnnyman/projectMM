@@ -447,3 +447,32 @@ TEST_CASE("MultiPinLedDriver allocates a real host bus the driver can encode int
 TEST_CASE("MultiPinLedDriver gives the host bus two distinct buffers when asked") {
     mm::test::checkHostBusDoubleBuffer<mm::I80Peripheral>();
 }
+
+// --- Current limiting ---------------------------------------------------------------------------
+// measureFrame() has to walk exactly the lights the encode will touch. laneStart_ is a running sum
+// of laneCounts_, so the lanes tile the window and one flat pass covers them, but only if the
+// total is the SUM of the lanes rather than the buffer size or the longest lane. Under-counting is
+// the dangerous direction: the limiter would report a frame safe while the supply sagged.
+TEST_CASE("MultiPinLedDriver prices every lane, not just the longest") {
+    mm::I80Peripheral peripheral;
+    mm::ParallelLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    std::strcpy(d.ledsPerPin, "50,20,20");
+    wire(d, peripheral, src, corr, 90);
+
+    // White everywhere: 90 lights x 3 channels x 8 mA = 2160 mA against a 1080 budget.
+    std::memset(src.data(), 255, static_cast<size_t>(90) * 3);
+    d.correctionForTest().budgetMa = 1080;
+    d.tick();
+
+    // Halved. Sizing the pass by the longest lane (50) would price it at 1200 mA and set limit to
+    // 230: the under-counting direction, which reports a frame safe while the supply sags.
+    CHECK(d.correctionForTest().limit == 128);
+}
+
+// A driver that never measures must not offer the controls: see DriverBase::limitsCurrent.
+TEST_CASE("MultiPinLedDriver offers the current controls") {
+    mm::ParallelLedDriver d;
+    CHECK(d.limitsCurrent());
+}

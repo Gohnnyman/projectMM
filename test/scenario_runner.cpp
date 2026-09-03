@@ -9,6 +9,7 @@
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/GridBlacksLayout.h"
 #include "light/layouts/SphereLayout.h"
+#include "light/layouts/RectangleLayout.h"
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
 #include "light/layers/Effects.h"
@@ -36,7 +37,10 @@
 #include "light/drivers/PreviewDriver.h"
 #include "core/SystemModule.h"
 #include "core/AudioService.h"
+#include "core/VideoService.h"
+#include "core/Services.h"
 #include "light/effects/AudioVolumeEffect.h"
+#include "light/effects/AmbilightEffect.h"
 #include "light/effects/AudioSpectrumEffect.h"
 #include "light/effects/GameOfLifeEffect.h"
 #include "light/effects/GEQ3DEffect.h"
@@ -207,6 +211,7 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout");
     mm::ModuleFactory::registerType<mm::GridBlacksLayout>("GridBlacksLayout");
     mm::ModuleFactory::registerType<mm::SphereLayout>("SphereLayout");
+    mm::ModuleFactory::registerType<mm::RectangleLayout>("RectangleLayout");
     mm::ModuleFactory::registerType<mm::Effects>("Effects");
     mm::ModuleFactory::registerType<mm::Layer>("Layer");
     mm::ModuleFactory::registerType<mm::LinesEffect>("LinesEffect");
@@ -232,8 +237,11 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule");
+    mm::ModuleFactory::registerType<mm::Services>("Services");
     mm::ModuleFactory::registerType<mm::AudioService>("AudioService");
+    mm::ModuleFactory::registerType<mm::VideoService>("VideoService");
     mm::ModuleFactory::registerType<mm::AudioVolumeEffect>("AudioVolumeEffect");
+    mm::ModuleFactory::registerType<mm::AmbilightEffect>("AmbilightEffect");
     mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect");
     mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect");
     mm::ModuleFactory::registerType<mm::GEQ3DEffect>("GEQ3DEffect");
@@ -392,6 +400,13 @@ struct ScenarioContext {
                 if (props.has("width"))  grid->width  = static_cast<mm::lengthType>(props["width"].num);
                 if (props.has("height")) grid->height = static_cast<mm::lengthType>(props["height"].num);
                 if (props.has("depth"))  grid->depth  = static_cast<mm::lengthType>(props["depth"].num);
+            } else if (std::strcmp(type, "RectangleLayout") == 0) {
+                // Same construct-time apply: the perimeter is computed from these, so a fixture
+                // that could not set them would silently measure the 32x18 default instead of the
+                // border it names. The wiring controls stay on set_control, which works post-start.
+                auto* rect = static_cast<mm::RectangleLayout*>(mod);
+                if (props.has("width"))  rect->width  = static_cast<uint16_t>(props["width"].num);
+                if (props.has("height")) rect->height = static_cast<uint16_t>(props["height"].num);
             }
         }
 

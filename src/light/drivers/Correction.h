@@ -1,9 +1,10 @@
 #pragma once
 
+#include <cmath> // std::pow, the gamma curve
 #include <cstdint>
 
 #include "light/ChannelRole.h"
-#include "light/FixtureChannels.h"   // kMotionBase + forEachMotionSlot: the layer-slot packing
+#include "light/FixtureChannels.h" // kMotionBase + forEachMotionSlot: the layer-slot packing
 
 namespace mm {
 
@@ -25,15 +26,14 @@ namespace mm {
 enum class WhiteMode : uint8_t { None, Min, Accurate };
 
 inline constexpr const char* kWhiteModeOptions[] = {"None", "Min", "Accurate"};
-inline constexpr uint8_t kWhiteModeCount =
-    sizeof(kWhiteModeOptions) / sizeof(kWhiteModeOptions[0]);
-
+inline constexpr uint8_t kWhiteModeCount = sizeof(kWhiteModeOptions) / sizeof(kWhiteModeOptions[0]);
 
 // Output correction applied per-light by each physical driver as it reads the shared
-// source buffer: brightness scale, channel reorder, and (for RGBW lights) white
-// derivation. Each driver owns one Correction (DriverBase), rebuilds it on a
-// brightness / preset / role change (cheap, cold path), and apply() is the hot-path
-// per-light transform. Today NetworkSendDriver and the WS2812 LED drivers consume it.
+// source buffer: brightness scale, gamma, per-channel white balance, channel reorder,
+// and (for RGBW lights) white derivation. Each driver owns one Correction (DriverBase),
+// rebuilds it on a brightness / gamma / balance / preset / role change (cheap, cold path),
+// and apply() is the hot-path per-light transform. Today NetworkSendDriver and the WS2812
+// LED drivers consume it.
 //
 // Channel model: a light is a run of `channelsPerLight` channels, each with a role
 // (Red/Green/Blue/White/Pan/…). The canonical description is the driver's dynamic
@@ -45,21 +45,20 @@ inline constexpr uint8_t kWhiteModeCount =
 // Non-color roles (pan/tilt/…) live in the role array for the fixture/preview to read;
 // apply() only writes the color roles it derived offsets for.
 //
-// Brightness uses a single 256-entry LUT applied to every channel. Gamma /
-// white-balance (which need a per-channel R/G/B split) are deliberately not here
-// yet — when they land, briLut becomes three tables. The name stays brightness-
-// neutral (`briLut`) so the gamma addition is a fill-logic change, not a rename.
+// Brightness, gamma and white balance all bake into ONE per-channel table: `briLut[3][256]`,
+// one row per SOURCE channel (0=R, 1=G, 2=B), filled as `gamma(v) × brightness × balance`.
 struct Correction {
-    static constexpr uint8_t kAbsent = 255;   // color role not carried by this light
+    static constexpr uint8_t kAbsent = 255;  // color role not carried by this light
+    static constexpr uint8_t kGammaOff = 10; // gamma 1.0: the identity curve, and the default
 
-    uint8_t briLut[256] = {};       // briLut[v] = (v * brightness) / 255 (scale8)
+    uint8_t briLut[3][256] = {}; // briLut[ch][v] = gamma(v) * brightness * balance[ch], ch: 0=R 1=G 2=B
     // Derived hot-path cache: the output-byte position of each color role. Source is
     // always RGB (src[0]=R, src[1]=G, src[2]=B); the offset says where in `out` that
     // role's byte lands. Recomputed from the role array by rebuild(); GRB by default.
     uint8_t offRed = 1;
     uint8_t offGreen = 0;
     uint8_t offBlue = 2;
-    uint8_t offWhite = kAbsent;     // derived white at this offset (kAbsent = light has no white)
+    uint8_t offWhite = kAbsent; // derived white at this offset (kAbsent = light has no white)
     // Extra emitters a fixture may carry beside cold white. The theory (why each is derived the way
     // it is; the honest limits) — a full fixture model with per-emitter spectral targets is the
     // proper home, see the light backlog:
@@ -113,14 +112,57 @@ struct Correction {
     bool motionHeld = false;
     uint8_t offYellow = kAbsent;
     uint8_t offUV = kAbsent;
-    uint8_t outChannels = 3;        // bytes emitted per light (= channelsPerLight of the wiring)
-    WhiteMode whiteMode = WhiteMode::Min;   // how white is synthesized from RGB (white lights only)
+    uint8_t outChannels = 3;              // bytes emitted per light (= channelsPerLight of the wiring)
+    WhiteMode whiteMode = WhiteMode::Min; // how white is synthesized from RGB (white lights only)
 
-    // Refresh just the brightness LUT (briLut[v] = v * brightness / 255). Split out so a brightness-
-    // only change re-scales the LUT without touching the channel offsets, and so a driver can apply
-    // brightness even when the role source (the preset library) isn't available yet.
+    // Gamma in TENTHS (22 = 2.2). An LED is near-linear in PWM duty while perception is a power
+    // law, so an uncorrected ramp reads "bright fast then flat"; `(v/255)^gamma` restores an even
+    // fade. Canon: Adafruit, "LED Tricks: Gamma Correction".
+    uint8_t gamma10 = kGammaOff;
+    // Per-channel white balance, 255 = untouched. Die efficiencies differ, so a white-looking RGB
+    // triple rarely renders neutral: trim the stronger channels DOWN to match the weakest. Up is
+    // not available: there is no headroom above 255, so raising clips instead of balancing.
+    uint8_t balRed = 255, balGreen = 255, balBlue = 255;
+
+    // Per CHANNEL, not per light: a white die draws about twice a color one, so one per-light
+    // figure under-reports white-heavy frames: the direction that browns out a supply. Measured
+    // on a 5 m SK6812 RGBW strip.
+    uint16_t budgetMa = 0; // 0 disables the limiter
+    uint8_t mAColor = 8;   // one R/G/B channel at 255
+    uint8_t mAWhite = 16;  // one W channel at 255
+    // The two emitters a 6-channel lightbar adds. Their own figures because amber sits near red
+    // while a UV die usually draws more, and guessing low browns out a supply. Assumed, not
+    // measured, which is why they are settable.
+    uint8_t mAYellow = 8;
+    uint8_t mAUV = 8;
+    uint16_t limit = 256; // measure() sets it; 256 = unity, so an unlimited frame is bit-exact
+
+    // Cold path: refresh the output tables and DERIVE the color-role offsets from the
+    // light's channel-role array (`roles`, `nChannels` entries: the driver's dynamic
+    // array, canonical). A role appearing at channel i sets that color's offset to i;
+    // a color role not present stays kAbsent (apply() skips it). outChannels becomes the
+    // channel count. Non-color roles (pan/tilt/…) are ignored here: they're written by
+    // the fixture role writers, not by apply()'s RGB path.
+    // Refill the three output tables from `brightness` plus the current gamma / balance fields.
+    // Split out so a brightness-only change re-scales them without touching the channel offsets,
+    // and so a driver can apply brightness even when the role source (the preset library) isn't
+    // available yet. Every gamma or balance edit routes through here too. they are inputs to the
+    // same fill, so there is one rebuild, not three.
     void rebuildBrightness(uint8_t brightness) {
-        for (int v = 0; v < 256; v++) briLut[v] = static_cast<uint8_t>((v * brightness) / 255);
+        // Gamma FIRST, then the linear scales: scaling before the curve would re-shape it at every
+        // brightness, so a color would shift as the slider moved.
+        uint8_t curve[256];
+        const float exponent = gamma10 / 10.0f;
+        for (int v = 0; v < 256; v++)
+            curve[v] = static_cast<uint8_t>(std::pow(v / 255.0f, exponent) * 255.0f + 0.5f);
+
+        const uint8_t balance[3] = {balRed, balGreen, balBlue};
+
+        for (int ch = 0; ch < 3; ch++) {
+            // Fold brightness and this channel's trim into one scale
+            const uint32_t scale = (static_cast<uint32_t>(brightness) * balance[ch]) / 255;
+            for (int v = 0; v < 256; v++) briLut[ch][v] = static_cast<uint8_t>((curve[v] * scale) / 255);
+        }
     }
 
     // Cold path: refresh the brightness LUT and DERIVE the color-role offsets from the light's
@@ -136,25 +178,76 @@ struct Correction {
         hasMotion = false;
         for (uint8_t i = 0; i < nChannels; i++) {
             switch (roles[i]) {
-                case ChannelRole::Red:       offRed = i;       break;
-                case ChannelRole::Green:     offGreen = i;     break;
-                case ChannelRole::Blue:      offBlue = i;      break;
-                case ChannelRole::White:     offWhite = i;     break;
-                case ChannelRole::WarmWhite: offWarmWhite = i; break;
-                case ChannelRole::Yellow:    offYellow = i;    break;
-                case ChannelRole::UV:        offUV = i;        break;
-                case ChannelRole::Dimmer:    offDimmer = i;    break;
-                case ChannelRole::Pan:       offPan = i;       break;
-                case ChannelRole::Tilt:      offTilt = i;      break;
-                case ChannelRole::Zoom:      offZoom = i;      break;
-                case ChannelRole::Rotate:    offRotate = i;    break;
-                case ChannelRole::Gobo:      offGobo = i;      break;
-                default: break;   // ChannelRole::None: a channel this fixture does not use
+            case ChannelRole::Red: offRed = i; break;
+            case ChannelRole::Green: offGreen = i; break;
+            case ChannelRole::Blue: offBlue = i; break;
+            case ChannelRole::White: offWhite = i; break;
+            case ChannelRole::WarmWhite: offWarmWhite = i; break;
+            case ChannelRole::Yellow: offYellow = i; break;
+            case ChannelRole::UV: offUV = i; break;
+            case ChannelRole::Dimmer: offDimmer = i; break;
+            case ChannelRole::Pan: offPan = i; break;
+            case ChannelRole::Tilt: offTilt = i; break;
+            case ChannelRole::Zoom: offZoom = i; break;
+            case ChannelRole::Rotate: offRotate = i; break;
+            case ChannelRole::Gobo: offGobo = i; break;
+            default: break; // ChannelRole::None: a channel this fixture does not use
             }
         }
-        hasMotion = offPan != kAbsent || offTilt != kAbsent || offZoom != kAbsent ||
-                    offRotate != kAbsent || offGobo != kAbsent;
+        hasMotion = offPan != kAbsent || offTilt != kAbsent || offZoom != kAbsent || offRotate != kAbsent ||
+                    offGobo != kAbsent;
         outChannels = nChannels;
+    }
+
+    // Shared by measure() and apply(), so the estimate cannot drift from what is emitted.
+    inline uint8_t whiteOf(uint8_t r, uint8_t g, uint8_t b) const {
+        if (whiteMode == WhiteMode::None) return 0;
+        return r < g ? (r < b ? r : b) : (g < b ? g : b);
+    }
+
+    // Once per frame before the emit loop: price this driver's `n` lights and set `limit`.
+    void measure(const uint8_t* src, uint8_t srcCh, uint32_t n) {
+        limit = 256;
+        if (budgetMa == 0) return;
+
+        // Which emitters this light carries cannot change mid-frame, so decide it once rather than
+        // per light. Both white roles come from the same synthesized value, so their draw adds.
+        uint32_t whiteMa = 0;
+        if (offWhite != kAbsent) whiteMa += mAWhite;
+        if (offWarmWhite != kAbsent) whiteMa += mAWhite;
+        const bool subtractWhite = offWhite != kAbsent && whiteMode == WhiteMode::Accurate;
+        const bool anyWhiteMode = whiteMode != WhiteMode::None;
+        const uint32_t yellowMa = (anyWhiteMode && offYellow != kAbsent) ? mAYellow : 0;
+        const uint32_t uvMa = (anyWhiteMode && offUV != kAbsent) ? mAUV : 0;
+
+        uint64_t sum = 0; // milliamps * 255; dividing per channel would round dim frames to zero
+        for (uint32_t i = 0; i < n; i++, src += srcCh) {
+            uint8_t r = briLut[0][src[0]], g = briLut[1][src[1]], b = briLut[2][src[2]];
+            const uint8_t w = whiteOf(r, g, b);
+            // Read BEFORE Accurate's subtraction, as apply() does. Zero under whiteMode None,
+            // where apply() emits neither.
+            if (yellowMa) sum += static_cast<uint32_t>(r < g ? r : g) * yellowMa;
+            if (uvMa) {
+                const uint8_t rg = r > g ? r : g;
+                sum += static_cast<uint32_t>(b > rg ? b - rg : 0) * uvMa;
+            }
+            if (subtractWhite) {
+                r -= w;
+                g -= w;
+                b -= w;
+            }
+            sum += (static_cast<uint64_t>(r) + g + b) * mAColor + static_cast<uint64_t>(w) * whiteMa;
+        }
+        // Rounded UP: a cap that understates is not a cap. One channel at 254 costs 7.97 mA and
+        // floors to 7, so a 7 mA budget would apply no limit at all.
+        const uint64_t scalableMa = (sum + 254) / 255;
+
+        // Neither the dimmer nor motion is priced: on the fixtures that declare them those bytes
+        // are DMX control values drawing nothing from this rail, so charging for them would squeeze
+        // the colors to make room for current that does not exist. The one case where a dimmer byte
+        // IS a die is IRGB mis-set on an addressable strip, and pricing it neither prevents that nor
+        // caps it: apply() writes the dimmer unscaled, so no limit reaches it.
+        if (scalableMa > budgetMa) limit = static_cast<uint16_t>((budgetMa * 256u) / scalableMa);
     }
 
     /// Hot path: transform one source light (`srcChannels` bytes at `src`) into `out`
@@ -202,9 +295,11 @@ struct Correction {
                 if (slot < srcChannels) out[chan[role]] = src[slot];
             });
         }
-        uint8_t r = briLut[src[0]];
-        uint8_t g = briLut[src[1]];
-        uint8_t b = briLut[src[2]];
+        // Brightness, gamma and the per-channel balance come from the one table; `limit` is
+        // 256 unless measure() found the frame over the current budget.
+        uint8_t r = static_cast<uint8_t>((briLut[0][src[0]] * limit) >> 8);
+        uint8_t g = static_cast<uint8_t>((briLut[1][src[1]] * limit) >> 8);
+        uint8_t b = static_cast<uint8_t>((briLut[2][src[2]] * limit) >> 8);
         // Every synthesized emitter (white + warm-white/yellow/UV) is gated by the ONE whiteMode:
         // None zeroes them (never a stale value — corrected_ is reused, not re-zeroed, frame to
         // frame), otherwise each is a best-effort approximation from RGB. Accurate additionally
@@ -212,19 +307,19 @@ struct Correction {
         // the other emitters are additive stand-ins only (no colorimetric model yet), so they don't
         // subtract. See the offWarmWhite/offYellow/offUV field comment for the approximation rationale.
         if (whiteMode == WhiteMode::None) {
-            if (offWhite != kAbsent)     out[offWhite] = 0;
+            if (offWhite != kAbsent) out[offWhite] = 0;
             if (offWarmWhite != kAbsent) out[offWarmWhite] = 0;
-            if (offYellow != kAbsent)    out[offYellow] = 0;
-            if (offUV != kAbsent)        out[offUV] = 0;
+            if (offYellow != kAbsent) out[offYellow] = 0;
+            if (offUV != kAbsent) out[offUV] = 0;
         } else {
-            const uint8_t w = r < g ? (r < b ? r : b) : (g < b ? g : b);  // min(r,g,b): the white component
+            const uint8_t w = whiteOf(r, g, b); // min(r,g,b): the white component
             // The additive stand-ins (warm-white/yellow/UV) approximate from the CORRECTED RGB — the
             // values BEFORE Accurate pulls white out below. Compute them here, off the pre-subtraction
             // r/g/b, so Accurate's `r -= w` (which only rebalances the RGB emitters) can't corrupt them.
             // warm white ≈ the white component (same as cold white for a warm-white-only strip).
             if (offWarmWhite != kAbsent) out[offWarmWhite] = w;
             // yellow ≈ min(R,G) (the shared red+green component).
-            if (offYellow != kAbsent)    out[offYellow] = r < g ? r : g;
+            if (offYellow != kAbsent) out[offYellow] = r < g ? r : g;
             // UV is out of gamut (no RGB pre-image), but it reads to the eye as deep blue/violet, so
             // drive it from the BLUE component that has no red/green to pair with — the violet-ish
             // excess `max(0, B - max(R,G))`. So UV fires on blues/purples, stays dark on warm colors.
@@ -235,13 +330,17 @@ struct Correction {
             // White last: it's the only emitter that (in Accurate) rebalances RGB, so it must run
             // after the stand-ins have read the pre-subtraction values.
             if (offWhite != kAbsent) {
-                if (whiteMode == WhiteMode::Accurate) { r -= w; g -= w; b -= w; }  // pull white out of RGB
+                if (whiteMode == WhiteMode::Accurate) {
+                    r -= w;
+                    g -= w;
+                    b -= w;
+                } // pull white out of RGB
                 out[offWhite] = w;
             }
         }
-        if (offRed != kAbsent)   out[offRed] = r;
+        if (offRed != kAbsent) out[offRed] = r;
         if (offGreen != kAbsent) out[offGreen] = g;
-        if (offBlue != kAbsent)  out[offBlue] = b;
+        if (offBlue != kAbsent) out[offBlue] = b;
     }
 };
 

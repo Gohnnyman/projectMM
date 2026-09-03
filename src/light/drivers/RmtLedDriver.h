@@ -38,6 +38,8 @@ namespace mm {
 /// @card RmtLedDriver.png
 class RmtLedDriver : public DriverBase {
 public:
+    bool limitsCurrent() const override { return true; } // measures its window before emitting
+
     /// WS2812/SK6812 strips are physically GRB-wired, so a fresh RMT driver references the "GRB"
     /// preset by default (a strip attached to a freshly-flashed board shows correct colors). The
     /// user can pick any preset from the library.
@@ -258,6 +260,7 @@ public:
         const uint16_t t0h = nsToTicks(cfg_.t0h_ns);
         const uint16_t t1h = nsToTicks(cfg_.t1h_ns);
         const uint16_t period = nsToTicks(cfg_.period_ns);
+        correction_.measure(src + winStart_ * srcCh, srcCh, n);
         size_t s = 0;
         for (nrOfLightsType i = 0; i < n; i++) {
             // Read the windowed light: this driver's slice starts at winStart_. wire_ is sized to

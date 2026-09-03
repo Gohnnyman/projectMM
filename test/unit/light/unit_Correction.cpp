@@ -1,6 +1,8 @@
 // @module Correction
 
 #include "doctest.h"
+
+#include <cstring>
 #include "light/effects/MovingHeadEffect.h"
 #include "light/layers/Layer.h"
 #include "light/layouts/GridLayout.h"
@@ -27,17 +29,17 @@ using mm::Correction;
 TEST_CASE("Correction brightness LUT: full brightness is identity") {
     Correction c;
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
-    for (int v = 0; v < 256; v++) CHECK(c.briLut[v] == v);
+    for (int v = 0; v < 256; v++) CHECK(c.briLut[0][v] == v);
 }
 
 // At brightness=128, every entry is roughly halved using scale8 (255→128, 128→64, 2→1).
 TEST_CASE("Correction brightness LUT: half brightness halves each value (scale8)") {
     Correction c;
     mm::test::rebuildFromPreset(c, 128, mm::test::PresetOrder::RGB);
-    CHECK(c.briLut[0] == 0);
-    CHECK(c.briLut[255] == 128);   // (255*128)/255 = 128
-    CHECK(c.briLut[128] == 64);    // (128*128)/255 = 64
-    CHECK(c.briLut[2] == 1);       // (2*128)/255 = 1
+    CHECK(c.briLut[0][0] == 0);
+    CHECK(c.briLut[0][255] == 128);   // (255*128)/255 = 128
+    CHECK(c.briLut[0][128] == 64);    // (128*128)/255 = 64
+    CHECK(c.briLut[0][2] == 1);       // (2*128)/255 = 1
 }
 
 // RGB preset at full brightness passes the source RGB through unchanged (3 output channels, no white).
@@ -188,7 +190,7 @@ TEST_CASE("Correction roles array: arbitrary Custom wiring derives correct offse
     CHECK(c.offGreen == 2);
     CHECK(c.offRed == 3);
     CHECK(c.outChannels == 4);
-    CHECK(c.briLut[255] == 128);   // LUT refreshed (brightness applied)
+    CHECK(c.briLut[0][255] == 128);   // LUT refreshed (brightness applied)
     const uint8_t src[3] = {200, 100, 60};  // scaled: 100, 50, 30 → min = 30
     uint8_t out[4] = {};
     c.apply(src, out, 3);
@@ -307,6 +309,163 @@ TEST_CASE("Correction: UV dark on warm colors; whiteMode None zeroes WW/Y/UV") {
         CHECK(out[4] == 0);            // Yellow zeroed
         CHECK(out[5] == 0);            // UV zeroed
     }
+}
+
+// --- Gamma and per-channel white balance ------------------------------------------------------
+// Both fold into the SAME three output tables the brightness scale fills, so neither costs
+// anything per light. These pin the fill: that the defaults are a true no-op, that the curve has
+// the right shape, that it runs before the brightness scale (not after), and that a channel trim
+// reaches the white derivation as well as the RGB channels.
+
+// An untouched Correction must behave exactly as it did before gamma existed: gamma 1.0, no trim,
+// so all three rows are the same linear ramp. This is the guard that a device which never opens
+// the calibration controls sees byte-identical output.
+TEST_CASE("Correction gamma: default is off, so all three channels stay linear and identical") {
+    Correction c;
+    CHECK(c.gamma10 == Correction::kGammaOff);
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    for (int v = 0; v < 256; v++) {
+        CHECK(c.briLut[0][v] == v);
+        CHECK(c.briLut[1][v] == v);
+        CHECK(c.briLut[2][v] == v);
+    }
+}
+
+// Gamma 2.2 is the standard correction for a linear-duty LED driven from perceptual values: it
+// pulls the midtones down (a linear ramp reads as "bright fast then flat") while leaving both
+// endpoints fixed, so black stays black and full stays full.
+TEST_CASE("Correction gamma: 2.2 pulls midtones down and pins both endpoints") {
+    Correction c;
+    c.gamma10 = 22;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    CHECK(c.briLut[0][0] == 0);       // black stays black
+    CHECK(c.briLut[0][255] == 255);   // full stays full
+    CHECK(c.briLut[0][64] == 12);     // (64/255)^2.2  * 255
+    CHECK(c.briLut[0][128] == 56);    // (128/255)^2.2 * 255: well under the linear 128
+    CHECK(c.briLut[0][192] == 137);
+    // The curve is a shape, not a dim: it must be monotonic, or a fade would visibly step back.
+    for (int v = 1; v < 256; v++) CHECK(c.briLut[0][v] >= c.briLut[0][v - 1]);
+}
+
+// The curve is applied to the source value and the brightness scale then dims the RESULT. Doing it
+// the other way round would re-shape the curve at every brightness, so a color would shift as the
+// user dragged the slider. At brightness 128 with gamma 2.2 the midtone lands on gamma(128)/2 = 28;
+// scaling first would instead give gamma(64) = 12, which is the regression this catches.
+TEST_CASE("Correction gamma: the curve runs before brightness, so dimming never reshapes it") {
+    Correction c;
+    c.gamma10 = 22;
+    mm::test::rebuildFromPreset(c, 128, mm::test::PresetOrder::RGB);
+    CHECK(c.briLut[0][128] == 28);    // gamma first: (56 * 128) / 255
+    CHECK(c.briLut[0][255] == 128);   // endpoint still just the brightness scale
+}
+
+// A white-balance trim scales one channel only. Leaving the weakest channel at 255 and lowering
+// the other two is how a white point is pulled neutral on a strip whose dies differ in efficiency.
+TEST_CASE("Correction white balance: trimming one channel leaves the others untouched") {
+    Correction c;
+    c.balGreen = 128;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    CHECK(c.briLut[0][255] == 255);   // red untrimmed
+    CHECK(c.briLut[1][255] == 128);   // green at half
+    CHECK(c.briLut[2][255] == 255);   // blue untrimmed
+    const uint8_t src[3] = {200, 200, 200};   // a "white" triple the strip would render green-cast
+    uint8_t out[3] = {};
+    c.apply(src, out, 3);
+    CHECK(out[0] == 200);
+    CHECK(out[1] == 100);             // pulled down to match the weaker channels
+    CHECK(out[2] == 200);
+}
+
+// On an RGBW fixture the white channel is derived as min(R,G,B) from the CORRECTED values, so a
+// balance trim reaches it too: otherwise the synthesized white would carry the very cast the trim
+// exists to remove. This is the case that matters on an SK6812 RGBW strip, where the separate white
+// phosphor sits right beside the RGB dies and makes any mismatch obvious.
+TEST_CASE("Correction white balance: RGBW white is derived from the balanced channels") {
+    Correction c;
+    c.balBlue = 128;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGBW);
+    const uint8_t src[3] = {200, 200, 200};
+    uint8_t out[4] = {};
+    c.apply(src, out, 3);
+    CHECK(out[0] == 200);   // R
+    CHECK(out[1] == 200);   // G
+    CHECK(out[2] == 100);   // B trimmed
+    CHECK(out[3] == 100);   // W = min of the BALANCED channels, not the raw 200
+}
+
+// Gamma and balance are two inputs to one fill, not two stages: a channel's table is the curve
+// scaled by that channel's trim, and the hot path still does a single lookup.
+TEST_CASE("Correction: gamma and white balance compose into the one table") {
+    Correction c;
+    c.gamma10 = 22;
+    c.balBlue = 128;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    CHECK(c.briLut[0][200] == 149);   // red: curve only, (200/255)^2.2 * 255
+    CHECK(c.briLut[2][200] == 74);    // blue: the same curve, then the half trim, (149 * 128) / 255
+}
+
+// --- Current limiting ------------------------------------------------------------------------
+// These check the NUMBERS, not just that something got smaller: the arithmetic is what stands
+// between a white frame and a browned-out supply.
+
+// An unset budget must leave every channel bit-exact, or the feature would dim existing installs.
+TEST_CASE("Correction: no budget leaves the frame untouched") {
+    Correction c;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    const uint8_t src[3] = {255, 255, 255};
+    c.measure(src, 3, 1);
+    CHECK(c.limit == 256);          // unity, so the shift gives the table value back exactly
+    uint8_t out[3] = {};
+    c.apply(src, out, 3);
+    CHECK(out[0] == 255);
+    CHECK(out[1] == 255);
+    CHECK(out[2] == 255);
+}
+
+// A limiter that trims when it needn't is just a dimmer.
+TEST_CASE("Correction: a frame within budget is not scaled") {
+    Correction c;
+    c.budgetMa = 1000;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    const uint8_t src[3] = {255, 255, 255};   // one light, 3 channels x 8 mA = 24 mA
+    c.measure(src, 3, 1);
+    CHECK(c.limit == 256);
+}
+
+// The headline case: white at full brightness on more lights than the supply can carry.
+TEST_CASE("Correction: an over-budget frame is scaled to fit") {
+    Correction c;
+    c.budgetMa = 1200;                        // half of what the frame below wants
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    uint8_t frame[100 * 3];
+    std::memset(frame, 255, sizeof(frame));   // 100 white lights
+    c.measure(frame, 3, 100);                 // 100 x 3 channels x 8 mA = 2400 mA
+    CHECK(c.limit == 128);                    // 1200/2400 -> half
+    uint8_t out[3] = {};
+    c.apply(frame, out, 3);
+    CHECK(out[0] == 127);                     // (255 * 128) >> 8
+}
+
+// Why a per-LIGHT figure cannot describe RGBW: Accurate moves the draw off R/G/B and onto W,
+// which is cheaper for the same color (16 mA a light against 40) so one budget halves a Min
+// frame and leaves an Accurate one alone.
+TEST_CASE("Correction: the estimate follows whiteMode, not a per-light constant") {
+    uint8_t frame[100 * 3];
+    std::memset(frame, 255, sizeof(frame));
+
+    Correction min;
+    min.whiteMode = WhiteMode::Min;
+    min.budgetMa = 2000;
+    mm::test::rebuildFromPreset(min, 255, mm::test::PresetOrder::RGBW);
+    min.measure(frame, 3, 100);               // RGB 3x8 + W 16 = 40 mA/light = 4000 mA
+    CHECK(min.limit == 128);                  // 2000/4000 -> half
+
+    Correction acc;
+    acc.whiteMode = WhiteMode::Accurate;
+    acc.budgetMa = 2000;
+    mm::test::rebuildFromPreset(acc, 255, mm::test::PresetOrder::RGBW);
+    acc.measure(frame, 3, 100);               // RGB drops to 0, W alone = 16 mA/light = 1600 mA
+    CHECK(acc.limit == 256);                  // inside budget, so untouched
 }
 
 // A fixture with a master dimmer channel must actually be LIT. The dimmer is a real output, not
@@ -472,4 +631,89 @@ TEST_CASE("Each moving-head formation aims the rig differently") {
     CHECK(mirror[0] != mirror[3]);
 
     mm::platform::setTestNowMs(0);   // back to the real clock for every later test
+}
+
+// Yellow and UV are real emitted channels on some fixtures, so the limiter has to price them too.
+TEST_CASE("Correction: the current estimate counts Yellow and UV channels") {
+    using R = mm::ChannelRole;
+    const R roles[] = {R::Red, R::Green, R::Blue, R::Yellow, R::UV};
+    const uint8_t frame[3] = {255, 255, 255};   // Y = 255, UV = 0, so the extra channel adds 8 mA
+
+    Correction c;
+    c.budgetMa = 24;   // plain RGB fits exactly; the extra Yellow channel must trip the limiter
+    c.rebuild(255, roles, 5);
+    c.measure(frame, 3, 1);
+
+    CHECK(c.limit < 256);
+}
+
+// A dimmer costs the estimate NOTHING: on every fixture that declares one it is a DMX control value
+// drawing nothing from this rail, like the motion roles beside it. Pricing it squeezed the colors to
+// make room for draw that does not exist.
+TEST_CASE("Correction: a master dimmer costs the current estimate nothing") {
+    uint8_t frame[10 * 3];
+    std::memset(frame, 255, sizeof(frame));   // 10 white lights, 3 x 8 mA = 240 mA
+
+    Correction plain;
+    plain.budgetMa = 200;
+    mm::test::rebuildFromPreset(plain, 255, mm::test::PresetOrder::RGB);
+    plain.measure(frame, 3, 10);
+
+    Correction dimmed;
+    dimmed.budgetMa = 200;
+    mm::test::rebuildFromPreset(dimmed, 255, mm::test::PresetOrder::RGB);
+    dimmed.offDimmer = 3;                      // the fixture carries one
+    dimmed.measure(frame, 3, 10);
+
+    CHECK(plain.limit == 213);                 // 200/240 of unity: the colors, and only those
+    CHECK(dimmed.limit == plain.limit);        // declaring a dimmer changed nothing
+
+    // And a black frame draws nothing whether or not a dimmer is declared. Priced, this tripped
+    // the limiter on a strip showing no light at all.
+    const uint8_t black[3] = {0, 0, 0};
+    dimmed.budgetMa = 1;
+    dimmed.measure(black, 3, 1);
+    CHECK(dimmed.limit == 256);
+}
+
+// Yellow and UV are emitted from the same corrected RGB as everything else, so a fixture carrying
+// them draws more than an RGB one on the same frame. Uncounted, an RGBY preset would exceed its cap.
+TEST_CASE("Correction: the estimate counts the Yellow and UV emitters") {
+    uint8_t frame[10 * 3];
+    std::memset(frame, 255, sizeof(frame));
+
+    Correction plain;
+    plain.budgetMa = 100;
+    mm::test::rebuildFromPreset(plain, 255, mm::test::PresetOrder::RGB);
+    plain.measure(frame, 3, 10);
+
+    Correction wide;
+    wide.budgetMa = 100;
+    mm::test::rebuildFromPreset(wide, 255, mm::test::PresetOrder::RGB);
+    wide.offYellow = 3;   // min(r,g) = 255 on a white frame, so a real extra draw
+    wide.measure(frame, 3, 10);
+
+    CHECK(wide.limit < plain.limit);   // the same frame costs more, so it is trimmed harder
+
+    // And each emitter carries its own figure: a UV die usually draws more than a visible one, so
+    // pricing it as a color channel would under-report, the direction that browns out a supply.
+    Correction thirsty;
+    thirsty.budgetMa = 100;
+    mm::test::rebuildFromPreset(thirsty, 255, mm::test::PresetOrder::RGB);
+    thirsty.offYellow = 3;
+    thirsty.mAYellow = 40;
+    thirsty.measure(frame, 3, 10);
+    CHECK(thirsty.limit < wide.limit);
+}
+
+// A cap that understates is not a cap: flooring the modelled draw lets a frame sit fractionally
+// over the budget with no limit applied.
+TEST_CASE("Correction: the modelled draw is rounded up, so the cap stays an upper bound") {
+    const uint8_t frame[3] = {254, 0, 0};   // one channel at 254: 7.97 mA at 8 mA full scale
+
+    Correction c;
+    c.budgetMa = 7;                          // floored the draw reads as exactly 7 and passes
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    c.measure(frame, 3, 1);
+    CHECK(c.limit < 256);                    // rounded up it is 8, over budget, so it is trimmed
 }

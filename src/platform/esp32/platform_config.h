@@ -57,7 +57,7 @@ constexpr bool isEsp32S3 = false;
 #endif
 
 // isEsp32S31: the S31 is the only target whose EMAC is RGMII / 1 Gb (SOC_EMAC_SUPPORT_1000M),
-// where classic/P4 are RMII: so its Ethernet default is a distinct RGMII PHY (YT8531) with a
+// where classic/P4 are RMII, so its Ethernet default is a distinct RGMII PHY (YT8531) with a
 // different pin set. Not derivable from a SOC flag (the RGMII data pins are board wiring, not a
 // chip property). Used by ethConfigDefault and ethInitEmac's RGMII branch/log.
 #ifdef CONFIG_IDF_TARGET_ESP32S31
@@ -175,7 +175,7 @@ constexpr uint8_t parlioLanes = 0;
 // classic chip's ONLY >8-lane route (it has neither LCD_CAM nor Parlio). IDF's esp_lcd
 // component backs the SAME esp_lcd i80 API (esp_lcd_new_i80_bus / tx_color, 8-or-16 bus
 // width, WR/DC) with the I2S peripheral on the classic ESP32 (esp_lcd_panel_io_i2s.c),
-// using WHOLE-FRAME chained DMA: so MultiPinLedDriver reuses the MultiPinLedDriver code path and
+// using WHOLE-FRAME chained DMA, so MultiPinLedDriver reuses the MultiPinLedDriver code path and
 // the i80Ws2812* seam, not a bespoke ISR ring. Gate CLASSIC-ONLY: SOC_LCD_I80_SUPPORTED
 // is set on the classic chip (I2S backend) AND the LCD_CAM chips (S3/P4/S31, LCD_CAM backend), so
 // exclude the LCD_CAM chips: otherwise both this and lcdLanes would be non-zero on those chips and
@@ -198,6 +198,18 @@ constexpr uint8_t i2sLanes = 0;
 constexpr bool hasI2sMic = true;
 #else
 constexpr bool hasI2sMic = false;
+#endif
+
+// USB video needs a High-Speed USB PHY (the S3 has USB, but only the slow kind: too slow to carry
+// video) and a hardware JPEG decoder. The target test is not redundant with the capability tests:
+// platform_esp32_usbvideo.cpp compiles its implementation for the P4 alone and the UVC component is
+// pulled in for the P4 alone, so a future chip meeting the capabilities would otherwise be offered
+// a source backed by the always-failing stub. Widen all three together or none.
+#if defined(CONFIG_IDF_TARGET_ESP32P4) && defined(CONFIG_SOC_USB_UTMI_PHY_NUM) && \
+    defined(CONFIG_SOC_JPEG_DECODE_SUPPORTED)
+constexpr bool hasUsbVideo = true;
+#else
+constexpr bool hasUsbVideo = false;
 #endif
 
 // OS capture devices are a desktop concept; boards use the pin-wired I2S mic above.

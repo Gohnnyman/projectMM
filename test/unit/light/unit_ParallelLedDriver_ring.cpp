@@ -77,7 +77,10 @@ public:
 
     // --- whole-frame bus (used to produce the reference frame the ring output is compared against) ---
     bool busInit(size_t frameBytes, bool) override { cap_ = frameBytes; buf_.assign(frameBytes, 0); return true; }
-    uint8_t* busBuffer(uint8_t i) override { return (i == 0 && !buf_.empty()) ? buf_.data() : nullptr; }
+    uint8_t* busBuffer(uint8_t i) override {
+        if (ringActive_) return i < kMockRingBufs && !ring_[i].empty() ? ring_[i].data() : nullptr;
+        return (i == 0 && !buf_.empty()) ? buf_.data() : nullptr;
+    }
     size_t busCapacity() const override { return cap_; }
     bool busTransmit(uint8_t, size_t) override { return true; }
     bool busWait(uint8_t, uint32_t) override { return true; }
@@ -622,6 +625,25 @@ TEST_CASE("MoonI80 ring: the windowed snapshot bias reads this driver's slice, n
 
     REQUIRE(refFrame.size() == winFrame.size());
     CHECK(std::memcmp(refFrame.data(), winFrame.data(), refFrame.size()) == 0);
+}
+
+// The ring path chooses the source copy first, then prices that same frame before arming the transfer.
+TEST_CASE("MoonI80 ring: current limiting prices the frame before the transfer starts") {
+    MockRingDriver d;
+    MockRingPeripheral peripheral;
+    mm::Buffer src;
+    mm::Correction corr;
+    wireShift(d, peripheral, src, corr, 90, "1,2");
+
+    peripheral.setWantRing(true);
+    d.applyState();
+    REQUIRE(peripheral.busIsRing());
+
+    std::memset(src.data(), 255, static_cast<size_t>(src.count()) * src.channelsPerLight());
+    d.correctionForTest().budgetMa = 17280;   // half of 90 lights × 2 pins × 8 strands × 24 mA
+    d.tick();
+
+    CHECK(d.correctionForTest().limit == 128);
 }
 
 // 7. TERMINATION — the DMA-chain contract the byte-tiling tests (1–6) never touch, and the exact site of

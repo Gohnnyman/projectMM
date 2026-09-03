@@ -133,6 +133,15 @@ public:
              + static_cast<size_t>(maxDest) * sizeof(nrOfLightsType);
     }
 
+    /// Hot-path: does this logical index reach any physical light at all? O(1), the CSR run is
+    /// empty exactly when its two offsets match. Lets a producer skip work whose result would be
+    /// discarded: on a border layout most of the logical box maps to nothing.
+    bool hasDestination(nrOfLightsType logicalIdx) const MM_NONBLOCKING {
+        if (identity_) return true;
+        if (!offsets_ || logicalIdx >= logicalCount_) return false;
+        return offsets_[logicalIdx + 1] > offsets_[logicalIdx];
+    }
+
     /// Hot-path: iterate physical destinations for a logical index. In identity mode
     /// it calls back with the logical index itself (no table read); otherwise it walks
     /// the CSR run, switching pages at each 4096 boundary in the paged case.

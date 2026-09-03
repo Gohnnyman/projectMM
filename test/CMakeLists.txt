@@ -17,6 +17,7 @@ add_executable(mm_tests
     unit/core/unit_fields.cpp
     unit/core/unit_crc.cpp
     unit/core/unit_AudioService_sync.cpp
+    unit/core/unit_VideoService.cpp
     unit/core/unit_IrService.cpp
     unit/core/unit_TcpConnect.cpp
     unit/core/unit_MqttPacket.cpp
@@ -84,6 +85,7 @@ add_executable(mm_tests
     unit/light/unit_WledAudioSyncPacket.cpp
     unit/light/unit_BlendMap.cpp
     unit/light/unit_draw.cpp
+    unit/light/unit_AmbilightEffect.cpp
     unit/light/unit_GameOfLifeEffect.cpp
     unit/light/unit_DemoReelEffect.cpp
     unit/light/unit_TextEffect.cpp
@@ -115,6 +117,7 @@ add_executable(mm_tests
     unit/light/unit_WaveEffect.cpp
     unit/light/unit_FireEffect.cpp
     unit/light/unit_GridLayout.cpp
+    unit/light/unit_RectangleLayout.cpp
     unit/light/unit_SingleColumnLayout.cpp
     unit/light/unit_SphereLayout.cpp
     unit/light/unit_WheelLayout.cpp

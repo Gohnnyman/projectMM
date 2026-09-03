@@ -145,3 +145,7 @@ __pycache__/
 # Root-anchored + dir-scoped, like /build/ above: a bare `.snapshots` would also swallow any
 # nested path of that name anywhere in the tree.
 /.snapshots/
+
+# Knowledge-graph output (the /graphify skill). NOT root-anchored, unlike the entries above:
+# it is written beside whatever path was scanned, so a nested one is output too, not a source dir.
+/graphify-out/

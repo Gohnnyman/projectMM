@@ -105,6 +105,7 @@ namespace mm {
 // installation. The wire format is the ColorLight 5A-75 documented byte layout, not FPP's code.
 class PanelCardDriver : public DriverBase {
 public:
+
     /// Panel cards are RGB, so this references the "RGB" preset rather than the strips' "GRB" —
     /// same per-driver default the network sinks use. The user can still pick any preset.
     PanelCardDriver() { setDefaultPresetName("RGB"); }

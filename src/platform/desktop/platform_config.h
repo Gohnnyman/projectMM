@@ -61,6 +61,9 @@ constexpr uint8_t i2sLanes = 0;
 // devices instead (hasAudioCapture below), through the same audioMicRead seam.
 constexpr bool hasI2sMic = false;
 
+// No USB host on desktop; VideoService keeps its test-pattern and file sources.
+constexpr bool hasUsbVideo = false;
+
 // OS audio capture (microphone / loopback devices) via the vendored miniaudio backend in
 // platform_desktop_audio.cpp. The device is picked by AudioService's `device` control.
 constexpr bool hasAudioCapture = true;

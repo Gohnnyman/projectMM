@@ -123,6 +123,12 @@ public:
     /// Reach the live Drivers (the one that owns the encode worker) to quiesce it around a mutation.
     static Drivers* active() { return ActiveInstance<Drivers>::active(); }
 
+    /// Global brightness (0–255). Scales every channel through each driver's per-channel LUT
+    /// (`(v × brightness) / 255`, after that driver's gamma curve and white-balance trim);
+    /// changing it rebuilds only those LUTs on the cheap `onControlChanged` tier: no pipeline
+    /// realloc, so the slider is fluent. Gamma and white balance are per-DRIVER (they describe a
+    /// fixture, not the board), so they live on DriverBase; only brightness is global.
+
     /// Where this rig's fixtures keep their motion channels, as LAYER slots.
     ///
     /// Callable BEFORE Drivers has prepared, which is the point: a Layer allocates its buffer in
