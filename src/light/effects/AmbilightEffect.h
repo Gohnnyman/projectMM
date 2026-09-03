@@ -9,7 +9,7 @@
 namespace mm {
 
 // Screen-follow ambient light: paints the layer with the live video frame, so lights around a
-// display glow the colour of the picture nearest them (the Ambilight / Hyperion behaviour).
+// display glow the color of the picture nearest them (the Ambilight / Hyperion behavior).
 //
 // TWO SPACES, and every name below says which one it is in:
 //
@@ -46,7 +46,7 @@ public:
         // A cut is a real jump, and smoothing through it reads as the lights lagging the picture.
         controls_.addControl("snapAbove", snapAbove, 0, 255);
         controls_.setHidden(controls_.count() - 1, smoothing == 0);
-        // Its own control because smoothing lags the COLOUR and this ramps the LEVEL.
+        // Its own control because smoothing lags the COLOR and this ramps the LEVEL.
         controls_.addControl("fadeInMs", fadeInMs, 0, 10000);
         controls_.addControl("edgeDepth", edgeDepth, 0, 50); // Hyperion samples ~8%
         // - a letterboxed film puts bars where the top and bottom lights look, so they go dark

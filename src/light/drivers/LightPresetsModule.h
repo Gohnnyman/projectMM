@@ -89,6 +89,17 @@ public:
     // White, WarmWhite, Yellow, or UV. Drives the whiteMode control's visibility: the control
     // governs all four, so it shows whenever any is present (not just White). A motion/fixture
     // role (Pan/Tilt/…) is not synthesised, so it doesn't count.
+    /// Does this preset carry `role` at all? The narrower question presetHasSynthChannel answers
+    /// as a group, for a caller that needs one emitter rather than any of them.
+    bool presetHasRole(uint32_t id, ChannelRole role) const {
+        const Preset* p = find(id);
+        if (!p) return false;
+        const uint8_t* r = roleAt(*p);
+        for (uint8_t c = 0; c < p->channelCount; c++)
+            if (static_cast<ChannelRole>(r[c]) == role) return true;
+        return false;
+    }
+
     bool presetHasSynthChannel(uint32_t id) const {
         const Preset* p = find(id);
         if (!p) return false;

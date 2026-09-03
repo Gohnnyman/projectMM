@@ -106,12 +106,12 @@ TEST_CASE("VideoService: latestFrame is readable with no service present and rep
 // robustness AudioService's mic seat has; without the tick() re-claim only a reboot recovers.
 TEST_CASE("VideoService: a survivor takes over the seat when the elected source is destroyed") {
     auto* elected = new VideoService(); // constructed first, so it claims the seat
-    elected->source = 0;                // test pattern: needs no file
+    elected->source = VideoService::kSourcePattern; // needs no file
     elected->applyState();
     REQUIRE(VideoService::latestFrame()->rgb != nullptr);
 
     VideoService survivor; // seat already held, so its claim is a no-op
-    survivor.source = 0;
+    survivor.source = VideoService::kSourcePattern;
     survivor.applyState();
 
     delete elected; // ~ActiveInstance vacates: the seat is now empty
@@ -130,9 +130,9 @@ TEST_CASE("VideoService: a platform that cannot capture does not offer the usb s
     CHECK(VideoService::kSourceCount == 2);
 
     VideoService v;
-    v.source = 2;
+    v.source = VideoService::kSourceUsb;
     v.applyState();
-    CHECK(v.source == 0); // fell back to the test pattern
+    CHECK(v.source == VideoService::kSourcePattern); // fell back
     CHECK(VideoService::latestFrame()->rgb != nullptr);
 }
 

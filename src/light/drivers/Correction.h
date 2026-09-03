@@ -124,7 +124,7 @@ struct Correction {
     // not available: there is no headroom above 255, so raising clips instead of balancing.
     uint8_t balRed = 255, balGreen = 255, balBlue = 255;
 
-    // Per CHANNEL, not per light: a white die draws about twice a colour one, so one per-light
+    // Per CHANNEL, not per light: a white die draws about twice a color one, so one per-light
     // figure under-reports white-heavy frames: the direction that browns out a supply. Measured
     // on a 5 m SK6812 RGBW strip.
     uint16_t budgetMa = 0; // 0 disables the limiter
@@ -150,7 +150,7 @@ struct Correction {
     // same fill, so there is one rebuild, not three.
     void rebuildBrightness(uint8_t brightness) {
         // Gamma FIRST, then the linear scales: scaling before the curve would re-shape it at every
-        // brightness, so a colour would shift as the slider moved.
+        // brightness, so a color would shift as the slider moved.
         uint8_t curve[256];
         const float exponent = gamma10 / 10.0f;
         for (int v = 0; v < 256; v++)
@@ -211,7 +211,7 @@ struct Correction {
         if (budgetMa == 0) return;
 
         // Which emitters this light carries cannot change mid-frame, so decide it once rather than
-        // per light. Both white roles come from the same synthesised value, so their draw adds.
+        // per light. Both white roles come from the same synthesized value, so their draw adds.
         uint32_t whiteMa = 0;
         if (offWhite != kAbsent) whiteMa += mAWhite;
         if (offWarmWhite != kAbsent) whiteMa += mAWhite;
@@ -251,7 +251,7 @@ struct Correction {
         // rail, so charging mAColor for them would be fiction. The dimmer is priced because IRGB
         // puts one on a 4-channel light, which is a plausible pick for an addressable strip.
         const uint64_t fixedMa = (offDimmer != kAbsent) ? static_cast<uint64_t>(n) * mAColor : 0;
-        if (fixedMa >= budgetMa) { // the fixed draw alone is over: nothing left to give the colours
+        if (fixedMa >= budgetMa) { // the fixed draw alone is over: nothing left to give the colors
             limit = 0;
             return;
         }

@@ -1509,19 +1509,25 @@ uint32_t videoCaptureFormatGeneration();
 // height and fps are requests rather than promises: the device negotiates what it
 // can, and videoCaptureFrame reports what actually arrived. False when nothing is
 // attached, the target has no USB host, or no MJPEG format matches.
+//
+// One open is one device at one negotiated format. A device that goes away is not followed: a
+// (re)connect bumps videoCaptureFormatGeneration(), and the caller answers it with a
+// deinit/init pair on its own thread. That rule is what keeps the buffers below stable.
 bool videoCaptureInit(VideoCaptureHandle& h, uint16_t width, uint16_t height, uint8_t fps);
 
 // Newest decoded frame as RGB888, or nullptr when none arrived since the last call.
-// The buffer belongs to the platform (the JPEG decoder writes it by DMA and needs its
-// own alignment) and stays valid until the next call: the caller borrows it for one
-// tick, exactly as VideoFrame does.
+//
+// The buffer belongs to the platform (the JPEG decoder writes it by DMA, with its own alignment).
+// It is allocated in videoCaptureInit and freed in videoCaptureDeinit, never in between, and the
+// decoder never writes into the one most recently returned. So both the pointer and its pixels
+// hold until the next call that RETURNS A FRAME: a caller may keep showing it across ticks that
+// return nullptr, which is what lets a dropped frame leave the picture up. It MUST drop it before
+// calling videoCaptureDeinit().
 const uint8_t* videoCaptureFrame(VideoCaptureHandle& h, uint16_t& width, uint16_t& height) MM_NONBLOCKING;
 
 void videoCaptureDeinit(VideoCaptureHandle& h);
 
 // ---------------------------------------------------------------------------
-// I2C bus diagnostics: domain-neutral, not audio-specific. Probes a bus and
-
 // I2C bus diagnostics: domain-neutral, not audio-specific. Probes a bus and
 // reports which 7-bit addresses ACK, the standard `i2cdetect` operation. Used
 // by the I2cScanModule diagnostic (src/core/I2cScanModule.h) to help bring up

@@ -950,11 +950,11 @@ Detail: [technical](moxygen/NoiseEffect.md)
 
 ### Ambilight 📺
 
-Paints the layer with the live frame from the [Video](../core/services.md#video) service, so lights around a display glow the colour of the picture nearest them: the screen-follow / Hyperion behaviour. Each light shows the **mean** of the source rectangle mapping to it, which is steady where a single sampled pixel would flicker on grain and moving edges.
+Paints the layer with the live frame from the [Video](../core/services.md#video) service, so lights around a display glow the color of the picture nearest them: the screen-follow / Hyperion behavior. Each light shows the **mean** of the source rectangle mapping to it, which is steady where a single sampled pixel would flicker on grain and moving edges.
 
-- `brightness`: scales the sampled colour. Dims *the video*, unlike the driver's brightness which dims everything.
+- `brightness`: scales the sampled color. Dims *the video*, unlike the driver's brightness which dims everything.
 - `saturation`: how far each channel is pushed from its zone's luma, as a percentage (100 = the mean untouched). Averaging mixes hues, so screen-follow lighting reads washed out without a boost.
-- `smoothing`: how much of the gap to a light's new colour is closed per frame. 0 follows the picture exactly; about 200 is Hyperion's default feel, roughly 200 ms to settle. The top of the range is a slow colour wash rather than an ambilight.
+- `smoothing`: how much of the gap to a light's new color is closed per frame. 0 follows the picture exactly; about 200 is Hyperion's default feel, roughly 200 ms to settle. The top of the range is a slow color wash rather than an ambilight.
 - `snapAbove`: a channel moving further than this jumps instead of easing. A scene cut is a real jump, and smoothing through it reads as the lights lagging the picture.
 - `fadeInMs`: ramps the output up from black when a picture arrives after a gap: boot, a console waking, a grabber replugged. 0 lands it at full immediately.
 - `edgeDepth`: how far into the picture the **outermost** lights look, as a percentage. Their own share is 1/height of the frame, a sliver at the very edge where compression is worst; Hyperion samples about 8%. It **sets** the depth rather than raising a floor, so a value below a position's own share makes its zone thinner instead. 0 keeps the plain division, which is what a video wall wants.

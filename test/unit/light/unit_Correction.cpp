@@ -348,7 +348,7 @@ TEST_CASE("Correction gamma: 2.2 pulls midtones down and pins both endpoints") {
 }
 
 // The curve is applied to the source value and the brightness scale then dims the RESULT. Doing it
-// the other way round would re-shape the curve at every brightness, so a colour would shift as the
+// the other way round would re-shape the curve at every brightness, so a color would shift as the
 // user dragged the slider. At brightness 128 with gamma 2.2 the midtone lands on gamma(128)/2 = 28;
 // scaling first would instead give gamma(64) = 12, which is the regression this catches.
 TEST_CASE("Correction gamma: the curve runs before brightness, so dimming never reshapes it") {
@@ -447,7 +447,7 @@ TEST_CASE("Correction: an over-budget frame is scaled to fit") {
 }
 
 // Why a per-LIGHT figure cannot describe RGBW: Accurate moves the draw off R/G/B and onto W,
-// which is cheaper for the same colour (16 mA a light against 40) so one budget halves a Min
+// which is cheaper for the same color (16 mA a light against 40) so one budget halves a Min
 // frame and leaves an Accurate one alone.
 TEST_CASE("Correction: the estimate follows whiteMode, not a per-light constant") {
     uint8_t frame[100 * 3];
@@ -667,7 +667,7 @@ TEST_CASE("Correction: the current estimate counts Yellow and UV channels") {
     CHECK(c.limit < 256);
 }
 
-// A dimmer is emitted at 255 whatever the limit says, so it cannot be scaled with the colours. It
+// A dimmer is emitted at 255 whatever the limit says, so it cannot be scaled with the colors. It
 // comes off the budget first: pricing it as a scalable term would compute a limit on the assumption
 // it shrinks too, and the frame would still draw more than the cap.
 TEST_CASE("Correction: a master dimmer is taken off the budget, not scaled with the frame") {
@@ -681,7 +681,7 @@ TEST_CASE("Correction: a master dimmer is taken off the budget, not scaled with 
     c.measure(frame, 3, 10);
     CHECK(c.limit == 128);                     // (200-80)/240 -> half, not 200/320
 
-    // And when the fixed draw alone is over budget there is nothing left to give the colours.
+    // And when the fixed draw alone is over budget there is nothing left to give the colors.
     c.budgetMa = 40;
     c.measure(frame, 3, 10);
     CHECK(c.limit == 0);
@@ -707,7 +707,7 @@ TEST_CASE("Correction: the estimate counts the Yellow and UV emitters") {
     CHECK(wide.limit < plain.limit);   // the same frame costs more, so it is trimmed harder
 
     // And each emitter carries its own figure: a UV die usually draws more than a visible one, so
-    // pricing it as a colour channel would under-report, the direction that browns out a supply.
+    // pricing it as a color channel would under-report, the direction that browns out a supply.
     Correction thirsty;
     thirsty.budgetMa = 100;
     mm::test::rebuildFromPreset(thirsty, 255, mm::test::PresetOrder::RGB);

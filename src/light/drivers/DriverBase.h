@@ -319,7 +319,7 @@ protected:
         controls_.addControl("balanceRed", balRed_, 0, 255);
         controls_.addControl("balanceGreen", balGreen_, 0, 255);
         controls_.addControl("balanceBlue", balBlue_, 0, 255);
-        // Per CHANNEL at full, because a white die draws about twice a colour one.
+        // Per CHANNEL at full, because a white die draws about twice a color one.
         const bool limits = limitsCurrent();
         controls_.addControl("maxCurrentMa", budgetMa_, 0, 60000);
         controls_.setHidden(controls_.count() - 1, !limits);
@@ -328,8 +328,11 @@ protected:
         controls_.addControl("mAPerWhiteChannel", mAWhite_, 1, 60);
         controls_.setHidden(controls_.count() - 1, !limits);
         // Only where the fixture carries them: four milliamp fields on an RGB strip would be noise.
-        const bool wide = correction_.offYellow != Correction::kAbsent ||
-                          correction_.offUV != Correction::kAbsent;
+        // Asked of the SELECTED preset rather than of correction_, which onControlChanged rebuilds
+        // after the controls: reading it here would show the previous fixture's answer for a frame.
+        // Same source whiteMode uses above.
+        const bool wide = lib && (lib->presetHasRole(presetId_, ChannelRole::Yellow) ||
+                                  lib->presetHasRole(presetId_, ChannelRole::UV));
         controls_.addControl("mAPerYellowChannel", mAYellow_, 1, 60);
         controls_.setHidden(controls_.count() - 1, !(limits && wide));
         controls_.addControl("mAPerUvChannel", mAUV_, 1, 60);

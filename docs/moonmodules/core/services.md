@@ -41,14 +41,14 @@ Detail: [technical](moxygen/AudioService.md)
 
 A Service (added by the user, not auto-wired): the video source that feeds screen-follow effects via `VideoService::latestFrame()`. The counterpart of [Audio](#audio) for a picture: one decode per tick, published once, read by however many effects want it. `source` decides which of the controls below are shown.
 
-- `source`: `test pattern` synthesises a frame and needs no hardware or files; `file` reads a binary PPM off the filesystem; `usb` captures from an HDMI grabber, offered only on a target that can.
+- `source`: `test pattern` synthesizes a frame and needs no hardware or files; `file` reads a binary PPM off the filesystem; `usb` captures from an HDMI grabber, offered only on a target that can.
 - `file`: (file) path to a binary PPM (P6, maxval 255). Upload it through the File Manager, or point at any path on the device.
 - `reload`: (file) re-read the file in place, without rebuilding the pipeline.
 - `offered`: (usb) the resolution and frame rate to request, chosen from what the attached device advertises. Read-only until one enumerates, since the device decides what is on the list.
-- `staleMs`: (usb) how long a gap in frames is tolerated before the lights go dark. 0 holds the last picture instead.
+- `staleMs`: (usb) how long a gap in frames is tolerated before the lights go dark. A UVC device streams continuously whatever is on the wire, so a gap means the grabber stopped, not that the content paused.
 - status: the live frame's dimensions (`848x480`), or the reason there is no frame.
 
-**The test pattern is a diagnostic, not decoration.** Four coloured border bands (red top, green right, blue bottom, yellow left) and a white block sweeping along the top edge. On a border-mounted strip that makes orientation self-evident: a mis-set `startCorner` or `clockwise` on the [Rectangle](../light/layouts.md#rectangle) layout shows as the wrong physical edge lighting, rather than a subtly wrong picture. The sweeping block shows liveness and which way "forward" runs.
+**The test pattern is a diagnostic, not decoration.** Four colored border bands (red top, green right, blue bottom, yellow left) and a white block sweeping along the top edge. On a border-mounted strip that makes orientation self-evident: a mis-set `startCorner` or `clockwise` on the [Rectangle](../light/layouts.md#rectangle) layout shows as the wrong physical edge lighting, rather than a subtly wrong picture. The sweeping block shows liveness and which way "forward" runs.
 
 **The USB source needs an ESP32-P4.** It wants two things at once and only that chip has both: a High-Speed USB PHY (the S3 has USB, but too slow to carry video) and a hardware JPEG decoder. Elsewhere the option is not offered and the two software sources still work. Choosing a format:
 

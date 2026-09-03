@@ -12,6 +12,11 @@
 // MM_NONBLOCKING, so videoCaptureFrame only reads an index, and the frame it names was decoded
 // earlier by decoderTask. A frame arriving while one is still pending is dropped: the newest is
 // the only one worth having.
+//
+// Ownership is the whole design: the buffers are allocated in videoCaptureInit and freed in
+// videoCaptureDeinit, both on the caller's thread, and nothing in between touches the set, so no
+// task can reallocate while another reads. A device that goes away is not chased from here: its
+// return re-enumerates, bumping the format generation, and the caller re-inits on that.
 
 #include "platform/platform.h"
 
@@ -41,13 +46,6 @@ static_assert(kSlots >= 3, "freeSlot() needs a spare beyond the published and th
 struct Capture {
     uvc_host_stream_hdl_t stream = nullptr;
     jpeg_decoder_handle_t jpeg = nullptr;
-    bool uvcInstalled = false;
-
-    // What to ask for again after a disconnect, and the flag that asks.
-    uint16_t reqWidth = 0;
-    uint16_t reqHeight = 0;
-    uint8_t reqFps = 0;
-    std::atomic<bool> lost{false};
 
     // The frame the UVC callback handed over, or null. Exchanged rather than assigned so the
     // callback never blocks and never overwrites one the decoder is already reading.
@@ -59,7 +57,8 @@ struct Capture {
     std::atomic<bool> running{false};
 
     // Decoded RGB888, from jpeg_alloc_decoder_mem for its cache-line and 2D-DMA alignment: a
-    // plain malloc shows up as intermittent corruption, not an error.
+    // plain malloc shows up as intermittent corruption, not an error. Written once, in init,
+    // before the decoder task exists; read-only from then on.
     uint8_t* rgb[kSlots] = {};
     size_t rgbCap = 0;
     uint16_t width[kSlots] = {};
@@ -85,14 +84,20 @@ uvc_host_frame_info_t frameList[kMaxFormats]; // file scope: too big for the dri
 // and a second overwrites bank 0 while that reader is still copying. The generation is odd during
 // a write, and a reader that sees it move across the copy retries. Cold path both sides, and the
 // writer (the UVC driver task) never waits.
+// The payload is atomic, not plain bytes. A seqlock detects an overlapping write, but two threads
+// touching a non-atomic object concurrently is a data race whatever the reader then does with what
+// it read: relaxed atomics make the program race-free and compile to the same loads and stores.
 struct FormatBank {
-    VideoCaptureFormat rows[kMaxFormats];
-    size_t count = 0;
+    std::atomic<uint16_t> width[kMaxFormats];
+    std::atomic<uint16_t> height[kMaxFormats];
+    std::atomic<uint8_t> fps[kMaxFormats];
+    std::atomic<size_t> count{0};
 };
 FormatBank formatBank;
 std::atomic<uint32_t> formatGen{0}; // 0 = nothing published yet; odd = a write in progress
 
 bool hostReady = false;
+bool uvcReady = false;
 
 // usb_host_lib_handle_events() is where enumeration and the port state machine actually run, and
 // it blocks. Nothing else may drive it, so this task owns it for the life of the application.
@@ -152,11 +157,13 @@ uint8_t fpsFrom(uint32_t interval) {
 // reachable from the UI.
 void addAdvertised(const uvc_host_frame_info_t& info, uint32_t interval, size_t& n) {
     if (n >= kMaxFormats || interval == 0) return;
-    VideoCaptureFormat& f = formatBank.rows[n++];
-    f.width = static_cast<uint16_t>(info.h_res);
-    f.height = static_cast<uint16_t>(info.v_res);
-    f.fps = fpsFrom(interval);
-    ESP_LOGI(kTag, "offers MJPEG %ux%u @ %u fps", f.width, f.height, f.fps);
+    const uint16_t w = static_cast<uint16_t>(info.h_res), h = static_cast<uint16_t>(info.v_res);
+    const uint8_t fps = fpsFrom(interval);
+    formatBank.width[n].store(w, std::memory_order_relaxed);
+    formatBank.height[n].store(h, std::memory_order_relaxed);
+    formatBank.fps[n].store(fps, std::memory_order_relaxed);
+    n++;
+    ESP_LOGI(kTag, "offers MJPEG %ux%u @ %u fps", w, h, fps);
 }
 
 // Runs on the UVC driver task when a device enumerates: before any stream is opened, which is what
@@ -191,34 +198,29 @@ void onDriverEvent(const uvc_host_driver_event_data_t* event, void*) {
                                   : CONFIG_UVC_INTERVAL_ARRAY_SIZE;
         for (uint8_t j = 0; j < rates; j++) addAdvertised(info, info.interval[j], n);
     }
-    formatBank.count = n;
+    formatBank.count.store(n, std::memory_order_relaxed);
     formatGen.fetch_add(1, std::memory_order_release); // even again: the list is settled
 }
 
-void onEvent(const uvc_host_stream_event_data_t* event, void* ctx) {
-    auto* cap = static_cast<Capture*>(ctx);
-    if (event->type == UVC_HOST_DEVICE_DISCONNECTED) {
-        cap->slots.store(0); // nothing published, nothing claimed
-        cap->lost.store(true); // decoderTask reopens; stream_open blocks, so not from here
-        ESP_LOGW(kTag, "capture device disconnected");
-    }
+// Runs on the UVC driver task. The stream is paused by the driver before this fires, so no frame
+// follows it; the renderer sees that as a gap and its stale timeout takes it from there. Nothing to
+// unwind here: the device's return re-enumerates, and the caller re-inits on that (file header).
+void onEvent(const uvc_host_stream_event_data_t* event, void*) {
+    if (event->type == UVC_HOST_DEVICE_DISCONNECTED) ESP_LOGW(kTag, "capture device disconnected");
 }
 
-// Allocated once from the negotiated format, so no reallocation ever races the render thread.
-// Grow-only, so a replug at the same or a smaller format keeps the buffers it has and a bigger
-// one gets new ones. Not doing this is silent: decode() would drop every oversized frame.
+// One set of slots per open, sized from the format the device agreed to. Called from init only,
+// before the decoder task exists, so nothing can be reading a slot while it is (re)written.
 bool allocSlots(Capture& cap, uint16_t w, uint16_t h) {
     const size_t need = static_cast<size_t>(w) * h * 3;
-    if (cap.rgb[0] && cap.rgbCap >= need) return true;
     jpeg_decode_memory_alloc_cfg_t memCfg = {};
     memCfg.buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER;
     for (int i = 0; i < kSlots; i++) {
-        free(cap.rgb[i]); // free(nullptr) is a no-op, so the first allocation needs no guard
         size_t got = 0;
         cap.rgb[i] = static_cast<uint8_t*>(jpeg_alloc_decoder_mem(need, &memCfg, &got));
         if (!cap.rgb[i]) {
-            cap.rgbCap = 0; // a partial set is no set: decode() must not write into a freed slot
-            return false;
+            cap.rgbCap = 0; // a partial set is no set: decode() must not write into a missing slot
+            return false;   // deinit frees what was allocated
         }
         cap.rgbCap = got; // every slot gets the same request, so the same rounded-up size
     }
@@ -267,39 +269,12 @@ void decode(Capture& cap, uvc_host_frame_t* frame) {
     }
 }
 
-bool openStream(Capture& cap, uint16_t width, uint16_t height, uint8_t fps); // defined below
-bool sizeBuffers(Capture& cap);                                              //      """
-
-// Replug recovery. uvc_host_stream_open blocks for up to its timeout, so this runs on the decode
-// task rather than in the event callback or the render tick. A failed attempt costs that timeout,
-// which is its own retry pacing.
-void reopen(Capture& cap) {
-    if (cap.stream) {
-        uvc_host_stream_close(cap.stream);
-        cap.stream = nullptr;
-    }
-    if (!openStream(cap, cap.reqWidth, cap.reqHeight, cap.reqFps)) return;
-    // Every reopen, not only the first: width and height are requests, so a replacement device
-    // can negotiate something larger, and buffers sized for the old one would make decode() drop
-    // every frame while the stream looked healthy.
-    if (!sizeBuffers(cap)) return;
-    if (uvc_host_stream_start(cap.stream) != ESP_OK) {
-        ESP_LOGW(kTag, "reopened the device but could not start the stream");
-        return; // `lost` stays set, so the next timeout tries again
-    }
-    cap.lost.store(false);
-    ESP_LOGI(kTag, "capture device back");
-}
-
 // The blocking half, kept off the render tick. Waits on a finite timeout rather than forever so
-// `running` and `lost` are seen without the callback having to signal.
+// `running` is seen without the callback having to signal.
 void decoderTask(void* arg) {
     auto* cap = static_cast<Capture*>(arg);
     while (cap->running.load()) {
-        if (xSemaphoreTake(cap->wake, pdMS_TO_TICKS(100)) != pdTRUE) {
-            if (cap->lost.load()) reopen(*cap);
-            continue;
-        }
+        if (xSemaphoreTake(cap->wake, pdMS_TO_TICKS(100)) != pdTRUE) continue;
         if (uvc_host_frame_t* frame = cap->pending.exchange(nullptr)) {
             decode(*cap, frame);
             uvc_host_frame_return(cap->stream, frame);
@@ -321,18 +296,22 @@ bool startDecoder(Capture& cap) {
     return false;
 }
 
-bool installUvc(Capture& cap) {
+// Installed once, like the host library above it: the format list belongs to the bus, not to one
+// open. Reinstalling per open would re-enumerate the attached device and bump the format
+// generation, which is the very signal the caller re-inits on.
+bool ensureUvcHost() {
+    if (uvcReady) return true;
     uvc_host_driver_config_t driverCfg = {};
     driverCfg.driver_task_stack_size = 4 * 1024;
     driverCfg.driver_task_priority = 5;
     driverCfg.xCoreID = tskNO_AFFINITY;
     driverCfg.create_background_task = true;
-    driverCfg.event_cb = onDriverEvent; // fills `advertised` as soon as a device enumerates
+    driverCfg.event_cb = onDriverEvent; // fills the format bank as soon as a device enumerates
     if (uvc_host_install(&driverCfg) != ESP_OK) {
         ESP_LOGE(kTag, "uvc_host_install failed");
         return false;
     }
-    cap.uvcInstalled = true;
+    uvcReady = true;
     return true;
 }
 
@@ -353,9 +332,6 @@ bool createSignals(Capture& cap) {
 }
 
 bool openStream(Capture& cap, uint16_t width, uint16_t height, uint8_t fps) {
-    cap.reqWidth = width;
-    cap.reqHeight = height;
-    cap.reqFps = fps;
     uvc_host_stream_config_t streamCfg = {};
     streamCfg.event_cb = onEvent;
     streamCfg.frame_cb = onFrame;
@@ -400,34 +376,18 @@ bool sizeBuffers(Capture& cap) {
 
 bool videoCaptureInit(VideoCaptureHandle& handle, uint16_t width, uint16_t height, uint8_t fps) {
     if (handle.impl) return true;
-    if (!ensureUsbHost()) return false;
+    if (!ensureUsbHost() || !ensureUvcHost()) return false;
     auto* cap = new Capture();
     handle.impl = cap; // every failure below unwinds through videoCaptureDeinit
 
-    if (!installUvc(*cap) || !createJpeg(*cap) || !createSignals(*cap)) {
-        videoCaptureDeinit(handle);
-        return false;
-    }
-    cap->reqWidth = width;
-    cap->reqHeight = height;
-    cap->reqFps = fps;
-
-    // No device yet is not a failure to unwind: the decode task's retry already handles a grabber
-    // that comes back, so starting it here makes plugging one in after boot behave like a replug.
-    // The caller still gets false and reports no device.
-    if (!startDecoder(*cap)) {
-        videoCaptureDeinit(handle);
-        return false;
-    }
-    if (!openStream(*cap, width, height, fps) || !sizeBuffers(*cap)) {
-        cap->lost.store(true); // the decode task retries on its next timeout
-        return false;
-    }
-    if (uvc_host_stream_start(cap->stream) != ESP_OK) {
-        cap->lost.store(true);
-        return false;
-    }
-    return true;
+    // In this order on purpose: the decoder task is started LAST, once every buffer it can reach
+    // exists, and the stream after it, so the first frame finds a task to wake. A device that is
+    // not there yet is a plain failure: its arrival bumps the format generation, and the caller
+    // comes back through here on that.
+    const bool ok = createJpeg(*cap) && createSignals(*cap) && openStream(*cap, width, height, fps) &&
+                    sizeBuffers(*cap) && startDecoder(*cap) && uvc_host_stream_start(cap->stream) == ESP_OK;
+    if (!ok) videoCaptureDeinit(handle);
+    return ok;
 }
 
 // Hot path: an index load and two field reads. Everything expensive already happened on
@@ -458,9 +418,14 @@ size_t videoCaptureFormats(VideoCaptureFormat* out, size_t max) {
         const uint32_t before = formatGen.load(std::memory_order_acquire);
         if (before == 0) return 0;      // nothing published yet
         if (before & 1u) continue;      // a write is in progress; let it finish
-        size_t n = formatBank.count;
+        size_t n = formatBank.count.load(std::memory_order_relaxed);
+        if (n > kMaxFormats) n = kMaxFormats; // a torn read of a rewrite in flight
         if (n > max) n = max;
-        for (size_t i = 0; i < n; i++) out[i] = formatBank.rows[i];
+        for (size_t i = 0; i < n; i++) {
+            out[i].width = formatBank.width[i].load(std::memory_order_relaxed);
+            out[i].height = formatBank.height[i].load(std::memory_order_relaxed);
+            out[i].fps = formatBank.fps[i].load(std::memory_order_relaxed);
+        }
         std::atomic_thread_fence(std::memory_order_acquire);
         if (formatGen.load(std::memory_order_relaxed) == before) return n; // no write overlapped
     }
@@ -469,23 +434,21 @@ size_t videoCaptureFormats(VideoCaptureFormat* out, size_t max) {
 void videoCaptureDeinit(VideoCaptureHandle& handle) {
     auto* cap = static_cast<Capture*>(handle.impl);
     if (!cap) return;
-    if (cap->stream) uvc_host_stream_stop(cap->stream); // no new frames while we tear down
-    if (cap->decoder) {  // stop the decoder before the things it reaches into
-        // Clear `lost` first so no new reopen() starts, then wait without a deadline: the task
-        // may be inside uvc_host_stream_open's own 3 s, and a shorter wait frees the semaphores
-        // and the JPEG engine underneath it.
-        cap->lost.store(false);
+    // Stop the stream first so no frame lands mid-teardown, then the task that would decode it.
+    // The join is unbounded on purpose: a decode in flight must finish before anything it reaches
+    // into is freed, and its own 40 ms decode timeout is what bounds how long that takes.
+    if (cap->stream) uvc_host_stream_stop(cap->stream);
+    if (cap->decoder) {
         cap->running = false;
-        xSemaphoreGive(cap->wake);  // it may be parked on this
+        xSemaphoreGive(cap->wake); // it may be parked on this
         xSemaphoreTake(cap->stopped, portMAX_DELAY);
     }
     if (uvc_host_frame_t* frame = cap->pending.exchange(nullptr)) uvc_host_frame_return(cap->stream, frame);
     if (cap->stream) uvc_host_stream_close(cap->stream);
     if (cap->jpeg) jpeg_del_decoder_engine(cap->jpeg);
-    if (cap->uvcInstalled) uvc_host_uninstall();
     if (cap->wake) vSemaphoreDelete(cap->wake);
     if (cap->stopped) vSemaphoreDelete(cap->stopped);
-    for (uint8_t* buf : cap->rgb) free(buf);
+    for (uint8_t* buf : cap->rgb) free(buf); // free(nullptr) is a no-op, so a partial set is fine
     delete cap;
     handle.impl = nullptr;
 }

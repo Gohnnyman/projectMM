@@ -56,7 +56,7 @@ struct Rig {
     // Anything testing the SMOOTHING has to tick without it.
     void tickOnly() { layer.tick(); }
     /// A tick with a NEW frame behind it: the effect skips a repeated one, so anything measuring
-    /// per-frame behaviour has to advance the source too, as the scheduler does.
+    /// per-frame behavior has to advance the source too, as the scheduler does.
     void tickOnly(VideoService& source) {
         source.tick();
         layer.tick();
@@ -104,7 +104,7 @@ TEST_CASE("AmbilightEffect: every light is written, none left dark by an empty z
     rig.fx.saturation = 100;
     rig.render();
 
-    // WRITTEN, not lit: the pattern's centre is black, so counting lit cells cannot tell "every
+    // WRITTEN, not lit: the pattern's center is black, so counting lit cells cannot tell "every
     // position was painted" from "one was". Fill with a value the effect cannot produce instead.
     constexpr uint8_t kSentinel = 0x5A;
     std::memset(rig.layer.buffer().data(), kSentinel, static_cast<size_t>(16) * 9 * 3);
@@ -116,14 +116,14 @@ TEST_CASE("AmbilightEffect: every light is written, none left dark by an empty z
             const bool untouched = p[0] == kSentinel && p[1] == kSentinel && p[2] == kSentinel;
             CHECK_FALSE(untouched);
         }
-    // The corners sit inside the coloured bands and must never be dark.
+    // The corners sit inside the colored bands and must never be dark.
     for (const auto& [x, y] : {std::pair{0, 0}, std::pair{15, 0}, std::pair{0, 8}, std::pair{15, 8}}) {
         const uint8_t* p = rig.px(x, y);
         CHECK((p[0] || p[1] || p[2]));
     }
 }
 
-// More lights than source pixels: neighbouring positions must SHARE one rather than resolve to
+// More lights than source pixels: neighboring positions must SHARE one rather than resolve to
 // an empty zone. The pattern is 64 wide, so a 128-wide layer forces the guard.
 TEST_CASE("AmbilightEffect: a layer finer than the frame still writes every light") {
     PatternSource src;
@@ -141,7 +141,7 @@ TEST_CASE("AmbilightEffect: a layer finer than the frame still writes every ligh
 
 // brightness scales the result down uniformly. Distinct from the driver's brightness: this one dims
 // the video relative to whatever else is composited beside it.
-TEST_CASE("AmbilightEffect: brightness scales the sampled colour down") {
+TEST_CASE("AmbilightEffect: brightness scales the sampled color down") {
     PatternSource src;
     Rig full(8, 8);
     full.fx.saturation = 100;
@@ -160,9 +160,9 @@ TEST_CASE("AmbilightEffect: brightness scales the sampled colour down") {
     CHECK(dimRed == (fullRed * 64) / 255);
 }
 
-// Saturation stretches each channel away from the zone's luma: above 100 a coloured zone gets
+// Saturation stretches each channel away from the zone's luma: above 100 a colored zone gets
 // more saturated, which is what pulls averaged means back off grey.
-TEST_CASE("AmbilightEffect: saturation above 100 pushes a coloured zone further from grey") {
+TEST_CASE("AmbilightEffect: saturation above 100 pushes a colored zone further from grey") {
     PatternSource src;
     Rig flat(8, 8);
     flat.fx.saturation = 100;
@@ -188,7 +188,7 @@ TEST_CASE("AmbilightEffect: no video source paints black, never the previous eff
 
     Rig rig(4, 4);
     rig.layer.applyState();
-    // Paint a recognisable frame, standing in for whatever effect ran before this one.
+    // Paint a recognizable frame, standing in for whatever effect ran before this one.
     uint8_t* buf = rig.layer.buffer().data();
     REQUIRE(buf != nullptr);
     for (size_t i = 0; i < rig.layer.buffer().count(); i++) {
@@ -326,7 +326,7 @@ TEST_CASE("AmbilightEffect: edgeDepth makes the outer row sample deeper") {
 TEST_CASE("AmbilightEffect: edgeDepth below the natural share makes the outer row thinner") {
     PatternSource src;
     // Three rows over a 36-tall pattern is a 12-row share, which reaches past the 9-row red band
-    // into the black centre. A shallower zone stays inside the band, so it reads BRIGHTER.
+    // into the black center. A shallower zone stays inside the band, so it reads BRIGHTER.
     Rig plain(8, 3), thin(8, 3);
     plain.fx.saturation = 100;
     thin.fx.saturation = 100;
@@ -419,7 +419,7 @@ TEST_CASE("AmbilightEffect: the top light escapes the letterbox once bars are de
     CHECK(rig.px(4, 0)[1] > 100);                // now reading the green picture
 }
 
-// The pattern's centre is black and its edges are coloured: the OPPOSITE of a letterbox. Nothing
+// The pattern's center is black and its edges are colored: the OPPOSITE of a letterbox. Nothing
 // must be detected in it, or a picture that fills the frame would get cropped.
 TEST_CASE("AmbilightEffect: a frame that fills the picture reports no bars") {
     PatternSource src;
