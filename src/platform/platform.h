@@ -1501,6 +1501,10 @@ struct VideoCaptureFormat {
 // reading. 0 means no device has been seen yet.
 size_t videoCaptureFormats(VideoCaptureFormat* out, size_t max);
 
+// Bumped whenever that list is rewritten, which is when a device enumerates. A consumer caching
+// the list compares this instead of copying, so noticing a hotplug costs one load. 0 until then.
+uint32_t videoCaptureFormatGeneration();
+
 // Claim the first UVC device on the bus and stream MJPEG. All three of width,
 // height and fps are requests rather than promises: the device negotiates what it
 // can, and videoCaptureFrame reports what actually arrived. False when nothing is

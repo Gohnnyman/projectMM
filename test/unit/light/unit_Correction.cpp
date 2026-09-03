@@ -716,3 +716,15 @@ TEST_CASE("Correction: the estimate counts the Yellow and UV emitters") {
     thirsty.measure(frame, 3, 10);
     CHECK(thirsty.limit < wide.limit);
 }
+
+// A cap that understates is not a cap: flooring the modelled draw lets a frame sit fractionally
+// over the budget with no limit applied.
+TEST_CASE("Correction: the modelled draw is rounded up, so the cap stays an upper bound") {
+    const uint8_t frame[3] = {254, 0, 0};   // one channel at 254: 7.97 mA at 8 mA full scale
+
+    Correction c;
+    c.budgetMa = 7;                          // floored the draw reads as exactly 7 and passes
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    c.measure(frame, 3, 1);
+    CHECK(c.limit < 256);                    // rounded up it is 8, over budget, so it is trimmed
+}

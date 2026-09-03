@@ -86,7 +86,12 @@ public:
             lit_.resize(0);
             return;
         }
-        if (!lit_.resize(positions)) return; // no list: tick() falls back to painting the whole box
+        // Count first, then size to the count: sizing by the box reserves 156 KB on a 200x200
+        // rectangle to hold the 3 KB its perimeter needs, the waste this list exists to remove.
+        size_t lit = 0;
+        for (size_t i = 0; i < positions; i++)
+            if (lut.hasDestination(static_cast<nrOfLightsType>(i))) lit++;
+        if (lit == 0 || !lit_.resize(lit)) return; // no list: tick() paints the whole box instead
         const lengthType w = width();
         for (size_t i = 0; i < positions; i++)
             if (lut.hasDestination(static_cast<nrOfLightsType>(i)))
@@ -105,8 +110,9 @@ public:
             return;
         }
 
-        // The frame already on the strip
-        if (frame->seq == lastSeq_) return;
+        // The frame already on the strip. `primed_` is what makes that true: prepare() clears the
+        // layer and resets it, so without it a rebuild against a frozen frame stays black.
+        if (primed_ && frame->seq == lastSeq_) return;
         lastSeq_ = frame->seq;
 
         const lengthType lightsX = width(), lightsY = height();

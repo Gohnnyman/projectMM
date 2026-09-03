@@ -2131,6 +2131,7 @@ bool videoCaptureInit(VideoCaptureHandle& /*h*/, uint16_t /*width*/, uint16_t /*
     return false;
 }
 size_t videoCaptureFormats(VideoCaptureFormat* /*out*/, size_t /*max*/) { return 0; }
+uint32_t videoCaptureFormatGeneration() { return 0; }
 const uint8_t* videoCaptureFrame(VideoCaptureHandle& /*h*/, uint16_t& /*width*/,
                                  uint16_t& /*height*/) MM_NONBLOCKING {
     return nullptr;

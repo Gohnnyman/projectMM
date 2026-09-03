@@ -1,6 +1,7 @@
 #pragma once
 
-#include "core/ActiveInstance.h" // the one-active-source seat (RAII vacate on destruct)
+#include "core/ActiveInstance.h"
+#include "core/Scheduler.h" // requestPrepareTree: a hotplug needs a cold-path rebuild // the one-active-source seat (RAII vacate on destruct)
 #include "core/color.h"          // RGB: the pattern's band colours
 #include "core/MoonModule.h"
 #include "core/ScratchBuffer.h"
@@ -142,6 +143,15 @@ public:
         MoonModule::tick();
     }
 
+    /// A grabber plugged in after prepare() enumerates on its own, so its format list arrives with
+    /// nothing having asked for it. Notice here (one atomic load) and ask for a rebuild, which runs
+    /// prepare() on the render thread where reading the list and rebuilding the dropdown belong.
+    void tick1s() MM_NONBLOCKING override {
+        if (source == 2 && platform::videoCaptureFormatGeneration() != formatGen_)
+            if (Scheduler* s = Scheduler::instance()) s->requestPrepareTree();
+        MoonModule::tick1s();
+    }
+
     void release() override {
         platform::videoCaptureDeinit(capture_);
         seat_.vacate();
@@ -171,6 +181,7 @@ private:
     /// Cold path: cache what the device advertises as dropdown labels. Kept out of
     /// defineControls(), which must stay pure. it only reads what this leaves behind.
     void readFormats() {
+        formatGen_ = platform::videoCaptureFormatGeneration();
         const uint8_t was = formatCount_;
         formatCount_ = static_cast<uint8_t>(platform::videoCaptureFormats(formats_, kMaxFormats));
         for (uint8_t i = 0; i < formatCount_; i++) {
@@ -218,6 +229,7 @@ private:
     char formatLabels_[kMaxFormats][24] = {};
     const char* formatOptions_[kMaxFormats] = {};
     uint8_t formatCount_ = 0;
+    uint32_t formatGen_ = 0; // the platform generation formats_ was read at
     ScratchBuffer<uint8_t> buf_{*this}; // width*height*3, accounted in dynamicBytes()
     VideoFrame frame_;
     uint32_t seq_ = 0;

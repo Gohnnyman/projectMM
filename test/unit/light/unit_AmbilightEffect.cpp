@@ -104,15 +104,18 @@ TEST_CASE("AmbilightEffect: every light is written, none left dark by an empty z
     rig.fx.saturation = 100;
     rig.render();
 
-    int lit = 0;
+    // WRITTEN, not lit: the pattern's centre is black, so counting lit cells cannot tell "every
+    // position was painted" from "one was". Fill with a value the effect cannot produce instead.
+    constexpr uint8_t kSentinel = 0x5A;
+    std::memset(rig.layer.buffer().data(), kSentinel, static_cast<size_t>(16) * 9 * 3);
+    rig.render();
+
     for (int y = 0; y < 9; y++)
         for (int x = 0; x < 16; x++) {
             const uint8_t* p = rig.px(x, y);
-            if (p[0] || p[1] || p[2]) lit++;
+            const bool untouched = p[0] == kSentinel && p[1] == kSentinel && p[2] == kSentinel;
+            CHECK_FALSE(untouched);
         }
-    // The pattern's centre is deliberately black, so not every light is lit, but the four bands
-    // are, and they are the majority of a 16x9 border-shaped frame.
-    CHECK(lit > 0);
     // The corners sit inside the coloured bands and must never be dark.
     for (const auto& [x, y] : {std::pair{0, 0}, std::pair{15, 0}, std::pair{0, 8}, std::pair{15, 8}}) {
         const uint8_t* p = rig.px(x, y);

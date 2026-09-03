@@ -64,8 +64,16 @@ struct Capture {
     size_t rgbCap = 0;
     uint16_t width[kSlots] = {};
     uint16_t height[kSlots] = {};
-    std::atomic<int> published{-1}; // decoder -> renderer: newest complete slot
-    std::atomic<int> inUse{-1};     // renderer -> decoder: slot handed out last call
+    // ONE word: reading which slot is newest and claiming it must be a single step, or the
+    // decoder can publish between the two and then pick the slot just read as free, decoding into
+    // a buffer being displayed. Packed (published+1) << 8 | (inUse+1); 0 in a field means none.
+    std::atomic<uint16_t> slots{0};
+
+    static int pubOf(uint16_t s) { return static_cast<int>(s >> 8) - 1; }
+    static int useOf(uint16_t s) { return static_cast<int>(s & 0xFF) - 1; }
+    static uint16_t pack(int pub, int use) {
+        return static_cast<uint16_t>(((pub + 1) << 8) | ((use + 1) & 0xFF));
+    }
 };
 
 // What the attached device advertises. File scope rather than inside Capture because it is learned
@@ -73,15 +81,16 @@ struct Capture {
 constexpr size_t kMaxFormats = 24;
 uvc_host_frame_info_t frameList[kMaxFormats]; // file scope: too big for the driver task's stack
 
-// Double-buffered: the driver task fills the bank `published` does NOT name, then publishes it, so
-// a rewrite cannot touch what a reader is copying. A count zeroed and restored is not exclusion:
-// a reader can load a nonzero one in the instant before the writer clears it.
+// A seqlock. Two banks are not enough: a reader loads bank 0, one connect event publishes bank 1,
+// and a second overwrites bank 0 while that reader is still copying. The generation is odd during
+// a write, and a reader that sees it move across the copy retries. Cold path both sides, and the
+// writer (the UVC driver task) never waits.
 struct FormatBank {
     VideoCaptureFormat rows[kMaxFormats];
     size_t count = 0;
 };
-FormatBank formatBank[2];
-std::atomic<int> publishedFormats{-1}; // -1 until a device has enumerated
+FormatBank formatBank;
+std::atomic<uint32_t> formatGen{0}; // 0 = nothing published yet; odd = a write in progress
 
 bool hostReady = false;
 
@@ -141,9 +150,9 @@ uint8_t fpsFrom(uint32_t interval) {
 // One dropdown row per (resolution, rate) pair. A device that does 320x240 at both 30 and 60 lists
 // the resolution ONCE with several intervals, so without this expansion only its default is
 // reachable from the UI.
-void addAdvertised(const uvc_host_frame_info_t& info, uint32_t interval, size_t& n, int bank) {
+void addAdvertised(const uvc_host_frame_info_t& info, uint32_t interval, size_t& n) {
     if (n >= kMaxFormats || interval == 0) return;
-    VideoCaptureFormat& f = formatBank[bank].rows[n++];
+    VideoCaptureFormat& f = formatBank.rows[n++];
     f.width = static_cast<uint16_t>(info.h_res);
     f.height = static_cast<uint16_t>(info.v_res);
     f.fps = fpsFrom(interval);
@@ -165,44 +174,52 @@ void onDriverEvent(const uvc_host_driver_event_data_t* event, void*) {
     }
     if (count > kMaxFormats) count = kMaxFormats; // it reports what it NEEDS, not what it wrote
 
-    // Fill the bank nobody is reading, then publish it.
-    const int bank = publishedFormats.load(std::memory_order_relaxed) == 0 ? 1 : 0;
+    // Bracket the rewrite in an odd generation, so a reader can tell it overlapped one.
+    formatGen.fetch_add(1, std::memory_order_release);
+    std::atomic_thread_fence(std::memory_order_release);
     size_t n = 0;
     for (size_t i = 0; i < count; i++) {
         const uvc_host_frame_info_t& info = frameList[i];
         if (info.format != UVC_VS_FORMAT_MJPEG) continue; // nothing else is decodable here
         if (info.interval_type == 0) { // a continuous range: offer both ends, fastest first
-            addAdvertised(info, info.interval_min, n, bank);
-            if (info.interval_max != info.interval_min) addAdvertised(info, info.interval_max, n, bank);
+            addAdvertised(info, info.interval_min, n);
+            if (info.interval_max != info.interval_min) addAdvertised(info, info.interval_max, n);
             continue;
         }
         const uint8_t rates = info.interval_type < CONFIG_UVC_INTERVAL_ARRAY_SIZE
                                   ? info.interval_type
                                   : CONFIG_UVC_INTERVAL_ARRAY_SIZE;
-        for (uint8_t j = 0; j < rates; j++) addAdvertised(info, info.interval[j], n, bank);
+        for (uint8_t j = 0; j < rates; j++) addAdvertised(info, info.interval[j], n);
     }
-    formatBank[bank].count = n;
-    publishedFormats.store(bank, std::memory_order_release);
+    formatBank.count = n;
+    formatGen.fetch_add(1, std::memory_order_release); // even again: the list is settled
 }
 
 void onEvent(const uvc_host_stream_event_data_t* event, void* ctx) {
     auto* cap = static_cast<Capture*>(ctx);
     if (event->type == UVC_HOST_DEVICE_DISCONNECTED) {
-        cap->published.store(-1);
+        cap->slots.store(0); // nothing published, nothing claimed
         cap->lost.store(true); // decoderTask reopens; stream_open blocks, so not from here
         ESP_LOGW(kTag, "capture device disconnected");
     }
 }
 
 // Allocated once from the negotiated format, so no reallocation ever races the render thread.
+// Grow-only, so a replug at the same or a smaller format keeps the buffers it has and a bigger
+// one gets new ones. Not doing this is silent: decode() would drop every oversized frame.
 bool allocSlots(Capture& cap, uint16_t w, uint16_t h) {
     const size_t need = static_cast<size_t>(w) * h * 3;
+    if (cap.rgb[0] && cap.rgbCap >= need) return true;
     jpeg_decode_memory_alloc_cfg_t memCfg = {};
     memCfg.buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER;
     for (int i = 0; i < kSlots; i++) {
+        free(cap.rgb[i]); // free(nullptr) is a no-op, so the first allocation needs no guard
         size_t got = 0;
         cap.rgb[i] = static_cast<uint8_t*>(jpeg_alloc_decoder_mem(need, &memCfg, &got));
-        if (!cap.rgb[i]) return false;
+        if (!cap.rgb[i]) {
+            cap.rgbCap = 0; // a partial set is no set: decode() must not write into a freed slot
+            return false;
+        }
         cap.rgbCap = got; // every slot gets the same request, so the same rounded-up size
     }
     return true;
@@ -212,8 +229,8 @@ bool allocSlots(Capture& cap, uint16_t w, uint16_t h) {
 // anyway would hand the decoder a buffer the render thread is reading. Corruption with no error is
 // worse than a dropped frame.
 int freeSlot(const Capture& cap) {
-    const int pub = cap.published.load(std::memory_order_relaxed);
-    const int use = cap.inUse.load(std::memory_order_relaxed);
+    const uint16_t s = cap.slots.load(std::memory_order_acquire);
+    const int pub = Capture::pubOf(s), use = Capture::useOf(s);
     for (int i = 0; i < kSlots; i++)
         if (i != pub && i != use) return i;
     return -1;
@@ -242,7 +259,12 @@ void decode(Capture& cap, uvc_host_frame_t* frame) {
 
     cap.width[slot] = static_cast<uint16_t>(info.width);
     cap.height[slot] = static_cast<uint16_t>(info.height);
-    cap.published.store(slot, std::memory_order_release); // dimensions first, then the slot
+    // Preserve whatever the renderer claimed while the decode ran. Pixels and dimensions are
+    // written first, and the release makes them visible to whoever acquires this.
+    uint16_t cur = cap.slots.load(std::memory_order_relaxed);
+    while (!cap.slots.compare_exchange_weak(cur, Capture::pack(slot, Capture::useOf(cur)),
+                                            std::memory_order_release, std::memory_order_relaxed)) {
+    }
 }
 
 bool openStream(Capture& cap, uint16_t width, uint16_t height, uint8_t fps); // defined below
@@ -257,9 +279,10 @@ void reopen(Capture& cap) {
         cap.stream = nullptr;
     }
     if (!openStream(cap, cap.reqWidth, cap.reqHeight, cap.reqFps)) return;
-    // The buffers are sized from the negotiated format, so a first open that never found a device
-    // has none yet. Grow-only: a later reopen at the same format keeps what it has.
-    if (!cap.rgb[0] && !sizeBuffers(cap)) return;
+    // Every reopen, not only the first: width and height are requests, so a replacement device
+    // can negotiate something larger, and buffers sized for the old one would make decode() drop
+    // every frame while the stream looked healthy.
+    if (!sizeBuffers(cap)) return;
     if (uvc_host_stream_start(cap.stream) != ESP_OK) {
         ESP_LOGW(kTag, "reopened the device but could not start the stream");
         return; // `lost` stays set, so the next timeout tries again
@@ -413,22 +436,34 @@ const uint8_t* videoCaptureFrame(VideoCaptureHandle& handle, uint16_t& width,
                                  uint16_t& height) MM_NONBLOCKING {
     auto* cap = static_cast<Capture*>(handle.impl);
     if (!cap) return nullptr;
-    const int slot = cap->published.load(std::memory_order_acquire);
-    // Consecutive publishes always land in different slots, so an unchanged one means no new frame.
-    if (slot < 0 || slot == cap->inUse.load(std::memory_order_relaxed)) return nullptr;
-    cap->inUse.store(slot, std::memory_order_relaxed); // claim it before the caller reads it
+    // Read and claim in one step. The loop runs again only if the decoder published meanwhile,
+    // and then hands back that newer frame.
+    uint16_t cur = cap->slots.load(std::memory_order_acquire);
+    int slot;
+    do {
+        slot = Capture::pubOf(cur);
+        // Consecutive publishes land in different slots, so an unchanged one means no new frame.
+        if (slot < 0 || slot == Capture::useOf(cur)) return nullptr;
+    } while (!cap->slots.compare_exchange_weak(cur, Capture::pack(slot, slot),
+                                               std::memory_order_acq_rel, std::memory_order_acquire));
     width = cap->width[slot];
     height = cap->height[slot];
     return cap->rgb[slot];
 }
 
+uint32_t videoCaptureFormatGeneration() { return formatGen.load(std::memory_order_acquire); }
+
 size_t videoCaptureFormats(VideoCaptureFormat* out, size_t max) {
-    const int bank = publishedFormats.load(std::memory_order_acquire);
-    if (bank < 0) return 0;
-    const FormatBank& b = formatBank[bank];
-    const size_t n = b.count < max ? b.count : max;
-    for (size_t i = 0; i < n; i++) out[i] = b.rows[i];
-    return n;
+    for (;;) {
+        const uint32_t before = formatGen.load(std::memory_order_acquire);
+        if (before == 0) return 0;      // nothing published yet
+        if (before & 1u) continue;      // a write is in progress; let it finish
+        size_t n = formatBank.count;
+        if (n > max) n = max;
+        for (size_t i = 0; i < n; i++) out[i] = formatBank.rows[i];
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (formatGen.load(std::memory_order_relaxed) == before) return n; // no write overlapped
+    }
 }
 
 void videoCaptureDeinit(VideoCaptureHandle& handle) {
@@ -463,6 +498,7 @@ namespace mm::platform {
 
 bool videoCaptureInit(VideoCaptureHandle&, uint16_t, uint16_t, uint8_t) { return false; }
 size_t videoCaptureFormats(VideoCaptureFormat*, size_t) { return 0; }
+uint32_t videoCaptureFormatGeneration() { return 0; }
 const uint8_t* videoCaptureFrame(VideoCaptureHandle&, uint16_t&, uint16_t&) MM_NONBLOCKING { return nullptr; }
 void videoCaptureDeinit(VideoCaptureHandle&) {}
 
