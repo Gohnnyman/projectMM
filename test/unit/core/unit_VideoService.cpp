@@ -143,3 +143,11 @@ TEST_CASE("VideoService: a platform with no capture advertises no formats") {
     mm::platform::VideoCaptureFormat formats[4];
     CHECK(mm::platform::videoCaptureFormats(formats, 4) == 0);
 }
+
+// Accepting a non-whitespace separator eats a pixel and shifts every channel one place, which
+// tints the whole image rather than failing.
+TEST_CASE("VideoService PPM: the separator must be whitespace, not merely present") {
+    uint16_t w = 0, h = 0;
+    CHECK(parse("P6\n2 2\n255X", w, h) == -1);
+    CHECK(parse("P6\n2 2\n255\n", w, h) == 11);   // the same header with a real separator
+}

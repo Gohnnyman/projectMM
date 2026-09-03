@@ -105,7 +105,6 @@ namespace mm {
 // installation. The wire format is the ColorLight 5A-75 documented byte layout, not FPP's code.
 class PanelCardDriver : public DriverBase {
 public:
-    bool limitsCurrent() const override { return true; }
 
     /// Panel cards are RGB, so this references the "RGB" preset rather than the strips' "GRB" —
     /// same per-driver default the network sinks use. The user can still pick any preset.
@@ -339,7 +338,6 @@ public:
             const uint8_t* src = sourceBuffer_->data();
             const uint8_t srcCh = sourceBuffer_->channelsPerLight();
             uint8_t* dst = corrected_.data();
-            correction_.measure(src + static_cast<size_t>(winStart) * srcCh, srcCh, nLights);
             for (nrOfLightsType i = 0; i < nLights; i++) {
                 // srcCh carries a wide light's motion channels through, as NetworkSendDriver does.
                 correction_.apply(src + (winStart + i) * srcCh, dst + i * outCh, srcCh);

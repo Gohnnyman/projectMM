@@ -130,6 +130,8 @@ public:
         correction_.budgetMa = budgetMa_;
         correction_.mAColor = mAColor_;
         correction_.mAWhite = mAWhite_;
+        correction_.mAYellow = mAYellow_;
+        correction_.mAUV = mAUV_;
         // Fill inputs, so they must be in place before the rebuild below. Pushed here rather than in
         // onControlChanged so a rebuild from ANY trigger carries the current values.
         correction_.gamma10 = gamma10_;
@@ -281,6 +283,8 @@ protected:
     uint16_t budgetMa_ = 0;   // 0 = no current limiting
     uint8_t mAColor_ = 8;     // measured on SK6812 RGBW: R 7.98, G 8.11, B 7.98
     uint8_t mAWhite_ = 16;    // measured: W 16.11
+    uint8_t mAYellow_ = 8;    // assumed, not measured: an amber die sits near red
+    uint8_t mAUV_ = 8;        // assumed: a UV die usually draws more, so this may read low
     uint8_t localBrightness_ = 255;  // per-driver dim, multiplied with the global brightness
     // Calibration for THIS fixture, so per-driver rather than global: two strips on one board can
     // need different values. Semantics in Correction.h.
@@ -323,6 +327,13 @@ protected:
         controls_.setHidden(controls_.count() - 1, !limits);
         controls_.addControl("mAPerWhiteChannel", mAWhite_, 1, 60);
         controls_.setHidden(controls_.count() - 1, !limits);
+        // Only where the fixture carries them: four milliamp fields on an RGB strip would be noise.
+        const bool wide = correction_.offYellow != Correction::kAbsent ||
+                          correction_.offUV != Correction::kAbsent;
+        controls_.addControl("mAPerYellowChannel", mAYellow_, 1, 60);
+        controls_.setHidden(controls_.count() - 1, !(limits && wide));
+        controls_.addControl("mAPerUvChannel", mAUV_, 1, 60);
+        controls_.setHidden(controls_.count() - 1, !(limits && wide));
         // The durable reference (the preset NAME) persists but isn't shown — the lightPreset Select
         // above is the user-facing control; presetRef_ just carries the reference across a reboot.
         controls_.addText("presetRef", presetRef_, sizeof(presetRef_));
@@ -341,7 +352,8 @@ protected:
             || std::strcmp(name, "whiteMode") == 0 || std::strcmp(name, "gamma x10") == 0
             || std::strcmp(name, "balanceRed") == 0 || std::strcmp(name, "balanceGreen") == 0
             || std::strcmp(name, "balanceBlue") == 0 || std::strcmp(name, "maxCurrentMa") == 0
-            || std::strcmp(name, "mAPerColorChannel") == 0 || std::strcmp(name, "mAPerWhiteChannel") == 0;
+            || std::strcmp(name, "mAPerColorChannel") == 0 || std::strcmp(name, "mAPerWhiteChannel") == 0
+            || std::strcmp(name, "mAPerYellowChannel") == 0 || std::strcmp(name, "mAPerUvChannel") == 0;
     }
 
 private:

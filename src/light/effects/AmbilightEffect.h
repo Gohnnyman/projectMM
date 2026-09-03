@@ -246,7 +246,11 @@ private:
     /// them. Hence the state; the return value is what the caller should actually map across.
     Bars trackBars(const VideoFrame& frame) MM_NONBLOCKING {
         if (!detectBlackBars) {
-            bars_ = Bars{};
+            // All of it, not just the adopted value: a surviving candidate_ with a saturated
+            // stable_ makes the next enable agree with itself immediately and never re-adopt, so
+            // the setting would look dead until the picture's geometry changed.
+            bars_ = candidate_ = Bars{};
+            stable_ = 0;
             return bars_;
         }
         Bars found;

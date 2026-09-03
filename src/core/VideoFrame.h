@@ -14,7 +14,9 @@ struct VideoFrame {
     const uint8_t* rgb = nullptr; // width*height*3, row-major, top-left origin, no padding
     uint16_t width = 0;
     uint16_t height = 0;
-    uint32_t seq = 0; // bumped per new frame; compare for INEQUALITY, never ordering.
+    // Bumped per PUBLISHED frame; compare for INEQUALITY, never ordering. A still PPM bumps it
+    // every tick, the way a camera aimed at a still object sends one every period.
+    uint32_t seq = 0;
 };
 
 // The "no source" frame consumers fall back to.

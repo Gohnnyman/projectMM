@@ -5,6 +5,7 @@
 #include "light/effects/AmbilightEffect.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/RectangleLayout.h"
+#include "platform/platform.h"   // fsRootPath: ctest roots the filesystem in the build tree
 #include "light/layouts/Layouts.h"
 
 #include <cstdint>
@@ -359,11 +360,14 @@ struct Letterbox {
     VideoService svc;
     char path[64] = {};
     Letterbox(int w, int h, int bar) {
-        // The desktop filesystem is rooted at fsRoot_ ("build"), so the service resolves a bare
-        // name under there: write it to the same place rather than to the real /tmp.
+        // The service resolves a bare name under the desktop filesystem root, which ctest points
+        // into the build tree. Ask for the resolved root rather than assuming one: with "build/"
+        // hard-coded the file landed where the service never looked, and this passed only when the
+        // binary was run from a checkout.
         std::snprintf(path, sizeof(path), "mm_letterbox_%dx%d_%d.ppm", w, h, bar);
-        char real[128];
-        std::snprintf(real, sizeof(real), "build/%s", path);
+        char real[256];
+        std::snprintf(real, sizeof(real), "%s/%s", mm::platform::fsRootPath(), path);
+        mm::platform::fsMkdir("/");   // ctest's root is a path, not necessarily a directory yet
         std::FILE* f = std::fopen(real, "wb");
         REQUIRE(f != nullptr);
         std::fprintf(f, "P6\n%d %d\n255\n", w, h);
@@ -379,8 +383,8 @@ struct Letterbox {
         svc.applyState();
     }
     ~Letterbox() {
-        char real[128];
-        std::snprintf(real, sizeof(real), "build/%s", path);
+        char real[256];
+        std::snprintf(real, sizeof(real), "%s/%s", mm::platform::fsRootPath(), path);
         std::remove(real);
     }
 };
@@ -504,4 +508,25 @@ TEST_CASE("AmbilightEffect: a repeated frame leaves the strip untouched") {
     std::memcpy(before, rig.px(4, 0), 3);
     for (int i = 0; i < 5; i++) rig.tickOnly();   // no new frame published
     CHECK(std::memcmp(before, rig.px(4, 0), 3) == 0);
+}
+
+// Turning detection off has to clear the hysteresis, not only the adopted bars. A surviving
+// candidate with a saturated counter agrees with itself the moment detection returns, so the
+// adoption branch never fires again and the control looks dead.
+TEST_CASE("AmbilightEffect: detection can be turned off and on again") {
+    Letterbox src(64, 64, 16);
+    Rig rig(8, 8);
+    rig.fx.saturation = 100;
+    rig.fx.detectBlackBars = true;
+    rig.render();
+    for (int i = 0; i < 60; i++) rig.tickOnly(src.svc);
+    REQUIRE(rig.px(4, 0)[1] > 100);              // bars adopted, reading the picture
+
+    rig.fx.detectBlackBars = false;
+    rig.tickOnly(src.svc);
+    CHECK(rig.px(4, 0)[1] == 0);                 // back to the frame, so back inside the bar
+
+    rig.fx.detectBlackBars = true;
+    for (int i = 0; i < 60; i++) rig.tickOnly(src.svc);
+    CHECK(rig.px(4, 0)[1] > 100);                // and adopted again rather than stuck
 }

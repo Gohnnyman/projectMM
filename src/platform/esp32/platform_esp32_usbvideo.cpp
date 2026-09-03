@@ -71,11 +71,17 @@ struct Capture {
 // What the attached device advertises. File scope rather than inside Capture because it is learned
 // from the driver event, which fires before a stream exists and outlives a failed open.
 constexpr size_t kMaxFormats = 24;
-VideoCaptureFormat advertised[kMaxFormats];
 uvc_host_frame_info_t frameList[kMaxFormats]; // file scope: too big for the driver task's stack
-// Written by the UVC driver task, read by prepare(). Zeroed before the rewrite and released after,
-// so a reader sees either an empty list or a complete one, never a half-written one.
-std::atomic<size_t> advertisedCount{0};
+
+// Double-buffered: the driver task fills the bank `published` does NOT name, then publishes it, so
+// a rewrite cannot touch what a reader is copying. A count zeroed and restored is not exclusion:
+// a reader can load a nonzero one in the instant before the writer clears it.
+struct FormatBank {
+    VideoCaptureFormat rows[kMaxFormats];
+    size_t count = 0;
+};
+FormatBank formatBank[2];
+std::atomic<int> publishedFormats{-1}; // -1 until a device has enumerated
 
 bool hostReady = false;
 
@@ -135,9 +141,9 @@ uint8_t fpsFrom(uint32_t interval) {
 // One dropdown row per (resolution, rate) pair. A device that does 320x240 at both 30 and 60 lists
 // the resolution ONCE with several intervals, so without this expansion only its default is
 // reachable from the UI.
-void addAdvertised(const uvc_host_frame_info_t& info, uint32_t interval, size_t& n) {
+void addAdvertised(const uvc_host_frame_info_t& info, uint32_t interval, size_t& n, int bank) {
     if (n >= kMaxFormats || interval == 0) return;
-    VideoCaptureFormat& f = advertised[n++];
+    VideoCaptureFormat& f = formatBank[bank].rows[n++];
     f.width = static_cast<uint16_t>(info.h_res);
     f.height = static_cast<uint16_t>(info.v_res);
     f.fps = fpsFrom(interval);
@@ -159,22 +165,24 @@ void onDriverEvent(const uvc_host_driver_event_data_t* event, void*) {
     }
     if (count > kMaxFormats) count = kMaxFormats; // it reports what it NEEDS, not what it wrote
 
-    advertisedCount.store(0, std::memory_order_release); // hide the list while it is rewritten
+    // Fill the bank nobody is reading, then publish it.
+    const int bank = publishedFormats.load(std::memory_order_relaxed) == 0 ? 1 : 0;
     size_t n = 0;
     for (size_t i = 0; i < count; i++) {
         const uvc_host_frame_info_t& info = frameList[i];
         if (info.format != UVC_VS_FORMAT_MJPEG) continue; // nothing else is decodable here
         if (info.interval_type == 0) { // a continuous range: offer both ends, fastest first
-            addAdvertised(info, info.interval_min, n);
-            if (info.interval_max != info.interval_min) addAdvertised(info, info.interval_max, n);
+            addAdvertised(info, info.interval_min, n, bank);
+            if (info.interval_max != info.interval_min) addAdvertised(info, info.interval_max, n, bank);
             continue;
         }
         const uint8_t rates = info.interval_type < CONFIG_UVC_INTERVAL_ARRAY_SIZE
                                   ? info.interval_type
                                   : CONFIG_UVC_INTERVAL_ARRAY_SIZE;
-        for (uint8_t j = 0; j < rates; j++) addAdvertised(info, info.interval[j], n);
+        for (uint8_t j = 0; j < rates; j++) addAdvertised(info, info.interval[j], n, bank);
     }
-    advertisedCount.store(n, std::memory_order_release);
+    formatBank[bank].count = n;
+    publishedFormats.store(bank, std::memory_order_release);
 }
 
 void onEvent(const uvc_host_stream_event_data_t* event, void* ctx) {
@@ -238,6 +246,7 @@ void decode(Capture& cap, uvc_host_frame_t* frame) {
 }
 
 bool openStream(Capture& cap, uint16_t width, uint16_t height, uint8_t fps); // defined below
+bool sizeBuffers(Capture& cap);                                              //      """
 
 // Replug recovery. uvc_host_stream_open blocks for up to its timeout, so this runs on the decode
 // task rather than in the event callback or the render tick. A failed attempt costs that timeout,
@@ -248,7 +257,13 @@ void reopen(Capture& cap) {
         cap.stream = nullptr;
     }
     if (!openStream(cap, cap.reqWidth, cap.reqHeight, cap.reqFps)) return;
-    uvc_host_stream_start(cap.stream);
+    // The buffers are sized from the negotiated format, so a first open that never found a device
+    // has none yet. Grow-only: a later reopen at the same format keeps what it has.
+    if (!cap.rgb[0] && !sizeBuffers(cap)) return;
+    if (uvc_host_stream_start(cap.stream) != ESP_OK) {
+        ESP_LOGW(kTag, "reopened the device but could not start the stream");
+        return; // `lost` stays set, so the next timeout tries again
+    }
     cap.lost.store(false);
     ESP_LOGI(kTag, "capture device back");
 }
@@ -366,12 +381,29 @@ bool videoCaptureInit(VideoCaptureHandle& handle, uint16_t width, uint16_t heigh
     auto* cap = new Capture();
     handle.impl = cap; // every failure below unwinds through videoCaptureDeinit
 
-    if (!installUvc(*cap) || !createJpeg(*cap) || !createSignals(*cap) ||
-        !openStream(*cap, width, height, fps) || !sizeBuffers(*cap) || !startDecoder(*cap)) {
+    if (!installUvc(*cap) || !createJpeg(*cap) || !createSignals(*cap)) {
         videoCaptureDeinit(handle);
         return false;
     }
-    uvc_host_stream_start(cap->stream);
+    cap->reqWidth = width;
+    cap->reqHeight = height;
+    cap->reqFps = fps;
+
+    // No device yet is not a failure to unwind: the decode task's retry already handles a grabber
+    // that comes back, so starting it here makes plugging one in after boot behave like a replug.
+    // The caller still gets false and reports no device.
+    if (!startDecoder(*cap)) {
+        videoCaptureDeinit(handle);
+        return false;
+    }
+    if (!openStream(*cap, width, height, fps) || !sizeBuffers(*cap)) {
+        cap->lost.store(true); // the decode task retries on its next timeout
+        return false;
+    }
+    if (uvc_host_stream_start(cap->stream) != ESP_OK) {
+        cap->lost.store(true);
+        return false;
+    }
     return true;
 }
 
@@ -391,9 +423,11 @@ const uint8_t* videoCaptureFrame(VideoCaptureHandle& handle, uint16_t& width,
 }
 
 size_t videoCaptureFormats(VideoCaptureFormat* out, size_t max) {
-    const size_t have = advertisedCount.load(std::memory_order_acquire);
-    const size_t n = have < max ? have : max;
-    for (size_t i = 0; i < n; i++) out[i] = advertised[i];
+    const int bank = publishedFormats.load(std::memory_order_acquire);
+    if (bank < 0) return 0;
+    const FormatBank& b = formatBank[bank];
+    const size_t n = b.count < max ? b.count : max;
+    for (size_t i = 0; i < n; i++) out[i] = b.rows[i];
     return n;
 }
 
@@ -401,9 +435,14 @@ void videoCaptureDeinit(VideoCaptureHandle& handle) {
     auto* cap = static_cast<Capture*>(handle.impl);
     if (!cap) return;
     if (cap->stream) uvc_host_stream_stop(cap->stream); // no new frames while we tear down
-    if (cap->decoder) {                                 // stop the decoder before what it uses
+    if (cap->decoder) {  // stop the decoder before the things it reaches into
+        // Clear `lost` first so no new reopen() starts, then wait without a deadline: the task
+        // may be inside uvc_host_stream_open's own 3 s, and a shorter wait frees the semaphores
+        // and the JPEG engine underneath it.
+        cap->lost.store(false);
         cap->running = false;
-        xSemaphoreTake(cap->stopped, pdMS_TO_TICKS(500));
+        xSemaphoreGive(cap->wake);  // it may be parked on this
+        xSemaphoreTake(cap->stopped, portMAX_DELAY);
     }
     if (uvc_host_frame_t* frame = cap->pending.exchange(nullptr)) uvc_host_frame_return(cap->stream, frame);
     if (cap->stream) uvc_host_stream_close(cap->stream);

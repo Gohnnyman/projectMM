@@ -322,11 +322,13 @@ public:
         if (ww <= 0 || ww > static_cast<long>(kMaxDim)) return -1;
         if (hh <= 0 || hh > static_cast<long>(kMaxDim)) return -1;
         if (maxval != 255) return -1;  // 16-bit samples are two big-endian bytes: another format
-        if (cur.pos >= len) return -1; // no separator byte, so no pixel data can follow
+        // Netpbm requires ONE whitespace byte here. Accepting whatever is present would eat a
+        // pixel: "P6\n2 2\n255X" would read as valid with the X swallowed.
+        if (cur.pos >= len || !HeaderCursor::isBlank(buf[cur.pos])) return -1;
 
         w = static_cast<uint16_t>(ww);
         h = static_cast<uint16_t>(hh);
-        return cur.pos + 1; // one whitespace byte separates the header from the pixels
+        return cur.pos + 1; // the pixels begin straight after that one byte
     }
 
 private:
@@ -337,11 +339,15 @@ private:
         int len;
         int pos = 0;
 
+        /// Spelled out rather than isspace(), which is locale-dependent and undefined for a
+        /// signed char above 127.
+        static bool isBlank(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
         void skipBlanks() {
             while (pos < len) {
                 if (buf[pos] == '#') {
                     while (pos < len && buf[pos] != '\n') pos++;
-                } else if (buf[pos] == ' ' || buf[pos] == '\t' || buf[pos] == '\n' || buf[pos] == '\r') {
+                } else if (isBlank(buf[pos])) {
                     pos++;
                 } else {
                     break;

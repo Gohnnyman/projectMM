@@ -666,3 +666,53 @@ TEST_CASE("Correction: the current estimate counts Yellow and UV channels") {
 
     CHECK(c.limit < 256);
 }
+
+// A dimmer is emitted at 255 whatever the limit says, so it cannot be scaled with the colours. It
+// comes off the budget first: pricing it as a scalable term would compute a limit on the assumption
+// it shrinks too, and the frame would still draw more than the cap.
+TEST_CASE("Correction: a master dimmer is taken off the budget, not scaled with the frame") {
+    uint8_t frame[10 * 3];
+    std::memset(frame, 255, sizeof(frame));   // 10 white lights, 3 x 8 mA = 240 mA scalable
+
+    Correction c;
+    c.budgetMa = 200;                          // 80 mA of that goes to the dimmer at 8 mA a light
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    c.offDimmer = 3;
+    c.measure(frame, 3, 10);
+    CHECK(c.limit == 128);                     // (200-80)/240 -> half, not 200/320
+
+    // And when the fixed draw alone is over budget there is nothing left to give the colours.
+    c.budgetMa = 40;
+    c.measure(frame, 3, 10);
+    CHECK(c.limit == 0);
+}
+
+// Yellow and UV are emitted from the same corrected RGB as everything else, so a fixture carrying
+// them draws more than an RGB one on the same frame. Uncounted, an RGBY preset would exceed its cap.
+TEST_CASE("Correction: the estimate counts the Yellow and UV emitters") {
+    uint8_t frame[10 * 3];
+    std::memset(frame, 255, sizeof(frame));
+
+    Correction plain;
+    plain.budgetMa = 100;
+    mm::test::rebuildFromPreset(plain, 255, mm::test::PresetOrder::RGB);
+    plain.measure(frame, 3, 10);
+
+    Correction wide;
+    wide.budgetMa = 100;
+    mm::test::rebuildFromPreset(wide, 255, mm::test::PresetOrder::RGB);
+    wide.offYellow = 3;   // min(r,g) = 255 on a white frame, so a real extra draw
+    wide.measure(frame, 3, 10);
+
+    CHECK(wide.limit < plain.limit);   // the same frame costs more, so it is trimmed harder
+
+    // And each emitter carries its own figure: a UV die usually draws more than a visible one, so
+    // pricing it as a colour channel would under-report, the direction that browns out a supply.
+    Correction thirsty;
+    thirsty.budgetMa = 100;
+    mm::test::rebuildFromPreset(thirsty, 255, mm::test::PresetOrder::RGB);
+    thirsty.offYellow = 3;
+    thirsty.mAYellow = 40;
+    thirsty.measure(frame, 3, 10);
+    CHECK(thirsty.limit < wide.limit);
+}
