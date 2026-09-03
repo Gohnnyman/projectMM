@@ -109,14 +109,22 @@ public:
     /// before the first tick rather than one tick later.
     void prepare() override {
         seat_.claim();  // re-take after a disable/enable cycle: release() vacated it
-        closeCapture(); // a source switch or a hotplug rebuild releases the device
         if (source >= kSourceCount) source = kSourcePattern; // a config restored from a capture-capable board
         if (source == kSourceUsb) {
-            openCapture();
-        } else if (source == kSourceFile) {
-            loadFile();
-        } else if (allocate(kPatternW, kPatternH)) {
-            renderPattern();
+            // Every tree-wide rebuild lands here too (a layout resized, a module added), and the
+            // device stays open through those: a reopen drops the published frame and blocks on
+            // negotiation. It happens only for what actually changed the request.
+            if (!captureCurrent()) {
+                closeCapture();
+                openCapture();
+            }
+        } else {
+            closeCapture(); // a source switch releases the device, and the frame borrowed from it
+            if (source == kSourceFile) {
+                loadFile();
+            } else if (allocate(kPatternW, kPatternH)) {
+                renderPattern();
+            }
         }
     }
 
@@ -173,6 +181,7 @@ private:
             fail("no capture device");
             return;
         }
+        opened_ = {usbWidth, usbHeight, usbFps};
         // What was ASKED for, until a frame arrives: the device negotiates, and readCapture()
         // replaces this with the dimensions actually being decoded.
         std::snprintf(status_, sizeof(status_), "asked %ux%u", usbWidth, usbHeight);
@@ -180,11 +189,20 @@ private:
         shownW_ = shownH_ = 0;
     }
 
+    /// Whether the open device already serves the selection: the same format list (a replug, even
+    /// of the same grabber, publishes a new generation) and the same requested format. A (re)open
+    /// is worth its cost only when one of those moved.
+    bool captureCurrent() const {
+        return capture_.impl && platform::videoCaptureFormatGeneration() == formatGen_ &&
+               opened_.width == usbWidth && opened_.height == usbHeight && opened_.fps == usbFps;
+    }
+
     /// Release the device. The published frame borrows one of ITS buffers (platform.h,
     /// videoCaptureFrame), so it is dropped first: this is the one place that order is decided,
     /// and every teardown path goes through here.
     void closeCapture() {
         frame_ = VideoFrame{};
+        opened_ = {};
         platform::videoCaptureDeinit(capture_);
     }
 
@@ -250,6 +268,7 @@ private:
     }
 
     platform::VideoCaptureHandle capture_;
+    platform::VideoCaptureFormat opened_ = {}; // the request the open device was made with
 
     // Derived from the selected row, never typed: what actually gets requested of the device, and
     // the opening bid before one has listed its formats. 16:9 on purpose: a 4:3 capture makes a

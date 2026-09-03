@@ -95,6 +95,12 @@ struct FormatBank {
 };
 FormatBank formatBank;
 std::atomic<uint32_t> formatGen{0}; // 0 = nothing published yet; odd = a write in progress
+// The device the bank describes, so the open reaches THAT one and not whichever the driver finds
+// first when two are attached. 0 (UVC_HOST_ANY_DEV_ADDR) until a device has enumerated.
+std::atomic<uint8_t> formatDevAddr{UVC_HOST_ANY_DEV_ADDR};
+// Only the first streaming function of a device is ever opened, so only its list is published:
+// a device exposing several would otherwise describe one function while another gets opened.
+constexpr uint8_t kStreamIndex = 0;
 
 bool hostReady = false;
 bool uvcReady = false;
@@ -170,11 +176,11 @@ void addAdvertised(const uvc_host_frame_info_t& info, uint32_t interval, size_t&
 // makes the list available even when the open then fails on an unsupported resolution.
 void onDriverEvent(const uvc_host_driver_event_data_t* event, void*) {
     if (event->type != UVC_HOST_DRIVER_EVENT_DEVICE_CONNECTED) return;
+    if (event->device_connected.uvc_stream_index != kStreamIndex) return; // never opened, so not listed
 
+    const uint8_t devAddr = event->device_connected.dev_addr;
     size_t count = kMaxFormats;
-    if (uvc_host_get_frame_list(event->device_connected.dev_addr,
-                                event->device_connected.uvc_stream_index,
-                                reinterpret_cast<uvc_host_frame_info_t(*)[]>(frameList),
+    if (uvc_host_get_frame_list(devAddr, kStreamIndex, reinterpret_cast<uvc_host_frame_info_t(*)[]>(frameList),
                                 &count) != ESP_OK) {
         ESP_LOGW(kTag, "device connected but its frame list could not be read");
         return;
@@ -183,6 +189,7 @@ void onDriverEvent(const uvc_host_driver_event_data_t* event, void*) {
 
     // Bracket the rewrite in an odd generation, so a reader can tell it overlapped one.
     formatGen.fetch_add(1, std::memory_order_release);
+    formatDevAddr.store(devAddr, std::memory_order_relaxed);
     std::atomic_thread_fence(std::memory_order_release);
     size_t n = 0;
     for (size_t i = 0; i < count; i++) {
@@ -336,10 +343,12 @@ bool openStream(Capture& cap, uint16_t width, uint16_t height, uint8_t fps) {
     streamCfg.event_cb = onEvent;
     streamCfg.frame_cb = onFrame;
     streamCfg.user_ctx = &cap;
-    streamCfg.usb.dev_addr = UVC_HOST_ANY_DEV_ADDR;
+    // The device whose formats are on offer, once one has enumerated; any device before that, and
+    // its enumeration then bumps the generation, so the caller comes back and opens it by address.
+    streamCfg.usb.dev_addr = formatDevAddr.load(std::memory_order_relaxed);
     streamCfg.usb.vid = UVC_HOST_ANY_VID;
     streamCfg.usb.pid = UVC_HOST_ANY_PID;
-    streamCfg.usb.uvc_stream_index = 0;
+    streamCfg.usb.uvc_stream_index = kStreamIndex;
     streamCfg.vs_format.h_res = width;
     streamCfg.vs_format.v_res = height;
     streamCfg.vs_format.fps = fps; // negotiated down to what the device offers
@@ -349,8 +358,8 @@ bool openStream(Capture& cap, uint16_t width, uint16_t height, uint8_t fps) {
     streamCfg.advanced.number_of_frame_buffers = 3;
 
     // Wait rather than fail: the host enumerates asynchronously, so a device plugged in at boot
-    // is usually not ready when this runs.
-    if (uvc_host_stream_open(&streamCfg, 3000, &cap.stream) != ESP_OK) {
+    // is usually not ready when this runs. The driver takes ticks, not milliseconds.
+    if (uvc_host_stream_open(&streamCfg, pdMS_TO_TICKS(3000), &cap.stream) != ESP_OK) {
         ESP_LOGW(kTag, "no UVC device offering MJPEG %ux%u", width, height);
         return false;
     }

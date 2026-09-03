@@ -105,25 +105,40 @@ TEST_CASE("RectangleLayout: every light occupies a distinct perimeter cell") {
 }
 
 // startCorner and clockwise change the WIRING, not the shape. Whatever corner the strip enters at
-// and whichever way it runs, the same set of cells lights up: only the index order differs. This
-// is what lets an effect's "top edge" be the physical top edge on any build.
-TEST_CASE("RectangleLayout: all eight wirings emit the same cells, in different order") {
+// and whichever way it runs, the same cells light up: only the index order differs. This is what
+// lets an effect's "top edge" be the physical top edge on any build.
+//
+// Every position is compared, not the set of them: a set has no order, so it passes on a walk that
+// visits the right cells in the wrong sequence, which is the one thing these controls choose. Each
+// wiring is the reference rotated to the chosen corner, counter-clockwise traversed backwards.
+TEST_CASE("RectangleLayout: each of the eight wirings emits the reference walk in its own order") {
+    const int w = 6, h = 4;
     RectangleLayout ref;
-    ref.width = 6; ref.height = 4;
+    ref.width = w; ref.height = h;   // top-left, clockwise, shared corners: the reference
     const auto base = walk(ref);
-    const std::set<std::pair<int, int>> expected(base.begin(), base.end());
+    const size_t n = base.size();
+    REQUIRE(n == static_cast<size_t>(2 * w + 2 * h - 4));
+
+    // kStartCornerOptions order: top-left, top-right, bottom-right, bottom-left.
+    const std::pair<int, int> corners[4] = {{0, 0}, {w - 1, 0}, {w - 1, h - 1}, {0, h - 1}};
 
     for (uint8_t corner = 0; corner < RectangleLayout::kStartCornerCount; corner++) {
+        size_t s = 0;                                   // where that corner sits in the reference
+        while (s < n && base[s] != corners[corner]) s++;
+        REQUIRE(s < n);
         for (bool cw : {true, false}) {
             RectangleLayout r;
-            r.width = 6; r.height = 4;
+            r.width = w; r.height = h;
             r.startCorner = corner;
             r.clockwise = cw;
             const auto p = walk(r);
+            REQUIRE(p.size() == n);
+            for (size_t i = 0; i < n; i++) {
+                const size_t j = cw ? (s + i) % n : (s + n - i) % n;
+                CHECK(p[i] == base[j]);
+            }
             const std::set<std::pair<int, int>> got(p.begin(), p.end());
-            CHECK(p.size() == base.size());
-            CHECK(got == expected);       // same cells...
-            CHECK(got.size() == p.size());  // ...each still exactly once
+            CHECK(got.size() == n);   // and still each cell exactly once
         }
     }
 }

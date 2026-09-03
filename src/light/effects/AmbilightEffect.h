@@ -90,12 +90,22 @@ public:
         // rectangle to hold the 3 KB its perimeter needs, the waste this list exists to remove.
         size_t lit = 0;
         for (size_t i = 0; i < positions; i++)
-            if (lut.hasDestination(static_cast<nrOfLightsType>(i))) lit++;
+            if (columnLit(lut, i, positions)) lit++;
         if (lit == 0 || !lit_.resize(lit)) return; // no list: tick() paints the whole box instead
         const lengthType w = width();
         for (size_t i = 0; i < positions; i++)
-            if (lut.hasDestination(static_cast<nrOfLightsType>(i)))
+            if (columnLit(lut, i, positions))
                 lit_[litCount_++] = static_cast<uint32_t>((i / w) << 16 | (i % w));
+    }
+
+    /// Whether front-face position `i` reaches an LED in ANY z plane. This effect is D2, and
+    /// Layer::extrude() copies what it paints at z=0 across the depth, so on a sparse 3D layout (a
+    /// sphere) a column with its only LED at z > 0 is still lit from here. `slice` = width*height.
+    bool columnLit(const MappingLUT& lut, size_t i, size_t slice) const MM_NONBLOCKING {
+        const lengthType d = depth();
+        for (lengthType z = 0; z < d; z++)
+            if (lut.hasDestination(static_cast<nrOfLightsType>(i + static_cast<size_t>(z) * slice))) return true;
+        return false;
     }
 
     void tick() MM_NONBLOCKING override {
@@ -142,10 +152,11 @@ public:
             // The list could not be allocated. Same output, asking the mapping per position -
             // which is the cost the list exists to avoid.
             const MappingLUT& lut = layer()->lut();
+            const size_t slice = static_cast<size_t>(lightsX) * lightsY;
             draw::fill(out, {0, 0, 0});
             for (lengthType y = 0; y < lightsY; y++)
                 for (lengthType x = 0; x < lightsX; x++)
-                    if (lut.hasDestination(static_cast<nrOfLightsType>(y * lightsX + x)))
+                    if (columnLit(lut, static_cast<size_t>(y) * lightsX + x, slice))
                         paint(out, *frame, region, x, y, lightsX, lightsY, canSmooth, level);
         }
         primed_ = true;
