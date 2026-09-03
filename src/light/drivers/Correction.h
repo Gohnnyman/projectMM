@@ -242,21 +242,12 @@ struct Correction {
         // floors to 7, so a 7 mA budget would apply no limit at all.
         const uint64_t scalableMa = (sum + 254) / 255;
 
-        // A master dimmer holds 255 whatever `limit` says, so it is a FIXED cost: take it off the
-        // budget and scale the rest into what is left. Priced as scalable, the ratio would assume
-        // it shrinks too and the frame would still exceed the cap. On an addressable strip that
-        // byte is a die, and the IRGB preset puts a Dimmer on one.
-        // Motion is written unscaled too and is deliberately not priced: on every fixture that
-        // really has pan and tilt those bytes are DMX control values drawing nothing from this
-        // rail, so charging mAColor for them would be fiction. The dimmer is priced because IRGB
-        // puts one on a 4-channel light, which is a plausible pick for an addressable strip.
-        const uint64_t fixedMa = (offDimmer != kAbsent) ? static_cast<uint64_t>(n) * mAColor : 0;
-        if (fixedMa >= budgetMa) { // the fixed draw alone is over: nothing left to give the colors
-            limit = 0;
-            return;
-        }
-        const uint64_t headroomMa = budgetMa - fixedMa;
-        if (scalableMa > headroomMa) limit = static_cast<uint16_t>((headroomMa * 256u) / scalableMa);
+        // Neither the dimmer nor motion is priced: on the fixtures that declare them those bytes
+        // are DMX control values drawing nothing from this rail, so charging for them would squeeze
+        // the colors to make room for current that does not exist. The one case where a dimmer byte
+        // IS a die is IRGB mis-set on an addressable strip, and pricing it neither prevents that nor
+        // caps it: apply() writes the dimmer unscaled, so no limit reaches it.
+        if (scalableMa > budgetMa) limit = static_cast<uint16_t>((budgetMa * 256u) / scalableMa);
     }
 
     /// Hot path: transform one source light (`srcChannels` bytes at `src`) into `out`

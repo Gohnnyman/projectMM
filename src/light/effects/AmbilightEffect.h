@@ -31,7 +31,7 @@ public:
     Dim dimensions() const override { return Dim::D2; } // a frame is flat; the Layer extrudes z
 
     uint8_t brightness = 255;     // dims THE VIDEO; the driver's brightness dims everything
-    uint8_t saturation = 130;     // percent of the distance from grey; 100 = the mean untouched
+    uint8_t saturation = 130;     // percent of the distance from gray; 100 = the mean untouched
     uint8_t smoothing = 0;        // 0 = follow the frame exactly; higher = slower to move
     uint8_t snapAbove = 80;       // jump rather than smooth when a channel moves further than this; 0 = never
     uint16_t fadeInMs = 0;        // ramp up from black over this long when a picture first arrives; 0 = off
@@ -245,8 +245,9 @@ private:
         return true;
     }
 
-    /// How many dark lines run inward from one edge, capped so a dark SCENE cannot be mistaken for
-    /// a bar and blank the strip.
+    /// How many dark lines run inward from one edge. Reaching the ceiling reports NO bar: darkness
+    /// that deep is a dark SCENE, where a real letterbox is about 12% an edge. Returning the ceiling
+    /// cropped a dark frame to its middle and kStableFrames held that into the next scene.
     int barFrom(const VideoFrame& frame, Edge edge) const MM_NONBLOCKING {
         const int extent = scansRows(edge) ? frame.height : frame.width;
         const int limit = extent * kMaxBarPercent / 100;
@@ -254,7 +255,7 @@ private:
             const int line = scansFromEnd(edge) ? extent - 1 - i : i;
             if (!lineIsDark(frame, line, edge)) return i;
         }
-        return limit;
+        return 0;
     }
 
     /// Scan this frame and return the bars IN EFFECT, which is not necessarily what was just

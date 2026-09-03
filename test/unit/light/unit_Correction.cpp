@@ -633,26 +633,6 @@ TEST_CASE("Each moving-head formation aims the rig differently") {
     mm::platform::setTestNowMs(0);   // back to the real clock for every later test
 }
 
-// A master dimmer is written at 255 every frame, and on an addressable strip every byte is a
-// die: the IRGB preset puts a Dimmer on one of them. Uncounted, 300 lights of that is amps the budget
-// never saw, and the limiter would call an over-budget frame safe.
-TEST_CASE("Correction: the current estimate counts a master dimmer") {
-    const uint8_t frame[3] = {0, 0, 0};   // black, so only the dimmer draws anything
-
-    Correction plain;
-    plain.budgetMa = 1;                   // any draw at all trips it, so limit reports the demand
-    mm::test::rebuildFromPreset(plain, 255, mm::test::PresetOrder::RGB);
-    plain.measure(frame, 3, 1);
-    CHECK(plain.limit == 256);            // nothing lit, nothing drawn
-
-    Correction dimmed;
-    dimmed.budgetMa = 1;
-    mm::test::rebuildFromPreset(dimmed, 255, mm::test::PresetOrder::RGB);
-    dimmed.offDimmer = 3;                 // the fixture carries one
-    dimmed.measure(frame, 3, 1);
-    CHECK(dimmed.limit < 256);            // held at 255, so it draws even on a black frame
-}
-
 // Yellow and UV are real emitted channels on some fixtures, so the limiter has to price them too.
 TEST_CASE("Correction: the current estimate counts Yellow and UV channels") {
     using R = mm::ChannelRole;
@@ -667,24 +647,33 @@ TEST_CASE("Correction: the current estimate counts Yellow and UV channels") {
     CHECK(c.limit < 256);
 }
 
-// A dimmer is emitted at 255 whatever the limit says, so it cannot be scaled with the colors. It
-// comes off the budget first: pricing it as a scalable term would compute a limit on the assumption
-// it shrinks too, and the frame would still draw more than the cap.
-TEST_CASE("Correction: a master dimmer is taken off the budget, not scaled with the frame") {
+// A dimmer costs the estimate NOTHING: on every fixture that declares one it is a DMX control value
+// drawing nothing from this rail, like the motion roles beside it. Pricing it squeezed the colors to
+// make room for draw that does not exist.
+TEST_CASE("Correction: a master dimmer costs the current estimate nothing") {
     uint8_t frame[10 * 3];
-    std::memset(frame, 255, sizeof(frame));   // 10 white lights, 3 x 8 mA = 240 mA scalable
+    std::memset(frame, 255, sizeof(frame));   // 10 white lights, 3 x 8 mA = 240 mA
 
-    Correction c;
-    c.budgetMa = 200;                          // 80 mA of that goes to the dimmer at 8 mA a light
-    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
-    c.offDimmer = 3;
-    c.measure(frame, 3, 10);
-    CHECK(c.limit == 128);                     // (200-80)/240 -> half, not 200/320
+    Correction plain;
+    plain.budgetMa = 200;
+    mm::test::rebuildFromPreset(plain, 255, mm::test::PresetOrder::RGB);
+    plain.measure(frame, 3, 10);
 
-    // And when the fixed draw alone is over budget there is nothing left to give the colors.
-    c.budgetMa = 40;
-    c.measure(frame, 3, 10);
-    CHECK(c.limit == 0);
+    Correction dimmed;
+    dimmed.budgetMa = 200;
+    mm::test::rebuildFromPreset(dimmed, 255, mm::test::PresetOrder::RGB);
+    dimmed.offDimmer = 3;                      // the fixture carries one
+    dimmed.measure(frame, 3, 10);
+
+    CHECK(plain.limit == 213);                 // 200/240 of unity: the colors, and only those
+    CHECK(dimmed.limit == plain.limit);        // declaring a dimmer changed nothing
+
+    // And a black frame draws nothing whether or not a dimmer is declared. Priced, this tripped
+    // the limiter on a strip showing no light at all.
+    const uint8_t black[3] = {0, 0, 0};
+    dimmed.budgetMa = 1;
+    dimmed.measure(black, 3, 1);
+    CHECK(dimmed.limit == 256);
 }
 
 // Yellow and UV are emitted from the same corrected RGB as everything else, so a fixture carrying

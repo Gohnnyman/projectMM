@@ -25,7 +25,7 @@ namespace platform = mm::platform;
 namespace {
 
 // Restore the real clock after any test that froze it, so a frozen value cannot leak into
-// order-dependent neighbours.
+// order-dependent neighbors.
 struct ClockGuard { ~ClockGuard() { mm::platform::setTestNowMs(0); } };
 
 // A live VideoService in test-pattern mode: red top band, blue bottom, yellow left, green right.
@@ -167,8 +167,8 @@ TEST_CASE("AmbilightEffect: brightness scales the sampled color down") {
 }
 
 // Saturation stretches each channel away from the zone's luma: above 100 a colored zone gets
-// more saturated, which is what pulls averaged means back off grey.
-TEST_CASE("AmbilightEffect: saturation above 100 pushes a colored zone further from grey") {
+// more saturated, which is what pulls averaged means back off gray.
+TEST_CASE("AmbilightEffect: saturation above 100 pushes a colored zone further from gray") {
     PatternSource src;
     Rig flat(8, 8);
     flat.fx.saturation = 100;
@@ -414,6 +414,38 @@ struct Letterbox {
     }
 };
 
+
+// A frame every line of which reads DARK to the bar probe, with brighter outer rows than middle
+// ones, so a wrongly adopted bar changes what the edge lights see. Same shape as Letterbox.
+struct DimFrame {
+    VideoService svc;
+    char path[64] = {};
+    DimFrame(int w, int h, uint8_t outer, uint8_t inner, int band) {
+        std::snprintf(path, sizeof(path), "mm_dim_%dx%d_%d.ppm", w, h, band);
+        char real[256];
+        std::snprintf(real, sizeof(real), "%s/%s", mm::platform::fsRootPath(), path);
+        mm::platform::fsMkdir("/");
+        std::FILE* f = std::fopen(real, "wb");
+        REQUIRE(f != nullptr);
+        std::fprintf(f, "P6\n%d %d\n255\n", w, h);
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                const uint8_t v = (y < band || y >= h - band) ? outer : inner;
+                const uint8_t px[3] = {v, v, v};
+                std::fwrite(px, 1, 3, f);
+            }
+        std::fclose(f);
+        svc.source = 1;
+        std::strncpy(svc.file, path, sizeof(svc.file) - 1);
+        svc.applyState();
+    }
+    ~DimFrame() {
+        char real[256];
+        std::snprintf(real, sizeof(real), "%s/%s", mm::platform::fsRootPath(), path);
+        std::remove(real);
+    }
+};
+
 } // namespace
 
 // Off by default: no scan, no shift, identical to before the feature existed.
@@ -439,6 +471,24 @@ TEST_CASE("AmbilightEffect: the top light escapes the letterbox once bars are de
     CHECK(rig.px(4, 0)[1] == 0);                       // first frame: still inside the bar
     for (int i = 0; i < 60; i++) rig.tickOnly(src.svc); // past the hysteresis window
     CHECK(rig.px(4, 0)[1] > 100);                // now reading the green picture
+}
+
+// Dark EVERYWHERE by the probe, but not uniform. Scanning to the ceiling used to report the deepest
+// bar on all four edges, cropping a dark scene to its middle for kStableFrames after it ended.
+TEST_CASE("AmbilightEffect: an all-dark frame reports no bars, not the deepest ones") {
+    // 40% of 64 is a 25-line ceiling. Rows 0..24 sit at 60, under barLevel 64, so the scan runs the
+    // whole way; rows 25..38 are black, which the top light would read if a bar were adopted.
+    DimFrame src(64, 64, 60, 0, 25);
+    Rig rig(8, 8);
+    rig.fx.saturation = 100;
+    rig.fx.detectBlackBars = true;
+    rig.fx.barLevel = 64;
+    rig.render();
+
+    const uint8_t first = rig.px(4, 0)[0];
+    REQUIRE(first > 0);                             // reading the bright outer rows, not the middle
+    for (int i = 0; i < 60; i++) rig.tickOnly(src.svc);   // past the hysteresis window
+    CHECK(rig.px(4, 0)[0] == first);                // nothing adopted, so nothing moved
 }
 
 // The pattern's center is black and its edges are colored: the OPPOSITE of a letterbox. Nothing
