@@ -8,14 +8,17 @@ It is deliberately small. Each member is a separate choice with its own checkbox
 
 One report about this install, sent once when the firmware is installed or upgraded, and the totals from everyone else back on the same card.
 
-### Why we collect this
+### Why you might like this
 
-projectMM is built by a small group of volunteers, so where the effort goes is the most consequential decision the project makes. Without numbers that decision is made from whoever spoke up most recently on Discord, which is a real signal but a badly skewed one: it over-weights the loud, the new, and the broken.
+Switching this on gets you the totals back on the same card: what other people run, on what hardware, at what scale. That is the half you can see immediately, and it is worth having on its own.
 
-- **To build what is actually used.** Which effects, layouts, modifiers, drivers and services are on real devices tells us where the next improvement is worth the most. An effect on nearly every install earns polish; one almost nobody enables does not get rewritten ahead of it.
+The other half is that it decides what gets built. projectMM is made by a small group of volunteers, so where the effort goes is the most consequential decision the project makes. Without numbers that decision comes from whoever spoke up most recently on Discord, which is a real signal but a badly skewed one: it over-weights the loud, the new, and the broken.
+
+- **To build what is actually used.** Which effects, layouts, modifiers, drivers and services are on real devices tells us where the next improvement is worth the most. For a scripted module this includes which of the shipped MoonLive scripts it runs, which is the more interesting fact: every one of them reports as "MoonLive" otherwise. A script you wrote yourself is counted, but its name is never sent. An effect on nearly every install earns polish; one almost nobody enables does not get rewritten ahead of it.
 - **To know what we can stop carrying.** Every feature costs flash, memory and maintenance forever, and on an ESP32 that budget is genuinely scarce. Something no install uses is a candidate for removal, and that is very hard to justify on a hunch.
 - **To test on the hardware people own.** Chip, flash, PSRAM and device model tell us which boards to keep on the bench and which variants must keep building. We would rather find a break on a board we own than have you find it.
 - **To size things for real installations.** How many lights are driven, and how much memory is free, say whether a default is sensible or whether we tuned it for a device nobody runs. A layout that assumes 256 lights is the wrong default if most walls are far bigger.
+- **To show you what other people run.** The totals come back onto the same card, so the effects, layouts and scripts other installations use are visible to you too. That is worth having on its own: it is a way to find something you did not know existed and try it tonight.
 - **To know whether an upgrade reached anyone.** The running version against the last reported one distinguishes an upgrade from a fresh install, which is what tells us whether a release is being picked up or a problem is stranding people on an old one.
 
 Development is not held hostage to these numbers: something rare and excellent stays. They inform the decision rather than make it.
@@ -30,11 +33,11 @@ The totals are shown on the same card that asks: contributing earns the answer b
 
 A public message board between projectMM devices. Off until you turn it on, and a message is sent only because you typed one and pressed send.
 
-Everything posted is public and permanent: no private message, no recipient, no delete. Your device name rides along only if you separately switch that on; otherwise messages show the first 8 characters of your installation id, which groups them without naming you.
+Everything posted is public and permanent: no private message, no recipient, no delete. Your device name rides along only if you separately switch that on; otherwise messages show the first 8 characters of your installation id, which groups them without naming you, the way a Meshtastic node id does.
 
 ## Sync (planned)
 
-Device to device over the internet, for a joint show across houses. Not built yet, and not built on Stats: it shares this container and the installation id, nothing else. It will be its own opt-in, described in the privacy policy before it ships.
+Device to device over the internet, for a joint show across houses. Not built yet, and not built on Stats: it shares this container and the installation id, nothing else. Like every other member it will be its own separate choice, off until you turn it on.
 
 ## Turning it off
 

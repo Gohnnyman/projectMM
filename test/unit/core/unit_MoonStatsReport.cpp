@@ -47,6 +47,37 @@ private:
     char flash_[8] = {};
 };
 
+/// A scripted module, the shape MoonLiveEffect and friends have: a `script` FilePath control
+/// holding a file NAME, plus whatever that script declared.
+class ScriptedModule : public mm::MoonModule {
+public:
+    ScriptedModule(const char* name, const char* script, mm::ModuleRole role)
+        : role_(role) {
+        setName(name);
+        std::snprintf(script_, sizeof(script_), "%s", script);
+    }
+
+    mm::ModuleRole role() const MM_NONBLOCKING override { return role_; }
+
+    void defineControls() override {
+        controls_.addFilePath("script", script_, sizeof(script_), mm::moonlive::kEffectPick);
+    }
+
+private:
+    mm::ModuleRole role_;
+    char script_[48] = {};
+};
+
+/// The report for a tree holding one scripted module.
+std::string scriptedReport(const char* script, mm::ModuleRole role = mm::ModuleRole::Effect) {
+    ScriptedModule mod("MoonLive", script, role);
+    mod.defineControls();
+    mm::MoonModule* tree[] = {&mod};
+    mm::JsonSink sink;
+    mm::buildMoonStatsReport(sink, tree, 1, mm::MoonStatsEvent::Install, nullptr, "4.0.0", nullptr);
+    return std::string(sink.data(), sink.size());
+}
+
 std::string report(mm::MoonStatsEvent event = mm::MoonStatsEvent::Install,
                    const char* id = nullptr,
                    const char* version = "4.0.0",
@@ -195,3 +226,29 @@ TEST_CASE("a module added under a wired parent is still reported") {
     CHECK(json.find("Effects") == std::string::npos);
 }
 
+/// A scripted module reports WHICH script it runs, because "MoonLive" alone says nothing: the
+/// interesting fact is that a device is running `aurora.mle`.
+TEST_CASE("a scripted module reports the shipped script it runs") {
+    const std::string json = scriptedReport("aurora.mle");
+    CHECK(json.find("effect:MoonLive/aurora.mle") != std::string::npos);
+}
+
+/// The other half, and the one that matters: a script a USER wrote is a name they invented, which
+/// is text they typed. The module still counts, under its bare type name.
+///
+/// Without this the feature would be a privacy regression wearing a usage-statistics hat: a script
+/// called "ewoud-bedroom-test.mle" would travel to the server exactly like a shipped name.
+TEST_CASE("a script the user wrote is counted but never named") {
+    const std::string json = scriptedReport("ewoud-bedroom-test.mle");
+    CHECK(json.find("ewoud-bedroom-test") == std::string::npos);
+    CHECK(json.find("effect:MoonLive") != std::string::npos);
+    CHECK(json.find("effect:MoonLive/") == std::string::npos);
+}
+
+/// A shipped name under the WRONG extension is not a shipped script: the catalogs are per role, so
+/// a lookup that scanned them all would let `aurora.mle` through on a layout and, worse, would make
+/// "is this ours" depend on a name rather than a name plus its kind.
+TEST_CASE("a catalog name is matched against its own role's catalog") {
+    const std::string json = scriptedReport("grid.mll", mm::ModuleRole::Layout);
+    CHECK(json.find("layout:MoonLive/grid.mll") != std::string::npos);
+}

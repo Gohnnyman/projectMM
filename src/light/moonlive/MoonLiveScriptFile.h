@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/moonlive/MoonLive.h"
+#include "light/moonlive/script_catalog.h"   // the shipped names, for isFactoryScript below
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -155,6 +156,28 @@ inline bool isScriptExt(const char* ext) {
     return std::strcmp(ext, kEffectExt) == 0 || std::strcmp(ext, kLayoutExt) == 0 ||
            std::strcmp(ext, kModifierExt) == 0 || std::strcmp(ext, kServiceExt) == 0 ||
            std::strcmp(ext, kPaletteExt) == 0;
+}
+
+/// Is `name` one of the scripts we ship? Beside `isScriptExt` for the same reason: the catalog is
+/// the only list of shipped names, so a second copy would drift the day a script is added.
+///
+/// The distinction matters wherever a script name leaves the device: a shipped name comes from our
+/// own catalog, while a name a user invented is text they typed.
+inline bool isFactoryScript(const char* name) {
+    if (!name || !*name) return false;
+    const char* ext = std::strrchr(name, '.');
+    if (!ext) return false;
+    const char* const* cat = nullptr;
+    size_t n = 0;
+    if (std::strcmp(ext, kEffectExt) == 0)        { cat = kEffectCatalog;   n = kEffectCatalogCount; }
+    else if (std::strcmp(ext, kLayoutExt) == 0)   { cat = kLayoutCatalog;   n = kLayoutCatalogCount; }
+    else if (std::strcmp(ext, kModifierExt) == 0) { cat = kModifierCatalog; n = kModifierCatalogCount; }
+    else if (std::strcmp(ext, kServiceExt) == 0)  { cat = kServiceCatalog;  n = kServiceCatalogCount; }
+    else if (std::strcmp(ext, kPaletteExt) == 0)  { cat = kPaletteCatalog;  n = kPaletteCatalogCount; }
+    else return false;
+    for (size_t i = 0; i < n; i++)
+        if (std::strcmp(cat[i], name) == 0) return true;
+    return false;
 }
 
 /// The largest script the loader will read into RAM at once. Not a language limit — the buffer is

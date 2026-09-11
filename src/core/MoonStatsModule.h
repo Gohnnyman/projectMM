@@ -33,6 +33,7 @@
 #include "platform/platform.h"
 #include "core/LightSummary.h"          // lightCount: the POD the light domain publishes
 #include "light/drivers/Drivers.h"      // Drivers::latestSummary(): the real light total
+#include "light/moonlive/MoonLiveScriptFile.h"  // isFactoryScript: a shipped name is ours, not yours
 
 namespace mm {
 
@@ -100,6 +101,21 @@ inline void field(JsonSink& sink, const MoonModule* mod, const char* control, co
 /// separately: one list in one column, four charts out of it. `ModuleRole` already exists on every
 /// module, so nothing new is invented and nothing a user typed is sent: both halves come from the
 /// catalog's fixed vocabulary.
+/// The shipped script a module runs, or nullptr when it runs none, runs one a user wrote, or is not
+/// a scripted module at all. Only a name from the catalog is returned, so nothing a user typed can
+/// reach a caller (the report test pins that).
+inline const char* factoryScriptOf(const MoonModule* m) {
+    if (!m) return nullptr;
+    const ControlList& cs = m->controls();
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (cs[i].type != ControlType::FilePath || !cs[i].name) continue;
+        if (std::strcmp(cs[i].name, "script") != 0) continue;
+        const char* value = static_cast<const char*>(cs[i].ptr);
+        return moonlive::isFactoryScript(value) ? value : nullptr;
+    }
+    return nullptr;
+}
+
 inline void reportModules(JsonSink& sink, const MoonModule* const* mods, uint8_t count,
                           bool& first) {
     for (uint8_t i = 0; i < count; i++) {
@@ -115,8 +131,17 @@ inline void reportModules(JsonSink& sink, const MoonModule* const* mods, uint8_t
         // remains is what somebody chose: drivers, services, layouts, effects, modifiers.
         const ModuleRole role = m->role();
         if (m->name() && role != ModuleRole::Generic && role != ModuleRole::Layer) {
+            // A scripted module is "MoonLive" whatever it runs, so the type name alone says nothing
+            // about what the device is actually doing. The script name is the interesting half, and
+            // it is reported ONLY when it is one we ship: those come from our own catalog, the same
+            // fixed vocabulary as a module type. A name the user invented is text they typed, which
+            // the report never carries, so it degrades to the bare type name.
+            const char* script = factoryScriptOf(m);
             char entry[80];
-            std::snprintf(entry, sizeof(entry), "%s:%s", roleName(role), m->name());
+            if (script)
+                std::snprintf(entry, sizeof(entry), "%s:%s/%s", roleName(role), m->name(), script);
+            else
+                std::snprintf(entry, sizeof(entry), "%s:%s", roleName(role), m->name());
             if (!first) sink.append(",");
             first = false;
             sink.writeJsonString(entry);

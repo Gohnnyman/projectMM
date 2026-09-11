@@ -1985,7 +1985,15 @@ function createCard(mod, depth) {
         if (statsConsent === false) {
             const nudge = document.createElement("div");
             nudge.className = "mooncloud-nudge";
-            nudge.textContent = "Turn on MoonCloud stats to share and see what everyone else is running.";
+            nudge.textContent = "Turn on MoonCloud stats to share and see what everyone else is running. ";
+            // The reasons live in one place, and it is a page rather than a paragraph here: a nudge
+            // long enough to make the case stops being a nudge.
+            const why = document.createElement("a");
+            why.href = "https://moonmodules.org/projectMM/mooncloud.html#why-you-might-like-this";
+            why.target = "_blank";
+            why.rel = "noopener";
+            why.textContent = "Why you might like this";
+            nudge.appendChild(why);
             host.appendChild(nudge);
         }
 
