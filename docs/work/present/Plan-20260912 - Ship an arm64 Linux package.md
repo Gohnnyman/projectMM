@@ -4,7 +4,7 @@
 
 projectMM releases Linux binaries for x86-64 only. An arm64 board (Raspberry Pi, NanoPi, most SBCs) has to clone the repo and compile, which takes an hour on first run and needs swap on a 1 GB board or the compiler is OOM-killed with no error. [installing-on-linux.md](docs/tutorials/installing-on-linux.md) documents that route, and the PO walked it on a NanoPi R28S: `.local` did not resolve, the routing table was skipped by a deep link, and the build step was still ahead.
 
-The blocker was never the code. `package_desktop.py` hand-rolls the `.deb` (an `ar` archive of two tarballs plus a control file), so nothing about it is x86-specific; it was that no arm64 Linux machine was available to build on. GitHub's arm64 runners went generally available for public repositories on 2025-08-07, which removes that. The release workflow already anticipates this at [release.yml:629](.github/workflows/release.yml): *"An arm64 image needs an arm64 Linux build in `build-linux` first, at which point this job gains a `platforms:` line and nothing else changes."*
+The blocker was never the code. `package_desktop.py` hand-rolls the `.deb` (an `ar` archive of two tarballs plus a control file), so nothing about it is x86-specific; it was that no arm64 Linux machine was available to build on. GitHub's arm64 runners went generally available for public repositories on 2025-08-07, which removes that. The release workflow already anticipates this at [release.yml:629](.github/workflows/release.yml): *"An arm64 image needs an arm64 Linux build in `build-linux` first, at which point this job gains a `platforms:` line and nothing else changes."* (`build-linux` is `build-linux-x64` since the jobs gained their architecture in the name.)
 
 Outcome: a user on a Pi or a NanoPi runs `sudo apt install ./projectmm_X.Y.Z_arm64.deb` and is done, and the container image runs on arm64 hosts.
 
@@ -31,7 +31,7 @@ One new helper, `_linux_arch()`, returning `(deb_arch, tarball_label, readme_lab
 
 ### 2. Add the `build-linux-arm64` job
 
-In [.github/workflows/release.yml](.github/workflows/release.yml), copy `build-linux` (line 392) to `build-linux-arm64` with `runs-on: ubuntu-22.04-arm`, uploading artifact name `desktop-linux-arm64`. The tag/version resolution blocks are identical by design across the build jobs, so keep them identical here too.
+In [.github/workflows/release.yml](.github/workflows/release.yml), copy `build-linux-x64` (line 392) to `build-linux-arm64` with `runs-on: ubuntu-22.04-arm`, uploading artifact name `desktop-linux-arm64`. The tag/version resolution blocks are identical by design across the build jobs, so keep them identical here too.
 
 Add the job to `release`'s `needs:` list (line 626). The "Flatten artifacts into dist/" step already globs every artifact, so the new assets ride along with no change.
 
@@ -53,7 +53,7 @@ The base image is already multi-arch (`gcr.io/distroless/cc-debian13`), but it i
 ## Verification
 
 1. `uv run moondeck/ci/package_desktop.py --version 0.0.0-test` on macOS still produces the unchanged `.dmg` path (the refactor must not touch non-Linux branches).
-2. Push the branch and let the release workflow run on a dispatch: `build-linux` and `build-linux-arm64` both green, and the release carries `projectmm_X.Y.Z_amd64.deb`, `projectmm_X.Y.Z_arm64.deb` and both tarballs.
+2. Push the branch and let the release workflow run on a dispatch: `build-linux-x64` and `build-linux-arm64` both green, and the release carries `projectmm_X.Y.Z_amd64.deb`, `projectmm_X.Y.Z_arm64.deb` and both tarballs.
 3. `dpkg-deb -I projectmm_X.Y.Z_arm64.deb` reports `Architecture: arm64`.
 4. **On the NanoPi** (the gate that matters, PO's call): `sudo apt install ./projectmm_*_arm64.deb`, then `projectMM`, then open `http://192.168.1.156:8080` and see the UI render. This is the only step that proves the binary runs on real arm64 hardware.
 5. On the NanoPi: `ldd $(which projectMM)` resolves every library, and `strings` confirms no `GLIBC_2.3[89]` requirement above 2.35.

@@ -25,13 +25,26 @@ Both architectures get a released binary, so the route below is the same one and
 
 ## Install the package
 
-The [releases page](https://github.com/MoonModules/projectMM/releases/latest) carries one `.deb` per architecture. Take the one matching `uname -m`: `_amd64.deb` for `x86_64`, `_arm64.deb` for `aarch64`.
+The [releases page](https://github.com/MoonModules/projectMM/releases/latest) carries one `.deb` per architecture: `_amd64.deb` for `x86_64`, `_arm64.deb` for `aarch64`.
+
+On a machine with a browser, download it and install:
 
 ```sh
-sudo apt install ./projectmm_X.Y.Z_amd64.deb     # x86_64
-sudo apt install ./projectmm_X.Y.Z_arm64.deb     # aarch64
+sudo apt install ./projectmm_X.Y.Z_arm64.deb
 projectMM
 ```
+
+On a headless board, fetch it over ssh instead. This picks the right file for the architecture it runs on, so the same two lines work on a Pi, a NanoPi and a server:
+
+```sh
+arch=$(dpkg --print-architecture)
+url=$(curl -fsSL https://api.github.com/repos/MoonModules/projectMM/releases/tags/latest \
+      | grep -o "https://[^\"]*_${arch}\.deb" | head -1)
+curl -fsSL -o projectmm.deb "$url" && sudo apt install -y ./projectmm.deb
+projectMM
+```
+
+`latest` is the rolling build from `main`, which is what the web installer offers too. For the newest tagged release, replace `tags/latest` with `latest` in that URL.
 
 Open `http://<machine>:8080`. A `.tar.gz` to unpack anywhere is on the same page.
 

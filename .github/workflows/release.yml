@@ -247,7 +247,7 @@ jobs:
           name: esp32-${{ matrix.firmware }}
           path: dist/
 
-  build-macos:
+  build-macos-arm64:
     needs: verify-version
     runs-on: macos-14
     steps:
@@ -313,7 +313,7 @@ jobs:
           name: desktop-macos
           path: dist/
 
-  build-windows:
+  build-windows-x64:
     needs: verify-version
     runs-on: windows-latest
     steps:
@@ -321,7 +321,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      # Same uv prerequisite as build-macos, see the comment there.
+      # Same uv prerequisite as build-macos-arm64, see the comment there.
       - uses: astral-sh/setup-uv@v3
       # Same tag + version resolution as build-esp32 (see the comments there): the computed
       # semver must reach the DESKTOP binary too, or a desktop build reports library.json's bare
@@ -387,7 +387,7 @@ jobs:
           name: desktop-windows
           path: dist/
 
-  build-linux:
+  build-linux-x64:
     needs: verify-version
     runs-on: ubuntu-latest
     steps:
@@ -395,7 +395,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      # Same uv prerequisite as build-macos, see the comment there.
+      # Same uv prerequisite as build-macos-arm64, see the comment there.
       - uses: astral-sh/setup-uv@v3
       # Builds with the runner's default GCC (13 on ubuntu-24.04). Its four false-positive
       # warnings are handled in CMakeLists.txt, which demotes them to non-fatal on GCC below
@@ -434,7 +434,7 @@ jobs:
           name: desktop-linux
           path: dist/
 
-  # The arm64 twin of build-linux: Raspberry Pi, NanoPi and every other 64-bit board, which
+  # The arm64 twin of build-linux-x64: Raspberry Pi, NanoPi and every other 64-bit board, which
   # otherwise have to compile from source for an hour.
   #
   # **ubuntu-22.04-arm, not 24.04, and this is load-bearing.** A binary carries the glibc floor of
@@ -454,7 +454,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v3
-      # Same tag + version resolution as every other build job; see build-linux for why.
+      # Same tag + version resolution as every other build job; see build-linux-x64 for why.
       - name: Resolve release tag
         id: tag
         shell: bash
@@ -488,7 +488,7 @@ jobs:
     # Plain branch push without matching paths is filtered by the top-level `paths:`
     # so the build jobs already won't run; this condition is the belt to their braces.
     if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
-    needs: [build-esp32, build-macos, build-windows, build-linux, build-linux-arm64]
+    needs: [build-esp32, build-macos-arm64, build-windows-x64, build-linux-x64, build-linux-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: write     # softprops/action-gh-release needs this
