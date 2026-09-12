@@ -609,6 +609,13 @@ def main() -> int:
     system = platform.system()
     machine = platform.machine().lower()
 
+    # Everything below produces a PUBLISHED artifact, which is the one case where a missing
+    # libcurl must fail the build rather than silently compile the MoonCloud client out: a binary
+    # that asks for consent it cannot honor is worse than one that never asks. CMakeLists reads
+    # this; nothing else sets it, so a contributor's build and the sanitizer lanes (which
+    # configure CMake directly and legitimately have no libcurl) keep the optional path.
+    os.environ["MM_PACKAGING"] = "1"
+
     # Clean only THIS host's build dir so a configure-flag change picked
     # up by this run gets a fresh CMakeCache. We don't touch the other
     # host's dir; on CI each runner only ever sees its own anyway.

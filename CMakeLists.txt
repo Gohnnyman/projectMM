@@ -189,22 +189,24 @@ if(CURL_FOUND)
     message(STATUS "libcurl ${CURL_VERSION_STRING}: MoonCloud reporting enabled")
     target_compile_definitions(mm_platform PRIVATE MM_HAVE_CURL)
     target_link_libraries(mm_platform PUBLIC CURL::libcurl)
-elseif(DEFINED ENV{CI} AND NOT WIN32)
-    # A CI build is the one case where absent is not acceptable: the binary would ask for consent
-    # and then be structurally unable to honor it, and nobody would find out. Optional stays
-    # optional for a contributor's machine; a published artifact must be able to report.
+elseif(DEFINED ENV{MM_PACKAGING} AND NOT WIN32)
+    # A PACKAGED build is the one case where absent is not acceptable: the binary would ask for
+    # consent and then be structurally unable to honor it, and nobody would find out. Optional
+    # stays optional for a contributor's machine; a published artifact must be able to report.
     #
-    # Keyed on CI, which every runner sets, rather than on MM_RELEASE. MM_RELEASE reaches the build
-    # as a CMake -D from build_esp32.py and is never an environment variable, so this branch could
-    # not fire and three of the four published desktop binaries shipped with reporting compiled
-    # out: the guard written to prevent exactly that was inert from the day it was added.
+    # Keyed on MM_PACKAGING, which package_desktop.py exports and nothing else sets. Two earlier
+    # signals were both wrong. MM_RELEASE reaches the build as a CMake -D from build_esp32.py and
+    # is never an environment variable, so that branch could not fire and three of the four
+    # published desktop binaries shipped with the feature compiled out. CI is set by every runner,
+    # including the sanitizer lanes that configure CMake directly and legitimately have no libcurl,
+    # so keying on it failed builds that produce no artifact at all.
     #
     # Windows is excluded until its job installs libcurl (vcpkg), which is real work rather than an
     # apt line. Until then it warns like any other machine, and its binary cannot report.
     message(FATAL_ERROR
-        "libcurl not found in a CI build. A published build with reporting compiled out asks for "
-        "consent it can never honor. Install it in the job (Linux: libcurl4-openssl-dev, "
-        "Windows: vcpkg install curl).")
+        "libcurl not found while packaging a release. A published build with the client compiled "
+        "out asks for consent it can never honor. Install it in the job "
+        "(Linux: libcurl4-openssl-dev, Windows: vcpkg install curl).")
 else()
     message(STATUS "libcurl not found: MoonCloud reporting disabled (install libcurl to enable)")
 endif()
