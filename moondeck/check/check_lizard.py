@@ -35,9 +35,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 # Not the repo root: lizard picks up `./whitelizard.txt` BY DEFAULT, and a baseline that
 # applies itself silently is what zeroed the KPI's complexity count once this landed.
-# Sitting in docs/metrics/ next to repo-health.* it is only ever applied on purpose, and
+# Sitting in docs/reference/metrics/ next to repo-health.* it is only ever applied on purpose, and
 # it lives with the other measured-state files.
-BASELINE = ROOT / "docs" / "metrics" / "whitelizard.txt"
+BASELINE = ROOT / "docs" / "reference" / "metrics" / "whitelizard.txt"
 
 # Same thresholds as collect_kpi.py — one definition of "too complex" across the tooling.
 MAX_CCN = 10

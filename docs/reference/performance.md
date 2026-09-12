@@ -1,16 +1,16 @@
 # Performance & Memory
 
-projectMM's per-step **performance contracts** live in the scenario JSONs — each `test/scenarios/*.json` step carries a per-target `contract` block (`tick_us` ceiling + `free_heap` floor) and an `observed` block (the latest reading per target). The scenarios are the source of truth and the assertion surface: every PR runs against them. See [testing.md § Performance contracts](testing.md#performance-contracts-contracttarget) for the contract semantics and renegotiation workflow. The headline numbers users care about are in [README.md § Performance](../README.md#performance).
+projectMM's per-step **performance contracts** live in the scenario JSONs: each `test/scenarios/*.json` step carries a per-target `contract` block (`tick_us` ceiling + `free_heap` floor) and an `observed` block (the latest reading per target). The scenarios are the source of truth and the assertion surface: every PR runs against them. See [testing.md § Performance contracts](testing.md#performance-contracts-contracttarget) for the contract semantics and renegotiation workflow. The headline numbers users care about are in [README.md § Performance](../README.md#performance).
 
 This document holds what scenarios can't carry: structural sizes (`sizeof`), build-variant deltas, and the WiFi/Ethernet physics that explain *why* a contract comes out where it does.
 
-**Render-loop model.** The Layer's buffer **persists** frame-to-frame — `Layer::tick()` does not clear it (the FastLED/WLED/MoonLight convention; see [architecture.md § Buffer persistence](architecture.md#buffer-persistence-the-layer-does-not-clear-each-frame)). This removed the per-frame full-buffer `memset` that a clear-every-frame model pays, and replaced N per-effect `draw::fade` passes with a single **collected fade** (`Layer::fadeToBlackBy` MINs the requested amounts and applies one buffer pass per frame) — so a layer with several fading effects now pays one fade pass, not N. Net hot-path effect on the tick numbers below is small (the clear/fade are one linear pass over the buffer, dwarfed by per-light effect compute and the output driver), but the *model* is what the scenario `observed` blocks were re-measured against on this cycle.
+**Render-loop model.** The Layer's buffer **persists** frame-to-frame, and `Layer::tick()` does not clear it (the FastLED/WLED/MoonLight convention; see [MoonLight, buffer persistence](../explanation/architecture/moonlight.md#buffer-persistence-the-layer-keeps-what-it-drew)). This removed the per-frame full-buffer `memset` that a clear-every-frame model pays, and replaced N per-effect `draw::fade` passes with a single **collected fade** (`Layer::fadeToBlackBy` MINs the requested amounts and applies one buffer pass per frame), so a layer with several fading effects now pays one fade pass, not N. Net hot-path effect on the tick numbers below is small (the clear/fade are one linear pass over the buffer, dwarfed by per-light effect compute and the output driver), but the *model* is what the scenario `observed` blocks were re-measured against on this cycle.
 
 ---
 
 ## Desktop (64-bit)
 
-Desktop ArtNet sends to a non-existent IP so packets complete instantly; `freeHeap` returns 0 (unlimited). Per-step tick budgets live in per-host `contract.desktop-<os>` blocks across the scenarios — `desktop-macos` for macOS arm64, `desktop-windows` for Windows x64, `desktop-linux` for Linux. The `sizeof` and dynamic-memory numbers below apply to all 64-bit desktop targets; tick numbers differ by host CPU and live in the scenario contracts.
+Desktop ArtNet sends to a non-existent IP so packets complete instantly; `freeHeap` returns 0 (unlimited). Per-step tick budgets live in per-host `contract.desktop-<os>` blocks across the scenarios: `desktop-macos` for macOS arm64, `desktop-windows` for Windows x64, `desktop-linux` for Linux. The `sizeof` and dynamic-memory numbers below apply to all 64-bit desktop targets; tick numbers differ by host CPU and live in the scenario contracts.
 
 ### sizeof (desktop, 64-bit)
 
@@ -128,7 +128,7 @@ this effect can carry on either is an open question rather than a claim.
 
 ---
 
-## ESP32 — Olimex Gateway Rev G (no PSRAM, 320 KB internal)
+## ESP32: Olimex Gateway Rev G (no PSRAM, 320 KB internal)
 
 Per-step tick/heap live in `contract.esp32-eth-wifi` and `contract.esp32-eth` across the scenarios; see the [README perf table](../README.md#performance) for the headline grid×board matrix. The notes below cover what those rows don't.
 
@@ -136,70 +136,15 @@ Per-step tick/heap live in `contract.esp32-eth-wifi` and `contract.esp32-eth` ac
 
 Individual measurements vary ~5–10% on the Olimex board with no configuration change — inherent ESP32/Ethernet timing jitter (lwIP `tcpip_thread` scheduling, EMAC DMA, Ethernet ACK pacing). Scenarios use 10% default ESP32 tolerance to absorb this; when a step trips, re-run before treating it as a real regression. The `collect_kpi.py --commit` gate parses a single `tick:` line from `esp32/monitor.log` and can flag an unlucky sample — same rule applies.
 
-### All-effects sweep (every effect, no modifier, Ethernet + ArtNet)
+### What the per-effect sweep established
 
-This Olimex sweep ran each effect alone over a Layer (no modifier) at four square grids, through the real ArtNet + Preview drivers — the per-effect cost of the same pipeline the README's single-effect headline row measures. Numbers are from a live run; apply the ~5–10% variance above. (The per-effect sweep merged into the light/heavy bracket of `scenario_perf_full`; this table is the archived Olimex run.)
+A 2026-06 Olimex sweep ran every effect alone over a Layer at four square grids, through the real ArtNet and Preview drivers. The rows are gone (the per-effect measurement merged into the light/heavy bracket of `scenario_perf_full`, and per-scenario ticks are generated into [repo-health](metrics/repo-health.md#render-performance)); three findings survive it.
 
-**FPS** (= 1,000,000 / tick µs):
+**At 128² the board is ArtNet-output-bound**, not compute-bound: the ~38 ms synchronous send dominates the tick, so nearly every effect converges to 12-23 FPS and effect cost washes out. Below 64² the compute is visible, with Rings, Noise and Spiral heaviest and Lines and Checkerboard lightest.
 
-| Effect | 16² | 32² | 64² | 128² |
-|--------|----:|----:|----:|-----:|
-| Lines | 12658 | 7633 | 2304 | 23 |
-| Rainbow | 3831 | 968 | 143 | 22 |
-| Noise | 1117 | 324 | 71 | 17 |
-| Plasma | 3194 | 829 | 135 | 18 |
-| PlasmaPalette | 6024 | 1733 | 267 | 21 |
-| Metaballs | 2016 | 521 | 102 | 18 |
-| Fire | 2762 | 784 | 159 | 21 |
-| Particles | 4716 | 1848 | 424 | 30 |
-| GlowParticles | 1706 | 586 | 128 | 14 |
-| Checkerboard | 8474 | 2617 | 397 | 21 |
-| Spiral | 2403 | 571 | 87 | 15 |
-| Rings | 1118 | 284 | 45 | 12 |
-| LavaLamp | 3030 | 756 | 113 | 18 |
-| GameOfLife | 6802 | 1519 | 226 | 13 |
+**Free internal heap falls as the grid grows**, because the Layer buffer, the LUT and the driver output buffer all live in internal RAM on a no-PSRAM board.
 
-At 128² nearly every effect converges to ~12–23 FPS: the board is **ArtNet-output-bound** there (the ~38 ms synchronous send dominates the tick), so effect-compute differences wash out — the same physics the README narrates for the S3 over WiFi. Effect cost is visible at 64² and below, where Rings / Noise / Spiral are the heaviest and Lines / Checkerboard the lightest.
-
-**Free internal heap** (KB) — the scarce resource on a no-PSRAM board; drops as the grid grows because the Layer buffer + LUT and the driver output buffer live in internal RAM:
-
-| Effect | 16² | 32² | 64² | 128² |
-|--------|----:|----:|----:|-----:|
-| Lines | 220 | 214 | 195 | 126 |
-| Rainbow | 173 | 167 | 158 | 126 |
-| Noise | 171 | 168 | 159 | 126 |
-| Plasma | 173 | 171 | 162 | 126 |
-| PlasmaPalette | 170 | 168 | 160 | 126 |
-| Metaballs | 173 | 171 | 162 | 126 |
-| Fire | 173 | 170 | 157 | 110 |
-| Particles | 172 | 167 | 149 | 77 |
-| GlowParticles | 173 | 171 | 162 | 126 |
-| Checkerboard | 173 | 168 | 159 | 123 |
-| Spiral | 170 | 169 | 160 | 123 |
-| Rings | 170 | 168 | 160 | 124 |
-| LavaLamp | 170 | 169 | 160 | 124 |
-| GameOfLife | 171 | 165 | 150 | 90 |
-
-**Largest free internal block** (KB) — the memory-pressure signal that matters: free heap can be ample while fragmentation leaves no single block big enough for the next allocation:
-
-| Effect | 16² | 32² | 64² | 128² |
-|--------|----:|----:|----:|-----:|
-| Lines | 108 | 108 | 108 | 62 |
-| Rainbow | 92 | 88 | 76 | 62 |
-| Noise | 92 | 88 | 76 | 62 |
-| Plasma | 92 | 92 | 84 | 62 |
-| PlasmaPalette | 92 | 88 | 80 | 62 |
-| Metaballs | 92 | 92 | 84 | 62 |
-| Fire | 96 | 92 | 76 | 62 |
-| Particles | 80 | 80 | 68 | 34 |
-| GlowParticles | 84 | 84 | 80 | 62 |
-| Checkerboard | 96 | 88 | 72 | 62 |
-| Spiral | 88 | 88 | 76 | 62 |
-| Rings | 92 | 88 | 80 | 62 |
-| LavaLamp | 92 | 88 | 72 | 62 |
-| GameOfLife | 88 | 84 | 68 | 46 |
-
-Most effects hold the same ~126 KB free / 62 KB block at 128² — their per-cell state is negligible next to the buffers. The exceptions carry real per-cell state: **Particles** (77 KB / 34 KB) and **GameOfLife** (90 KB / 46 KB) allocate a parallel grid-sized array, and **Fire** (110 KB) a heat map. Those three are the ones to watch for fragmentation headroom on a no-PSRAM board at large grids.
+**Three effects carry real per-cell state**, and they are the ones to watch for fragmentation headroom at large grids: Particles and GameOfLife allocate a parallel grid-sized array (77 KB free / 34 KB largest block, and 90 KB / 46 KB at 128²), and Fire a heat map (110 KB). Every other effect holds the same ~126 KB free with a ~62 KB largest block, since its per-cell state is negligible beside the buffers. The largest free block is the signal that matters rather than the total: free heap can be ample while fragmentation leaves no single block big enough for the next allocation.
 
 ### ArtNet over WiFi vs Ethernet
 
@@ -279,32 +224,13 @@ The brown-out cap drops TX power 12 dB below default (8 dBm vs ~20 dBm). At lowe
 
 The PSRAM-merged heap (`totalHeap() > totalInternalHeap()`) is auto-detected — SystemModule binds the `psram` progress control only when this comparison is true. See `docs/moonmodules/core/SystemModule.md`.
 
-### All-effects sweep — render-only (no output driver, audio + discovery disabled)
+### What the render-only sweep established
 
-A render-only per-effect sweep on the S3 (`observed.esp32s3-n16r8`, build `Jun 17 2026`; this curve is what `scenario_perf_full`'s light/heavy bracket now measures on-device). Unlike the Olimex sweep above (which runs through the ArtNet driver and is output-bound at 128²), this one measures **raw render cost**: audio (I2S sampling) and the Devices module (the blocking HTTP discovery sweep) are disabled and **no output driver** is attached, so the tick is Layout→Layer→effect only. On the S3 the Layer buffer lives in PSRAM, so effect-compute is visible all the way to 16K pixels (it never converges to an output-bound floor the way the no-PSRAM Olimex does).
+A 2026-06 render-only sweep on the S3 measured raw effect cost: no output driver, audio and discovery disabled, so the tick is Layout to Layer to effect alone. The rows are gone, since `scenario_perf_full`'s light/heavy bracket measures that curve on-device now. Two findings survive.
 
-**Tick (µs)** — render only, ~5–10% run-to-run variance applies:
+**Effect compute stays visible to 16K pixels**, unlike the no-PSRAM Olimex, because the S3 holds the Layer buffer in PSRAM and never hits an output-bound floor. The cheapest (Lines, Checkerboard, PlasmaPalette) clear ~100 FPS even at 16K; the heaviest is Noise at 51 ms, about 19 FPS, paying a noise sample per pixel, then Rings and GlowParticles.
 
-| Effect | 16² (256) | 32² (1K) | 64² (4K) | 128² (16K) |
-|--------|----:|----:|----:|-----:|
-| Lines | 88 | 96 | 179 | 6,425 |
-| Rainbow | 285 | 849 | 3,228 | 16,207 |
-| Noise | 913 | 2,951 | 11,661 | 51,230 |
-| Plasma | 352 | 1,020 | 3,744 | 20,020 |
-| PlasmaPalette | 146 | 423 | 1,765 | 10,085 |
-| Metaballs | 462 | 1,757 | 6,108 | 28,576 |
-| Fire | 382 | 1,138 | 4,505 | 22,745 |
-| Particles | 229 | 535 | 1,945 | 15,792 |
-| GlowParticles | 580 | 1,874 | 6,959 | 31,479 |
-| Checkerboard | 121 | 345 | 1,098 | 8,500 |
-| Spiral | 465 | 1,379 | 6,712 | 24,666 |
-| Rings | 852 | 2,455 | 9,383 | 41,403 |
-| LavaLamp | 309 | 974 | 3,612 | 21,243 |
-| GameOfLife | 138 | 413 | 1,870 | 16,127 |
-
-The cheapest (Lines, Checkerboard, PlasmaPalette) clear ~100 FPS even at 16K; the heaviest is **Noise** (51 ms = ~19 FPS at 16K, a noise sample per pixel), then Rings and GlowParticles. Effect-compute differences stay visible across the whole range because nothing is output-bound here.
-
-**Free internal heap** holds ~8.54 MB at small grids and ~8.46–8.49 MB at 16K — the ~50–100 KB delta is just the grid-sized render buffer (the `model` array), and it returns to ~8.54 MB whenever the grid shrinks: **no leak, no fragmentation creep** across the sweep. Largest free internal block stays ~90–110 KB throughout. (Internal RAM is not the constraint on this PSRAM board; the Layer buffer is in PSRAM.)
+**Internal RAM is not the constraint on a PSRAM board.** Free internal heap holds ~8.54 MB at small grids and ~8.46-8.49 MB at 16K, the delta being the grid-sized render buffer, and it returns to ~8.54 MB whenever the grid shrinks: no leak and no fragmentation creep across the sweep. The largest free block stays ~90-110 KB throughout.
 
 ### MoonLive (scripted effect) — tick + memory
 
@@ -316,7 +242,7 @@ A `MoonLiveEffect` compiles its script to native code for whichever ISA the boar
 | `setRGB(random16(256), 0, 255, 0)` (one host call) | 29 | ~140 B |
 | `fill(0, 0, 255)` (loop over all lights) | 47 | ~68 B |
 
-The rows above are a dated S3 bench record; the numbers below them are what a desktop run measures today. The tick cost is native-code speed: a `setRGB` is a bounds-guard + three byte stores (~26 µs including the per-tick module overhead), `fill` adds the per-light loop. The **exec block scales with the program**, not a fixed cap: a one-liner is tens of bytes of machine code (`place()` allocates the emitted length, word-rounded), reported as the module's dynamic memory (`setDynamicBytes(engine_.heapBytes())`, the exec block plus the control arena) so it shows on the UI card. At rest the engine itself is ~48 B of members + that exec block; the compile path's transient buffers (staging, IR, assembler ≈ 4 KB) live on the cold-path stack and are freed on return, see [docs/backlog/livescripts-analysis-top-down.md § 3.7](work/future/livescripts-analysis-top-down.md) for how this scales as the language grows.
+The rows above are a dated S3 bench record; the numbers below them are what a desktop run measures today. The tick cost is native-code speed: a `setRGB` is a bounds-guard + three byte stores (~26 µs including the per-tick module overhead), `fill` adds the per-light loop. The **exec block scales with the program**, not a fixed cap: a one-liner is tens of bytes of machine code (`place()` allocates the emitted length, word-rounded), reported as the module's dynamic memory (`setDynamicBytes(engine_.heapBytes())`, the exec block plus the control arena) so it shows on the UI card. At rest the engine itself is ~48 B of members + that exec block; the compile path's transient buffers (staging, IR, assembler ≈ 4 KB) live on the cold-path stack and are freed on return, see [docs/backlog/livescripts-analysis-top-down.md § 3.7](../work/future/livescripts-analysis-top-down.md) for how this scales as the language grows.
 
 **System variables cost a byte store each, per binding.** They are arena slots the binding refreshes before `run()` — a null check and a byte store apiece, replacing nothing, so the per-tick figure above is unchanged by them. An **effect** writes three (`width`/`height`/`depth`) once per tick; a **modifier** writes six (those plus the `x`/`y`/`z` it is handed) on the mapping-build cold path, not per frame; a **layout** writes none, since it is given no dimensions. `t` adds no arena byte: it is an argument register the host already passes. Not quite free, though — a callee may clobber an argument register under the ABI, so a backend saves it across calls (the arm64 one stacks x3 with the vreg pool; `unit_moonlive_fill` pins that a script reading `t` after a call still sees the host's value). The compile path grew (a system-variable table, resolved before locals and controls) but that is cold-path, once per `source` edit.
 
@@ -391,14 +317,14 @@ Each parallel LED driver run on real hardware at a 128×128 = 16384-light grid, 
 
 | Peripheral | Board | Pins used (8 lanes) | Result | Ceiling / bound |
 |---|---|---|---|---|
-| **Parlio** | ESP32-P4 (Waveshare P4-NANO) | `20,21,22,23,24,25,26,27` | `Drivers` tick ~30100 µs, fps 30 at 16384 lights (8 lanes, SWAR transpose) | Parlio's single-shot transfer caps at 65535 bytes TOTAL (not per lane), and a light costs `channels × 24 × slotBytes`, so the ceiling is **897 lights/lane at 8 lanes RGB**, 673 RGBW, and halves to 442/332 at 16 lanes (a 16-bit bus doubles `slotBytes`). Over that, the driver reports `too many lights per pin` and keeps running; lifting the ceiling is the [chunked-DMA work](work/future/backlog-light.md) (tier 1 → ~16-21K). |
+| **Parlio** | ESP32-P4 (Waveshare P4-NANO) | `20,21,22,23,24,25,26,27` | `Drivers` tick ~30100 µs, fps 30 at 16384 lights (8 lanes, SWAR transpose) | Parlio's single-shot transfer caps at 65535 bytes TOTAL (not per lane), and a light costs `channels × 24 × slotBytes`, so the ceiling is **897 lights/lane at 8 lanes RGB**, 673 RGBW, and halves to 442/332 at 16 lanes (a 16-bit bus doubles `slotBytes`). Over that, the driver reports `too many lights per pin` and keeps running; lifting the ceiling is the [chunked-DMA work](../work/future/backlog-light.md) (tier 1 → ~16-21K). |
 | **LCD_CAM i80** (MultiPinLedDriver) | ESP32-S3 N16R8 Dev | data `18,5,6,7,8,9,10,11` · WR(clock) `12` · DC `13` | Same encoder, healthy on real i80; encode scales ~6 µs/light (8×512 = 4096 → 23 ms; 8×1024 = 8192 → 50 ms) | **single-DMA init ceiling 8192–12288 lights** (8×1024 inits; 8×1536 → "LCD init failed — check pins/memory"). A data lane on WR/DC only corrupts *that* lane (it carries the bus-control waveform, not pixels), so the driver **warns and keeps running** — a board that wires all lanes but drives fewer strands can legitimately park WR/DC on an unused data pin. WR and DC on the *same* GPIO is rejected up front (the bus needs two distinct control lines). |
-| **RMT** | classic ESP32 (LOLIN D32 / WROOM) | `2,4,13,14,16,17,18,19` (pin 2 = a real 24-LED strand) | 8-pin RMT drives **8×256 = 2048 lights** (tick ~12.6 ms), scales to ~8192 before the tick plateaus; all lanes healthy, pin-2 strand verified lit | **silent alloc-fail:** the RMT symbol buffer sizes for the driver's `count` window, so `count=0` on a 16384-grid needs ~1.5 MB, fails on the ~90 KB heap, and `tick()` bails with **no status** (LEDs dark). Bound the driver with the start/count window; a status for this is [backlogged](work/future/backlog-light.md). |
+| **RMT** | classic ESP32 (LOLIN D32 / WROOM) | `2,4,13,14,16,17,18,19` (pin 2 = a real 24-LED strand) | 8-pin RMT drives **8×256 = 2048 lights** (tick ~12.6 ms), scales to ~8192 before the tick plateaus; all lanes healthy, pin-2 strand verified lit | **silent alloc-fail:** the RMT symbol buffer sizes for the driver's `count` window, so `count=0` on a 16384-grid needs ~1.5 MB, fails on the ~90 KB heap, and `tick()` bails with **no status** (LEDs dark). Bound the driver with the start/count window; a status for this is [backlogged](../work/future/backlog-light.md). |
 | **I2S i80** | classic ESP32 (ESP32-WROVER) | data `2,4,13,14,18,19,21,22` · WR(clock) `32` · DC `33` (pin 2 = a real strand, verified lit) | The classic ESP32 runs the **same** `MultiPinLedDriver` over the **I2S peripheral in i80 mode** (IDF routes the i80 API to I2S here, to LCD_CAM on the S3/P4 — one driver, chip-picked backend). 8-lane doubling sweep (128×128 grid, 2026-07-13): 64/pin (512) → 4877 µs, 128/pin (1024) → 8575 µs, 256/pin (2048) → 15638 µs. Scales linearly at **~7.6 µs/light** (heavier than the S3's LCD_CAM ~6 µs — the classic I2S clock path). `frameTime` reports the WS2812 wire floor (512 → 243 fps, 2048 → 67 fps). The `MultiPinLed` status reports the live count. **16 lanes work on classic too** (the I2S peripheral does the 16-bit i80 bus, 16×256 = 4096 verified), but the WROVER exposes only ~13 non-strap pins, so 8-lane is the practical set. | **Internal-RAM ceiling: 2048 lights at 8 lanes (4096 at 16).** The classic I2S backend **cannot DMA from PSRAM** (`esp_lcd_i80_alloc_draw_buffer` rejects `MALLOC_CAP_SPIRAM` — "external memory is not supported"), so its frame buffer is internal-DMA-RAM only (`maxBlock` ≈ 76 KB). Swept at 8 lanes on a 128×128 grid (2026-07-13): 64/pin (512) ✅, 128/pin (1024) ✅, **256/pin (2048) ✅ — then 512/pin (4096) and above → `i80 bus init failed — check pins / memory`**, a **clean degrade, not a crash** (uptime kept climbing through every rung). That lands exactly on the parallel-I2S acceptance floor (8×256 = 2048), so the classic chip meets its floor and no more. The opposite of the LCD_CAM row below, which reaches 16384 via PSRAM — the classic chip's DMA simply can't get there. **The render is decoupled from this ceiling:** the same sweep kept rendering the full 128×128 = 16384-light grid at every rung (`Layer` ≈ 511 ms/frame, from PSRAM) while the *output* was capped — so a big grid still renders, it just can't all reach the LEDs. At 16K lights the effect render (511 ms) dwarfs the output (24 ms), so multicore cannot help: the render is the wall on this chip. Two classic-only quirks the driver handles: the I2S i80 tx has an unconditional command phase whose busy-wait hangs to a watchdog reset unless given a real 8-bit command (`lcd_cmd_bits=8` / `kI80Cmd=0`), and the draw buffer + a done-ISR marked `IRAM_ATTR`. |
-| **LCD_CAM 16-lane** | ESP32-S3 (SE 16 V1 + LightCrafter 16, n8r8) | SE16 data `47,48,21,38,14,39,13,40,12,41,11,42,10,2,3,1` · WR/DC `5`/`6`; LC16 data `47,21,14,9,8,16,15,7,1,2,42,41,40,39,38,48` · WR/DC ghost `33`/`34` | **Reaches the full 16384 lights (the 16K target) where Parlio caps at 4096.** SE16 16-lane doubling sweep (128×128 grid), **async double-buffer ON** (re-measured 2026-07-13 after Step 1.5): 512 → 1843 µs, 1024 → 3422 µs, 2048 → 6612 µs, 4096 → 15153 µs, 8192 → 26788 µs, **16384 → 49916 µs (~20 fps)**: the driver tick is now the *encode* alone, the WS2812 wire wait overlapped in background DMA (`frameTime` reports it separately: 16384 → 28786 µs). That's **~30–56 % faster than the pre-Step-1.5 blocking path** the earlier row measured (async **OFF** reproduces it within 3 %: 4096 → 22518 µs, 16384 → 77732 µs vs the old 21945 / 76979 µs, so the [lcd→i80 rename](moonmodules/light/drivers.md#led-drivers) is behavior-neutral; the speedup is Step 1.5, not the rename). The `MultiPinLed` status reports the live count (`driving N of 16384 lights`). | **No contiguous-block ceiling, the key difference from Parlio.** LCD_CAM allocates its DMA buffer via `esp_lcd_i80_alloc_draw_buffer` **from PSRAM**, so it isn't bound by the ~368 KB largest-internal-block limit that caps Parlio at 4096 lights; it drives all 16384. **16K is now ~20 fps** (up from ~13 fps pre-Step-1.5). The ENCODE is the wall here, not the wire: async hides the 28,786 µs wire behind DMA (which alone would allow ~35 fps), so the tick *is* the 49,916 µs encode → ~20 fps. Recovering the rest of the deep-per-lane wall (§ Step 3, [multicore top-down](#multicore-the-whole-output-stage-on-core-1-multicore-step-2)), though the ~50 ms encode still runs on **core 0**, which on the LC16 **starves the W5500 SPI-Ethernet** (also core 0) → link drops, HTTP times out while the render loop keeps ticking. This is the measured contention that justifies the [multicore pipeline (Step 2)](#multicore-the-whole-output-stage-on-core-1-multicore-step-2) on classic/S3, a core-budget limit, not a fault. |
-| **Parlio 16-lane** | ESP32-P4 (testbench, n16r8) | 16 data pins `21,20,22,23,24,25,26,27,32,33,39,40,41,42,43,44` | 16-lane doubling sweep (`ledsPerPin` 32→256/pin on a 128×128 grid, 2026-07-12; reproduced within 0.3% on a second P4). Tick scales **linearly** with lights: 512 → 1653 µs, 1024 → 2925 µs, 2048 → 5514 µs, **4096 → 10760 µs** at 256/pin. **Async double-buffer shipped (Step 1.5, 2026-07-13):** with `doubleBuffer` ON, the ~7.5 ms WS2812 wire wait moves into background DMA, so the *driver* tick at 256/pin drops **10,820 → 3,790 µs** and the whole board rises **48 → 76 fps** (system tick 20.6 → 13.0 ms). The **`frameTime`** KPI reports the measured wire floor directly: live **7474 µs (133 fps max)** here (the true, measured output ceiling). With the wire hidden, the tick is now **effect render (~7.3 ms) + driver (~3.8 ms) serial**, so the effect is the next bottleneck, which the [multicore pipeline (Step 2)](#multicore-the-whole-output-stage-on-core-1-multicore-step-2) overlaps toward the 133 fps `frameTime` ceiling. (`doubleBuffer` OFF reproduces the pre-Step-1.5 10,820 µs / 92 driver-fps exactly: the synchronous path, kept as the opt-out. ON is simply the better configuration; the switch exists to A/B it. Its one-frame latency saving is below the perceptual A/V-sync threshold, so there is no user class (audio-reactive included) that should run it OFF for latency.) The `ParlioLed` status reports the live count (`driving N of 16384 lights`). | **Single-DMA ceiling ≈ 4096 lights (256/pin).** 512/pin (8192) → `Parlio init failed, check pins / memory`. The P4 has 33 MB free heap but the largest *contiguous* internal block is ~368 KB, and the 16-bit single-shot DMA buffer needs one contiguous block, so it's a **contiguous-block limit, not total memory** (it bites well before the 65535-byte/lane byte cap). Reaching the full 16384 (1024/pin) needs the [Parlio chunked-transfer](work/future/backlog-light.md) work (frame split across DMA bursts), deferred indefinitely since >~65K lights on one chip is a network-distribution problem. |
+| **LCD_CAM 16-lane** | ESP32-S3 (SE 16 V1 + LightCrafter 16, n8r8) | SE16 data `47,48,21,38,14,39,13,40,12,41,11,42,10,2,3,1` · WR/DC `5`/`6`; LC16 data `47,21,14,9,8,16,15,7,1,2,42,41,40,39,38,48` · WR/DC ghost `33`/`34` | **Reaches the full 16384 lights (the 16K target) where Parlio caps at 4096.** SE16 16-lane doubling sweep (128×128 grid), **async double-buffer ON** (re-measured 2026-07-13 after Step 1.5): 512 → 1843 µs, 1024 → 3422 µs, 2048 → 6612 µs, 4096 → 15153 µs, 8192 → 26788 µs, **16384 → 49916 µs (~20 fps)**: the driver tick is now the *encode* alone, the WS2812 wire wait overlapped in background DMA (`frameTime` reports it separately: 16384 → 28786 µs). That's **~30–56 % faster than the pre-Step-1.5 blocking path** the earlier row measured (async **OFF** reproduces it within 3 %: 4096 → 22518 µs, 16384 → 77732 µs vs the old 21945 / 76979 µs, so the [lcd→i80 rename](../moonmodules/light/drivers.md#led-drivers) is behavior-neutral; the speedup is Step 1.5, not the rename). The `MultiPinLed` status reports the live count (`driving N of 16384 lights`). | **No contiguous-block ceiling, the key difference from Parlio.** LCD_CAM allocates its DMA buffer via `esp_lcd_i80_alloc_draw_buffer` **from PSRAM**, so it isn't bound by the ~368 KB largest-internal-block limit that caps Parlio at 4096 lights; it drives all 16384. **16K is now ~20 fps** (up from ~13 fps pre-Step-1.5). The ENCODE is the wall here, not the wire: async hides the 28,786 µs wire behind DMA (which alone would allow ~35 fps), so the tick *is* the 49,916 µs encode → ~20 fps. Recovering the rest of the deep-per-lane wall (§ Step 3, [multicore top-down](#multicore-the-whole-output-stage-on-core-1-multicore-step-2)), though the ~50 ms encode still runs on **core 0**, which on the LC16 **starves the W5500 SPI-Ethernet** (also core 0) → link drops, HTTP times out while the render loop keeps ticking. This is the measured contention that justifies the [multicore pipeline (Step 2)](#multicore-the-whole-output-stage-on-core-1-multicore-step-2) on classic/S3, a core-budget limit, not a fault. |
+| **Parlio 16-lane** | ESP32-P4 (testbench, n16r8) | 16 data pins `21,20,22,23,24,25,26,27,32,33,39,40,41,42,43,44` | 16-lane doubling sweep (`ledsPerPin` 32→256/pin on a 128×128 grid, 2026-07-12; reproduced within 0.3% on a second P4). Tick scales **linearly** with lights: 512 → 1653 µs, 1024 → 2925 µs, 2048 → 5514 µs, **4096 → 10760 µs** at 256/pin. **Async double-buffer shipped (Step 1.5, 2026-07-13):** with `doubleBuffer` ON, the ~7.5 ms WS2812 wire wait moves into background DMA, so the *driver* tick at 256/pin drops **10,820 → 3,790 µs** and the whole board rises **48 → 76 fps** (system tick 20.6 → 13.0 ms). The **`frameTime`** KPI reports the measured wire floor directly: live **7474 µs (133 fps max)** here (the true, measured output ceiling). With the wire hidden, the tick is now **effect render (~7.3 ms) + driver (~3.8 ms) serial**, so the effect is the next bottleneck, which the [multicore pipeline (Step 2)](#multicore-the-whole-output-stage-on-core-1-multicore-step-2) overlaps toward the 133 fps `frameTime` ceiling. (`doubleBuffer` OFF reproduces the pre-Step-1.5 10,820 µs / 92 driver-fps exactly: the synchronous path, kept as the opt-out. ON is simply the better configuration; the switch exists to A/B it. Its one-frame latency saving is below the perceptual A/V-sync threshold, so there is no user class (audio-reactive included) that should run it OFF for latency.) The `ParlioLed` status reports the live count (`driving N of 16384 lights`). | **Single-DMA ceiling ≈ 4096 lights (256/pin).** 512/pin (8192) → `Parlio init failed, check pins / memory`. The P4 has 33 MB free heap but the largest *contiguous* internal block is ~368 KB, and the 16-bit single-shot DMA buffer needs one contiguous block, so it's a **contiguous-block limit, not total memory** (it bites well before the 65535-byte/lane byte cap). Reaching the full 16384 (1024/pin) needs the [Parlio chunked-transfer](../work/future/backlog-light.md) work (frame split across DMA bursts), deferred indefinitely since >~65K lights on one chip is a network-distribution problem. |
 
-**LOLIN D32 (classic ESP32-WROOM) usable LED GPIOs:** `4,13,14,18,19,21,22,23,25,26,27,32,33` plus `16,17` (free on WROOM — they're the PSRAM bus only on WROVER). Avoid straps `0,2,12,15`, the onboard LED on `5`, and battery-sense on `35`; input-only `34–39` can't drive an LED. (Chip-level set: [gpio-usage.md](reference/gpio-usage.md).)
+**LOLIN D32 (classic ESP32-WROOM) usable LED GPIOs:** `4,13,14,18,19,21,22,23,25,26,27,32,33` plus `16,17` (free on WROOM — they're the PSRAM bus only on WROVER). Avoid straps `0,2,12,15`, the onboard LED on `5`, and battery-sense on `35`; input-only `34–39` can't drive an LED. (Chip-level set: [gpio-usage.md](hardware/gpio-usage.md).)
 
 **Diagnostic used:** RMT `tickTimeUs > 1000` = actively encoding (LEDs on); a tiny ~30 µs tick = the symbol alloc failed and `tick()` bailed (dark). `dynamicBytes` for RMT is the frame buffer (`driverHeapBytes()` returns `frameCap_`: outChannels bytes per light).
 
@@ -424,7 +350,7 @@ mix measures ~56 FPS on the same wall.
 wall costs proportionally more rows; a 256-row wall would double the packet count. The card format's
 1 Gbit requirement is a wire-time constraint rather than a bandwidth one: at 100 Mbit the same bytes
 take ten times as long and overrun the inter-frame window the sync depends on
-([drivers.md](moonmodules/light/drivers.md#panelcard)).
+([drivers.md](../moonmodules/light/drivers.md#panelcard)).
 
 **The DMA ring is what makes it stable.** `CONFIG_ETH_DMA_BUFFER_SIZE` defaults to 512 B, so a
 1512 B frame spanned three descriptors and a 10-descriptor ring held ~3.3 frames while the driver
@@ -432,7 +358,7 @@ fires 132 back-to-back. At that depth the S31 refused ~19 000 frames and wedged 
 minutes; at 1536 B per buffer (one descriptor per frame) plus `CONFIG_ETH_TRANSMIT_MUTEX`, it runs
 clean. Both are bench-isolated, and ring COUNT is not the lever: 30 descriptors ran no cleaner than
 10. Cost: ~20 KB of internal DMA RAM, since the size applies to both rings
-([lessons.md](work/past/lessons.md)).
+([lessons.md](../work/past/lessons.md)).
 
 **Static RAM: 0 B.** The driver's 1 512 B packet buffer is a class member, so it costs nothing on a
 board that never adds the driver; `check_footprint --module PanelCardDriver --firmware esp32s31`
@@ -452,7 +378,7 @@ The P4 has no native radio: WiFi comes from an on-board ESP32-C6 over SDIO. Comp
 
 So roughly **4x per request and 2x on throughput** for having the co-processor compiled in. Render is unaffected (359 fps on the WiFi build), so this is not frame-loop contention: the cost is per-REQUEST rather than per-byte, which points at a periodic blocker a request waits out rather than a slow pipe.
 
-Measured on IDF v6.1-rc1. The penalty was far worse on v6.1-beta1 (33-60x per request, 17x throughput, with requests alternating 0.4/0.8 s); most of that is gone and what remains is tracked in [backlog-core](work/future/backlog-core.md).
+Measured on IDF v6.1-rc1. The penalty was far worse on v6.1-beta1 (33-60x per request, 17x throughput, with requests alternating 0.4/0.8 s); most of that is gone and what remains is tracked in [backlog-core](../work/future/backlog-core.md).
 
 ## Multicore: the whole output stage on core 1 (`multicore`, Step 2)
 
@@ -539,7 +465,7 @@ Tick µs; FPS in parens for the 16K row:
 | 64² (4K) | 13,547 | 11,235 | 4,358 |
 | 128² (16K) | 62,316 (16 FPS) | 50,555 (20 FPS) | 17,433 (57 FPS) |
 
-All curves scale **~linear in pixel count** (no superlinear blowup → no realloc/fragmentation pathology). The heavy effect is the 16K bottleneck on every board, and the board ranking is P4 ≫ S3 > classic on heavy compute (the P4's 400MHz dual-core is ~3× the S3). **Surprise worth noting:** at light-16K the *classic* (4,360µs) beats the S3 (7,949µs): the S3's PSRAM-resident buffer has higher access latency than the classic's internal RAM for the cheap Checkerboard inner loop, and classic's uint16 LUT is half the size; on the heavy effect the compute dominates and the S3 pulls ahead again. Fixed-point / strided-sampling ideas are on the [backlog](work/future/README.md).
+All curves scale **~linear in pixel count** (no superlinear blowup → no realloc/fragmentation pathology). The heavy effect is the 16K bottleneck on every board, and the board ranking is P4 ≫ S3 > classic on heavy compute (the P4's 400MHz dual-core is ~3× the S3). **Surprise worth noting:** at light-16K the *classic* (4,360µs) beats the S3 (7,949µs): the S3's PSRAM-resident buffer has higher access latency than the classic's internal RAM for the cheap Checkerboard inner loop, and classic's uint16 LUT is half the size; on the heavy effect the compute dominates and the S3 pulls ahead again. Fixed-point / strided-sampling ideas are on the [backlog](../work/future/index.md).
 
 ### MultiplyModifier — compute down, memory up (Noise effect)
 
@@ -558,50 +484,6 @@ So the modifier roughly **halves** the heavy tick at every grid (¼ logical area
 
 ## ESP32 firmware size
 
-Board: the default `esp32` (WiFi + Ethernet — the largest classic variant, measured pre-collapse as `esp32-eth-wifi`). Partition layout: app0/app1 = 1.75 MB each, LittleFS = 384 KB, coredump = 64 KB.
+Per-target image size, capacity and headroom are generated every commit into [repo-health](metrics/repo-health.md#firmware-size), across all 14 firmware variants.
 
-| | Size |
-|---|---|
-| Firmware image | ~1.27 MB |
-| App partition | 1.75 MB (~72% used, ~28% headroom) |
-| DRAM used | 38 KB |
-| DRAM free | 142 KB |
-| `sizeof(MoonModule)` ESP32 | 56 bytes |
-
-### Component breakdown (default `esp32`)
-
-Run from project root after a clean build:
-
-```bash
-uv run moondeck/build/build_esp32.py --firmware esp32
-idf.py -B build/esp32-esp32 \
-       -DSDKCONFIG=build/esp32-esp32/sdkconfig \
-       size-components | head -40
-```
-
-These numbers shift with IDF version + sdkconfig — treat as rough proportions.
-
-| Category | Approx | What |
-|---|---|---|
-| WiFi stack | ~400 KB | `esp_wifi` + `wpa_supplicant` + `esp_phy`. ~1/3 of the binary; `esp32-eth` drops it entirely (image → ~602 KB). |
-| lwIP networking | ~180 KB | TCP/IP stack, DHCP, DNS, ARP, mDNS, SNTP. |
-| TLS + cert bundle | ~170 KB | `mbedtls` + Mozilla root bundle (~50 KB). Used by `esp_https_ota`; reused by any future HTTPS client. |
-| FreeRTOS + IDF core | ~150 KB | Kernel, esp_event, esp_timer, heap, logging, partition ops. Always present. |
-| projectMM code | ~120 KB | `src/core/` + `src/light/` + `src/platform/esp32/` + `src/main.cpp`. ~10% of the binary. |
-| HTTP server + WS | ~60 KB | `esp_http_server` + `HttpServerModule` routing. |
-| Embedded UI assets | ~50 KB | `index.html`, `app.js`, `style.css`, `preview3d.js`, `install-picker.js`, logo PNG — packed as `constexpr uint8_t[]`. |
-| `esp_https_ota` + HTTP client | ~40 KB | OTA-from-URL machinery. |
-| LittleFS | ~30 KB | `joltwallet/esp_littlefs` component. |
-| Ethernet stack | ~30 KB | `esp_eth` + LAN8720 PHY. Present in every classic variant since the collapse (RMII driver is always compiled in). |
-| Misc (alignment, .rodata) | ~40 KB | Format strings, error tables, version metadata. |
-
-### Variant size deltas
-
-| Variant | Image | Delta | Difference |
-|---|---|---|---|
-| `esp32` (default, WiFi + RMII Eth) | 1.27 MB | — | Everything compiled in |
-| `esp32-eth` | 0.60 MB | −670 KB | WiFi stack excluded (`EXCLUDE_COMPONENTS`) |
-| `esp32s3-n16r8` | ~1.27 MB | similar | Xtensa LX7, 16 MB flash, different partition table; W5500 SPI Eth instead of RMII |
-
-The default `esp32` carries both the WiFi and Ethernet stacks (1.27 MB); `esp32-eth` is the Ethernet-only build that drops the WiFi stack for ~670 KB less image.
-
+What that table cannot show is where the bytes go. On the default `esp32`, roughly a third of the image is the WiFi stack (`esp_wifi`, `wpa_supplicant`, `esp_phy`), then lwIP at ~180 KB, mbedTLS plus the Mozilla root bundle at ~170 KB, FreeRTOS and the IDF core at ~150 KB, and projectMM's own code at ~120 KB, about a tenth of the binary. That is why `esp32-eth` is the smaller build: excluding WiFi is the single largest saving available. Proportions shift with the IDF version and sdkconfig; measure with `idf.py -B build/esp32-esp32 size-components`.

@@ -137,7 +137,7 @@ this is removing a distinction the storage layer never made — not introducing 
 still decides is which slots it WRITES each frame; reading is uniform.
 
 This is a breaking change for any script using a modifier's `x`/`y`/`z`, so it needs its
-[MIGRATING.md](../../../MIGRATING.md) entry and a sweep of the shipped `moonlive/` scripts.
+[MIGRATING.md](../../../reference/MIGRATING.md) entry and a sweep of the shipped `moonlive/` scripts.
 
 ### Clean first, with speed decisions made deliberately
 

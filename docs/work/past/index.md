@@ -15,9 +15,9 @@ One-time surveys of earlier projects, used to decide what to harvest into projec
 - [moonlight-inventory.md](moonlight-inventory.md): MoonLight, the closest prior art (CSR mapping, layer model, control mechanisms).
 - [v1-inventory.md](v1-inventory.md): projectMM v1 (release 1.4.0).
 - [v2-inventory.md](v2-inventory.md): projectMM v2.
-- [lessons.md](lessons.md): hard-won debugging lessons and gotchas, a bug, its cause and the fix, recorded with the code that proved them. A lesson that hardened into a *rule* lives in [CLAUDE.md](../../../CLAUDE.md) or [coding-standards.md](../../coding-standards.md) instead.
+- [lessons.md](lessons.md): hard-won debugging lessons and gotchas, a bug, its cause and the fix, recorded with the code that proved them. A lesson that hardened into a *rule* lives in [CLAUDE.md](../../../CLAUDE.md) or [coding-standards.md](../../contributing/coding-standards.md) instead.
 
-The LED-driver and shift-register design analyses moved to [future](../future/README.md), where the other research documents sit: they were written to decide what to build, and that is what future holds.
+The LED-driver and shift-register design analyses moved to [future](../future/index.md), where the other research documents sit: they were written to decide what to build, and that is what future holds.
 
 ## Plans and their PRs
 

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-The rules that bind every change. What the system is: [README.md](README.md). How it is shaped: [architecture.md](docs/architecture.md). How code is written: [coding-standards.md](docs/coding-standards.md). How prose is written: [documentation-standards.md](docs/documentation-standards.md).
+The rules that bind every change. What the system is: [README.md](README.md). How it is shaped: [the architecture](docs/explanation/architecture/index.md). How code is written: [coding-standards.md](docs/contributing/coding-standards.md). How prose is written: [documentation-standards.md](docs/contributing/documentation-standards.md).
 
 A high-performance system driving large LED installations and DMX fixtures. One source tree drives ESP32, Teensy, Raspberry Pi, macOS, Windows and Linux.
 
@@ -14,7 +14,7 @@ A high-performance system driving large LED installations and DMX fixtures. One 
 
 3. **Architecture first.** The domain-neutral core owns the hard constructs, written once; the light domain stays simple on top. Platform-specific code lives only in the platform layer. When core enforces a rule on one path, extend core to the next. No hacks: fix it the standard way when spotted, or backlog the real fix by name. Default to subtraction: the first question on any change is what it can remove.
 
-    **Build the best solution, not the compatible one.** projectMM has no installed base to protect, so "it would break existing configs" is not an argument for a worse design. When a better shape replaces an older one, the old one goes: two mechanisms doing one job is the debt this project exists to avoid. The break is documented rather than carried, which costs a [MIGRATING](docs/MIGRATING.md) entry and buys one way to do each thing. Weigh what a user loses, not what changes.
+    **Build the best solution, not the compatible one.** projectMM has no installed base to protect, so "it would break existing configs" is not an argument for a worse design. When a better shape replaces an older one, the old one goes: two mechanisms doing one job is the debt this project exists to avoid. The break is documented rather than carried, which costs a [MIGRATING](docs/reference/MIGRATING.md) entry and buys one way to do each thing. Weigh what a user loses, not what changes.
 
 4. **Guardrails everywhere.** Every behavior is pinned by tests whose descriptions read as functional documentation. Every commit is measured, so growth and regression are visible as they happen. Judgment is reviewed; everything else is checked per event below. The final guardrail is physical: verified means it ran on real hardware, with the product owner's eyes as the measurement.
 
@@ -24,14 +24,15 @@ A high-performance system driving large LED installations and DMX fixtures. One 
 
     **Scope: the files this change is already editing, not the repo.** "In passing" means a file already open for another reason. A repo-wide sweep is its own change with its own review. A blanket find-and-replace is also how a symbol gets renamed by accident, so read what an edit touches before making it.
 
-6. **Robustness.** Unbreakable in use: any input, any order, any size. Degrade visibly, never crash, and every discovered crash becomes a test. Every setting applies live ([live reconfiguration](docs/architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)). Out of scope: power loss, brown-out, corrupted updates.
+6. **Robustness.** Unbreakable in use: any input, any order, any size. Degrade visibly, never crash, and every discovered crash becomes a test. Every setting applies live ([live reconfiguration](docs/explanation/architecture/moonmodule.md#live-reconfiguration-every-change-applies-on-the-next-frame)). Out of scope: power loss, brown-out, corrupted updates.
 
 ## Roles
 
 The product owner is the critical success factor. They review every line before committing, specify requirements, control all git operations, test on hardware, decide what is built, and filter agent suggestions critically. The agent writes; the product owner thinks.
 
-| | Agent | Model | Focus |
+| | Role | Model | Focus |
 |--|-------|-------|-------|
+| 🧑 | **Product owner** | human | Decides what is built, reviews every line, owns every git operation. Whoever initiates a branch or submits a PR |
 | 🤖 | **Architect** | Opus | System design, boundary review |
 | 👽 | **Developer** | Sonnet | Implementation, one step at a time |
 | 👾 | **Reviewer** | **Fable** (Opus fallback) | Pre-merge branch review, large-commit review |
@@ -79,10 +80,10 @@ The product owner initiates every event and every gate list. A conditional check
 
 ```mermaid
 flowchart TB
-    branch["<b>branch</b><br/><i>PO picks and branches</i>"] --> work["<b>build · test · document</b><br/><i>agent works, desktop first</i>"]
-    work --> commit["<b>commit</b><br/><i>PO reviews every line</i>"]
-    commit --> merge["<b>merge</b><br/><i>PO merges</i>"]
-    merge --> release["<b>release</b><br/><i>PO tags</i>"]
+    branch["<b>branch</b><br/><i>🧑 PO picks and branches</i>"] --> work["<b>build · test · document</b><br/><i>👽 implements · 🛸 pins it · desktop first</i>"]
+    work --> commit["<b>commit</b><br/><i>🧑 PO reviews every line</i>"]
+    commit --> merge["<b>merge</b><br/><i>🧑 PO merges</i>"]
+    merge --> release["<b>release</b><br/><i>🧑 PO tags</i>"]
 
     commit -.-> g1["<i>the checks the diff triggers</i>"]
     merge -.-> g2["<i>the same over the branch diff,<br/>plus judgment gates</i>"]
@@ -104,9 +105,9 @@ Main is always releasable: what is on main ships as the latest pre-release, and 
 
 ```mermaid
 flowchart TB
-    pick["<b>1 · pick</b><br/><i>PO names one module, effect,<br/>driver or capability</i>"]
-    spec["<b>2 · spec</b><br/><i>before code, and enough<br/>to implement from</i>"]
-    plan["<b>3 · plan</b><br/><i>plan mode, then PO approves</i>"]
+    pick["<b>1 · pick</b><br/><i>🧑 PO names one module, effect,<br/>driver or capability</i>"]
+    spec["<b>2 · spec</b><br/><i>🤖 shapes it, 🔬 maps the prior art,<br/>before code and enough to build from</i>"]
+    plan["<b>3 · plan</b><br/><i>🤖 plans, 🧑 PO approves</i>"]
     file["<b>docs/work/present/</b><br/><code>Plan-YYYYMMDD - title.md</code>"]
     pr["<b>the PR</b><br/><i>the plan becomes its description,<br/>the file is deleted in the same PR</i>"]
 
@@ -131,22 +132,22 @@ Keep a branch under ~100 changed files: past that CodeRabbit declines the PR out
 
 ### Build and test
 
-Implement against [architecture.md](docs/architecture.md) and [coding-standards.md](docs/coding-standards.md). Everything build, flash, run and monitor: [building.md](docs/building.md). Per-script reference: [MoonDeck.md](moondeck/MoonDeck.md).
+Implement against [the architecture](docs/explanation/architecture/index.md) and [coding-standards.md](docs/contributing/coding-standards.md). Everything build, flash, run and monitor: [building.md](docs/how-to/building.md). Per-script reference: [MoonDeck.md](moondeck/MoonDeck.md).
 
 ```mermaid
 flowchart LR
-    d{"<b>desktop</b><br/><i>the fast loop,<br/>always first</i>"}
+    d{"<b>desktop</b><br/><i>👽 the fast loop,<br/>always first</i>"}
 
     d --> db["<b>build_desktop</b> · the firmware, zero warnings"]
     d --> rd["<b>run_desktop</b> · kills the previous instance"]
-    d --> dt["<b>build_desktop --tests</b> 🐢 · then <b>test_desktop</b> 🐢"]
-    d --> sh["<b>run_scenario</b> 🐢 · logic and pipeline shape"]
-    d --> sb["<b>run_live_scenario --host</b> · what timing and memory cost"]
+    d --> dt["🛸 <b>build_desktop --tests</b> 🐢 · then <b>test_desktop</b> 🐢"]
+    d --> sh["🛸 <b>run_scenario</b> 🐢 · logic and pipeline shape"]
+    d --> sb["🛸 <b>run_live_scenario --host</b> · what timing and memory cost"]
     d --> dn["<b>build_desktop --no-jit</b> 🐢 · no MoonLive backend"]
     d --> dg["<b>build_desktop --gcc</b> 🐢 · CI's toolchain, after a CI-only failure"]
 
     d ==>|"<b>PO judges the result<br/>and gives the green light</b>"| e
-    e{"<b>ESP32</b><br/><i>only what the desktop<br/>cannot show</i>"}
+    e{"<b>ESP32</b><br/><i>🧑 PO approves every flash ·<br/>only what the desktop cannot show</i>"}
 
     e --> be["<b>build_esp32 --firmware</b> 🐢"]
     e --> fe["<b>flash_esp32 --port</b>"]
@@ -164,29 +165,31 @@ flowchart LR
 
 **Every task is one MoonDeck script, and the script is the contract**: it picks the right build directory, applies the flags the gate expects, and tees its output where the report reads it. Never run `ctest`, `cmake`, `pytest`, `node --test` or `idf.py` directly when a script wraps it. A task that seems to have no script is worth saying rather than working around: started by hand, an older process keeps port 8080 and answers every request with the code you replaced.
 
-New behavior is pinned before it ships: a unit test for module logic, a scenario test for a full pipeline, and every discovered crash becomes a regression test. Placement: [coding-standards § Tests](docs/coding-standards.md#tests). Inventory and strategy: [testing.md](docs/testing.md).
+New behavior is pinned before it ships: a unit test for module logic, a scenario test for a full pipeline, and every discovered crash becomes a regression test. Placement: [coding-standards § Tests](docs/contributing/coding-standards.md#tests). Inventory and strategy: [testing.md](docs/reference/testing.md).
 
 **Scenarios record.** A run writes its observation blocks back into the scenario JSONs, and `collect_kpi.py` feeds them to repo-health as the per-commit trend. The numbers are read rather than filed: a tick or heap value that moves without a reason in the diff is an irregularity to explain before committing. Select what the diff touched (`--module`, `--name`) rather than refreshing everything, and say in one line what was picked and why.
 
 ### Document
 
-Docs land with the code: the module's spec and catalog card describe what shipped, a breaking change gets its [MIGRATING](docs/MIGRATING.md) entry, and a shipped backlog item or spec draft is deleted. The merge gate verifies this happened. How the writing looks and how much of it there is: [documentation-standards.md](docs/documentation-standards.md), which is the one home for all of it.
+Docs land with the code: the module's spec and catalog card describe what shipped, a breaking change gets its [MIGRATING](docs/reference/MIGRATING.md) entry, and a shipped backlog item or spec draft is deleted. The merge gate verifies this happened. How the writing looks and how much of it there is: [documentation-standards.md](docs/contributing/documentation-standards.md), which is the one home for all of it.
 
 ### Commit
 
 On "run pre-commit": run the checks whose trigger the diff matches, report one line each as PASS, FAIL or SKIP with the reason, then wait for an explicit "commit now". 🐢 marks a check costing tens of seconds or more.
 
-**Once per request, and never unprompted.** One "run pre-commit" buys exactly one run, after which the agent reports and stops. A failure is something to report, not to fix and re-run. A second run needs the words again, as much after a failure or a fix as at any other time.
+**A failure is something to report, not to fix and re-run.** A second run needs the words again, as much after a failure or a fix as at any other time.
 
 ```mermaid
 flowchart LR
+    pc{"<b>🧑 run pre-commit</b><br/><i>PO says the words,<br/>once per request</i>"}
     diff{"the diff<br/>touches"}
-    always["<b>always</b><br/>check_specs"]
-    md["<b>.md</b><br/>check_prose<br/>build_docs --strict 🐢<br/>check_taglines <i>(front pages only)</i>"]
-    code["<b>src/ or test/</b><br/>check_nonblocking<br/>build_desktop 🐢 · test_desktop 🐢<br/>run_scenario 🐢<br/>check_platform_boundary <i>(not src/platform)</i><br/>check_esp32_built <i>(not src/platform/desktop)</i><br/>build_desktop --no-jit 🐢 <i>(MoonLive only)</i><br/>collect_kpi 🐢 <i>· records rather than passes,<br/>and writes to the tree</i>"]
-    web["<b>src/ui or mooninstaller/</b><br/>test_host --js<br/>check_devices"]
-    py["<b>moondeck/ or moonlive/</b><br/>test_host --python<br/>check_firmwares"]
-    board["<b>the provisioning path,<br/>with a board attached</b><br/>improv_smoke_test<br/><i>recommended, and say so<br/>in the commit when skipped</i>"]
+    pc --> diff
+    always["<b>always</b><br/>💀 check_specs"]
+    md["<b>.md</b><br/>💀 check_prose · build_docs --strict 🐢<br/>check_taglines <i>(front pages only)</i>"]
+    code["<b>src/ or test/</b><br/>💀 check_nonblocking · build_desktop 🐢<br/>🛸 test_desktop 🐢 · run_scenario 🐢<br/>💀 check_platform_boundary <i>(not src/platform)</i><br/>💀 check_esp32_built <i>(not src/platform/desktop)</i><br/>💀 build_desktop --no-jit 🐢 <i>(MoonLive only)</i><br/>💀 collect_kpi 🐢 <i>· records, writes to the tree</i>"]
+    web["<b>src/ui or mooninstaller/</b><br/>🛸 test_host --js · 💀 check_devices"]
+    py["<b>moondeck/ or moonlive/</b><br/>🛸 test_host --python · 💀 check_firmwares"]
+    board["<b>the provisioning path,<br/>with a board attached</b><br/>🛸 improv_smoke_test<br/><i>recommended, say so when skipped</i>"]
 
     diff --> always & md & code & web & py & board
 
@@ -194,7 +197,7 @@ flowchart LR
     classDef check fill:#1f4d3d,stroke:#5fb89a,color:#fff
     classDef agent fill:#3d2d61,stroke:#a07bc9,color:#fff
     classDef gate fill:#4d3d1f,stroke:#c9a95f,color:#fff
-    class diff po
+    class diff,pc po
     class always check
     class md,code,web,py agent
     class board gate
@@ -205,11 +208,23 @@ Each name is a script under `moondeck/`, run through `uv run`; the command and w
 
 Three checks earn their place for a reason worth knowing. **Repo health** is the only place the creeping numbers are visible: flash and DRAM per target, binary size, the tick matrix, line counts, complexity warnings. Its diff belongs in the commit and its deltas in the commit message. It runs when the code changes rather than on every commit, because its timings drift with the host: on a docs-only diff it records a regression that nothing in the diff caused. **The no-backend build** catches a helper left unused outside its guard, fatal under GCC while clang stays silent. **ESP32 firmware fresh** compares the binary against every source in a tenth of a second and catches the edit that was never compiled; compile for real after an sdkconfig or toolchain change. The [provisioning path](moondeck/MoonDeck.md#improv_smoke_test) is the five files MoonDeck names.
 
-**Git only with the product owner in the loop.** Staging, committing and pushing happen only when they explicitly trigger them.
 
-**Staged is the review marker: staged means reviewed, unstaged means not.** The index is a review state rather than commit preparation, so the agent never stages or unstages on its own. Staging claims something as reviewed that nobody read; unstaging discards a verification that was performed. A scratch file of the agent's that lands in the index is reported rather than quietly removed.
+```mermaid
+flowchart TB
+    report["<b>👽 the agent reports and stops</b><br/><i>one line each: PASS, FAIL or SKIP</i><br/>👾 <i>the Reviewer joins on a large diff</i>"]
+    stage["<b>🧑 the PO stages what they reviewed</b><br/><i>staged means read, unstaged means not.<br/>The agent never stages or unstages</i>"]
+    now["<b>🧑 the PO says commit now</b><br/><i>covering only that diff;<br/>any later edit voids it</i>"]
+    report --> stage --> now
 
-**The trigger is the words "commit now."** "Fix it", "do step 4" and "the build is broken" say what to change, which is a separate question from whether to record it. **A "commit now" covers only the diff the product owner reviewed**: any later edit voids it, however small, so say what changed and wait for a fresh one. One combined commit per cycle; a branch may bundle multiple topics.
+    classDef po fill:#2d3561,stroke:#7b88c9,color:#fff
+    classDef agent fill:#3d2d61,stroke:#a07bc9,color:#fff
+    class stage,now po
+    class report agent
+```
+
+Both handoffs above are absolute, for a reason the diagram cannot carry. **Staging in either direction damages the record**: staging claims something as reviewed that nobody read, and unstaging discards a verification that was performed, invisibly. So a scratch file of the agent's that lands in the index is reported rather than quietly removed.
+
+**Only the words "commit now" trigger a commit.** "Fix it", "do step 4" and "the build is broken" say what to change, which is a separate question from whether to record it. One combined commit per cycle; a branch may bundle multiple topics.
 
 Commit message: title ≤ 72 characters, imperative. Then a 1 to 3 sentence end-user summary, no file lists. Then the performance one-liner from `collect_kpi.py --commit`. Then change sections as bullets: **Core**, **Light domain**, **UI**, **Scripts/MoonDeck**, **Tests**, **Docs/CI**, **Reviews** (🐇 external, 👾 Reviewer; one bullet per finding: flagged → done, accepted or deferred, plus why). No hard wraps inside a part.
 
@@ -223,11 +238,11 @@ The product owner pushes; external review runs on the PR; findings are processed
 
 ```mermaid
 flowchart LR
-    pm{"<b>run pre-merge</b><br/><i>PO says the words</i>"}
-    checks["<b>the same checks</b><br/>over <code>git diff --name-only main...</code><br/><i>catches what a green<br/>commit series hides</i>"]
-    gcc["<b>+ build_desktop --gcc --tests</b> 🐢<br/><i>only when CI failed on something<br/>clang builds cleanly</i>"]
-    judge["<b>judgment gates</b><br/>review feedback addressed<br/>Reviewer over the branch diff, started first<br/>docs in sync · PR title matches the diff<br/>perf snapshot <i>(tick path changed)</i><br/>README <i>(build, flash or first run changed)</i>"]
-    merge["<b>PO merges</b>"]
+    pm{"<b>🧑 run pre-merge</b><br/><i>PO says the words</i>"}
+    checks["<b>💀 the same checks</b><br/>over <code>git diff --name-only main...</code><br/><i>catches what a green<br/>commit series hides</i>"]
+    gcc["<b>💀 + build_desktop --gcc --tests</b> 🐢<br/><i>only when CI failed on something<br/>clang builds cleanly</i>"]
+    judge["<b>judgment gates</b><br/>🧑 review feedback addressed<br/>👾 Reviewer over the branch diff, started first<br/>docs in sync · PR title matches the diff<br/>perf snapshot <i>(tick path changed)</i><br/>README <i>(build, flash or first run changed)</i>"]
+    merge["<b>🧑 the PO pushes and merges</b><br/><i>never the agent</i>"]
 
     pm --> checks --> merge
     pm --> gcc --> merge
@@ -255,6 +270,6 @@ The rest is the product owner's judgment: merge gates passed on the tagged commi
 
 ## Documentation
 
-Published at [moonmodules.org/projectMM](https://moonmodules.org/projectMM/); sources under `docs/`, laid out in [the documentation hierarchy](docs/documentation-standards.md#the-hierarchy). Docs describe the system as it is; git is the history; specs precede implementation.
+Published at [moonmodules.org/projectMM](https://moonmodules.org/projectMM/); sources under `docs/`, laid out in [the documentation hierarchy](docs/contributing/documentation-standards.md#the-hierarchy). Docs describe the system as it is; git is the history; specs precede implementation.
 
 `docs/work/` is the exemption to present tense: `future` is what does not exist yet, `present` is being built, `past` is what shipped and the lessons it taught. Agents read it when planning, on request, and it shrinks under mandatory subtraction like everything else.

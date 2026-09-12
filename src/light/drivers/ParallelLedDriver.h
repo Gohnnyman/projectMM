@@ -781,7 +781,7 @@ public:
     /// So after kDeadFramesBeforeGiveUp consecutive dead transfers, stop transmitting: report the failure
     /// and let the tick return immediately. The LEDs go dark — but the device stays *reachable*, so the
     /// user can see the status and fix the setting that caused it. Degraded, not crashed; the
-    /// *Robustness* rule ([architecture.md](../../../docs/architecture.md#robustness)) says a bad input
+    /// *Robustness* rule ([the architecture](../../../docs/explanation/architecture/moonmodule.md#robustness)) says a bad input
     /// may leave the output idle, never the device wedged.
     ///
     /// It self-heals: any completed transfer clears the strike count, and a config change re-inits the

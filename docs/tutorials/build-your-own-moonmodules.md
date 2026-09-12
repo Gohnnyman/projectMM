@@ -1,12 +1,12 @@
 # Build your own MoonModules
 
-A hands-on guide to writing your own light **effects** (and later layouts, modifiers, and drivers) for projectMM. It's written for developers new to the codebase — including as a practical class in a school or workshop. If you can write a `for` loop in C++, you can write an effect.
+A hands-on guide to writing your own light **effects** (and later layouts, modifiers, and drivers) for projectMM. It's written for developers new to the codebase, including as a practical class in a school or workshop. If you can write a `for` loop in C++, you can write an effect.
 
 By the end you'll understand the one idea that makes modules easy here: **you write *what* your module does; the core decides *when* to run it.** You fill in a few functions; the engine handles lifecycle, threading, and memory timing, and calls your functions at the right moment.
 
 ## Everything is a MoonModule
 
-The building block of the whole system is the **MoonModule**. An effect is a MoonModule. So is a layout, a modifier, a driver, the WiFi manager, the file browser — *everything*. A MoonModule is just a small C++ class with a few **hook functions** the core knows how to call, plus some **controls** (the sliders and toggles the user sees). That's the entire contract. Learn it once and you can build any kind of module.
+The building block of the whole system is the **MoonModule**. An effect is a MoonModule. So is a layout, a modifier, a driver, the WiFi manager, the file browser, *everything*. A MoonModule is just a small C++ class with a few **hook functions** the core knows how to call, plus some **controls** (the sliders and toggles the user sees). That's the entire contract. Learn it once and you can build any kind of module.
 
 The four light-domain kinds you'll write are all MoonModules with a tiny bit extra:
 
@@ -15,7 +15,7 @@ The four light-domain kinds you'll write are all MoonModules with a tiny bit ext
 - a **modifier** derives from `ModifierBase` (a MoonModule that bends/masks the image),
 - a **driver** derives from `DriverBase` (a MoonModule that pushes the image to hardware).
 
-Each base just pre-fills the hooks specific to that job, so you fill in even less. Under all of them is the same `MoonModule` with the same lifecycle — which is why, once you've written an effect, every other kind feels familiar.
+Each base just pre-fills the hooks specific to that job, so you fill in even less. Under all of them is the same `MoonModule` with the same lifecycle, which is why, once you've written an effect, every other kind feels familiar.
 
 ## The big picture in one minute
 
@@ -257,7 +257,7 @@ TEST_CASE("RainbowEffect writes non-zero RGB data to buffer") {
 
 That's the whole shape: **set up a small grid, run `tick()`, assert the output is what you expect.** Good things to pin for a new effect: it paints *something* on a normal grid, it survives a 1×1 and 0×0 grid without crashing (the robustness rule), and — if it holds memory — its `dynamicBytes` drops to zero when it's disabled. When you find a bug, the fix isn't done until a test reproduces it: that's how a crash becomes a test that stops it ever coming back.
 
-Tests live in `test/unit/light/unit_<YourEffect>.cpp` and run with `ctest`. The full strategy — the unit vs. scenario tiers, how to pick one, the live-device tier — is a topic of its own: see [docs/testing.md](../testing.md). For your first effect, one small "it paints and it doesn't crash" test is plenty.
+Tests live in `test/unit/light/unit_<YourEffect>.cpp` and run with `ctest`. The full strategy — the unit vs. scenario tiers, how to pick one, the live-device tier — is a topic of its own: see [docs/reference/testing.md](../reference/testing.md). For your first effect, one small "it paints and it doesn't crash" test is plenty.
 
 ## A tour of the other module kinds
 
@@ -319,8 +319,8 @@ You get all of that "release the pin on disable" behavior by implementing the sa
 ## What to read next
 
 - **The effects catalog:** [docs/moonmodules/light/effects.md](../moonmodules/light/effects.md) — every shipped effect, with screenshots and controls. The best source of copy-and-tweak starting points.
-- **The architecture doc:** [docs/architecture.md](../architecture.md) — the render pipeline (Layouts → Effects → Layer → Effect/Modifier → Drivers) and the hot-path rules (why we avoid heap and floats inside `tick()`).
-- **Coding standards:** [docs/coding-standards.md](../coding-standards.md) — the house style (header-only light modules, `constexpr`, naming) so your module reads like the rest.
+- **The architecture doc:** [docs/explanation/architecture/index.md](../explanation/architecture/index.md), the render pipeline (Layouts → Effects → Layer → Effect/Modifier → Drivers) and the hot-path rules (why we avoid heap and floats inside `tick()`).
+- **Coding standards:** [docs/contributing/coding-standards.md](../contributing/coding-standards.md) — the house style (header-only light modules, `constexpr`, naming) so your module reads like the rest.
 - **The real modules:** the smallest ones make the best teachers — `RainbowEffect` (a clean loop), `GameOfLifeEffect` (the memory lifecycle), `GridLayout` (`placeLights`).
 
 The recurring lesson across all of them: **keep your module about what it does.** Declare your controls, draw or transform in the hook, allocate-in-`prepare`/free-in-`release` if you hold memory — and let the core decide when any of it runs. That discipline is what keeps a large, multi-platform light engine understandable one small module at a time.

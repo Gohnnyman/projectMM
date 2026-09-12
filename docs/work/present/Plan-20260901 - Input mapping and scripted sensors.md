@@ -24,7 +24,7 @@ Two definitions are in the repo today and they do not agree.
 
 - [`docs/moonmodules/light/drivers.md:3`](../../moonmodules/light/drivers.md): "A driver sends
   lights somewhere." Output-only, light-specific.
-- [`docs/architecture.md:143`](../../architecture.md): "producers vs consumers: producers generate
+- [`docs/explanation/architecture/index.md:143`](../../explanation/architecture/index.md): "producers vs consumers: producers generate
   data, consumers process and output it. Effects are producers, drivers are consumers." A role in a
   dataflow, said of the light domain.
 
@@ -156,7 +156,7 @@ distance an effect samples every frame is not a control a person edits, and rout
 
 The pattern for a stream exists and is already domain-neutral: `AudioService` publishes an
 `AudioFrame` that effects pull through a static `latestFrame()`, which
-[architecture.md](../../architecture.md#data-exchange-between-modules) states as the shared-struct
+[the architecture](../../explanation/architecture/moonmodule.md#data-exchange-between-modules) states as the shared-struct
 pull. A sensor service does the same, and may *also* carry mapping rows for thresholds a person
 cares about ("closer than 50 cm" drives a switch). One module, two outputs, because that is what a
 sensor is: a stream, with events derivable from it.

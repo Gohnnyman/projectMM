@@ -1,6 +1,6 @@
 # Coding standards
 
-How code in this repo is written. Hard rules and process live in [CLAUDE.md](../CLAUDE.md); how to build and run lives in [building.md](building.md); what is tested lives in [testing.md](testing.md). Design rationale for the rules below lives in [architecture.md](architecture.md).
+How code in this repo is written. Hard rules and process live in [CLAUDE.md](../CLAUDE.md); how to build and run lives in [building.md](../how-to/building.md); what is tested lives in [testing.md](../reference/testing.md). Design rationale for the rules below lives in [the architecture](../explanation/architecture/index.md).
 
 It runs from the smallest scale outward: the line you are typing, then naming and when to add a file, then values and the hot path they run in. After that the shape of a whole module, then the tooling that checks all of it, and last the method for when something breaks.
 
@@ -33,7 +33,7 @@ Use project typedefs (`lengthType`, `nrOfLightsType`) consistently so types matc
 ## Growing the codebase
 
 - **Consider extending before creating.** When adding a feature, check whether an existing module extends cleanly; a new file is fine if genuinely cleaner, but justify it.
-- **Reference, don't copy.** Prior art (friend repos, datasheets, our own prototype branches) holds proven approaches: study it, take the ideas, write our own code, never copy or trace the structure. Credits live in the [friend-repo digests](friend-repos/README.md) and per-module prior-art sections.
+- **Reference, don't copy.** Prior art (friend repos, datasheets, our own prototype branches) holds proven approaches: study it, take the ideas, write our own code, never copy or trace the structure. Credits live in the [friend-repo digests](../friend-repos/index.md) and per-module prior-art sections.
 
 ## Values and types
 
@@ -62,7 +62,7 @@ Counter-example to avoid: storing `char rssiStr_[12]` and re-`snprintf`'ing `"-5
 
 ## The hot path
 
-**A faster device renders the same motion more smoothly, not more motion.** Anything on a tick path whose output changes between two calls with identical inputs is animating, and it takes its step from wallclock, not from having been called. This holds for effects, for modifiers that scroll or rotate, and for anything else the render loop reaches. A pure fold of coordinates from controls is not animating and owes nothing. Rationale and the two-rate check: [live reconfiguration, in architecture.md](architecture.md#live-reconfiguration-every-change-applies-without-a-reboot).
+**A faster device renders the same motion more smoothly, not more motion.** Anything on a tick path whose output changes between two calls with identical inputs is animating, and it takes its step from wallclock, not from having been called. This holds for effects, for modifiers that scroll or rotate, and for anything else the render loop reaches. A pure fold of coordinates from controls is not animating and owes nothing. Rationale and the two-rate check: [live reconfiguration, in architecture.md](../explanation/architecture/moonmodule.md#live-reconfiguration-every-change-applies-on-the-next-frame).
 
 The shape, whichever quantity it is:
 
@@ -89,7 +89,7 @@ carry_ += rate * time_.advance(elapsed());     // particles::FrameTime, 256 = on
 
 ### Override-and-chain convention
 
-A MoonModule that owns children gets the standard lifecycle methods (`setup`, `tick`, `tick20ms`, `tick1s`, `release`, `defineControls`, `prepare`) propagated to children by the base class default, see [architecture.md § MoonModules](architecture.md#moonmodules). When a container overrides one of these to add its own work, the convention is **when in the override to call the base**:
+A MoonModule that owns children gets the standard lifecycle methods (`setup`, `tick`, `tick20ms`, `tick1s`, `release`, `defineControls`, `prepare`) propagated to children by the base class default, see [MoonModule](../explanation/architecture/moonmodule.md). When a container overrides one of these to add its own work, the convention is **when in the override to call the base**:
 
 - **`tick` / `tick20ms` / `tick1s`**: option A: parent work first, then chain. The parent prepares state that children consume.
 
@@ -138,7 +138,7 @@ When a `switch (type)` outside the type's home file is legitimate: the caller ha
 - **Chip-/board-fixed → default it, and you must.** The RMII Ethernet pin map, the on-board status LED, a country code per region are silicon- or PCB-wired, so a default cannot do harm. Omitting one does: a no-WiFi board with un-defaulted Ethernet pins can never connect to be configured.
 - **User-soldered → leave it unset.** A MEMS mic, an LED strand, an LED-driver pin goes wherever the user ran the wire, so any default is a guess that can drive a pin the user committed elsewhere. Empty until set; idle with a "set pins" status meanwhile (degraded is fine, crashed is not).
 
-A "default" that is one specific board's values is bespoke masquerading as standard. Make the capability opt-in and require each consumer to state its own values, so a missing declaration fails loudly instead of inheriting a stranger's wiring. Never auto-run a peripheral whose init can block on absent hardware. The design rationale, the MCU to deviceModel provenance model, is in [architecture.md, config provenance](architecture.md#config-provenance-mcu-devicemodel).
+A "default" that is one specific board's values is bespoke masquerading as standard. Make the capability opt-in and require each consumer to state its own values, so a missing declaration fails loudly instead of inheriting a stranger's wiring. Never auto-run a peripheral whose init can block on absent hardware. The design rationale, the MCU to deviceModel provenance model, is in [architecture.md, config provenance](../explanation/architecture/mooninstaller.md#config-provenance-mcu-devicemodel).
 
 ## Tooling and checks
 
@@ -155,14 +155,14 @@ All targets build warnings-as-errors: `-Wall -Wextra -Werror` on Clang/GCC (macO
 - In a comparison, keep both sides the same signedness, don't mix a signed expression with an unsigned literal (`== 1`, not `== 1u`, when the other side is signed). Watch `& `, `%`, and subtraction results, which carry the signedness of their operands.
 - A change that only built+passed on macOS/Linux is **not** verified for Windows. The Windows CI job (`release.yml`) is the real gate for MSVC-only warnings; let it run before considering a `src/`-touching change done, or build with MSVC locally if you have it.
 
-Diagnostics as you type come from clangd, using the same `.clang-tidy` CI runs; once-per-machine setup is in [building.md, editor setup](building.md#editor-setup-clangd).
+Diagnostics as you type come from clangd, using the same `.clang-tidy` CI runs; once-per-machine setup is in [building.md, editor setup](../how-to/building.md#editor-setup-clangd).
 
 ### Platform boundary
 
-- **Platform boundary** (`moondeck/check/check_platform_boundary.py`), scans all files outside `src/platform/` for `#ifdef` / `#if defined` with platform macros and `#include` of platform-specific headers (`esp_*`, `freertos/*`, `driver/*`, `SDL.h`, `wiringPi.h`, …). Fails if any are found. The platform boundary rule itself: [architecture.md § Platform abstraction](architecture.md#platform-abstraction).
+- **Platform boundary** (`moondeck/check/check_platform_boundary.py`), scans all files outside `src/platform/` for `#ifdef` / `#if defined` with platform macros and `#include` of platform-specific headers (`esp_*`, `freertos/*`, `driver/*`, `SDL.h`, `wiringPi.h`, …). Fails if any are found. The platform boundary rule itself: [architecture.md § Platform abstraction](../explanation/architecture/mooncore.md#platform-abstraction).
 ### Static checks
 
-- **Hot path check** (`moondeck/check/check_nonblocking.py`): the tick methods carry `MM_NONBLOCKING`, and Clang verifies transitively that nothing they reach allocates or blocks. It reports rather than fails, because a new blocking call is sometimes legitimate, and `docs/metrics/hotpath-baseline.txt` freezes the known set. An audit must sweep every syscall the path can reach, not the loudest one: a socket timeout is not a fix, it is the size of the freeze. The rule itself: [architecture.md](architecture.md#hot-path-discipline).
+- **Hot path check** (`moondeck/check/check_nonblocking.py`): the tick methods carry `MM_NONBLOCKING`, and Clang verifies transitively that nothing they reach allocates or blocks. It reports rather than fails, because a new blocking call is sometimes legitimate, and `docs/metrics/hotpath-baseline.txt` freezes the known set. An audit must sweep every syscall the path can reach, not the loudest one: a socket timeout is not a fix, it is the size of the freeze. The rule itself: [the architecture](../explanation/architecture/moonmodule.md#hot-path-discipline).
 - **Code formatting**: `clang-format` with a project `.clang-format` file. Applied in CI; code that doesn't match fails the check. Run locally via editor integration or `clang-format -i`.
 
 ### When checks run
@@ -171,12 +171,12 @@ Which checks run at which lifecycle event is defined once, in the [Commit](../CL
 
 ### Tests
 
-- **Placement.** New core logic gets a module (unit) test; a full pipeline gets a scenario test. Inventory and strategy: [testing.md](testing.md).
+- **Placement.** New core logic gets a module (unit) test; a full pipeline gets a scenario test. Inventory and strategy: [testing.md](../reference/testing.md).
 - **Interim fixes.** When a per-module interim ships in place of the named core fix (see [CLAUDE.md § Principles](../CLAUDE.md#principles), Architecture first), its tests assert *behavior*, not the per-module mechanism, so they survive the later move into core unchanged.
 
 ## Debugging and verification
 
-Hard-won discipline for diagnosing hardware and infrastructure failures, distilled from the war stories in [lessons.md](work/past/lessons.md).
+Hard-won discipline for diagnosing hardware and infrastructure failures, distilled from the war stories in [lessons.md](../work/past/lessons.md).
 
 - **Prove the failure is *about* the change before editing code.** When something fails right after a change, re-run it isolated, probe the actual end state, and confirm the artifact under test is the one you built: process uptime, the `build` timestamp, what is bound to the port. A stale process, a loaded machine, or an async-confirmation timeout reads as a regression it isn't.
 - **A status/dimension assertion does not prove the pipeline renders.** A correctness test for a mapping or effect asserts the buffer or LUT is non-empty with the expected coverage (e.g. LUT destinations == physical light count), beyond the declared dimensions looking right.

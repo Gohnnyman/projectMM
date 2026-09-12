@@ -1,6 +1,6 @@
 # Firmware variants and memory
 
-What each firmware build contains, and what each class of device can run. Facts to look up; the reasoning behind them is in [architecture.md](../architecture.md).
+What each firmware build contains, and what each class of device can run. Facts to look up; the reasoning behind them is in [the architecture](../../explanation/architecture/index.md).
 
 ## Firmware variants
 

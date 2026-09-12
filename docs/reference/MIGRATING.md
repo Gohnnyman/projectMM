@@ -24,6 +24,29 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### Documentation: every page moved to its Diátaxis folder
+
+**Action: nothing on a device. Update a bookmark to a documentation page.**
+Affects readers of [moonmodules.org/projectMM](https://moonmodules.org/projectMM/), not devices.
+
+The published pages were flat at the site root and the folders that did exist carried mixed meanings: `reference/` held hardware pages while the nav's "Reference" section held two unrelated ones. Each page now sits in the folder naming its [Diátaxis](https://diataxis.fr/) type, so a path says what kind of page it reaches and the source tree matches the menu.
+
+| Was | Now |
+|---|---|
+| `architecture/*.html` | `explanation/architecture/*.html` |
+| `usecases/*.html` | `how-to/*.html` |
+| `building.html` | `how-to/building.html` |
+| `logging-an-issue.html` | `how-to/logging-an-issue.html` |
+| `mooncloud.html` · `why-we-write-our-own.html` | `explanation/*.html` |
+| `performance.html` · `testing.html` · `MIGRATING.html` | `reference/*.html` |
+| `reference/<board>.html` | `reference/hardware/<board>.html` |
+| `tests/*.html` · `metrics/*.html` | `reference/tests/*.html` · `reference/metrics/*.html` |
+| `coding-standards.html` · `documentation-standards.html` · `principles-and-process.html` | `contributing/*.html` |
+| `privacy-policy.html` | `legal/privacy-policy.html` |
+
+`index.html` and `gettingstarted.html` stay at the root, and `moonmodules/` is unchanged. No redirects are published, so an old bookmark 404s rather than forwarding.
+
+
 ### Audio: `floor` is now the silence threshold in both level modes
 
 **Action: re-set `floor` on a device whose microphone you had tuned.**
@@ -58,7 +81,7 @@ The break is between the two images on a device, not between a device and its co
 whose MoonBase predates this change still answers only the old names, so an updated application
 handing over to it leaves the browser calling routes that image does not have. The way through is
 the same as any MoonBase update: flash both images over serial once
-([building.md](building.md#flashing-a-running-device-over-the-network)). A device flashed serially
+([building.md](../how-to/building.md#flashing-a-running-device-over-the-network)). A device flashed serially
 from this version on is consistent and needs nothing.
 
 ### `soundReactive` is now `audioReactive`
@@ -152,7 +175,7 @@ device always joins it, so a fleet can mix the setting freely.
 The reason for the default: a broadcast at discovery cadence makes every phone, printer and laptop
 on the LAN take an interrupt and parse a packet none of them want. Multicast reaches only the
 devices that joined the group. See
-[multicast and IGMP snooping](architecture.md#multicast-and-igmp-snooping) for when that saving is
+[multicast and IGMP snooping](../explanation/architecture/moonlight.md#multicast-and-igmp-snooping) for when that saving is
 real (a switch that snoops) and when it is not.
 
 ### A light preset's Dimmer channel is now driven
@@ -167,7 +190,7 @@ values as before. **If you drive a fixture on `IRGB` or another dimmer-carrying 
 light up where it previously stayed dark.** Nothing to change; the previous behavior was a defect.
 
 Routing brightness to the dimmer channel rather than holding it open is the better model and is
-[backlogged](work/future/backlog-light.md), so this value will change again.
+[backlogged](../work/future/backlog-light.md), so this value will change again.
 
 
 ### esp32-16mb moves to the MoonBase partition table (2026-08-28)
@@ -176,7 +199,7 @@ Routing brightness to the dimmer channel rather than holding it open is the bett
 bookmarklet on older firmware); restore after the install brings WiFi, config and scripts back.
 
 `esp32-16mb` replaces its dual-OTA layout with
-[MoonBase](architecture.md#moonbase-the-second-boot-image), the same trade the 4 MB variants
+[MoonBase](../explanation/architecture/moonbase.md), the same trade the 4 MB variants
 made in the entry below, taken here by choice rather than necessity: the second app slot was
 idle except during an update, so the filesystem grows 7168 to 11264 KB and the device gains
 MoonBase's stronger recovery story (a power cut mid-install boots MoonBase and the user retries
@@ -192,7 +215,7 @@ A partition table only changes over USB, so an OTA update leaves a device on the
 bookmarklet on older firmware); restore after the install brings WiFi, config and scripts back.
 
 The 4 MB variants (`esp32`, `esp32-wrover`, `esp32-eth`) replace the dual-OTA layout with
-[MoonBase](architecture.md#moonbase-the-second-boot-image): the app slot grows
+[MoonBase](../explanation/architecture/moonbase.md): the app slot grows
 1856 → 2496 KB and the filesystem 256 → 548 KB, but the filesystem moves (0x3B0000 → 0x360000),
 so the existing volume is not where the new table looks; without a backup, WiFi credentials,
 module config and scripts all re-enter through provisioning. A partition table only changes over USB: a device
@@ -298,7 +321,7 @@ The `peripheral` dropdown no longer says `i80` / `MoonI80`. "i80" is the Intel 8
 
 ### The per-driver `preset` control is renamed to `lightPreset` (2026-07-23)
 
-**Action: nothing** on-device (the saved value survives, see the `lightPreset` [persistence contract](moonmodules/light/drivers.md#led-driver-details)). Only an external script or automation that POSTs the control by name (`/api/control` with `"control":"preset"`) must switch to `lightPreset`.
+**Action: nothing** on-device (the saved value survives, see the `lightPreset` [persistence contract](../moonmodules/light/drivers.md#led-driver-details)). Only an external script or automation that POSTs the control by name (`/api/control` with `"control":"preset"`) must switch to `lightPreset`.
 
 ### `AudioService`: the `sync` control becomes `mode` + `send audio`, and `simulate` is renumbered (2026-07-22)
 

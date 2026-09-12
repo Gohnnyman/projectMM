@@ -4,7 +4,7 @@
 //     textbook always-correct queries for valid / output-capable / RTC-domain, and
 //   - a small per-chip strap/reserved table, because the SDK has NO "is this a boot strap or a
 //     flash/PSRAM pin" query — that is board/datasheet knowledge. The table mirrors
-//     docs/reference/gpio-usage.md (its single documented source); keep the two in sync.
+//     docs/reference/hardware/gpio-usage.md (its single documented source); keep the two in sync.
 // No chip type escapes this file (the platform-boundary rule); the module gets a plain GpioCapability.
 
 #include "platform/platform.h"
@@ -30,7 +30,7 @@ namespace mm::platform {
 
 namespace {
 
-// Per-chip strap + reserved (flash/PSRAM/USB) pins, from docs/reference/gpio-usage.md. Reserved
+// Per-chip strap + reserved (flash/PSRAM/USB) pins, from docs/reference/hardware/gpio-usage.md. Reserved
 // pins corrupt the device if used; straps change boot mode if driven at reset. The set is keyed on
 // the build's CONFIG_IDF_TARGET (the same discriminator platform_config.h / platform_esp32.cpp use),
 // so an octal-PSRAM S3 build sees its 33-37 reserved while a no-PSRAM part would not — the build IS

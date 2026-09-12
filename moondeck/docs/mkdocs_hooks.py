@@ -1,6 +1,6 @@
 """MkDocs build hooks. Wired via `hooks:` in mkdocs.yml. Three jobs:
 
-1. on_files — synthesise `tests/unit-tests.md` + `tests/scenario-tests.md` into
+1. on_files — synthesise `reference/tests/unit-tests.md` + `reference/tests/scenario-tests.md` into
    MkDocs' virtual file tree from the test files (via `_test_metadata.py`, the
    same parser the CLI generator + MoonDeck use). So the inventory pages are NOT
    committed to the repo and can't drift — rebuilt from source every build. The
@@ -334,8 +334,8 @@ def on_files(files, config):
             files.remove(existing)
         files.append(f)
 
-    _add("tests/unit-tests.md", render_unit_tests(collect_unit_files()))
-    _add("tests/scenario-tests.md", render_scenarios(collect_scenario_files()))
+    _add("reference/tests/unit-tests.md", render_unit_tests(collect_unit_files()))
+    _add("reference/tests/scenario-tests.md", render_scenarios(collect_scenario_files()))
 
     # The MoonLive SCRIPT-LANGUAGE reference. It lives at moonlive/README.md — beside the
     # scripts it documents, where someone browsing that folder finds it — so it is staged
@@ -374,10 +374,10 @@ def on_files(files, config):
 
 
 # Pages that embed a file living at the REPO ROOT via a pymdownx snippet. Their
-# borrowed text spells doc links `docs/architecture.md` — correct from the root (that
+# borrowed text spells doc links `docs/explanation/architecture/index.md` — correct from the root (that
 # is where CLAUDE.md is read by agents and on GitHub), but one level too deep once the
 # text is rendered from inside docs/, where it resolves to docs/docs/… and 404s.
-_EMBEDS_REPO_ROOT_FILE = {"principles-and-process.md"}
+_EMBEDS_REPO_ROOT_FILE = {"contributing/principles-and-process.md"}
 
 # `href="docs/<rest>"` → `href="<rest>"`, and the same for the `.md` → `.html` form MkDocs
 # has already applied by this stage. Only the `docs/` prefix is dropped; anchor and path
@@ -424,7 +424,7 @@ def _rebase_repo_root_doc_links(html):
 class _MuteRebasedLinkWarnings(logging.Filter):
     """Drop the link warnings for the page whose links this hook rebases after validation.
 
-    `principles-and-process.md` embeds CLAUDE.md, whose links (`docs/architecture.md`,
+    `principles-and-process.md` embeds CLAUDE.md, whose links (`docs/explanation/architecture/index.md`,
     `moondeck/MoonDeck.md`) are correct where that file is actually read — the repo root and
     GitHub — and `_rebase_repo_root_doc_links` turns them into working site links. But
     validation is a markdown treeprocessor inside `Page.render()`, so it judges the

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Measure the repo's current state into `docs/metrics/` — the lean-o-meter.
+"""Measure the repo's current state into `docs/reference/metrics/` — the lean-o-meter.
 
 The v4 goal is a system that stays small as it gains features, and the honest way to know
 whether that is happening is to measure it every commit rather than to assert it. This
 writes ONE small file holding only the CURRENT numbers: flash per firmware variant, tick
 and FPS per target, lines of code by area, comment density, test counts, docs inventory.
 
-**The file never grows, because the history is git's.** `git log -p docs/metrics/repo-health.json`
+**The file never grows, because the history is git's.** `git log -p docs/reference/metrics/repo-health.json`
 is the trend; the file itself is a snapshot. That is the whole design: no accumulating
 log, no rolling window, no second source of truth to prune later.
 
@@ -21,7 +21,7 @@ so two machines agree and a number never moves for a reason nobody can explain.
 
 Usage:
   uv run moondeck/check/repo_health.py            # print the snapshot + delta, write nothing
-  uv run moondeck/check/repo_health.py --write    # write docs/metrics/repo-health.* (KPI gate does this)
+  uv run moondeck/check/repo_health.py --write    # write docs/reference/metrics/repo-health.* (KPI gate does this)
 """
 
 import argparse
@@ -39,11 +39,11 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "moondeck" / "build"))
 from build_esp32 import FIRMWARES  # noqa: E402
 from build_desktop import desktop_binary  # noqa: E402 (one definition of where it lands)
-HEALTH_FILE = ROOT / "docs" / "metrics" / "repo-health.json"
+HEALTH_FILE = ROOT / "docs" / "reference" / "metrics" / "repo-health.json"
 # The same snapshot as a table a human reads: units applied, ratios as percentages, areas
 # grouped. The JSON stays the source the delta is computed from; this is the view. Both
 # are generated from one measurement, so they cannot disagree.
-HEALTH_MD = ROOT / "docs" / "metrics" / "repo-health.md"
+HEALTH_MD = ROOT / "docs" / "reference" / "metrics" / "repo-health.md"
 
 # Source areas measured separately: the core/light split is the one the architecture cares
 # about (core is meant to grow slower than the domain), and the rest are the other places
@@ -269,7 +269,7 @@ def measure_tests():
 
 
 def measure_complexity():
-    """Complexity, the number lizard owns (docs/testing.md § Static analysis).
+    """Complexity, the number lizard owns (docs/reference/testing.md § Static analysis).
 
     Deliberately the RAW count, not the baselined one: the gate (check_lizard.py) subtracts
     whitelizard.txt so it fails only on new violations, but the TREND has to see the whole
@@ -515,7 +515,7 @@ def render_markdown(new, old):
          f"[`moondeck/check/repo_health.py`](../../moondeck/check/repo_health.py) on every "
          f"KPI-gate run. **Do not edit by hand.**", "",
          "Current state only; the trend is this file's git history "
-         "(`git log -p docs/metrics/repo-health.md`). Nothing here fails a build: the numbers make "
+         "(`git log -p docs/reference/metrics/repo-health.md`). Nothing here fails a build: the numbers make "
          "growth visible, the judgment stays human.", ""]
 
     if new.get("flash"):

@@ -66,7 +66,7 @@ Unsigned, so SmartScreen will warn on first run, the same trade-off already docu
 - **`CMakeLists.txt`**, a `WIN32`-guarded `.rc` resource so the exe carries the icon.
 - **`moondeck/ci/package_desktop.py`**, `.ico` generation from `web-installer/favicon.png`, the NSIS script, and the installer build with its skip-if-absent guard.
 - **`.github/workflows/release.yml`**, publish the installer alongside the zip from the existing `build-windows` job.
-- **`docs/building.md`, `README.md`**, the Windows install path, and where settings live per platform.
+- **`docs/how-to/building.md`, `README.md`**, the Windows install path, and where settings live per platform.
 
 ## Verification
 

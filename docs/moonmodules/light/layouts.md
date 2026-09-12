@@ -2,7 +2,7 @@
 
 ![layouts controls](../../assets/core/Layouts.png)
 
-Every layout, one block each: what it does and what each control means — together. A layout maps light indices to physical `(x, y, z)` positions — it defines the *shape* an [effect](effects.md) draws onto and a [driver](drivers.md) sends out. The [Layouts](moxygen/Layouts.md) container holds one or more layout children and composes them into one coordinate space; a [Layer](moxygen/Layer.md) renders over that combined space. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../documentation-standards.md#module-pages).)
+Every layout, one block each: what it does and what each control means — together. A layout maps light indices to physical `(x, y, z)` positions — it defines the *shape* an [effect](effects.md) draws onto and a [driver](drivers.md) sends out. The [Layouts](moxygen/Layouts.md) container holds one or more layout children and composes them into one coordinate space; a [Layer](moxygen/Layer.md) renders over that combined space. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../contributing/documentation-standards.md#module-pages).)
 
 ## MoonLight layouts
 
@@ -196,7 +196,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/GridLayout.md)
 
-[Tests](../../tests/unit-tests.md#gridlayout)
+[Tests](../../reference/tests/unit-tests.md#gridlayout)
 
 <a id="gridblacks"></a>
 
@@ -213,7 +213,7 @@ Origin: projectMM
 
 Detail: [technical](moxygen/GridBlacksLayout.md)
 
-[Tests](../../tests/unit-tests.md#gridblackslayout)
+[Tests](../../reference/tests/unit-tests.md#gridblackslayout)
 
 <a id="sphere"></a>
 
@@ -227,7 +227,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/SphereLayout.md)
 
-[Tests](../../tests/unit-tests.md#spherelayout)
+[Tests](../../reference/tests/unit-tests.md#spherelayout)
 
 <a id="wheel"></a>
 
@@ -242,7 +242,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/WheelLayout.md)
 
-[Tests](../../tests/unit-tests.md#wheellayout)
+[Tests](../../reference/tests/unit-tests.md#wheellayout)
 
 The [Layouts](moxygen/Layouts.md) container itself takes no controls — see its page for coordinate iteration, reordering, and rebuild propagation.
 

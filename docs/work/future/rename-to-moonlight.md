@@ -100,7 +100,7 @@ Taking the **MoonLight** name sets an expectation: someone arriving from the pre
 
 This is parity-to-take-the-name, not parity-for-parity's-sake — projectMM's architecture (live reconfiguration, robustness, the generic module/UI) is already ahead in places the count doesn't show. Prioritise what a predecessor user would *miss*, not raw feature count.
 
-**Live scripting is not a gap — [MoonLive](../../architecture.md#moonlive-the-live-script-engine) overrules it.** The predecessor's on-device scripting was an *interpreter* lineage; MoonLive is a **native-codegen compiler** (source → typed IR → real machine code, called by function pointer at near-100% native speed in the hot path) — the architecture's named *standout*. So live scripting is a projectMM **advantage to lead with**, not a parity item to close; it is deliberately absent from the MoSCoW below.
+**Live scripting is not a gap — [MoonLive](../../explanation/architecture/moonlive.md) overrules it.** The predecessor's on-device scripting was an *interpreter* lineage; MoonLive is a **native-codegen compiler** (source → typed IR → real machine code, called by function pointer at near-100% native speed in the hot path) — the architecture's named *standout*. So live scripting is a projectMM **advantage to lead with**, not a parity item to close; it is deliberately absent from the MoSCoW below.
 
 These are pointers to existing backlog items; the rename doesn't create new work so much as set a **bar** for which items gate it. Each links to its detailed entry rather than restating it.
 

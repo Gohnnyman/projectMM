@@ -15,15 +15,15 @@ flowchart TB
     entry["<b>README.md</b> · <b>index.md</b><br/><i>what it is, what to do next</i>"]
 
     tut["<b>tutorial</b><br/>gettingstarted.md · tutorials/<br/><i>a lesson to follow</i>"]
-    how["<b>how-to</b><br/>usecases/ · building.md<br/><i>one task you already have</i>"]
-    exp["<b>explanation</b><br/>architecture.md<br/><i>why it is shaped this way</i>"]
-    ref["<b>reference</b><br/>reference/ · testing.md<br/>performance.md · MIGRATING.md<br/><i>facts, fast</i>"]
+    how["<b>how-to</b><br/>how-to/<br/><i>one task you already have</i>"]
+    exp["<b>explanation</b><br/>explanation/<br/><i>why it is shaped this way</i>"]
+    ref["<b>reference</b><br/>reference/ · moonmodules/<br/><i>facts, fast</i>"]
 
     mod["<b>moonmodules/</b><br/><i>reference: one row per module</i>"]
     mox["<b>moxygen/</b><br/><i>every member, generated</i>"]
     hdr["<b>src/**/*.h</b><br/><i>per-member detail lives here</i>"]
 
-    rules["<b>the rules</b><br/>CLAUDE.md · coding-standards<br/>documentation-standards<br/><i>for contributors</i>"]
+    rules["<b>the rules</b><br/>CLAUDE.md · contributing/<br/><i>for contributors</i>"]
     outside["<b>work/</b> · <b>friend-repos/</b><br/><i>planned, shipped, watched</i>"]
 
     entry --> tut --> how --> exp --> ref
@@ -55,12 +55,14 @@ Every page serves one of four reader needs, and only one. This is [Diátaxis](ht
 
 | | Doing | Understanding |
 |---|---|---|
-| **Learning** | **Tutorial**: a lesson to follow. `gettingstarted.md`, `tutorials/`. | **Explanation**: why it is shaped this way. `architecture.md`. |
-| **Working** | **How-to**: one task you already have. `usecases/`, `building.md`. | **Reference**: facts, fast. The generated technical pages, the catalog rows, `performance.md`, `MIGRATING.md`. |
+| **Learning** | **Tutorial**: a lesson to follow. `gettingstarted.md`, `tutorials/`. | **Explanation**: why it is shaped this way. `explanation/`. |
+| **Working** | **How-to**: one task you already have. `how-to/`. | **Reference**: facts, fast. `reference/`, the generated technical pages, the catalog rows. |
+
+**The folder under `docs/` is the type.** A page's path says which cell it sits in, so `how-to/building.md` is a how-to by location and a reader never has to be told. The nav labels stay reader-facing ("Understanding projectMM" over "Explanation"), because the type is a writer's tool.
 
 The test for any page is the cell it sits in. A tutorial that stops to explain, or a reference that starts to teach, is two pages: move the other half to where it belongs.
 
-Two kinds of page sit outside the grid on purpose. **The rules** ([CLAUDE.md](../CLAUDE.md), [coding-standards.md](coding-standards.md), this page, [testing.md](testing.md)) are for contributors, and bind every change. **Work not yet in the code** lives under `docs/work/`, and nothing there describes the system as it is: `future` is what does not exist, `present` is being built and deleted at its PR, `past` is what shipped.
+Two kinds of page sit outside the grid on purpose. **The rules** ([CLAUDE.md](../../CLAUDE.md), [coding-standards.md](coding-standards.md), this page) live in `contributing/`, are for contributors, and bind every change. `legal/` sits outside it too. **Work not yet in the code** lives under `docs/work/`, and nothing there describes the system as it is: `future` is what does not exist, `present` is being built and deleted at its PR, `past` is what shipped.
 
 Two scales below a page: **a module** has exactly one reference page written and one generated (see [Module pages](#module-pages)), and **a line of code** carries its own reason in a comment (see [Comments](#comments)).
 

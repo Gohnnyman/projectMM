@@ -86,7 +86,7 @@ constexpr EthFixedPad ethFixedPads[] = {
 constexpr uint8_t ethFixedPadCount = 12;
 #elif defined(CONFIG_IDF_TARGET_ESP32P4)
 // P4 RMII: the data lines the EMAC drives, from ETH_ESP32_EMAC_DEFAULT_CONFIG() (which ethInitEmac
-// leaves untouched) and matching the NANO wiring in docs/reference/gpio-usage.md. Not the management
+// leaves untouched) and matching the NANO wiring in docs/reference/hardware/gpio-usage.md. Not the management
 // pair, which NetworkModule owns as real controls a carrier can reroute.
 constexpr EthFixedPad ethFixedPads[] = {
     {"ethTxEn", 49}, {"ethTxd0", 34}, {"ethTxd1", 35},
@@ -221,7 +221,7 @@ struct AudioCodecPins {
 // Default None; the ESP32-S31 Function-CoreBoard has an ES8311 (addr 0x18, I2C
 // SDA on GPIO51 / SCL on GPIO50, MCLK on GPIO52: bench-confirmed by I2C scan; the
 // schematic net labels read SDA/SCL the other way round. See
-// docs/reference/esp32-s31-coreboard.md.).
+// docs/reference/hardware/esp32-s31-coreboard.md.).
 #ifdef CONFIG_IDF_TARGET_ESP32S31
 constexpr CodecType audioCodecType = CodecType::Es8311;
 constexpr AudioCodecPins audioCodecPins = { /*sda*/ 51, /*scl*/ 50, /*mclk*/ 52, /*addr*/ 0x18 };
@@ -393,7 +393,7 @@ struct EthPinConfig {
 //    *data* pins (TX_CTL/TXD0-3, RX_CTL/RXD0-3, clocks) are board-fixed and live in
 //    ethInitEmac()'s S31 branch, not this struct (same reason RMII data pins don't -
 //    see above); rmiiClock* are unused for RGMII (clocks are set there too). See
-//    docs/reference/esp32-s31-coreboard.md for the schematic pin map.
+//    docs/reference/hardware/esp32-s31-coreboard.md for the schematic pin map.
 constexpr EthPinConfig ethConfigDefault =
 #ifdef CONFIG_ETH_USE_OPENETH
     // Under emulation the interface is QEMU's MAC, whatever chip is being emulated. It has no pins

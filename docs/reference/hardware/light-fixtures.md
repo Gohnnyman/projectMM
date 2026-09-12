@@ -2,19 +2,19 @@
 
 DMX channel maps and specifications for the fixtures and Art-Net nodes on the bench, read from
 their manuals so a light preset can be built without re-scraping a PDF. A fixture here has a
-matching entry in the **LightPresets** library ([drivers](../moonmodules/light/drivers.md)); the
+matching entry in the **LightPresets** library ([drivers](../../moonmodules/light/drivers.md)); the
 preset is the channel-role layout, and the numbers behind it are below.
 
 ## SHEHDS Mini LED Moving Head 10W RGBW
 
-![SHEHDS Mini LED moving head](../assets/light/fixtures/djlight-mini-led-10w.jpg){ width="280" }
+![SHEHDS Mini LED moving head](../../assets/light/fixtures/djlight-mini-led-10w.jpg){ width="280" }
 
 A single 10 W RGBW 4-in-1 LED in a compact moving head: the smallest fixture that exercises the
 full pan/tilt/color path, which is why it is the first moving head on the bench.
 
 **Source:** the printed manual supplied with the fixture
-([channel tables](../assets/light/fixtures/djlight-mini-led-10w-dmx-channels.jpg),
-[display menu](../assets/light/fixtures/djlight-mini-led-10w-display.jpg)) ·
+([channel tables](../../assets/light/fixtures/djlight-mini-led-10w-dmx-channels.jpg),
+[display menu](../../assets/light/fixtures/djlight-mini-led-10w-display.jpg)) ·
 [product listing](https://www.amazon.com/SHEHDS-Lighting-Professional-Channels-Christmas/dp/B08B4MV36K)
 
 A PDF circulating under this ASIN describes a 9/14-channel fixture with a combined shutter/dimmer.
@@ -49,7 +49,7 @@ strobe channel. Trust the printed manual; the tables below come from it.
 
 CH6 is a straight linear dimmer. Today the driver holds it fully open and keeps brightness in the
 color values; routing brightness onto it is the better model and is
-[backlogged](../work/future/backlog-light.md). The channels left
+[backlogged](../../work/future/backlog-light.md). The channels left
 unmapped hold at 0, which is what a light driver wants: **strobe off** (CH7) and full-speed
 movement (CH5). The fine channels are unused until 16-bit positioning is wired up.
 
@@ -65,7 +65,7 @@ worth driving from projectMM.
 
 ## P-Knight Art-Net2 CR021R
 
-![P-Knight Art-Net2 CR021R](../assets/light/fixtures/pknight-artnet2-cr021r.jpg){ width="280" }
+![P-Knight Art-Net2 CR021R](../../assets/light/fixtures/pknight-artnet2-cr021r.jpg){ width="280" }
 
 A two-universe Art-Net to DMX512 node: Ethernet in, XLR DMX out. It is how projectMM drives a wired
 fixture, the counterpart to the LED drivers that speak to addressable strips directly.

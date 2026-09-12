@@ -15,7 +15,7 @@ big-endian address string, a type-tag string, and 32-bit aligned arguments.
 **A correction worth recording, because it shaped this plan.** The premise that reached us was
 "OSC is the way, I have a Behringer X-Touch". OSC is indeed the way for the ecosystem, but **the
 X-Touch does not speak it**, and neither does the QCon Pro G2 that `control.md` also names. Both
-are **Mackie Control** surfaces ([control surfaces reference](../../reference/control-surfaces.md)).
+are **Mackie Control** surfaces ([control surfaces reference](../../reference/hardware/control-surfaces.md)).
 So OSC does not connect the desks we own, and this plan deliberately does not pretend
 otherwise. Driving those needs RTP-MIDI plus the MCU semantic layer, including motor feedback,
 which is a much larger job and is scoped separately at the end.

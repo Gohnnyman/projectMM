@@ -473,7 +473,7 @@ static int runScenario(const char* path) {
     }
 
     // Mode field (construct/mutate) determines what shape the scenario expects
-    // the world to be in. See docs/testing.md § Scenario modes.
+    // the world to be in. See docs/reference/testing.md § Scenario modes.
     //   construct → scenario builds the pipeline from an empty scheduler; runs
     //               in-process only (live device's main.cpp owns the top-level
     //               shape; constructing fresh requires an empty scheduler that

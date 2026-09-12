@@ -226,7 +226,7 @@ void taskWdtReset();
 // reserved (flash/PSRAM/USB) pin. Domain-neutral; no chip API escapes src/platform/. ESP32 fills
 // `validGpio`/`outputCapable`/`rtc` from the IDF's own GPIO_IS_VALID_GPIO / GPIO_IS_VALID_OUTPUT_
 // GPIO / rtc_gpio_is_valid_gpio (the textbook, always-correct SDK queries), and overlays `strap` /
-// `reserved` from a small per-chip table sourced from docs/reference/gpio-usage.md (the SDK has no
+// `reserved` from a small per-chip table sourced from docs/reference/hardware/gpio-usage.md (the SDK has no
 // "is this a strap / flash pin" query: that's board/datasheet knowledge). Desktop returns
 // "all valid, nothing reserved" (a host build has no real GPIOs to protect). Pure lookup, no state.
 struct GpioCapability {

@@ -52,7 +52,7 @@ Each step compiles clean and either changes visible test-suite counts or lands a
 
 13. **Docs & backlog:**
     - `docs/backlog/backlog-light.md:295-307` — move entry to a shipped-item note or delete per docs model (backlog shrinks under mandatory subtraction).
-    - `docs/architecture.md:461-475` — if the wording "arm64-only host backend" appears, update to "arm64 or x86_64 host backend".
+    - `docs/explanation/architecture/index.md:461-475` — if the wording "arm64-only host backend" appears, update to "arm64 or x86_64 host backend".
     - This plan file lives on the branch, becomes the PR description, is deleted once realized (per CLAUDE.md's plan-lifecycle rule).
 
 ## Files touched (grouped)
@@ -73,7 +73,7 @@ Each step compiles clean and either changes visible test-suite counts or lands a
 
 **Docs:**
 - `docs/backlog/backlog-light.md` — subtract shipped entry.
-- `docs/architecture.md` — factual update if needed.
+- `docs/explanation/architecture/index.md` — factual update if needed.
 
 ## Verification
 

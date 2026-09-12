@@ -2,7 +2,7 @@
 
 MoonCloud is everything projectMM does with a server MoonModules runs. It is off until you switch it on, and it is one self-contained part of the software: its members are the only code that talks to a server of ours.
 
-It is deliberately small. Each member is a separate choice with its own checkbox, because wanting one is not agreeing to the other, and each says on its own card what it exchanges before you decide. What every member sends, what never leaves your network, and how the installation id works: [privacy policy](privacy-policy.md). The controls, per member: [core system catalog](moonmodules/core/system.md#mooncloud).
+It is deliberately small. Each member is a separate choice with its own checkbox, because wanting one is not agreeing to the other, and each says on its own card what it exchanges before you decide. What every member sends, what never leaves your network, and how the installation id works: [privacy policy](../legal/privacy-policy.md). The controls, per member: [core system catalog](../moonmodules/core/system.md#mooncloud).
 
 ## Stats
 

@@ -12,7 +12,7 @@ Everything not listed here shipped and was archived.
 |---|---|
 | **MoonLive palettes** | The promised scenario: a scripted palette driving a real effect end to end. Everything else landed. |
 | **OSC control ingest** | `unit_OscModule` and an OSC scenario, both promised. Only `unit_OscPacket` exists. |
-| **Two-way control surfaces** | `unit_ControlSurface` + `unit_OscModule`, a scenario, and the seam section in `docs/reference/control-surfaces.md`. The code is complete. |
+| **Two-way control surfaces** | `unit_ControlSurface` + `unit_OscModule`, a scenario, and the seam section in `docs/reference/hardware/control-surfaces.md`. The code is complete. |
 | **Config backup and restore** | One sentence: the installer's erase-confirm should point at backing up config first (`mooninstaller/install.js`). |
 
 ## Bench-gated: needs hardware, not keyboard time

@@ -1,6 +1,6 @@
 # MoonDeck Script Reference
 
-MoonDeck is projectMM's browser-based developer console: one page that builds, flashes, runs, tests, monitors, and checks the project across every target, and discovers and drives devices on the network. Every action it offers is a thin wrapper around a script under `moondeck/`, so the CLI (`uv run moondeck/<group>/<name>.py`) and MoonDeck run exactly the same code — agents typically use the CLI, humans use MoonDeck. For what MoonDeck *is* and where it sits in the workflow see [docs/building.md § MoonDeck](../docs/building.md#moondeck--the-dev-console); this page is the per-script reference.
+MoonDeck is projectMM's browser-based developer console: one page that builds, flashes, runs, tests, monitors, and checks the project across every target, and discovers and drives devices on the network. Every action it offers is a thin wrapper around a script under `moondeck/`, so the CLI (`uv run moondeck/<group>/<name>.py`) and MoonDeck run exactly the same code: agents typically use the CLI, humans use MoonDeck. For what MoonDeck *is* and where it sits in the workflow see [docs/how-to/building.md § MoonDeck](../docs/how-to/building.md#moondeck--the-dev-console). What follows is the per-script reference.
 
 Launch it with `uv run moondeck/moondeck.py` and open <http://localhost:8420>. The console has three tabs — **Desktop** (build build / run / test), **ESP32** (chip + port, build / flash / monitor), and **Live** (discovery and live runs against networked devices) — above a network bar and per-device deviceModel pickers. Script definitions live in `moondeck/moondeck_config.json` (committed); runtime state (selected network, devices, ports) persists in `moondeck/moondeck.json` (gitignored).
 
@@ -319,7 +319,7 @@ finding grouped by file. No report file to open: a run this slow should answer o
 and the old `build/clang-tidy-report.md` was gitignored anyway, so it existed only to be read
 once.
 
-**Verify a zero before believing it** ([testing.md](../docs/testing.md#verify-a-zero-before-believing-it)
+**Verify a zero before believing it** ([testing.md](../docs/reference/testing.md#verify-a-zero-before-believing-it)
 covers why and lists the known silent-failure modes). This script's own guard: it refuses to
 report when more than ten files fail to compile.
 
@@ -515,7 +515,7 @@ uv run moondeck/check/check_nonblocking.py --module AudioService
 
 `MoonModule::tick/tick20ms/tick1s` carry `MM_NONBLOCKING` ([platform.h](../src/platform/platform.h)),
 and Clang 20+ verifies under `-Wfunction-effects` that nothing they reach allocates or blocks —
-**transitively**, through the whole call graph ([coding-standards.md § Static checks](../docs/coding-standards.md#static-checks) owns the rule).
+**transitively**, through the whole call graph ([coding-standards.md § Static checks](../docs/contributing/coding-standards.md#static-checks) owns the rule).
 
 The attribute is inherited by overrides, so three annotations cover every module's tick. It also
 sits in `tickChildren`'s **member-pointer type** — without that, the indirect call through `fn`
@@ -935,7 +935,7 @@ Removes one ESP32 per-firmware build dir (`--firmware <name>`) or every `build/e
 
 ### build_esp32
 
-Build one of the shipping ESP32 firmware variants. The MoonDeck **Build** button reads the **Firmware** dropdown and forwards `--firmware <selected>` to `build_esp32.py`. The dropdown is populated from the `FIRMWARES` dict, the single source of truth. ("Firmware" is the compiled binary; the physical product (deviceModel) is a separate concept — see [architecture.md § Firmware vs deviceModel vs board](../docs/architecture.md#firmware-vs-devicemodel-vs-board).)
+Build one of the shipping ESP32 firmware variants. The MoonDeck **Build** button reads the **Firmware** dropdown and forwards `--firmware <selected>` to `build_esp32.py`. The dropdown is populated from the `FIRMWARES` dict, the single source of truth. ("Firmware" is the compiled binary; the physical product (deviceModel) is a separate concept: see [MoonInstaller, firmware vs deviceModel vs board](../docs/explanation/architecture/mooninstaller.md#the-three-words).)
 
 | Firmware key | Chip | What's in the image |
 |---|---|---|

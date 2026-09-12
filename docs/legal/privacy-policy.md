@@ -74,7 +74,7 @@ An MQTT broker, Home Assistant, Art-Net or E1.31 consoles: projectMM speaks to t
 
 **A new feature that transmits anything is documented here before it ships, and asks for its own consent.** We may later offer to collect things this policy does not describe today, such as which effects are used or automatic crash reports. Each would be a separate opt-in choice, described here first, and switched off until you turn it on.
 
-Revisions are made in the open: the policy lives in the [project repository](https://github.com/MoonModules/projectMM/blob/main/docs/privacy-policy.md), so every change is a commit you can read.
+Revisions are made in the open: the policy lives in the [project repository](https://github.com/MoonModules/projectMM/blob/main/docs/legal/privacy-policy.md), so every change is a commit you can read.
 
 ## Contact
 

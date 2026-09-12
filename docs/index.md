@@ -35,19 +35,19 @@ One source tree drives ESP32, Teensy, Raspberry Pi, macOS, Windows and Linux.
 
     Every behavior is pinned by a test. When a bug is fixed, a test proves it.
 
-    [Unit tests](tests/unit-tests.md) · [Scenario tests](tests/scenario-tests.md)
+    [Unit tests](reference/tests/unit-tests.md) · [Scenario tests](reference/tests/scenario-tests.md)
 
 -   :material-code-braces: **Go deeper**
 
     System design, the module model, and the per-module reference.
 
-    [Architecture](architecture.md) · [Core modules](moonmodules/core/supporting.md) · [Light pipeline](moonmodules/light/supporting.md)
+    [Architecture](explanation/architecture/index.md) · [Core modules](moonmodules/core/supporting.md) · [Light pipeline](moonmodules/light/supporting.md)
 
 -   :material-speedometer: **Numbers and people**
 
     Measured frame rates per device, how the project works, why the code is ours, and who inspired what.
 
-    [Performance](performance.md) · [Why our own code](why-we-write-our-own.md) · [How we work](https://github.com/MoonModules/projectMM#how-we-work) · [Credits](https://github.com/MoonModules/projectMM#credits)
+    [Performance](reference/performance.md) · [Why our own code](explanation/why-we-write-our-own.md) · [How we work](https://github.com/MoonModules/projectMM#how-we-work) · [Credits](https://github.com/MoonModules/projectMM#credits)
 
 </div>
 

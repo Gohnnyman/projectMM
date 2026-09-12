@@ -765,7 +765,7 @@ therefore needs a host test that proves the semantics and a bench run that prove
   the compiler.
 - **`while`, `break`, `continue`.** `for` and `if` cover what an effect does; the rest is language
   completeness rather than expressiveness, and each one costs a grammar rule and a test surface.
-- **Floating point.** The render path is integer by rule ([coding-standards](../../../coding-standards.md)),
+- **Floating point.** The render path is integer by rule ([coding-standards](../../../contributing/coding-standards.md)),
   and the Xtensa classic has no FPU, so a float in a script would be a silent softfloat call per light.
 - **A scripted DRIVER as the fourth role.** It is the honest test of step 5's dispatch, but it needs
   the driver surface to be as settled as the other three are, and that is its own question.

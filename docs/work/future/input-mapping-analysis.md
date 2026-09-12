@@ -14,7 +14,7 @@ Neither survives contact with real hardware:
   user's.
 - Adding a sixth IR action today means editing `kActions` and reflashing, which is exactly the
   configured-at-build-time model the project exists to avoid
-  ([architecture.md, live reconfiguration](../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)).
+  ([MoonModule, live reconfiguration](../../explanation/architecture/moonmodule.md#live-reconfiguration-every-change-applies-on-the-next-frame)).
 
 Both modules have the same shape of defect, so they want the same fix.
 
@@ -120,13 +120,13 @@ destination because a person needs to see what it does. This is what the mapping
 effect samples every frame: an effect wants *the current value on the hot path*, not a notification.
 Routing that through `setControl` would be wrong twice over. It would put a control write, a name
 lookup and a persistence dirty-flag on the render path at frame rate, which the
-[hot-path rules](../../architecture.md#hot-path-discipline) forbid. And it would be lossy: a control is
+[hot-path rules](../../explanation/architecture/moonmodule.md#hot-path-discipline) forbid. And it would be lossy: a control is
 a setting a person edits, where a stream is data an effect reads.
 
 **The pattern for a stream already exists and is already domain-neutral.** `AudioService` publishes
 an `AudioFrame` and effects reach it through the static `AudioService::latestFrame()`;
 `AudioSpectrumEffect`, `GEQEffect`, `SpectrumEffect` and `NoiseMeterEffect` all consume it that way.
-[architecture.md, data exchange](../../architecture.md#data-exchange-between-modules) states it as the
+[MoonModule, data exchange](../../explanation/architecture/moonmodule.md#data-exchange-between-modules) states it as the
 shared-struct pull: a POD struct the producer overwrites in place each tick, a plain-data header
 both sides include, a const getter, no allocation and no subscription. It even names this case:
 lock-free "is visually harmless for the gyro/sensor data this carries".
@@ -166,7 +166,7 @@ by depth. A single `distance` control cannot carry it, and neither can a fader.
 the render tick on a Dig-2-Go is 289 us. So this sensor must not be read on the render tick at all:
 either SPI at 3 MHz (which is why the part offers it), a slower ranging rate matched to what the
 effect needs, or the read moved off the render core the way the encode split already is
-([architecture.md, parallelism](../../architecture.md#parallelism)). **This is the first sensor whose
+([MoonModule, parallelism](../../explanation/architecture/moonmodule.md#parallelism)). **This is the first sensor whose
 platform seam has to be asynchronous**, and that is worth knowing before the synchronous
 `i2cReadRegs` shape is treated as sufficient for everything.
 
@@ -327,10 +327,10 @@ custom anyway, that may be the better answer than parsing a commercial controlle
   table.
 - **[CLAUDE.md, minimalism](../../CLAUDE.md)**: every fact has one home. The surface is that home
   for "what does this control do", which is the argument for the two-step model over direct targets.
-- **[architecture.md, live reconfiguration](../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)**:
+- **[MoonModule, live reconfiguration](../../explanation/architecture/moonmodule.md#live-reconfiguration-every-change-applies-on-the-next-frame)**:
   a mapping must be editable on a running device. A compiled-in action table fails this, which is
   the concrete defect in `IrService` today.
-- **[architecture.md, Services](../../architecture.md)**: "Direction is per-module, not a role: a
+- **[MoonCore, services](../../explanation/architecture/index.md)**: "Direction is per-module, not a role: a
   service may read (gyro), write (relay), or both." Input services are already the sanctioned shape.
 
 ## Open questions for the product owner

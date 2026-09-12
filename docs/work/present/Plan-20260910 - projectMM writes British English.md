@@ -2,7 +2,7 @@
 
 ## Context
 
-The project is American-spelled by an explicit rule ([coding-standards.md:18](docs/coding-standards.md), [CLAUDE.md:101](CLAUDE.md)), enforced by `check_prose.py` at the commit gate and by `hook_prose.py` on every write. The PO wants British: `colour`, `behaviour`, `initialise`, `centre`, `grey`, `catalogue`, `analyse`.
+The project is American-spelled by an explicit rule ([coding-standards.md:18](../../contributing/coding-standards.md), [CLAUDE.md:101](CLAUDE.md)), enforced by `check_prose.py` at the commit gate and by `hook_prose.py` on every write. The PO wants British: `colour`, `behaviour`, `initialise`, `centre`, `grey`, `catalogue`, `analyse`.
 
 The deciding argument is user impact. The project has no official launch, so ADR-0013's "no migration code, documented break" applies at its cheapest: nothing outside our control has adopted our names yet. What *is* outside our control keeps its American spelling, and the PO accepts that discrepancy: **CSS/HTML properties, WLED/Home-Assistant wire keys, vendor symbols, SPDX headers.**
 
@@ -50,7 +50,7 @@ Three traps the inverted dict must handle, each needing an exclusion in the chec
 - `analysis`/`analyses` (already correct; only `analyze`→`analyse`)
 - `license` as a *verb* and in SPDX headers stays; only the noun becomes `licence`
 
-Update the rule statements: [docs/coding-standards.md:18](docs/coding-standards.md) (rewrite the paragraph and its rationale, which currently argues the opposite) and [CLAUDE.md:101](CLAUDE.md). Both must name the external-contract exception explicitly, or the next reader will "fix" a CSS property.
+Update the rule statements: [docs/contributing/coding-standards.md:18](../../contributing/coding-standards.md) (rewrite the paragraph and its rationale, which currently argues the opposite) and [CLAUDE.md:101](CLAUDE.md). Both must name the external-contract exception explicitly, or the next reader will "fix" a CSS property.
 
 **Verify:** `uv run moondeck/check/check_prose.py` now flags American spellings in added lines; write a file containing `colour` and confirm the hook permits it.
 
@@ -60,7 +60,7 @@ Rename the builtins in `src/core/moonlive/MoonLiveBuiltins_common.h` and `src/li
 
 Update the **12 call sites across 9 files** under `moonlive/effects/` (aurora, balls, comet-trail, fractal, metal, noise, octopus, stadbeest-eyes, stadbeest-legs). `setPaletteColorZ` is used only by `aurora.mle` (2 of those 12).
 
-**MIGRATING entry**, following the format of the `floor` entry at [docs/MIGRATING.md:27](docs/MIGRATING.md): state the action (rename the call in any script you wrote), and name the shadowing hazard, which is the real trap: `/moonlive` (user) shadows `/.moonlive` (factory), so a stale user copy of a shipped script keeps calling the old name and fails with "unknown function" at the call site, while the factory copy is fixed.
+**MIGRATING entry**, following the format of the `floor` entry at [docs/reference/MIGRATING.md:27](../../reference/MIGRATING.md): state the action (rename the call in any script you wrote), and name the shadowing hazard, which is the real trap: `/moonlive` (user) shadows `/.moonlive` (factory), so a stale user copy of a shipped script keeps calling the old name and fails with "unknown function" at the call site, while the factory copy is fixed.
 
 **Verify:** `./build/macos/test/mm_tests -tc="*every script in moonlive*"` (the test that compiles every shipped script), then the Xtensa codegen test that compiles all 33 at the device budget. On the bench, load a renamed script on a board and see it run.
 

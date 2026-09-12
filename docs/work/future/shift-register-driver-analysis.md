@@ -42,7 +42,7 @@ Plus **one shared CLOCK line** and **one shared LATCH line** across all six '595
 
 **One '245 is exactly enough, and that is not a coincidence:** the signals needing the 3.3 → 5 V shift are **6 data lines + CLOCK + LATCH = 8**, which is precisely a '245's width. A '245 is a bus *transceiver*, so its direction pin (DIR) is strapped for a fixed A→B direction and OE tied active — it is used as a plain octal buffer here.
 
-**The `T` in 74HC*T* is load-bearing.** At 5 V a **74HC** input needs V_IH ≥ 0.7 × Vcc = **3.5 V**, and the ESP32 only drives **3.3 V** — *below* threshold, so a HIGH is not guaranteed to read as a 1. It typically *seems* to work on the bench (a given chip may trip nearer 2.5 V at room temperature) and then fails with temperature, supply, or a new batch: **flaky/garbled strands, not dead ones** — the worst kind of fault to chase. **74HCT** has TTL-compatible inputs (V_IH = **2.0 V**), so 3.3 V is unambiguously a HIGH while the outputs still swing a full 5 V, which is what WS2812 wants. Same margin problem, and same family of fix, as the data-line level shifter in [led-signal-integrity.md](../../usecases/led-signal-integrity.md).
+**The `T` in 74HC*T* is load-bearing.** At 5 V a **74HC** input needs V_IH ≥ 0.7 × Vcc = **3.5 V**, and the ESP32 only drives **3.3 V** — *below* threshold, so a HIGH is not guaranteed to read as a 1. It typically *seems* to work on the bench (a given chip may trip nearer 2.5 V at room temperature) and then fails with temperature, supply, or a new batch: **flaky/garbled strands, not dead ones** — the worst kind of fault to chase. **74HCT** has TTL-compatible inputs (V_IH = **2.0 V**), so 3.3 V is unambiguously a HIGH while the outputs still swing a full 5 V, which is what WS2812 wants. Same margin problem, and same family of fix, as the data-line level shifter in [led-signal-integrity.md](../../how-to/led-signal-integrity.md).
 
 **Timing headroom is thin, and the buffer is why — know this before blaming the firmware.** The fitted '245 is **plain HCT** (t_pd ≈ 10–18 ns at 5 V), *not* the ~5 ns **A**HCT part. Shift mode clocks the bus at **26.67 MHz** — a **37.5 ns** period — so the buffer alone can consume roughly a third of the bit period in propagation delay.
 
@@ -52,7 +52,7 @@ Plus **one shared CLOCK line** and **one shared LATCH line** across all six '595
 
 **So do not "test" a buffer-timing hypothesis by lowering the clock** — a lower pclk makes the slot *longer*, pushing T0H further past 380 ns, and the symptom it produces is the same washed-out white. There is no lower exact divide in the band. If the buffer is genuinely suspected, the falsifiable test is the *part*: an **AHCT245** (~5 ns) is a drop-in that restores the margin, and the symptom either tracks it or the buffer is innocent.
 
-This is the same "make the hardware hypothesis falsifiable before reaching for the soldering iron" discipline as the TX-power sweep in [led-signal-integrity.md](../../usecases/led-signal-integrity.md).
+This is the same "make the hardware hypothesis falsifiable before reaching for the soldering iron" discipline as the TX-power sweep in [led-signal-integrity.md](../../how-to/led-signal-integrity.md).
 
 **Total GPIO cost = `physicalDataPins + 2`.** hpwit's headline "120 strips from 15 pins" is `NBIS2SERIALPINS = 15` data pins × 8 outputs = 120, **plus** the clock and latch pins — so 17 GPIOs in total, not 15. Worth stating because it changes the pin budget.
 
@@ -409,6 +409,6 @@ The module header reports the **tick** rate (252 fps) while `frameTime` reports 
 - `src/light/drivers/ParallelSlots.h` — the 3-slot wire contract + SWAR transpose.
 - `src/platform/esp32/platform_esp32_i80.cpp` — PSRAM-first on LCD_CAM, internal-only on classic I2S (`SOC_LCDCAM_I80_LCD_SUPPORTED` gate).
 - `src/platform/esp32/platform_esp32_parlio.cpp` — the PSRAM→internal degrade.
-- [performance.md § Multi-pin LED driving](../../performance.md) — Parlio **65,535 B/lane** single-shot cap (897 RGB lights/lane); S3 i80 **16,384 lights** on PSRAM.
+- [performance.md § Multi-pin LED driving](../../reference/performance.md) — Parlio **65,535 B/lane** single-shot cap (897 RGB lights/lane); S3 i80 **16,384 lights** on PSRAM.
 - [led-driver-psram-ring-analysis.md](led-driver-psram-ring-analysis.md): the classic ~2,048 ceiling; the parked refill ring; the shift-register driver's 12,288 floor.
 - [leddriver-analysis-bottom-up.md](leddriver-analysis-bottom-up.md) — "the multiplex is a configuration of a parallel-clocked backend, not a sibling driver class"; the RMT × ShiftReg impossibility.

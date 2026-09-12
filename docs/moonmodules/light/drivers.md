@@ -62,7 +62,7 @@ Two ParallelLedDriver instances that select peripherals on the **same hardware b
 
 Origin: WS2812B on FastLED / WLED prior art, and the clockless I2S / RMT / Parlio techniques of **[hpwit](https://github.com/hpwit) (Yves Bazin)**, whose work is why a single board can drive dozens of parallel strands at all ([analysis](../../work/future/leddriver-analysis-top-down.md))
 
-Tests: [RMT](../../tests/unit-tests.md#rmtleddriver) · [shared + peripherals](../../tests/unit-tests.md#parallelleddriver)
+Tests: [RMT](../../reference/tests/unit-tests.md#rmtleddriver) · [shared + peripherals](../../reference/tests/unit-tests.md#parallelleddriver)
 
 Detail: [RMT](moxygen/RmtLedDriver.md) · [Parallel](moxygen/ParallelLedDriver.md) · peripherals: [i80](moxygen/MultiPinLedDriver.md) · [MoonI80](moxygen/MoonLedDriver.md) · [Parlio](moxygen/ParlioLedDriver.md)
 
@@ -81,7 +81,7 @@ Streams the buffer over UDP as **Art-Net**, **E1.31 / sACN**, or **DDP** — one
   (`239.255.{universe_hi}.{universe_lo}`) rather than the configured address, so one send
   reaches every receiver that joined that universe. It is opt-in rather than the default for
   E1.31: the saving only materialises on a switch that does IGMP snooping, and firmware cannot
-  tell. See [multicast and IGMP snooping](../../architecture.md#multicast-and-igmp-snooping).
+  tell. See [multicast and IGMP snooping](../../explanation/architecture/moonlight.md#multicast-and-igmp-snooping).
 - `ips` — the receivers. **Blank by default — the driver idles until set**, so it never sends uninvited traffic. Type the full address once, then a range or a list: `192.168.1.70-74` (five tubes, ends inclusive) or `192.168.1.60,61,62,65`; both mix, and a further full address switches subnet.
 - `lightsPerIp` — lights per receiver, same idiom as an LED driver's `ledsPerPin`: **blank** = split the window evenly; **one number** = that many each; **a list** `150,100,50` = one per receiver by position.
 - `universe_start` — first universe for Art-Net / E1.31 (DDP ignores it). Restarts per receiver — each is an independent node addressing its own strip.
@@ -108,7 +108,7 @@ An effect writes `setPan` for every light in its layer, so a formation spanning 
 
 Origin: MoonLight D_NetworkOut; Art-Net 4 / E1.31 / DDP specs
 
-[Tests](../../tests/unit-tests.md#networksenddriver)
+[Tests](../../reference/tests/unit-tests.md#networksenddriver)
 
 Detail: [technical](moxygen/NetworkSendDriver.md)
 
@@ -136,7 +136,7 @@ Origin: ColorLight 5A-75 documented byte layout. Inspired by [FPP](https://githu
 
 Protocol references: [FPP's ColorLight-5a-75.cpp](https://github.com/FalconChristmas/fpp/blob/master/src/channeloutput/ColorLight-5a-75.cpp) is the implementation this driver's byte layout agrees with, and Harald Kubota's [5A-75B protocol write-up](https://hkubota.wordpress.com/2022/01/31/winter-project-colorlight-5a-75b-protocol/) documents the same wire format independently, including the brightness and color-temperature bytes and the discovery exchange. Read it with its comments: a reader supplied the controller-number field that makes multiple cards on one segment distinguishable, and the article's own MAC pair is printed the other way round from FPP's (destination `11:22:33:44:55:66`, source `22:22:33:44:55:66`, which is what this driver sends and what the cards filter on). Its lineage runs back to the [original mplayer-colorlight reverse engineering](http://www.mylifesucks.de/oss/mplayer-colorlight/).
 
-[Tests](../../tests/unit-tests.md#panelcarddriver)
+[Tests](../../reference/tests/unit-tests.md#panelcarddriver)
 
 Detail: [technical](moxygen/PanelCardDriver.md)
 
@@ -157,7 +157,7 @@ Drives **Philips Hue bulbs as pixels**: each color bulb in the driver's window b
 
 Origin: projectMM, on the [Hue v1 CLIP API](https://developers.meethue.com/develop/hue-api/)
 
-[Tests](../../tests/unit-tests.md#huedriver)
+[Tests](../../reference/tests/unit-tests.md#huedriver)
 
 Detail: [technical](moxygen/HueDriver.md)
 
@@ -190,7 +190,7 @@ sweeps far slower than a pixel changes, so half rate each is not visible on the 
 
 Origin: projectMM, on [MoonLight](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h)'s PhysicalLayer model
 
-[Tests](../../tests/unit-tests.md#previewdriver)
+[Tests](../../reference/tests/unit-tests.md#previewdriver)
 
 Detail: [technical](moxygen/PreviewDriver.md)
 

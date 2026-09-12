@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 """Prose rules, enforced on ADDED lines through Vale.
 
-The rules are stated in docs/documentation-standards.md and live as YAML under .vale/styles/,
+The rules are stated in docs/contributing/documentation-standards.md and live as YAML under .vale/styles/,
 one file per rule, so the standard and its check share one vocabulary. This script owns the one
 thing Vale cannot: SCOPE. It walks the git diff and feeds Vale only what a change adds, because
 the tree holds thousands of pre-existing violations and a whole-file gate would fail every commit
@@ -37,13 +37,13 @@ EXEMPT = (
     "docs/friend-repos/", # monthly digests OF OTHER PROJECTS, quoted from their sources
     "docs/work/past/",    # dated records: what was true at a moment, kept unrewritten
     "docs/work/future/",  # prior-project digests quoted from their sources
-    "docs/metrics/",      # generated
-    "docs/tests/",        # generated from test comments (fix the test, not the page)
+    "docs/reference/metrics/",      # generated
+    "docs/reference/tests/",        # generated from test comments (fix the test, not the page)
     "docs/moonmodules/",  # partly generated technical pages
     "src/platform/desktop/vendor/",   # upstream single-header code (miniaudio): not our prose
     "src/ui/vendor/",                 # upstream browser code (Prism): not our prose either
     "moondeck/check/check_prose.py",  # the detector: its rule table spells the very patterns
-    "docs/documentation-standards.md",  # the RULE: it must quote an em-dash and "analyse" to ban them
+    "docs/contributing/documentation-standards.md",  # the RULE: it must quote an em-dash and "analyse" to ban them
 )
 
 def added_lines(base):
@@ -128,7 +128,7 @@ def main():
     print(f"Prose check: {len(findings)} finding(s) in ADDED lines.\n")
     for f in findings:
         print("  " + f)
-    print("\nRules: docs/documentation-standards.md, enforced by .vale/styles/projectMM/.")
+    print("\nRules: docs/contributing/documentation-standards.md, enforced by .vale/styles/projectMM/.")
     # Only an ERROR blocks; warnings and suggestions inform.
     return 1 if errors else 0
 

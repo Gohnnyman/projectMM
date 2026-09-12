@@ -28,7 +28,7 @@ Reading across the friend-repo digests, the themes the wider ESP32-LED ecosystem
 
 ## What these projects do that projectMM doesn't (yet)
 
-Observational: where the landscape is ahead of projectMM. These are *not* commitments; real adoption decisions live in the [`../backlog/`](../work/future/README.md), cross-referenced where one already exists.
+Observational: where the landscape is ahead of projectMM. These are *not* commitments; real adoption decisions live in the [`../backlog/`](../work/future/index.md), cross-referenced where one already exists.
 
 - **Parallel multi-strip output on S3/P4** (PARLIO/LCD_CAM, and hpwit's I2S/shift-register drivers) — the direct parallel drivers ship (MultiPin/Moon on LCD_CAM, Parlio on P4, driving up to 16 strands and 12,288+ lights). The shift-register/'595 expander path also ships but is dormant: it works at prime-only geometries yet has a known lapping-ring sparkle at the largest configs, so it stays off by default. See the [LED-driver analysis](../work/future/leddriver-analysis-top-down.md).
 - **Audio-reactive input** — none of projectMM's effects are audio- or motion-reactive yet. The Peripheral role + the Pi-sensor backlog entry are the foundation; the producer→effect wiring is backlog.

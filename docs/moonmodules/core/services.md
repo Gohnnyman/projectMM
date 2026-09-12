@@ -36,7 +36,7 @@ A Service (added by the user, not auto-wired): the audio source that feeds the F
 
 Detail: [technical](moxygen/AudioService.md)
 
-[Tests](../../tests/unit-tests.md#audioservice)
+[Tests](../../reference/tests/unit-tests.md#audioservice)
 
 <a id="osc"></a>
 
@@ -178,7 +178,7 @@ does **IGMP snooping** forwards the group only to the ports that joined it, so t
 never see the traffic at all. Without snooping the switch floods it exactly like broadcast, and on
 WiFi it goes out at the lowest basic rate to every station. So multicast can reduce how many hosts
 have to process ~40 packets a second, but it does not guarantee it. See
-[multicast and IGMP snooping](../../architecture.md#multicast-and-igmp-snooping).
+[multicast and IGMP snooping](../../explanation/architecture/moonlight.md#multicast-and-igmp-snooping).
 
 The 44-byte v2 packet is byte-compatible with WLED, with one field that is not yet equivalent:
 
@@ -211,7 +211,7 @@ resolution the receiving effects discard anyway when they divide back down to a 
 A received magnitude is clamped to 255, since a real WLED source reaches ~9500 and an unclamped
 value would drive effects harder than locally analyzed audio ever could.
 
-Prior art: the WLED-MM audio-reactive usermod by **Frank ([@softhack007](https://github.com/softhack007))**, the most-used open-source audio-reactive LED implementation, whose adaptive noise-gate concept the analysis here descends from (analyzed with his permission); and **[@troyhacks](https://github.com/troyhacks/WLED)**, who reworked that DSP onto Espressif's [esp-dsp](https://github.com/espressif/esp-dsp) FFT, the same choice this service makes. The line-in path exists because **wladi ([myhome-control](https://shop.myhome-control.de))** supplied the hardware and pinout for the [MHC-WLED ESP32-P4 shield](../../reference/mhc-wled-esp32-p4-shield.md): its onboard PCM1808 I2S ADC is what `mclkPin` is for.
+Prior art: the WLED-MM audio-reactive usermod by **Frank ([@softhack007](https://github.com/softhack007))**, the most-used open-source audio-reactive LED implementation, whose adaptive noise-gate concept the analysis here descends from (analyzed with his permission); and **[@troyhacks](https://github.com/troyhacks/WLED)**, who reworked that DSP onto Espressif's [esp-dsp](https://github.com/espressif/esp-dsp) FFT, the same choice this service makes. The line-in path exists because **wladi ([myhome-control](https://shop.myhome-control.de))** supplied the hardware and pinout for the [MHC-WLED ESP32-P4 shield](../../reference/hardware/mhc-wled-esp32-p4-shield.md): its onboard PCM1808 I2S ADC is what `mclkPin` is for.
 
 ## OSC — details
 
@@ -286,7 +286,7 @@ the layout a preset launcher wants and the addresses are the ones it will use; t
 placeholder rather than as part of the contract above.
 
 **It does not reach a Mackie desk.** The X-Touch and QCon Pro G2 speak Mackie Control over MIDI,
-not OSC: see [control surfaces](../../reference/control-surfaces.md) for what would.
+not OSC: see [control surfaces](../../reference/hardware/control-surfaces.md) for what would.
 
 ## Infrared: details
 

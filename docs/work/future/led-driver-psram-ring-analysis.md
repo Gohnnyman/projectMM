@@ -171,5 +171,5 @@ Keeping i80 is **not** legacy baggage: for a ≤2 K install on a WiFi-busy board
 - [Support for External RAM — ESP-IDF (ESP32-S3)](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-guides/external-ram.html) — the S3 *does* have hardware DMA-to-PSRAM (descriptors still internal): why our S3 i80 reaches 16 K and classic cannot.
 
 **projectMM's own measurements:**
-- [performance.md § Multi-pin LED driving](../../performance.md#multi-pin-led-driving-all-three-peripherals-128128-grid) — classic i80 2048-light ceiling + `esp_lcd_i80_alloc_draw_buffer` rejecting `MALLOC_CAP_SPIRAM`; S3 16,384 @ ~34 fps; P4 Parlio 4096, 139 fps @ 1024; the `multicore` +44 % table.
+- [performance.md § Multi-pin LED driving](../../reference/performance.md#multi-pin-led-driving-all-three-peripherals-128128-grid) — classic i80 2048-light ceiling + `esp_lcd_i80_alloc_draw_buffer` rejecting `MALLOC_CAP_SPIRAM`; S3 16,384 @ ~34 fps; P4 Parlio 4096, 139 fps @ 1024; the `multicore` +44 % table.
 - [backlog-light.md](backlog-light.md) — the superseded chunk-streaming-ring decision; the shift-register driver's **48 × 256 = 12,288** acceptance floor.

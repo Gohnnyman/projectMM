@@ -3,10 +3,10 @@
 The projectMM web UI as shipped — the render layer over the MoonModule tree. This page is the UI's
 own implementation spec (status bar, cards, control rendering, styling, the no-rebuild update
 contract). The **high-level architecture** — hand-maintained files, MoonModule-driven rendering, the
-light-domain plug-in points — lives in [architecture.md § Web UI](../../architecture.md#web-ui);
+light-domain plug-in points — lives in [MoonCore, the web UI](../../explanation/architecture/mooncore.md#web-ui);
 the **backend contract** it consumes (every `/api/*` endpoint, the `/ws` frame shape, the control
 descriptors) is owned by [HttpServerModule](moxygen/HttpServerModule.md); the **emoji legend** the
-cards and picker render is [architecture.md § Tag emoji legend](../../architecture.md#tag-emoji-legend).
+cards and picker render is [the tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend).
 This page covers only what those don't: the browser-side rendering behavior.
 
 ## Interaction principles
@@ -110,7 +110,7 @@ indentation. Nesting depth shows as progressively lighter backgrounds and a left
   Child cards live in a `.card-children` wrapper appended into the parent card's DOM node (not flat
   siblings); `renderModuleTree` recurses into the parent card, not into `main`.
 - **`{ }`** opens `GET /api/modules/{name}` in a new tab — that one module's live JSON, for issue
-  reports (see [Log an issue](../../logging-an-issue.md)). On EVERY card, unlike `✎`/`×` (user-editable
+  reports (see [Log an issue](../../how-to/logging-an-issue.md)). On EVERY card, unlike `✎`/`×` (user-editable
   children only) and `?` (types that have a doc page).
 - **Enabled toggle** in the right-hand action cluster mirrors `MoonModule::enabled()` — a styled
   `<button>` (transparent + muted border, 26×26); state shown by the glyph alone (accent **✓** on,
@@ -118,7 +118,7 @@ indentation. Nesting depth shows as progressively lighter backgrounds and a left
   disabled modules whose `respectsEnabled()` returns true (default).
 - **Emoji tags** next to the name show the same set the type picker uses: role + dimensional (both
   UI-derived) + the curated `tags()` from `/api/types`. Identical identity across card and picker; the
-  assignments are [architecture.md § Tag emoji legend](../../architecture.md#tag-emoji-legend).
+  assignments are [the tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend).
 - **Help link (?)** at the far right of the title row opens the module's doc page in a new tab. The
   path comes from `docPath` in `/api/types` (engine-provided, relative to `docs/moonmodules/`); omitted
   when the type declares none.
@@ -142,7 +142,7 @@ indentation. Nesting depth shows as progressively lighter backgrounds and a left
 
 Auto-rendered by `controls[].type` — adding a MoonModule with these types needs no UI change. (The
 descriptors themselves, and their storage shape, are [Control](moxygen/Control.md) /
-[coding-standards § store values in their native shape](../../coding-standards.md); this table is
+[coding-standards § store values in their native shape](../../contributing/coding-standards.md); this table is
 how each *renders*.)
 
 | Type | Element | Interaction | Debounce |
@@ -193,7 +193,7 @@ One picker serves **add** (`+ add child`) and **replace** (the ✎ button), rend
 - **Role filter.** Add mode filters to the parent's `acceptsChildRoles` (declared per-type in
   `/api/types` — the UI hardcodes no container→role map); replace mode filters to the target's own role.
 - **Emoji tag chips.** A row of toggle chips above the list, one per distinct emoji across the filtered
-  types (sources + meanings: [architecture.md § Tag emoji legend](../../architecture.md#tag-emoji-legend)).
+  types (sources + meanings: [the tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend)).
   The UI treats `tags` as opaque — splits it into grapheme clusters, one chip each. Toggling narrows
   with **AND** logic (a type shows only if it carries every active chip).
 - **Search box** — substring match on type name; combines with chips (both must match).
@@ -229,7 +229,7 @@ renderer, everything after is the domain's choice; the UI ignores types it doesn
   color work.
 
 The light-domain renderer (WebGL point cloud, the `0x03`/`0x02` frame format, orbit camera,
-downsampling) is [architecture.md § Web UI](../../architecture.md#web-ui) /
+downsampling) is [MoonCore, the web UI](../../explanation/architecture/mooncore.md#web-ui) /
 [PreviewDriver](../light/moxygen/PreviewDriver.md).
 
 ## State updates — the no-rebuild contract

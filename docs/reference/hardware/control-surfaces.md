@@ -2,13 +2,13 @@
 
 What projectMM needs to know about the physical desks on the bench, so a control-ingest plan can be
 written from facts rather than from a product page. A desk here is a candidate source for
-[ControlModule](../moonmodules/core/control.md)'s pads, encoders and faders, which were laid out to
+[ControlModule](../../moonmodules/core/control.md)'s pads, encoders and faders, which were laid out to
 match this class of hardware in the first place.
 
 **The headline, because it contradicts the obvious assumption:** neither desk speaks OSC. Both are
 **Mackie Control** surfaces. OSC is the right protocol for the wider ecosystem (Resolume,
 TouchDesigner, TouchOSC, DIY Arduino rigs) and is planned on that basis, but it does not reach
-these two. See [the OSC plan](../work/present/Plan-20260829%20-%20OSC%20control%20ingest.md).
+these two. See [the OSC plan](../../work/present/Plan-20260829%20-%20OSC%20control%20ingest.md).
 
 ## Behringer X-Touch (Universal)
 

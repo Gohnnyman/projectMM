@@ -2,7 +2,7 @@
 
 projectMM runs as an ordinary Linux application: the same effect pipeline, web UI and network drivers as on a board, with a real CPU behind them. A small always-on machine makes a good installation controller, whether a server, a Raspberry Pi or a NanoPi.
 
-Deploying is covered here. Building and developing on Linux is in [building.md](../building.md).
+Deploying is covered here. Building and developing on Linux is in [building.md](../how-to/building.md).
 
 > Windows, with screenshots: [Installing projectMM on a desktop](installing-to-desktop.md). Flashing a board: [Install & first light](../gettingstarted.md).
 
@@ -156,4 +156,4 @@ Docker runs a full instance on anything with an amd64 kernel; the command is in 
 
 - [Install & first light](../gettingstarted.md): the same program on an ESP32.
 - [How projectMM works](how-projectmm-works.md): layouts, layers, effects and drivers.
-- [building.md](../building.md): building, testing and packaging in depth.
+- [building.md](../how-to/building.md): building, testing and packaging in depth.

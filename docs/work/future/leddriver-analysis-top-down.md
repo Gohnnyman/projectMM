@@ -255,7 +255,7 @@ The brightness / channel-reorder / RGBW-white stage is **not** specific to LED d
 - `Drivers` exposes `brightness` and `lightPreset` controls and rebuilds the LUT on the cheap `onUpdate` tier (no pipeline rebuild — the slider stays fluent). It hands each child a `const Correction*` via `DriverBase::setCorrection`; Preview ignores it (shows the raw logical buffer).
 - An LED driver consumes the *same* `const Correction*`. In the fused single-pass case (§ 4.3, identity / shuffle, no blend) it calls `correction_->apply(...)` per light and encodes the result straight into the DMA buffer — F/G/H and the WS2812 encode are one pass, never a second sweep over encoded bytes.
 
-So the LED driver does **not** re-invent brightness/reorder/white — it reuses the shipped `Correction`. Gamma and white-balance fold into the same LUT later as a per-channel R/G/B split (the field is `briLut`, not `gammaLut`, so that's a fill change, not a rename). See [architecture.md § Drivers](../../architecture.md#drivers) for the cross-driver picture.
+So the LED driver does **not** re-invent brightness/reorder/white — it reuses the shipped `Correction`. Gamma and white-balance fold into the same LUT later as a per-channel R/G/B split (the field is `briLut`, not `gammaLut`, so that's a fill change, not a rename). See [MoonLight, drivers](../../explanation/architecture/moonlight.md#drivers) for the cross-driver picture.
 
 ## 5. Testing architecture
 

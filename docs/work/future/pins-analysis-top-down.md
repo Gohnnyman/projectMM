@@ -43,7 +43,7 @@ The bottom-up survey's convergent core — *one authority that knows who owns ea
 |---|---|
 | WLED `PinManager` allocation table | The `ControlType::Pin` controls **are** the registry — no parallel table to sync. |
 | A pin clamped to the chip's GPIO count | `ControlType::Pin` is already clamped to `MM_MAX_GPIO` (build-injected per target from `CONFIG_SOC_GPIO_PIN_COUNT`). |
-| ESPHome reserved/strap validation data | [`gpio-usage.md`](../../reference/gpio-usage.md) — hand-curated per-MCU reserved/strap/role-conflict knowledge. |
+| ESPHome reserved/strap validation data | [`gpio-usage.md`](../../reference/hardware/gpio-usage.md) — hand-curated per-MCU reserved/strap/role-conflict knowledge. |
 | The pin-conflict check itself | Already specced: the [pin-uniqueness item](backlog-core.md#pin-uniqueness-check-across-modules-prevents-conflicts-replaces-a-singleton-hack) — *enumerate every `Pin` control, a value seen twice is a conflict.* |
 
 So the module is **mostly a view + a validator over data that already exists**, which is why phase 1 is small. The one thing missing entirely is the *authority* — no `allocatePin`, no owner tracking, no conflict gate wired in. That's the gap this closes, in stages.

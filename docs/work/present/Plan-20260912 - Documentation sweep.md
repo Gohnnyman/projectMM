@@ -17,8 +17,8 @@ Three things landed with the standards page, so that it holds after this sweep r
 ## Done (whole file clean)
 
 - `docs/tutorials/installing-on-linux.md`
-- `docs/documentation-standards.md`
-- `docs/coding-standards.md`
+- `docs/contributing/documentation-standards.md`
+- `docs/contributing/coding-standards.md`
 
 ## Also cleared this branch, by deletion rather than rewrite
 
@@ -28,8 +28,8 @@ Three things landed with the standards page, so that it holds after this sweep r
 
 ## Two pages with a decided shape, pending
 
-- `docs/performance.md`: its 234 rows of dated bench numbers overlap `docs/metrics/repo-health.md`, which is generated per commit. The measurements go to `metrics/`, the analysis stays; a hand-kept number next to a generated one is the drift the one-home rule forbids.
-- `docs/architecture.md`: explanation, kept whole; reserved for a separate rework.
+- `docs/reference/performance.md`: its 234 rows of dated bench numbers overlap `docs/metrics/repo-health.md`, which is generated per commit. The measurements go to `metrics/`, the analysis stays; a hand-kept number next to a generated one is the drift the one-home rule forbids.
+- `docs/explanation/architecture/index.md`: explanation, kept whole; reserved for a separate rework.
 
 ## Remaining: 55 pages, 2521 findings
 
@@ -40,53 +40,53 @@ Ordered by findings, most first.
 | 211 | `docs/work/past/lessons.md` |
 | 204 | `docs/work/future/leddriver-analysis-bottom-up.md` |
 | 173 | `docs/work/future/shift-register-driver-analysis.md` |
-| 164 | `docs/architecture.md` |
+| 164 | `docs/explanation/architecture/index.md` |
 | 121 | `docs/moonmodules/light/power-functions.md` |
 | 116 | `docs/work/future/leddriver-analysis-top-down.md` |
-| 112 | `docs/performance.md` |
-| 95 | `docs/usecases/home-automation.md` |
-| 94 | `docs/testing.md` |
+| 112 | `docs/reference/performance.md` |
+| 95 | `docs/how-to/home-automation.md` |
+| 94 | `docs/reference/testing.md` |
 | 90 | `docs/work/present/Plan-20260630 - MoonLight migration (multi-stage).md` |
-| 89 | `docs/usecases/build-your-own-moonmodules.md` |
+| 89 | `docs/tutorials/build-your-own-moonmodules.md` |
 | 81 | `docs/moonmodules/light/drivers.md` |
 | 77 | `docs/moonmodules/core/system.md` |
-| 70 | `docs/building.md` |
+| 70 | `docs/how-to/building.md` |
 | 67 | `docs/moonmodules/light/MoonLiveEffect.md` |
 | 66 | `docs/moonmodules/light/layouts.md` |
 | 65 | `docs/gettingstarted.md` |
-| 53 | `docs/MIGRATING.md` |
+| 53 | `docs/reference/MIGRATING.md` |
 | 49 | `CLAUDE.md` |
 | 45 | `docs/moonmodules/core/ui.md` |
 | 35 | `docs/moonmodules/light/modifiers.md` |
 | 33 | `docs/work/present/Plan-20260901 - Input mapping and scripted sensors.md` |
-| 30 | `docs/reference/esp32-s31-coreboard.md` |
+| 30 | `docs/reference/hardware/esp32-s31-coreboard.md` |
 | 28 | `docs/moonmodules/core/services.md` |
-| 26 | `docs/reference/gpio-usage.md` |
+| 26 | `docs/reference/hardware/gpio-usage.md` |
 | 25 | `docs/tutorials/how-projectmm-works.md` |
 | 23 | `docs/moonmodules/light/effects.md` |
-| 22 | `docs/reference/mhc-wled-esp32-p4-shield.md` |
+| 22 | `docs/reference/hardware/mhc-wled-esp32-p4-shield.md` |
 | 21 | `docs/moonmodules/light/supporting.md` |
 | 21 | `docs/tutorials/generative-effects.md` |
 | 20 | `docs/work/present/Plan-20260830 - Two-way control surfaces.md` |
 | 16 | `docs/moonmodules/core/control.md` |
-| 15 | `docs/logging-an-issue.md` |
+| 15 | `docs/how-to/logging-an-issue.md` |
 | 14 | `README.md` |
 | 13 | `docs/moonmodules/light/MoonLiveLayout.md` |
 | 12 | `docs/tutorials/panel-cards.md` |
 | 12 | `docs/work/present/Plan-20260827 - Config backup and restore.md` |
 | 11 | `docs/tutorials/installing-to-desktop.md` |
 | 8 | `docs/moonmodules/light/MoonLiveModifier.md` |
-| 7 | `docs/usecases/led-signal-integrity.md` |
+| 7 | `docs/how-to/led-signal-integrity.md` |
 | 7 | `docs/work/present/Plan-20260903 - MoonLive palettes.md` |
 | 6 | `docs/work/present/Plan-20260829 - OSC control ingest.md` |
 | 6 | `docs/work/present/Plan-20260910 - projectMM writes British English.md` |
 | 5 | `docs/moonmodules/core/supporting.md` |
 | 5 | `docs/work/present/Plan-20260908 - Stream the WebSocket state instead of buffering it (attempted, reverted).md` |
 | 4 | `docs/index.md` |
-| 4 | `docs/reference/light-fixtures.md` |
-| 4 | `docs/why-we-write-our-own.md` |
-| 3 | `docs/mooncloud.md` |
-| 3 | `docs/privacy-policy.md` |
+| 4 | `docs/reference/hardware/light-fixtures.md` |
+| 4 | `docs/explanation/why-we-write-our-own.md` |
+| 3 | `docs/explanation/mooncloud.md` |
+| 3 | `docs/legal/privacy-policy.md` |
 | 3 | `docs/tutorials/control-surface.md` |
 | 3 | `docs/work/present/Plan-20260910 - MoonCloud.md` |
 | 1 | `docs/work/present/OPEN-WORK.md` |

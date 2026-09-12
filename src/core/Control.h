@@ -148,7 +148,7 @@ enum class ControlType : uint8_t {
                 ///< persistent storage beyond the one descriptor pointer, the same
                 ///< "control holds a void* into module-owned data" shape every addX()
                 ///< uses, one level up. (Data-over-objects: no per-row object graph,
-                ///< no allocation on rebuild — see docs/architecture.md hot-path.)
+                ///< no allocation on rebuild — see docs/explanation/architecture/index.md hot-path.)
     Button,     ///< a momentary action, not a stored value. The UI renders a button;
                 ///< a click POSTs a value and the module's onControlChanged() runs the action.
                 ///< No backing storage (ptr unused) and non-persistable — distinct

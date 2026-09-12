@@ -8,7 +8,7 @@ A named, typed value a MoonModule exposes to the UI: the binding between a class
 
 Detail: [technical](moxygen/Control.md)
 
-[Tests](../../tests/unit-tests.md#moonmodule)
+[Tests](../../reference/tests/unit-tests.md#moonmodule)
 
 ### Scheduler
 
@@ -16,7 +16,7 @@ Orders module `setup()` by declared init-order dependencies (WiFi before HTTP, H
 
 Detail: [technical](moxygen/Scheduler.md)
 
-[Tests](../../tests/unit-tests.md#scheduler)
+[Tests](../../reference/tests/unit-tests.md#scheduler)
 
 ### MoonModule
 
@@ -24,7 +24,7 @@ The base class every module derives from, carrying the shared lifecycle (`setup`
 
 Detail: [technical](moxygen/MoonModule.md)
 
-[Tests](../../tests/unit-tests.md#moonmodule)
+[Tests](../../reference/tests/unit-tests.md#moonmodule)
 
 <a id="filesystem"></a>
 
@@ -34,7 +34,7 @@ The persistence **engine**: writes control values to `/.config/*.json` and resto
 
 Detail: [technical](moxygen/FilesystemModule.md)
 
-[Tests](../../tests/unit-tests.md#filesystemmodule)
+[Tests](../../reference/tests/unit-tests.md#filesystemmodule)
 
 ## Persistence and dynamic rebuild
 

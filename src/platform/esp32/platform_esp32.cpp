@@ -732,7 +732,7 @@ static bool ethInitEmac() {
     // clocks. These are the chip's fixed RGMII IO_MUX pads — the ONLY GPIOs the EMAC accepts
     // for each signal (validated against the IO_MUX table in IDF's esp32s31/emac_periph.c;
     // a non-IO_MUX pin fails "invalid ... GPIO number"). They also match the CoreBoard
-    // schematic wiring (docs/reference/esp32-s31-coreboard.md). Passing GPIO_NUM_MAX (-1)
+    // schematic wiring (docs/reference/hardware/esp32-s31-coreboard.md). Passing GPIO_NUM_MAX (-1)
     // here would make IDF pick these same defaults; we list them explicitly for clarity.
     // A pad's GPIO by signal name. constexpr-evaluable, so a name that is not in the list fails the
     // build rather than silently wiring pad 0.

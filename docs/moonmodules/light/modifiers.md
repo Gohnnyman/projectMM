@@ -1,6 +1,6 @@
 # Modifiers
 
-Every modifier, one block each: its preview, what it does, and what each control means — together. A modifier sits between an [effect](effects.md) and the output: it reshapes *where* pixels land (or masks them) without changing the effect's drawing. Modifiers compose — a [Layer](moxygen/Layer.md) folds its whole modifier stack each rebuild; a *dynamic* modifier (one that overrides `modifyLive`) also runs a per-frame pass. See [ModifierBase](moxygen/ModifierBase.md) for the static-vs-dynamic split. Each block's emoji are its `tags()` (see the [tag emoji legend](../../architecture.md#tag-emoji-legend)); **Kind** is static (baked into the mapping at rebuild) or dynamic (per-frame remap). Modifiers are grouped into sections, and each block carries that modifier's preview, behavior, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../documentation-standards.md#module-pages).)
+Every modifier, one block each: its preview, what it does, and what each control means — together. A modifier sits between an [effect](effects.md) and the output: it reshapes *where* pixels land (or masks them) without changing the effect's drawing. Modifiers compose — a [Layer](moxygen/Layer.md) folds its whole modifier stack each rebuild; a *dynamic* modifier (one that overrides `modifyLive`) also runs a per-frame pass. See [ModifierBase](moxygen/ModifierBase.md) for the static-vs-dynamic split. Each block's emoji are its `tags()` (see the [tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend)); **Kind** is static (baked into the mapping at rebuild) or dynamic (per-frame remap). Modifiers are grouped into sections, and each block carries that modifier's preview, behavior, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../contributing/documentation-standards.md#module-pages).)
 
 A modifier folds coordinates rather than drawing, so it reaches for very little of the shared [power function](power-functions.md) toolbox — that page states the split and lists which modifiers use what.
 
@@ -16,7 +16,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/BlockModifier.md)
 
-[Tests](../../tests/unit-tests.md#blockmodifier)
+[Tests](../../reference/tests/unit-tests.md#blockmodifier)
 
 <a id="checkerboard"></a>
 
@@ -33,7 +33,7 @@ Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502
 
 Detail: [technical](moxygen/CheckerboardModifier.md)
 
-[Tests](../../tests/unit-tests.md#checkerboardmodifier)
+[Tests](../../reference/tests/unit-tests.md#checkerboardmodifier)
 
 <a id="circle"></a>
 
@@ -45,7 +45,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/CircleModifier.md)
 
-[Tests](../../tests/unit-tests.md#circlemodifier)
+[Tests](../../reference/tests/unit-tests.md#circlemodifier)
 
 <a id="mirror"></a>
 
@@ -59,7 +59,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/MirrorModifier.md)
 
-[Tests](../../tests/unit-tests.md#mirrormodifier)
+[Tests](../../reference/tests/unit-tests.md#mirrormodifier)
 
 <a id="multiply"></a>
 
@@ -76,7 +76,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/MultiplyModifier.md)
 
-[Tests](../../tests/unit-tests.md#multiplymodifier)
+[Tests](../../reference/tests/unit-tests.md#multiplymodifier)
 
 <a id="pinwheel"></a>
 
@@ -94,7 +94,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/PinwheelModifier.md)
 
-[Tests](../../tests/unit-tests.md#pinwheelmodifier)
+[Tests](../../reference/tests/unit-tests.md#pinwheelmodifier)
 
 <a id="ripplexz"></a>
 
@@ -109,7 +109,7 @@ Origin: MoonLight · by @Troy (WLEDMM Art-Net) · via [MoonLight](https://github
 
 Detail: [technical](moxygen/RippleXZModifier.md)
 
-[Tests](../../tests/unit-tests.md#ripplexzmodifier)
+[Tests](../../reference/tests/unit-tests.md#ripplexzmodifier)
 
 <a id="transpose"></a>
 
@@ -124,7 +124,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/TransposeModifier.md)
 
-[Tests](../../tests/unit-tests.md#transposemodifier)
+[Tests](../../reference/tests/unit-tests.md#transposemodifier)
 
 ## projectMM-native modifiers
 
@@ -140,7 +140,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/RandomMapModifier.md)
 
-[Tests](../../tests/unit-tests.md#randommapmodifier)
+[Tests](../../reference/tests/unit-tests.md#randommapmodifier)
 
 <a id="region"></a>
 
@@ -154,7 +154,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/RegionModifier.md)
 
-[Tests](../../tests/unit-tests.md#regionmodifier)
+[Tests](../../reference/tests/unit-tests.md#regionmodifier)
 
 <a id="rotate"></a>
 
@@ -168,5 +168,5 @@ Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502
 
 Detail: [technical](moxygen/RotateModifier.md)
 
-[Tests](../../tests/unit-tests.md#rotatemodifier)
+[Tests](../../reference/tests/unit-tests.md#rotatemodifier)
 

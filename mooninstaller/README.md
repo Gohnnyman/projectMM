@@ -174,7 +174,7 @@ pins, board-fixed Ethernet pins). A bare board whose LED or mic pins the *user*
 wires omits them; the user adds the module and sets the pins manually later.
 Inject nothing you don't know. (This is the
 MCU/Board/Device provenance rule from
-[architecture.md § Config provenance](../architecture.md#config-provenance-mcu--board--device):
+[MoonInstaller, config provenance](../docs/explanation/architecture/mooninstaller.md#config-provenance-mcu-devicemodel):
 default a pin only at the level that fixes it.) The `MM testbench S3`
 entry above adds an `AudioService` with the real, verified INMP441 mic pins
 (WS=4/SD=5/SCK=6, matching the bench wiring in

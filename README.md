@@ -34,7 +34,7 @@ If you like projectMM, give it a star, fork it, or open an issue. It helps the p
 
 🛡️ **Robust to any input**: add, delete, replace or reconfigure any module in any order, at any grid size, and the device keeps running. Every crash found becomes a regression test.
 
-Written against ESP-IDF directly with no third-party libraries, and with our own code rather than a fork: [why we write our own code](docs/why-we-write-our-own.md). How it is put together: [architecture.md](docs/architecture.md).
+Written against ESP-IDF directly with no third-party libraries, and with our own code rather than a fork: [why we write our own code](docs/explanation/why-we-write-our-own.md). How it is put together: [the architecture](docs/explanation/architecture/index.md).
 
 ## The parts
 
@@ -86,7 +86,7 @@ That uniformity pays three times over. The interface renders any module from its
 
 ![A module card: declared controls, rendered with no per-module code](docs/assets/core/Layers.png)
 
-[architecture.md § MoonModules](docs/architecture.md#moonmodules)
+Architecture: [MoonModule](docs/explanation/architecture/moonmodule.md) · Use it: [core modules](docs/moonmodules/core/) · [light modules](docs/moonmodules/light/)
 
 ### MoonCore
 
@@ -94,7 +94,7 @@ The domain-neutral runtime: the module base class, controls, scheduling, persist
 
 ![The Services card, built from declared controls](docs/assets/core/Services.png)
 
-[architecture.md § Core](docs/architecture.md#core) · [MoonModules](docs/architecture.md#moonmodules)
+Architecture: [MoonCore](docs/explanation/architecture/mooncore.md) · [MoonModule](docs/explanation/architecture/moonmodule.md) · Use it: [System](docs/moonmodules/core/system.md) · [Control](docs/moonmodules/core/control.md) · [Services](docs/moonmodules/core/services.md)
 
 ### MoonLight
 
@@ -102,7 +102,7 @@ The light domain, and the bigger half of the code: light values, layouts, layers
 
 ![The Layers panel: a layer, an effect, and its controls](docs/assets/light/Effects.png)
 
-[Effects](docs/moonmodules/light/effects.md) · [Layouts](docs/moonmodules/light/layouts.md) · [Modifiers](docs/moonmodules/light/modifiers.md) · [Drivers](docs/moonmodules/light/drivers.md)
+Architecture: [MoonLight](docs/explanation/architecture/moonlight.md) · Use it: [Effects](docs/moonmodules/light/effects.md) · [Layouts](docs/moonmodules/light/layouts.md) · [Modifiers](docs/moonmodules/light/modifiers.md) · [Drivers](docs/moonmodules/light/drivers.md)
 
 ### MoonLive
 
@@ -110,25 +110,25 @@ Scripts compiled to native machine code on the device. Write an effect in the br
 
 ![A MoonLive effect running](docs/assets/light/effects/MoonLiveEffect.gif)
 
-[MoonLiveEffect](docs/moonmodules/light/MoonLiveEffect.md) · [the script language](moonlive/README.md)
+Architecture: [MoonLive](docs/explanation/architecture/moonlive.md) · Use it: [MoonLiveEffect](docs/moonmodules/light/MoonLiveEffect.md) · [the script language](moonlive/README.md)
 
 ### MoonI80
 
 Our own DMA driver for parallel WS2812 output, one of the backends [ParallelLedDriver](docs/moonmodules/light/drivers.md#parallelled) selects. It adds a streaming ring and 74HCT595 expander support, which is what drives 12,288 lights from a single board.
 
-[LED drivers](docs/moonmodules/light/drivers.md#moonled)
+Architecture: [MoonLight drivers](docs/explanation/architecture/moonlight.md#drivers) · Use it: [LED drivers](docs/moonmodules/light/drivers.md#moonled)
 
 ### MoonBase
 
 A small maintenance image in the factory slot that installs updates into one large app slot, instead of spending half the flash on a second copy of the firmware. A power cut mid-update lands back in MoonBase rather than a half-written app.
 
-[architecture.md § MoonBase](docs/architecture.md#moonbase-the-second-boot-image)
+Architecture: [MoonBase](docs/explanation/architecture/moonbase.md) · Use it: [System modules](docs/moonmodules/core/system.md)
 
 ### MoonCloud
 
-The opt-in server side, and the only server a device talks to. [Stats](docs/mooncloud.md#stats) reports what people run so development follows real use, [Talk](docs/mooncloud.md#talk) is a public message board between devices, and [Sync](docs/mooncloud.md#sync-planned) is planned.
+The opt-in server side, and the only server a device talks to. [Stats](docs/explanation/mooncloud.md#stats) reports what people run so development follows real use, [Talk](docs/explanation/mooncloud.md#talk) is a public message board between devices, and [Sync](docs/explanation/mooncloud.md#sync-planned) is planned.
 
-[MoonCloud](docs/mooncloud.md) · [privacy policy](docs/privacy-policy.md)
+Architecture: [MoonCloud](docs/explanation/architecture/mooncloud.md) · Use it: [MoonCloud](docs/explanation/mooncloud.md) · [privacy policy](docs/legal/privacy-policy.md)
 
 ### MoonInstaller
 
@@ -136,7 +136,7 @@ The browser installer: it picks your device, flashes the matching firmware, and 
 
 ![The installer picking a device](docs/assets/ui/installer.png)
 
-[Web installer](https://moonmodules.org/projectMM/install/) · [source](mooninstaller/README.md)
+Architecture: [MoonInstaller](docs/explanation/architecture/mooninstaller.md) · Use it: [Web installer](https://moonmodules.org/projectMM/install/) · [Getting started](docs/gettingstarted.md) · [source](mooninstaller/README.md)
 
 ### MoonDeck
 
@@ -144,7 +144,7 @@ The developer console: one page that builds, flashes, runs, tests and monitors a
 
 ![MoonDeck, the dev console](docs/assets/ui/moondeck_desktop.png)
 
-[MoonDeck](moondeck/MoonDeck.md)
+Architecture: [MoonDeck](docs/explanation/architecture/moondeck.md) · Use it: [MoonDeck](moondeck/MoonDeck.md) · [building.md](docs/how-to/building.md)
 
 ## Performance
 
@@ -158,7 +158,7 @@ A full render pipeline (effect, modifier, Art-Net output) on real hardware, at 1
 
 Smaller grids run far faster: a classic ESP32 holds over 1,500 FPS at 16x16 and 81 FPS at 64x64. Pick an Ethernet device when frame rate matters, and an S3 when you need PSRAM headroom for large buffers.
 
-Per-grid and per-device tables, free-heap figures, and why WiFi costs what it does: [performance.md](docs/performance.md). The contracts CI enforces on every run live in [`test/scenarios/*.json`](test/scenarios/).
+Per-grid and per-device tables, free-heap figures, and why WiFi costs what it does: [performance.md](docs/reference/performance.md). The contracts CI enforces on every run live in [`test/scenarios/*.json`](test/scenarios/).
 
 ## Getting started
 
@@ -176,25 +176,25 @@ Per-grid and per-device tables, free-heap figures, and why WiFi costs what it do
 uv run moondeck/moondeck.py
 ```
 
-Open `http://localhost:8420` to build, run, test, flash and discover devices. Full setup and every target: [building.md](docs/building.md).
+Open `http://localhost:8420` to build, run, test, flash and discover devices. Full setup and every target: [building.md](docs/how-to/building.md).
 
 ## Documentation
 
 | Document | What's in it |
 |----------|--------------|
 | [Getting started](docs/gettingstarted.md) | Blank board to running light show |
-| [architecture.md](docs/architecture.md) | How the system is put together |
-| [building.md](docs/building.md) | Build and flash for every target |
+| [the architecture](docs/explanation/architecture/index.md) | How the system is put together |
+| [building.md](docs/how-to/building.md) | Build and flash for every target |
 | [moonmodules/](docs/moonmodules/) | One page per module: [core](docs/moonmodules/core/) and [light](docs/moonmodules/light/) |
-| [performance.md](docs/performance.md) | Timing and memory per platform |
-| [testing.md](docs/testing.md) | What the tests cover |
-| [coding-standards.md](docs/coding-standards.md) | How code here is written |
-| [documentation-standards.md](docs/documentation-standards.md) | How docs here are written |
+| [performance.md](docs/reference/performance.md) | Timing and memory per platform |
+| [testing.md](docs/reference/testing.md) | What the tests cover |
+| [coding-standards.md](docs/contributing/coding-standards.md) | How code here is written |
+| [documentation-standards.md](docs/contributing/documentation-standards.md) | How docs here are written |
 | [CLAUDE.md](CLAUDE.md) | Rules, constraints, and the process |
 
 ## How we work
 
-projectMM is built by AI agents under tight human direction. Everything in this repository is authored by agents; the **product owner** writes none of it directly. What the product owner authors is the [process](CLAUDE.md), the [architecture](docs/architecture.md), and the [module specifications](docs/moonmodules/), then decides what to build, reviews every line, runs the hardware tests, and controls every commit and release. Agents write; the product owner thinks.
+projectMM is built by AI agents under tight human direction. Everything in this repository is authored by agents; the **product owner** writes none of it directly. What the product owner authors is the [process](CLAUDE.md), the [architecture](docs/explanation/architecture/index.md), and the [module specifications](docs/moonmodules/), then decides what to build, reviews every line, runs the hardware tests, and controls every commit and release. Agents write; the product owner thinks.
 
 The roles, the principles and the full process: [CLAUDE.md](CLAUDE.md).
 
@@ -209,7 +209,7 @@ This is the current iteration of years of LED and light-system development, and 
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
 | **MoonLight** | Ground-up build: 60+ effects, memory-optimized mapping, 11 driver types | [ewowi/MoonLight](https://github.com/ewowi/MoonLight) |
 
-We built and maintained these, so projectMM rests on our own hands-on experience. Their lessons are distilled in [`docs/work/past/`](docs/work/past/README.md). We carry the ideas forward and write our own code, crediting by name whoever inspired a feature.
+We built and maintained these, so projectMM rests on our own hands-on experience. Their lessons are distilled in [`docs/work/past/`](docs/work/past/index.md). We carry the ideas forward and write our own code, crediting by name whoever inspired a feature.
 
 ## Credits
 
@@ -224,7 +224,7 @@ People whose work directly shaped parts of projectMM. We study their thinking wi
 - **The [Improv Wi-Fi](https://github.com/improv-wifi) project**: the open serial provisioning standard the web installer uses.
 - **[FastLED](https://github.com/FastLED/FastLED)**: the canonical LED-effects library whose names and models projectMM carries forward (`scale8`, `sin8`, the gradient-palette model, the `beatsin8` family) so a contributor recognizes them on sight. The implementations are our own, integer-only and hot-path-tuned.
 - **[FPP](https://github.com/FalconChristmas/fpp) (Falcon Player)**: the show player that prompted [PanelCardDriver](docs/moonmodules/light/drivers.md#panelcard): if a Linux host can feed a wall of HUB75 panels, so can the board already rendering them.
-- **[Tasmota](https://github.com/arendst/Tasmota) and Mathieu Carbou's [MycilaSafeBoot](https://github.com/mathieucarbou/MycilaSafeBoot)**: the safeboot pattern behind [MoonBase](docs/architecture.md#moonbase-the-second-boot-image), our from-scratch minimal take on it.
+- **[Tasmota](https://github.com/arendst/Tasmota) and Mathieu Carbou's [MycilaSafeBoot](https://github.com/mathieucarbou/MycilaSafeBoot)**: the safeboot pattern behind [MoonBase](docs/explanation/architecture/moonbase.md), our from-scratch minimal take on it.
 - **Damian Schneider ([dedehai](https://github.com/DedeHai))**: author of the WLED Particle System, whose shape our [particle kernel](docs/moonmodules/light/power-functions.md#particles) follows in fixed point.
 - **wladi ([myhome-control](https://shop.myhome-control.de))**: designer of the [MHC-WLED ESP32-P4 shield](https://shop.myhome-control.de/en/ABC-WLED-ESP32-P4-shield/HW10027), and the source of the pinout details that got its line-in audio working.
 

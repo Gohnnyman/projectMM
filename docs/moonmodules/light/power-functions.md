@@ -184,7 +184,7 @@ The 16-bit forms matter here: the 8-bit versions step visibly on a large fixture
 
 Two related problems. First, motion: raw linear movement reads as mechanical, so easings shape it, followers smooth it, and peak-hold gives a meter its characteristic instant-rise slow-fall. Second, randomness that is *reproducible* — addressed by position rather than drawn from a stream, so the same pixel gets the same value on every device and every frame.
 
-The framerate rule lives here too: everything in this group is driven by elapsed time, never by frame count ([architecture](../../architecture.md#effects)).
+The framerate rule lives here too: everything in this group is driven by elapsed time, never by frame count ([architecture](../../explanation/architecture/moonlight.md#effects)).
 
 <div class="mm-pf" markdown="1">
 

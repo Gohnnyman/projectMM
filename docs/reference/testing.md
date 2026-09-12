@@ -270,7 +270,7 @@ Every measurable step carries a per-target `contract` block — the **performanc
 - Both are **hand-set promises**, not auto-captured last readings. Renegotiating a contract requires `--update-contract --reason "..."` — see below.
 - `set_by` records when the contract was last (re)negotiated; `reason` records why. Both stamped automatically by `--update-contract`.
 
-Target keys match `SystemModule.firmware` on a flashed device (`esp32`, `esp32-eth`, `esp32-eth-wifi`, `esp32s3-n16r8`, …) plus `desktop-macos` / `desktop-linux` / `desktop-windows` for desktop builds. The in-process runner picks the host OS automatically; the live runner reads the device's `firmware` control. (See [architecture.md § Firmware vs deviceModel vs board](architecture.md#firmware-vs-devicemodel-vs-board) for the distinction.)
+Target keys match `SystemModule.firmware` on a flashed device (`esp32`, `esp32-eth`, `esp32-eth-wifi`, `esp32s3-n16r8`, …) plus `desktop-macos` / `desktop-linux` / `desktop-windows` for desktop builds. The in-process runner picks the host OS automatically; the live runner reads the device's `firmware` control. (See [MoonInstaller, firmware vs deviceModel vs board](../explanation/architecture/mooninstaller.md#the-three-words) for the distinction.)
 
 **Tolerance** absorbs run-to-run jitter only — not "I don't care":
 
@@ -468,7 +468,7 @@ uv run moondeck/scenario/run_live_scenario.py --compare-baseline          # chec
 
 MoonDeck's Live tab wraps the same workflow: the Network bar at the top selects the LAN, Discover/Refresh populates the device list, the Live Scenarios card runs the selected scenario against every checked device.
 
-![MoonDeck Live tab](assets/ui/moondeck_live.png)
+![MoonDeck Live tab](../assets/ui/moondeck_live.png)
 
 All scenarios use relative FPS bounds (`min_pct`) so they pass on any device — desktop at 10K FPS or ESP32 at 17 FPS. Settle time is 3 seconds to let the pipeline stabilise after rebuilds.
 

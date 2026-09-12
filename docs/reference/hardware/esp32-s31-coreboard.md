@@ -1,4 +1,4 @@
-# ESP32-S31 Function-CoreBoard-1 — hardware reference
+# ESP32-S31 Function-CoreBoard-1 hardware reference
 
 Pin maps and onboard features for the Espressif **ESP32-S31 Function-CoreBoard-1**, read from the
 official schematic so projectMM work (Ethernet, audio, SD, USB-host) reads this instead of
@@ -26,12 +26,12 @@ The onboard electret mic (J6) and speaker connect through an **ES8311 mono codec
 | I2S_LRCK (WS) | 55 | word select |
 | I2S_ASDOUT | 54 | **mic / ADC data: codec → ESP** (the record path) |
 | I2S_DSDIN | 56 | playback / DAC data: ESP → codec (speaker path) |
-| **ESP_I2C_SDA** | **51** | codec control bus — **SDA is GPIO51, SCL is GPIO50** |
+| **ESP_I2C_SDA** | **51** | codec control bus: **SDA is GPIO51, SCL is GPIO50** |
 | **ESP_I2C_SCL** | **50** | codec control bus |
 | PA_CTRL | 57 | NS4150B amplifier enable |
 
-> **SDA/SCL are GPIO51/GPIO50** — the *opposite* of what the schematic's `ESP_I2C_SDA` /
-> `ESP_I2C_SCL` net labels suggest. Bench-confirmed: the [I2cScanModule](../moonmodules/core/moxygen/I2cScanModule.md)
+> **SDA/SCL are GPIO51/GPIO50**, the *opposite* of what the schematic's `ESP_I2C_SDA` /
+> `ESP_I2C_SCL` net labels suggest. Bench-confirmed: the [I2cScanModule](../../moonmodules/core/moxygen/I2cScanModule.md)
 > (sda=51, scl=50 in the S31 catalog entry) finds the ES8311 ACK at 0x18; with 50/51 nothing
 > ACKs. The other audio pins match the schematic + the chip's GPIO table (all of GPIO50–57 are
 > plain I/O GPIOs routed through the matrix — no special-function conflict).
@@ -93,7 +93,7 @@ GPIOs are the chip's fixed IO_MUX pads (the only ones the EMAC accepts; from IDF
   power-on LED D11). **Leave it installed.** With J5 removed the board is *half-powered*: the CP2102N
   runs off USB VBUS so its port still enumerates, but the ESP32-S31's 3.3V/EN rail is incomplete and
   the chip drives nothing — you get a serial port that opens but zero bytes from the MCU, at any baud,
-  in any reset/download mode (see [lessons.md](../work/past/lessons.md), which cost an hour of chasing a
+  in any reset/download mode (see [lessons.md](../../work/past/lessons.md), which cost an hour of chasing a
   cable that wasn't the problem).
 - **40-pin GPIO header** (J2). Optional 32.768 kHz crystal footprint (Y1, NC by default).
 
@@ -118,12 +118,12 @@ The board's own peripherals claim a large, contiguous low-GPIO block; the **J2 h
 
 The two pins in **one column are physically stacked**, so a 2-pin jumper cap bridges them with no flying wire — that adjacency is what makes a column a good loopback pair.
 
-**Free on J2 for user I/O** (read off the table above, minus the board peripherals and boot straps): the numbered GPIOs on cols 5–16 (**4, 36, 37, 38, 39, 40, 42, 43, 44, 45, 46, 47, 48, 49**) are plain I/O clear of Ethernet (2, 5–19), audio (50–57), the SD lines (broken out as `D0`–`D3` / `CLK` / `CMD` by function, cols 13–16), the onboard LED (60) and the straps (0, 1, 3, 61). The `C` label at col 17 is a chip-enable, not a GPIO. **The GPIO numbers here are read from the board silkscreen and not yet bench-confirmed**: the S31 reference pin tables have been found off-by-one before (see the [S31 Ethernet lesson](../work/past/lessons.md)), so probe a pin before committing a design to it.
+**Free on J2 for user I/O** (read off the table above, minus the board peripherals and boot straps): the numbered GPIOs on cols 5–16 (**4, 36, 37, 38, 39, 40, 42, 43, 44, 45, 46, 47, 48, 49**) are plain I/O clear of Ethernet (2, 5–19), audio (50–57), the SD lines (broken out as `D0`–`D3` / `CLK` / `CMD` by function, cols 13–16), the onboard LED (60) and the straps (0, 1, 3, 61). The `C` label at col 17 is a chip-enable, not a GPIO. **The GPIO numbers here are read from the board silkscreen and not yet bench-confirmed**: the S31 reference pin tables have been found off-by-one before (see the [S31 Ethernet lesson](../../work/past/lessons.md)), so probe a pin before committing a design to it.
 
 **Recommended assignment** (what the S31 catalog entry uses):
 
 - **LED strip data:** the onboard WS2812 is on **GPIO 60** (the catalog default). For an *external* strand, use **GPIO 42** as the single-lane pick; a parallel rig (RMT/Parlio) takes the free block (**36–49**, skipping 41 which isn't broken out) for several lanes. **GPIO 4** (col 16 top) also works as an LED data pin and sits one column from the `G` / `3V3` / `5V` power rail (cols 17–20), so a single strip's data + ground + 5 V wires land close together — handy for a tidy 3-wire pigtail. It's a plain I/O with no strap or peripheral tie on this board (the SD lines beside it, D0–D3 / CLK / CMD, are broken out by function name, not GPIO number, so GPIO 4 is *not* one of them; it just neighbors that cluster on the header). The only reason it reads as "distinct" from the rest of the free run is its header position — it's over by the SD/power group rather than in the low-block on cols 8–12.
-- **Loopback self-test:** **Tx = GPIO 48, Rx = GPIO 47** — the two pins of **column 7** (48 top, 47 bottom), so a single jumper cap shorts them. A driver transmits a known WS2812 frame out Tx and reads it back on Rx to verify output on real silicon (same pattern as the P4-NANO bench's 32↔33). They sit at the top of the free run, clear of the operational LED pins so the strip wiring and the jumper don't interfere. **Bench-confirmed on the S31 for [RMT](../moonmodules/light/drivers.md#rmtled) and the [Parallel LED driver](../moonmodules/light/drivers.md#parallelled) across all three of its peripherals.** The S31 SOC has a real LCD_CAM (`SOC_LCDCAM_I80_LCD_SUPPORTED`), so its `i80` backend is LCD_CAM-driven (not the classic ESP32's I2S-in-i80-mode, which the platform layer excludes on any chip with real LCD_CAM) and can draw its frame from PSRAM. The `peripheral` selector therefore offers all three: **`i80`, `MoonI80`, and `Parlio`** — the RGMII Ethernet does not take the LCD_CAM block. Bench-verified: an 8x8 panel driving on `i80` (data GPIO 60), and Parlio on the free-block pins. Testing several drivers in a row, they all default loopback to GPIO 48, so only one can hold the pin at a time — toggle each driver's `loopbackTest` off before testing the next.
+- **Loopback self-test:** **Tx = GPIO 48, Rx = GPIO 47** — the two pins of **column 7** (48 top, 47 bottom), so a single jumper cap shorts them. A driver transmits a known WS2812 frame out Tx and reads it back on Rx to verify output on real silicon (same pattern as the P4-NANO bench's 32↔33). They sit at the top of the free run, clear of the operational LED pins so the strip wiring and the jumper don't interfere. **Bench-confirmed on the S31 for [RMT](../../moonmodules/light/drivers.md#rmtled) and the [Parallel LED driver](../../moonmodules/light/drivers.md#parallelled) across all three of its peripherals.** The S31 SOC has a real LCD_CAM (`SOC_LCDCAM_I80_LCD_SUPPORTED`), so its `i80` backend is LCD_CAM-driven (not the classic ESP32's I2S-in-i80-mode, which the platform layer excludes on any chip with real LCD_CAM) and can draw its frame from PSRAM. The `peripheral` selector therefore offers all three: **`i80`, `MoonI80`, and `Parlio`** — the RGMII Ethernet does not take the LCD_CAM block. Bench-verified: an 8x8 panel driving on `i80` (data GPIO 60), and Parlio on the free-block pins. Testing several drivers in a row, they all default loopback to GPIO 48, so only one can hold the pin at a time — toggle each driver's `loopbackTest` off before testing the next.
 
 ## SoC capabilities (from `components/soc/esp32s31/include/soc/soc_caps.h`)
 
@@ -131,8 +131,8 @@ Wi-Fi 6 · Bluetooth (no separate BLE soc-flag) · IEEE 802.15.4 (Thread/Zigbee)
 TWAI (CAN) · RMT · Parlio · LCD_CAM i80 · on-chip EMAC · PSRAM. RISC-V dual-core.
 
 The S31 catalog entry drives **LEDs** (RMT on GPIO60) and **Wi-Fi 6**, and wires an
-**[I2cScanModule](../moonmodules/core/moxygen/I2cScanModule.md)** on the codec bus (SDA 51 / SCL 50) for
-I2C bring-up. The **[AudioService](../moonmodules/core/moxygen/AudioService.md)** ES8311 path is implemented
+**[I2cScanModule](../../moonmodules/core/moxygen/I2cScanModule.md)** on the codec bus (SDA 51 / SCL 50) for
+I2C bring-up. The **[AudioService](../../moonmodules/core/moxygen/AudioService.md)** ES8311 path is implemented
 — the codec seam configures the ES8311 over I2C (codec reachable, ACK at 0x18) and AudioService
 reads the I2S mic. End-to-end mic validation depends on confirming MCLK at GPIO52; the S31 entry
 keeps **Audio** under `planned` until that bench check passes, so the installer advertises only

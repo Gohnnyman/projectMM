@@ -1,6 +1,6 @@
 name: CodeQL
 
-# Layer 4 of the analysis stack (docs/testing.md § Static analysis) — the only one that sees
+# Layer 4 of the analysis stack (docs/reference/testing.md § Static analysis) — the only one that sees
 # whole-program taint. It earns its place on one question: we parse six network packet formats
 # (ArtNet, DDP, E1.31, WLED audio sync, MQTT, WLED) plus HTTP, doing ~22 memcpy operations on
 # data arriving from the LAN, on a device with no MMU and no process isolation. Nothing else in
@@ -22,7 +22,7 @@ name: CodeQL
 
 on:
   # NOT A GATE: no `pull_request` trigger, so it cannot block a merge. The reasoning is
-  # docs/testing.md § Static analysis, which every analyser here follows. The Security tab
+  # docs/reference/testing.md § Static analysis, which every analyser here follows. The Security tab
   # keeps the open/fixed alert lifecycle, which is the baselining we would otherwise build.
   #
   # Both branches are listed on purpose. A workflow whose trigger names a branch nobody is

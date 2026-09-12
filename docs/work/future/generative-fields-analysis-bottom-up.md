@@ -156,7 +156,7 @@ Against Part 1's blocks, measured on this tree:
 | Particles | pool, gravity, drag, bounce, collide, splat render | ✅ |
 | Stored-field simulation | none | ⬜ (out of scope unless the top-down wants fluid) |
 
-The persistence contract advection needs already exists: the Layer does not clear between frames, and "a read-prior effect reads last frame's pixels via `draw::get` / `draw::blur`; the persistence *is* its state" ([architecture.md § Buffer persistence](../../architecture.md#buffer-persistence-the-layer-does-not-clear-each-frame)). What is missing is the resampler and the bit depth.
+The persistence contract advection needs already exists: the Layer does not clear between frames, and "a read-prior effect reads last frame's pixels via `draw::get` / `draw::blur`; the persistence *is* its state" ([MoonLight, buffer persistence](../../explanation/architecture/moonlight.md#buffer-persistence-the-layer-keeps-what-it-drew)). What is missing is the resampler and the bit depth.
 
 `PolarNoiseEffect` is the Part 1 shader already: polar addressing, `warp8` in polar space (the angle warped by noise), `kaleido`, a palette, with `octaves` and `warp` exposed as the cost knobs and the header stating the cost ("~4 samples/pixel at octaves=2 … on a large wall drop `octaves` to 1").
 
@@ -168,7 +168,7 @@ Advection is not expressible from a script: the 64-byte arena holds no frame of 
 
 ## The budget, measured
 
-Per-pixel cycles at 240 MHz ([power-functions-analysis-bottom-up.md § Shaders](power-functions-analysis-bottom-up.md)): ~15,600 at 16×16 @ 60 fps, **~293 at 128×128 @ 50 fps**. The S3 render-only sweep ([performance.md](../../performance.md)), µs per frame:
+Per-pixel cycles at 240 MHz ([power-functions-analysis-bottom-up.md § Shaders](power-functions-analysis-bottom-up.md)): ~15,600 at 16×16 @ 60 fps, **~293 at 128×128 @ 50 fps**. The S3 render-only sweep ([performance.md](../../reference/performance.md)), µs per frame:
 
 | Effect | 16² | 32² | 64² | 128² | per pixel at 128² |
 |---|---:|---:|---:|---:|---:|
@@ -189,10 +189,10 @@ What each shipped target brings, from the IDF SoC capability headers and our own
 |---|---|---|---|---|---|
 | classic ESP32 (Xtensa LX6) | 2 × 240 MHz | single precision | none | internal only, or 4 MB PSRAM on WROVER / 2 MB on PICO | slower; beats the S3 only on memory-bound loops (internal RAM vs PSRAM latency) |
 | ESP32-S3 (Xtensa LX7) | 2 × 240 MHz | single precision | 128-bit PIE (`SOC_SIMD_INSTRUCTION_SUPPORTED`) | 8 MB octal PSRAM | the reference row in this document |
-| ESP32-P4 (RISC-V) | 2 × 400 MHz | single precision | PIE + hardware loops (`SOC_CPU_HAS_PIE`, `SOC_CPU_HAS_HWLOOP`) | 32 MB PSRAM | ~3× on heavy compute ([performance.md](../../performance.md)) |
+| ESP32-P4 (RISC-V) | 2 × 400 MHz | single precision | PIE + hardware loops (`SOC_CPU_HAS_PIE`, `SOC_CPU_HAS_HWLOOP`) | 32 MB PSRAM | ~3× on heavy compute ([performance.md](../../reference/performance.md)) |
 | ESP32-S31 (RISC-V) | 2 × 320 MHz | single precision | PIE + hardware loops | PSRAM | between the S3 and the P4 |
-| desktop | GHz class | double and single | NEON / SSE / AVX | unbounded | 20-40× an S3 per core, plus SIMD ([performance.md](../../performance.md), the `collide` measurement) |
-| Teensy 4.x (Cortex-M7), a future target | 1 × 600 MHz | single and double | none (DSP instructions) | 1 MB internal, no PSRAM | not measured; listed in [architecture.md § Scaling to available memory](../../reference/firmware-variants.md#scaling-to-available-memory) as a supported class |
+| desktop | GHz class | double and single | NEON / SSE / AVX | unbounded | 20-40× an S3 per core, plus SIMD ([performance.md](../../reference/performance.md), the `collide` measurement) |
+| Teensy 4.x (Cortex-M7), a future target | 1 × 600 MHz | single and double | none (DSP instructions) | 1 MB internal, no PSRAM | not measured; listed in [architecture.md § Scaling to available memory](../../reference/hardware/firmware-variants.md#scaling-to-available-memory) as a supported class |
 
 **Can the FPU help?** Every target has one, so a float kernel is legal everywhere, and the repo already has the precedent: `raymarch.h` is compiled only where the SoC declares an FPU, as "the one bounded exception to the integer-only render path", while `shader.h` stays fixed point and runs everywhere ([power-functions.md § Raymarching](../../moonmodules/light/power-functions.md#raymarching-one-technique-inside-a-shader)). The honest expectation: on these cores a float multiply costs about what an integer multiply costs, so an FPU does not make a noise sample cheaper; it makes square roots, arctangents and trig cheap enough to skip the tables, and it lets a float reference algorithm run unconverted where an exact fixed-point port is not worth writing yet. The portable contract stays fixed point; the FPU is a per-target acceleration behind it, per the standing decision.
 
@@ -209,7 +209,7 @@ What each shipped target brings, from the IDF SoC capability headers and our own
 | 64×64 | 1 | 4 | ~45 |
 | 128×128 | 0 (one sample = 19 fps) | 1 | ~11 |
 
-So the ESP32 class stops at one sample per pixel on a 128² wall (S3) to one or two (P4), and carries a rich 3-to-12-layer composition only up to about 32×32 (S3) or 64×64 (P4). Beyond that line the desktop continues without a change of code: it is the same effect on the same contract, with SIMD and the clock on its side, and it already drives lights over the network as a processing node ([architecture.md § Drivers](../../architecture.md#drivers): ArtNet, DDP, E1.31). Advection moves the border differently: its per-pixel cost is fixed and small, so the S3 and P4 carry it to a 128² wall as long as the wide color state fits PSRAM; the classic without PSRAM stops at panel size for lack of memory, not cycles.
+So the ESP32 class stops at one sample per pixel on a 128² wall (S3) to one or two (P4), and carries a rich 3-to-12-layer composition only up to about 32×32 (S3) or 64×64 (P4). Beyond that line the desktop continues without a change of code: it is the same effect on the same contract, with SIMD and the clock on its side, and it already drives lights over the network as a processing node ([MoonLight, drivers](../../explanation/architecture/moonlight.md#drivers): ArtNet, DDP, E1.31). Advection moves the border differently: its per-pixel cost is fixed and small, so the S3 and P4 carry it to a 128² wall as long as the wide color state fits PSRAM; the classic without PSRAM stops at panel size for lack of memory, not cycles.
 
 ## What we need to add
 
@@ -232,7 +232,7 @@ The bottom-up settles what the top-down can take as given: the family is two tec
 
 ### Prompt for the agent that writes the top-down
 
-> Read `CLAUDE.md`, `docs/architecture.md` (§ Hot path discipline, § Effects and Layer, § Buffer persistence, § MoonLive), `docs/coding-standards.md`, `docs/backlog/generative-fields-analysis-bottom-up.md` (this document, in full: Part 1 is the specification language, Part 2 the examples, Part 3 the gap), `docs/backlog/power-functions-analysis-top-down.md` (the shape and the standing decisions: dimension-generic, one contract everywhere with per-target acceleration, fixed point invisible to the writer, the 16-bit contract, particles as the stateful precedent), `docs/moonmodules/light/power-functions.md` (what exists), and `docs/backlog/moonlive-language-roadmap.md` § 4c and § 2 (the per-pixel call cost and the multi-argument host-call blocker).
+> Read `CLAUDE.md`, `docs/explanation/architecture/index.md` (§ Hot path discipline, § Effects and Layer, § Buffer persistence, § MoonLive), `docs/contributing/coding-standards.md`, `docs/backlog/generative-fields-analysis-bottom-up.md` (this document, in full: Part 1 is the specification language, Part 2 the examples, Part 3 the gap), `docs/backlog/power-functions-analysis-top-down.md` (the shape and the standing decisions: dimension-generic, one contract everywhere with per-target acceleration, fixed point invisible to the writer, the 16-bit contract, particles as the stateful precedent), `docs/moonmodules/light/power-functions.md` (what exists), and `docs/backlog/moonlive-language-roadmap.md` § 4c and § 2 (the per-pixel call cost and the multi-argument host-call blocker).
 >
 > Write `docs/backlog/generative-fields-analysis-top-down.md`: the implementation spec for the generative-fields family in projectMM, for compiled effects and for MoonLive scripts, on the power-function library. Use the house format of the power-functions top-down (status legend, TL;DR, numbered sections, decisions for sign-off, out of scope). Present tense for what exists, forward-looking only under the banner. American spelling, no em-dashes. Specify every kernel from Part 1's primary sources by its textbook name and algorithm; use Part 2 only for measured numbers, parameter vocabularies and precision choices, never as a source of code, and record prior art per module the way `PolarNoiseEffect.h` does.
 >
