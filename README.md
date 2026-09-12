@@ -168,7 +168,7 @@ Per-grid and per-device tables, free-heap figures, and why WiFi costs what it do
 
 - **macOS arm64**: `.dmg`, drag to Applications. Ad-hoc signed, so right-click and Open the first time.
 - **Windows x64**: `-setup.exe` installs for your user without an admin prompt. Unsigned, so SmartScreen asks once.
-- **Linux x64**: `.tar.gz`, or `.deb` on Debian, Ubuntu and Raspberry Pi OS.
+- **Linux x64 and arm64**: `.tar.gz`, or `.deb` on Debian, Ubuntu and Raspberry Pi OS. The arm64 build covers a Raspberry Pi, a NanoPi and most 64-bit boards.
 
 **From source**: you need [uv](https://docs.astral.sh/uv/), CMake 3.20+ and a C++20 compiler, plus ESP-IDF v6.x for ESP32. Then launch [MoonDeck](#moondeck):
 
