@@ -17,26 +17,31 @@ uname -m
 | `uname -m` says | Machine | Route |
 |---|---|---|
 | `x86_64` | Intel or AMD PC, server or VM | Install the package |
-| `aarch64` | arm64 board: Pi, NanoPi, most SBCs | Build from source |
+| `aarch64` | arm64 board: Pi, NanoPi, most SBCs | Install the package |
 
-The released Linux binaries are x86-64 only, so an arm64 board builds from source and ends up with the identical program. A Pi 4 or 5 has ample headroom. A NanoPi R28S has two Gigabit ports, so it can sit between the house network and the lighting network, and 1 GB of RAM, which runs projectMM comfortably and compiles it tightly (see the swap note in step 6). Both routes assume a Debian-based system (Debian, Ubuntu, Raspberry Pi OS, Armbian); on another distribution, translate the package names in step 5.
+Both architectures get a released binary, so the route below is the same one and only the filename differs. Building from source is still there for a distribution the package does not suit, and for developing. A Pi 4 or 5 has ample headroom. A NanoPi R28S has two Gigabit ports, so it can sit between the house network and the lighting network, and 1 GB of RAM, which runs projectMM comfortably. Everything here assumes a Debian-based system (Debian, Ubuntu, Raspberry Pi OS, Armbian); on another distribution, translate the package names.
 
 > `x64` and `amd64` are two names for the same thing. `arm64` is different machine code.
 
-## x86-64: install the package
+## Install the package
 
-The [releases page](https://github.com/MoonModules/projectMM/releases/latest) carries `projectmm_X.Y.Z_amd64.deb`:
+The [releases page](https://github.com/MoonModules/projectMM/releases/latest) carries one `.deb` per architecture. Take the one matching `uname -m`: `_amd64.deb` for `x86_64`, `_arm64.deb` for `aarch64`.
 
 ```sh
-sudo apt install ./projectmm_X.Y.Z_amd64.deb
+sudo apt install ./projectmm_X.Y.Z_amd64.deb     # x86_64
+sudo apt install ./projectmm_X.Y.Z_arm64.deb     # aarch64
 projectMM
 ```
 
 Open `http://<machine>:8080`. A `.tar.gz` to unpack anywhere is on the same page.
 
-## arm64: build from source
+**A package built for the wrong architecture refuses to install**, which is the failure you want: `apt` rejects it by name rather than installing something that cannot run.
 
-Allow an hour the first time, most of it waiting.
+The arm64 build targets glibc 2.35, so it installs on Raspberry Pi OS Bookworm, Debian 12 and 13, Ubuntu 22.04 and later. On something older, build from source below.
+
+## Build from source
+
+For a distribution the package does not suit, an older glibc, or to develop on the board. Allow an hour the first time, most of it waiting.
 
 ### 1. Write an OS image to the SD card
 
@@ -57,19 +62,32 @@ ping raspberrypi.local          # or NanoPi-R28S.local
 arp -a                          # everything the network has seen
 ```
 
-Your router's client list is the fallback when mDNS does not resolve.
+Your router's client list is the fallback when mDNS does not resolve. A name that never resolves means the board has no mDNS responder: Raspberry Pi OS ships one, a minimal Debian or FriendlyELEC image often does not, so `.local` fails while the IP answers. Log in by IP and fix it below.
 
 ### 3. Log in
 
 ```sh
 ssh <you>@<hostname>.local      # Raspberry Pi OS: the user you set in Imager
 ssh pi@NanoPi-R28S              # FriendlyELEC Debian: user pi, password pi
+ssh pi@192.168.1.156            # by address, when neither name resolves
+```
+
+**A wall of `setlocale: LC_CTYPE: cannot change locale (UTF-8)` warnings on login is harmless.** macOS sends its own `LC_CTYPE` to the board, which has no locale by that name, and bash repeats the warning per startup file. It fires before anything you run. Silence it on the board:
+
+```sh
+sudo apt install -y locales && sudo locale-gen en_US.UTF-8
 ```
 
 Change a default password at once:
 
 ```sh
 passwd
+```
+
+**If `.local` did not resolve**, install the mDNS responder now and the name works from the next boot:
+
+```sh
+sudo apt install -y avahi-daemon
 ```
 
 Without network access, attach a keyboard and monitor and configure it there: `sudo nmtui` for WiFi and addresses, `ip ad` to see what the board has. On a NanoPi, `sudo nmtui` also configures the second port.
@@ -150,7 +168,7 @@ projectMM writes to disk only when settings change, so the card is a fine home f
 
 ## Containers
 
-Docker runs a full instance on anything with an amd64 kernel; the command is in the [README](https://github.com/MoonModules/projectMM#readme). A container shares the host kernel and runs native instructions, so an amd64 image needs an amd64 host. On an arm64 board, build from source as above.
+Docker runs a full instance on amd64 and arm64 alike; the command is in the [README](https://github.com/MoonModules/projectMM#readme). The published image carries both, so a board and a server pull the same tag and each gets native instructions.
 
 ## Where to go next
 
