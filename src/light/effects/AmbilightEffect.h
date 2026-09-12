@@ -34,7 +34,6 @@ public:
     uint8_t saturation = 130;     // percent of the distance from gray; 100 = the mean untouched
     uint8_t smoothing = 0;        // 0 = follow the frame exactly; higher = slower to move
     uint8_t snapAbove = 80;       // jump rather than smooth when a channel moves further than this; 0 = never
-    uint16_t fadeInMs = 0;        // ramp up from black over this long when a picture first arrives; 0 = off
     uint8_t edgeDepth = 0;        // percent of the frame the OUTERMOST positions look in; 0 = their own share
     bool detectBlackBars = false; // find the letterbox and map the lights across the picture
     uint8_t barLevel = 12;        // a channel at or below this counts as bar; ~5%, for compression noise
@@ -46,8 +45,6 @@ public:
         // A cut is a real jump, and smoothing through it reads as the lights lagging the picture.
         controls_.addControl("snapAbove", snapAbove, 0, 255);
         controls_.setHidden(controls_.count() - 1, smoothing == 0);
-        // Its own control because smoothing lags the COLOR and this ramps the LEVEL.
-        controls_.addControl("fadeInMs", fadeInMs, 0, 10000);
         controls_.addControl("edgeDepth", edgeDepth, 0, 50); // Hyperion samples ~8%
         // - a letterboxed film puts bars where the top and bottom lights look, so they go dark
         // - edgeDepth cannot help: it widens a zone from the edge, so the bar stays inside it
@@ -104,7 +101,8 @@ public:
     bool columnLit(const MappingLUT& lut, size_t i, size_t slice) const MM_NONBLOCKING {
         const lengthType d = depth();
         for (lengthType z = 0; z < d; z++)
-            if (lut.hasDestination(static_cast<nrOfLightsType>(i + static_cast<size_t>(z) * slice))) return true;
+            if (lut.hasDestination(static_cast<nrOfLightsType>(i + static_cast<size_t>(z) * slice)))
+                return true;
         return false;
     }
 
@@ -132,22 +130,20 @@ public:
         if (region.width <= 0 || region.height <= 0) return;
 
         const bool canSmooth = smootherReady(lightsX, lightsY);
-        if (!primed_) fadeStart_ = elapsed(); // a picture arriving after a gap restarts the ramp
-        const uint16_t level = fadeLevel();
 
         // Three ways to reach the same set of positions, cheapest first.
         if (allLit_) {
             // Nothing to skip: the plain box, no clear, no mapping queries.
             for (lengthType y = 0; y < lightsY; y++)
                 for (lengthType x = 0; x < lightsX; x++)
-                    paint(out, *frame, region, x, y, lightsX, lightsY, canSmooth, level);
+                    paint(out, *frame, region, x, y, lightsX, lightsY, canSmooth);
         } else if (lit_) {
             // The list. Unlit positions are never written, so they keep the black
             // Layer::prepare() left on the rebuild this effect's prepare() rode in on, BlendMap
             // never reads them, but PreviewDriver shows the raw buffer and must not see a ghost.
             for (size_t i = 0; i < litCount_; i++)
                 paint(out, *frame, region, static_cast<lengthType>(lit_[i] & 0xFFFF),
-                      static_cast<lengthType>(lit_[i] >> 16), lightsX, lightsY, canSmooth, level);
+                      static_cast<lengthType>(lit_[i] >> 16), lightsX, lightsY, canSmooth);
         } else {
             // The list could not be allocated. Same output, asking the mapping per position -
             // which is the cost the list exists to avoid.
@@ -157,7 +153,7 @@ public:
             for (lengthType y = 0; y < lightsY; y++)
                 for (lengthType x = 0; x < lightsX; x++)
                     if (columnLit(lut, static_cast<size_t>(y) * lightsX + x, slice))
-                        paint(out, *frame, region, x, y, lightsX, lightsY, canSmooth, level);
+                        paint(out, *frame, region, x, y, lightsX, lightsY, canSmooth);
         }
         primed_ = true;
     }
@@ -182,13 +178,11 @@ private:
         Span rows(int y, int lightsY) const { return spanFor(y, lightsY, height, deepY).shifted(top); }
     };
 
-    /// One light position: average its pixels, correct, smooth, level, write.
+    /// One light position: average its pixels, correct, smooth, write.
     void paint(const draw::Canvas& out, const VideoFrame& frame, const Region& region, lengthType x,
-               lengthType y, lengthType lightsX, lengthType lightsY, bool canSmooth,
-               uint16_t level) MM_NONBLOCKING {
+               lengthType y, lengthType lightsX, lengthType lightsY, bool canSmooth) MM_NONBLOCKING {
         RGB color = adjust(meanOf(frame, region.cols(x, lightsX), region.rows(y, lightsY)));
         if (canSmooth) color = smooth(static_cast<size_t>(y) * lightsX + x, color);
-        if (level != 256) color = dim(color, level);
         draw::pixel(out, {x, y, 0}, color);
     }
 
@@ -348,20 +342,6 @@ private:
         return c;
     }
 
-    /// How far up the ramp this frame is, 256 (unity) once it is over or when fadeInMs is 0.
-    /// Unsigned subtraction, so the millisecond counter wrapping costs one frame at full level.
-    uint16_t fadeLevel() const MM_NONBLOCKING {
-        if (!fadeInMs) return 256;
-        const uint32_t since = elapsed() - fadeStart_;
-        return since < fadeInMs ? static_cast<uint16_t>((since * 256u) / fadeInMs) : 256;
-    }
-
-    /// Scale by `level`/256, the fade-in envelope.
-    static RGB dim(RGB c, uint16_t level) MM_NONBLOCKING {
-        return {static_cast<uint8_t>((c.r * level) >> 8), static_cast<uint8_t>((c.g * level) >> 8),
-                static_cast<uint8_t>((c.b * level) >> 8)};
-    }
-
     /// Walk each channel a fraction of the way toward `color`. The state is 8.8 so the fraction of
     /// a step survives between frames: in whole bytes a slow setting rounds every step to zero.
     RGB smooth(size_t lightId, RGB color) MM_NONBLOCKING {
@@ -397,7 +377,6 @@ private:
     ScratchBuffer<uint16_t> state_{*this}; // 8.8 per channel per light position, while smoothing is on
     bool primed_ = false;                  // false until one frame has been written
     uint32_t lastSeq_ = 0;                 // the frame already on the strip
-    uint32_t fadeStart_ = 0;               // millis() when the current picture first arrived
 };
 
 } // namespace mm

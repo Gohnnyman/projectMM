@@ -49,6 +49,10 @@ public:
     char file[64] = "/frame.ppm";
     uint8_t usbFormat = 0;   // index into the device's advertised list; the only USB setting persisted
     uint16_t staleMs = 2000; // gap tolerated before the lights go dark
+    // Sweep rate of the test pattern's white block, in PIXELS PER SECOND. 0 parks it, which makes
+    // the pattern a still reference for checking a border light against a known color. 17 is the
+    // rate it used to be hard-coded to: a sweep every ~4 s.
+    uint8_t patternSpeed = 17;
 
     // Synthesized-pattern extent. Small on purpose: a border effect averages the frame down to a
     // few dozen values, so pixels beyond that buy nothing but bandwidth and decode time. 16:9.
@@ -71,6 +75,10 @@ public:
 
     void defineControls() override {
         controls_.addSelect("source", source, kSourceOptions, kSourceCount);
+        // Live (not in affectsPrepare): the rate changes what the NEXT frame draws, and nothing
+        // about the buffer, so it must not tear the pipeline down to take effect.
+        controls_.addControl("patternSpeed", patternSpeed, 0, 255);
+        controls_.setHidden(controls_.count() - 1, source != kSourcePattern);
         controls_.addText("file", file, sizeof(file));
         controls_.setHidden(controls_.count() - 1, source != kSourceFile);
         controls_.addButton("reload");
@@ -111,6 +119,11 @@ public:
         seat_.claim();  // re-take after a disable/enable cycle: release() vacated it
         if (source >= kSourceCount) source = kSourcePattern; // a config restored from a capture-capable board
         if (source == kSourceUsb) {
+            // Resolve the selected row FIRST: usbWidth/Height are what captureCurrent() compares
+            // against, and they only ever moved inside openCapture(). A restored usbFormat that
+            // arrives after the first prepare would otherwise never reach them, so the check would
+            // keep reporting the stale request as current and never reopen.
+            applyFormat();
             // Every tree-wide rebuild lands here too (a layout resized, a module added), and the
             // device stays open through those: a reopen drops the published frame and blocks on
             // negotiation. It happens only for what actually changed the request.
@@ -148,9 +161,19 @@ public:
     /// prepare() on the render thread: the only thread that may open or close the device, and the
     /// one path by which a device that came back is picked up again.
     void tick1s() MM_NONBLOCKING override {
-        if (source == kSourceUsb && platform::videoCaptureFormatGeneration() != formatGen_)
+        if (source == kSourceUsb && (platform::videoCaptureFormatGeneration() != formatGen_ || selectionStale()))
             if (Scheduler* s = Scheduler::instance()) s->requestPrepareTree();
         MoonModule::tick1s();
+    }
+
+    /// Does the selected row disagree with what is actually open? Boot restores control VALUES
+    /// after prepare() has already run, so a persisted `usbFormat` arrives too late to reach the
+    /// device: prepare opened row 0 and nothing asked it to look again. Watching the generation
+    /// alone never catches that, because no device came or went. Four int compares.
+    bool selectionStale() const MM_NONBLOCKING {
+        if (!capture_.impl || usbFormat >= formatCount_) return false;
+        const platform::VideoCaptureFormat& f = formats_[usbFormat];
+        return f.width != opened_.width || f.height != opened_.height || f.fps != opened_.fps;
     }
 
     void release() override {
@@ -231,7 +254,10 @@ private:
                           formats_[i].height, formats_[i].fps);
             formatOptions_[i] = formatLabels_[i];
         }
-        if (usbFormat >= formatCount_) usbFormat = 0;
+        // Only once there IS a list. An empty one means the device has not enumerated yet, not
+        // that the pick is invalid: clamping against 0 threw away a restored index every boot, and
+        // the reopen that would have applied it never ran, so the stream stayed on row 0.
+        if (formatCount_ && usbFormat >= formatCount_) usbFormat = 0;
         // On the GENERATION, not the count: a replacement device advertising the same number of
         // different formats overwrites the labels in place, and a client with no schema resync
         // would go on offering the old ones.
@@ -271,9 +297,14 @@ private:
     platform::VideoCaptureFormat opened_ = {}; // the request the open device was made with
 
     // Derived from the selected row, never typed: what actually gets requested of the device, and
-    // the opening bid before one has listed its formats. 16:9 on purpose: a 4:3 capture makes a
-    // 16:9 source letterbox into it, and the border zones then average bars instead of picture.
-    uint16_t usbWidth = 848;
+    // the opening bid before one has listed its formats. 640x480 because almost every UVC device
+    // offers it, and a bid nothing offers costs a full uvc_host_stream_open timeout (3 s) at every
+    // boot before the real list can be read: an MS2130 grabber has no 848x480 at all.
+    //
+    // It is 4:3, and a 16:9 source letterboxes into it, so the top and bottom zones would average
+    // bars rather than picture. That only applies to this first probe: the moment the device lists
+    // its formats, `usbFormat` picks the row, and a 16:9 one should be chosen there.
+    uint16_t usbWidth = 640;
     uint16_t usbHeight = 480;
     uint8_t usbFps = 60;
 
@@ -281,7 +312,7 @@ private:
     uint16_t shownW_ = 0, shownH_ = 0; // the dimensions the status last reported
 
     static constexpr int kMaxHeaderBytes = 256; // room for a comment, and its own error if not
-    static constexpr uint8_t kMaxFormats = 24;
+    static constexpr uint8_t kMaxFormats = platform::kVideoCaptureMaxFormats;
     platform::VideoCaptureFormat formats_[kMaxFormats] = {};
     char formatLabels_[kMaxFormats][24] = {};
     const char* formatOptions_[kMaxFormats] = {};
@@ -290,6 +321,10 @@ private:
     ScratchBuffer<uint8_t> buf_{*this}; // width*height*3, accounted in dynamicBytes()
     VideoFrame frame_;
     uint32_t seq_ = 0;
+    // Sweep position in 1/1000 px and the millis() it was last advanced at. Milli-pixels because a
+    // per-second rate sampled per tick rounds to zero motion in whole pixels at 1 px/s.
+    uint32_t sweepMilliPx_ = 0;
+    uint32_t sweepAtMs_ = 0;
     char status_[24] = {};
 
     /// Drop the published frame and say why. Returns false so every failing path reads as one line,
@@ -324,8 +359,14 @@ private:
     void renderPattern() {
         uint8_t* p = buf_.data();
         if (!p) return;
-        // One sweep every ~4 s, so motion is obvious without being frantic.
-        const int sweepX = static_cast<int>((platform::millis() / 60u) % kPatternW);
+        // An accumulator fed by elapsed time, not a position derived from millis(): a derived one
+        // jumps the block the instant the rate changes and cannot express "stopped" at all.
+        const uint32_t now = platform::millis();
+        if (sweepAtMs_ == 0) sweepAtMs_ = now; // first frame: no elapsed time to charge for
+        const uint32_t elapsed = now - sweepAtMs_;
+        sweepAtMs_ = now;
+        if (patternSpeed) sweepMilliPx_ = (sweepMilliPx_ + elapsed * patternSpeed) % (kPatternW * 1000u);
+        const int sweepX = static_cast<int>(sweepMilliPx_ / 1000u);
         for (int y = 0; y < kPatternH; y++) {
             for (int x = 0; x < kPatternW; x++) {
                 // A white block riding the top edge: shows liveness, and which way "forward" runs.

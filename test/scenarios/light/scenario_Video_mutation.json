@@ -170,12 +170,12 @@
       }
     },
     {
-      "name": "configure-consumer-fade",
-      "description": "Configure the consumer while it renders: the fade ramp, which restarts from the current elapsed() rather than resetting the pipeline.",
+      "name": "configure-consumer-brightness",
+      "description": "Configure the consumer while it renders: a plain scalar write that touches no buffer, so the resize in the next step is the only allocation under test.",
       "op": "set_control",
       "id": "Ambi",
-      "key": "fadeInMs",
-      "value": 500
+      "key": "brightness",
+      "value": 200
     },
     {
       "name": "configure-consumer-smoothing",

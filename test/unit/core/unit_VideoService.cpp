@@ -151,3 +151,34 @@ TEST_CASE("VideoService PPM: the separator must be whitespace, not merely presen
     CHECK(parse("P6\n2 2\n255X", w, h) == -1);
     CHECK(parse("P6\n2 2\n255\n", w, h) == 11);   // the same header with a real separator
 }
+
+// The sweep is a RATE, not a phase of the clock: it advances by the time elapsed between frames at
+// patternSpeed pixels per second, so a rate change moves smoothly rather than jumping, and 0 parks
+// the block. That is what makes the pattern a still reference for checking one border light.
+TEST_CASE("VideoService: the test pattern sweeps at patternSpeed pixels per second, and 0 parks it") {
+    struct ClockGuard { ~ClockGuard() { mm::platform::setTestNowMs(0); } } guard;
+    // Column of the white block on the top row, which is otherwise the red band.
+    auto sweepX = [] {
+        const mm::VideoFrame* f = VideoService::latestFrame();
+        for (int x = 0; x < f->width; x++)
+            if (f->rgb[static_cast<size_t>(x) * 3 + 1] == 255) return x;
+        return -1;
+    };
+
+    mm::platform::setTestNowMs(1000);
+    VideoService v;
+    v.source = VideoService::kSourcePattern;
+    v.patternSpeed = 10;
+    v.applyState(); // the first frame takes the clock and charges nothing
+    const int start = sweepX();
+    REQUIRE(start >= 0);
+
+    mm::platform::setTestNowMs(1500); // 0.5 s at 10 px/s
+    v.tick();
+    CHECK(sweepX() == (start + 5) % VideoService::kPatternW);
+
+    v.patternSpeed = 0;
+    mm::platform::setTestNowMs(4000);
+    v.tick();
+    CHECK(sweepX() == (start + 5) % VideoService::kPatternW); // parked, however long passes
+}

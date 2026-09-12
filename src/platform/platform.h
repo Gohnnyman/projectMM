@@ -1496,6 +1496,10 @@ struct VideoCaptureFormat {
     uint8_t fps = 0;
 };
 
+// Rows kept per device. A grabber lists its modes largest first, so a cap that is too low hides
+// exactly the cheap ones.
+constexpr size_t kVideoCaptureMaxFormats = 64;
+
 // Fills `out` with up to `max` of those rows and returns how many were written. Learned when a
 // device enumerates, so it survives a failed videoCaptureInit, which is exactly when it is worth
 // reading. 0 means no device has been seen yet.

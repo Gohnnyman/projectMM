@@ -24,10 +24,6 @@ namespace platform = mm::platform;
 
 namespace {
 
-// Restore the real clock after any test that froze it, so a frozen value cannot leak into
-// order-dependent neighbors.
-struct ClockGuard { ~ClockGuard() { mm::platform::setTestNowMs(0); } };
-
 // A live VideoService in test-pattern mode: red top band, blue bottom, yellow left, green right.
 // Its seat is claimed on construction and vacated on destruction, so each case starts clean.
 struct PatternSource {
@@ -263,56 +259,6 @@ TEST_CASE("AmbilightEffect: a heavily smoothed light converges exactly, rising a
     rig.fx.brightness = 255;
     for (int i = 0; i < 2000; i++) rig.tickOnly(src.svc);
     CHECK(rig.px(4, 0)[0] == bright);
-}
-
-// The soft start rides OUTSIDE the smoother: the accumulators keep tracking the true picture while
-// only the emitted level ramps. Off by default, so the picture lands at full the moment it arrives.
-TEST_CASE("AmbilightEffect: fadeInMs off means the first picture lands at full level") {
-    PatternSource src;
-    Rig instant(8, 8), faded(8, 8);
-    instant.fx.saturation = 100;
-    faded.fx.saturation = 100;
-    faded.fx.fadeInMs = 0;
-    instant.render();
-    faded.render();
-    CHECK(std::memcmp(instant.px(4, 0), faded.px(4, 0), 3) == 0);
-}
-
-// With a ramp set, the first frame must be dark and later frames brighter: the whole point being
-// that a room does not jump to full brightness the instant a console wakes up.
-//
-// The clock is DRIVEN: a real-time loop outruns a 4000 ms ramp and leaves the level where it
-// started. The no-ramp rig alongside is the target, sampled from the same frame at the same
-// instant, so the pattern's moving sweep cannot read as the envelope.
-TEST_CASE("AmbilightEffect: fadeInMs ramps the first frames up from black") {
-    ClockGuard guard;
-    PatternSource src;
-    Rig faded(8, 8), target(8, 8);
-    faded.fx.saturation = 100;
-    faded.fx.fadeInMs = 4000;
-    target.fx.saturation = 100;
-    target.fx.fadeInMs = 0; // no envelope: what the faded rig has to arrive at
-
-    platform::setTestNowMs(1000); // fadeStart_ is taken here, so the ramp opens at zero
-    faded.render();
-    target.render();
-    const uint8_t start = faded.px(4, 0)[0];
-    CHECK(start == 0);                     // the envelope is shut at t = fadeStart
-    CHECK(target.px(4, 0)[0] > 0);         // ...and there is really a picture behind it
-
-    platform::setTestNowMs(3000); // half of a 4000 ms ramp
-    src.svc.tick();               // one new frame, which both rigs then read
-    faded.tickOnly();
-    target.tickOnly();
-    const uint8_t mid = faded.px(4, 0)[0], midTarget = target.px(4, 0)[0];
-    CHECK(mid > start);      // it MOVED
-    CHECK(mid < midTarget);  // and has not arrived yet
-
-    platform::setTestNowMs(5001); // past the end of the ramp
-    src.svc.tick();
-    faded.tickOnly();
-    target.tickOnly();
-    CHECK(faded.px(4, 0)[0] == target.px(4, 0)[0]); // arrives, not merely stays under
 }
 
 // --- edgeDepth ---------------------------------------------------------------------------------

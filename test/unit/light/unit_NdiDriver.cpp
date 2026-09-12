@@ -18,7 +18,7 @@
 namespace {
 
 // The NDI seams and virtual time are process-global, so a REQUIRE that aborts mid-case would
-// strand a forced mode (or a frozen clock) for whichever test runs next — the classic
+// strand a forced mode (or a frozen clock) for whichever test runs next: the classic
 // passes-alone / fails-in-sequence flake. A scope guard restores both however the case leaves.
 struct NdiSeamGuard {
     explicit NdiSeamGuard(mm::platform::NdiTestMode mode) {
@@ -60,7 +60,7 @@ void setUp(mm::NdiDriver& driver, mm::Buffer& source, Wall& wall, mm::nrOfLights
     mm::platform::ndiTestClearFrames();
 }
 
-// Paint light `i` a flat colour, so a test can name the bytes it expects back.
+// Paint light `i` a flat color, so a test can name the bytes it expects back.
 void paint(mm::Buffer& b, mm::nrOfLightsType i, uint8_t r, uint8_t g, uint8_t bl) {
     uint8_t* p = b.data() + static_cast<size_t>(i) * 3;
     p[0] = r; p[1] = g; p[2] = bl;
@@ -159,7 +159,7 @@ TEST_CASE("NdiDriver holds its frame rate to the fps ceiling") {
     CHECK(mm::platform::ndiTestFrameCount() == 2);
 }
 
-// A blank sourceName means the device's own name — what a user scanning a receiver's source list
+// A blank sourceName means the device's own name: what a user scanning a receiver's source list
 // expects to find, rather than an empty entry.
 TEST_CASE("NdiDriver names the source after the device when left blank") {
     NdiSeamGuard seam{mm::platform::NdiTestMode::ForceAvailable};
@@ -176,7 +176,7 @@ TEST_CASE("NdiDriver names the source after the device when left blank") {
     CHECK(std::string(mm::platform::ndiTestSenderName()) == "Wall");
 }
 
-// A layer smaller than the frame must not leak the previous frame's pixels into the tail — a
+// A layer smaller than the frame must not leak the previous frame's pixels into the tail: a
 // shrunk layout should go dark there, not show stale image.
 TEST_CASE("NdiDriver blanks the tail when the layer is smaller than the frame") {
     NdiSeamGuard seam{mm::platform::NdiTestMode::ForceAvailable};

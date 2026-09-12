@@ -25,6 +25,7 @@
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
 
 #include "driver/jpeg_decode.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "usb/usb_host.h"
 #include "usb/uvc_host.h"
@@ -33,7 +34,9 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cstring>
 
 namespace mm::platform {
 namespace {
@@ -77,7 +80,7 @@ struct Capture {
 
 // What the attached device advertises. File scope rather than inside Capture because it is learned
 // from the driver event, which fires before a stream exists and outlives a failed open.
-constexpr size_t kMaxFormats = 24;
+constexpr size_t kMaxFormats = kVideoCaptureMaxFormats;
 uvc_host_frame_info_t frameList[kMaxFormats]; // file scope: too big for the driver task's stack
 
 // A seqlock. Two banks are not enough: a reader loads bank 0, one connect event publishes bank 1,
@@ -91,6 +94,7 @@ struct FormatBank {
     std::atomic<uint16_t> width[kMaxFormats];
     std::atomic<uint16_t> height[kMaxFormats];
     std::atomic<uint8_t> fps[kMaxFormats];
+    std::atomic<uint32_t> interval[kMaxFormats]; // as published: `fps` is rounded for the UI
     std::atomic<size_t> count{0};
 };
 FormatBank formatBank;
@@ -168,6 +172,7 @@ void addAdvertised(const uvc_host_frame_info_t& info, uint32_t interval, size_t&
     formatBank.width[n].store(w, std::memory_order_relaxed);
     formatBank.height[n].store(h, std::memory_order_relaxed);
     formatBank.fps[n].store(fps, std::memory_order_relaxed);
+    formatBank.interval[n].store(interval, std::memory_order_relaxed);
     n++;
     ESP_LOGI(kTag, "offers MJPEG %ux%u @ %u fps", w, h, fps);
 }
@@ -216,10 +221,18 @@ void onEvent(const uvc_host_stream_event_data_t* event, void*) {
     if (event->type == UVC_HOST_DEVICE_DISCONNECTED) ESP_LOGW(kTag, "capture device disconnected");
 }
 
+// RGB888 bytes the decoder writes for a w x h JPEG: both axes padded to the 16-pixel MCU
+// (jpeg_decoder_process, note 2). Sized w*h*3, 800x600 overruns by 19200 bytes and every frame fails.
+size_t decodedBytes(uint16_t w, uint16_t h) {
+    const size_t aw = (static_cast<size_t>(w) + 15) & ~static_cast<size_t>(15);
+    const size_t ah = (static_cast<size_t>(h) + 15) & ~static_cast<size_t>(15);
+    return aw * ah * 3;
+}
+
 // One set of slots per open, sized from the format the device agreed to. Called from init only,
 // before the decoder task exists, so nothing can be reading a slot while it is (re)written.
 bool allocSlots(Capture& cap, uint16_t w, uint16_t h) {
-    const size_t need = static_cast<size_t>(w) * h * 3;
+    const size_t need = decodedBytes(w, h);
     jpeg_decode_memory_alloc_cfg_t memCfg = {};
     memCfg.buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER;
     for (int i = 0; i < kSlots; i++) {
@@ -245,11 +258,55 @@ int freeSlot(const Capture& cap) {
     return -1;
 }
 
+// UVC payload header (UVC 1.5 2.4.3.3): bLength 12 when PTS and SCR are present, EOH set, SCR's
+// top 5 reserved bits zero. `pts` pins later headers to the frame's first one: PTS is constant
+// across one frame's payloads.
+constexpr size_t kPayloadHeaderLen = 12;
+constexpr size_t kBulkMps = 512; // high-speed bulk
+
+bool isPayloadHeader(const uint8_t* h, size_t avail, const uint8_t* pts) {
+    constexpr uint8_t kEoh = 0x80, kErr = 0x40, kScr = 0x08, kPts = 0x04, kEof = 0x02;
+    return avail >= kPayloadHeaderLen && h[0] == kPayloadHeaderLen &&
+           (h[1] & (kEoh | kErr | kScr | kPts | kEof)) == (kEoh | kScr | kPts) && !(h[11] & 0xF8) &&
+           (!pts || memcmp(h + 2, pts, 4) == 0);
+}
+
+// Drops the payload headers usb_host_uvc leaves inside a bulk frame and returns the new length.
+// uvc_bulk.c strips a header only after a short transfer; a device whose payload is a multiple of
+// the packet size never sends one between payloads, so every header after the first stays in the
+// bitstream at stride `payload` and the decoder fails from there down. The stride is not exposed by
+// the driver, so it is read off the first header, which can only sit 12 bytes before a packet end.
+// A candidate is confirmed by the header that must follow it one stride on, when the frame is long
+// enough to hold one: entropy-coded bytes pass the field checks about once per 2^18 tries.
+size_t stripPayloadHeaders(uint8_t* d, size_t len) {
+    size_t hdr = 0;
+    for (size_t i = kBulkMps - kPayloadHeaderLen; !hdr && i + kPayloadHeaderLen < len; i += kBulkMps) {
+        if (!isPayloadHeader(d + i, len - i, nullptr)) continue;
+        const size_t next = 2 * i + kPayloadHeaderLen;
+        if (next + kPayloadHeaderLen > len || isPayloadHeader(d + next, len - next, d + i + 2)) hdr = i;
+    }
+    if (!hdr) return len;
+    const size_t payload = hdr + kPayloadHeaderLen;
+    uint8_t pts[4]; // copied: the compaction overwrites the header it came from
+    memcpy(pts, d + hdr + 2, sizeof pts);
+    size_t w = hdr, r = hdr;
+    while (isPayloadHeader(d + r, len - r, pts)) {
+        r += kPayloadHeaderLen;
+        const size_t run = std::min(payload - kPayloadHeaderLen, len - r);
+        memmove(d + w, d + r, run);
+        w += run;
+        r += run;
+    }
+    memmove(d + w, d + r, len - r); // whatever follows a missing header is left as delivered
+    return w + (len - r);
+}
+
 void decode(Capture& cap, uvc_host_frame_t* frame) {
+    const size_t len = stripPayloadHeaders(frame->data, frame->data_len);
     // Dimensions from the bitstream, not from the request: a device may negotiate something else.
     jpeg_decode_picture_info_t info = {};
-    if (jpeg_decoder_get_info(frame->data, frame->data_len, &info) != ESP_OK) return;
-    if (static_cast<size_t>(info.width) * info.height * 3 > cap.rgbCap) {
+    if (jpeg_decoder_get_info(frame->data, len, &info) != ESP_OK) return;
+    if (decodedBytes(static_cast<uint16_t>(info.width), static_cast<uint16_t>(info.height)) > cap.rgbCap) {
         ESP_LOGW(kTag, "frame %ux%u exceeds the buffers sized at open", info.width, info.height);
         return;
     }
@@ -262,8 +319,8 @@ void decode(Capture& cap, uvc_host_frame_t* frame) {
     decodeCfg.rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_RGB;
     decodeCfg.conv_std = JPEG_YUV_RGB_CONV_STD_BT601;
     uint32_t outSize = 0;
-    if (jpeg_decoder_process(cap.jpeg, &decodeCfg, frame->data, frame->data_len, cap.rgb[slot], cap.rgbCap,
-                             &outSize) != ESP_OK)
+    if (jpeg_decoder_process(cap.jpeg, &decodeCfg, frame->data, len, cap.rgb[slot], cap.rgbCap, &outSize) !=
+        ESP_OK)
         return;
 
     cap.width[slot] = static_cast<uint16_t>(info.width);
@@ -324,7 +381,9 @@ bool ensureUvcHost() {
 
 bool createJpeg(Capture& cap) {
     jpeg_decode_engine_cfg_t jpegCfg = {};
-    jpegCfg.timeout_ms = 40;
+    // 200, not 40: the timeout aborts the 2D-DMA mid-frame, and writing 6.2 MB of 1080p RGB into
+    // PSRAM alone takes ~34 ms. At 40 ms only 14% of intact frames survived.
+    jpegCfg.timeout_ms = 200;
     if (jpeg_new_decoder_engine(&jpegCfg, &cap.jpeg) == ESP_OK) return true;
     ESP_LOGE(kTag, "no JPEG decoder engine");
     return false;
@@ -336,6 +395,20 @@ bool createSignals(Capture& cap) {
     if (cap.wake && cap.stopped) return true;
     ESP_LOGE(kTag, "no semaphores");
     return false;
+}
+
+// The published interval of a row as the float the driver compares against; 0 (device default)
+// when the row is unknown, so the request still opens at that resolution.
+float exactFpsFor(uint16_t w, uint16_t h, uint8_t fps) {
+    const size_t n = formatBank.count.load(std::memory_order_acquire);
+    for (size_t i = 0; i < n && i < kMaxFormats; i++) {
+        if (formatBank.width[i].load(std::memory_order_relaxed) != w) continue;
+        if (formatBank.height[i].load(std::memory_order_relaxed) != h) continue;
+        if (formatBank.fps[i].load(std::memory_order_relaxed) != fps) continue;
+        const uint32_t iv = formatBank.interval[i].load(std::memory_order_relaxed);
+        if (iv) return 10000000.0f / static_cast<float>(iv);
+    }
+    return 0.0f;
 }
 
 bool openStream(Capture& cap, uint16_t width, uint16_t height, uint8_t fps) {
@@ -351,11 +424,18 @@ bool openStream(Capture& cap, uint16_t width, uint16_t height, uint8_t fps) {
     streamCfg.usb.uvc_stream_index = kStreamIndex;
     streamCfg.vs_format.h_res = width;
     streamCfg.vs_format.v_res = height;
-    streamCfg.vs_format.fps = fps; // negotiated down to what the device offers
+    // The device's own interval, not the rounded fps: the driver matches within 0.0001 fps, so a
+    // 59.94 mode never matches a requested 60.
+    streamCfg.vs_format.fps = exactFpsFor(width, height, fps);
     streamCfg.vs_format.format = UVC_VS_FORMAT_MJPEG;
-    // urb_size and frame_size left at 0: the driver then derives them from what this device
-    // actually negotiated, which beats any constant here.
+    // urb_size left at 0 (4x MPS): the driver's default, and every urb is internal SRAM.
+    // number_of_urbs has no default: 0 is malloc(0), and the open fails with ESP_ERR_NO_MEM.
+    streamCfg.advanced.number_of_urbs = 4;
     streamCfg.advanced.number_of_frame_buffers = 3;
+    // frame_size 0 means dwMaxVideoFrameSize, the UNCOMPRESSED size: 3 x 4.1 MB at 1080p for MJPEG
+    // frames of 40-76 KB. Half of it still leaves an order of magnitude of headroom.
+    streamCfg.advanced.frame_size = static_cast<size_t>(width) * height / 2;
+    streamCfg.advanced.frame_heap_caps = MALLOC_CAP_SPIRAM; // keep the internal heap for USB and WiFi
 
     // Wait rather than fail: the host enumerates asynchronously, so a device plugged in at boot
     // is usually not ready when this runs. The driver takes ticks, not milliseconds.

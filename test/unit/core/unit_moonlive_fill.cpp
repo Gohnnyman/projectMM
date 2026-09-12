@@ -846,7 +846,7 @@ TEST_CASE("every scalar member takes a whole slot whatever its type") {
 
 // A control no longer declares a width to keep in step with its member: ONE call surfaces any
 // member and reads the widget from the member's own type, so the pair that could disagree is gone.
-// What survives is the range check — a range past what the member's type holds is refused rather
+// What survives is the range check: a range past what the member's type holds is refused rather
 // than truncated, because a slider whose top silently wraps is worse than one that never appears.
 TEST_CASE("a control takes any scalar member, but not a range its type cannot hold") {
     moonlive::MoonLive eng;
@@ -887,8 +887,8 @@ TEST_CASE("a control takes any scalar member, but not a range its type cannot ho
     eng2.free();
 }
 
-// The point of an `int` member: a script exposes a value a byte cannot hold — a dwell time, a
-// 0..1000 scale — as ONE control, instead of packing it into two byte sliders. The declaration
+// The point of an `int` member: a script exposes a value a byte cannot hold (a dwell time, a
+// 0..1000 scale) as ONE control, instead of packing it into two byte sliders. The declaration
 // reaches the binding with its full range intact, and the live value spans the member's whole slot.
 TEST_CASE("an int member is published as a control spanning its full range") {
     moonlive::MoonLive eng;
