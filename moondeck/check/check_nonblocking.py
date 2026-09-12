@@ -67,7 +67,7 @@ NO_CAUSE = "\u2014"
 # Keyed on (file, callee) rather than line number, so the entry survives edits above it. Losing
 # the line means two calls to the same function in one file collapse to one entry — acceptable:
 # the question this answers is "is this a NEW kind of blocking call", not "how many".
-BASELINE = ROOT / "docs" / "metrics" / "hotpath-baseline.txt"
+BASELINE = ROOT / "docs" / "reference" / "metrics" / "hotpath-baseline.txt"
 
 
 def read_baseline():

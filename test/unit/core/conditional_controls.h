@@ -2,7 +2,7 @@
 // (the `hidden` flag) depends on another control's value. Used by every module
 // that has them (NetworkModule's static-IP fields, RmtLedDriver's loopbackRxPin).
 //
-// The invariant these helpers pin (see docs/architecture.md § Conditional controls):
+// The invariant these helpers pin (see docs/explanation/architecture/index.md § Conditional controls):
 //   1. A conditional control is ALWAYS bound (present in the control list) so
 //      persistence can load its value regardless of the live conditional state.
 //   2. Its `hidden` flag correctly reflects the conditioning control's value.

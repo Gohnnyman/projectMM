@@ -145,7 +145,7 @@ def _detect_target(state: dict) -> str:
     exposed through the `firmware` control. Desktop: same key but reports
     `unknown`, so we substitute desktop-<host-os> using the runtime os name (still
     distinguishes macOS vs Linux vs Windows builds, which can differ in tick
-    noticeably). See docs/architecture.md § Firmware vs board.
+    noticeably). See docs/explanation/architecture/index.md § Firmware vs board.
     """
     import platform
     firmware = None
@@ -290,7 +290,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                  update_reason: str | None = None) -> dict:
     """Run a scenario against a live device and return results.
 
-    Mode handling (see docs/testing.md § Scenario modes):
+    Mode handling (see docs/reference/testing.md § Scenario modes):
       construct  — scenario builds the pipeline from scratch. Live device's
                    main.cpp owns the top-level shape, so construct scenarios
                    only run in-process. Skip here with a clear note.
@@ -718,7 +718,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
             # Per-step contract: { "contract": { "<target>": { "tick_us": N,
             #   "free_heap": M, "tick_tolerance_pct": P, "heap_tolerance_pct": Q,
             #   "set_by": "YYYY-MM-DD", "reason": "..." } } }
-            # Contracts are hand-set promises — see docs/testing.md § Performance
+            # Contracts are hand-set promises — see docs/reference/testing.md § Performance
             # contracts. `--update-contract --reason "..."` rewrites them.
             contract_block = step.get("contract", {}).get(target) if step.get("contract") else None
             if contract_block:

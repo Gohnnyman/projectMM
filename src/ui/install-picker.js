@@ -17,7 +17,7 @@
 // callback and wires it to the right transport.
 //
 // "Firmware" here is the compiled binary variant (chip + radios + sdkconfig
-// fragments), not the physical board. See docs/architecture.md § Firmware
+// fragments), not the physical board. See docs/explanation/architecture/mooninstaller.md § Firmware
 // vs board. Release assets are named per firmware variant
 // (firmware-<variant>-v<ver>.bin, manifest-<variant>.json).
 //

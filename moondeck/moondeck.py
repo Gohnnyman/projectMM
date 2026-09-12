@@ -41,7 +41,7 @@ STATE_FILE = SCRIPTS_DIR / "moondeck.json"
 
 # Shared test-metadata parsers live next to the doc generator. Both this server
 # and moondeck/docs/generate_test_docs.py import from there so the two views of
-# the same source files (HTML in MoonDeck, markdown in docs/tests/) can't drift.
+# the same source files (HTML in MoonDeck, markdown in docs/reference/tests/) can't drift.
 sys.path.insert(0, str(SCRIPTS_DIR / "docs"))
 import _test_metadata as test_meta  # noqa: E402
 # Re-use the doc generator's perf-table formatter so the MoonDeck step view
@@ -217,7 +217,7 @@ def _probe_device(ip, port=8080, timeout=0.4):
     - `firmware` is the variant flashed (value of the `firmware` control on
       SystemModule, set from kFirmwareName in build_info.h). Used to deduce
       `deviceModel` when the device hasn't been told its model yet. See
-      docs/architecture.md § Firmware vs board.
+      docs/explanation/architecture/index.md § Firmware vs board.
     - `deviceModel` is the physical-hardware identity (a catalog entry). Preferred source: the device's
       own `deviceModel` control on SystemModule (the value MoonDeck pushed earlier
       and the device persisted). Fall back to firmware-based deduction
@@ -275,7 +275,7 @@ def _deduce_device_model(firmware: str) -> str:
     """Firmware → deviceModel name when exactly one catalog entry claims this
     firmware. Returns "" when zero (unknown firmware) or multiple device models
     claim it (ambiguous — user picks). Catalog lives at
-    mooninstaller/deviceModels.json; see docs/architecture.md § Firmware vs board.
+    mooninstaller/deviceModels.json; see docs/explanation/architecture/index.md § Firmware vs board.
     """
     if not firmware:
         return ""
@@ -1266,7 +1266,7 @@ def _apply_probe_results(devices: list, probed: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Perf-table HTML (shared shape with docs/tests/scenario-tests.md)
+# Perf-table HTML (shared shape with docs/reference/tests/scenario-tests.md)
 # ---------------------------------------------------------------------------
 
 def _render_perf_table_html(step: dict) -> str:
@@ -1934,7 +1934,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
     def _serve_doc(self):
         """Serve any docs/**/*.md file as styled HTML with deep-link anchor support.
-        URL: /api/docs/<path>[?#anchor] — e.g. /api/docs/testing.md, /api/docs/tests/unit-tests.md"""
+        URL: /api/docs/<path>[?#anchor] — e.g. /api/docs/reference/testing.md, /api/docs/reference/tests/unit-tests.md"""
         import re as _re
         raw_path = self.path[len("/api/docs/"):]
         parts = raw_path.split("?", 1)
@@ -2074,7 +2074,7 @@ code {{ background: transparent; color: #8aa6ba; padding: 0; }}
             step_desc = html_mod.escape(str(step.get("description", "")))
             # `contract` and `observed` are the per-target performance data
             # and render as a single shared table (same shape as
-            # docs/tests/scenario-tests.md — see test_doc_gen._format_perf_table).
+            # docs/reference/tests/scenario-tests.md — see test_doc_gen._format_perf_table).
             # Everything else stays in the JSON-dump key/value list below.
             perf_html = _render_perf_table_html(step)
             other = {k: v for k, v in step.items()
@@ -2120,7 +2120,7 @@ h1 {{ color: #e94560; font-size: 18px; margin: 0 0 4px 0; }}
 .also {{ color: #6a7a99; font-size: 11px; margin: 0 0 12px 0; }}
 code {{ background: transparent; color: #c0c0c0; padding: 0; }}
 .step-kv code:first-child {{ color: #8aa6ba; }}
-/* Perf table — same shape as docs/tests/scenario-tests.md per-step table */
+/* Perf table — same shape as docs/reference/tests/scenario-tests.md per-step table */
 .perf {{ margin-top: 6px; }}
 .perf-head {{ font-size: 12px; color: #9aa6ba; margin: 4px 0 2px 0; }}
 .perf-table {{ border-collapse: collapse; font-size: 12px; margin: 2px 0; }}

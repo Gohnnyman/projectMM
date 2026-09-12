@@ -32,7 +32,7 @@ Look at that picture again, because every card has the same parts:
 | 🧠 **112B** | How much memory it uses, live |
 | **⏻** | Turn it off without deleting it |
 | **?** | Open this module's documentation |
-| **`{ }`** | Open its live state, for [issue reports](../logging-an-issue.md) |
+| **`{ }`** | Open its live state, for [issue reports](../how-to/logging-an-issue.md) |
 | `status`, `width`, `height` … | The settings, one per row |
 | The **Grid** box inside | A child card — cards nest |
 | **+ add module** | Add a child here |
@@ -79,7 +79,7 @@ remove them, rearrange them freely.
 | Card | What it's for |
 |---|---|
 | **Layouts** | Where the lights physically ARE |
-| **Effects** | What colour they are, over time |
+| **Effects** | What color they are, over time |
 | **Drivers** | How the colours actually reach the lights |
 
 That split is why the menu is ordered the way it is: the device first, then the
@@ -155,7 +155,7 @@ it is saved it recompiles and swaps in live, same as everything else.
 
 This is a deliberate design rule, not a convenience, and you can trust it: if
 something needs a reboot before it works, that is a bug worth
-[reporting](../logging-an-issue.md).
+[reporting](../how-to/logging-an-issue.md).
 
 Your settings save themselves and survive a power cycle.
 

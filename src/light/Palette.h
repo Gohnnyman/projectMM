@@ -17,7 +17,7 @@ namespace mm {
 // Prior art: FastLED's gradient palettes (CRGBPalette16 / ColorFromPalette), the convention WLED +
 // MoonLight share — the recognisable names + model are carried; this implementation is our own, on
 // our RGB/scale8. The gradient *data* in kBuiltinPalettes is from MoonLight's palettes.h (a public
-// palette set), reformatted; see docs/backlog/moonlight-palettes-data.md.
+// palette set), reformatted; see docs/work/future/backlog-light.md.
 struct Palette {
     static constexpr uint8_t kEntries = 16;
     RGB entry[kEntries] = {};

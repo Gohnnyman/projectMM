@@ -16,7 +16,7 @@ namespace mm {
 // The column itself IS the shift register: each loop reads pixel y-1 into pixel y (from the far end
 // back toward the source) and writes the freshly-computed color at y=0, so no separate history
 // buffer is needed — the look is entirely in the Buffer's own scroll. As a D1 effect it writes only
-// the x=0 column running along Y (the project's "1D runs along Y" contract, docs/architecture.md);
+// the x=0 column running along Y (the project's "1D runs along Y" contract, docs/explanation/architecture/index.md);
 // Layer::extrude fans that single column across x (and z on a cube) on wider layers, so the same
 // code renders a strip or tiles a panel.
 //

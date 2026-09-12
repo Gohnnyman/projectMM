@@ -84,7 +84,7 @@ namespace mm {
 /// path we share), and Damian Schneider (DedeHai, the fixed-point FFT for FPU-less chips). The
 /// forward-looking analysis (source-seam extensions, line-in / PDM / analog / I²C codecs, and the
 /// adaptive-noise-gate design that would retire the borrowed `floor` squelch) is a design study in
-/// docs/backlog/audio-dsp-roadmap.md.
+/// docs/work/future/backlog-light.md.
 /// @card AudioService.png
 class AudioService : public MoonModule {
 public:

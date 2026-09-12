@@ -15,7 +15,7 @@ its own manifest because:
     offset on flash (0x1000 vs 0x0 — wrong offset bricks visibly).
 
 "Firmware" here is the compiled binary variant — separate from "board" (the
-physical hardware). See docs/architecture.md § Firmware vs board.
+physical hardware). See docs/explanation/architecture/index.md § Firmware vs board.
 
 We don't hardcode the offsets. ESP-IDF writes them into
 `build/flasher_args.json` for the exact chip it just built. The CI stage

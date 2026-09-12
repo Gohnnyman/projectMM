@@ -1,7 +1,7 @@
 # Getting started
 
 New to ESP32 or flashing firmware? You don't need to be. projectMM installs
-straight from your web browser — no software to download, no command line. In a
+straight from your web browser: no software to download, no command line. In a
 few minutes you'll have lights running and the device on your network, and the
 device's own web interface open in your browser ready to play with.
 
@@ -10,7 +10,7 @@ This guide has two chapters. **Chapter 1** gets projectMM onto your device.
 every part does and where to start building your own light show.
 
 **You need:** an ESP32 board, a USB cable that carries data (not charge-only),
-and a **Chromium-based browser** on a computer — Google Chrome, Microsoft Edge,
+and a **Chromium-based browser** on a computer (Google Chrome, Microsoft Edge,
 or Opera (the installer uses the Web Serial API, which Safari and Firefox don't
 support).
 
@@ -19,7 +19,7 @@ support).
 
 ---
 
-## Chapter 1 — Install projectMM
+## Chapter 1: install projectMM
 
 ### 1. Open the installer and plug in
 
@@ -40,7 +40,7 @@ which? Unplug, look at the list, plug back in — the new entry is your device.)
 ship drivers for the USB-serial chips most ESP32 boards use (WCH CH340, Silicon
 Labs CP2102). One-time install fixes it for every future flash — full
 step-by-step + the download link is in
-[building.md § Windows: USB-serial drivers](building.md#windows-usb-serial-drivers).
+[building.md § Windows: USB-serial drivers](how-to/building.md#windows-usb-serial-drivers).
 macOS and Linux ship these drivers built in, so it's a Windows-only step.
 
 Once a port is chosen, the installer recognises the chip and tells you how many
@@ -67,7 +67,7 @@ how ready each one is:
   once you add and set up the matching module yourself in the UI (Chapter 2).
 - 🟠 **Amber** — planned. The hardware has it, but there's no module for it yet —
   it's on the to-do list. (Want to help? Building one is our usual loop: read the
-  product page and datasheet, pin the behaviour as tests, then write the code to
+  product page and datasheet, pin the behavior as tests, then write the code to
   pass them — [see how we work](../CLAUDE.md#principles).)
 
 So a green pill is "just works", a yellow one is "works, with a bit of setup", and
@@ -85,7 +85,7 @@ Leave **Release** and **Firmware** at their suggested values (the newest stable
 build, and the firmware that matches your device). Tick **Erase chip first** only
 if you're starting clean, switching firmware, or updating a 4 MB classic board
 (esp32 / wrover / eth) from a release before v4.0. That last update must erase:
-its partition layout changed ([MIGRATING](MIGRATING.md)), and if the device already holds
+its partition layout changed ([MIGRATING](reference/MIGRATING.md)), and if the device already holds
 config you care about, back it up first ("Back up a device's config first" on the
 installer page): erasing wipes WiFi credentials and all settings, and the backup
 brings them back after the flash (its report lists anything it could not carry).
@@ -146,7 +146,7 @@ Three regions, left to right:
 
 - **The module list** (left) — every part of your device, from system info at the
   top to your light setup at the bottom. Click a name to jump to it.
-- **The 3D preview** (centre) — a live picture of your lights in their real shape,
+- **The 3D preview** (center): a live picture of your lights in their real shape,
   updating as the effects run. This is what your physical LEDs are doing, right now.
 - **The controls** (right) — the settings for each module. Drag a slider or pick an
   option and the lights react instantly.
@@ -208,7 +208,7 @@ USB cable needed once it's on your network.
 
 ![The Firmware module](assets/gettingstarted/02-06-UI-Firmware.png)
 
-**Updating from an older build?** Skim the [migration notes](MIGRATING.md) first. Most updates need nothing — the device keeps your settings — but a breaking change is listed there with the one action it costs you (usually re-setting or re-adding a control).
+**Updating from an older build?** Skim the [migration notes](reference/MIGRATING.md) first. Most updates need nothing — the device keeps your settings — but a breaking change is listed there with the one action it costs you (usually re-setting or re-adding a control).
 
 > [FirmwareUpdateModule](moonmodules/core/system.md#firmware-update)
 
@@ -263,7 +263,7 @@ There are two ways in — zeroconf (HA finds the device on its own) or MQTT
 auto-discovery (for a broker-only or cross-subnet setup) — and from there you can
 bridge the entity into Apple Home too. The step-by-step, including installing HA
 and the MQTT broker if you don't have them, is in the
-[home automation guide](usecases/home-automation.md).
+[home automation guide](how-to/home-automation.md).
 
 ### Building a light show: layouts → layers → drivers
 
@@ -344,12 +344,12 @@ magic bytes, chip or description say it is not a MoonBase image for this chip.
 ### Where to go next
 
 - **Understand the pipeline** — how layouts, layers, effects, modifiers and
-  drivers fit together: [architecture overview](architecture.md#the-pipeline).
+  drivers fit together: [architecture overview](explanation/architecture/moonlight.md#the-pipeline).
 - **Run it on your computer** instead of (or alongside) an ESP32 — macOS, Windows,
   Linux: [project overview → Getting started](../README.md#getting-started).
 - **Manage several devices, build, and flash from one console** with MoonDeck, our
   developer tool: [MoonDeck guide](../moondeck/MoonDeck.md).
-- **Build from source** or target Teensy / Raspberry Pi: [building.md](building.md).
+- **Build from source** or target Teensy / Raspberry Pi: [building.md](how-to/building.md).
 
 Stuck, or something didn't work? Open an
 [issue](https://github.com/MoonModules/projectMM/issues) — and tell us what device

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate docs/tests/unit-tests.md and docs/tests/scenario-tests.md from the source of truth.
+"""Generate docs/reference/tests/unit-tests.md and docs/reference/tests/scenario-tests.md from the source of truth.
 
 Unit tests: walks test/unit/ recursively for unit_*.cpp, extracts `// @module <Name>`, optional
 `// @also A, B`, and a single `//` description line above each `TEST_CASE("...")`.
@@ -29,7 +29,7 @@ from _test_metadata import (
     collect_unit_files,
 )
 
-OUT_DIR = ROOT / "docs" / "tests"
+OUT_DIR = ROOT / "docs" / "reference" / "tests"
 UNIT_OUT = OUT_DIR / "unit-tests.md"
 SCENARIO_OUT = OUT_DIR / "scenario-tests.md"
 

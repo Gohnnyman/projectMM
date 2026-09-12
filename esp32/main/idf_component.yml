@@ -51,7 +51,7 @@ dependencies:
   # gate. The `rules` gate scopes it to the S31 — the only board with the codec —
   # so other targets don't resolve a component they never compile (same pattern as
   # ip101/w5500 above). A managed component outside mainline v6.0, like the P4
-  # esp_hosted exception (docs/building.md § ESP-IDF version).
+  # esp_hosted exception (docs/how-to/building.md § ESP-IDF version).
   espressif/esp_codec_dev:
     version: "^1.3.0"
     rules:
@@ -60,7 +60,7 @@ dependencies:
   # co-processor over SDIO. The P4 has no native radio; these present the C6's
   # radio through the standard esp_wifi_* API (API-compatible, so the WiFi seam in
   # platform_esp32.cpp is unchanged; esp_hosted self-inits at boot, no bring-up
-  # code needed). DELIBERATE v6.0-floor exception (docs/building.md § ESP-IDF
+  # code needed). DELIBERATE v6.0-floor exception (docs/how-to/building.md § ESP-IDF
   # version): these are managed components outside mainline v6.0, accepted
   # explicitly. The `rules` gate pulls them ONLY when CONFIG_MM_P4_WIFI is set
   # (declared in main/Kconfig.projbuild, set by sdkconfig.defaults.esp32p4rev1-eth-wifi)

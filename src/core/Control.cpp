@@ -1,12 +1,12 @@
 // Why .h + .cpp (Control is now in the core-services file-shape list, see
-// docs/coding-standards.md § File shape): Control.h started as declarations
+// docs/contributing/coding-standards.md § File shape): Control.h started as declarations
 // + inline scalar helpers; the JSON serialization / parsing logic grew to
 // six switches across three files (HttpServerModule, FilesystemModule,
 // scenario_runner). Centralising them here keeps Control.h light for the
 // 20+ MoonModule headers that include it just to call addX() and makes
 // "add a new ControlType" a single-place edit instead of a hunt across
 // three consumers — the "per-type behaviour lives with the type" rule in
-// docs/coding-standards.md applied to wire-format serialization.
+// docs/contributing/coding-standards.md applied to wire-format serialization.
 
 #include "core/Control.h"
 

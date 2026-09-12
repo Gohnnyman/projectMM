@@ -62,7 +62,7 @@ private:
 /// distinct salt is what stops a report being tied to a device somebody can observe locally.
 ///
 /// NOT anonymous: it is stable, so two reports carrying it came from one install. That is the point,
-/// and why [privacy-policy.md](../../docs/privacy-policy.md) calls it pseudonymous.
+/// and why [privacy-policy.md](../../docs/legal/privacy-policy.md) calls it pseudonymous.
 
 /// Characters written by `installationId`, excluding the terminator.
 inline constexpr size_t kInstallationIdChars = 32;

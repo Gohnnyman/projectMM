@@ -64,7 +64,7 @@ if(CONFIG_IDF_TARGET_ESP32)
 endif()
 
 # Firmware-variant defines, set by moondeck/build/build_esp32.py via firmware_cmake_args().
-# See docs/architecture.md § Firmware vs board — "firmware" is the compiled
+# See docs/explanation/architecture/mooninstaller.md § Firmware vs board — "firmware" is the compiled
 # binary variant; the physical "board" is a separate concept the device
 # cannot identify on its own.
 #

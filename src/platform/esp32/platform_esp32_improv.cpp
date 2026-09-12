@@ -192,7 +192,7 @@ static void improvSendWifiNetworks() {
     // ensureWifiInit() (triggered by wifiApInit / wifiStaInit). If a scan is ever
     // requested on a P4 that has not initialised WiFi, this returns an error
     // cleanly (no crash) rather than scanning a cold link. The cold-provision
-    // bench check is filed in docs/backlog/backlog-core.md § Improv-as-REST.
+    // bench check is filed in docs/work/future/backlog-core.md § Improv-as-REST.
     wifi_scan_config_t scan_cfg = {};
     if (esp_wifi_scan_start(&scan_cfg, true /*block*/) != ESP_OK) {
         improvSendError(improv::ERROR_UNKNOWN);

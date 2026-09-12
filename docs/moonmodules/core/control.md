@@ -21,7 +21,7 @@ A grid of preset pads, a row of rotary encoders above them, a row of on/off swit
 
 Detail: [technical](moxygen/ControlModule.md)
 
-[Tests](../../tests/unit-tests.md#controlmodule)
+[Tests](../../reference/tests/unit-tests.md#controlmodule)
 
 ## Presets
 
