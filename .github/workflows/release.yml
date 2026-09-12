@@ -397,6 +397,14 @@ jobs:
           fetch-depth: 0
       # Same uv prerequisite as build-macos-arm64, see the comment there.
       - uses: astral-sh/setup-uv@v3
+      # libcurl is the ONE outbound HTTPS client, and CMake treats it as optional so a
+      # contributor's machine still builds without it. That optionality is wrong for a PUBLISHED
+      # artifact: the ubuntu runners carry no libcurl dev package, so every released Linux binary
+      # until now shipped with the feature compiled out. `|| true` because a transient apt failure
+      # should not abort a release on its own; CMake's own check is what decides, and it fails the
+      # build loudly when the library really is absent.
+      - name: Install libcurl (MoonCloud, only used once consent is given in the app)
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev || true
       # Builds with the runner's default GCC (13 on ubuntu-24.04). Its four false-positive
       # warnings are handled in CMakeLists.txt, which demotes them to non-fatal on GCC below
       # 16 rather than pinning a compiler here: a from-source build on Debian or Raspberry Pi
@@ -454,6 +462,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v3
+      # libcurl is the ONE outbound HTTPS client, and CMake treats it as optional so a
+      # contributor's machine still builds without it. That optionality is wrong for a PUBLISHED
+      # artifact: the ubuntu runners carry no libcurl dev package, so every released Linux binary
+      # until now shipped with the feature compiled out. `|| true` because a transient apt failure
+      # should not abort a release on its own; CMake's own check is what decides, and it fails the
+      # build loudly when the library really is absent.
+      - name: Install libcurl (MoonCloud, only used once consent is given in the app)
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev || true
       # Same tag + version resolution as every other build job; see build-linux-x64 for why.
       - name: Resolve release tag
         id: tag

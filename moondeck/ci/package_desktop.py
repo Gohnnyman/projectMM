@@ -178,6 +178,12 @@ def package_deb(binary: Path, version: str) -> Path | None:
         "Section: misc\n"
         "Priority: optional\n"
         f"Architecture: {deb_arch}\n"
+        # The binary links libcurl for the one outbound HTTPS call. Every Debian-family system
+        # ships it, but naming it here is what makes apt GUARANTEE it rather than leaving a
+        # missing-library failure at startup. Two names for one library: bookworm and Raspberry Pi
+        # OS call it libcurl4, trixie renamed it libcurl4t64 in the 64-bit-time_t transition, and
+        # the alternation satisfies whichever the target has.
+        "Depends: libcurl4 | libcurl4t64\n"
         "Maintainer: MoonModules <https://github.com/MoonModules/projectMM>\n"
         "Description: Drive large LED installations and DMX fixtures\n"
         " projectMM renders effects to LED fixtures and DMX, controlled from a\n"
