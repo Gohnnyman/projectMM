@@ -25,7 +25,7 @@ let deviceModels = []; // [{ name, firmwares: [...], ... }] — `name` is the id
 // `firmware` is the variant flashed onto the ESP32 (esp32 / esp32-eth /
 // esp32-16mb / esp32s3-n16r8) — separate from the per-device `deviceModel`
 // (physical hardware) inside each network's devices list. See
-// docs/architecture.md § Firmware vs board.
+// docs/explanation/architecture/mooninstaller.md § Firmware vs board.
 // Devices and the active serial port now live INSIDE the active network.
 // Migration from the legacy flat shape happens server-side in load_state().
 let state = { networks: [], active_network: "", firmware: "", scenario: "", module: "" };

@@ -38,7 +38,7 @@ Observational: where the landscape is ahead of projectMM. These are *not* commit
 
 ## Refreshing
 
-Adding a month or a new friend repo is the [friend-repos](README.md) workflow, and its prompt lives there. This folder's own documents are records rather than a feed: they change when the thing they record changes.
+Adding a month or a new friend repo is the [friend-repos](index.md) workflow, and its prompt lives there. This folder's own documents are records rather than a feed: they change when the thing they record changes.
 
 ## Digest prompt (reusable)
 

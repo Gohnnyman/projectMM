@@ -8,8 +8,7 @@
 # ///
 """Build (or serve) the projectMM docs site with MkDocs Material.
 
-Phase 0 of the docs overhaul (docs/backlog/docs-system-overhaul.md): render the
-existing docs/ tree as a navigable site, config in mkdocs.yml. Dependencies are
+Renders the docs/ tree as a navigable site, config in mkdocs.yml. Dependencies are
 declared inline (PEP 723) so `uv run` provisions them — same pattern as the other
 moondeck/docs/ tools and the uv-everywhere project rule; no requirements file.
 

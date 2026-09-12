@@ -304,7 +304,7 @@ public:
     ///
     /// Full status, the reuse-race + concurrency follow-ups, and the measurements behind these limits:
     /// [the analysis](https://github.com/MoonModules/projectMM/blob/main/docs/work/future/shift-register-driver-analysis.md)
-    /// and the ring items in `docs/backlog/backlog-light.md`.
+    /// and the ring items in `docs/work/future/backlog-light.md`.
     bool     pinExpander = false;
     /// The 74HCT595 LATCH (RCLK) line — pulsed once the shifted byte is in, presenting it on the
     /// '595 outputs. Unlike the shift clock (the peripheral's own WR pin), this is a DATA lane:

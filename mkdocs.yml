@@ -1,8 +1,7 @@
-# Docs site config — Material for MkDocs. Phase 0 of the docs overhaul
-# (docs/backlog/docs-system-overhaul.md): render the EXISTING docs as a
-# navigable, searchable site at the Pages root, with zero content changes.
-# The `nav:` below imposes a top-down end-user → developer order over files
-# that already exist; nothing here moves or rewrites a doc.
+# Docs site config — Material for MkDocs. Renders docs/ as a navigable,
+# searchable site at the Pages root. Each page lives in the folder naming its
+# Diátaxis type, so the `nav:` below follows the tree rather than imposing an
+# order over it (docs/contributing/documentation-standards.md § The hierarchy).
 #
 # Built in CI (release.yml deploy-pages job) into pages/ root; the web
 # installer keeps its /install/ path untouched. Build locally with
@@ -156,6 +155,10 @@ nav:
       - Modifiers: moonmodules/light/modifiers.md
       - Drivers: moonmodules/light/drivers.md
       - Live scripting: moonmodules/light/MoonLiveEffect.md
+      # The other two jobs the same engine does: a scripted layout and a scripted
+      # modifier. Reachable by link before, now on the menu beside the effect page.
+      - "Live scripting: layouts": moonmodules/light/MoonLiveLayout.md
+      - "Live scripting: modifiers": moonmodules/light/MoonLiveModifier.md
       # The script LANGUAGE reference. Authored at moonlive/README.md (beside the scripts
       # it documents) and staged into the tree by mkdocs_hooks.on_files — it is not a file
       # under docs/, so it appears here by its staged URI.

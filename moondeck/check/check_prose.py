@@ -36,7 +36,6 @@ SUFFIXES = (".h", ".hpp", ".c", ".cpp", ".inc", ".md", ".py", ".js", ".css", ".h
 EXEMPT = (
     "docs/friend-repos/", # monthly digests OF OTHER PROJECTS, quoted from their sources
     "docs/work/past/",    # dated records: what was true at a moment, kept unrewritten
-    "docs/work/future/",  # prior-project digests quoted from their sources
     "docs/reference/metrics/",      # generated
     "docs/reference/tests/",        # generated from test comments (fix the test, not the page)
     "docs/moonmodules/",  # partly generated technical pages

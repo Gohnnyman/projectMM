@@ -2539,7 +2539,7 @@ bool irChannelReady(uint16_t /*pin*/) { return true; }   // no channel to fail o
 // (Processing.NDI.structs.h and Processing.NDI.Send.h). Getting a field's type or ORDER wrong here
 // is a silent crash or a skewed image rather than a compile error, because these are passed by
 // pointer into a binary that was built against the real definitions. They are quoted verbatim in
-// the plan (docs/history/plans) with their source, and must not be "tidied".
+// the plan (docs/work/past/plans) with their source, and must not be "tidied".
 namespace {
 
 using NdiSendInstance = void*;

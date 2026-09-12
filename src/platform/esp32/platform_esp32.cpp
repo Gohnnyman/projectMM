@@ -667,7 +667,7 @@ void setEthConfig(const EthPinConfig& cfg) { ethConfig_ = cfg; }
 //      in EXT_CHIP_CONFIG (0xA001 bit 8), TX delay 13×150 ps ≈ 1.95 ns in EXT_RGMII_CONFIG1 (0xA003
 //      bits [7:0]). These are the delay values IDF's example uses; a board whose PCB trace lengths need
 //      a different skew tunes them here. (DHCP at 100M on a 10/100 switch needs a further MAC Tx-clock
-//      fix that isn't here yet — see docs/backlog/backlog-core.md; this init is what brings the link up.)
+//      fix that isn't here yet — see docs/work/future/backlog-core.md; this init is what brings the link up.)
 static esp_err_t ethYt8531BoardInit(esp_eth_handle_t eth_handle) {
     bool autoNegoEn = true;
     esp_err_t err = esp_eth_ioctl(eth_handle, ETH_CMD_S_AUTONEGO, &autoNegoEn);

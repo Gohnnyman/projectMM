@@ -1,6 +1,6 @@
 # Backlog — mixed (core + light)
 
-Forward-looking items whose work genuinely spans **both** the core and light domains — a core mechanism interacting with a light driver/effect/modifier, where assigning it to one side would misrepresent it. Core-only items are in [backlog-core.md](backlog-core.md), light-only in [backlog-light.md](backlog-light.md). Index + overview: [README.md](README.md).
+Forward-looking items whose work genuinely spans **both** the core and light domains — a core mechanism interacting with a light driver/effect/modifier, where assigning it to one side would misrepresent it. Core-only items are in [backlog-core.md](backlog-core.md), light-only in [backlog-light.md](backlog-light.md). Index + overview: [README.md](index.md).
 
 ## Cross-domain
 

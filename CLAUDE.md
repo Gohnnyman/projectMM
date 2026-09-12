@@ -52,7 +52,7 @@ The product owner is the critical success factor. They review every line before 
 
 **An addition names its subtraction.** A change that adds a rule, a file or a concept says what comes out, or says plainly that nothing does and why.
 
-**Sanity-check every request** against README, this file and architecture.md. If it conflicts, push back briefly with the reference; the product owner can still overrule.
+**Sanity-check every request** against README, this file and [the architecture](docs/explanation/architecture/index.md). If it conflicts, push back briefly with the reference; the product owner can still overrule.
 
 **Reverting is the product owner's call**, whatever prompted it: a contradicting doc, a reviewer finding, a failing check, or the agent's own second thoughts. State the case and wait.
 

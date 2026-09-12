@@ -12,7 +12,7 @@ For effects and modifiers also captures a 3-second GIF of the preview canvas.
 Also captures MoonDeck tab screenshots and the web installer page, and
 inserts them into the appropriate docs files.
 
-Saves to (by domain/type, mirroring src — see docs/backlog/folder-structure-proposal.md):
+Saves to (by domain/type, mirroring src):
   docs/assets/light/effects/<TypeName>.png/.gif   — effect card + preview
   docs/assets/light/{modifiers,layouts,drivers}/  — other light modules
   docs/assets/core/<TypeName>.png                 — core modules
@@ -74,7 +74,7 @@ ASSETS = ROOT / "docs" / "assets"
 UI_DIR = ASSETS / "ui"   # tooling / installer / full-page shots (not per-module)
 
 # Map a module to its asset subfolder (domain/type), mirroring src. Module screenshots live in
-# docs/assets/{core, light/{effects,modifiers,layouts,drivers}}/ — see folder-structure-proposal.
+# docs/assets/{core, light/{effects,modifiers,layouts,drivers}}/.
 def asset_dir_for(type_name: str) -> Path:
     if type_name.endswith("Effect"):
         return ASSETS / "light" / "effects"

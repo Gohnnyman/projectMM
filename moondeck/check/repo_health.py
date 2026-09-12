@@ -244,7 +244,7 @@ def measure_docs():
     """Documentation inventory — the counts the docs-bloat conversation actually turns on."""
     md = [f for f in _git_files("docs") if f.suffix == ".md"]
     plans = [f for f in md if "work/present" in f.as_posix() or "work/past/plans" in f.as_posix()]
-    lessons = ROOT / "docs" / "history" / "lessons.md"
+    lessons = ROOT / "docs" / "work" / "past" / "lessons.md"
     claude = ROOT / "CLAUDE.md"
     backlog = [f for f in md if "backlog" in f.as_posix()]
     return {

@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # real diagnostics in the editor (it needs the actual include paths and flags, not guesses).
 # On by default because it costs nothing, is ignored by every consumer that doesn't want it,
 # and a missing database is the single most common reason clangd reports phantom errors.
-# `.clangd` at the repo root points at it; see docs/coding-standards.md § Editor setup.
+# `.clangd` at the repo root points at it; see docs/contributing/coding-standards.md § Editor setup.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Warning flags differ between GCC/Clang and MSVC. Gate by compiler so the
@@ -81,7 +81,7 @@ else()
     # (platform.h); -Wfunction-effects then checks TRANSITIVELY that nothing they reach
     # allocates or blocks, through the whole call graph. Clang 20+ only; the flag does not
     # exist on GCC, so the ESP32 build gets no hot-path check — src/platform/esp32/ is
-    # analysed only where the desktop build reaches it (docs/testing.md § Static analysis).
+    # analysed only where the desktop build reaches it (docs/reference/testing.md § Static analysis).
     # Probe for the flag instead of inferring it from a version: AppleClang reports its own
     # version line (the CI macos-14 runner reads >= 20 while predating the warning), so a version
     # comparison enables -Wfunction-effects on toolchains that reject it — and it is -Werror.
@@ -89,7 +89,7 @@ else()
     check_cxx_compiler_flag(-Wfunction-effects MM_HAS_WFUNCTION_EFFECTS)
     if(MM_HAS_WFUNCTION_EFFECTS)
         # -Wno-error is PERMANENT, not a stepping stone: this is a report, not a gate. The
-        # findings are real and frozen in docs/metrics/hotpath-baseline.txt as architecture
+        # findings are real and frozen in docs/reference/metrics/hotpath-baseline.txt as architecture
         # work; failing the build on them would block every other gate, and a new one may be
         # legitimate (a driver that must wait on hardware). The clang-hotpath card reports
         # what is NEW; a human judges it.

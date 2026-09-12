@@ -705,7 +705,7 @@ point: no build, no compile database, no toolchain, so it runs anywhere in about
 **What it does for us.** It owns ONE number — how complex a function is — and it is the only tool
 here that produces a per-commit trend rather than a verdict. clang-tidy can tell you a function is
 complex today; only a series tells you the codebase is drifting, which is what
-[repo-health](../docs/metrics/repo-health.json) and `collect_kpi` plot. Its own
+[repo-health](../docs/reference/metrics/repo-health.json) and `collect_kpi` plot. Its own
 `readability-function-*` checks stay off in clang-tidy for exactly that reason (one rule, one
 owner). The tokenizer's cost is real: on template- and macro-dense C++ it reports a mangled
 function name (`SolidEffect::static_cast<lengthType>` for a method called `tick`), and since the
@@ -734,7 +734,7 @@ different fixes: `HttpServerModule::handleConnection` is `93* 178*` (both — sp
 split. TOKEN, PARAM and LINES are context for *why* a function is heavy; nothing gates on them.
 
 A raw run reports 162 functions over threshold (CCN > 10 or NLOC > 60), and a metric that can
-never reach zero is a poor gate — people stop reading it. So [`docs/metrics/whitelizard.txt`](../docs/metrics/whitelizard.txt)
+never reach zero is a poor gate: people stop reading it. So [`docs/reference/metrics/whitelizard.txt`](../docs/reference/metrics/whitelizard.txt)
 freezes today's set and the check fails only on something new. The baseline is lizard's own
 `--whitelist` format, matched on **file + function name** rather than line numbers, so it
 survives edits above a function.
@@ -757,7 +757,7 @@ uv run moondeck/scenario/run_scenario.py --name scenario_Layer_base_pipeline   #
 
 Scenarios are JSON files in `test/scenarios/`. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
 
-For a full description of each scenario, see the [scenario inventory](/api/docs/tests/scenario-tests.md) — auto-generated from the JSON files.
+For a full description of each scenario, see the [scenario inventory](/api/docs/reference/tests/scenario-tests.md), auto-generated from the JSON files.
 
 ### history_report
 
@@ -857,7 +857,7 @@ uv run moondeck/scenario/run_live_scenario.py --compare-baseline                
 
 Executes scenario steps (add_module, set_control, delete_module) via REST API. Collects per-step FPS and heap measurements. Compares against stored baselines to detect performance regressions. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
 
-For a full description of each scenario, see the [scenario inventory](/api/docs/tests/scenario-tests.md) — auto-generated from the JSON files.
+For a full description of each scenario, see the [scenario inventory](/api/docs/reference/tests/scenario-tests.md), auto-generated from the JSON files.
 
 ### run_network_live
 

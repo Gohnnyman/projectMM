@@ -101,7 +101,7 @@ def check_idf_pin(idf_path: Path) -> None:
 # *build-time* cost only: the linker dead-strips the unused code, so they add ~0
 # bytes of flash to esp32p4rev1-eth (our coprocessorWifi() is the empty stub there, so
 # no esp_hosted symbol is referenced — confirmed: their .text size is 0x0 in the
-# .map). Left as-is rather than fought; see docs/backlog/.
+# .map). Left as-is rather than fought; see docs/work/future/.
 ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 
 # Firmware catalogue. Each entry describes one shipping firmware variant.
