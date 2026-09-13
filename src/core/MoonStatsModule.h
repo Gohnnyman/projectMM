@@ -17,7 +17,7 @@
 ///
 /// Suppressed in AP mode, where there is no route out and the user is mid-provisioning.
 ///
-/// See [privacy-policy.md](../../docs/privacy-policy.md) for what is promised.
+/// See [privacy-policy.md](../../docs/legal/privacy-policy.md) for what is promised.
 
 #include <cstdint>
 #include <cstdio>

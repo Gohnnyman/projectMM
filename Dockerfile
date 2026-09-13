@@ -28,12 +28,18 @@
 #
 # **Capabilities.** None. It binds 8080 as an ordinary process and needs no added capability.
 #
-# **amd64 only.** The release ships no arm64 LINUX binary (macOS arm64 is a different target), so
-# an arm64 image needs an arm64 build in the release pipeline first, not a change here.
+# **amd64 and arm64.** The release builds a .deb for each, so `docker build` on an arm64 host
+# (a Pi, a NanoPi, an Apple-silicon Mac running Docker Desktop) fetches the arm64 package by
+# itself: the stage below resolves the asset from the architecture it is building for.
 
 # --- stage 1: fetch the release and unpack it -------------------------------------------------
 # A full Debian image, used only to resolve and extract the .deb. None of it reaches the result.
 FROM debian:trixie-slim AS fetch
+
+# BuildKit sets TARGETARCH to amd64 or arm64, the same two suffixes the release writes, so the
+# asset is selected by the architecture being built rather than hardcoded. A plain `docker build`
+# on any host therefore produces an image that runs there.
+ARG TARGETARCH
 
 # WHICH release to install, and the default is the ROLLING PRERELEASE, matching what the installer
 # page offers rather than the last tagged version: projectMM ships from `main` continuously, so a
@@ -53,8 +59,8 @@ RUN apt-get update \
     else \
         api="https://api.github.com/repos/${REPO}/releases/tags/${RELEASE}"; \
     fi \
- && url=$(curl -fsSL "$api" | grep -o 'https://[^"]*_amd64\.deb' | head -1) \
- && test -n "$url" || { echo "no amd64 .deb in release ${RELEASE}" >&2; exit 1; } \
+ && url=$(curl -fsSL "$api" | grep -o "https://[^\"]*_${TARGETARCH}\.deb" | head -1) \
+ && test -n "$url" || { echo "no ${TARGETARCH} .deb in release ${RELEASE}" >&2; exit 1; } \
  && curl -fsSL -o /tmp/projectmm.deb "$url" \
  && dpkg-deb -x /tmp/projectmm.deb /rootfs
 

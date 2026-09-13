@@ -20,7 +20,7 @@ The device's identity and vitals — name (behind mDNS `<name>.local`, the SoftA
 
 Detail: [technical](moxygen/SystemModule.md)
 
-[Tests](../../tests/unit-tests.md#systemmodule)
+[Tests](../../reference/tests/unit-tests.md#systemmodule)
 
 <a id="network"></a>
 
@@ -39,7 +39,7 @@ WiFi / Ethernet connectivity, static-IP configuration, RSSI and TX-power reporti
 
 Detail: [technical](moxygen/NetworkModule.md)
 
-[Tests](../../tests/unit-tests.md#networkmodule)
+[Tests](../../reference/tests/unit-tests.md#networkmodule)
 
 <a id="improv-provisioning"></a>
 
@@ -66,7 +66,7 @@ Discovers and lists other projectMM devices on the LAN (the `devices` List contr
   (**default off**). WLED apps and devices browse the discovery port on **broadcast**, so a
   projectMM device does not appear in them until this is turned on. Off is the better neighbour
   on the network: a broadcast wakes every phone, printer and laptop on the LAN to parse a packet
-  none of them want. See [multicast and IGMP snooping](../../architecture.md#multicast-and-igmp-snooping)
+  none of them want. See [multicast and IGMP snooping](../../explanation/architecture/moonlight.md#multicast-and-igmp-snooping)
   for when that actually saves traffic.
 
 Presence always goes to the projectMM group `239.255.77.77`, so peers find each other however
@@ -74,7 +74,7 @@ this control is set; `wledCompatible` only adds the broadcast copy.
 
 Detail: [technical](moxygen/DevicesModule.md)
 
-[Tests](../../tests/unit-tests.md#devicesmodule)
+[Tests](../../reference/tests/unit-tests.md#devicesmodule)
 
 <a id="mqtt"></a>
 
@@ -87,12 +87,12 @@ Bridges the light to an MQTT broker so a home-automation hub (Homebridge) can co
 - `broker` — the broker hostname (e.g. `homeassistant.lan`) or IP. A hostname is resolved via DNS.
 - `port` — broker port (default 1883).
 - `username` / `password` — broker credentials (optional; the password is stored obfuscated like the WiFi password).
-- `haDiscovery` — announce a Home Assistant MQTT-discovery light (default off, opt-in). HA already auto-discovers the device over the WLED `/json` shim (color + palette + sensors, no broker), so this stays off to avoid a duplicate entity; turn it on for broker-only / cross-subnet setups where mDNS doesn't reach. When on, HA auto-creates a wired entity; toggling it off removes it. See the [home-automation guide](../../usecases/home-automation.md).
+- `haDiscovery` — announce a Home Assistant MQTT-discovery light (default off, opt-in). HA already auto-discovers the device over the WLED `/json` shim (color + palette + sensors, no broker), so this stays off to avoid a duplicate entity; turn it on for broker-only / cross-subnet setups where mDNS doesn't reach. When on, HA auto-creates a wired entity; toggling it off removes it. See the [home-automation guide](../../how-to/home-automation.md).
 - read-only — `mqtt_status` (`disabled` / `idle` / `connecting` / `connected` / `disconnected` / an error).
 
 Detail: [technical](moxygen/MqttModule.md)
 
-[Tests](../../tests/unit-tests.md#mqttmodule)
+[Tests](../../reference/tests/unit-tests.md#mqttmodule)
 
 <a id="firmware-update"></a>
 
@@ -108,11 +108,11 @@ Over-the-air firmware flashing — the one operation that swaps the binary and n
   factory slot. Its presence is also what tells the UI that installs run through the
   reboot-into-MoonBase cycle, behind one "updating firmware" overlay, and that a **Restart in
   MoonBase** button belongs on the card
-  ([architecture.md § MoonBase](../../architecture.md#moonbase-the-second-boot-image)).
+  ([MoonBase](../../explanation/architecture/moonbase.md)).
 
 Detail: [technical](moxygen/FirmwareUpdateModule.md)
 
-[Tests](../../tests/unit-tests.md#firmwareupdatemodule)
+[Tests](../../reference/tests/unit-tests.md#firmwareupdatemodule)
 
 <a id="mooncloud"></a>
 
@@ -128,7 +128,7 @@ The container for everything projectMM does with a server MoonModules runs. It h
 
 #### Stats
 
-One opt-in report about this install, sent once when the firmware is installed or upgraded, so development effort goes where the users are. Off until you answer yes. Everything it sends, and the reasoning behind the identifier, is in the [privacy policy](../../privacy-policy.md).
+One opt-in report about this install, sent once when the firmware is installed or upgraded, so development effort goes where the users are. Off until you answer yes. Everything it sends, and the reasoning behind the identifier, is in the [privacy policy](../../legal/privacy-policy.md).
 
 - `consent`: a checkbox, off by default. Nothing is sent, and no identifier is computed, while it is off.
 - read-only: `version` (what is running) and `reportedVersion` (what last produced a report). They differ exactly when a report is due, which is what makes one upgrade send one report and a reboot send nothing.
@@ -138,7 +138,7 @@ The report carries hardware and configuration: chip, flash, PSRAM, SDK, device m
 The card also shows the totals everyone else reported: contributing earns the answer back where you already are. The charts are drawn empty until consent is on, so what saying yes gets you is visible before you say it.
 
 
-[Tests](../../tests/unit-tests.md#moonstatsmodule) · Detail: [technical](moxygen/MoonStatsModule.md)
+[Tests](../../reference/tests/unit-tests.md#moonstatsmodule) · Detail: [technical](moxygen/MoonStatsModule.md)
 
 <a id="mooncloud-talk"></a>
 
@@ -155,19 +155,19 @@ A public message board between projectMM devices, in the shape Meshtastic's chan
 
 **There is no authentication**, so a sender id can be fabricated by anyone posting by hand. That is acceptable for a board where nothing is gated on identity, and it is said here rather than left to be discovered.
 
-[Tests](../../tests/unit-tests.md#moontalkmodule) · Detail: [technical](moxygen/MoonTalkModule.md)
+[Tests](../../reference/tests/unit-tests.md#moontalkmodule) · Detail: [technical](moxygen/MoonTalkModule.md)
 
 <a id="file-manager"></a>
 
 ### File Manager
 
-A boot-wired system tool (distinct from Filesystem, the persistence *engine*): browse and manage the device filesystem from a dedicated panel — a lazy expand/collapse folder tree (VS Code / Explorer shape) plus an inline text editor. Browsing is UI-side over `/api/dir` + `/api/file`, so the module itself stays minimal. Tree/toolbar/editor behaviour: ⌄ details.
+A boot-wired system tool (distinct from Filesystem, the persistence *engine*): browse and manage the device filesystem from a dedicated panel — a lazy expand/collapse folder tree (VS Code / Explorer shape) plus an inline text editor. Browsing is UI-side over `/api/dir` + `/api/file`, so the module itself stays minimal. Tree/toolbar/editor behavior: ⌄ details.
 
 <img src="../../assets/core/FileManagerModule.png" width="300" alt="File Manager panel — folder tree + toolbar">
 
 - `file browser`, the panel itself: an expand/collapse folder tree with a toolbar (＋folder / ＋file / upload / backup / restore / delete / refresh) and an inline text editor. The module's main surface (⌄ details for the interactions).
 - **Backup (⤓)**, download the device's files (config, scripts, presets) as one `.json` bundle: every successfully read file, byte-verified against the directory listing; an unreadable or non-text file is skipped and named, and only a verified-short read aborts the backup. **Keep the file private: it contains the WiFi password.** For a device on firmware from before this button, the [installer page](https://moonmodules.org/projectMM/install/) offers the same backup as a bookmarklet.
-- **Restore (⟲)**, upload a backup bundle (press twice: it overwrites the device's files). Known renames from [MIGRATING.md](../../MIGRATING.md) apply in the browser before upload, then a report lists everything that needs an eye: renamed and mapped entries, values to review, module types or controls this firmware no longer has (per [ADR-0013](../../adr/0013-no-migration-code-robust-persistence-plus-documented-breaks.md) the device itself never migrates). Every file applies to the running device as it lands (live reconfiguration), with two boot-only exceptions the dialog names: network settings (bring-up is not re-runnable live, so the dialog offers the restart that applies them) and the web server's own `port` (binds at boot).
+- **Restore (⟲)**, upload a backup bundle (press twice: it overwrites the device's files). Known renames from [MIGRATING.md](../../reference/MIGRATING.md) apply in the browser before upload, then a report lists everything that needs an eye: renamed and mapped entries, values to review, module types or controls this firmware no longer has (per the documented break the device itself never migrates). Every file applies to the running device as it lands (live reconfiguration), with two boot-only exceptions the dialog names: network settings (bring-up is not re-runnable live, so the dialog offers the restart that applies them) and the web server's own `port` (binds at boot).
 - `show hidden` — reveal dot-prefixed files/folders (e.g. `.config`); forwarded to `/api/dir` as its `hidden` filter.
 - `filesystem` — read-only usage bar (used / total bytes, from the platform).
 - `lastSaved` — read-only; how long ago config was persisted (read from the Filesystem engine).
@@ -205,7 +205,7 @@ Detail: [technical](moxygen/TasksModule.md)
 
 A read-only diagnostic that shows **which module owns each GPIO, for what role, and whether that pin is safe for it** — the device's pin ownership map, keyed by physical GPIO the way an OS Device Manager, a Tasmota template, or a GPIOViewer diagram is. A fixed System module, wired-by-code, always present. It walks the live module tree and collects every claimed pin — each GPIO control (a mic's `sckPin`/`wsPin`/`sdPin`, an Ethernet PHY's `ethMdcGpio`, a driver's `loopbackTxPin`) and each LED-driver `pins` lane CSV — so it needs no state of its own: unlike a central pin manager, each module owns its pins and this one only observes. A GPIO claimed by two controls is flagged red at the summary and lists both owners in the row detail — the read-only way to surface a conflict (a mic pin colliding with an LED lane, two lanes on one pin) without wedging the device: the claim still lands, the map just makes it loud. A **disabled** module's pins drop out of the map (switching a module off frees its GPIOs, on re-claims them) — the intent side of releasing resources on disable. Refreshes once a second, so a live pin change shows without a reboot.
 
-- read-only — `pins` (a row per claimed GPIO: `gpio`, `owner` = the owning module, `role` = derived from the control name — `sckPin`→BCLK, `wsPin`→WS, `pins`→LED lane N, `ethMdcGpio`→MDC, …). A row is flagged with a colored edge when the claim is unsafe: **error** (red) for a claim on a reserved flash/PSRAM/USB pin or a double-claim, **warn** (yellow) for a driven role on a boot strap or input-only pin. The strap/reserved data comes from [gpio-usage.md](../../reference/gpio-usage.md) via the platform layer; PSRAM-conditional pins (classic-ESP32 16/17, S3 33-37) are flagged only when PSRAM is actually present at runtime, so a bare-WROOM board isn't falsely flagged. Each row also shows the pin's **live state** — `dir` (out/in/both/off, the pad's *actual* direction right now — shown as information, not auto-flagged, since a pin reading input/off is often legitimate: an idle I²C line, an unrun loopback pin, an external clock), `level` (HIGH/LOW, read straight off the pad — a driver's output must toggle when it renders, a mic clock must toggle when the mic runs), and `drive` (WEAK…STRONGEST). Expand a row to see every claim on that GPIO (`owner · role`) plus a `warning` line naming *why* it's flagged; a double-claim lists all co-owners. Unused pins (value −1) are skipped.
+- read-only — `pins` (a row per claimed GPIO: `gpio`, `owner` = the owning module, `role` = derived from the control name — `sckPin`→BCLK, `wsPin`→WS, `pins`→LED lane N, `ethMdcGpio`→MDC, …). A row is flagged with a colored edge when the claim is unsafe: **error** (red) for a claim on a reserved flash/PSRAM/USB pin or a double-claim, **warn** (yellow) for a driven role on a boot strap or input-only pin. The strap/reserved data comes from [gpio-usage.md](../../reference/hardware/gpio-usage.md) via the platform layer; PSRAM-conditional pins (classic-ESP32 16/17, S3 33-37) are flagged only when PSRAM is actually present at runtime, so a bare-WROOM board isn't falsely flagged. Each row also shows the pin's **live state** — `dir` (out/in/both/off, the pad's *actual* direction right now — shown as information, not auto-flagged, since a pin reading input/off is often legitimate: an idle I²C line, an unrun loopback pin, an external clock), `level` (HIGH/LOW, read straight off the pad — a driver's output must toggle when it renders, a mic clock must toggle when the mic runs), and `drive` (WEAK…STRONGEST). Expand a row to see every claim on that GPIO (`owner · role`) plus a `warning` line naming *why* it's flagged; a double-claim lists all co-owners. Unused pins (value −1) are skipped.
 
 Detail: [technical](moxygen/PinsModule.md)
 
@@ -256,7 +256,7 @@ Home Assistant adopts the device two ways, both zero-config:
 - **MQTT auto-discovery** — with `haDiscovery` on (opt-in; off by default) and a broker set, the device announces itself on `homeassistant/light/projectMM_<mac6>/config` and HA auto-creates a wired entity with **on/off + brightness** (the config declares `brightness` only; color isn't in it, so the entity has no color control). Retained across reboots. Color/palette stays on the separate `hsv/set` topic above, not this entity. Off by default because the WLED `/json` shim already gives HA a richer light (color + palette + sensors) over mDNS with no broker — leaving both on lists the device twice; enable this only for broker-only / cross-subnet setups.
 - **WLED integration** — HA's built-in WLED integration discovers the device over the WLED `/json` API projectMM already serves; on/off + brightness work with no broker.
 
-Both can be on at once. Setup walkthrough (including exposing HA to Apple Home via HA's HomeKit Bridge, no Homebridge needed) in the [Home Assistant recipe](../../usecases/home-automation.md#adopt-in-home-assistant).
+Both can be on at once. Setup walkthrough (including exposing HA to Apple Home via HA's HomeKit Bridge, no Homebridge needed) in the [Home Assistant recipe](../../how-to/home-automation.md#adopt-in-home-assistant).
 
 ## File Manager — details
 

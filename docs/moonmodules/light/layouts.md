@@ -2,7 +2,7 @@
 
 ![layouts controls](../../assets/core/Layouts.png)
 
-Every layout, one block each: what it does and what each control means — together. A layout maps light indices to physical `(x, y, z)` positions — it defines the *shape* an [effect](effects.md) draws onto and a [driver](drivers.md) sends out. The [Layouts](moxygen/Layouts.md) container holds one or more layout children and composes them into one coordinate space; a [Layer](moxygen/Layer.md) renders over that combined space. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../adr/0015-library-is-a-tag-not-a-folder.md).)
+Every layout, one block each: what it does and what each control means — together. A layout maps light indices to physical `(x, y, z)` positions — it defines the *shape* an [effect](effects.md) draws onto and a [driver](drivers.md) sends out. The [Layouts](moxygen/Layouts.md) container holds one or more layout children and composes them into one coordinate space; a [Layer](moxygen/Layer.md) renders over that combined space. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../contributing/documentation-standards.md#module-pages).)
 
 ## MoonLight layouts
 
@@ -196,7 +196,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/GridLayout.md)
 
-[Tests](../../tests/unit-tests.md#gridlayout)
+[Tests](../../reference/tests/unit-tests.md#gridlayout)
 
 <a id="gridblacks"></a>
 
@@ -213,7 +213,7 @@ Origin: projectMM
 
 Detail: [technical](moxygen/GridBlacksLayout.md)
 
-[Tests](../../tests/unit-tests.md#gridblackslayout)
+[Tests](../../reference/tests/unit-tests.md#gridblackslayout)
 
 <a id="sphere"></a>
 
@@ -221,28 +221,28 @@ Detail: [technical](moxygen/GridBlacksLayout.md)
 
 Lights on the surface of a hollow sphere — a one-light-thick shell inside a `(2·radius+1)³` box, no interior lights.
 
-- `radius` — surface radius in light-units (1–64); the shell is every cell whose distance from the centre rounds to `radius`.
+- `radius` — surface radius in light-units (1–64); the shell is every cell whose distance from the center rounds to `radius`.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
 
 Detail: [technical](moxygen/SphereLayout.md)
 
-[Tests](../../tests/unit-tests.md#spherelayout)
+[Tests](../../reference/tests/unit-tests.md#spherelayout)
 
 <a id="wheel"></a>
 
 ### Wheel
 
-A bicycle-wheel: `spokes` straight rows radiate from a centre hub, each carrying `ledsPerSpoke` LEDs spaced one unit apart outward.
+A bicycle-wheel: `spokes` straight rows radiate from a center hub, each carrying `ledsPerSpoke` LEDs spaced one unit apart outward.
 
 - `spokes` — number of spokes radiating from the hub (2–64).
-- `ledsPerSpoke` — LEDs along each spoke, spaced one unit apart from the centre outward.
+- `ledsPerSpoke` — LEDs along each spoke, spaced one unit apart from the center outward.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
 
 Detail: [technical](moxygen/WheelLayout.md)
 
-[Tests](../../tests/unit-tests.md#wheellayout)
+[Tests](../../reference/tests/unit-tests.md#wheellayout)
 
 The [Layouts](moxygen/Layouts.md) container itself takes no controls — see its page for coordinate iteration, reordering, and rebuild propagation.
 

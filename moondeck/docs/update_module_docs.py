@@ -31,7 +31,7 @@ DOCS_DIR = ROOT / "docs" / "moonmodules"
 ASSETS = ROOT / "docs" / "assets"
 UI_DIR = ASSETS / "ui"   # tooling/installer/full-page shots (not per-module)
 
-# A module's asset subfolder (domain/type), mirroring src — see folder-structure-proposal.md.
+# A module's asset subfolder (domain/type), mirroring src.
 def asset_dir_for(type_name: str):
     if type_name.endswith("Effect"):
         return ASSETS / "light" / "effects"

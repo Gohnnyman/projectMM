@@ -1,6 +1,6 @@
 # MoonDeck Script Reference
 
-MoonDeck is projectMM's browser-based developer console: one page that builds, flashes, runs, tests, monitors, and checks the project across every target, and discovers and drives devices on the network. Every action it offers is a thin wrapper around a script under `moondeck/`, so the CLI (`uv run moondeck/<group>/<name>.py`) and MoonDeck run exactly the same code — agents typically use the CLI, humans use MoonDeck. For what MoonDeck *is* and where it sits in the workflow see [docs/building.md § MoonDeck](../docs/building.md#moondeck--the-dev-console); this page is the per-script reference.
+MoonDeck is projectMM's browser-based developer console: one page that builds, flashes, runs, tests, monitors, and checks the project across every target, and discovers and drives devices on the network. Every action it offers is a thin wrapper around a script under `moondeck/`, so the CLI (`uv run moondeck/<group>/<name>.py`) and MoonDeck run exactly the same code: agents typically use the CLI, humans use MoonDeck. For what MoonDeck *is* and where it sits in the workflow see [docs/how-to/building.md § MoonDeck](../docs/how-to/building.md#moondeck--the-dev-console). What follows is the per-script reference.
 
 Launch it with `uv run moondeck/moondeck.py` and open <http://localhost:8420>. The console has three tabs — **Desktop** (build build / run / test), **ESP32** (chip + port, build / flash / monitor), and **Live** (discovery and live runs against networked devices) — above a network bar and per-device deviceModel pickers. Script definitions live in `moondeck/moondeck_config.json` (committed); runtime state (selected network, devices, ports) persists in `moondeck/moondeck.json` (gitignored).
 
@@ -319,7 +319,7 @@ finding grouped by file. No report file to open: a run this slow should answer o
 and the old `build/clang-tidy-report.md` was gitignored anyway, so it existed only to be read
 once.
 
-**Verify a zero before believing it** ([testing.md](../docs/testing.md#verify-a-zero-before-believing-it)
+**Verify a zero before believing it** ([testing.md](../docs/reference/testing.md#verify-a-zero-before-believing-it)
 covers why and lists the known silent-failure modes). This script's own guard: it refuses to
 report when more than ten files fail to compile.
 
@@ -515,7 +515,7 @@ uv run moondeck/check/check_nonblocking.py --module AudioService
 
 `MoonModule::tick/tick20ms/tick1s` carry `MM_NONBLOCKING` ([platform.h](../src/platform/platform.h)),
 and Clang 20+ verifies under `-Wfunction-effects` that nothing they reach allocates or blocks —
-**transitively**, through the whole call graph ([coding-standards.md § Static checks](../docs/coding-standards.md#static-checks) owns the rule).
+**transitively**, through the whole call graph ([coding-standards.md § Static checks](../docs/contributing/coding-standards.md#static-checks) owns the rule).
 
 The attribute is inherited by overrides, so three annotations cover every module's tick. It also
 sits in `tickChildren`'s **member-pointer type** — without that, the indirect call through `fn`
@@ -705,7 +705,7 @@ point: no build, no compile database, no toolchain, so it runs anywhere in about
 **What it does for us.** It owns ONE number — how complex a function is — and it is the only tool
 here that produces a per-commit trend rather than a verdict. clang-tidy can tell you a function is
 complex today; only a series tells you the codebase is drifting, which is what
-[repo-health](../docs/metrics/repo-health.json) and `collect_kpi` plot. Its own
+[repo-health](../docs/reference/metrics/repo-health.json) and `collect_kpi` plot. Its own
 `readability-function-*` checks stay off in clang-tidy for exactly that reason (one rule, one
 owner). The tokenizer's cost is real: on template- and macro-dense C++ it reports a mangled
 function name (`SolidEffect::static_cast<lengthType>` for a method called `tick`), and since the
@@ -734,7 +734,7 @@ different fixes: `HttpServerModule::handleConnection` is `93* 178*` (both — sp
 split. TOKEN, PARAM and LINES are context for *why* a function is heavy; nothing gates on them.
 
 A raw run reports 162 functions over threshold (CCN > 10 or NLOC > 60), and a metric that can
-never reach zero is a poor gate — people stop reading it. So [`docs/metrics/whitelizard.txt`](../docs/metrics/whitelizard.txt)
+never reach zero is a poor gate: people stop reading it. So [`docs/reference/metrics/whitelizard.txt`](../docs/reference/metrics/whitelizard.txt)
 freezes today's set and the check fails only on something new. The baseline is lizard's own
 `--whitelist` format, matched on **file + function name** rather than line numbers, so it
 survives edits above a function.
@@ -757,7 +757,7 @@ uv run moondeck/scenario/run_scenario.py --name scenario_Layer_base_pipeline   #
 
 Scenarios are JSON files in `test/scenarios/`. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
 
-For a full description of each scenario, see the [scenario inventory](/api/docs/tests/scenario-tests.md) — auto-generated from the JSON files.
+For a full description of each scenario, see the [scenario inventory](/api/docs/reference/tests/scenario-tests.md), auto-generated from the JSON files.
 
 ### history_report
 
@@ -857,7 +857,7 @@ uv run moondeck/scenario/run_live_scenario.py --compare-baseline                
 
 Executes scenario steps (add_module, set_control, delete_module) via REST API. Collects per-step FPS and heap measurements. Compares against stored baselines to detect performance regressions. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
 
-For a full description of each scenario, see the [scenario inventory](/api/docs/tests/scenario-tests.md) — auto-generated from the JSON files.
+For a full description of each scenario, see the [scenario inventory](/api/docs/reference/tests/scenario-tests.md), auto-generated from the JSON files.
 
 ### run_network_live
 
@@ -935,7 +935,7 @@ Removes one ESP32 per-firmware build dir (`--firmware <name>`) or every `build/e
 
 ### build_esp32
 
-Build one of the shipping ESP32 firmware variants. The MoonDeck **Build** button reads the **Firmware** dropdown and forwards `--firmware <selected>` to `build_esp32.py`. The dropdown is populated from the `FIRMWARES` dict, the single source of truth. ("Firmware" is the compiled binary; the physical product (deviceModel) is a separate concept — see [architecture.md § Firmware vs deviceModel vs board](../docs/architecture.md#firmware-vs-devicemodel-vs-board).)
+Build one of the shipping ESP32 firmware variants. The MoonDeck **Build** button reads the **Firmware** dropdown and forwards `--firmware <selected>` to `build_esp32.py`. The dropdown is populated from the `FIRMWARES` dict, the single source of truth. ("Firmware" is the compiled binary; the physical product (deviceModel) is a separate concept: see [MoonInstaller, firmware vs deviceModel vs board](../docs/explanation/architecture/mooninstaller.md#the-three-words).)
 
 | Firmware key | Chip | What's in the image |
 |---|---|---|
@@ -1062,7 +1062,7 @@ uv run moondeck/qemu/run_qemu.py --gdb            # freeze at reset, wait for a 
 
 Uses [Espressif's QEMU fork](https://github.com/espressif/qemu) ([docs](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/tools/qemu.html)), which emulates the ESP32's CPU, memory and enough peripherals to boot a real firmware image. Install it with `python3 $IDF_PATH/tools/idf_tools.py install qemu-xtensa`.
 
-**Why it earns its place: it EXECUTES the code.** Every other check compares emitted bytes against a model of what they should be, so none can catch a mistake the model shares. The emulator runs the instructions the way silicon does, including Xtensa's register window, `entry`/`retw` and the exception path, so a JIT defect faults here, on this machine, in seconds, instead of on a bench with only a crash dump to read. That is what it was built for ([the register-window frame bug](../docs/history/lessons.md#lessons-from-the-moonlive-on-xtensa-branch-the-register-window-frame-bug)).
+**Why it earns its place: it EXECUTES the code.** Every other check compares emitted bytes against a model of what they should be, so none can catch a mistake the model shares. The emulator runs the instructions the way silicon does, including Xtensa's register window, `entry`/`retw` and the exception path, so a JIT defect faults here, on this machine, in seconds, instead of on a bench with only a crash dump to read. That is what it was built for ([the register-window frame bug](../docs/work/past/lessons.md#lessons-from-the-moonlive-on-xtensa-branch-the-register-window-frame-bug)).
 
 The emulated board is a full device, not a console toy: the `qemu` firmware variant swaps WiFi (no radio exists) for QEMU's emulated OpenCores MAC, so the guest gets a DHCP address and the REST API and web UI work exactly as on hardware. The same scripts, tests and browser drive it. Host port 8410 forwards to the guest's HTTP server, deliberately not 8080 so a desktop build can run alongside.
 

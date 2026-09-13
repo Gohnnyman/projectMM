@@ -1,6 +1,6 @@
 # Funkelfetisch/projectMM: monthly activity digest
 
-What landed on [Funkelfetisch/projectMM](https://github.com/Funkelfetisch/projectMM), month by month. External-context reference, a factual log of a friend repo's activity, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](README.md).
+What landed on [Funkelfetisch/projectMM](https://github.com/Funkelfetisch/projectMM), month by month. External-context reference, a factual log of a friend repo's activity, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](index.md).
 
 This is a **fork of this project** building a commercial product on it: **HELIO**, a physical "infinity sphere" lamp (a warm-white 3000 K RGBW strip inside a clear acrylic shell). The fork's own plan documents describe matching a browser preview to "the transmitted LED frame, warm-white output, clear acrylic, internal reflections, and optional wall bounce", and its firmware carries a `helio1` sdkconfig variant, a curated preset player, and a branded update channel. The README is unchanged from ours, so this is projectMM plus a product layer rather than a rebrand.
 

@@ -1,6 +1,6 @@
 # Modifiers
 
-Every modifier, one block each: its preview, what it does, and what each control means — together. A modifier sits between an [effect](effects.md) and the output: it reshapes *where* pixels land (or masks them) without changing the effect's drawing. Modifiers compose — a [Layer](moxygen/Layer.md) folds its whole modifier stack each rebuild; a *dynamic* modifier (one that overrides `modifyLive`) also runs a per-frame pass. See [ModifierBase](moxygen/ModifierBase.md) for the static-vs-dynamic split. Each block's emoji are its `tags()` (see the [tag emoji legend](../../architecture.md#tag-emoji-legend)); **Kind** is static (baked into the mapping at rebuild) or dynamic (per-frame remap). Modifiers are grouped into sections, and each block carries that modifier's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../adr/0015-library-is-a-tag-not-a-folder.md).)
+Every modifier, one block each: its preview, what it does, and what each control means — together. A modifier sits between an [effect](effects.md) and the output: it reshapes *where* pixels land (or masks them) without changing the effect's drawing. Modifiers compose — a [Layer](moxygen/Layer.md) folds its whole modifier stack each rebuild; a *dynamic* modifier (one that overrides `modifyLive`) also runs a per-frame pass. See [ModifierBase](moxygen/ModifierBase.md) for the static-vs-dynamic split. Each block's emoji are its `tags()` (see the [tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend)); **Kind** is static (baked into the mapping at rebuild) or dynamic (per-frame remap). Modifiers are grouped into sections, and each block carries that modifier's preview, behavior, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../contributing/documentation-standards.md#module-pages).)
 
 A modifier folds coordinates rather than drawing, so it reaches for very little of the shared [power function](power-functions.md) toolbox — that page states the split and lists which modifiers use what.
 
@@ -10,13 +10,13 @@ A modifier folds coordinates rather than drawing, so it reaches for very little 
 
 ### Block 💫 · static
 
-Expands a 1D effect into concentric **square rings** (Chebyshev distance from the centre): the effect's linear position becomes the ring index, so a gradient effect draws nested squares.
+Expands a 1D effect into concentric **square rings** (Chebyshev distance from the center): the effect's linear position becomes the ring index, so a gradient effect draws nested squares.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
 Detail: [technical](moxygen/BlockModifier.md)
 
-[Tests](../../tests/unit-tests.md#blockmodifier)
+[Tests](../../reference/tests/unit-tests.md#blockmodifier)
 
 <a id="checkerboard"></a>
 
@@ -33,33 +33,33 @@ Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502
 
 Detail: [technical](moxygen/CheckerboardModifier.md)
 
-[Tests](../../tests/unit-tests.md#checkerboardmodifier)
+[Tests](../../reference/tests/unit-tests.md#checkerboardmodifier)
 
 <a id="circle"></a>
 
 ### Circle 💫 · static
 
-Expands a 1D effect into concentric **circular rings** (Euclidean distance from the centre): the effect's linear position becomes the radius, so a gradient effect draws nested circles. The circular counterpart to [Block](#block).
+Expands a 1D effect into concentric **circular rings** (Euclidean distance from the center): the effect's linear position becomes the radius, so a gradient effect draws nested circles. The circular counterpart to [Block](#block).
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
 Detail: [technical](moxygen/CircleModifier.md)
 
-[Tests](../../tests/unit-tests.md#circlemodifier)
+[Tests](../../reference/tests/unit-tests.md#circlemodifier)
 
 <a id="mirror"></a>
 
 ### Mirror 💫 · static
 
-Folds the far half of the box back onto the near half per axis, mirroring the image across the box centre (top-left quadrant reflected into the others in 2D, near octant into all eight in 3D).
+Folds the far half of the box back onto the near half per axis, mirroring the image across the box center (top-left quadrant reflected into the others in 2D, near octant into all eight in 3D).
 
-- `mirrorX` / `mirrorY` / `mirrorZ` — mirror across the centre on that axis (each default on; enabling an axis the layout doesn't use is a no-op).
+- `mirrorX` / `mirrorY` / `mirrorZ` — mirror across the center on that axis (each default on; enabling an axis the layout doesn't use is a no-op).
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
 Detail: [technical](moxygen/MirrorModifier.md)
 
-[Tests](../../tests/unit-tests.md#mirrormodifier)
+[Tests](../../reference/tests/unit-tests.md#mirrormodifier)
 
 <a id="multiply"></a>
 
@@ -76,15 +76,15 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/MultiplyModifier.md)
 
-[Tests](../../tests/unit-tests.md#multiplymodifier)
+[Tests](../../reference/tests/unit-tests.md#multiplymodifier)
 
 <a id="pinwheel"></a>
 
 ### Pinwheel 💫 · static
 
-Remaps the grid into radial **petals** around the centre — the angle to each pixel picks its petal, with an optional swirl (angle sheared by radius), symmetry, and z-twist. Turns a linear or 2D effect into a rotating flower/spokes pattern.
+Remaps the grid into radial **petals** around the center — the angle to each pixel picks its petal, with an optional swirl (angle sheared by radius), symmetry, and z-twist. Turns a linear or 2D effect into a rotating flower/spokes pattern.
 
-- `petals` — number of petals radiating from the centre.
+- `petals` — number of petals radiating from the center.
 - `swirl` — shear the angle by radius (−127..127; a spiral; negative reverses).
 - `reverse` — reverse the petal order.
 - `symmetry` — fold the petals into a factor-of-360 symmetry.
@@ -94,7 +94,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/PinwheelModifier.md)
 
-[Tests](../../tests/unit-tests.md#pinwheelmodifier)
+[Tests](../../reference/tests/unit-tests.md#pinwheelmodifier)
 
 <a id="ripplexz"></a>
 
@@ -109,7 +109,7 @@ Origin: MoonLight · by @Troy (WLEDMM Art-Net) · via [MoonLight](https://github
 
 Detail: [technical](moxygen/RippleXZModifier.md)
 
-[Tests](../../tests/unit-tests.md#ripplexzmodifier)
+[Tests](../../reference/tests/unit-tests.md#ripplexzmodifier)
 
 <a id="transpose"></a>
 
@@ -124,7 +124,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/TransposeModifier.md)
 
-[Tests](../../tests/unit-tests.md#transposemodifier)
+[Tests](../../reference/tests/unit-tests.md#transposemodifier)
 
 ## projectMM-native modifiers
 
@@ -140,7 +140,7 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/RandomMapModifier.md)
 
-[Tests](../../tests/unit-tests.md#randommapmodifier)
+[Tests](../../reference/tests/unit-tests.md#randommapmodifier)
 
 <a id="region"></a>
 
@@ -154,13 +154,13 @@ Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/bl
 
 Detail: [technical](moxygen/RegionModifier.md)
 
-[Tests](../../tests/unit-tests.md#regionmodifier)
+[Tests](../../reference/tests/unit-tests.md#regionmodifier)
 
 <a id="rotate"></a>
 
 ### Rotate · dynamic
 
-Rotates the 2D image around its centre, turning continuously over time (the codebase's transform-matrix reference).
+Rotates the 2D image around its center, turning continuously over time (the codebase's transform-matrix reference).
 
 - `speed` — rotation speed (1–255; turns faster as it rises).
 
@@ -168,5 +168,5 @@ Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502
 
 Detail: [technical](moxygen/RotateModifier.md)
 
-[Tests](../../tests/unit-tests.md#rotatemodifier)
+[Tests](../../reference/tests/unit-tests.md#rotatemodifier)
 

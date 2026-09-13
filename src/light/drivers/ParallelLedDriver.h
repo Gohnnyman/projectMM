@@ -212,7 +212,7 @@ public:
     ///
     /// Toggling rebuilds the bus (via affectsPrepare) to add or free the second buffer. Distinct from
     /// the container's `multicore` control, and they stack: this hides the WIRE behind DMA within one
-    /// core; that hides the ENCODE behind the render on the other core. See docs/history/lessons.md.
+    /// core; that hides the ENCODE behind the render on the other core. See docs/work/past/lessons.md.
     bool doubleBuffer = true;
     /// Streaming-ring source snapshot on/off — an A/B measurement knob, ring path only. ON (default,
     /// the safe behavior) freezes the source into a driver-owned buffer each frame so the ring's refill
@@ -303,8 +303,8 @@ public:
     /// i80.
     ///
     /// Full status, the reuse-race + concurrency follow-ups, and the measurements behind these limits:
-    /// [the analysis](https://github.com/MoonModules/projectMM/blob/main/docs/history/shift-register-driver-analysis.md)
-    /// and the ring items in `docs/backlog/backlog-light.md`.
+    /// [the analysis](https://github.com/MoonModules/projectMM/blob/main/docs/work/future/shift-register-driver-analysis.md)
+    /// and the ring items in `docs/work/future/backlog-light.md`.
     bool     pinExpander = false;
     /// The 74HCT595 LATCH (RCLK) line — pulsed once the shifted byte is in, presenting it on the
     /// '595 outputs. Unlike the shift clock (the peripheral's own WR pin), this is a DATA lane:
@@ -554,7 +554,7 @@ public:
     /// +1 frame latency, +1 DMA buffer). Inert off this chip and idle until inited with a source
     /// buffer + correction. (The double-buffer defaults ON — it overlaps the blocking wire wait and
     /// lifted the P4 whole-board rate 48→76 fps; OFF is the audio-reactive 0-latency opt-out and pays
-    /// for exactly one buffer — see the doubleBuffer control + docs/history/lessons.md.)
+    /// for exactly one buffer — see the doubleBuffer control + docs/work/past/lessons.md.)
     // REPORTED AS BLOCKING, deliberately: tickSync()/tickRing() reach busWaitIfBusy(), which
     // waits for the DMA transfer to finish (bounded by waitBudgetMs, and self-limiting via
     // deadFrames_). The wait is by design — the driver owns the bus for the frame, and encoding
@@ -781,7 +781,7 @@ public:
     /// So after kDeadFramesBeforeGiveUp consecutive dead transfers, stop transmitting: report the failure
     /// and let the tick return immediately. The LEDs go dark — but the device stays *reachable*, so the
     /// user can see the status and fix the setting that caused it. Degraded, not crashed; the
-    /// *Robustness* rule ([architecture.md](../../../docs/architecture.md#robustness)) says a bad input
+    /// *Robustness* rule ([the architecture](../../../docs/explanation/architecture/moonmodule.md#robustness)) says a bad input
     /// may leave the output idle, never the device wedged.
     ///
     /// It self-heals: any completed transfer clears the strike count, and a config change re-inits the

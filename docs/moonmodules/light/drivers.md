@@ -60,9 +60,9 @@ The card reads top-down as **invariant controls → `peripheral` divider → per
 
 Two ParallelLedDriver instances that select peripherals on the **same hardware block** (e.g. both `i80` and `MoonI80`, which share LCD_CAM) conflict — the second idles with a status. Different blocks (RMT + `Parlio` + `i80` on a P4) coexist.
 
-Origin: WS2812B on FastLED / WLED prior art, and the clockless I2S / RMT / Parlio techniques of **[hpwit](https://github.com/hpwit) (Yves Bazin)**, whose work is why a single board can drive dozens of parallel strands at all ([analysis](../../history/leddriver-analysis-top-down.md))
+Origin: WS2812B on FastLED / WLED prior art, and the clockless I2S / RMT / Parlio techniques of **[hpwit](https://github.com/hpwit) (Yves Bazin)**, whose work is why a single board can drive dozens of parallel strands at all ([analysis](../../work/future/leddriver-analysis-top-down.md))
 
-Tests: [RMT](../../tests/unit-tests.md#rmtleddriver) · [shared + peripherals](../../tests/unit-tests.md#parallelleddriver)
+Tests: [RMT](../../reference/tests/unit-tests.md#rmtleddriver) · [shared + peripherals](../../reference/tests/unit-tests.md#parallelleddriver)
 
 Detail: [RMT](moxygen/RmtLedDriver.md) · [Parallel](moxygen/ParallelLedDriver.md) · peripherals: [i80](moxygen/MultiPinLedDriver.md) · [MoonI80](moxygen/MoonLedDriver.md) · [Parlio](moxygen/ParlioLedDriver.md)
 
@@ -81,7 +81,7 @@ Streams the buffer over UDP as **Art-Net**, **E1.31 / sACN**, or **DDP** — one
   (`239.255.{universe_hi}.{universe_lo}`) rather than the configured address, so one send
   reaches every receiver that joined that universe. It is opt-in rather than the default for
   E1.31: the saving only materialises on a switch that does IGMP snooping, and firmware cannot
-  tell. See [multicast and IGMP snooping](../../architecture.md#multicast-and-igmp-snooping).
+  tell. See [multicast and IGMP snooping](../../explanation/architecture/moonlight.md#multicast-and-igmp-snooping).
 - `ips` — the receivers. **Blank by default — the driver idles until set**, so it never sends uninvited traffic. Type the full address once, then a range or a list: `192.168.1.70-74` (five tubes, ends inclusive) or `192.168.1.60,61,62,65`; both mix, and a further full address switches subnet.
 - `lightsPerIp` — lights per receiver, same idiom as an LED driver's `ledsPerPin`: **blank** = split the window evenly; **one number** = that many each; **a list** `150,100,50` = one per receiver by position.
 - `universe_start` — first universe for Art-Net / E1.31 (DDP ignores it). Restarts per receiver — each is an independent node addressing its own strip.
@@ -108,7 +108,7 @@ An effect writes `setPan` for every light in its layer, so a formation spanning 
 
 Origin: MoonLight D_NetworkOut; Art-Net 4 / E1.31 / DDP specs
 
-[Tests](../../tests/unit-tests.md#networksenddriver)
+[Tests](../../reference/tests/unit-tests.md#networksenddriver)
 
 Detail: [technical](moxygen/NetworkSendDriver.md)
 
@@ -136,7 +136,7 @@ Origin: ColorLight 5A-75 documented byte layout. Inspired by [FPP](https://githu
 
 Protocol references: [FPP's ColorLight-5a-75.cpp](https://github.com/FalconChristmas/fpp/blob/master/src/channeloutput/ColorLight-5a-75.cpp) is the implementation this driver's byte layout agrees with, and Harald Kubota's [5A-75B protocol write-up](https://hkubota.wordpress.com/2022/01/31/winter-project-colorlight-5a-75b-protocol/) documents the same wire format independently, including the brightness and color-temperature bytes and the discovery exchange. Read it with its comments: a reader supplied the controller-number field that makes multiple cards on one segment distinguishable, and the article's own MAC pair is printed the other way round from FPP's (destination `11:22:33:44:55:66`, source `22:22:33:44:55:66`, which is what this driver sends and what the cards filter on). Its lineage runs back to the [original mplayer-colorlight reverse engineering](http://www.mylifesucks.de/oss/mplayer-colorlight/).
 
-[Tests](../../tests/unit-tests.md#panelcarddriver)
+[Tests](../../reference/tests/unit-tests.md#panelcarddriver)
 
 Detail: [technical](moxygen/PanelCardDriver.md)
 
@@ -157,7 +157,7 @@ Drives **Philips Hue bulbs as pixels**: each color bulb in the driver's window b
 
 Origin: projectMM, on the [Hue v1 CLIP API](https://developers.meethue.com/develop/hue-api/)
 
-[Tests](../../tests/unit-tests.md#huedriver)
+[Tests](../../reference/tests/unit-tests.md#huedriver)
 
 Detail: [technical](moxygen/HueDriver.md)
 
@@ -182,7 +182,7 @@ points. A rig without moving heads never sends that message and pays nothing for
 The wire carries where a head POINTS, never a rendered look, so a richer visual later (a cone with
 falloff rather than a ray) is a browser change and not a protocol one. The beam is a ray today
 because beam angle and throw distance are fixture attributes the
-[fixture model](../../backlog/backlog-light.md) does not carry yet, and drawing a cone would mean
+[fixture model](../../work/future/backlog-light.md) does not carry yet, and drawing a cone would mean
 inventing them.
 
 Color and aim alternate frame by frame, since the transport keeps one send in flight: a head
@@ -190,7 +190,7 @@ sweeps far slower than a pixel changes, so half rate each is not visible on the 
 
 Origin: projectMM, on [MoonLight](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h)'s PhysicalLayer model
 
-[Tests](../../tests/unit-tests.md#previewdriver)
+[Tests](../../reference/tests/unit-tests.md#previewdriver)
 
 Detail: [technical](moxygen/PreviewDriver.md)
 
@@ -304,7 +304,7 @@ RMT is its own driver; the rest are `peripheral` choices on the one **Parallel L
 |---|---|---|---|---|---|
 | **RMT** ([detail](moxygen/RmtLedDriver.md)) | *(own driver)* | any ESP32 (classic 8 ch, S3 4, P4 4 DMA) | one per RMT TX channel | `loopbackFrame` | The general single-/few-strand output; default for classic + S3 board entries. `loopbackFrame` bit-verifies a *whole frame*, catching frame-rate / RF corruption a 24-bit burst misses. |
 | Parallel LED | **`i80`** | S3 / P4 / S31 (LCD_CAM) · classic (I2S) | **1–16** | `clockPin` `dcPin` | Over IDF's `esp_lcd` i80 bus. The **bus** is 8 or 16 bits wide (≤8 pins → 8-bit, 9–16 → 16-bit) — but the **pin count is free**: configure only the pins that drive something and the driver rounds the bus up around them, parking the spare lanes on a pin the peripheral already drives. `clockPin`/`dcPin` are i80 bus lines the LEDs ignore: on the classic ESP32 `clockPin` defaults to unset (the platform sinks it onto an input-only pad, so no GPIO is spent) while `dcPin` needs a real pin because the bus toggles it in software every frame; on the LCD_CAM chips both need a real pad. On the classic the bus is an I2S peripheral and takes instance 1, leaving instance 0 (the only one with a PDM converter) for the microphone, so both run. **Capped by one contiguous DMA buffer**: the classic backend is internal-RAM only (I2S can't reach PSRAM) → **2048 lights**; LCD_CAM draws from PSRAM → **16384**. Over the cap it idles with a status rather than crashing. |
-| Parallel LED | **`MoonI80`** | S3 / P4 / S31 (LCD_CAM only) | **1–16**; ×8 per pin with an expander (**6 pins → 48 strands**) | `clockPin` `pinExpander` `latchPin` `useRing` `ringAuto`; 🔧 `shiftOverclock` `ringRows` `ringBufs` `ringPadUs` | The same LCD_CAM output as `i80` on **our own GDMA chain**, which buys two things `esp_lcd` cannot: a frame **streamed** through a small buffer pool instead of held whole (so length stops being a memory question), and a **74HCT595 pin expander** — one GPIO fans out to 8 strands. `ringAuto` (default on) derives the streaming geometry per config, so the manual `ring*` knobs and `shiftOverclock` (a faster '595 clock for short-wired rigs) are expert-only tuning — the full guide is on the technical page. No `dcPin` at all, and WR is routed only when a '595 needs it as its shift clock. Not on the classic ESP32 (its i80 is the I2S peripheral). The prime-only ring (frame fits the buffer pool) and the pin expander are wall-solid; the **lapping** ring (very long strands, where the ISR refills from a PSRAM source) has a known last-row sparkle on the largest configs, tracked in [the backlog](../../backlog/backlog-light.md). Why + what it costs: [ADR-0014](../../adr/0014-own-i80-dma-driver-below-esp-lcd.md). |
+| Parallel LED | **`MoonI80`** | S3 / P4 / S31 (LCD_CAM only) | **1–16**; ×8 per pin with an expander (**6 pins → 48 strands**) | `clockPin` `pinExpander` `latchPin` `useRing` `ringAuto`; 🔧 `shiftOverclock` `ringRows` `ringBufs` `ringPadUs` | The same LCD_CAM output as `i80` on **our own GDMA chain**, which buys two things `esp_lcd` cannot: a frame **streamed** through a small buffer pool instead of held whole (so length stops being a memory question), and a **74HCT595 pin expander**, one GPIO fans out to 8 strands. `ringAuto` (default on) derives the streaming geometry per config, so the manual `ring*` knobs and `shiftOverclock` (a faster '595 clock for short-wired rigs) are expert-only tuning, the full guide is on the technical page. No `dcPin` at all, and WR is routed only when a '595 needs it as its shift clock. Not on the classic ESP32 (its i80 is the I2S peripheral). The prime-only ring (frame fits the buffer pool) and the pin expander are wall-solid; the **lapping** ring (very long strands, where the ISR refills from a PSRAM source) has a known last-row sparkle on the largest configs, tracked in [the backlog](../../work/future/backlog-light.md). Why + what it costs: [MoonLedDriver](moxygen/MoonLedDriver.md). |
 | Parallel LED | **`Parlio`** | ESP32-P4 | **1–16** | — | The P4's parallel path; Parlio generates its own pixel clock, so no clock/dc pins to spend. Bus width follows the pin count. On P4-NANO a known-good 8-set is `20,21,22,23,24,25,26,27`. |
 
 The [Parallel LED technical page](moxygen/ParallelLedDriver.md) carries the wire contract, buffer slicing, memory sizing, and the loopback self-test; each peripheral's own page ([i80](moxygen/MultiPinLedDriver.md) · [MoonI80](moxygen/MoonLedDriver.md) · [Parlio](moxygen/ParlioLedDriver.md)) covers its DMA specifics.

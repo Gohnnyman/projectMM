@@ -462,7 +462,7 @@ private:
         // programs). Pan and tilt each carry a fine channel, CH6 is a plain linear dimmer and CH7 a
         // separate strobe: leaving strobe unmapped holds it at 0, which is what a light driver
         // wants. CH5 (axis speed) is None too, so movement runs at full speed.
-        // See docs/reference/light-fixtures.md for the full channel table.
+        // See docs/reference/hardware/light-fixtures.md for the full channel table.
         static constexpr R kMHMini11[] = {      // 11ch: Pan,-,Tilt,-,-,Dim,-,R,G,B,W
             R::Pan, N, R::Tilt, N, N, R::Dimmer, N, R::Red, R::Green, R::Blue, R::White};
 

@@ -667,7 +667,7 @@ void setEthConfig(const EthPinConfig& cfg) { ethConfig_ = cfg; }
 //      in EXT_CHIP_CONFIG (0xA001 bit 8), TX delay 13×150 ps ≈ 1.95 ns in EXT_RGMII_CONFIG1 (0xA003
 //      bits [7:0]). These are the delay values IDF's example uses; a board whose PCB trace lengths need
 //      a different skew tunes them here. (DHCP at 100M on a 10/100 switch needs a further MAC Tx-clock
-//      fix that isn't here yet — see docs/backlog/backlog-core.md; this init is what brings the link up.)
+//      fix that isn't here yet — see docs/work/future/backlog-core.md; this init is what brings the link up.)
 static esp_err_t ethYt8531BoardInit(esp_eth_handle_t eth_handle) {
     bool autoNegoEn = true;
     esp_err_t err = esp_eth_ioctl(eth_handle, ETH_CMD_S_AUTONEGO, &autoNegoEn);
@@ -732,7 +732,7 @@ static bool ethInitEmac() {
     // clocks. These are the chip's fixed RGMII IO_MUX pads — the ONLY GPIOs the EMAC accepts
     // for each signal (validated against the IO_MUX table in IDF's esp32s31/emac_periph.c;
     // a non-IO_MUX pin fails "invalid ... GPIO number"). They also match the CoreBoard
-    // schematic wiring (docs/reference/esp32-s31-coreboard.md). Passing GPIO_NUM_MAX (-1)
+    // schematic wiring (docs/reference/hardware/esp32-s31-coreboard.md). Passing GPIO_NUM_MAX (-1)
     // here would make IDF pick these same defaults; we list them explicitly for clarity.
     // A pad's GPIO by signal name. constexpr-evaluable, so a name that is not in the list fails the
     // build rather than silently wiring pad 0.
@@ -1866,7 +1866,7 @@ void mdnsShutdown() {
 // a projectMM device broadcasts and listens for the 44-byte presence packet on UDP 65506.
 // Keeping discovery off mDNS also keeps the advertise stable, because a PTR query for a
 // service this device
-// also hosts destabilises our own advertise — see docs/adr/0006-device-discovery-udp-mdns-advertise-only.md.
+// also hosts destabilizes our own advertise.
 
 // Outbound HTTP request (plain HTTP, LAN, no TLS) — see platform.h. A bounded blocking lwIP
 // socket call; the caller (HueDriver) runs it off the render path on tick1s. Mirrors the

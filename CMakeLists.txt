@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # real diagnostics in the editor (it needs the actual include paths and flags, not guesses).
 # On by default because it costs nothing, is ignored by every consumer that doesn't want it,
 # and a missing database is the single most common reason clangd reports phantom errors.
-# `.clangd` at the repo root points at it; see docs/coding-standards.md § Editor setup.
+# `.clangd` at the repo root points at it; see docs/contributing/coding-standards.md § Editor setup.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Warning flags differ between GCC/Clang and MSVC. Gate by compiler so the
@@ -81,7 +81,7 @@ else()
     # (platform.h); -Wfunction-effects then checks TRANSITIVELY that nothing they reach
     # allocates or blocks, through the whole call graph. Clang 20+ only; the flag does not
     # exist on GCC, so the ESP32 build gets no hot-path check — src/platform/esp32/ is
-    # analysed only where the desktop build reaches it (docs/testing.md § Static analysis).
+    # analysed only where the desktop build reaches it (docs/reference/testing.md § Static analysis).
     # Probe for the flag instead of inferring it from a version: AppleClang reports its own
     # version line (the CI macos-14 runner reads >= 20 while predating the warning), so a version
     # comparison enables -Wfunction-effects on toolchains that reject it — and it is -Werror.
@@ -89,7 +89,7 @@ else()
     check_cxx_compiler_flag(-Wfunction-effects MM_HAS_WFUNCTION_EFFECTS)
     if(MM_HAS_WFUNCTION_EFFECTS)
         # -Wno-error is PERMANENT, not a stepping stone: this is a report, not a gate. The
-        # findings are real and frozen in docs/metrics/hotpath-baseline.txt as architecture
+        # findings are real and frozen in docs/reference/metrics/hotpath-baseline.txt as architecture
         # work; failing the build on them would block every other gate, and a new one may be
         # legitimate (a driver that must wait on hardware). The clang-hotpath card reports
         # what is NEW; a human judges it.
@@ -189,14 +189,24 @@ if(CURL_FOUND)
     message(STATUS "libcurl ${CURL_VERSION_STRING}: MoonCloud reporting enabled")
     target_compile_definitions(mm_platform PRIVATE MM_HAVE_CURL)
     target_link_libraries(mm_platform PUBLIC CURL::libcurl)
-elseif(DEFINED ENV{MM_RELEASE})
-    # A RELEASE build is the one case where absent is not acceptable: the binary would ask for
+elseif(DEFINED ENV{MM_PACKAGING} AND NOT WIN32)
+    # A PACKAGED build is the one case where absent is not acceptable: the binary would ask for
     # consent and then be structurally unable to honor it, and nobody would find out. Optional
     # stays optional for a contributor's machine; a published artifact must be able to report.
+    #
+    # Keyed on MM_PACKAGING, which package_desktop.py exports and nothing else sets. Two earlier
+    # signals were both wrong. MM_RELEASE reaches the build as a CMake -D from build_esp32.py and
+    # is never an environment variable, so that branch could not fire and three of the four
+    # published desktop binaries shipped with the feature compiled out. CI is set by every runner,
+    # including the sanitizer lanes that configure CMake directly and legitimately have no libcurl,
+    # so keying on it failed builds that produce no artifact at all.
+    #
+    # Windows is excluded until its job installs libcurl (vcpkg), which is real work rather than an
+    # apt line. Until then it warns like any other machine, and its binary cannot report.
     message(FATAL_ERROR
-        "libcurl not found, and MM_RELEASE is set. A released build with reporting compiled out "
-        "asks for consent it can never honor. Install libcurl (Windows: vcpkg install curl) or "
-        "unset MM_RELEASE for a local build.")
+        "libcurl not found while packaging a release. A published build with the client compiled "
+        "out asks for consent it can never honor. Install it in the job "
+        "(Linux: libcurl4-openssl-dev, Windows: vcpkg install curl).")
 else()
     message(STATUS "libcurl not found: MoonCloud reporting disabled (install libcurl to enable)")
 endif()

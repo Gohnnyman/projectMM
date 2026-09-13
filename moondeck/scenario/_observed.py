@@ -46,7 +46,7 @@ contended sample eventually ages out, which the widen-only shape could never do.
 
 The "what to watch" mapping is a property of the contract direction (tick contract =
 ceiling, so p95 is the failure indicator; heap/block contract = floor, so min is).
-See docs/testing.md § Persistent observations.
+See docs/reference/testing.md § Persistent observations.
 
 A target that cannot be run here (another OS) is reformatted into this shape with n=0
 and an empty window, so the file is uniform and the absence of data is explicit rather

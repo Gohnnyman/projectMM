@@ -2317,7 +2317,7 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*lane
     return {};   // not supported off the S3
 }
 
-// MoonI80 (our own LCD_CAM DMA driver, ADR-0014) — the same memory-backed bus as the esp_lcd
+// MoonI80 (our own LCD_CAM DMA driver), the same memory-backed bus as the esp_lcd
 // family above. The RING path stays inert: it is a GDMA construct with no host equivalent, so a
 // driver that would stream on device runs whole-frame here (busInitRing returns false and the
 // orchestrator falls back, exactly as its contract specifies).
@@ -2539,7 +2539,7 @@ bool irChannelReady(uint16_t /*pin*/) { return true; }   // no channel to fail o
 // (Processing.NDI.structs.h and Processing.NDI.Send.h). Getting a field's type or ORDER wrong here
 // is a silent crash or a skewed image rather than a compile error, because these are passed by
 // pointer into a binary that was built against the real definitions. They are quoted verbatim in
-// the plan (docs/history/plans) with their source, and must not be "tidied".
+// the plan (docs/work/past/plans) with their source, and must not be "tidied".
 namespace {
 
 using NdiSendInstance = void*;

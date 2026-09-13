@@ -1973,7 +1973,7 @@ function createCard(mod, depth) {
     // card-build. The picker reads SystemModule.firmware (already in
     // /api/state) to filter to OTA-compatible releases. On install, the
     // device fetches the binary via /api/firmware/url: no browser CORS in
-    // the data path. See docs/architecture.md § Firmware vs board.
+    // the data path. See docs/explanation/architecture/mooninstaller.md § Firmware vs board.
     if (mod.type === "FirmwareUpdateModule") {
         // A nudge where someone has just thought about versions, which is the moment the aggregate
         // is worth something to them. Shown only while Stats consent is off, so it disappears the

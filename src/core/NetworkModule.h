@@ -273,7 +273,7 @@ public:
     void defineControls() override {
         // Chain to base FIRST so children (Improv on ESP32) register their
         // controls before NetworkModule appends its own — per the override-
-        // and-chain convention in docs/coding-standards.md § Override-and-
+        // and-chain convention in docs/contributing/coding-standards.md § Override-and-
         // chain ("defineControls — chain first, then parent work").
         // Earlier shape called this at the end, which inverted the order
         // (parent's controls landed before children's).

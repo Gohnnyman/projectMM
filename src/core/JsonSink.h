@@ -130,7 +130,7 @@ public:
     // it doesn't lose precision parsing scenario fixtures. The runner is
     // desktop / test-only.
     //
-    // **Production firmware must not call this** — see docs/coding-standards.md
+    // **Production firmware must not call this** — see docs/contributing/coding-standards.md
     // § Prefer integers: `double` runs in software emulation on ESP32 Xtensa
     // (~30x slower than `float`). Production code paths use the typed
     // serializers in `Control.cpp` (writeControlValue) which dispatch on

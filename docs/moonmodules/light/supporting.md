@@ -14,7 +14,7 @@ One rendering layer — an effect writes into its buffer, modifiers transform th
 
 Detail: [technical](moxygen/Layer.md)
 
-[Tests](../../tests/unit-tests.md#layer)
+[Tests](../../reference/tests/unit-tests.md#layer)
 
 <a id="layers"></a>
 
@@ -26,7 +26,7 @@ The container of layers — composites them (blend mode + opacity per layer) int
 
 Detail: [technical](moxygen/Effects.md)
 
-[Tests](../../tests/unit-tests.md#effects)
+[Tests](../../reference/tests/unit-tests.md#effects)
 
 <a id="layouts"></a>
 
@@ -38,7 +38,7 @@ The container of layout modules — walks each layout's coordinates to build the
 
 Detail: [technical](moxygen/Layouts.md)
 
-[Tests](../../tests/unit-tests.md#layouts)
+[Tests](../../reference/tests/unit-tests.md#layouts)
 
 <a id="drivers"></a>
 
@@ -56,7 +56,7 @@ The container of driver modules — owns the shared driver buffer and the per-li
 
 Detail: [technical](moxygen/Drivers.md)
 
-[Tests](../../tests/unit-tests.md#drivers)
+[Tests](../../reference/tests/unit-tests.md#drivers)
 
 <a id="lightpresets"></a>
 
@@ -74,7 +74,7 @@ Contiguous light-data buffer, shared between the layers that write it (effects) 
 
 Detail: [technical](moxygen/Buffer.md)
 
-[Tests](../../tests/unit-tests.md#buffer)
+[Tests](../../reference/tests/unit-tests.md#buffer)
 
 ### MappingLUT
 
@@ -82,7 +82,7 @@ Maps the virtual grid to the physical sparse light set — a radius-4 sphere bec
 
 Detail: [technical](moxygen/MappingLUT.md)
 
-[Tests](../../tests/unit-tests.md#mappinglut)
+[Tests](../../reference/tests/unit-tests.md#mappinglut)
 
 ### Effect base
 

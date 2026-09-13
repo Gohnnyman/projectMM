@@ -16,7 +16,7 @@
 // `kAbsent` means "this fixture has no such channel", and every setter is a no-op then. That is
 // what keeps a moving-head effect harmless on an LED strip: it calls setPan(), the strip carries
 // no pan channel, nothing is written. The same effect on a moving head steers it. (MoonLight's
-// LightsHeader is the same idea, credited in docs/history/.)
+// LightsHeader is the same idea, credited in docs/work/past/.)
 //
 // These are offsets into the LAYER's light, which is not the same layout as the fixture's. A
 // layer light always begins with RGB(W) (every draw primitive writes there), so motion is packed

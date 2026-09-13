@@ -12,7 +12,7 @@ TEST_CASE("FirmwareUpdateModule firmware control populated") {
     // Local desktop builds fall through to "unknown" because CMake doesn't
     // pass -DMM_FIRMWARE_NAME; release builds get the real key. Either way,
     // the control must exist and be non-empty so the OTA / install-picker path
-    // has something to read. (See docs/architecture.md § Firmware vs board —
+    // has something to read. (See docs/explanation/architecture/index.md § Firmware vs board —
     // "firmware" is the compiled-binary variant; the physical board is separate.)
     mm::FirmwareUpdateModule fw;
     fw.setup();

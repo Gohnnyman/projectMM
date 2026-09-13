@@ -71,7 +71,7 @@ namespace mm {
 /// Assistant's MQTT-discovery format (the same retained-`homeassistant/…/config` announce Tasmota /
 /// ESPHome / Zigbee2MQTT use). projectMM writes its own lean client over the platform socket
 /// primitive rather than a framework MQTT library. See docs/moonmodules/core/system.md#mqtt for the
-/// Homebridge accessory config; docs/usecases/home-automation.md for the HA setup.
+/// Homebridge accessory config; docs/how-to/home-automation.md for the HA setup.
 /// @card MqttModule.png
 class MqttModule : public MoonModule {
 public:
