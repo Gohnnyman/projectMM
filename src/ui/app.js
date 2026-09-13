@@ -578,9 +578,8 @@ async function sendControl(moduleName, controlName, value) {
                 moonTalkCache = null;
                 refetchState();
             // The wait is for `consent` alone: that report leaves from tick1s, so an immediate read
-            // would show the totals without the very row the reader is looking for. `refresh` sends
-            // `send update` sends inside this write, like MoonTalk's `send`, so it re-reads with
-            // no delay.
+            // would show the totals without the very row the reader is looking for. `send update`
+            // sends inside this write, like MoonTalk's `send`, so it re-reads with no delay.
             }, mod?.type === "MoonStatsModule" && controlName === "consent" ? 2000 : 0);
         }
     } catch (e) {
@@ -6273,7 +6272,7 @@ function renderMoonCloudStats(host, mod) {
                                            ["Flash", "flash", "flash"],
                                            ["PSRAM", "psram", "psram"],
                                            ["SDK", "sdk", "sdk"],
-                                           ["Install or upgrade", "events", "event"],
+                                           ["Report event", "events", "event"],
                                            ["Upgraded from", "previousVersions", "previousVersion"],
                                            ["Drivers", "drivers", "driver"],
                                            ["Services", "services", "service"],

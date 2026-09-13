@@ -6,7 +6,7 @@ It is deliberately small. Each member is a separate choice with its own checkbox
 
 ## Stats
 
-One report about this install, sent once when the firmware is installed or upgraded, and the totals from everyone else back on the same card.
+One report about this install, sent once when the firmware is installed or upgraded, and again whenever you press **send update** on the card, for a setup that changed without a version change. The totals from everyone else come back on the same card.
 
 ### Why you might like this
 

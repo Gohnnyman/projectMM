@@ -417,8 +417,13 @@ private:
 
         JsonSink body;
         const LightSummary* lights = Drivers::latestSummary();
+        // previousVersion ONLY on an upgrade: the server reads its presence as what makes a row an
+        // upgrade (worker.js), and previousVersion() returns reportedVersion_, which is non-empty
+        // whenever a refresh is pressed. Sending it there would report every refresh as an upgrade
+        // from the version already running.
+        const char* prev = (kind == MoonStatsEvent::Upgrade) ? previousVersion() : nullptr;
         buildMoonStatsReport(body, tree, count,
-                             kind, id, runningVersion_, previousVersion(),
+                             kind, id, runningVersion_, prev,
                              lights ? lights->lightCount : 0,
                              static_cast<uint32_t>(platform::totalHeap()),
                              static_cast<uint32_t>(platform::freeHeap()));
@@ -429,9 +434,15 @@ private:
         if (auto* cloud = static_cast<const MoonCloudModule*>(parent())) {
             sent = cloud->post("/api/report", body.data());
         }
-        // Marked reported either way, which is the automatic path's rule: re-sending until a server
-        // answers would turn one report into a heartbeat. The button is how a user retries.
-        markReported();
+        // The AUTOMATIC report marks itself either way: nobody is waiting for it, and re-sending
+        // until a server answers would turn one report into a heartbeat.
+        //
+        // A BUTTON press is different, and marking it would lose data. Pressing it before the
+        // automatic report has gone out (no network yet at boot, then a failed send) would set
+        // reportedVersion to the running version, reportDue() would be false forever, and the
+        // install would never be counted: a press the user was TOLD had failed, silently
+        // consuming the report they were waiting for.
+        if (kind != MoonStatsEvent::Refresh || sent) markReported();
         return sent;
     }
 

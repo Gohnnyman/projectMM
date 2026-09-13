@@ -202,7 +202,11 @@ Open `http://<machine>:8080`. `--restart unless-stopped` is what brings it back 
 **`failed to mount ... fstype: overlay ... invalid argument`** means the machine's root filesystem is itself an overlay, which several board and NAS systems use, and Docker's default `overlay2` driver cannot stack one on another. Check with `findmnt -no FSTYPE /`; if it says `overlay`, switch drivers:
 
 ```sh
-echo '{ "storage-driver": "vfs" }' | sudo tee /etc/docker/daemon.json
+sudo mkdir -p /etc/docker
+# Add the key to whatever is already there. A plain `tee` would discard existing settings, and a
+# NAS or a board image often ships some.
+sudo sh -c 'f=/etc/docker/daemon.json; [ -s "$f" ] || echo "{}" > "$f"; \
+  tmp=$(mktemp); python3 -c "import json,sys;d=json.load(open(sys.argv[1]));d[\"storage-driver\"]=\"vfs\";json.dump(d,open(sys.argv[2],\"w\"),indent=2)" "$f" "$tmp" && mv "$tmp" "$f"'
 sudo systemctl restart docker
 ```
 
@@ -216,7 +220,7 @@ sudo systemctl restart docker
 | Updates | download the new `.deb` | `docker pull` and recreate |
 | Survives a reboot | needs a systemd unit | `--restart unless-stopped` |
 | Runs on | Debian family, glibc 2.35+ | any Linux with Docker |
-| Disk | ~1 MB plus libcurl | ~57 MB image |
+| Disk | the binary plus libraries the system already has | an image carrying its own libraries |
 | Isolation | none: an ordinary program | its own filesystem and process space |
 | Upgrades cleanly | apt handles dependencies | the image carries its own |
 | Debugging | logs in the terminal, files on disk | `docker logs`, and no shell inside the image |

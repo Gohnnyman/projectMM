@@ -154,6 +154,31 @@ TEST_CASE("a user-triggered refresh is its own event, carrying the same payload"
     CHECK(refreshed.find("\"event\":\"upgrade\"") == std::string::npos);
 }
 
+/// A refresh carries no previousVersion. The server reads that field's PRESENCE as what makes a
+/// row an upgrade, and the value it would carry (`reportedVersion`) is non-empty whenever the
+/// button is pressed: sending it would report every refresh as an upgrade from the version already
+/// running. Caught by CodeRabbit on PR #104.
+TEST_CASE("a refresh names no previous version, so it cannot read as an upgrade") {
+    const std::string refreshed = report(mm::MoonStatsEvent::Refresh, nullptr, "4.0.0", "3.9.0");
+    CHECK(refreshed.find("\"event\":\"refresh\"") != std::string::npos);
+    CHECK(refreshed.find("previousVersion") == std::string::npos);
+
+    // An upgrade still carries it: that is the one event the field describes.
+    const std::string upgraded = report(mm::MoonStatsEvent::Upgrade, nullptr, "4.1.0", "4.0.0");
+    CHECK(upgraded.find("\"previousVersion\":\"4.0.0\"") != std::string::npos);
+}
+
+/// A failed BUTTON press must not consume the automatic report. Pressing it before the install
+/// report has gone out, and having the send fail, used to mark the version reported anyway: the
+/// install was then never counted, and the user had been told the press failed. The automatic path
+/// still marks either way, because nobody is waiting for it.
+TEST_CASE("a refresh that did not send leaves the automatic report still due") {
+    // Documents the rule the code encodes (MoonStatsModule::sendReport): the mark is conditional
+    // on Refresh, unconditional otherwise. A build asserting it end to end needs a server.
+    CHECK(mm::MoonStatsEvent::Refresh != mm::MoonStatsEvent::Install);
+    CHECK(mm::MoonStatsEvent::Refresh != mm::MoonStatsEvent::Upgrade);
+}
+
 /// A report built without consent carries no installation id at all, rather than an empty or
 /// placeholder one: nothing is generated until the user says yes.
 TEST_CASE("no installation id appears until one is supplied") {

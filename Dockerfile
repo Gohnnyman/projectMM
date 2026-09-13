@@ -55,7 +55,7 @@ ARG REPO=MoonModules/projectMM
 
 # libcurl4t64 is installed, not merely downloaded: the release binary links it (the one outbound
 # HTTPS call), so the image must carry it AND everything it in turn needs. Letting apt resolve that
-# is the point: the chain is 28 libraries deep (GnuTLS, Kerberos, LDAP, SASL, libssh2), and a
+# is the point: the chain runs deep (TLS, Kerberos, LDAP, SASL, libssh2, compression), and a
 # hand-written COPY list would be wrong the first time any of them changed.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl libcurl4t64 \
@@ -70,10 +70,11 @@ RUN apt-get update \
  && dpkg-deb -x /tmp/projectmm.deb /rootfs \
  # Every shared object the binary resolves to, gathered by asking the loader rather than by
  # listing names: ldd walks the whole transitive chain, so this stays correct as that chain moves.
- # The distroless base already carries libc/libstdc++/libm/libgcc_s; copying them again is
- # harmless and keeps this one command independent of what the base happens to include.
+ # The four the distroless base already carries (libc, libstdc++, libm, libgcc_s) are EXCLUDED
+ # rather than copied over: the base and this trixie stage are pinned independently, so shipping
+ # both would put two glibc builds in one image and let the loader pick by path order.
  && mkdir -p /deps \
- && ldd /rootfs/usr/bin/projectMM | awk '/=> \//{print $3}' | sort -u | xargs -I{} cp -L {} /deps/
+ && ldd /rootfs/usr/bin/projectMM | awk '/=> \//{print $3}' | sort -u | grep -vE '/(libc|libm|libstdc\+\+|libgcc_s)\.so' | xargs -I{} cp -L {} /deps/
 
 # --- stage 2: the image that ships ------------------------------------------------------------
 # Distroless: the binary plus the shared libraries it resolves, with no shell and no package

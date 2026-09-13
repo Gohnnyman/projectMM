@@ -1656,28 +1656,30 @@ uint16_t ethLinkSpeedMbps() MM_NONBLOCKING {
 }
 #else
 namespace {
-/// (link up, Mbit) for the interface the raw sender bound to, or (false, 0) when nothing is bound.
+/// (carrier up, Mbit) for a named interface. The ONE place either question is asked of the OS.
 ///
-/// Was a stub returning false on every non-Windows host, which made PanelCardDriver report "no
-/// ethernet link" while it drove a card perfectly: the SEND path is implemented here (AF_PACKET on
-/// Linux, BPF on macOS) and only the link-STATE query was missing, so the driver's health check
-/// contradicted its own output. Reported by a user driving a ColorLight card from a NanoPi.
-bool posixAdapterLink(uint16_t& mbps) MM_NONBLOCKING {
+/// Both callers need it: the link-state query below describes the NIC the sender bound to, and the
+/// interface labels name a speed beside each adapter. They were two copies of the same ioctl and
+/// the same six-case subtype table, which is two chances to drift when a rate is added.
+///
+/// `mbps` of 0 means the OS states no rate (a virtual interface, a down link, or macOS Wi-Fi
+/// reporting only "autoselect"), which is honest rather than a guess.
+bool posixIfLink(const char* ifname, uint16_t& mbps) MM_NONBLOCKING {
     mbps = 0;
-    if (!ethRawIfName_[0]) return false;   // capture mode, or a bind that failed
+    if (!ifname || !*ifname) return false;
 #if defined(__linux__)
-    // operstate is the kernel's own word for the carrier: "up" or "down", with "unknown" for
-    // virtual interfaces that have no carrier concept. Only "up" counts as a link.
+    // operstate is the kernel's own word for the carrier: "up", "down", or "unknown" for a virtual
+    // interface with no carrier concept. Only "up" counts.
     char path[128];
-    std::snprintf(path, sizeof(path), "/sys/class/net/%s/operstate", ethRawIfName_);
+    std::snprintf(path, sizeof(path), "/sys/class/net/%s/operstate", ifname);
     FILE* f = std::fopen(path, "r");
     if (!f) return false;
     char state[16] = {};
     const bool read = std::fscanf(f, "%15s", state) == 1;
     std::fclose(f);
     if (!read || std::strcmp(state, "up") != 0) return false;
-    // Speed rides along from the same sysfs tree, in Mbit. Absent or -1 on a link that states none.
-    std::snprintf(path, sizeof(path), "/sys/class/net/%s/speed", ethRawIfName_);
+    // Speed rides along from the same sysfs tree, in Mbit. Absent or -1 where none is stated.
+    std::snprintf(path, sizeof(path), "/sys/class/net/%s/speed", ifname);
     if (FILE* sf = std::fopen(path, "r")) {
         long v = 0;
         if (std::fscanf(sf, "%ld", &v) == 1 && v > 0) mbps = static_cast<uint16_t>(v);
@@ -1685,16 +1687,15 @@ bool posixAdapterLink(uint16_t& mbps) MM_NONBLOCKING {
     }
     return true;
 #elif defined(__APPLE__)
-    // IFM_ACTIVE is the carrier bit; the negotiated rate is the media SUBTYPE, the same mapping
-    // the interface labels use. Wi-Fi and "autoselect" state no rate, where 0 is honest.
+    // IFM_ACTIVE is the carrier bit; the negotiated rate is encoded as the media SUBTYPE.
     const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) return false;
     ifmediareq req{};
-    // A name longer than ifm_name could never have bound in the first place (the kernel caps an
-    // interface name at IFNAMSIZ), so refuse rather than query a truncated one and describe the
-    // wrong NIC. GCC proves the truncation is possible and rejects the copy without this.
-    if (std::strlen(ethRawIfName_) >= sizeof(req.ifm_name)) { ::close(fd); return false; }
-    std::memcpy(req.ifm_name, ethRawIfName_, std::strlen(ethRawIfName_) + 1);
+    // A name longer than ifm_name could never have bound (the kernel caps one at IFNAMSIZ), so
+    // refuse rather than query a truncated one and describe the wrong NIC. GCC proves the
+    // truncation is possible and rejects a plain snprintf without this.
+    if (std::strlen(ifname) >= sizeof(req.ifm_name)) { ::close(fd); return false; }
+    std::memcpy(req.ifm_name, ifname, std::strlen(ifname) + 1);
     bool up = false;
     if (::ioctl(fd, SIOCGIFMEDIA, &req) == 0 && (req.ifm_status & IFM_ACTIVE)) {
         up = true;
@@ -1711,8 +1712,21 @@ bool posixAdapterLink(uint16_t& mbps) MM_NONBLOCKING {
     ::close(fd);
     return up;
 #else
+    (void)ifname;
     return false;   // a host OS with no raw-L2 path: nothing to describe
 #endif
+}
+
+/// (link up, Mbit) for the interface the raw sender bound to, or (false, 0) when nothing is bound.
+///
+/// Was a stub returning false on every non-Windows host, which made PanelCardDriver report "no
+/// ethernet link" while it drove a card perfectly: the SEND path is implemented here (AF_PACKET on
+/// Linux, BPF on macOS) and only the link-STATE query was missing, so the driver's health check
+/// contradicted its own output. Reported by a user driving a ColorLight card from a NanoPi.
+bool posixAdapterLink(uint16_t& mbps) MM_NONBLOCKING {
+    mbps = 0;
+    if (!ethRawIfName_[0]) return false;   // capture mode, or a bind that failed
+    return posixIfLink(ethRawIfName_, mbps);
 }
 }  // namespace
 
@@ -1720,8 +1734,10 @@ bool ethLinkUp() MM_NONBLOCKING { uint16_t m = 0; return posixAdapterLink(m); }
 bool ethConnected() MM_NONBLOCKING { return ethLinkUp(); }
 uint16_t ethLinkSpeedMbps() MM_NONBLOCKING {
     uint16_t m = 0;
-    if (posixAdapterLink(m) && m) return m;
-    return ethTestLinkSpeed_;   // unbound, or a speed the OS would not state
+    if (posixAdapterLink(m)) return m;   // bound and up: the OS's answer, 0 included
+    // Only when nothing is bound. A bound NIC that states no rate reports 0 above rather than
+    // this, because inventing a speed for a real adapter is worse than admitting none is known.
+    return ethTestLinkSpeed_;
 }
 #endif
 
@@ -3278,44 +3294,13 @@ size_t rawInterfaces(const char* const** optionsOut) {
             // (a virtual interface, a link that is down, Wi-Fi on macOS which reports only
             // "autoselect"). Rides in the label for the same reason as the Windows branch: the
             // name alone does not say which entry is the 1 Gb NIC and which is a tunnel.
+            // posixIfLink is the one place either the carrier or the rate is asked of the OS;
+            // the label wants only the rate, so it discards the carrier. This was a second copy
+            // of the same ioctl and the same subtype table.
             auto linkMbps = [](const char* ifname) -> unsigned {
-#ifdef __linux__
-                // sysfs states it directly, in Mbit. Absent or -1 for a virtual or down link.
-                char path[128];
-                std::snprintf(path, sizeof(path), "/sys/class/net/%s/speed", ifname);
-                FILE* f = std::fopen(path, "r");
-                if (!f) return 0;
-                long v = 0;
-                const bool ok = std::fscanf(f, "%ld", &v) == 1;
-                std::fclose(f);
-                return (ok && v > 0) ? static_cast<unsigned>(v) : 0;
-#elif defined(__APPLE__)
-                // macOS has no speed field: the negotiated rate is encoded as the media
-                // SUBTYPE, so map the ones that name a rate. Wi-Fi and "autoselect" report no
-                // subtype we can turn into a number, which is exactly when 0 is the honest
-                // answer rather than a guess.
-                const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
-                if (fd < 0) return 0;
-                ifmediareq req{};
-                std::snprintf(req.ifm_name, sizeof(req.ifm_name), "%s", ifname);
-                unsigned mbps = 0;
-                if (::ioctl(fd, SIOCGIFMEDIA, &req) == 0 && (req.ifm_status & IFM_ACTIVE)) {
-                    switch (IFM_SUBTYPE(req.ifm_active)) {
-                        case IFM_10_T:   mbps = 10;    break;
-                        case IFM_100_TX: mbps = 100;   break;
-                        case IFM_1000_T: mbps = 1000;  break;
-                        case IFM_2500_T: mbps = 2500;  break;
-                        case IFM_5000_T: mbps = 5000;  break;
-                        case IFM_10G_T:  mbps = 10000; break;
-                        default: break;
-                    }
-                }
-                ::close(fd);
+                uint16_t mbps = 0;
+                posixIfLink(ifname, mbps);
                 return mbps;
-#else
-                (void)ifname;
-                return 0;
-#endif
             };
 
         auto isVirtual = [](const char* n) {
