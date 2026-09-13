@@ -167,7 +167,11 @@ target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 # build needs no SDK and the binary runs without it.
 # `dl` on Linux: miniaudio (platform_desktop_audio.cpp) runtime-links ALSA/PulseAudio via
 # dlopen, so no audio SDK is a build requirement, the same no-SDK rule as Npcap above.
+# `winhttp` on Windows: the one outbound HTTPS call (MoonCloud). It is the OS's own client, in the
+# SDK Visual Studio already installs, so Windows needs no libcurl and no vendored TLS. The other
+# platforms use libcurl for the same reason, each taking the stack its OS ships.
 target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32> $<$<PLATFORM_ID:Windows>:iphlpapi>
+                                          $<$<PLATFORM_ID:Windows>:winhttp>
                                           $<$<PLATFORM_ID:Linux>:dl> $<$<PLATFORM_ID:Linux>:pthread>)
 
 # The two libraries genuinely need each other: mm_core calls into the platform surface, and the
@@ -201,8 +205,9 @@ elseif(DEFINED ENV{MM_PACKAGING} AND NOT WIN32)
     # including the sanitizer lanes that configure CMake directly and legitimately have no libcurl,
     # so keying on it failed builds that produce no artifact at all.
     #
-    # Windows is excluded until its job installs libcurl (vcpkg), which is real work rather than an
-    # apt line. Until then it warns like any other machine, and its binary cannot report.
+    # Windows is exempt, and for a reason that is now permanent rather than pending: it sends
+    # through WinHTTP (httpsPost), so libcurl being absent there costs it nothing. Failing a
+    # Windows build over a library it does not use would block a binary that reports perfectly.
     message(FATAL_ERROR
         "libcurl not found while packaging a release. A published build with the client compiled "
         "out asks for consent it can never honor. Install it in the job "

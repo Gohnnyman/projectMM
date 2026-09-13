@@ -120,7 +120,7 @@ Detail: [technical](moxygen/FirmwareUpdateModule.md)
 
 The container for everything projectMM does with a server MoonModules runs. It holds no settings of its own: each thing MoonCloud does is a child with its own consent, because a user who wants one has not thereby agreed to the other.
 
-- **Stats**, below: one opt-in report per install or upgrade, and the totals back.
+- **Stats**, below: one opt-in report per install or upgrade, plus one whenever you press send update, and the totals back.
 - **Talk**, below: a public message board between devices.
 - **Sync** (planned): device to device over the internet, a joint show across houses. Not built on Stats; they share this container and the installation id, nothing else.
 

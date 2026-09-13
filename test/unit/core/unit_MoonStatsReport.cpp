@@ -140,6 +140,20 @@ TEST_CASE("an upgrade is distinguished from a fresh install by the previous vers
     CHECK(upgraded.find("\"previousVersion\":\"4.0.0\"") != std::string::npos);
 }
 
+/// The button's event. Install and Upgrade are decided by a version comparison, which cannot see a
+/// setup that changed without one: someone who reported a bare board and then wired up the fixtures
+/// they actually run. Distinct from the other two so the install count stays a count of installs.
+TEST_CASE("a user-triggered refresh is its own event, carrying the same payload") {
+    const std::string refreshed = report(mm::MoonStatsEvent::Refresh, nullptr, "4.0.0", nullptr);
+    CHECK(refreshed.find("\"event\":\"refresh\"") != std::string::npos);
+    // Same shape as any other report: the button re-sends, it does not send something smaller.
+    CHECK(refreshed.find("\"chip\"") != std::string::npos);
+    CHECK(refreshed.find("\"version\":\"4.0.0\"") != std::string::npos);
+    // And it is none of the other two, so a legend cannot show it as an install.
+    CHECK(refreshed.find("\"event\":\"install\"") == std::string::npos);
+    CHECK(refreshed.find("\"event\":\"upgrade\"") == std::string::npos);
+}
+
 /// A report built without consent carries no installation id at all, rather than an empty or
 /// placeholder one: nothing is generated until the user says yes.
 TEST_CASE("no installation id appears until one is supplied") {

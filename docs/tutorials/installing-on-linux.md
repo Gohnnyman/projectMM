@@ -144,6 +144,8 @@ That is a running system. Everything below is optional.
 
 ## Keeping it running after a reboot
 
+For the package or a source build. A container does this with `--restart unless-stopped` instead, see [Docker](#docker).
+
 Give it a systemd unit at `/etc/systemd/system/projectmm.service`:
 
 ```ini
@@ -167,7 +169,7 @@ sudo systemctl enable --now projectmm
 systemctl status projectmm
 ```
 
-`Restart=always` covers a crash as well as a reboot. Adjust `User` and the path to where you built.
+`Restart=always` covers a crash as well as a reboot. Adjust `User` and the path: `/usr/bin/projectMM` for the package, or where you built for a source build.
 
 ## Shutting down
 
@@ -179,9 +181,61 @@ sudo shutdown now     # or: sudo reboot
 
 projectMM writes to disk only when settings change, so the card is a fine home for it. The risk is the operating system's own writes.
 
-## Containers
+## Docker
 
-Docker runs a full instance on amd64 and arm64 alike; the command is in the [README](https://github.com/MoonModules/projectMM#readme). The published image carries both, so a board and a server pull the same tag and each gets native instructions.
+The same program, installed as a container rather than a package. One published image carries amd64 and arm64, so a board and a server pull the same tag and each gets native instructions.
+
+```sh
+docker run -d --name projectmm --network host \
+  -v projectmm-data:/data --restart unless-stopped \
+  ghcr.io/moonmodules/projectmm:latest
+```
+
+Open `http://<machine>:8080`. `--restart unless-stopped` is what brings it back after a reboot, so Docker replaces the systemd unit above rather than needing one of its own.
+
+**Use `--network host`.** The web UI and unicast fixture output work through ordinary port mapping (`-p 8080:8080`), but mDNS discovery is multicast and Art-Net's broadcast mode is too, and neither crosses a bridge network. Host networking is what lets a container find boards and be found by them. Verified on a NanoPi R28S driving a ColorLight card.
+
+**The volume is the configuration.** `/data` holds everything you set up; without it, every `docker rm` starts you over.
+
+### When the container exits at once
+
+**`failed to mount ... fstype: overlay ... invalid argument`** means the machine's root filesystem is itself an overlay, which several board and NAS systems use, and Docker's default `overlay2` driver cannot stack one on another. Check with `findmnt -no FSTYPE /`; if it says `overlay`, switch drivers:
+
+```sh
+echo '{ "storage-driver": "vfs" }' | sudo tee /etc/docker/daemon.json
+sudo systemctl restart docker
+```
+
+`vfs` copies layers instead of sharing them, so it uses more disk and pulls are slower. `fuse-overlayfs` is the faster alternative where the package exists.
+
+## Package or container: which to pick
+
+| | Package (`.deb`) | Docker |
+|---|---|---|
+| Install | `apt install ./projectmm_*.deb` | one `docker run` |
+| Updates | download the new `.deb` | `docker pull` and recreate |
+| Survives a reboot | needs a systemd unit | `--restart unless-stopped` |
+| Runs on | Debian family, glibc 2.35+ | any Linux with Docker |
+| Disk | ~1 MB plus libcurl | ~57 MB image |
+| Isolation | none: an ordinary program | its own filesystem and process space |
+| Upgrades cleanly | apt handles dependencies | the image carries its own |
+| Debugging | logs in the terminal, files on disk | `docker logs`, and no shell inside the image |
+
+**Take the package** on a board you own and administer: it is smaller, it starts faster, and its files are where you expect them.
+
+**Take Docker** where you would rather not install anything permanent, where the machine already runs containers, or where the distribution is too old for the package's glibc floor. A container carries its own libraries, so the host's age stops mattering.
+
+## Where else this runs
+
+Docker widens the target from "a Debian-family board" to "anything that runs containers", which is a much larger set:
+
+- **Raspberry Pi** (3, 4, 5, and Zero 2 W): arm64, so the same image and the same commands as a NanoPi. Nothing here is NanoPi-specific.
+- **A NAS**: Synology (Container Manager), QNAP (Container Station), Unraid, TrueNAS. Give it host networking, or mDNS and Art-Net broadcast will not leave the box.
+- **A mini PC or home server**: amd64, the largest and least surprising target.
+- **A router or firewall appliance** running OpenWrt or OPNsense with Docker: plausible where the device has the RAM, and the overlay-root note above is likely to apply.
+- **Kubernetes**: one pod, one volume. Multicast needs an L2 CNI rather than the default bridge.
+
+The realistic limits are architecture and memory, not the kind of device. It needs 64-bit, arm64 or amd64, because no 32-bit image is published. Memory is rarely the binding constraint: a container rendering a 16x16 grid measures 4.5 MB on a NanoPi, and a large installation grows that by its buffers rather than by a fixed overhead. A coffee machine is not out of the question if it meets both and runs Docker, though the fixtures would have to come to it.
 
 ## Where to go next
 

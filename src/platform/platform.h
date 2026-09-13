@@ -862,17 +862,19 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
 // it needs TLS, certificate verification and DNS, none of which we should be writing ourselves.
 //
 // Each platform uses the TLS ITS OS ALREADY SHIPS, so nothing is vendored: `esp_http_client` with
-// `esp_crt_bundle` on ESP32 (the same pair the OTA path uses), and libcurl on desktop, which is
-// present on macOS and every Linux distribution and carries its own certificate handling.
+// `esp_crt_bundle` on ESP32 (the same pair the OTA path uses), WinHTTP on Windows (in the SDK,
+// Schannel and the Windows certificate store), and libcurl on macOS and Linux, present on both and
+// carrying its own certificate handling.
 //
 // Response body is discarded: the one caller (MoonCloud Stats) has nothing to do with it, and
 // buffering a reply from an untrusted server is a risk with no benefit. Blocking, so callers run
 // it off the render path.
 bool httpsPost(const char* url, const char* body, uint32_t timeoutMs);
 
-/// Whether this build can make an outbound HTTPS request at all. False only on a desktop build
-/// compiled without libcurl, where `httpsPost` always returns false: a structural inability rather
-/// than a failed attempt, which a caller must be able to tell apart from network loss.
+/// Whether this build can make an outbound HTTPS request at all. False only on a macOS or Linux
+/// build compiled without libcurl, where `httpsPost` always returns false: a structural inability
+/// rather than a failed attempt, which a caller must be able to tell apart from network loss.
+/// Windows is always true, since WinHTTP ships with the OS and needs nothing found at build time.
 bool httpsAvailable() MM_NONBLOCKING;
 
 // Improv WiFi provisioning over UART0.

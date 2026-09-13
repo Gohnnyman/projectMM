@@ -46,7 +46,10 @@ namespace mm {
 // asserts the forbidden names cannot appear whatever the tree holds.
 
 /// What the report says happened.
-enum class MoonStatsEvent : uint8_t { Install, Upgrade };
+/// Install and Upgrade are automatic and happen once each. Refresh is the user pressing the
+/// button: same payload, same consent, sent again because their setup changed in a way no version
+/// bump describes (they wired the real fixtures up after reporting a bare board).
+enum class MoonStatsEvent : uint8_t { Install, Upgrade, Refresh };
 
 /// Read one control's value out of `mod` by name. Named lookup rather than an index: a renamed
 /// control makes the field disappear rather than emitting whatever moved into its slot.
@@ -175,7 +178,8 @@ inline void buildMoonStatsReport(JsonSink& sink,
 
     if (!first) sink.append(",");
     sink.append("\"event\":");
-    sink.writeJsonString(event == MoonStatsEvent::Upgrade ? "upgrade" : "install");
+    sink.writeJsonString(event == MoonStatsEvent::Refresh ? "refresh"
+                         : event == MoonStatsEvent::Upgrade ? "upgrade" : "install");
     first = false;
 
     if (version && *version) {
@@ -238,13 +242,46 @@ public:
     /// line names them instead of repeating them.
     void refreshStatus() {
         if (consent_) clearStatus();
-        else setStatus("Off. Switch on to share what hardware you run, once per install or upgrade: "
+        else setStatus("Off. Switch on to share what hardware you run, once per install or upgrade "
+                       "and whenever you press send update: "
                        "the empty charts below are exactly what it contributes to, and what you get "
                        "back. No device name, no addresses, no credentials.");
     }
 
     void onControlChanged(const char* name) override {
-        if (name && std::strcmp(name, "consent") == 0) refreshStatus();
+        if (!name) return;
+        if (std::strcmp(name, "consent") == 0) { refreshStatus(); return; }
+        if (std::strcmp(name, "send update") != 0) return;
+        // Every outcome says something. A button that sometimes does nothing and never explains why
+        // leaves a user unable to tell "it worked" from "it was ignored", which is the state this
+        // card was in: the only way to know was to read the database.
+        //
+        // Consent is re-read rather than assumed: a control write arrives from the API as readily
+        // as from the card, and this is the one path where a user action opens a connection.
+        if (!consent_) { setStatus("Switch consent on first: nothing is sent while it is off.",
+                                   Severity::Warning); return; }
+        if (!platform::httpsAvailable()) {
+            setStatus("This build cannot send: it was compiled without an HTTPS client.",
+                      Severity::Error);
+            return;
+        }
+        if (!platform::networkReady()) {
+            setStatus("No network yet. Press send update again once this device is online.",
+                      Severity::Warning);
+            return;
+        }
+        if (inApMode()) {
+            setStatus("Serving its own access point, so there is no route out. "
+                      "Join a network, then press send update.", Severity::Warning);
+            return;
+        }
+        if (sendReport(MoonStatsEvent::Refresh)) {
+            setStatus("Sent. The charts below now describe this device as it is now.",
+                      Severity::Status);
+        } else {
+            setStatus("Could not reach the server. Nothing was sent; press send update to try again.",
+                      Severity::Error);
+        }
     }
 
     void defineControls() override {
@@ -269,6 +306,20 @@ public:
         // has nothing to persist.
         controls_.addReadOnly("version", runningVersion_, sizeof(runningVersion_));
 
+        // Send again on demand. The automatic trigger is a version comparison, which says nothing
+        // about a setup that changed WITHOUT a version change: someone who reported a bare board,
+        // then wired up the fixtures they actually run, has no way to correct what the charts say
+        // about them. Pressing this replaces their row rather than adding one, because the server
+        // keys on (installationId, version).
+        //
+        // "send update", not "refresh": the charts below already carry a ⟲ that re-reads them, and
+        // two controls both called refresh would be one word for two different jobs. This one
+        // SENDS. The event it carries on the wire is still "refresh", which the server and the
+        // stored rows already use.
+        //
+        // A press that cannot send says why (see onControlChanged) rather than doing nothing: the
+        // card gave no sign either way, and the only way to tell was to read the database.
+        controls_.addButton("send update");
     }
 
     /// True when a report is due: the user said yes, and the running version differs from the one
@@ -337,7 +388,7 @@ public:
         if (!platform::networkReady()) return;   // nothing to do yet; try again next second
         // Serving our own AP means no route out, so a send would fail and mark itself reported.
         if (inApMode()) return;
-        sendReport();
+        sendReport(dueEvent());
     }
 
     /// Asked of the platform rather than pushed in by NetworkModule: a stale copy is a prompt that
@@ -347,16 +398,18 @@ public:
 private:
     /// Build the report and POST it once. Marked reported on hand-off: re-sending until a server
     /// answers would turn one report into a heartbeat.
-    void sendReport() {
+    /// `kind` defaults to the automatic install-or-upgrade decision. The button passes Refresh,
+    /// which is the one case the version comparison cannot express.
+    bool sendReport(MoonStatsEvent kind) {
         char id[kInstallationIdChars + 1] = {};
         installationId(id);
-        if (!id[0]) return;   // no consent, no id, no report
+        if (!id[0]) return false;   // no consent, no id, no report
 
         // Scheduler exposes module(i) rather than the array. 32 is its own capacity, so this
         // cannot truncate a tree it accepted.
         MoonModule* tree[32] = {};
         auto* sched = Scheduler::instance();
-        if (!sched) return;
+        if (!sched) return false;
         uint8_t count = 0;
         for (uint8_t i = 0; i < sched->moduleCount() && count < 32; i++) {
             if (MoonModule* m = sched->module(i)) tree[count++] = m;
@@ -365,16 +418,21 @@ private:
         JsonSink body;
         const LightSummary* lights = Drivers::latestSummary();
         buildMoonStatsReport(body, tree, count,
-                             dueEvent(), id, runningVersion_, previousVersion(),
+                             kind, id, runningVersion_, previousVersion(),
                              lights ? lights->lightCount : 0,
                              static_cast<uint32_t>(platform::totalHeap()),
                              static_cast<uint32_t>(platform::freeHeap()));
 
-        // Sent through the container, which owns the address. The response is discarded.
+        // Sent through the container, which owns the address. The response body is discarded, but
+        // WHETHER it was accepted is not: the button reports it, so a press is never silent.
+        bool sent = false;
         if (auto* cloud = static_cast<const MoonCloudModule*>(parent())) {
-            (void)cloud->post("/api/report", body.data());
+            sent = cloud->post("/api/report", body.data());
         }
+        // Marked reported either way, which is the automatic path's rule: re-sending until a server
+        // answers would turn one report into a heartbeat. The button is how a user retries.
         markReported();
+        return sent;
     }
 
     bool consent_ = false;

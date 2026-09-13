@@ -56,6 +56,19 @@ test("a report cannot smuggle a field the firmware never sends", () => {
   assert.equal(row.chip, "ESP32-S3");
 });
 
+// The event reaches every user's card as a pie legend, so the worker constrains it to the words it
+// knows. "refresh" is the button on the Stats card: the same payload re-sent because a setup changed
+// without a version change, and it must survive the filter or the button silently does nothing.
+test("the event is one of the three words the card can show", () => {
+  const accepted = source.slice(source.indexOf('report.event !== undefined'),
+                                source.indexOf('const row = clean('));
+  for (const word of ["install", "upgrade", "refresh"]) {
+    assert.ok(accepted.includes(`"${word}"`), `${word} must be accepted`);
+  }
+  // Anything else is dropped rather than stored: a legend cannot render a word we never chose.
+  assert.ok(accepted.includes("202"), "an unknown event is accepted and discarded");
+});
+
 test("the country comes from the edge, never from the report", () => {
   // A caller claiming a different country must not be believed: the value is the one Cloudflare
   // resolved, and the whole reason it is trustworthy is that no address was stored to derive it.

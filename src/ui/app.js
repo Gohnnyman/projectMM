@@ -554,12 +554,12 @@ async function sendControl(moduleName, controlName, value) {
         // switched. The routine WS push cannot carry it: renderCards is suppressed while the user
         // is interacting, and operating this select is exactly that.
         else if (moduleName === "Firmware" && controlName === "image") refetchState();
-        // Three writes change what a MoonCloud card shows: pressing `send` publishes a message, and
-        // either member's `consent` decides whether that member reads at all. Typing in `message` or
-        // toggling `shareName` changes only the device, and re-reading after those showed exactly
-        // what was already on screen.
+        // Four writes change what a MoonCloud card shows: pressing `send` publishes a message,
+        // pressing `send update` re-sends this device's report, and either member's `consent` decides
+        // whether that member reads at all. Typing in `message` or toggling `shareName` changes only
+        // the device, and re-reading after those showed exactly what was already on screen.
         else if (mod?.type === "MoonTalkModule" ? (controlName === "send" || controlName === "consent")
-               : mod?.type === "MoonStatsModule" ? controlName === "consent"
+               : mod?.type === "MoonStatsModule" ? (controlName === "consent" || controlName === "send update")
                : false) {
             // Switching consent OFF changes nothing on the server (a report already sent stays
             // sent), so the card rebuilds from what it has and nothing is re-read. The rebuild is
@@ -577,6 +577,10 @@ async function sendControl(moduleName, controlName, value) {
                 moonCloudStatsCache.clear();
                 moonTalkCache = null;
                 refetchState();
+            // The wait is for `consent` alone: that report leaves from tick1s, so an immediate read
+            // would show the totals without the very row the reader is looking for. `refresh` sends
+            // `send update` sends inside this write, like MoonTalk's `send`, so it re-reads with
+            // no delay.
             }, mod?.type === "MoonStatsModule" && controlName === "consent" ? 2000 : 0);
         }
     } catch (e) {
