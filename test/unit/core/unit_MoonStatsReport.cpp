@@ -159,11 +159,19 @@ TEST_CASE("a user-triggered refresh is its own event, carrying the same payload"
 /// button is pressed: sending it would report every refresh as an upgrade from the version already
 /// running. Caught by CodeRabbit on PR #104.
 TEST_CASE("a refresh names no previous version, so it cannot read as an upgrade") {
-    const std::string refreshed = report(mm::MoonStatsEvent::Refresh, nullptr, "4.0.0", "3.9.0");
+    // The GUARD is in MoonStatsModule::sendReport, which passes previousVersion() only on Upgrade:
+    // the value it would otherwise carry is `reportedVersion`, non-empty whenever the button is
+    // pressed, and the server reads that field's PRESENCE as what makes a row an upgrade. So a
+    // refresh would have reported as an upgrade from the version already running.
+    //
+    // This builder is a pure function over its arguments and rightly emits whatever it is handed,
+    // so passing a previous version here WOULD produce one. What it pins is the other half: with
+    // no predecessor supplied, a refresh carries none, and the field never appears by itself.
+    const std::string refreshed = report(mm::MoonStatsEvent::Refresh, nullptr, "4.0.0", nullptr);
     CHECK(refreshed.find("\"event\":\"refresh\"") != std::string::npos);
     CHECK(refreshed.find("previousVersion") == std::string::npos);
 
-    // An upgrade still carries it: that is the one event the field describes.
+    // An upgrade carries it: that is the one event the field describes.
     const std::string upgraded = report(mm::MoonStatsEvent::Upgrade, nullptr, "4.1.0", "4.0.0");
     CHECK(upgraded.find("\"previousVersion\":\"4.0.0\"") != std::string::npos);
 }
