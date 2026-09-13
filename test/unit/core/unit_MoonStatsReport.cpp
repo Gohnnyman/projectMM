@@ -8,6 +8,7 @@
 #include <string>
 
 #include "core/SystemModule.h"
+#include "light/drivers/PreviewDriver.h"   // the one type the report excludes as boot wiring
 
 namespace {
 
@@ -253,6 +254,60 @@ TEST_CASE("the report names modules by ROLE, not by how they were wired") {
     CHECK(json.find("Disabled") == std::string::npos);              // switched off
 }
 
+/// A second instance of a layout must not become a second SLICE. Scheduler uniquifies an instance
+/// name (`Ring`, `Ring-2`, `Ring-3`), and a user may rename a module to anything, so reporting
+/// `name()` counted one person's three rings as three layouts and would have sent whatever someone
+/// typed. The TYPE is the fixed vocabulary: displayNameFor turns the factory key into the same
+/// label the UI shows, so all three report `layout:Ring`.
+TEST_CASE("a module reports its type, not the instance name a user sees") {
+    mm::AudioService first;
+    first.setName("Audio");
+    first.setTypeName("AudioService");
+
+    // The second instance, as Scheduler would name it.
+    mm::AudioService second;
+    second.setName("Audio-2");
+    second.setTypeName("AudioService");
+
+    // And one the user renamed outright: the report must carry none of that text.
+    mm::AudioService renamed;
+    renamed.setName("Ewoud bedroom");
+    renamed.setTypeName("AudioService");
+
+    mm::MoonModule* tree[] = {&first, &second, &renamed};
+    mm::JsonSink sink;
+    mm::buildMoonStatsReport(sink, tree, 3, mm::MoonStatsEvent::Install,
+                             nullptr, "1.0.0", nullptr);
+    const std::string json = sink.data();
+
+    CHECK(json.find("service:Audio") != std::string::npos);
+    CHECK(json.find("Audio-2") == std::string::npos);        // the suffix never reaches the report
+    CHECK(json.find("Ewoud bedroom") == std::string::npos);  // nor does a name somebody typed
+}
+
+/// The preview driver is on every device, so counting it said only that a device booted. Excluded
+/// by TYPE, not by isWiredByCode(): that flag marks only children, and filtering on it once
+/// reported every top-level module as `generic:System`. The case above pins that distinction.
+TEST_CASE("the preview driver is boot wiring, so it is never reported") {
+    mm::PreviewDriver preview;
+    preview.setName("Preview");
+    preview.setTypeName("PreviewDriver");
+
+    // A driver the user actually added, to prove the exclusion is by type and not by role.
+    mm::AudioService chosen;
+    chosen.setName("Audio");
+    chosen.setTypeName("AudioService");
+
+    mm::MoonModule* tree[] = {&preview, &chosen};
+    mm::JsonSink sink;
+    mm::buildMoonStatsReport(sink, tree, 2, mm::MoonStatsEvent::Install,
+                             nullptr, "1.0.0", nullptr);
+    const std::string json = sink.data();
+
+    CHECK(json.find("Preview") == std::string::npos);
+    CHECK(json.find("service:Audio") != std::string::npos);
+}
+
 /// A user's module hangs UNDER a wired parent, so skipping the parent must not skip the child.
 TEST_CASE("a module added under a wired parent is still reported") {
     mm::SystemModule parent;
@@ -298,4 +353,52 @@ TEST_CASE("a script the user wrote is counted but never named") {
 TEST_CASE("a catalog name is matched against its own role's catalog") {
     const std::string json = scriptedReport("grid.mll", mm::ModuleRole::Layout);
     CHECK(json.find("layout:MoonLive/grid.mll") != std::string::npos);
+}
+
+/// The status slot describes THE LAST ATTEMPT, so a verdict has to be retractable. Without this the
+/// failure text outlived the failure: a send that failed once painted "Could not reach the server"
+/// permanently, and the card kept reporting a send as outstanding long after the next one had
+/// arrived. Observed on a NanoPi, whose report HAD landed while the card still showed the error.
+///
+/// The retraction follows DriverBase's "clear only MY status" rule: a module that cleared
+/// unconditionally would wipe a line something else had every right to show.
+TEST_CASE("a stats verdict is retracted before the next one is formed") {
+    struct Probe : mm::MoonStatsModule {
+        using mm::MoonStatsModule::setOwnStatus;
+        using mm::MoonStatsModule::clearOwnStatus;
+    };
+    Probe m;
+
+    static const char kFailed[] = "Could not reach the server.";
+    static const char kSent[] = "Sent.";
+
+    m.setOwnStatus(kFailed, mm::MoonModule::Severity::Error);
+    CHECK(m.status() == kFailed);
+
+    // A later success retracts the failure rather than leaving both truths on the card.
+    m.clearOwnStatus();
+    CHECK(m.status() == nullptr);
+
+    m.setOwnStatus(kSent, mm::MoonModule::Severity::Status);
+    CHECK(m.status() == kSent);
+}
+
+/// The other half of the rule, and the one that makes it safe: a status set by SOMETHING ELSE is
+/// never cleared by this module. Retracting unconditionally would turn one fixed bug into another.
+TEST_CASE("a stats retraction leaves a foreign status alone") {
+    struct Probe : mm::MoonStatsModule {
+        using mm::MoonStatsModule::setOwnStatus;
+        using mm::MoonStatsModule::clearOwnStatus;
+    };
+    Probe m;
+
+    static const char kMine[] = "Could not reach the server.";
+    static const char kForeign[] = "Ethernet cable unplugged.";
+
+    m.setOwnStatus(kMine, mm::MoonModule::Severity::Error);
+    // Something else claims the slot: a driver, the network module, anything.
+    m.setStatus(kForeign, mm::MoonModule::Severity::Warning);
+
+    m.clearOwnStatus();
+    CHECK(m.status() == kForeign);   // not ours to clear
 }

@@ -33,6 +33,7 @@
 #include "platform/platform.h"
 #include "core/LightSummary.h"          // lightCount: the POD the light domain publishes
 #include "light/drivers/Drivers.h"      // Drivers::latestSummary(): the real light total
+#include "core/ModuleFactory.h"      // displayNameFor: the TYPE label, not the instance name
 #include "light/moonlive/MoonLiveScriptFile.h"  // isFactoryScript: a shipped name is ours, not yours
 
 namespace mm {
@@ -133,18 +134,40 @@ inline void reportModules(JsonSink& sink, const MoonModule* const* mods, uint8_t
         // `Layer` is structural too (it holds effects rather than being one a user picks). What
         // remains is what somebody chose: drivers, services, layouts, effects, modifiers.
         const ModuleRole role = m->role();
-        if (m->name() && role != ModuleRole::Generic && role != ModuleRole::Layer) {
+        // PreviewDriver is boot wiring, not a choice: main.cpp adds it to every device, so it
+        // reported once per installation and topped the driver pie with a number that was really
+        // the installation count. Excluded BY TYPE rather than by isWiredByCode(), because that
+        // flag marks only children: the twelve top-level modules carry no marker, and filtering on
+        // it once reported every one of them as `generic:System`. The test below pins that.
+        //
+        // The other boot-wired modules need no entry here: LightPresets and Devices are Generic,
+        // which the role rule already drops. AudioService is deliberately NOT auto-wired (main.cpp:
+        // "a mic peripheral, useful only on a board"), so it stays a real user choice and counts.
+        const bool prewired = std::strcmp(m->typeName(), "PreviewDriver") == 0;
+        if (m->name() && !prewired && role != ModuleRole::Generic && role != ModuleRole::Layer) {
             // A scripted module is "MoonLive" whatever it runs, so the type name alone says nothing
             // about what the device is actually doing. The script name is the interesting half, and
             // it is reported ONLY when it is one we ship: those come from our own catalog, the same
             // fixed vocabulary as a module type. A name the user invented is text they typed, which
             // the report never carries, so it degrades to the bare type name.
             const char* script = factoryScriptOf(m);
+            // The TYPE, not the instance name. `name()` is user-editable and carries the
+            // uniquifying suffix Scheduler adds for a second instance, so three rings reported
+            // `Ring`, `Ring-2`, `Ring-3` as three different layouts, and a renamed module reported
+            // whatever its owner typed. displayNameFor turns the factory key into the same label
+            // the UI shows (RingLayout -> Ring), which is a fixed vocabulary from our own registry.
+            //
+            // Falls back to name() when typeName is empty: only ModuleFactory sets it, so a module
+            // built any other way would otherwise report an empty string. The returned pointer is a
+            // shared static buffer, valid until the next call, which the snprintf below consumes.
+            const char* label = m->typeName() && m->typeName()[0]
+                                    ? ModuleFactory::displayNameFor(m->typeName(), role)
+                                    : m->name();
             char entry[80];
             if (script)
-                std::snprintf(entry, sizeof(entry), "%s:%s/%s", roleName(role), m->name(), script);
+                std::snprintf(entry, sizeof(entry), "%s:%s/%s", roleName(role), label, script);
             else
-                std::snprintf(entry, sizeof(entry), "%s:%s", roleName(role), m->name());
+                std::snprintf(entry, sizeof(entry), "%s:%s", roleName(role), label);
             if (!first) sink.append(",");
             first = false;
             sink.writeJsonString(entry);
@@ -163,7 +186,8 @@ inline void buildMoonStatsReport(JsonSink& sink,
                           const char* version,
                           const char* previousVersion,
                           uint32_t lightCount = 0,
-                          uint32_t totalHeap = 0, uint32_t freeHeap = 0) {
+                          uint32_t totalHeap = 0, uint32_t freeHeap = 0,
+                          uint32_t fps = 0) {
     const MoonModule* system = findModule(root, moduleCount, "System");
 
     sink.append("{");
@@ -203,10 +227,14 @@ inline void buildMoonStatsReport(JsonSink& sink,
     // be re-cut, which is the same trap as a field that was never collected.
     // Passed in, not read here: the builder is a pure function over its arguments everywhere else,
     // and reading the platform mid-serialize would make these two fields untestable.
-    sink.appendf(",\"totalHeap\":%u,\"freeHeap\":%u,\"lightCount\":%u",
+    //
+    // `fps` is the SYSTEM render rate (Scheduler::fps), not a per-effect number: it says what the
+    // whole tree achieves on that hardware, which is the figure a reader compares against their own.
+    sink.appendf(",\"totalHeap\":%u,\"freeHeap\":%u,\"lightCount\":%u,\"fps\":%u",
                  static_cast<unsigned>(totalHeap),
                  static_cast<unsigned>(freeHeap),
-                 static_cast<unsigned>(lightCount));
+                 static_cast<unsigned>(lightCount),
+                 static_cast<unsigned>(fps));
 
     // Facts about the board, not the person. `deviceName` and `mac` sit in the same control list
     // and are deliberately NOT here.
@@ -252,35 +280,39 @@ public:
         if (!name) return;
         if (std::strcmp(name, "consent") == 0) { refreshStatus(); return; }
         if (std::strcmp(name, "send update") != 0) return;
+        // Retract the previous verdict before forming a new one. Every line below describes THE
+        // LAST ATTEMPT, so a stale one is a lie the moment the next press starts: the failure text
+        // outlived the failure and told users a report was outstanding long after one had arrived.
+        clearOwnStatus();
         // Every outcome says something. A button that sometimes does nothing and never explains why
         // leaves a user unable to tell "it worked" from "it was ignored", which is the state this
         // card was in: the only way to know was to read the database.
         //
         // Consent is re-read rather than assumed: a control write arrives from the API as readily
         // as from the card, and this is the one path where a user action opens a connection.
-        if (!consent_) { setStatus("Switch consent on first: nothing is sent while it is off.",
-                                   Severity::Warning); return; }
+        if (!consent_) { setOwnStatus("Switch consent on first: nothing is sent while it is off.",
+                                      Severity::Warning); return; }
         if (!platform::httpsAvailable()) {
-            setStatus("This build cannot send: it was compiled without an HTTPS client.",
-                      Severity::Error);
+            setOwnStatus("This build cannot send: it was compiled without an HTTPS client.",
+                         Severity::Error);
             return;
         }
         if (!platform::networkReady()) {
-            setStatus("No network yet. Press send update again once this device is online.",
-                      Severity::Warning);
+            setOwnStatus("No network yet. Press send update again once this device is online.",
+                         Severity::Warning);
             return;
         }
         if (inApMode()) {
-            setStatus("Serving its own access point, so there is no route out. "
-                      "Join a network, then press send update.", Severity::Warning);
+            setOwnStatus("Serving its own access point, so there is no route out. "
+                         "Join a network, then press send update.", Severity::Warning);
             return;
         }
         if (sendReport(MoonStatsEvent::Refresh)) {
-            setStatus("Sent. The charts below now describe this device as it is now.",
-                      Severity::Status);
+            setOwnStatus("Sent. The charts below now describe this device as it is now.",
+                         Severity::Status);
         } else {
-            setStatus("Could not reach the server. Nothing was sent; press send update to try again.",
-                      Severity::Error);
+            setOwnStatus("Could not reach the server. Nothing was sent; press send update to try again.",
+                         Severity::Error);
         }
     }
 
@@ -426,7 +458,8 @@ private:
                              kind, id, runningVersion_, prev,
                              lights ? lights->lightCount : 0,
                              static_cast<uint32_t>(platform::totalHeap()),
-                             static_cast<uint32_t>(platform::freeHeap()));
+                             static_cast<uint32_t>(platform::freeHeap()),
+                             sched->fps());
 
         // Sent through the container, which owns the address. The response body is discarded, but
         // WHETHER it was accepted is not: the button reports it, so a press is never silent.
@@ -446,6 +479,35 @@ private:
         return sent;
     }
 
+    /// The verdict this module last put on the status slot, or null. Every `send update` outcome
+    /// describes THE LAST ATTEMPT, so it has to be retractable: without this the failure text
+    /// outlived the failure, and a card kept reporting a send as outstanding long after the next
+    /// one had succeeded. Borrowed string literals, compared by address.
+    ///
+    /// "Clear only MY status", the rule DriverBase records for the same situation: a module that
+    /// called clearStatus() unconditionally would wipe a line something else had every right to
+    /// show.
+    const char* ownStatus_ = nullptr;
+
+protected:
+    // Protected, matching DriverBase::setConfigErr / clearConfigErr: the pair is a subclass tool and
+    // a test seam, never part of the card's public surface.
+
+    /// Set a verdict and remember it, so the next press can retract exactly this one.
+    void setOwnStatus(const char* msg, Severity sev) {
+        ownStatus_ = msg;
+        setStatus(msg, sev);
+    }
+
+    /// Retract this module's verdict, and only this module's.
+    void clearOwnStatus() {
+        if (ownStatus_) {
+            if (status() == ownStatus_) clearStatus();
+            ownStatus_ = nullptr;
+        }
+    }
+
+private:
     bool consent_ = false;
     char reportedVersion_[32] = {};
     char runningVersion_[32] = {};

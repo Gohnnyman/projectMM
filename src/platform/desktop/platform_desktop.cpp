@@ -686,7 +686,14 @@ const char* hostPlatform() {
     // /.dockerenv is what Docker itself creates in every container it builds. Checked ONCE, since
     // a process cannot move in or out of a container while it runs.
     static const bool inContainer = std::filesystem::exists("/.dockerenv");
-    if (inContainer) return "docker";
+    // The architecture rides along: a container on a Pi and one on an amd64 server are different
+    // deployments, and "docker" alone made them one slice. Still says it IS a container first,
+    // which is the fact that changes how it behaves (no display, a mounted volume).
+  #if defined(__aarch64__)
+    if (inContainer) return "docker-arm64";
+  #else
+    if (inContainer) return "docker-x64";
+  #endif
   #if defined(__aarch64__)
     // A Raspberry Pi and every other arm64 SBC lands here, and the board breakdown exists to find
     // out how many there are: answering "linux-x64" would report every one of them as a PC.

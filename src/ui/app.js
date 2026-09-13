@@ -6272,7 +6272,7 @@ function renderMoonCloudStats(host, mod) {
                                            ["Flash", "flash", "flash"],
                                            ["PSRAM", "psram", "psram"],
                                            ["SDK", "sdk", "sdk"],
-                                           ["Report event", "events", "event"],
+                                           ["Event", "events", "event"],
                                            ["Upgraded from", "previousVersions", "previousVersion"],
                                            ["Drivers", "drivers", "driver"],
                                            ["Services", "services", "service"],
@@ -6282,6 +6282,7 @@ function renderMoonCloudStats(host, mod) {
                                            ["Lights", "lightCounts", "lightCount"],
                                            ["Free memory", "freeMemory", "freeHeap"],
                                            ["Total memory", "totalMemory", "totalHeap"],
+                                           ["FPS", "fps", "fps"],
                                            ["Build", "builds", "dev"],
                                            ["Country", "countries", "country"]]) {
             // No stats: the heading over an empty circle, so the card shows what consent unlocks

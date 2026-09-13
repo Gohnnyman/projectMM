@@ -30,6 +30,7 @@ const ALLOWED = [
   "totalHeap",
   "freeHeap",
   "lightCount",
+  "fps",
   "dev",
 ];
 
@@ -62,7 +63,7 @@ function clean(report, country) {
     // The numeric fields arrive as JSON NUMBERS, so the string test below would drop them: every
     // other allowlisted field is text, and only `modules` and `dev` had branches of their own.
     // Bounded and floored at 0, because a report is untrusted input from an open endpoint.
-    if (key === "totalHeap" || key === "freeHeap" || key === "lightCount") {
+    if (key === "totalHeap" || key === "freeHeap" || key === "lightCount" || key === "fps") {
       const n = typeof value === "number" ? value : Number(value);
       row[key] = Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), MAX_NUMBER) : 0;
       continue;
@@ -114,8 +115,8 @@ async function handleReport(request, env) {
   // double-counting, which is what makes the totals a count of installations.
   await env.DB.prepare(
     `INSERT INTO reports
-       (installationId, event, version, previousVersion, chip, flash, psram, sdk, deviceModel, modules, country, receivedAt, totalHeap, freeHeap, lightCount, dev)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (installationId, event, version, previousVersion, chip, flash, psram, sdk, deviceModel, modules, country, receivedAt, totalHeap, freeHeap, lightCount, fps, dev)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(installationId, version) DO UPDATE SET
        event = excluded.event,
        previousVersion = excluded.previousVersion,
@@ -130,6 +131,7 @@ async function handleReport(request, env) {
        totalHeap = excluded.totalHeap,
        freeHeap = excluded.freeHeap,
        lightCount = excluded.lightCount,
+       fps = excluded.fps,
        dev = excluded.dev`
   )
     .bind(
@@ -148,6 +150,7 @@ async function handleReport(request, env) {
       row.totalHeap ?? 0,
       row.freeHeap ?? 0,
       row.lightCount ?? 0,
+      row.fps ?? 0,
       row.dev ?? 0
     )
     .run();
@@ -213,7 +216,7 @@ async function handleStats(env, url) {
   }
   // A bucketed chart filters by BOUNDS: its slices name ranges ("64-128 KB"), and the column holds
   // the raw number, so there is no value to match on. `?freeHeapMin=65536&freeHeapMax=131072`.
-  for (const column of ["totalHeap", "freeHeap", "lightCount"]) {
+  for (const column of ["totalHeap", "freeHeap", "lightCount", "fps"]) {
     const min = Number(url?.searchParams.get(`${column}Min`));
     const max = Number(url?.searchParams.get(`${column}Max`));
     if (Number.isFinite(min) && min > 0) { where.push(`${column} >= ?`); binds.push(min); }
@@ -337,6 +340,13 @@ async function handleStats(env, url) {
     { name: "64-128 KB", max: 128 * 1024 }, { name: "128-256 KB", max: 256 * 1024 },
     { name: "256 KB+", max: Infinity },
   ];
+  // Frame rate reads as thresholds rather than a scale: below 30 motion is visibly stepping, 30-60
+  // is watchable, 60+ is the target, and a desktop renders into the thousands where a board cannot.
+  const kFpsBuckets = [
+    { name: "<30", max: 29 }, { name: "30-59", max: 59 },
+    { name: "60-119", max: 119 }, { name: "120-999", max: 999 },
+    { name: "1000+", max: Infinity },
+  ];
   const kTotalBuckets = [
     { name: "<128 KB", max: 128 * 1024 }, { name: "128-256 KB", max: 256 * 1024 },
     { name: "256-512 KB", max: 512 * 1024 }, { name: "512 KB-4 MB", max: 4 * 1024 * 1024 },
@@ -369,6 +379,7 @@ async function handleStats(env, url) {
     lightCounts: await bucketed("lightCount", kLightBuckets),
     freeMemory: await bucketed("freeHeap", kFreeBuckets),
     totalMemory: await bucketed("totalHeap", kTotalBuckets),
+    fps: await bucketed("fps", kFpsBuckets),
     events: await eventCounts(),
     ...(() => {
       // Spread as `drivers`, `services`, `layouts`, `effects`, … so a new role needs no server
@@ -497,7 +508,8 @@ const PAGE = `<!doctype html>
 <div class="sub" id="sub">Loading...</div>
 <div class="charts" id="out"></div>
 <footer>
-  Opt-in, one report per install or upgrade. No addresses are stored and the country is resolved at
+  Opt-in, one report per install or upgrade, plus one whenever a user presses send update on the
+  device. No addresses are stored and the country is resolved at
   the edge. <a href="https://moonmodules.org/projectMM/privacy-policy.html">Privacy policy</a> &middot;
   <a href="https://github.com/MoonModules/projectMM/tree/main/mooncloud">Source</a> &middot;
   <a href="/api/stats">Raw JSON</a>
@@ -583,7 +595,7 @@ fetch("/api/stats").then(r => r.json()).then(d => {
   for (const [label, rows] of [["Version", d.versions], ["Chip", d.chips],
                                ["Board", d.deviceModels], ["Flash", d.flash],
                                ["PSRAM", d.psram], ["SDK", d.sdk],
-                               ["Install or upgrade", d.events],
+                               ["Event", d.events],
                                ["Upgraded from", d.previousVersions],
                                ["Drivers", d.drivers],
                                ["Services", d.services],
@@ -593,6 +605,7 @@ fetch("/api/stats").then(r => r.json()).then(d => {
                                ["Lights", d.lightCounts],
                                ["Free memory", d.freeMemory],
                                ["Total memory", d.totalMemory],
+                               ["FPS", d.fps],
                                ["Build", d.builds], ["Country", d.countries]]) {
     const shown = topSlices(rows);
     if (!shown.length) continue;

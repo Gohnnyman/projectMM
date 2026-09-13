@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS reports (
   totalHeap       INTEGER NOT NULL DEFAULT 0,   -- internal + PSRAM capacity
   freeHeap        INTEGER NOT NULL DEFAULT 0,   -- free at report time
   lightCount      INTEGER NOT NULL DEFAULT 0,   -- physical lights driven (Layer::physicalLightCount)
+  fps             INTEGER NOT NULL DEFAULT 0,   -- system render rate at report time (Scheduler::fps)
 
   -- One row per installation per version. A device that re-reports the same upgrade overwrites its
   -- row rather than adding one, so a count of rows is a count of installations rather than of
