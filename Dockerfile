@@ -22,9 +22,10 @@
 # **When L2 matters.** mDNS discovery (finding boards, being found by them) is multicast and does
 # not cross a bridge network, and Art-Net's broadcast mode has the same problem. For those, attach
 # the container to the host's network directly (`--network host`, or an L2 CNI on Kubernetes).
-# Unicast output needs none of it. NOT verified on a Linux host yet: on macOS and Windows, Docker
-# Desktop runs a Linux VM, so `--network host` joins the VM rather than the machine's LAN and the
-# question cannot be answered there.
+# Unicast output needs none of it. Verified on a NanoPi R28S (arm64, Debian 13): the container
+# serves its UI and reaches the LAN through `--network host`. On macOS and Windows the question
+# cannot be answered, because Docker Desktop runs a Linux VM and host networking joins the VM
+# rather than the machine's LAN.
 #
 # **Capabilities.** None. It binds 8080 as an ordinary process and needs no added capability.
 #
@@ -52,8 +53,12 @@ ARG TARGETARCH
 ARG RELEASE=latest
 ARG REPO=MoonModules/projectMM
 
+# libcurl4t64 is installed, not merely downloaded: the release binary links it (the one outbound
+# HTTPS call), so the image must carry it AND everything it in turn needs. Letting apt resolve that
+# is the point: the chain runs deep (TLS, Kerberos, LDAP, SASL, libssh2, compression), and a
+# hand-written COPY list would be wrong the first time any of them changed.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl \
+ && apt-get install -y --no-install-recommends ca-certificates curl libcurl4t64 \
  && if [ "$RELEASE" = "stable" ]; then \
         api="https://api.github.com/repos/${REPO}/releases/latest"; \
     else \
@@ -62,13 +67,23 @@ RUN apt-get update \
  && url=$(curl -fsSL "$api" | grep -o "https://[^\"]*_${TARGETARCH}\.deb" | head -1) \
  && test -n "$url" || { echo "no ${TARGETARCH} .deb in release ${RELEASE}" >&2; exit 1; } \
  && curl -fsSL -o /tmp/projectmm.deb "$url" \
- && dpkg-deb -x /tmp/projectmm.deb /rootfs
+ && dpkg-deb -x /tmp/projectmm.deb /rootfs \
+ # Every shared object the binary resolves to, gathered by asking the loader rather than by
+ # listing names: ldd walks the whole transitive chain, so this stays correct as that chain moves.
+ # The four the distroless base already carries (libc, libstdc++, libm, libgcc_s) are EXCLUDED
+ # rather than copied over: the base and this trixie stage are pinned independently, so shipping
+ # both would put two glibc builds in one image and let the loader pick by path order.
+ && mkdir -p /deps \
+ && ldd /rootfs/usr/bin/projectMM | awk '/=> \//{print $3}' | sort -u | grep -vE '/(libc|libm|libstdc\+\+|libgcc_s)\.so' | xargs -I{} cp -L {} /deps/
 
 # --- stage 2: the image that ships ------------------------------------------------------------
-# Distroless: the binary plus its four shared libraries, with no shell and no package manager, so
-# the attack surface is the application rather than a distribution. `ldd` on the release binary
-# lists exactly libstdc++, libm, libgcc_s and libc, which is the whole reason this fits: nothing
-# else has to come along. 45 MB against 140 MB for the full-Debian form.
+# Distroless: the binary plus the shared libraries it resolves, with no shell and no package
+# manager, so the attack surface is the application rather than a distribution.
+#
+# It used to be four libraries (libstdc++, libm, libgcc_s, libc), all of them in the base. Linking
+# libcurl for the one outbound HTTPS call added a chain of its own (TLS, Kerberos, LDAP, compression),
+# which is why the fetch stage now collects what the loader actually resolves instead of the image
+# relying on the base to happen to carry it.
 #
 # **debian13, NOT debian12**, and this is load-bearing. The release is built on ubuntu-24.04
 # (glibc 2.39), so the binary requires glibc >= 2.38. The debian12/bookworm images ship 2.36, where
@@ -80,6 +95,11 @@ RUN apt-get update \
 FROM gcr.io/distroless/cc-debian13@sha256:9b615fff20e1a4fad29c2b30562580b212c7dd5e2225236735cca0070ed11c78
 
 COPY --from=fetch /rootfs/usr/bin/projectMM /usr/bin/projectMM
+# The libraries the loader resolved in the fetch stage, collected there rather than named here.
+# Without this the container starts and dies immediately on "libcurl.so.4: cannot open shared
+# object file", which is what shipped between dev.126 and this fix: the publish job builds the
+# image but never runs it, so a missing library passes CI and fails on a user's board.
+COPY --from=fetch /deps/ /usr/lib/
 
 # WHERE THE CONFIG LIVES, and why this line is required rather than a convenience. The desktop
 # build resolves its data directory from the environment (platform_desktop.cpp, userDataDir): on

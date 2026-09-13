@@ -120,7 +120,7 @@ Detail: [technical](moxygen/FirmwareUpdateModule.md)
 
 The container for everything projectMM does with a server MoonModules runs. It holds no settings of its own: each thing MoonCloud does is a child with its own consent, because a user who wants one has not thereby agreed to the other.
 
-- **Stats**, below: one opt-in report per install or upgrade, and the totals back.
+- **Stats**, below: one opt-in report per install or upgrade, plus one whenever you press send update, and the totals back.
 - **Talk**, below: a public message board between devices.
 - **Sync** (planned): device to device over the internet, a joint show across houses. Not built on Stats; they share this container and the installation id, nothing else.
 
@@ -132,8 +132,9 @@ One opt-in report about this install, sent once when the firmware is installed o
 
 - `consent`: a checkbox, off by default. Nothing is sent, and no identifier is computed, while it is off.
 - read-only: `version` (what is running) and `reportedVersion` (what last produced a report). They differ exactly when a report is due, which is what makes one upgrade send one report and a reboot send nothing.
+- `send update`: a button that reports again now, for a setup that changed without a version change. It replaces this install's row rather than adding one, and says on the card whether it sent. Distinct from the ⟲ above the charts, which only re-reads the totals.
 
-The report carries hardware and configuration: chip, flash, PSRAM, SDK, device model, total and free memory, how many lights are driven, and which drivers, services, layouts, effects and modifiers you added, each tagged by role. It carries no device name, no addresses, no credentials and no text you typed, and a unit test asserts those cannot appear in it.
+The report carries hardware and configuration: chip, flash, PSRAM, SDK, device model, total and free memory, how many lights are driven, and which drivers, services, layouts, effects and modifiers you added, each tagged by role. A scripted module also names the script it runs, but only when that script is one we ship: a script you wrote yourself is counted under its module type and its name is never sent. It carries no device name, no addresses, no credentials and no text you typed, and a unit test asserts those cannot appear in it.
 
 The card also shows the totals everyone else reported: contributing earns the answer back where you already are. The charts are drawn empty until consent is on, so what saying yes gets you is visible before you say it.
 

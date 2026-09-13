@@ -554,12 +554,12 @@ async function sendControl(moduleName, controlName, value) {
         // switched. The routine WS push cannot carry it: renderCards is suppressed while the user
         // is interacting, and operating this select is exactly that.
         else if (moduleName === "Firmware" && controlName === "image") refetchState();
-        // Three writes change what a MoonCloud card shows: pressing `send` publishes a message, and
-        // either member's `consent` decides whether that member reads at all. Typing in `message` or
-        // toggling `shareName` changes only the device, and re-reading after those showed exactly
-        // what was already on screen.
+        // Four writes change what a MoonCloud card shows: pressing `send` publishes a message,
+        // pressing `send update` re-sends this device's report, and either member's `consent` decides
+        // whether that member reads at all. Typing in `message` or toggling `shareName` changes only
+        // the device, and re-reading after those showed exactly what was already on screen.
         else if (mod?.type === "MoonTalkModule" ? (controlName === "send" || controlName === "consent")
-               : mod?.type === "MoonStatsModule" ? controlName === "consent"
+               : mod?.type === "MoonStatsModule" ? (controlName === "consent" || controlName === "send update")
                : false) {
             // Switching consent OFF changes nothing on the server (a report already sent stays
             // sent), so the card rebuilds from what it has and nothing is re-read. The rebuild is
@@ -577,6 +577,9 @@ async function sendControl(moduleName, controlName, value) {
                 moonCloudStatsCache.clear();
                 moonTalkCache = null;
                 refetchState();
+            // The wait is for `consent` alone: that report leaves from tick1s, so an immediate read
+            // would show the totals without the very row the reader is looking for. `send update`
+            // sends inside this write, like MoonTalk's `send`, so it re-reads with no delay.
             }, mod?.type === "MoonStatsModule" && controlName === "consent" ? 2000 : 0);
         }
     } catch (e) {
@@ -1985,7 +1988,15 @@ function createCard(mod, depth) {
         if (statsConsent === false) {
             const nudge = document.createElement("div");
             nudge.className = "mooncloud-nudge";
-            nudge.textContent = "Turn on MoonCloud stats to share and see what everyone else is running.";
+            nudge.textContent = "Turn on MoonCloud stats to share and see what everyone else is running. ";
+            // The reasons live in one place, and it is a page rather than a paragraph here: a nudge
+            // long enough to make the case stops being a nudge.
+            const why = document.createElement("a");
+            why.href = "https://moonmodules.org/projectMM/mooncloud.html#why-you-might-like-this";
+            why.target = "_blank";
+            why.rel = "noopener";
+            why.textContent = "Why you might like this";
+            nudge.appendChild(why);
             host.appendChild(nudge);
         }
 
@@ -6261,7 +6272,7 @@ function renderMoonCloudStats(host, mod) {
                                            ["Flash", "flash", "flash"],
                                            ["PSRAM", "psram", "psram"],
                                            ["SDK", "sdk", "sdk"],
-                                           ["Install or upgrade", "events", "event"],
+                                           ["Report event", "events", "event"],
                                            ["Upgraded from", "previousVersions", "previousVersion"],
                                            ["Drivers", "drivers", "driver"],
                                            ["Services", "services", "service"],

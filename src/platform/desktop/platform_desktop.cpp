@@ -36,6 +36,7 @@
 #include <io.h>     // _fileno, _commit (POSIX fileno/fsync equivalents)
 #include <iphlpapi.h>   // GetIfTable2 — real link state + negotiated speed (ethLinkUp)
 #include <netioapi.h>   // MIB_IF_ROW2: sees a NIC a Hyper-V vSwitch hides from GetAdaptersAddresses
+#include <winhttp.h>    // https POST: Windows' own TLS, so the .exe needs no bundled library
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -539,7 +540,8 @@ const char* chipModel() {
 }
 
 bool httpsAvailable() MM_NONBLOCKING {
-#ifdef MM_HAVE_CURL
+#if defined(_WIN32) || defined(MM_HAVE_CURL)
+    // Windows needs no libcurl: WinHTTP ships with the OS, so the send path is always compiled in.
     return true;
 #else
     return false;   // built without libcurl: httpsPost can never succeed
@@ -547,7 +549,84 @@ bool httpsAvailable() MM_NONBLOCKING {
 }
 
 bool httpsPost(const char* url, const char* body, uint32_t timeoutMs) {
-#ifdef MM_HAVE_CURL
+#ifdef _WIN32
+    // WinHTTP rather than libcurl on Windows. Same reason the other platforms use libcurl: the TLS
+    // the OS already ships, nothing vendored. libcurl has no dev package on the runner image and no
+    // public binary cache, so acquiring it would mean building curl from source on every release;
+    // winhttp.lib is in the SDK and costs one link entry. Schannel and the Windows certificate
+    // store are used implicitly, which is the same trust root every other Windows program gets.
+    if (!url || !*url) return false;
+
+    // WinHTTP takes the pieces of a URL separately, and as wide strings, where libcurl takes one
+    // byte string. WinHttpCrackUrl does the split so no parsing is hand-rolled here.
+    const int wideLen = MultiByteToWideChar(CP_UTF8, 0, url, -1, nullptr, 0);
+    if (wideLen <= 0) return false;
+    std::wstring wideUrl(static_cast<size_t>(wideLen), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, url, -1, wideUrl.data(), wideLen);
+
+    wchar_t host[256] = {};
+    wchar_t path[1024] = {};
+    wchar_t query[1024] = {};
+    URL_COMPONENTS parts = {};
+    parts.dwStructSize      = sizeof(parts);
+    parts.lpszHostName      = host;   parts.dwHostNameLength      = ARRAYSIZE(host);
+    parts.lpszUrlPath       = path;   parts.dwUrlPathLength       = ARRAYSIZE(path);
+    // lpszExtraInfo is the query string, which WinHttpCrackUrl splits OUT of the path. Asking for
+    // it and re-joining is what keeps this a general seam: the one caller today passes no query,
+    // and a later one that did would otherwise have it dropped silently.
+    parts.lpszExtraInfo     = query;  parts.dwExtraInfoLength     = ARRAYSIZE(query);
+    if (!WinHttpCrackUrl(wideUrl.c_str(), 0, 0, &parts)) return false;
+    // Anything but https is a caller error rather than something to downgrade into cleartext.
+    if (parts.nScheme != INTERNET_SCHEME_HTTPS) return false;
+    const std::wstring target = std::wstring(path) + query;
+
+    HINTERNET session = WinHttpOpen(L"projectMM", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                                    WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!session) return false;
+
+    // The one timeout the caller gives, applied to every phase: a hung DNS or TLS handshake must
+    // bound the same way a hung read does, or the "bounded blocking send" contract is not kept.
+    const int t = static_cast<int>(timeoutMs);
+    WinHttpSetTimeouts(session, t, t, t, t);
+
+    bool ok = false;
+    if (HINTERNET connection = WinHttpConnect(session, host, parts.nPort, 0)) {
+        if (HINTERNET request = WinHttpOpenRequest(connection, L"POST", target.c_str(), nullptr,
+                                                   WINHTTP_NO_REFERER,
+                                                   WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                                   WINHTTP_FLAG_SECURE)) {
+            // No redirect following, matching the libcurl path: the one endpoint is ours and
+            // answers directly, and following one would let a server move a POST body elsewhere.
+            DWORD noRedirects = WINHTTP_DISABLE_REDIRECTS;
+            WinHttpSetOption(request, WINHTTP_OPTION_DISABLE_FEATURE,
+                             &noRedirects, sizeof(noRedirects));
+
+            const char* payload = body ? body : "";
+            const DWORD payloadLen = static_cast<DWORD>(std::strlen(payload));
+            // lpOptional carries the whole body, which is what lets a one-shot POST skip
+            // WinHttpWriteData entirely.
+            if (WinHttpSendRequest(request,
+                                   L"Content-Type: application/json\r\n",
+                                   static_cast<DWORD>(-1),
+                                   const_cast<char*>(payload), payloadLen, payloadLen, 0)
+                && WinHttpReceiveResponse(request, nullptr)) {
+                DWORD status = 0, statusSize = sizeof(status);
+                if (WinHttpQueryHeaders(request,
+                                        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                                        WINHTTP_HEADER_NAME_BY_INDEX, &status, &statusSize,
+                                        WINHTTP_NO_HEADER_INDEX)) {
+                    ok = status >= 200 && status < 300;
+                }
+            }
+            WinHttpCloseHandle(request);
+        }
+        WinHttpCloseHandle(connection);
+    }
+    WinHttpCloseHandle(session);
+    // The response body is never read, matching the contract in platform.h: the one caller has
+    // nothing to do with it, and the handles close either way.
+    return ok;
+#elif defined(MM_HAVE_CURL)
     if (!url || !*url) return false;
 
     // curl_global_init is NOT thread-safe and must run once before any easy handle. Doing it in a
@@ -1033,6 +1112,9 @@ bool     ethRestartFails_ = false;   // simulated recovery failure
 // The bound raw socket, or -1 for capture mode (the default, and all any test sees).
 int      ethRawFd_ = -1;
 unsigned ethRawIfIndex_ = 0;         // Linux AF_PACKET needs the index; BPF binds by name
+// The name the raw sender bound to, so ethLinkUp/ethLinkSpeedMbps describe THAT NIC rather than
+// whichever one the host lists first. Windows keeps boundGuid_ for the same reason.
+char     ethRawIfName_[64] = {};
 
 #ifdef _WIN32
 // --- Npcap/WinPcap, loaded at RUN TIME ---------------------------------------------------------
@@ -1351,6 +1433,7 @@ bool ethBindRawInterface(const char* ifName) {
 #else
     if (ethRawFd_ >= 0) { ::close(ethRawFd_); ethRawFd_ = -1; }
     ethRawIfIndex_ = 0;
+    ethRawIfName_[0] = '\0';
     if (!ifName || !ifName[0]) return true;   // explicit return to capture mode
 
 #if defined(__linux__)
@@ -1360,6 +1443,7 @@ bool ethBindRawInterface(const char* ifName) {
     if (idx == 0) { ::close(fd); return false; }
     ethRawFd_ = fd;
     ethRawIfIndex_ = idx;
+    std::snprintf(ethRawIfName_, sizeof(ethRawIfName_), "%s", ifName);
     return true;
 #elif defined(__APPLE__)
     // BPF has no single device: open the first free /dev/bpfN, then bind it to the interface.
@@ -1377,6 +1461,7 @@ bool ethBindRawInterface(const char* ifName) {
         unsigned hdrComplete = 1;
         if (::ioctl(fd, BIOCSHDRCMPLT, &hdrComplete) < 0) { ::close(fd); return false; }
         ethRawFd_ = fd;
+        std::snprintf(ethRawIfName_, sizeof(ethRawIfName_), "%s", ifName);
         return true;
     }
     return false;
@@ -1570,9 +1655,90 @@ uint16_t ethLinkSpeedMbps() MM_NONBLOCKING {
     return ethTestLinkSpeed_;   // unbound, or a speed Windows would not state
 }
 #else
-bool ethLinkUp() MM_NONBLOCKING { return false; }
-bool ethConnected() MM_NONBLOCKING { return false; }
-uint16_t ethLinkSpeedMbps() MM_NONBLOCKING { return ethTestLinkSpeed_; }
+namespace {
+/// (carrier up, Mbit) for a named interface. The ONE place either question is asked of the OS.
+///
+/// Both callers need it: the link-state query below describes the NIC the sender bound to, and the
+/// interface labels name a speed beside each adapter. They were two copies of the same ioctl and
+/// the same six-case subtype table, which is two chances to drift when a rate is added.
+///
+/// `mbps` of 0 means the OS states no rate (a virtual interface, a down link, or macOS Wi-Fi
+/// reporting only "autoselect"), which is honest rather than a guess.
+bool posixIfLink(const char* ifname, uint16_t& mbps) MM_NONBLOCKING {
+    mbps = 0;
+    if (!ifname || !*ifname) return false;
+#if defined(__linux__)
+    // operstate is the kernel's own word for the carrier: "up", "down", or "unknown" for a virtual
+    // interface with no carrier concept. Only "up" counts.
+    char path[128];
+    std::snprintf(path, sizeof(path), "/sys/class/net/%s/operstate", ifname);
+    FILE* f = std::fopen(path, "r");
+    if (!f) return false;
+    char state[16] = {};
+    const bool read = std::fscanf(f, "%15s", state) == 1;
+    std::fclose(f);
+    if (!read || std::strcmp(state, "up") != 0) return false;
+    // Speed rides along from the same sysfs tree, in Mbit. Absent or -1 where none is stated.
+    std::snprintf(path, sizeof(path), "/sys/class/net/%s/speed", ifname);
+    if (FILE* sf = std::fopen(path, "r")) {
+        long v = 0;
+        if (std::fscanf(sf, "%ld", &v) == 1 && v > 0) mbps = static_cast<uint16_t>(v);
+        std::fclose(sf);
+    }
+    return true;
+#elif defined(__APPLE__)
+    // IFM_ACTIVE is the carrier bit; the negotiated rate is encoded as the media SUBTYPE.
+    const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return false;
+    ifmediareq req{};
+    // A name longer than ifm_name could never have bound (the kernel caps one at IFNAMSIZ), so
+    // refuse rather than query a truncated one and describe the wrong NIC. GCC proves the
+    // truncation is possible and rejects a plain snprintf without this.
+    if (std::strlen(ifname) >= sizeof(req.ifm_name)) { ::close(fd); return false; }
+    std::memcpy(req.ifm_name, ifname, std::strlen(ifname) + 1);
+    bool up = false;
+    if (::ioctl(fd, SIOCGIFMEDIA, &req) == 0 && (req.ifm_status & IFM_ACTIVE)) {
+        up = true;
+        switch (IFM_SUBTYPE(req.ifm_active)) {
+            case IFM_10_T:   mbps = 10;    break;
+            case IFM_100_TX: mbps = 100;   break;
+            case IFM_1000_T: mbps = 1000;  break;
+            case IFM_2500_T: mbps = 2500;  break;
+            case IFM_5000_T: mbps = 5000;  break;
+            case IFM_10G_T:  mbps = 10000; break;
+            default: break;
+        }
+    }
+    ::close(fd);
+    return up;
+#else
+    (void)ifname;
+    return false;   // a host OS with no raw-L2 path: nothing to describe
+#endif
+}
+
+/// (link up, Mbit) for the interface the raw sender bound to, or (false, 0) when nothing is bound.
+///
+/// Was a stub returning false on every non-Windows host, which made PanelCardDriver report "no
+/// ethernet link" while it drove a card perfectly: the SEND path is implemented here (AF_PACKET on
+/// Linux, BPF on macOS) and only the link-STATE query was missing, so the driver's health check
+/// contradicted its own output. Reported by a user driving a ColorLight card from a NanoPi.
+bool posixAdapterLink(uint16_t& mbps) MM_NONBLOCKING {
+    mbps = 0;
+    if (!ethRawIfName_[0]) return false;   // capture mode, or a bind that failed
+    return posixIfLink(ethRawIfName_, mbps);
+}
+}  // namespace
+
+bool ethLinkUp() MM_NONBLOCKING { uint16_t m = 0; return posixAdapterLink(m); }
+bool ethConnected() MM_NONBLOCKING { return ethLinkUp(); }
+uint16_t ethLinkSpeedMbps() MM_NONBLOCKING {
+    uint16_t m = 0;
+    if (posixAdapterLink(m)) return m;   // bound and up: the OS's answer, 0 included
+    // Only when nothing is bound. A bound NIC that states no rate reports 0 above rather than
+    // this, because inventing a speed for a real adapter is worse than admitting none is known.
+    return ethTestLinkSpeed_;
+}
 #endif
 
 size_t ethTestFrameCount() { return ethTestCount_; }
@@ -3128,44 +3294,13 @@ size_t rawInterfaces(const char* const** optionsOut) {
             // (a virtual interface, a link that is down, Wi-Fi on macOS which reports only
             // "autoselect"). Rides in the label for the same reason as the Windows branch: the
             // name alone does not say which entry is the 1 Gb NIC and which is a tunnel.
+            // posixIfLink is the one place either the carrier or the rate is asked of the OS;
+            // the label wants only the rate, so it discards the carrier. This was a second copy
+            // of the same ioctl and the same subtype table.
             auto linkMbps = [](const char* ifname) -> unsigned {
-#ifdef __linux__
-                // sysfs states it directly, in Mbit. Absent or -1 for a virtual or down link.
-                char path[128];
-                std::snprintf(path, sizeof(path), "/sys/class/net/%s/speed", ifname);
-                FILE* f = std::fopen(path, "r");
-                if (!f) return 0;
-                long v = 0;
-                const bool ok = std::fscanf(f, "%ld", &v) == 1;
-                std::fclose(f);
-                return (ok && v > 0) ? static_cast<unsigned>(v) : 0;
-#elif defined(__APPLE__)
-                // macOS has no speed field: the negotiated rate is encoded as the media
-                // SUBTYPE, so map the ones that name a rate. Wi-Fi and "autoselect" report no
-                // subtype we can turn into a number, which is exactly when 0 is the honest
-                // answer rather than a guess.
-                const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
-                if (fd < 0) return 0;
-                ifmediareq req{};
-                std::snprintf(req.ifm_name, sizeof(req.ifm_name), "%s", ifname);
-                unsigned mbps = 0;
-                if (::ioctl(fd, SIOCGIFMEDIA, &req) == 0 && (req.ifm_status & IFM_ACTIVE)) {
-                    switch (IFM_SUBTYPE(req.ifm_active)) {
-                        case IFM_10_T:   mbps = 10;    break;
-                        case IFM_100_TX: mbps = 100;   break;
-                        case IFM_1000_T: mbps = 1000;  break;
-                        case IFM_2500_T: mbps = 2500;  break;
-                        case IFM_5000_T: mbps = 5000;  break;
-                        case IFM_10G_T:  mbps = 10000; break;
-                        default: break;
-                    }
-                }
-                ::close(fd);
+                uint16_t mbps = 0;
+                posixIfLink(ifname, mbps);
                 return mbps;
-#else
-                (void)ifname;
-                return 0;
-#endif
             };
 
         auto isVirtual = [](const char* n) {

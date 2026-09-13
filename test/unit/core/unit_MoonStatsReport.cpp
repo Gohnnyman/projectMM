@@ -47,6 +47,37 @@ private:
     char flash_[8] = {};
 };
 
+/// A scripted module, the shape MoonLiveEffect and friends have: a `script` FilePath control
+/// holding a file NAME, plus whatever that script declared.
+class ScriptedModule : public mm::MoonModule {
+public:
+    ScriptedModule(const char* name, const char* script, mm::ModuleRole role)
+        : role_(role) {
+        setName(name);
+        std::snprintf(script_, sizeof(script_), "%s", script);
+    }
+
+    mm::ModuleRole role() const MM_NONBLOCKING override { return role_; }
+
+    void defineControls() override {
+        controls_.addFilePath("script", script_, sizeof(script_), mm::moonlive::kEffectPick);
+    }
+
+private:
+    mm::ModuleRole role_;
+    char script_[48] = {};
+};
+
+/// The report for a tree holding one scripted module.
+std::string scriptedReport(const char* script, mm::ModuleRole role = mm::ModuleRole::Effect) {
+    ScriptedModule mod("MoonLive", script, role);
+    mod.defineControls();
+    mm::MoonModule* tree[] = {&mod};
+    mm::JsonSink sink;
+    mm::buildMoonStatsReport(sink, tree, 1, mm::MoonStatsEvent::Install, nullptr, "4.0.0", nullptr);
+    return std::string(sink.data(), sink.size());
+}
+
 std::string report(mm::MoonStatsEvent event = mm::MoonStatsEvent::Install,
                    const char* id = nullptr,
                    const char* version = "4.0.0",
@@ -107,6 +138,53 @@ TEST_CASE("an upgrade is distinguished from a fresh install by the previous vers
     const std::string upgraded = report(mm::MoonStatsEvent::Upgrade, nullptr, "4.1.0", "4.0.0");
     CHECK(upgraded.find("\"event\":\"upgrade\"") != std::string::npos);
     CHECK(upgraded.find("\"previousVersion\":\"4.0.0\"") != std::string::npos);
+}
+
+/// The button's event. Install and Upgrade are decided by a version comparison, which cannot see a
+/// setup that changed without one: someone who reported a bare board and then wired up the fixtures
+/// they actually run. Distinct from the other two so the install count stays a count of installs.
+TEST_CASE("a user-triggered refresh is its own event, carrying the same payload") {
+    const std::string refreshed = report(mm::MoonStatsEvent::Refresh, nullptr, "4.0.0", nullptr);
+    CHECK(refreshed.find("\"event\":\"refresh\"") != std::string::npos);
+    // Same shape as any other report: the button re-sends, it does not send something smaller.
+    CHECK(refreshed.find("\"chip\"") != std::string::npos);
+    CHECK(refreshed.find("\"version\":\"4.0.0\"") != std::string::npos);
+    // And it is none of the other two, so a legend cannot show it as an install.
+    CHECK(refreshed.find("\"event\":\"install\"") == std::string::npos);
+    CHECK(refreshed.find("\"event\":\"upgrade\"") == std::string::npos);
+}
+
+/// A refresh carries no previousVersion. The server reads that field's PRESENCE as what makes a
+/// row an upgrade, and the value it would carry (`reportedVersion`) is non-empty whenever the
+/// button is pressed: sending it would report every refresh as an upgrade from the version already
+/// running. Caught by CodeRabbit on PR #104.
+TEST_CASE("a refresh names no previous version, so it cannot read as an upgrade") {
+    // The GUARD is in MoonStatsModule::sendReport, which passes previousVersion() only on Upgrade:
+    // the value it would otherwise carry is `reportedVersion`, non-empty whenever the button is
+    // pressed, and the server reads that field's PRESENCE as what makes a row an upgrade. So a
+    // refresh would have reported as an upgrade from the version already running.
+    //
+    // This builder is a pure function over its arguments and rightly emits whatever it is handed,
+    // so passing a previous version here WOULD produce one. What it pins is the other half: with
+    // no predecessor supplied, a refresh carries none, and the field never appears by itself.
+    const std::string refreshed = report(mm::MoonStatsEvent::Refresh, nullptr, "4.0.0", nullptr);
+    CHECK(refreshed.find("\"event\":\"refresh\"") != std::string::npos);
+    CHECK(refreshed.find("previousVersion") == std::string::npos);
+
+    // An upgrade carries it: that is the one event the field describes.
+    const std::string upgraded = report(mm::MoonStatsEvent::Upgrade, nullptr, "4.1.0", "4.0.0");
+    CHECK(upgraded.find("\"previousVersion\":\"4.0.0\"") != std::string::npos);
+}
+
+/// A failed BUTTON press must not consume the automatic report. Pressing it before the install
+/// report has gone out, and having the send fail, used to mark the version reported anyway: the
+/// install was then never counted, and the user had been told the press failed. The automatic path
+/// still marks either way, because nobody is waiting for it.
+TEST_CASE("a refresh that did not send leaves the automatic report still due") {
+    // Documents the rule the code encodes (MoonStatsModule::sendReport): the mark is conditional
+    // on Refresh, unconditional otherwise. A build asserting it end to end needs a server.
+    CHECK(mm::MoonStatsEvent::Refresh != mm::MoonStatsEvent::Install);
+    CHECK(mm::MoonStatsEvent::Refresh != mm::MoonStatsEvent::Upgrade);
 }
 
 /// A report built without consent carries no installation id at all, rather than an empty or
@@ -195,3 +273,29 @@ TEST_CASE("a module added under a wired parent is still reported") {
     CHECK(json.find("Effects") == std::string::npos);
 }
 
+/// A scripted module reports WHICH script it runs, because "MoonLive" alone says nothing: the
+/// interesting fact is that a device is running `aurora.mle`.
+TEST_CASE("a scripted module reports the shipped script it runs") {
+    const std::string json = scriptedReport("aurora.mle");
+    CHECK(json.find("effect:MoonLive/aurora.mle") != std::string::npos);
+}
+
+/// The other half, and the one that matters: a script a USER wrote is a name they invented, which
+/// is text they typed. The module still counts, under its bare type name.
+///
+/// Without this the feature would be a privacy regression wearing a usage-statistics hat: a script
+/// called "ewoud-bedroom-test.mle" would travel to the server exactly like a shipped name.
+TEST_CASE("a script the user wrote is counted but never named") {
+    const std::string json = scriptedReport("ewoud-bedroom-test.mle");
+    CHECK(json.find("ewoud-bedroom-test") == std::string::npos);
+    CHECK(json.find("effect:MoonLive") != std::string::npos);
+    CHECK(json.find("effect:MoonLive/") == std::string::npos);
+}
+
+/// A shipped name under the WRONG extension is not a shipped script: the catalogs are per role, so
+/// a lookup that scanned them all would let `aurora.mle` through on a layout and, worse, would make
+/// "is this ours" depend on a name rather than a name plus its kind.
+TEST_CASE("a catalog name is matched against its own role's catalog") {
+    const std::string json = scriptedReport("grid.mll", mm::ModuleRole::Layout);
+    CHECK(json.find("layout:MoonLive/grid.mll") != std::string::npos);
+}

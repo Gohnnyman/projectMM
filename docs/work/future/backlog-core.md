@@ -56,20 +56,25 @@ running projectMM permanently on a NAS or a Pi.
 
 ## Distribution
 
-### An arm64 Linux release build, so SBCs stop building from source (2026-09-09)
+### The arm64 `.deb` is untested on Raspberry Pi OS bookworm (2026-09-13)
 
-Every Linux job in `release.yml` runs on `ubuntu-latest`, which is x86-64, so the release publishes
-`projectMM-linux-x64` and `projectmm_X.Y.Z_amd64.deb` and nothing for arm64. That one gap is why a
-Raspberry Pi or a NanoPi has to clone and compile, and why the container image can only be amd64
-(the image in PR #98 installs the released `.deb`, so an arm64 image needs an arm64 `.deb` first).
+**Shipped** (`a229be6d`): `build-linux-arm64` publishes `projectmm_X.Y.Z_arm64.deb` and a tarball,
+the container image is a multi-arch manifest, and the SBC route is `apt install`. Verified on a
+NanoPi R28S (Debian 13 trixie): installed, ran, and reported to MoonStats as `linux-arm64`.
 
-GitHub offers arm64 Linux runners for public repositories (`ubuntu-24.04-arm`), so this is a second
-job rather than cross-compilation. Unverified against this repo: whether `package_desktop.py` runs
-there unmodified, and whether the runner is available on this plan. Check both before promising it.
+One piece of that verification was never done, because the bench has no such board. The job runs on
+`ubuntu-22.04-arm` **deliberately**, for glibc 2.35: Raspberry Pi OS bookworm ships 2.36, and a
+build on `ubuntu-24.04-arm` (glibc 2.39) would install there and then die at startup with
+`GLIBC_2.38 not found`, the same failure the Dockerfile records hitting on debian12. The floor is
+what makes bookworm work, and **bookworm is the one target nobody has run it on**.
 
-Shipping it collapses three problems into one fix: the SBC route becomes `apt install`, the
-container can publish a multi-arch manifest (one tag, Docker picks per host), and
-[installing-on-linux.md](../../tutorials/installing-on-linux.md) loses its build-from-source branch.
+Two halves are untested together: that the binary starts (the symbol check says the highest
+requirement is `GLIBC_2.35`, which is the proxy), and that `Depends: libcurl4 | libcurl4t64`
+resolves there. Trixie provides only `libcurl4t64`, bookworm only `libcurl4`, and only the first
+half has been exercised. A wrong alternation fails visibly at `apt install` with an unsatisfiable
+dependency rather than installing something broken, which is the good failure mode.
+
+**A user with a Pi settles it in one command.** Closing this needs a report, not a code change.
 
 ### A flashable SD image with projectMM already on it (robwomp, 2026-09-08)
 

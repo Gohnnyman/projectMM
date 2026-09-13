@@ -50,8 +50,8 @@ test("the card re-reads only on a write that changed the server, once", () => {
     const trigger = app.slice(i, i + 260);
     assert.match(trigger, /controlName === "send" \|\| controlName === "consent"/,
                  "Talk must rebuild on its own consent, not only on send");
-    assert.match(trigger, /"MoonStatsModule" \? controlName === "consent"/,
-                 "Stats rebuilds on its consent");
+    assert.match(trigger, /"MoonStatsModule" \? \(controlName === "consent" \|\| controlName === "send update"\)/,
+                 "Stats rebuilds on its consent, and on the button that re-sends its report");
     const rule = app.slice(i, app.indexOf("\n        }", i) + 1);
     assert.ok(rule.includes("refetchState"), "the rule must refresh the card");
     assert.ok(!/\.value\s*=\s*""/.test(rule), "it must not reach into the DOM");

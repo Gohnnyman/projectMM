@@ -99,8 +99,12 @@ async function handleReport(request, env) {
   if (typeof report.installationId !== "string" || !/^[0-9a-f]{32}$/.test(report.installationId)) {
     return json({ ok: true }, 202);
   }
-  // `event` reaches every user's card as a pie legend, so it is one of two words or nothing.
-  if (report.event !== undefined && report.event !== "install" && report.event !== "upgrade") {
+  // `event` reaches every user's card as a pie legend, so it is one of three words or nothing.
+  // "refresh" is a user pressing the button on the card: the same payload sent again because their
+  // setup changed without a version change. It overwrites their row in `reports` like any other
+  // report, and is distinct in `events` so the install count stays a count of installs.
+  if (report.event !== undefined && report.event !== "install" &&
+      report.event !== "upgrade" && report.event !== "refresh") {
     return json({ ok: true }, 202);
   }
 

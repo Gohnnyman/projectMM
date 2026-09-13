@@ -90,11 +90,11 @@ The card explains what consent buys above the checkbox, and `inApMode()` asks th
 
 One POST, fire and forget, off the render thread on `tick1s`. A failure is silent and not retried: a lost report costs one row in an aggregate, where a retry queue is persistence, scheduling and a failure mode for something nobody is waiting for. `markReported()` runs on hand-off, so an unreachable server leaves the device quiet rather than re-sending every boot.
 
-**HTTPS through one seam, `platform::httpsPost`, using the TLS each OS already ships.** libcurl on desktop, present on macOS and every Linux distribution and found with `find_package(CURL)`; `esp_http_client` with `esp_crt_bundle_attach` on ESP32, the same pair the OTA path uses, so a device adds call-site code rather than a TLS stack. Nothing is vendored and no certificate store is ours to maintain.
+**HTTPS through one seam, `platform::httpsPost`, using the TLS each OS already ships.** libcurl on macOS and Linux, present on both and found with `find_package(CURL)`; WinHTTP on Windows, which is in the SDK and needs nothing acquired; `esp_http_client` with `esp_crt_bundle_attach` on ESP32, the same pair the OTA path uses, so a device adds call-site code rather than a TLS stack. Nothing is vendored and no certificate store is ours to maintain.
 
 `platform::httpRequest` stays what it is: a LAN socket for the Philips Hue v1 API, plain HTTP, host given as a dotted-quad IP. `httpsPost` is the one that resolves names and verifies certificates.
 
-**libcurl is optional.** Without it the build succeeds, `MM_HAVE_CURL` stays undefined and `httpsPost` returns false, so a build never fails over an opt-in statistic. CMake prints which way it went.
+**libcurl is optional.** Without it a macOS or Linux build succeeds, `MM_HAVE_CURL` stays undefined and `httpsPost` returns false, so a build never fails over an opt-in statistic. CMake prints which way it went, and fails a packaging build outright (`MM_PACKAGING`), since a published binary that asks for consent must be able to honor it. Windows is exempt: it never uses libcurl.
 
 Verified against live endpoints: a valid certificate sends, and `expired.badssl.com` is refused, so the verification is real. `VERIFYPEER` and `VERIFYHOST` are set explicitly rather than left to curl's defaults, so a later edit has to say out loud that it is turning them off.
 
@@ -136,7 +136,7 @@ The address is compiled in (`kHost` in `MoonCloudModule.h`, `kMoonCloudUrl` in `
 ## Risks
 
 - **The totals are trust-based.** Any sender id can be claimed, so the numbers rest on people having no reason to fabricate them. Accepted: the alternative is authenticating users to defend a statistic. Rate limiting at the edge blunts casual abuse, and the privacy policy says this out loud.
-- **A prompt that annoys is worse than no data.** It appears once per install or upgrade, and Never is permanent. If it ever fires more often than that, it is a bug.
+- **A prompt that annoys is worse than no data.** It appears once per install or upgrade, and Never is permanent. If it ever fires more often than that, it is a bug. (The refresh button sends on demand, which is the user asking rather than the device prompting.)
 - **`std::random_device` is deterministic on some libstdc++ targets**, which would make two fresh containers share an id. Container-only, and detectable in the data as an implausibly popular id.
 - **The server is a standing commitment.** It needs an owner, a domain and an account, and that rather than the code is what kept this in the backlog.
 
