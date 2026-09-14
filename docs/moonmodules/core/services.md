@@ -69,7 +69,7 @@ their own on load, so every widget would show its layout file's defaults until t
 The shipped session has a `sync from device` button for exactly this.
 
 **Setting one up**, from installing the app to using it from a phone, is its own page:
-[Driving projectMM from a phone or tablet](../../tutorials/control-surface.md). It needs no
+[Driving projectMM from a phone or tablet](../../how-to/control-surface.md). It needs no
 checkout and no tooling, just the app and the session file from the latest release.
 
 Detail: [technical](moxygen/OscModule.md)

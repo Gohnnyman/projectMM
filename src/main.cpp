@@ -197,7 +197,8 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::CarLightsLayout>("CarLightsLayout", "light/layouts.md#carlights");
     mm::ModuleFactory::registerType<mm::CubeLayout>("CubeLayout", "light/layouts.md#cube");
     mm::ModuleFactory::registerType<mm::HumanSizedCubeLayout>("HumanSizedCubeLayout", "light/layouts.md#humansizedcube");
-    mm::ModuleFactory::registerType<mm::MoonLiveLayout>("MoonLiveLayout", "light/MoonLiveLayout.md");
+    mm::ModuleFactory::registerType<mm::MoonLiveLayout>("MoonLiveLayout",
+                                                        "light/MoonLiveEffect.md#a-layout-written-as-a-script");
     mm::ModuleFactory::registerType<mm::PanelsLayout>("PanelsLayout", "light/layouts.md#panels");
     mm::ModuleFactory::registerType<mm::TorontoBarGourdsLayout>("TorontoBarGourdsLayout", "light/layouts.md#torontobargourds");
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout", "light/layouts.md#grid");
@@ -285,7 +286,8 @@ static void registerModuleTypes() {
     // Modifiers — alphabetical by display name.
     mm::ModuleFactory::registerType<mm::BlockModifier>("BlockModifier", "light/modifiers.md#block");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers.md#checkerboard");
-    mm::ModuleFactory::registerType<mm::MoonLiveModifier>("MoonLiveModifier", "light/MoonLiveModifier.md");
+    mm::ModuleFactory::registerType<mm::MoonLiveModifier>("MoonLiveModifier",
+                                                          "light/MoonLiveEffect.md#a-modifier-written-as-a-script");
     mm::ModuleFactory::registerType<mm::CircleModifier>("CircleModifier", "light/modifiers.md#circle");
     mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier", "light/modifiers.md#mirror");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers.md#multiply");
