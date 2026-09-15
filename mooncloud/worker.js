@@ -211,8 +211,12 @@ async function handleStats(env, url) {
   for (const role of ["driver", "service", "layout", "effect", "modifier"]) {
     const value = url?.searchParams.get(role);
     if (!value) continue;
-    where.push("(',' || modules || ',') LIKE ?");
-    binds.push(`%,${role}:${value},%`);
+    // ESCAPE, because the value is a module NAME and LIKE reads _ and % as wildcards. Without it
+    // `?effect=A_B` also matches `AxB`, which is a filter quietly answering a different question
+    // than the one asked. The backslash is escaped first, or it would escape the escapes.
+    const literal = value.replace(/([\\%_])/g, "\\$1");
+    where.push("(',' || modules || ',') LIKE ? ESCAPE '\\'");
+    binds.push(`%,${role}:${literal},%`);
   }
   // A bucketed chart filters by BOUNDS: its slices name ranges ("64-128 KB"), and the column holds
   // the raw number, so there is no value to match on. `?freeHeapMin=65536&freeHeapMax=131072`.

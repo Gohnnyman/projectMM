@@ -18,6 +18,8 @@ A Service (added by the user, not auto-wired): the audio source that feeds the F
 
 <img src="../../assets/core/AudioService.png" width="300" alt="Audio module controls">
 
+<video src="../../assets/uiscenarios/react-to-sound.webm" autoplay loop muted playsinline width="720" title="An audio-reactive effect following the room through the board's own microphone"></video>
+
 - `mode` — Local audio / Receive network / Simulate: analyze the on-board mic/line-in, consume a peer's audio off the network (WLED-compatible), or feed a synthesized signal. Receive network appears only on a network build; the controls below are its detail, shown per mode.
 - `micMode`: (Local, I²S targets) `I2S` for a three-wire part (the INMP441 and most MEMS mics, and line-in ADCs), `PDM` for a two-wire one (a clock and a data line, as on the QuinLED Dig-Next-2's onboard microphone). PDM uses `wsPin` as its clock and `sdPin` as its data, and hides the two clock pins it does not have.
 - `sckPin` / `wsPin` / `sdPin`: (Local, I²S targets) the I²S GPIOs (bit clock / word-select / data; unset until entered).

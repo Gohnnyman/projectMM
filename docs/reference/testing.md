@@ -478,6 +478,21 @@ Memory tracking works on ESP32: `freeHeap` and `freeInternalHeap` report real va
 
 One live-tier test lives outside the scenario JSON schema because it spans **multiple devices**: `uv run moondeck/scenario/run_network_live.py` runs a lights-over-UDP matrix (ArtNet, E1.31 and DDP) over every online board in moondeck.json — each board is once the sender, all others listen, and reception is asserted by reading each device's `/ws` preview stream (see [MoonDeck.md § run_network_live](../moondeck/MoonDeck.md#run_network_live)). A device matrix needs loops and per-round state the declarative scenario JSON can't express, so it follows the `improv_smoke_test.py` script shape instead.
 
+## UI scenarios
+
+UI scenarios drive the web interface itself: a run file lists what a person does (open a card, add a module through the picker, drag a slider) and each step checks itself by reading the device back over REST.
+
+```bash
+uv run moondeck/test/test_host.py --ui                     # the whole lane
+uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/add-a-layer.json
+```
+
+The runs live in `test/uiscenarios/clips/`, the engine in `moondeck/uiscenario/`. Data under `test/`, runner under `moondeck/`: the same split the pipeline scenarios use. Tests are parametrised over the directory, so a new run file is a new test with nothing to wire up. Format and actions: [RUNS.md](../../moondeck/uiscenario/RUNS.md).
+
+**REST is read-only here.** Every state change goes through the affordance a person uses, because a step that POSTs its way to the outcome proves nothing about the interface. The reads are what `expect` compares against, which is what lets one file be both a test and the source of a documentation video: the same run recorded produces the clips under `docs/assets/uiscenarios/`, so a failing test means the UI no longer does what a published video shows.
+
+**Opt-in, because it needs something running.** A bare `test_host.py` leaves this lane out; `--ui` skips rather than fails when nothing answers, the same way the JS lane skips without node. A run that drives another surface names its own `host` (the installer's preview server), and one that needs particular hardware names a `requires` capability resolved against the bench registry.
+
 ## Hardware Verification
 
 All live scenarios pass on both desktop and ESP32 with `min_pct: 80` relative bounds. Per-module timing, memory allocation, and sizeof measurements for each platform are in [performance.md](performance.md).

@@ -1233,6 +1233,37 @@ body.cards-resizing {
     font-size: 13px;
 }
 
+/* The OPEN menu, styled. A native <select> draws its popup in the OS compositor, so every
+   rule above stops at the closed control: a dark card opens a light system menu, and the
+   emoji and dimension a row carries cannot appear in it at all (which is why the script
+   field above is a button rather than a select). `appearance: base-select` renders the
+   picker in the page instead, where it inherits the card's own colours.
+   Chrome/Edge 135+; everywhere else this is ignored and the native menu is used, so it
+   costs nothing where it is not supported. */
+@supports (appearance: base-select) {
+    .control-row select {
+        appearance: base-select;
+    }
+    .control-row select::picker(select) {
+        background: var(--bg-0);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 2px;
+        font-size: 13px;
+        box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+    }
+    .control-row select option {
+        color: var(--fg);
+        padding: 4px 8px;
+        border-radius: 3px;
+    }
+    .control-row select option:hover,
+    .control-row select option:checked {
+        background: var(--accent, #a78bfa);
+        color: #fff;
+    }
+}
+
 /* A read-only url control: rendered as a link rather than a text box, since the reason to show
    one is to open or copy it. Sits on the same baseline as an input's text so a card mixing the
    two does not look ragged. */

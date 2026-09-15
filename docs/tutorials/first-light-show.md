@@ -12,6 +12,9 @@ Open **Layouts**. A fresh device has a **Grid**, which is the shape most rigs st
 
 Set **width** to 16 and **height** to 16. The preview reshapes as you type, and the light count under the card follows.
 
+<video src="../assets/uiscenarios/change-layout.webm" autoplay loop muted playsinline width="720" title="Typing a new width and height; the preview reshapes as the numbers change"></video>
+
+
 That number is the whole point of a layout. Every effect downstream asks the layout how many lights there are and where each one sits, so this one card decides what the rest of the pipeline is painting on. Nothing else in the tree stores a size, which is why changing it here never leaves something stale behind.
 
 If your strip zig-zags back and forth along the rows, turn on **serpentine**. Watch a running effect while you toggle it: a wrong setting shows up as every other row drawn backwards, which is unmistakable once seen.
@@ -22,17 +25,27 @@ Open **Effects**. Under the Layer, press **+ add module** and pick an effect. **
 
 Now change **speed** while it runs. Then **scale**. The lights respond as the slider moves, because an effect is not a rendered animation the device plays back: it is a function being run once per frame, reading its controls each time.
 
+<video src="../assets/uiscenarios/add-an-effect.webm" autoplay loop muted playsinline width="720" title="Adding an effect through the picker, then driving its controls while it runs"></video>
+
+
 Try a second effect. Press **+ add module** again and add **Sinelon** beside the first.
 
-Both now run into the same Layer, and the Layer composites them. The card gives each effect a **blendMode** and an **opacity**, which is what makes stacking useful rather than a fight: set the second to a low opacity and it tints the first instead of replacing it.
+Both now run into the same Layer, in order, each writing over what the one before it left. That is useful when the second effect draws sparsely (sparks over a wash), and it is not blending: two effects in one Layer share one buffer.
 
-This is the same model an image editor uses, and it is worth a minute of play. Effects compose; you are not picking one from a list.
+Blending happens between **layers**. Press **+** on the Effects card to add a second Layer, give it its own effect, and the Layer card gains a **blendMode** and an **opacity**. The drivers composite the layers bottom to top, so lowering the top layer's opacity tints what is underneath instead of replacing it.
+
+<video src="../assets/uiscenarios/add-a-layer.webm" autoplay loop muted playsinline width="720" title="Adding a second Layer with its own effect, then lowering its opacity to blend"></video>
+
+This is the same model an image editor uses, and it is worth a minute of play. Layers compose; you are not picking one effect from a list.
 
 ## 3. Reshape it, leaving the effect alone
 
 Under the Layer, add a **modifier**: **Mirror**.
 
 The effect did not change. The modifier sits between the effect and the lights and folds the coordinates on the way through, so a pattern that ran across the whole grid now runs across half and reflects.
+
+<video src="../assets/uiscenarios/add-a-modifier.webm" autoplay loop muted playsinline width="720" title="Adding a Mirror modifier; the pattern folds while the effect is untouched"></video>
+
 
 That separation is why a modifier is worth having at all. Mirror, rotate and multiply are things you want on *any* effect, and writing them into each effect would be the same code many times over.
 

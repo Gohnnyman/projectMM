@@ -24,7 +24,7 @@ flowchart LR
     class fs gained
 ```
 
-Neither image can rewrite the partition it is executing from, so each installs the other. That is the whole scheme: the arrows are the only two write paths, and the app is the only thing that can repair a broken recovery image. A power cut during either write lands in MoonBase, which is a place a user can retry from over the network rather than a half-written app that needs a cable.
+Neither image can rewrite the partition it is executing from, so each installs the other. That is the whole scheme: the arrows are the only two write paths, and the app is the only thing that can repair a broken recovery image. The two directions fail differently, and both fail safe. An app update points the bootloader at MoonBase first, so a power cut anywhere in it lands in MoonBase, which a user retries from over the network. A MoonBase update writes and verifies the factory slot without touching otadata, so a cut there leaves the still-valid app in `ota_0` to boot and try again.
 
 ## What it replaces
 

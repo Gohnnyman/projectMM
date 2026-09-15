@@ -389,7 +389,7 @@ setXYZ((width - 1 - xPos) * 2, yPos, zPos);   // mirror, then stretch
 
 `width` matters more than it looks. A mirror written against a fixed `255` sends every light of a 16-wide grid far outside the grid, the Layer discards each one as out of bounds, and the fixture goes black. No error appears anywhere, because the script itself ran perfectly.
 
-**A coordinate is a byte, so an axis spans 0..255.** A position handed TO a script outside that range is passed through untransformed rather than wrapped. A position a script COMPUTES past 255 keeps its low byte, so `(width - 1 - x) * 2` on a grid wider than 128 lands somewhere unintended. A script's own members may be `int`, so intermediate arithmetic can exceed 255 even where the coordinate handed back cannot.
+**A computed coordinate is full width.** `setXYZ` hands its three values to the binding as a call rather than storing them as bytes, so `setXYZ(767 - xPos, ...)` on a 768-wide wall arrives as 767 rather than clamping to 255. It was an inline three-byte store once, and that is exactly the bug it caused. A negative position handed TO a script is passed through untransformed rather than wrapped.
 
 **A script cannot resize the logical box.** A modifier has two hooks: one reshapes the box once per rebuild, one folds each coordinate. A script drives only the second, so transforms that keep the box the same size work, and ones that halve it (the way the built-in [Mirror](modifiers.md#mirror) does) need the compiled modifier.
 
