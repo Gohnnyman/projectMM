@@ -10,7 +10,7 @@ caller adds a camera. Playwright's own Screencast API draws the cursor, highligh
 what each action touches and renders the captions as overlays, so there is no second
 pass burning text into frames and no hand-drawn pointer to keep in sync.
 
-    uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/add-a-layer.json
+    uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/add-a-layer.json
 
 Prerequisites:
     1. A running projectMM:   uv run moondeck/run/run_desktop.py
@@ -20,6 +20,7 @@ Prerequisites:
 from __future__ import annotations
 
 import argparse
+import math
 import shutil
 import subprocess
 import sys
@@ -57,6 +58,9 @@ def publish(raw: Path, out: Path, speed: float, width: int, crf: int) -> bool:
         print("ffmpeg not on PATH: keeping the raw take, no published clip")
         return False
     out.parent.mkdir(parents=True, exist_ok=True)
+    if not math.isfinite(speed) or speed <= 0:
+        print(f"speed must be a positive number, got {speed}")
+        return False
     vf = f"setpts={1/speed:.4f}*PTS,scale={width}:-2,fps=24"
     cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(raw), "-vf", vf,
            "-c:v", "libvpx-vp9", "-crf", str(crf), "-b:v", "0",
@@ -70,7 +74,7 @@ def publish(raw: Path, out: Path, speed: float, width: int, crf: int) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--run", required=True,
-                    help="the run file to perform (test/uiscenarios/<name>.json)")
+                    help="the run file to perform (test/uiscenarios/clips/<name>.json)")
     ap.add_argument("--host", default="localhost:8080",
                     help="projectMM to drive (default: localhost:8080)")
     ap.add_argument("--out", default=None,
@@ -128,17 +132,23 @@ def main() -> int:
 
     print(f"Recording [{run.name}]: {len(run.steps)} steps")
 
+    # RAISES rather than degrading to an empty set. An empty set from a failed probe is
+    # indistinguishable from a device with no modules, and either reading disables the
+    # leftover check: a failure before the run makes a device look like another surface,
+    # and one after it computes an empty leftover set, so a dirty take publishes.
+    def module_names() -> set:
+        return uirun.all_names(uirun.state(host).get("modules", []))
+
     # The leftover report only means something against a projectMM DEVICE. A run may
     # drive another surface entirely (the web installer), which has no module tree and
-    # answers /api/state with HTML, so the probe decides rather than the caller.
-    def module_names() -> set:
-        try:
-            return uirun.all_names(uirun.state(host).get("modules", []))
-        except Exception:
-            return set()
-
-    before: set = module_names()
-    is_device = bool(before)
+    # answers /api/state with HTML, so the probe decides rather than the caller. Only
+    # THIS probe is forgiving: it runs before the recording, where an unreachable device
+    # is still a surface question rather than a verdict on the take.
+    try:
+        before: set = module_names()
+        is_device = bool(before)
+    except Exception:
+        before, is_device = set(), False
 
     with sync_playwright() as p:
         # The test id contract, same as the UI tests use.
@@ -179,8 +189,14 @@ def main() -> int:
     # leaves behind is REPORTED rather than quietly removed. A DELETE here would be the
     # one place the tool sets state instead of observing it, and it would also hide a
     # run whose cleanup steps are broken.
+    #
+    # This probe is NOT rescued: a device that answered before the run and not after it
+    # is exactly the case the leftover check exists for, so the failure aborts rather
+    # than publishing an unverified take.
     leftover = sorted(module_names() - before) if is_device else []
-    if leftover and not args.keep:
+    if args.keep:
+        leftover = []              # the flag says leftovers are expected, so they are not a fault
+    if leftover:
         print("\nThe run left these behind (its own delete steps did not remove them):")
         for name in leftover:
             print(f"  {name}")
@@ -196,6 +212,7 @@ def main() -> int:
     # embeds, so overwriting it from a run the device disagreed with ships a video of
     # the UI not working. The exit code alone did not prevent that: the file was
     # already written by the time anyone read it.
+    published = False
     if failures or leftover:
         # NAME the reason. "Not published" alone sent me reading a 17 MB take to work
         # out what had gone wrong, when the run already knew.
@@ -213,10 +230,17 @@ def main() -> int:
         speed = args.speed if args.speed is not None else run.speed
         width = args.width if args.width is not None else run.width
         if publish(out, pub, speed, width, args.crf):
+            published = True
             ksize = pub.stat().st_size // 1024
             print(f"{pub.relative_to(ROOT)}  ({ksize} KB, {speed:g}x "
                   f"{width}px - tracked, embed this one)")
-    return 1 if failures else 0
+    # NON-ZERO whenever a clip was wanted and none was written. A leftover-only refusal
+    # still wrote no clip, so exiting 0 turned a refused take into a green card with
+    # nothing behind it. --no-publish is the one case where no clip is the requested
+    # outcome, and a raw take that recorded cleanly is a success.
+    if args.no_publish:
+        return 1 if failures or leftover else 0
+    return 0 if published else 1
 
 
 if __name__ == "__main__":

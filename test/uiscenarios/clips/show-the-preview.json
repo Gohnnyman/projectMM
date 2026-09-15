@@ -22,8 +22,7 @@
     {
       "action": "hero",
       "seconds": 8.0,
-      "caption": "One ESP32. Thousands of lights, and every change on the next frame.",
-      "caption_seconds": 7.0
+      "caption": "One ESP32. Thousands of lights, and every change on the next frame."
     },
     {
       "action": "delete_module",

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import subprocess
 import sys
@@ -148,6 +149,9 @@ def main() -> int:
 
     proj = json.loads(Path(args.project).read_text())
     bpm = float(proj.get("bpm", 120.0))
+    if not math.isfinite(bpm) or bpm <= 0:
+        print(f"bpm must be a positive number, got {bpm}", file=sys.stderr)
+        return 1
     bar = 4 * 60 / bpm                       # one bar, in seconds, at 4/4
     width = int(proj.get("width", 1280))
     # media/video/ holds finished video: the clips and the cuts made from them. The

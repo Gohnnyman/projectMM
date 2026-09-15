@@ -30,8 +30,7 @@
     {
       "action": "hero",
       "seconds": 10.0,
-      "caption": "Nothing is being driven here: the lights are following the room.",
-      "caption_seconds": 9.0
+      "caption": "Nothing is being driven here: the lights are following the room."
     },
     {
       "action": "delete_module",

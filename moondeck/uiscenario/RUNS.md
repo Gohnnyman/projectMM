@@ -13,8 +13,8 @@ The split is the point: a step's truth is written once, and whether it is being 
 {
   "name": "build-a-show",
   "description": "The pipeline model in one take.",
-  "bpm": 112.35,
-  "first_beat": 8.78,
+  "speed": 2.0,
+  "width": 960,
   "steps": [ ... ]
 }
 ```
@@ -42,7 +42,6 @@ Only `action` and that action's own arguments are required.
 | `hold` | video | extra seconds to dwell afterwards, for the edit |
 | `expect` | test | read back over REST; a mismatch fails the run |
 | `as` | both | bind the created module's name for later steps |
-| `caption_seconds` | video | override how long the caption holds
 
 `as` matters because the DEVICE names a module, not the run file: an added `RipplesEffect` may land as `Ripples-2`. Bind it once, then write `{ripples}` in any later step. A `{name}` nothing bound is an error rather than a literal, so a typo fails loudly instead of hunting a card by that name.
 

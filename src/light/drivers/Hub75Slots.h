@@ -5,10 +5,10 @@
 
 namespace mm {
 
-/// @defgroup Hub75Slots HUB75 scan encoder — the bit-plane wire format
+/// @defgroup Hub75Slots HUB75 scan encoder: the bit-plane wire format
 /// @{
 ///
-/// HUB75 encode — the contract between Hub75Driver (domain) and a HUB75 port
+/// HUB75 encode: the contract between Hub75Driver (domain) and a HUB75 port
 /// (peripheral), named for the wire unit it builds: one pixel clock = one SLOT =
 /// one byte on the parallel bus. Sibling of ParallelSlots.h, which does the same
 /// job for WS2812. Pure data transform, no platform include, so the host test
@@ -21,29 +21,35 @@ namespace mm {
 /// row `r` drives panel rows `r` and `r + 32` together.
 ///
 /// **Brightness is time, not amplitude.** A HUB75 pixel is a switch: on or off.
-/// Intensity comes from BINARY CODED MODULATION — plane `p` is displayed for
-/// 2^p time units, so an 8-bit value lights its bit-`p` planes for a total
-/// proportional to the value. That is why the frame is bit-plane-major and why
-/// depth costs refresh linearly: every plane is a full scan of the panel.
+/// Intensity is meant to come from BINARY CODED MODULATION: plane `p` displayed for
+/// 2^p time units, so a value lights its planes for a total proportional to itself.
+/// That weighting is the peripheral's output-enable window, and it is NOT built yet:
+/// today every plane shows for the same time, so the ramp is flat and bit 7 is worth
+/// no more than bit 0 (backlog-light.md carries the fix).
+///
+/// Either way the encoder stores each plane ONCE. Emitting plane `p` 2^p times is the
+/// obvious reading and it is wrong: 255 passes at 8-bit is 1,060,800 bytes for a single
+/// 64x64 panel, where storing once is 33,280. Depth costs refresh and memory linearly:
+/// every plane is one full scan of the panel.
 ///
 /// Wire layout of one encoded frame, outermost first:
 ///
 ///   for each bit plane p (0 = least significant)
 ///     for each scan row r
-///       for each column x          -> one bus byte per column: the six colour
+///       for each column x          -> one bus byte per column: the six color
 ///                                     bits for (x, r) and (x, r + rows)
 ///       one blanking byte           -> OE high (dark) while the row address
 ///                                     changes and the shift register latches
 ///
-/// The row address and the control lines ride the SAME bus byte as the colour
+/// The row address and the control lines ride the SAME bus byte as the color
 /// bits, because the peripheral clocks one word per slot and a HUB75 panel wants
 /// address + data simultaneously. `Hub75Layout` says which bus bit each line sits
 /// on, which is the one thing that differs between a board's wiring and ours.
 ///
 /// Prior art: the HUB75 lineage generally (mrcodetastic/ESP32-HUB75-MatrixPanel-DMA,
-/// hzeller/rpi-rgb-led-matrix, ESPHome's hub75 component) — the scan/BCM structure
+/// hzeller/rpi-rgb-led-matrix, ESPHome's hub75 component). The scan/BCM structure
 /// is the panel's, not any library's; the encoder below is written from the panel
-/// behaviour rather than transcribed.
+/// behavior rather than transcribed.
 
 /// Which bus bit each HUB75 line occupies. The peripheral drives one byte per
 /// slot, so every line is a bit position in that byte rather than a GPIO here:
@@ -52,8 +58,8 @@ namespace mm {
 /// Defaults are the conventional order and cost nothing to override: a board that
 /// wires the panel differently changes these, and the encoder is unchanged.
 struct Hub75Layout {
-    uint8_t r1 = 0, g1 = 1, b1 = 2;    // upper half-panel colour bits
-    uint8_t r2 = 3, g2 = 4, b2 = 5;    // lower half-panel colour bits
+    uint8_t r1 = 0, g1 = 1, b1 = 2;    // upper half-panel color bits
+    uint8_t r2 = 3, g2 = 4, b2 = 5;    // lower half-panel color bits
     uint8_t a = 8, b = 9, c = 10, d = 11, e = 12;   // row address bits
     uint8_t lat = 13;                  // latch: shift register -> output drivers
     uint8_t oe = 14;                   // output enable, ACTIVE LOW (high = dark)
@@ -63,10 +69,15 @@ struct Hub75Layout {
 /// is NOT derivable from the height: two panels of identical dimensions can scan
 /// differently, which is why it is a user control rather than a calculation.
 struct Hub75Geometry {
+    /// One pixel clock carries one 16-bit bus word. Sixteen rather than eight because the
+    /// control lines live at bits 8-14 (see Hub75Layout): an 8-bit slot drops the row
+    /// address, the latch and OE, which is a panel that never lights.
+    static constexpr size_t kBytesPerSlot = 2;
+
     uint16_t width = 64;
     uint16_t height = 64;
     uint8_t  scanRate = 16;    // 1/8, 1/16 or 1/32
-    uint8_t  bitDepth = 6;     // 2..8; every plane costs a full scan pass
+    uint8_t  bitDepth = 4;     // 2..4; every plane costs a full scan pass
 
     /// Scan rows: how many address steps one plane walks. The panel's scanRate IS
     /// that count: a 1/16 panel steps 16 addresses whatever its height.
@@ -83,19 +94,32 @@ struct Hub75Geometry {
     /// and a lower row together, so an odd count has no pair for the last one).
     bool valid() const {
         if (width == 0 || height == 0) return false;
-        if (bitDepth < 2 || bitDepth > 8) return false;
+        // Capped at 4 while every plane shows for the same time: an unweighted plane 5 and
+        // above costs a full scan pass and a fifth of the frame buffer for a difference the
+        // eye cannot find. The cap lifts when the planes are weighted (backlog-light.md).
+        if (bitDepth < 2 || bitDepth > 4) return false;
         if (scanRate == 0 || height % scanRate != 0) return false;
         return rowsPerScan() % 2 == 0;
     }
 
-    /// Bytes one encoded frame occupies: every plane, every scan row, every column,
-    /// plus one blanking byte per row. This is the number that decides which
-    /// peripheral can carry the panel (Parlio caps at 65,535).
-    size_t frameBytes() const {
-        const uint16_t pairs = rowsPerScan() / 2;   // colour passes per address step
+    /// Slots one encoded frame occupies: every plane, every scan row, every column, plus one
+    /// blanking slot per row. Each plane is stored ONCE. Binary coded modulation weights the
+    /// planes in TIME rather than in memory (the OE window for plane p is 2^p long), because
+    /// storing plane p 2^p times would multiply this buffer by 255 at 8-bit: over a megabyte
+    /// for a single 64x64 panel, which no ESP32 can hold. The weighting is the peripheral's
+    /// job, and until it does it every bit is worth the same (see backlog-light.md).
+    size_t frameSlots() const {
+        const uint16_t pairs = rowsPerScan() / 2;   // color passes per address step
         return static_cast<size_t>(bitDepth) * scanRows() *
                (static_cast<size_t>(width) * pairs + 1);
     }
+
+    /// Bytes one encoded frame occupies. TWO per slot: the bus is 16 bits wide, because
+    /// the address, latch and OE lines sit above bit 7 and a byte would leave them off
+    /// the wire. This is the number that decides which peripheral can carry the panel
+    /// (Parlio caps at 65,535), and it is the one home for the size: the platform asks
+    /// rather than recomputing it.
+    size_t frameBytes() const { return frameSlots() * kBytesPerSlot; }
 };
 
 /// Encode one rendered RGB frame into a HUB75 bit-plane buffer.
@@ -114,7 +138,7 @@ inline size_t hub75Encode(const uint8_t* rgb, uint8_t* out,
     if (!geo.valid()) return 0;
 
     const uint16_t rows = geo.scanRows();
-    const uint16_t pairs = geo.rowsPerScan() / 2;   // colour passes per address step
+    const uint16_t pairs = geo.rowsPerScan() / 2;   // color passes per address step
     const uint16_t pairSpan = geo.height / 2;       // upper row pairs with row + span
     // The address lines, indexed so a scan row's bits are set by position. Only the
     // first `addrBits` are consulted, so a 1/8 panel never touches D or E and a board
@@ -152,7 +176,9 @@ inline size_t hub75Encode(const uint8_t* rgb, uint8_t* out,
                 for (uint8_t bit = 0; bit < addrBits; bit++) {
                     if ((r >> bit) & 1) word |= static_cast<uint16_t>(1u << addr[bit]);
                 }
+                // Little-endian, matching how the peripheral latches a 16-bit bus word.
                 out[w++] = static_cast<uint8_t>(word & 0xFF);
+                out[w++] = static_cast<uint8_t>((word >> 8) & 0xFF);
             }
             // The blanking byte: OE HIGH (panel dark) while the latch pulses. Dark
             // first, then latch, is what stops the row that is about to be addressed
@@ -163,6 +189,7 @@ inline size_t hub75Encode(const uint8_t* rgb, uint8_t* out,
                 if ((r >> bit) & 1) blank |= static_cast<uint16_t>(1u << addr[bit]);
             }
             out[w++] = static_cast<uint8_t>(blank & 0xFF);
+            out[w++] = static_cast<uint8_t>((blank >> 8) & 0xFF);
         }
     }
     return w;

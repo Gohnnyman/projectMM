@@ -1,6 +1,6 @@
-// HUB75 panel output over the ESP-IDF esp_lcd i80 bus — the peripheral half of Hub75Driver
+// HUB75 panel output over the ESP-IDF esp_lcd i80 bus: the peripheral half of Hub75Driver
 // (src/light/drivers/Hub75Driver.h), which does the domain work: applies Correction and encodes the
-// rendered frame into bit planes (light/drivers/Hub75Slots.h). This file owns only the peripheral —
+// rendered frame into bit planes (light/drivers/Hub75Slots.h). This file owns only the peripheral:
 // the bus, the DMA frame buffer, and the continuous scan. No domain logic here.
 //
 // **HUB75 output is CONTINUOUS, not one-shot, and that is the design difference from every other
@@ -20,6 +20,8 @@
 // backend to write, and the broad macro would only compile dead code onto it.
 
 #include "platform/platform.h"
+// The wire format, for the frame size: one home for it, shared with the driver that encodes.
+#include "light/drivers/Hub75Slots.h"
 
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
@@ -37,6 +39,7 @@
 #include "driver/parlio_tx.h"
 #endif
 #include "esp_heap_caps.h"
+#include "esp_cache.h"   // writeback: the CPU fills the frame, the DMA reads it
 #include "esp_timer.h"
 #include "driver/gpio.h"
 
@@ -74,29 +77,37 @@ struct Hub75State {
 #endif
     uint8_t* frame = nullptr;
     size_t   frameBytes = 0;
-    bool     running = false;
+    size_t   frameAlloc = 0;      // what was allocated: rounded up to whole cache lines
+    bool     framePsram = false;  // cached external memory, so writes need a flush
+    // ATOMIC: the ISR callbacks read this to decide whether to touch `frame`, and teardown clears
+    // it from a task. A plain bool orders nothing between the two, so a callback could pass the
+    // check and then read a freed frame.
+    std::atomic<bool> running{false};
     // Refresh measurement. The scan restarts in the done callback, so counting those and dividing by
     // elapsed time is the panel's ACTUAL refresh rather than a calculation: it is what a tester
     // reports back, and the docs' predicted table is what they compare it against.
     // ATOMIC, not volatile. The counter is written in the DMA completion ISR and read from the
     // 1 Hz status tick, which is exactly the case volatile does NOT cover: it prevents the compiler
-    // caching the value but orders nothing between the two contexts. Relaxed ordering is enough —
+    // caching the value but orders nothing between the two contexts. Relaxed ordering is enough:
     // nothing else is published alongside it, and a refresh figure one scan stale is meaningless.
     std::atomic<uint32_t> scans{0};
     uint32_t windowStartUs = 0;
     std::atomic<uint16_t> refreshHz{0};
 };
 
-// Restart the scan from the done callback: the panel is lit only while it is being clocked, so any
-// gap between frames is a visible dim. Re-sending the same buffer is what keeps it continuous, and
-// the driver's writes into that buffer are picked up by whichever scan is next.
+// Keeping the panel clocked, which the two peripherals solve differently.
 //
-// ISR context: no allocation, no logging, no blocking call.
+// The panel is lit only while it is being clocked, so any gap between frames is a visible dim.
+// PARLIO re-sends by itself: `loop_transmission` repeats the buffer until the unit is disabled, so
+// its callback only counts. LCD_CAM has no such flag, so its callback must re-arm, and
+// esp_lcd_panel_io_tx_color is what does it. That call queues a descriptor rather than waiting on
+// the bus, and the queue is depth 1 with exactly one transfer outstanding, so it cannot block here;
+// a deeper queue is what would make this unsafe.
 #if MM_HUB75_LCDCAM
 bool IRAM_ATTR hub75DoneCb(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t*,
                            void* ctx) {
     auto* st = static_cast<Hub75State*>(ctx);
-    if (!st || !st->running) return false;
+    if (!st || !st->running.load(std::memory_order_acquire)) return false;
     st->scans.fetch_add(1, std::memory_order_relaxed);
     esp_lcd_panel_io_tx_color(io, -1, st->frame, st->frameBytes);
     return false;
@@ -104,22 +115,22 @@ bool IRAM_ATTR hub75DoneCb(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_
 #endif
 
 #if MM_HUB75_PARLIO
-// Parlio's restart, same job as the LCD_CAM callback above: re-arm the scan so the panel is never
-// unclocked. Parlio counts its transmit length in BITS, which is the one API difference that bites.
-bool IRAM_ATTR hub75ParlioDoneCb(parlio_tx_unit_handle_t unit,
+// Parlio counts only: the unit loops the buffer on its own, so re-arming here would queue a second
+// transmission against a transfer that never ends.
+bool IRAM_ATTR hub75ParlioDoneCb(parlio_tx_unit_handle_t,
                                  const parlio_tx_done_event_data_t*, void* ctx) {
     auto* st = static_cast<Hub75State*>(ctx);
-    if (!st || !st->running) return false;
+    if (!st || !st->running.load(std::memory_order_acquire)) return false;
     st->scans.fetch_add(1, std::memory_order_relaxed);
-    parlio_transmit_config_t xcfg = {};
-    parlio_tx_unit_transmit(unit, st->frame, st->frameBytes * 8, &xcfg);
     return false;
 }
 #endif
 
 void destroyState(Hub75State* st) {
     if (!st) return;
-    st->running = false;
+    // Order matters: clear the flag, stop the peripheral (which disables its callback and waits for
+    // an in-flight one), and only then free the frame the callback reads.
+    st->running.store(false, std::memory_order_release);
 #if MM_HUB75_LCDCAM
     if (st->io) esp_lcd_panel_io_del(st->io);
     if (st->bus) esp_lcd_del_i80_bus(st->bus);
@@ -139,10 +150,10 @@ void destroyState(Hub75State* st) {
 /// the GPIO that carries bit N.
 ///
 /// Returns false when a required line is unset. A HUB75 port with a missing line is not a degraded
-/// port, it is a dark one, so this refuses rather than initialising something that cannot work.
+/// port, it is a dark one, so this refuses rather than initializing something that cannot work.
 bool buildPinOrder(const Hub75Pins& p, uint8_t scanRate, gpio_num_t* out, size_t& count) {
     constexpr uint16_t kUnset = 0xFFFF;
-    // Bits 0-5: colour. Bits 8-12: address. 13: latch. 14: OE. The gap at 6-7 is deliberate — it
+    // Bits 0-5: color. Bits 8-12: address. 13: latch. 14: OE. The gap at 6-7 is deliberate, because it
     // matches Hub75Layout's defaults, so encoder and bus agree without either knowing the other.
     const uint16_t order[15] = {
         p.r1, p.g1, p.b1, p.r2, p.g2, p.b2,
@@ -218,8 +229,18 @@ bool hub75Init(Hub75Handle& h, Hub75Backend backend, const Hub75Pins& pins,
         g_lastError = "set the panel size and scan rate";
         return false;
     }
-    if (bitDepth < 2 || bitDepth > 8) {
-        g_lastError = "bit depth must be 2 to 8";
+    // A REAL panel is 1/8, 1/16 or 1/32. Checked here rather than in the encoder, which only asks
+    // whether a geometry can be encoded: buildPinOrder derives the address line count from this,
+    // so a value like 3 divides some heights cleanly and then asks for an address width no panel
+    // has. The driver's select offers only these three; this catches a config file that does not.
+    if (scanRate != 8 && scanRate != 16 && scanRate != 32) {
+        g_lastError = "scan rate must be 1/8, 1/16 or 1/32";
+        return false;
+    }
+    // Same cap as the encoder's Hub75Geometry::valid: unweighted planes above 4 cost a scan
+    // pass and a share of the frame for nothing the eye can see. Lifts when planes are weighted.
+    if (bitDepth < 2 || bitDepth > 4) {
+        g_lastError = "bit depth must be 2 to 4";
         return false;
     }
     if (height % scanRate != 0 || ((height / scanRate) % 2) != 0) {
@@ -230,13 +251,20 @@ bool hub75Init(Hub75Handle& h, Hub75Backend backend, const Hub75Pins& pins,
     gpio_num_t busPins[16] = {};
     size_t busCount = 0;
     if (!buildPinOrder(pins, scanRate, busPins, busCount)) {
-        g_lastError = "a HUB75 line is unset: every colour, address and control pin is required";
+        g_lastError = "a HUB75 line is unset: every color, address and control pin is required";
         return false;
     }
 
-    const size_t pairsPre = (height / scanRate) / 2;
-    const size_t frameBytesPre = static_cast<size_t>(bitDepth) * scanRate *
-                                 (static_cast<size_t>(width) * pairsPre + 1);
+    // The size comes from the encoder, which is the one home for the wire format. Recomputing
+    // it here is how the two silently disagreed: this must be the exact buffer hub75Encode
+    // writes, or a correct encode overruns the DMA frame.
+    mm::Hub75Geometry geo;
+    geo.width = width; geo.height = height; geo.scanRate = scanRate; geo.bitDepth = bitDepth;
+    if (!geo.valid()) {
+        g_lastError = "the panel geometry does not divide into scan row pairs";
+        return false;
+    }
+    const size_t frameBytesPre = geo.frameBytes();
     if (!hub75BackendAvailable(backend, frameBytesPre)) {
         // Named rather than silently substituted. A user who picked Parlio for a reason (the LCD_CAM
         // is driving their strips) must hear that this panel will not fit on it, not find themselves
@@ -285,7 +313,7 @@ bool hub75Init(Hub75Handle& h, Hub75Backend backend, const Hub75Pins& pins,
 #endif
     } else {
 #if MM_HUB75_LCDCAM
-    // The bus is 16 bits wide because the layout puts OE at bit 14: the colour and control lines do
+    // The bus is 16 bits wide because the layout puts OE at bit 14: the color and control lines do
     // not fit in 8. A board is free to re-map them into the low byte (Hub75Layout allows it), but
     // the default wiring is the one this must support.
     esp_lcd_i80_bus_config_t busCfg = {};
@@ -331,10 +359,22 @@ bool hub75Init(Hub75Handle& h, Hub75Backend backend, const Hub75Pins& pins,
     // PSRAM first: this is the whole reason HUB75 rides LCD_CAM rather than Parlio. A 16-panel frame
     // is 256 KB, far past any internal-DRAM block, and the LCD_CAM GDMA bursts straight from PSRAM.
     // Internal is the fallback for a small panel on a board without PSRAM.
+    // ALIGNED, and the size rounded up to match: a PSRAM DMA buffer must start on a cache-line
+    // boundary and span whole lines, or the writeback below flushes a partial line and the burst
+    // reads a neighbour's bytes. heap_caps_calloc gives neither guarantee.
+    // 64 bytes is the external-memory cache line on every chip with PSRAM (S3, P4, S31). The IDF
+    // query for it lives in esp_private/, and reaching into a private header to learn a constant
+    // the silicon fixes is a worse dependency than naming the constant.
+    constexpr size_t kCacheLine = 64;
+    const size_t frameAlloc = ((frameBytesPre + kCacheLine - 1) / kCacheLine) * kCacheLine;
     st->frame = static_cast<uint8_t*>(
-        heap_caps_calloc(1, frameBytesPre, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
+        heap_caps_aligned_calloc(kCacheLine, 1, frameAlloc, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
+    st->frameAlloc = frameAlloc;
+    st->framePsram = st->frame != nullptr;
     if (!st->frame) {
+        // Internal DRAM needs no cache maintenance, so the plain allocator is right here.
         st->frame = static_cast<uint8_t*>(heap_caps_calloc(1, frameBytesPre, MALLOC_CAP_DMA));
+        st->frameAlloc = frameBytesPre;
     }
     if (!st->frame) {
         g_lastError = "the panel frame does not fit in memory: lower the bit depth";
@@ -359,12 +399,15 @@ size_t hub75BufferCapacity(const Hub75Handle& h) MM_NONBLOCKING {
 bool hub75Start(Hub75Handle& h) {
     auto* st = static_cast<Hub75State*>(h.impl);
     if (!st || !st->frame) return false;
-    if (st->running) return true;       // already scanning; starting twice would queue two
-    st->running = true;
+    if (st->running.load(std::memory_order_acquire)) return true;   // starting twice would queue two
+    st->running.store(true, std::memory_order_release);
     bool ok = false;
     if (st->backend == Hub75Backend::Parlio) {
 #if MM_HUB75_PARLIO
         parlio_transmit_config_t xcfg = {};
+        // Repeat forever until the unit is disabled: this is what keeps the panel clocked without
+        // an ISR re-arming it, and it is why the Parlio done callback only counts.
+        xcfg.flags.loop_transmission = 1;
         // Parlio counts in BITS, the one API difference from the LCD_CAM path.
         ok = st->parlio && parlio_tx_unit_transmit(st->parlio, st->frame,
                                                    st->frameBytes * 8, &xcfg) == ESP_OK;
@@ -376,7 +419,7 @@ bool hub75Start(Hub75Handle& h) {
 #endif
     }
     if (!ok) {
-        st->running = false;
+        st->running.store(false, std::memory_order_release);
         g_lastError = "the panel scan would not start";
     }
     return ok;
@@ -384,7 +427,7 @@ bool hub75Start(Hub75Handle& h) {
 
 uint16_t hub75RefreshHz(const Hub75Handle& h) MM_NONBLOCKING {
     auto* st = static_cast<Hub75State*>(h.impl);
-    if (!st || !st->running) return 0;
+    if (!st || !st->running.load(std::memory_order_acquire)) return 0;
     // Averaged over a ~1 s window, recomputed on read. Cheap enough for a 1 Hz status poll, and it
     // keeps the ISR down to one increment.
     const uint32_t now = static_cast<uint32_t>(esp_timer_get_time());

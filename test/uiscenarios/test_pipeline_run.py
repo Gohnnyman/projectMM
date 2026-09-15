@@ -4,7 +4,7 @@ These are the same files `moondeck/uiscenario/uivideo.py` records the videos fro
 a failure here means the UI no longer does what a video claims it does. One test per
 run: a clip that cannot be performed is a broken clip, whichever consumer is asking.
 
-Parametrised over the directory rather than naming files, so a new run file is a new
+Parameterized over the directory rather than naming files, so a new run file is a new
 test with nothing to wire up: dropping `add-a-driver.json` into this folder is the
 whole change.
 """

@@ -199,7 +199,7 @@ nav:
   - Architecture:
       # "Overview", not the section's own name: the tab already says Architecture, and a first
       # child repeating it reads as a page about the tab rather than the way into it. The
-      # convention is for INDEX pages only — a section whose first child is real content keeps
+      # convention is for INDEX pages only: a section whose first child is real content keeps
       # that page's own title, which says what it is ("Install & first light", "Testing strategy").
       - Overview: explanation/architecture/index.md
       - MoonModule: explanation/architecture/moonmodule.md

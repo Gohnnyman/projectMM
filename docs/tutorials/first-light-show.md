@@ -21,18 +21,18 @@ If your strip zig-zags back and forth along the rows, turn on **serpentine**. Wa
 
 ## 2. Paint something on it
 
-Open **Effects**. Under the Layer, press **+ add module** and pick an effect. **Noise** is a good first choice: it moves at every scale, so it shows the grid off better than a flat fill.
+Open **Effects**. Under the Layer, press **+ add module** and pick an effect. **Bouncing Balls** is a good first choice: it has motion you can read at a glance, so the controls show their effect immediately.
 
-Now change **speed** while it runs. Then **scale**. The lights respond as the slider moves, because an effect is not a rendered animation the device plays back: it is a function being run once per frame, reading its controls each time.
+Now change **numBalls** while it runs. Then **grav**. The lights respond as the slider moves, because an effect is not a rendered animation the device plays back: it is a function being run once per frame, reading its controls each time.
 
 <video src="../assets/uiscenarios/add-an-effect.webm" autoplay loop muted playsinline width="720" title="Adding an effect through the picker, then driving its controls while it runs"></video>
 
 
-Try a second effect. Press **+ add module** again and add **Sinelon** beside the first.
+Try a second effect. Press **+ add module** again and add **Ripples** beside the first.
 
 Both now run into the same Layer, in order, each writing over what the one before it left. That is useful when the second effect draws sparsely (sparks over a wash), and it is not blending: two effects in one Layer share one buffer.
 
-Blending happens between **layers**. Press **+** on the Effects card to add a second Layer, give it its own effect, and the Layer card gains a **blendMode** and an **opacity**. The drivers composite the layers bottom to top, so lowering the top layer's opacity tints what is underneath instead of replacing it.
+Blending happens between **layers**. Press **+ add module** on the Effects card to add a second Layer, give it its own effect, and the Layer card carries a **blendMode** and an **opacity**. The drivers composite the layers bottom to top, so lowering the top layer's opacity tints what is underneath instead of replacing it.
 
 <video src="../assets/uiscenarios/add-a-layer.webm" autoplay loop muted playsinline width="720" title="Adding a second Layer with its own effect, then lowering its opacity to blend"></video>
 
@@ -55,7 +55,7 @@ Open **Drivers**. Set **brightness** first, and set it low: 20 is plenty on a be
 
 Then add the driver for your hardware:
 
-- **LED strip on a pin**: add a **LedDriver**, set the **pin** your data line is soldered to, and set the light count to match the layout.
+- **LED strip on a pin**: add an **RmtLedDriver** (or a **ParallelLedDriver** for many strands at once), set **pins** to the GPIO your data line is soldered to, and set the light count to match the layout.
 - **Over the network**: add a **NetworkSendDriver** for Art-Net, E1.31/sACN or DDP, and give it the destination address.
 - **Nothing attached**: the **Preview** driver is already there. That is what has been feeding the 3D view all along.
 

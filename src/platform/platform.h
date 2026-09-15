@@ -1518,16 +1518,17 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
 // ---------------------------------------------------------------------------
 // HUB75 panel output. A HUB75 panel is SCANNED, not addressed: one frame is
 // height/2 scan lines (RGB1 and RGB2 drive both half-panels at once), each line
-// clocked out as `width` parallel words, and brightness comes from repeating the
-// whole thing once per BIT PLANE. So the DMA frame is
-// (height/2) x width x bitDepth bytes, which is what decides the peripheral:
-// the Parlio single-shot cap (65,535 bytes) carries one 64x64 panel comfortably
-// and cannot carry sixteen, while the i80/LCD_CAM DMA reaches PSRAM.
+// clocked out as `width` parallel words, one bit plane at a time. A frame is
+// `bitDepth` plane passes of two bytes a slot (the bus is 16 bits wide), and
+// Hub75Geometry::frameBytes is its one home: the platform asks rather than
+// recomputing. That size decides the
+// peripheral, the Parlio single-shot cap being 65,535 bytes, while the
+// i80/LCD_CAM DMA reaches PSRAM.
 //
-// ONE seam, two backends, and the driver never learns which: init picks the
-// peripheral from what the chip has and what the geometry costs, exactly as
-// esp_lcd picks LCD_CAM or I2S behind the i80 API. That is what keeps the size
-// ceiling a platform fact rather than a driver branch.
+// ONE seam, two backends: hub75Init takes the backend to use, and the platform
+// reports which ones this silicon has and which can carry a given frame. WHICH
+// to spend on the panel is the driver's `peripheral` select, because a chip with
+// both may already be driving WS2812 strips from one of them.
 //
 // Inert everywhere the silicon is absent (desktop, classic ESP32): init returns
 // false and the driver reports it, the allocate-and-degrade rule every other
@@ -1539,8 +1540,8 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
 /// wiring, and on an S3 it would land on octal-PSRAM or a strapping pin.
 /// `e` is used only by 1/32-scan panels and stays unset on 1/8 and 1/16.
 struct Hub75Pins {
-    uint16_t r1 = 0xFFFF, g1 = 0xFFFF, b1 = 0xFFFF;   // upper half-panel colour
-    uint16_t r2 = 0xFFFF, g2 = 0xFFFF, b2 = 0xFFFF;   // lower half-panel colour
+    uint16_t r1 = 0xFFFF, g1 = 0xFFFF, b1 = 0xFFFF;   // upper half-panel color
+    uint16_t r2 = 0xFFFF, g2 = 0xFFFF, b2 = 0xFFFF;   // lower half-panel color
     uint16_t a = 0xFFFF, b = 0xFFFF, c = 0xFFFF;      // row address, 1/8 scan
     uint16_t d = 0xFFFF;                              // + 1/16 scan
     uint16_t e = 0xFFFF;                              // + 1/32 scan
@@ -1573,7 +1574,7 @@ const char* hub75BackendLabel(Hub75Backend backend);
 /// dimensions can scan differently, so the user says which. `bitDepth` (2..8) is the refresh
 /// tradeoff, and it is the caller's to make.
 ///
-/// Returns false when the backend is absent, the pins are incomplete, or the frame does not fit —
+/// Returns false when the backend is absent, the pins are incomplete, or the frame does not fit:
 /// `hub75LastError()` says which, so the driver reports a cause rather than "check pins / memory".
 bool hub75Init(Hub75Handle& h, Hub75Backend backend, const Hub75Pins& pins,
                uint16_t width, uint16_t height, uint8_t scanRate, uint8_t bitDepth);

@@ -27,7 +27,7 @@ Your browser will most likely flag it straight away: *"isn't commonly downloaded
 
 ## 2. Tell the browser to keep it
 
-Microsoft Defender SmartScreen judges a download by its **reputation**, built from how many people have downloaded that exact file from a publisher it recognises. projectMM is not code-signed, and every build produces a brand-new file, so its reputation is always zero. The warning is about the certificate, not about the contents.
+Microsoft Defender SmartScreen judges a download by its **reputation**, built from how many people have downloaded that exact file from a publisher it recognizes. projectMM is not code-signed, and every build produces a brand-new file, so its reputation is always zero. The warning is about the certificate, not about the contents.
 
 In the Downloads panel, click the **`⋯`** next to the file, then open the **Delete** dropdown and choose **Keep anyway**:
 

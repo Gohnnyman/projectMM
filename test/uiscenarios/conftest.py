@@ -44,13 +44,17 @@ def host() -> str:
     return HOST
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def _browser_available(playwright):
     """Skip the lane, once, when Playwright's browser is not installed.
 
     Without this the first test errors deep inside a launch, and the fix (one install
     command) is nowhere in the output. A bench that has never run these is a normal
     bench, which is what SKIP means.
+
+    A DEPENDENCY of ui_for rather than autouse: the checks that only read run files
+    (the action vocabulary, the documentation, a project's clip names) need no browser,
+    and autouse skipped them on a machine that has never installed chromium.
     """
     try:
         browser = playwright.chromium.launch()
@@ -72,7 +76,7 @@ def _test_ids(playwright):
 
 
 @pytest.fixture
-def ui_for(page, host):
+def ui_for(page, host, _browser_available):
     """A Driver for whichever app a run names.
 
     Most runs drive the device UI. One drives the web installer on its preview port,

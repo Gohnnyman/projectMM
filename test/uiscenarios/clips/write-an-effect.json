@@ -39,7 +39,6 @@
       "text": "class MyEffect {\n  byte bpm = 90;\n\n  void defineControls() {\n    addControl(\"bpm\", bpm, 1, 255);\n  }\n\n  void tick() {\n    fill(beatsin(bpm, 0, 255), 200, 255);\n  }\n}\n",
       "delay": 38,
       "caption": "Write your own. This is C-like source, typed in the browser.",
-      "caption_seconds": 12.0,
       "hold": 2.0
     },
     {

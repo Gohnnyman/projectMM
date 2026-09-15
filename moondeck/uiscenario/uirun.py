@@ -274,11 +274,10 @@ class Driver:
     action on screen, which is precisely what a viewer needs and what a test does not.
     """
 
-    def __init__(self, page, host: str, screencast=None, caption_ms: int = 2600):
+    def __init__(self, page, host: str, screencast=None):
         self.page = page
         self.host = host
         self.screencast = screencast
-        self.caption_ms = caption_ms
         # PACED for the camera, brisk for the test. Every dwell below exists so a
         # viewer can follow a pointer; a test watching nobody pays ~40 of them per run
         # for no benefit. The poll-based waits are NOT gated by this: those are
@@ -397,22 +396,22 @@ class Driver:
         self.page.wait_for_timeout(240)
         return True
 
-    def caption(self, text: str, seconds: float | None = None):
+    def caption(self, text: str):
         """Narration over the current screen, as an overlay in the page.
 
         Returns a CONTEXT MANAGER, and the caller wraps the action in it. That is not
         a stylistic choice: show_overlay(duration=...) BLOCKS for its whole duration
         (measured: 6000ms returns after 6006ms). Calling it before the action paid
-        every caption twice over as dead wall-clock, which is where 286 of a 372-second
-        take went, and it froze the screen while the words were up so the action always
-        happened after they had gone.
+        every caption twice over as dead wall-clock, and it froze the screen while the
+        words were up so the action always happened after they had gone.
 
         Entered around the action, the words are on screen WHILE the thing they
-        describe happens, and the caption costs nothing of its own.
+        describe happens, and the caption costs nothing of its own. The `with` block is
+        the overlay's whole lifetime, so there is no duration to pass: the words stay up
+        for exactly as long as the step they narrate takes, including its hold.
         """
         if not self.screencast:
             return _NullOverlay()
-        ms = int((seconds or 0) * 1000) or self.caption_ms
         safe = (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
         return self.screencast.show_overlay(
             '<div style="position:fixed;left:50%;bottom:44px;transform:translateX(-50%);'
@@ -421,19 +420,6 @@ class Driver:
             'font:500 25px/1.35 -apple-system,Segoe UI,Roboto,sans-serif;'
             'text-align:center;backdrop-filter:blur(8px);'
             'box-shadow:0 8px 30px rgba(0,0,0,.45)">' + safe + '</div>')
-
-    def _caption_span(self, action: str, args: dict, step) -> float:
-        """How long this step's words should stay up: the action, plus its hold.
-
-        Estimated rather than measured, because the overlay has to be raised BEFORE
-        the action runs. The numbers come from timing the engine: an annotated pointer
-        move costs about its show_actions duration, a drag adds its travel, and typing
-        adds per-character delay.
-        """
-        base = ACTIONS.get(action, (None, 2.0))[1]
-        if action == "drag_slider":
-            base = 2.4 + float(args.get("seconds", 1.8))
-        return base + float(step.hold) + 0.6
 
     def chapter(self, title: str, description: str | None = None,
                 seconds: float = 2.0) -> None:
@@ -475,20 +461,24 @@ class Driver:
         """
         nav = self.nav(module)
         if nav.count():
-            self.tap(nav)
+            if not self.tap(nav):
+                return False
             # renderCards() replaces the subtree wholesale, so wait for the new card
-            # rather than a fixed sleep.
+            # rather than a fixed sleep. The wait is the STEP'S OUTCOME: a nav click that
+            # misses, or a root that never renders, has to read as a failure rather than
+            # as a completed step with nothing behind it.
             try:
                 self.card(module).first.wait_for(state="attached", timeout=4000)
             except Exception:
-                pass
+                return False
             self.page.wait_for_timeout(420)
             return True
 
         tab = self.page.locator(f'.tab[data-tab-mid="{self._css(module)}"]')
         if not self._ready(tab):
             return False
-        self.tap(tab)
+        if not self.tap(tab):
+            return False
         self.page.wait_for_timeout(420)
         return True
 
@@ -555,9 +545,12 @@ class Driver:
         # the Layer card's own add button, and `.first` was the WRONG one: the Layer's,
         # which offers effects where a layer was wanted. app.js scopes the same way for
         # the same reason (renderModuleTree: "Scope to direct children of this card").
-        add = card.locator("> .tab-strip > .tab-add")
-        if not add.count():
-            add = card.locator(".tab-add")          # tabs sit one level down in some cards
+        # The strip lives in the card's own .card-children wrapper (renderChildTabs
+        # appends it there, and createCard appends that to the card), so this is the
+        # full path to THIS card's + tab. No unscoped fallback: `.tab-add` anywhere
+        # under the card is a child card's + button, which is the exact mix-up this
+        # scoping exists to prevent.
+        add = card.locator("> .card-children > .tab-strip > .tab-add")
         footer = card.locator("> .card-footer > button")
 
         if add.count():
@@ -663,8 +656,6 @@ class Driver:
         # file editor reuses .card-btn-del (app.js), so a descendant search can arm the
         # wrong × entirely. add_module already scopes this way.
         btn = card.locator("> .card-title .card-actions .card-btn-del")
-        if not btn.count():
-            btn = card.locator(".card-btn-del")
         if not self.tap(btn):
             return False
         self._settle(0.5)                  # the armed ✓ is worth seeing
@@ -717,9 +708,10 @@ class Driver:
         if not create.count():
             self._dismiss_picker()
             return False
-        try:
-            self.tap(create)
-        except Exception:
+        # The create button is what COMMITS. A tap that misses it leaves the dialog open
+        # with nothing created, and add_module/replace_module only notice via _await_new;
+        # pick_file has no second check at all, so the miss has to be reported here.
+        if not self.tap(create):
             self._dismiss_picker()
             return False
         self.page.wait_for_timeout(420)
@@ -850,9 +842,11 @@ class Driver:
         # exists to show: text becomes running code. Leaving it unsaved also left the
         # card mid-edit, which is why the run's own delete step then failed.
         save = self.page.locator("button.fm-editor-save")
-        if save.count():
-            self.tap(save)
-            self.page.wait_for_timeout(1600)     # compile + first frame
+        if not save.count():
+            return False
+        if not self.tap(save):
+            return False
+        self.page.wait_for_timeout(1600)     # compile + first frame
         return True
 
     # -- selector actions ---------------------------------------------------
@@ -986,7 +980,7 @@ class Driver:
             return max > min ? (Number(e.value) - min) / (max - min) : 0;
         }"""))
         # INSET the travel by half a thumb. A range input's thumb is centered on the
-        # track but its centre never reaches the very edge, so a press at width*1.0
+        # track but its center never reaches the very edge, so a press at width*1.0
         # landed BESIDE the thumb: Chromium started no drag, the mouse moved with
         # nothing captured, and the value stayed put while the call reported success.
         # A click at the same x works, which is what proved the press was the problem.
@@ -1111,10 +1105,10 @@ class Driver:
 
     def _act(self, a: str, args: dict) -> tuple[bool, str | None]:
         """Perform one action. Returns (completed, name-of-anything-created)."""
-        entry = ACTIONS.get(a)
-        if not entry:
+        method_name = ACTIONS.get(a)
+        if not method_name:
             raise ValueError(f"unknown action: {a}")
-        method = getattr(self, entry[0])
+        method = getattr(self, method_name)
         result = method(*self._ARGS[a](args))
         if a in self._CREATES:
             return result is not None, result
@@ -1149,18 +1143,20 @@ class Driver:
                                 "choose_option", "goto", "scroll_to"):
             self.reveal(target)
 
-        # The action runs INSIDE the caption's overlay, so the words are on screen
-        # while the thing they describe happens. show_overlay blocks for its duration,
-        # so raising it before the action instead froze the screen for the caption's
-        # whole span and only then moved the pointer: the words and the change could
-        # never coincide, and the wasted time dominated the take.
+        # The action runs INSIDE the caption's overlay, so the words are on screen while
+        # the thing they describe happens. show_overlay blocks for its duration, so
+        # raising it before the action froze the screen and the words could never
+        # coincide with the change they narrate.
+        #
+        # The hold runs inside it too: it is the dwell the run asks for on this step, so
+        # the words have to still be up during it.
         if step.caption:
-            secs = args.get("caption_seconds")
-            span = float(secs) if secs else self._caption_span(a, args, step)
-            with self.caption(step.caption, span):
+            with self.caption(step.caption):
                 ok, created = self._act(a, args)
+                self._settle(step.hold)
         else:
             ok, created = self._act(a, args)
+            self._settle(step.hold)        # video-only: _settle is a no-op unpaced
 
         if step.bind and created:
             self.bindings[step.bind] = created
@@ -1204,35 +1200,36 @@ class Driver:
         return self.failures
 
 
-# The ONE inventory of actions: name -> (Driver method, seconds a caption should hold).
+# The ONE inventory of actions: name -> the Driver method that performs it.
 #
-# Three hand-kept lists drifted twice while this was built (the dispatcher, the test's
-# KNOWN_ACTIONS, the caption estimate), each time surfacing as a confusing mid-run
-# failure. The dispatcher calls through this, the test derives its vocabulary from it,
-# and RUNS.md's table is checked against it.
-ACTIONS: dict[str, tuple[str, float]] = {
-    "chapter":        ("_do_chapter",   0.0),
-    "wait":           ("_do_wait",      0.0),
-    "open_card":      ("open_card",     1.6),
-    "add_module":     ("add_module",    4.0),
-    "replace_module": ("replace_module", 4.0),
-    "delete_module":  ("delete_module", 2.6),
-    "clear_children": ("clear_children", 3.0),
-    "set_number":     ("set_number",    2.4),
-    "set_text":       ("set_text",      2.4),
-    "drag_slider":    ("drag_slider",   2.4),
-    "choose":         ("choose",        1.6),
-    "click_control":  ("click_control", 1.6),
+# Hand-kept lists drifted twice while this was built (the dispatcher and the test's
+# KNOWN_ACTIONS), each time surfacing as a confusing mid-run failure. The dispatcher
+# calls through this, the test derives its vocabulary from it, and RUNS.md's table is
+# checked against it. No caption duration here: a caption lives exactly as long as the
+# `with` block around its step, so there is nothing to estimate.
+ACTIONS: dict[str, str] = {
+    "chapter":        "_do_chapter",
+    "wait":           "_do_wait",
+    "open_card":      "open_card",
+    "add_module":     "add_module",
+    "replace_module": "replace_module",
+    "delete_module":  "delete_module",
+    "clear_children": "clear_children",
+    "set_number":     "set_number",
+    "set_text":       "set_text",
+    "drag_slider":    "drag_slider",
+    "choose":         "choose",
+    "click_control":  "click_control",
     # Selector actions: another projectMM surface, with no module contract of its own.
-    "click":          ("click",         1.8),
-    "type_into":      ("type_into",     3.0),
-    "choose_option":  ("choose_option", 2.2),
-    "goto":           ("goto",          2.0),
-    "scroll_to":      ("scroll_to",     1.4),
+    "click":          "click",
+    "type_into":      "type_into",
+    "choose_option":  "choose_option",
+    "goto":           "goto",
+    "scroll_to":      "scroll_to",
     # Shot actions: a framing, and the two halves of the MoonLive editor.
-    "hero":           ("hero",          0.0),
-    "pick_file":      ("pick_file",     3.0),
-    "type_script":    ("type_script",   6.0),
+    "hero":           "hero",
+    "pick_file":      "pick_file",
+    "type_script":    "type_script",
 }
 
 

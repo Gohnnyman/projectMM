@@ -1,10 +1,10 @@
 # Drivers
 
-A driver sends lights somewhere. It reads its slice of the [Drivers](moxygen/Drivers.md) container's shared buffer, applies its own [output correction](moxygen/DriverBase.md), and outputs — over a wire (WS2812), the network (Art-Net / E1.31 / DDP), to a smart-light hub (Hue), or to the web UI (Preview).
+A driver sends lights somewhere. It reads its slice of the [Drivers](moxygen/Drivers.md) container's shared buffer, applies its own [output correction](moxygen/DriverBase.md), and outputs: over a wire (WS2812), to a HUB75 panel on the board's own pins, over the network (Art-Net / E1.31 / DDP), to a smart-light hub (Hue), or to the web UI (Preview).
 
 Several drivers can share one buffer, each driving its own slice. Every driver starts with the same [shared controls](#shared-driver-controls), then adds its own. Drivers are added per board through the catalog ([`deviceModels.json`](../../../mooninstaller/deviceModels.json)); `PreviewDriver` is the one boot-wired driver.
 
-**Jump to:** [shared controls](#shared-driver-controls) · [LED](#led-drivers) · [Network](#network-drivers) · [Smart light](#smart-light-drivers) · [Preview](#preview-drivers)
+**Jump to:** [shared controls](#shared-driver-controls) · [LED](#led-drivers) · [HUB75](#hub75) · [Network](#network-drivers) · [Smart light](#smart-light-drivers) · [Preview](#preview-drivers)
 
 ## Shared driver controls
 
@@ -66,6 +66,36 @@ Tests: [RMT](../../reference/tests/unit-tests.md#rmtleddriver) · [shared + peri
 
 Detail: [RMT](moxygen/RmtLedDriver.md) · [Parallel](moxygen/ParallelLedDriver.md) · peripherals: [i80](moxygen/MultiPinLedDriver.md) · [MoonI80](moxygen/MoonLedDriver.md) · [Parlio](moxygen/ParlioLedDriver.md)
 
+<a id="hub75"></a>
+
+### HUB75 🟦 · panels on your own pins
+
+Drives **HUB75 LED panels directly from the board's GPIO**, with no receiving card in between. The sibling of [Panel Card](#panelcard), which drives the same panels the other way: through a ColorLight receiving card over Ethernet. Which one you want is a size question. A receiving card earns its place above roughly 16,384 pixels; below that it is a Windows tool to configure and a dedicated Ethernet link to run, for a panel the board could have driven itself.
+
+- `board`: which board's wiring to use. Picking one fills in the fourteen pins below, so a fresh driver arrives wired rather than blank.
+- `r1 g1 b1` / `r2 g2 b2`: the six color lines. A HUB75 panel lights two rows at once, an upper and a lower, which is what the two sets are.
+- `a b c d e`: the row address. `d` appears on 1/16 panels, `e` on 1/32; a 1/8 panel leaves both unwired.
+- `clk lat oe`: shift clock, latch, and output enable.
+- `peripheral`: which silicon block drives the panel, `LCD_CAM` or `Parlio`, offered only where the chip has both and the geometry fits. Yours to pick rather than the driver's: a P4 has one of each, so a board already driving WS2812 strips from one needs the panel on the other.
+- `scanRate`: 1/8, 1/16 or 1/32, **read off the panel rather than calculated**. Two panels of identical dimensions can scan differently, so this is the one fact about your panel its size does not tell the driver.
+- `bitDepth` (2 to 4): color precision against refresh and memory, and the trade is yours. Read the cost below before raising it.
+- `refresh`: the **measured** rate, not a prediction. If a panel flickers, this is the number to report.
+- **No geometry controls**: the panel size comes from the [Layout](layouts.md), as it does for every driver. A `PanelLayout` describes one panel and a `PanelsLayout` tiles several; this driver reads the finished picture.
+
+**The board select is where the pins come from.** It defaults to MoonHub75 and fills all fourteen lines in on first use. Pick a published board map (MoonHub75, MatrixPortal S3, Waveshare RGB Matrix) and the pin rows are **hidden**: those lines are soldered, so there is nothing to act on. The generic per-chip sets and **Custom** **show** them, because those exist to be adjusted. Hidden rows stay bound, so the values still persist and still drive the panel. A soldered line is never guessed from nothing, which is why a board map supplies them: pick from the per-chip free sets in [GPIO usage](../../reference/hardware/gpio-usage.md) when you wire your own.
+
+**Which silicon.** A chip with an LCD_CAM or Parlio block. The classic ESP32 has neither, and is excluded on pins before memory is even a question: it has 13 usable output GPIOs and a 1/16 port needs all 13, leaving nothing for a strand, a button or a microphone.
+
+**What depth costs.** Every bit plane is a full scan of the panel, so depth costs refresh and memory linearly: 8-bit is eight passes where 4-bit is four. Each slot on the wire is 2 bytes, because the address, latch and output-enable lines sit above bit 7 of a 16-bit bus word. One 64x64 panel at 1/32 scan is 16,640 bytes a frame at 4-bit, 24,960 at 6-bit and 33,280 at 8-bit; a 256x256 wall at 8-bit is 524,800, which needs the PSRAM the LCD_CAM path reaches and is far past what Parlio carries in one transfer.
+
+**Depth does not yet change the ramp, which is why it stops at 4.** The planes are emitted once each rather than weighted for 2^p time, so bit 3 lights for the same time as bit 0 and a gradient is coarser than the depth suggests. Every extra plane still costs a full scan pass and its share of the frame, so a fifth plane and beyond would buy nothing the eye can find. The weighting is [backlogged](https://github.com/MoonModules/projectMM/blob/main/docs/work/future/backlog-light.md), and the cap lifts with it.
+
+**This driver is new and has not run on a wall we own.** It is built from the panel's documented behavior and its encoder is pinned by [host tests](../../reference/tests/unit-tests.md#hub75driver), which is not the same as hardware verification. Reports welcome, and `refresh` plus your geometry is what makes one useful.
+
+Prior art: the HUB75 lineage generally ([mrcodetastic/ESP32-HUB75-MatrixPanel-DMA](https://github.com/mrcodetastic/ESP32-HUB75-MatrixPanel-DMA), [hzeller/rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix), [ESPHome's hub75 component](https://github.com/esphome-libs/esp-hub75)). The scan and bit-plane structure belongs to the panel rather than to any library; those implementations were studied, not copied.
+
+Detail: [technical](moxygen/Hub75Driver.md)
+
 ## Network drivers
 
 <a id="networksend"></a>
@@ -111,40 +141,6 @@ Origin: MoonLight D_NetworkOut; Art-Net 4 / E1.31 / DDP specs
 [Tests](../../reference/tests/unit-tests.md#networksenddriver)
 
 Detail: [technical](moxygen/NetworkSendDriver.md)
-
-<a id="hub75"></a>
-
-### HUB75 🟦 · panels on your own pins
-
-Drives **HUB75 LED panels directly from the board's GPIO**, with no receiving card in between. The sibling of [Panel Card](#panelcard), which drives the same panels the other way: through a ColorLight receiving card over Ethernet. Which one you want is a size question. A receiving card earns its place above roughly 16,384 pixels; below that it is a Windows tool to configure and a dedicated Ethernet link to run, for a panel the board could have driven itself.
-
-- `r1 g1 b1` / `r2 g2 b2`: the six colour lines. A HUB75 panel lights two rows at once, an upper and a lower, which is what the two sets are.
-- `a b c d e`: the row address. `d` appears on 1/16 panels, `e` on 1/32; a 1/8 panel leaves both unwired.
-- `clk lat oe`: shift clock, latch, and output enable.
-- `scanRate`: 1/8, 1/16 or 1/32, **read off the panel rather than calculated**. Two panels of identical dimensions can scan differently, so this is the one fact about your panel its size does not tell the driver.
-- `bitDepth` (2 to 8): colour precision against refresh, and the trade is yours. Every bit plane is a full scan of the panel, so depth costs refresh linearly. See the table below before picking 8.
-- `refresh`: the **measured** rate, not a prediction. If a panel flickers, this is the number to report.
-- **No geometry controls**: the panel size comes from the [Layout](layouts.md), as it does for every driver. A `PanelLayout` describes one panel and a `PanelsLayout` tiles several; this driver reads the finished picture.
-
-**Every pin starts unset, deliberately.** On an S3 exactly three GPIOs are spare once a 1/16 port is wired, so a default would land on octal-PSRAM, USB, UART0 or a strapping pin. Pick from the per-chip free sets in [GPIO usage](../../reference/hardware/gpio-usage.md), or use a board whose catalog entry supplies them.
-
-**Which chips.** S3, P4 and S31. The classic ESP32 is excluded on pins before memory is even a question: it has 13 usable output GPIOs and a 1/16 port needs all 13, leaving nothing for a strand, a button or a microphone.
-
-**What a panel costs, and what it can refresh.** The frame is `(height / 2) x width x bitDepth` bytes, and every plane is a scan:
-
-| Panels | Geometry | 6-bit | 8-bit | Predicted refresh, 8-bit |
-|---|---|---:|---:|---:|
-| 1 | 64x64 | 12,480 B | 16,640 B | ~1200 Hz |
-| 4 | 128x128 | 49,344 B | 65,792 B | ~300 Hz |
-| 16 | 256x256 | 196,800 B | 262,400 B | ~76 Hz |
-
-Those refresh figures are computed from the shift clock, not measured, and they ignore latch overhead: treat them as ceilings and compare them against what `refresh` actually reports. Flicker becomes visible somewhere below about 60 Hz, so a 16-panel wall at 8-bit is close enough to that line to be worth testing before committing to it. Lower `bitDepth` buys refresh back proportionally.
-
-**This driver is new and has not run on a wall we own.** It is built from the panel's documented behaviour and its encoder is pinned by [host tests](../../reference/tests/unit-tests.md#hub75driver), which is not the same as hardware verification. Reports welcome, and `refresh` plus your geometry is what makes one useful.
-
-Prior art: the HUB75 lineage generally ([mrcodetastic/ESP32-HUB75-MatrixPanel-DMA](https://github.com/mrcodetastic/ESP32-HUB75-MatrixPanel-DMA), [hzeller/rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix), [ESPHome's hub75 component](https://github.com/esphome-libs/esp-hub75)). The scan and bit-plane structure belongs to the panel rather than to any library; those implementations were studied, not copied.
-
-Detail: [technical](moxygen/Hub75Driver.md)
 
 <a id="panelcard"></a>
 

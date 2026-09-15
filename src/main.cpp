@@ -143,6 +143,12 @@
 // Everything else would carry ~2.8 KB of flash for a driver it cannot use, so it does not link it.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
 #include "light/drivers/PanelCardDriver.h"
+#endif
+// HUB75 is a GPIO panel, not a receiver card: it needs LCD_CAM or Parlio silicon and nothing else,
+// so it gates on the chip the way every other LED driver above does. Tying it to MM_PANEL_CARDS
+// hid it from every S3 that is not a panel-card firmware, which is most of them.
+#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED) || defined(CONFIG_SOC_PARLIO_SUPPORTED) || \
+    MM_LINKS_ALL_LED_DRIVERS
 #include "light/drivers/Hub75Driver.h"
 #endif
 #include "core/HttpServerModule.h"
@@ -311,6 +317,10 @@ static void registerModuleTypes() {
     // Same firmware gate as the include above.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::PanelCardDriver>("PanelCardDriver", "light/drivers.md#panelcard");
+#endif
+    // Same silicon gate as the include above.
+#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED) || defined(CONFIG_SOC_PARLIO_SUPPORTED) || \
+    MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::Hub75Driver>("Hub75Driver", "light/drivers.md#hub75");
 #endif
     // Register only the LED drivers this chip's silicon can run (see the gated
