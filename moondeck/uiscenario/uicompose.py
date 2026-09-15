@@ -171,9 +171,15 @@ def main() -> int:
         dst = work / f"{i:02d}.webm"
         label = entry.get("clip") or Path(entry["source"]).stem
         print(f"  {t:7.1f}s  {label:24} {entry.get('bars', 8):>3} bars = {want:5.1f}s")
-        if fit(src, dst, want, width, entry.get("title"), entry.get("subtitle")):
-            segments.append(dst)
-            t += want
+        if not fit(src, dst, want, width, entry.get("title"),
+                   entry.get("subtitle")):
+            # STOP. Concatenating the rest would produce a video that looks finished
+            # and is silently missing a section, which is worse than no video at all.
+            print(f"  failed to fit {label}; not cutting a partial video",
+                  file=sys.stderr)
+            return 1
+        segments.append(dst)
+        t += want
 
     if not segments:
         print("nothing to cut", file=sys.stderr)

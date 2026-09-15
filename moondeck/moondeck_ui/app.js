@@ -422,7 +422,7 @@ function renderScripts() {
                     <button class="steps-btn" title="Show the selected scenario's steps">Steps</button>
                 </div>` : ""}
                 ${needsUiRun ? `<div class="scenario-row">
-                    <select class="uirun-select"></select>
+                    <select class="uirun-select" aria-label="${script.needs_uiclip ? "Clip to record" : "Project to cut"}" title="${script.needs_uiclip ? "Which UI clip to record" : "Which video project to cut"}"></select>
                 </div>` : ""}
                 ${script.flags && script.flags.length > 0 ? `<div class="flag-row"></div>` : ""}
             `;
@@ -479,13 +479,31 @@ function renderScripts() {
                 const kind = script.needs_uiclip ? "uiclip" : "uiproject";
                 const list = script.needs_uiclip ? uiClips : uiProjects;
                 const stateKey = kind;              // one choice per kind, shared by cards
-                sel.innerHTML = list.length
-                    ? list.map(r => `<option value="${r.name}" title="${(r.description || "").replace(/"/g, "&quot;")}">${r.name}</option>`).join("")
-                    : `<option value="">(none found)</option>`;
+                // DOM, not innerHTML: a run file's description is free text, and
+                // escaping it by hand covered quotes and nothing else.
+                sel.replaceChildren();
+                if (list.length) {
+                    for (const r of list) {
+                        const opt = document.createElement("option");
+                        opt.value = r.name;
+                        opt.textContent = r.name;
+                        if (r.description) opt.title = r.description;
+                        sel.appendChild(opt);
+                    }
+                } else {
+                    const opt = document.createElement("option");
+                    opt.value = "";
+                    opt.textContent = "(none found)";
+                    sel.appendChild(opt);
+                }
                 if (state[stateKey] && list.some(r => r.name === state[stateKey])) {
                     sel.value = state[stateKey];
                 } else if (list.length) {
                     state[stateKey] = list[0].name;
+                } else {
+                    // CLEAR a stale choice. Keeping it sent a name the server no longer
+                    // offers, which the launcher then rejected as unknown.
+                    state[stateKey] = "";
                 }
                 sel.addEventListener("change", () => {
                     state[stateKey] = sel.value;

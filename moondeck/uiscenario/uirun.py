@@ -595,23 +595,23 @@ class Driver:
             return 0
         roles = {r.strip() for r in (mod.get("acceptsChildRoles") or "").split(",")
                  if r.strip()}
+        # ONE fetch, used for both questions. /api/types builds a throwaway instance of
+        # every registered type to read its controls, so asking twice is a heavy probe
+        # run twice on a board.
+        try:
+            payload = requests.get(f"http://{self.host}/api/types", timeout=5).json()
+        except requests.RequestException:
+            return 0
+        types = payload.get("types", [])
         if not roles:
-            try:
-                payload = requests.get(f"http://{self.host}/api/types", timeout=5).json()
-            except requests.RequestException:
-                return 0
-            for t in payload.get("types", []):
+            for t in types:
                 if t.get("name") == mod.get("type"):
                     roles = {r.strip() for r in (t.get("acceptsChildRoles") or "").split(",")
                              if r.strip()}
                     break
         if not roles:
             return 0
-        try:
-            payload = requests.get(f"http://{self.host}/api/types", timeout=5).json()
-        except requests.RequestException:
-            return 0
-        return sum(1 for t in payload.get("types", []) if t.get("role") in roles)
+        return sum(1 for t in types if t.get("role") in roles)
 
     def replace_module(self, module: str, type_name: str) -> str | None:
         """Swap a card's type in place, via its own ✎ button and the same picker."""
@@ -1187,9 +1187,20 @@ class Driver:
         return ok
 
     def run_all(self, run: Run) -> list[str]:
-        """Perform every step. Returns the failures, empty when the run was clean."""
+        """Perform every step. Returns the failures, empty when the run was clean.
+
+        STOPS at an unresolved binding. A step naming `{ripples}` when nothing bound it
+        means the step that should have created it failed, so everything after is
+        chasing a module that does not exist: the run cannot recover, and continuing
+        only records minutes of a take nobody can use.
+        """
         for step in run.steps:
+            before = len(self.failures)
             self.perform(step)
+            if len(self.failures) > before and any(
+                    "which no earlier step bound" in f for f in self.failures[before:]):
+                self.failures.append("stopped: the rest of the run depends on that step")
+                break
         return self.failures
 
 

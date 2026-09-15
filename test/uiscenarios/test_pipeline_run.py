@@ -36,7 +36,7 @@ KNOWN_ACTIONS = set(uirun.ACTIONS)
 
 
 @pytest.fixture
-def clean_pipeline(host):
+def clean_pipeline():
     """Fail the test if a run leaves modules behind.
 
     NOT a cleanup: nothing here writes over REST, because the whole point of these
@@ -48,12 +48,26 @@ def clean_pipeline(host):
     another app (the installer) has no module tree to compare and must not be judged
     against the device's.
     """
-    before = uirun.all_names(uirun.state(host).get("modules", []))
+    snapshot: dict = {}
 
-    def check():
-        leftover = sorted(uirun.all_names(uirun.state(host).get("modules", [])) - before)
+    def check(target: str):
+        """Compare the device the run actually drove, not the session's default.
+
+        A run naming `requires` resolves to whichever board carries that capability,
+        which is not the host this lane was pointed at: snapshotting the default meant
+        the check read a machine the run never touched.
+        """
+        if target not in snapshot:
+            return                        # nothing was snapshotted for this device
+        leftover = sorted(
+            uirun.all_names(uirun.state(target).get("modules", [])) - snapshot[target])
         assert not leftover, ("the run did not delete what it created through the UI: "
                               + ", ".join(leftover))
+
+    def take(target: str):
+        snapshot[target] = uirun.all_names(uirun.state(target).get("modules", []))
+
+    check.take = take
     yield check
 
 
@@ -75,10 +89,14 @@ def test_run_performs_through_the_ui(ui_for, clean_pipeline, run_path):
     """The run completes, and the device agrees with each step that checks itself."""
     run = uirun.load_run(run_path)
     driver = ui_for(run)               # skips when the run's app is not running
+    # AFTER the driver resolved its host: a `requires` run picks its own device, and
+    # snapshotting before that read whichever machine the lane defaulted to.
+    if not run.host:                   # only a device run owns a module tree
+        clean_pipeline.take(driver.host)
     failures = driver.run_all(run)
     assert not failures, f"{run_path.name} failed:\n  " + "\n  ".join(failures)
-    if not run.host:                   # only a device run owns the module tree
-        clean_pipeline()
+    if not run.host:
+        clean_pipeline(driver.host)
 
 
 @pytest.mark.parametrize("project_path",

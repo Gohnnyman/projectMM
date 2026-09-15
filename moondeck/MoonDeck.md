@@ -876,7 +876,7 @@ Record one UI clip: perform a run file against the interface while Playwright re
 uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/add-a-layer.json
 ```
 
-The dropdown lists every run under `test/uiscenarios/clips/`. A run drives the interface and nothing else: the `+` tab, the type picker, the card's own buttons, the real inputs. REST is read-only, and is what each step's `expect` block checks against, which lets the same file be a UI test (`test_host.py --ui`) as well as a video source. Two files come out: the raw take in `media/video/` (ignored) and the published clip in `docs/assets/uiscenarios/` (tracked, embed this one). Format and actions: [RUNS.md](uiscenario/RUNS.md).
+The dropdown lists every run under `test/uiscenarios/clips/`. A run drives the interface and nothing else: the `+` tab, the type picker, the card's own buttons, the real inputs. REST is read-only, and is what each step's `expect` block checks against, which lets the same file be a UI test (`test_host.py --ui`) as well as a video source. The raw take lands in `media/video/` (ignored). The published clip lands in `docs/assets/uiscenarios/` (tracked, embed this one) only when the run was clean: a take whose steps failed, or that left modules behind, is refused so it cannot overwrite a good clip. Format and actions: [RUNS.md](uiscenario/RUNS.md).
 
 A run names its own `host` when it drives something other than the desktop UI, so the installer clip records against the installer preview and the audio clip against a board with a microphone. Start what a run needs before recording it.
 

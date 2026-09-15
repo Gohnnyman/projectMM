@@ -92,6 +92,9 @@ def ui_for(page, host):
             pytest.skip(f"{target} is not answering "
                         f"(uv run moondeck/run/preview_installer.py)")
         driver = uirun.Driver(page, target)
-        driver.open_app(cards=(target == host))
+        # Cards unless it is another APP: a `requires` run resolves to a real device
+        # (target != host) that renders cards like any other, so keying on the address
+        # made a hardware run skip the wait it needs.
+        driver.open_app(cards=not run.host)
         return driver
     return make

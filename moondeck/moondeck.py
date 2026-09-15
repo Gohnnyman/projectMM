@@ -2006,6 +2006,8 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 data = json.loads(path.read_text())
             except (OSError, json.JSONDecodeError):
                 continue          # a malformed run must not empty the whole dropdown
+            if not isinstance(data, dict):
+                continue          # a JSON list or string has no description to read
             out.append({"name": path.stem,
                         "description": data.get("description", "")})
         return out

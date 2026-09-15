@@ -63,7 +63,7 @@ The driver is the only part of the tree that knows about wires. Everything upstr
 
 ## 5. Keep it
 
-Everything you did is already persisted. Controls save themselves a couple of seconds after the last change, so a power cut costs you nothing.
+Everything you did is already persisted. Controls save themselves a couple of seconds after the last change. Once that save lands a power cut costs you nothing; pull the plug mid-turn of a knob and you lose the last second or two of fiddling.
 
 Reboot the device if you want to prove it. The tree comes back as you left it.
 

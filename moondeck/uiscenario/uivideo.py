@@ -147,7 +147,10 @@ def main() -> int:
         context = browser.new_context(viewport=VIEWPORT)
         page = context.new_page()
         driver = uirun.Driver(page, host, screencast=page.screencast)
-        driver.open_app(cards=not (run.host or run.requires))
+        # `requires` resolves to a real DEVICE, which renders cards like any other; only
+        # `host` means another app (the installer), which has none. Folding the two
+        # together made a hardware run skip the card wait it needs.
+        driver.open_app(cards=not run.host)
 
         with page.screencast.start(path=str(out), size=VIEWPORT):
             # show_actions draws the pointer and names each action on screen: it

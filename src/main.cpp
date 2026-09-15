@@ -143,6 +143,7 @@
 // Everything else would carry ~2.8 KB of flash for a driver it cannot use, so it does not link it.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
 #include "light/drivers/PanelCardDriver.h"
+#include "light/drivers/Hub75Driver.h"
 #endif
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
@@ -310,6 +311,7 @@ static void registerModuleTypes() {
     // Same firmware gate as the include above.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::PanelCardDriver>("PanelCardDriver", "light/drivers.md#panelcard");
+    mm::ModuleFactory::registerType<mm::Hub75Driver>("Hub75Driver", "light/drivers.md#hub75");
 #endif
     // Register only the LED drivers this chip's silicon can run (see the gated
     // includes above) — keeps the type picker honest (no MultiPinLedDriver offered on a
