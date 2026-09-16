@@ -1,24 +1,24 @@
-// GPIO capability introspection for the pin ownership map (PinsModule) — see platform::gpioCapability
+// GPIO capability introspection for the pin ownership map (PinsModule). See platform::gpioCapability
 // in platform.h. Two data sources, combined:
 //   - the IDF's own GPIO_IS_VALID_GPIO / GPIO_IS_VALID_OUTPUT_GPIO / rtc_gpio_is_valid_gpio, the
 //     textbook always-correct queries for valid / output-capable / RTC-domain, and
 //   - a small per-chip strap/reserved table, because the SDK has NO "is this a boot strap or a
-//     flash/PSRAM pin" query — that is board/datasheet knowledge. The table mirrors
+//     flash/PSRAM pin" query, which is board/datasheet knowledge. The table mirrors
 //     docs/reference/hardware/gpio-usage.md (its single documented source); keep the two in sync.
 // No chip type escapes this file (the platform-boundary rule); the module gets a plain GpioCapability.
 
 #include "platform/platform.h"
 
-#include "sdkconfig.h"        // CONFIG_IDF_TARGET_* — selects the per-chip strap/reserved table
+#include "sdkconfig.h"        // CONFIG_IDF_TARGET_*: selects the per-chip strap/reserved table
 #include "soc/gpio_num.h"     // GPIO_IS_VALID_GPIO / GPIO_IS_VALID_OUTPUT_GPIO
-#include "driver/gpio.h"      // gpio_get_level / gpio_get_drive_capability — the live-state reads
+#include "driver/gpio.h"      // gpio_get_level / gpio_get_drive_capability: the live-state reads
 #include "driver/rtc_io.h"    // rtc_gpio_is_valid_gpio
 #include "esp_adc/adc_oneshot.h"  // adcRead: the ADC1 oneshot unit
 #include "esp_adc/adc_cali.h"      // adcReadMv: per-chip eFuse correction
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_efuse.h"        // esp_efuse_get_pkg_ver: the classic ESP32's PACKAGE decides its pin table
 #include "soc/efuse_defs.h"   // EFUSE_RD_CHIP_VER_PKG_*: the package ids
-#include "esp_heap_caps.h"    // heap_caps_get_total_size(MALLOC_CAP_SPIRAM) — detect PSRAM without a new
+#include "esp_heap_caps.h"    // heap_caps_get_total_size(MALLOC_CAP_SPIRAM): detect PSRAM without a new
                               // component dep (the heap component is always linked; esp_psram is not,
                               // and adding it to REQUIRES would switch main to strict mode, hiding the
                               // implicitly-available components the other platform files rely on)
@@ -33,19 +33,18 @@ namespace {
 // Per-chip strap + reserved (flash/PSRAM/USB) pins, from docs/reference/hardware/gpio-usage.md. Reserved
 // pins corrupt the device if used; straps change boot mode if driven at reset. The set is keyed on
 // the build's CONFIG_IDF_TARGET (the same discriminator platform_config.h / platform_esp32.cpp use),
-// so an octal-PSRAM S3 build sees its 33-37 reserved while a no-PSRAM part would not — the build IS
-// the chip variant. A gpio not listed here is neither a strap nor reserved (the SDK queries still
-// decide valid/output/rtc). Both helpers are plain linear scans over tiny fixed arrays.
+// so the build IS the chip variant. A gpio not listed here is neither a strap nor reserved (the SDK
+// queries still decide valid/output/rtc). Both helpers are plain linear scans over tiny fixed arrays.
+//
+// kReservedIfPsram is the second list each target carries: pins the flash/PSRAM bus takes only when
+// the module HAS PSRAM, which is a runtime fact (one esp32s3 image runs on a bare module with none
+// and on a WROVER with it), so gpioCapability adds them only when psramPresent(). A plain WROOM (the
+// Olimex ESP32-Gateway) keeps its 16/17.
 bool inList(uint8_t gpio, const uint8_t* list, size_t n) {
     for (size_t i = 0; i < n; i++) if (list[i] == gpio) return true;
     return false;
 }
 
-// Some pins are reserved ONLY when the module has PSRAM — and PSRAM is a runtime fact (the SAME esp32 /
-// esp32s3 firmware runs on a bare-WROOM board with none AND a WROVER/octal-PSRAM board with it), so a
-// static table can't decide. kReservedIfPsram lists those pins; they're added to the reserved set only
-// when esp_psram_is_initialized() is true at runtime. A plain WROOM (e.g. the Olimex ESP32-Gateway) has
-// no PSRAM, so its 16/17 stay free — flagging them would be a false positive.
 #if defined(CONFIG_IDF_TARGET_ESP32)
 // Classic ESP32 in a plain module (WROOM / WROVER, a D0WD die): flash 6-11 always; 16/17 are the
 // extra flash/PSRAM bus on WROVER modules only.
@@ -99,10 +98,9 @@ constexpr uint8_t kReservedIfPsram[] = {};
 constexpr uint8_t kStrap[]           = {};
 #endif
 
-// PSRAM presence is a RUNTIME fact — query it once and cache (it can't change after boot). The pins in
-// kReservedIfPsram are only really reserved when PSRAM is present; on a bare-WROOM board they're free.
-// Use the heap-caps total for the SPIRAM region: 0 = no PSRAM (the heap component is always linked,
-// unlike esp_psram — see the include note).
+// Queried once and cached: PSRAM presence cannot change after boot. The heap-caps total for the
+// SPIRAM region is the cheap read, 0 meaning none (the heap component is always linked, unlike
+// esp_psram, see the include note).
 bool psramPresent() {
     static const bool present = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
     return present;
@@ -116,8 +114,17 @@ GpioCapability gpioCapability(uint8_t gpio) {
     c.outputCapable = GPIO_IS_VALID_OUTPUT_GPIO(gpio);
     c.rtc           = rtc_gpio_is_valid_gpio(static_cast<gpio_num_t>(gpio));
     c.strap         = inList(gpio, kStrap, sizeof(kStrap));
+    // kReservedIfPsram is gated on PSRAM being PRESENT, except where the image itself fixes the
+    // pins: an octal-PSRAM S3 build wires 33-37 to the PSRAM bus whatever the runtime finds, and a
+    // board whose PSRAM failed to init would otherwise hand those pads out as free GPIO.
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_SPIRAM_MODE_OCT
+    constexpr bool kPsramPinsFixedByImage = true;
+#else
+    constexpr bool kPsramPinsFixedByImage = false;
+#endif
     c.reserved      = inList(gpio, kReserved, sizeof(kReserved)) ||
-                      (psramPresent() && inList(gpio, kReservedIfPsram, sizeof(kReservedIfPsram)));
+                      ((kPsramPinsFixedByImage || psramPresent()) &&
+                       inList(gpio, kReservedIfPsram, sizeof(kReservedIfPsram)));
 #if defined(CONFIG_IDF_TARGET_ESP32)
     // The die's valid-GPIO mask does not know the package; the tables above do (see their note).
     switch (packageId()) {
@@ -135,17 +142,24 @@ GpioCapability gpioCapability(uint8_t gpio) {
     return c;
 }
 
+const char* gpioRefusal(uint8_t gpio) {
+    const GpioCapability c = gpioCapability(gpio);
+    if (!c.validGpio) return "does not exist on this chip package";
+    if (c.reserved)   return "is wired to flash/PSRAM on this chip";
+    return nullptr;
+}
+
 GpioLiveState gpioLiveState(uint8_t gpio) {
     GpioLiveState s;
     if (!GPIO_IS_VALID_GPIO(gpio)) return s;   // valid=false → the map omits the live columns
     s.valid = true;
-    s.level = gpio_get_level(static_cast<gpio_num_t>(gpio)) != 0;   // reads the pad — see the wire
+    s.level = gpio_get_level(static_cast<gpio_num_t>(gpio)) != 0;   // reads the pad, see the wire
     gpio_drive_cap_t cap = GPIO_DRIVE_CAP_DEFAULT;
     gpio_get_drive_capability(static_cast<gpio_num_t>(gpio), &cap);
     s.driveCap = static_cast<uint8_t>(cap);    // 0..3 = WEAK / MEDIUM / STRONG / STRONGEST
     // Live pin DIRECTION straight off the pad config (not the role's intent): is the output driver /
     // input buffer enabled right now. A role that should drive but reads back !output = the pin isn't
-    // being driven (a dead driver / wire fault) — the mismatch the map flags.
+    // being driven (a dead driver or wire fault), the mismatch the map flags.
     gpio_io_config_t io = {};
     if (gpio_get_io_config(static_cast<gpio_num_t>(gpio), &io) == ESP_OK) {
         s.output = io.oe;

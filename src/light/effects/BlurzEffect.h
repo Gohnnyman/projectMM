@@ -19,7 +19,7 @@ namespace mm {
 // frequency→position map, and the fade-then-blur pipeline are reproduced here, written fresh on
 // EffectBase + the shared draw primitives. Reads AudioService::latestFrame(); with simulation off or no
 // publisher the bands read 0 → the strip fades to black, safe on any target and grid size.
-/// Author: Andrew Tuline (WLED-SR), with enhancements by @softhack007 — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
+/// Author: Andrew Tuline (WLED-SR), with enhancements by @softhack007, https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 //
 // 1D in spirit (a strip of `nrOfLights` pixels) but declared D2 so it spans a 2D panel as a flat run
 // along the buffer's pixel index; the dot and blur work over the whole pixel count either way.

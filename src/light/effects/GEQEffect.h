@@ -23,8 +23,8 @@ namespace mm {
 /// here, written fresh on projectMM's EffectBase + the shared draw / palette primitives. Reads
 /// AudioService::latestFrame(); silence → bars flat → peaks fall away → dark, safe on any target and grid
 /// size. The per-column peak-fall state lives on the heap (sized to width()), allocated in prepare
-/// and freed in release — never a large inline member.
-/// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
+/// and freed in release, never a large inline member.
+/// Author: Andrew Tuline (WLED-SR), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Audio-reactive graphic-equaliser effect: 16 bands as vertical bars.
 class GEQEffect : public EffectBase {
 public:

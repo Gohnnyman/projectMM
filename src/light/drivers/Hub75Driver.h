@@ -32,58 +32,20 @@ namespace mm {
 /// Prior art: the HUB75 lineage generally (mrcodetastic/ESP32-HUB75-MatrixPanel-DMA,
 /// hzeller/rpi-rgb-led-matrix, ESPHome's hub75 component). The scan and bit-plane structure belongs
 /// to the panel rather than to any library; studied, not copied.
-/// ## Pin configurations for known boards
 ///
-/// The `board` select supplies the pins, defaulting to MoonHub75 and prefilling all fourteen on
-/// first definition, because a soldered line must never be guessed from nothing. These are the
-/// maps for boards that wire a HUB75 connector, taken from each board's own published source
-/// rather than from a tutorial. A panel's ribbon numbers its color lines R1/G1/B1 (upper half)
-/// and R2/G2/B2 (lower half); some board docs call the same pairs R0/G0/B0 and R1/G1/B1, which is
-/// the one naming trap worth knowing before wiring.
+/// @moreinfo
 ///
-/// **MoonHub75 PCB** (Lilygo T7-S3 + passive adapter, designed by Sören / lost-hope).
-/// A MoonModules board: https://moonmodules.org/projects/hardware/#moonhub75-pcb
-/// Map from the hardware repository (MOONHUB75/README.md), whose R0/G0/B0 is this driver's r1/g1/b1:
+/// **The `board` select supplies the pins**, defaulting to MoonHub75 and prefilling all fourteen on
+/// first definition, because a soldered line must never be guessed from nothing. Each map is taken
+/// from that board's own published source, and the maps themselves are on the driver's page
+/// (docs/moonmodules/light/drivers.md, "HUB75, details"), where a user wiring a panel can read them
+/// beside the rest of the card.
 ///
-///     r1  1    g1  5    b1  6
-///     r2  7    g2 13    b2  9
-///     a  16    b  48    c  47    d  21    e  38
-///     clk 18   lat 8    oe  4
-///
-/// The same board carries an INMP441 microphone socket on IO10/11/12 (DA/CK/WS), so an audio-
-/// reactive effect and a panel run together on it.
-///
-/// **Adafruit MatrixPortal S3**, from the board's own CircuitPython definition
-/// (ports/espressif/boards/adafruit_matrixportal_s3/pins.c):
-///
-///     r1 42    g1 41    b1 40
-///     r2 38    g2 39    b2 37
-///     a  45    b  36    c  48    d  35    e  21
-///     clk 2    lat 47   oe 14
-///
-/// A 1/32-scan panel needs `e`; on 1/16 panels that pin is free.
-///
-/// **Four of the MatrixPortal's lines sit on pins the generic S3 free set excludes**: b2 = 37,
-/// b = 36 and d = 35 are octal-PSRAM pins, and a = 45 is a boot strap. That is not an error in the
-/// map, it is what a board designer can do and a user cannot: the MatrixPortal ships quad-PSRAM,
-/// which frees 33-37, and its strapping level is fixed by the board. So this map runs on the
-/// quad-PSRAM image (esp32s3-zero) and the pre-init guard refuses it on an octal one (N8R8/N16R8),
-/// where 35-37 are the PSRAM bus and driving them resets the chip.
-///
-/// **Waveshare ESP32-S3-RGB-Matrix** (SKU 34422), from WLED's `WAVESHARE_S3_PINOUT`:
-///
-///     r1  4    g1  5    b1  6
-///     r2  7    g2 15    b2 16
-///     a  18    b   8    c   3    d 42    e  9
-///     clk 41   lat 40   oe  2
-///
-/// Do not confuse it with the Waveshare **ESP32-S3-Matrix**, a different product with an onboard
-/// 8x8 WS2812 matrix and no HUB75 connector.
-///
-/// **One ordering trap runs through all of these.** WLED's array is
-/// `{R1,G1,B1,R2,G2,B2,A,B,C,D,E,LAT,OE,CLK}`: latch and output-enable come BEFORE the clock, so a
-/// map transcribed as `...CLK,LAT,OE` silently swaps three lines. The maps above are written in
-/// this driver's own control order (clk, lat, oe) with that conversion already applied.
+/// **Two naming traps, both worth knowing before wiring.** A panel's ribbon numbers its color lines
+/// R1/G1/B1 (upper half) and R2/G2/B2 (lower half); some board docs call the same pairs R0/G0/B0 and
+/// R1/G1/B1. And WLED's pin array is `{R1,G1,B1,R2,G2,B2,A,B,C,D,E,LAT,OE,CLK}`, so latch and
+/// output-enable come BEFORE the clock: a map transcribed as `...CLK,LAT,OE` silently swaps three
+/// lines. Every map here is in this driver's own control order (clk, lat, oe), converted already.
 ///
 class Hub75Driver : public DriverBase {
 public:
@@ -95,7 +57,7 @@ public:
     /// The `-generic` entries are not boards: they are a working set of pins from the chip's own
     /// free list, for someone wiring a bare module. Shown per chip, because a P4's free GPIOs are
     /// not an S3's.
-    uint8_t boardSel = 0;    // index into kBoardOptions; 0 = MoonHub75
+    uint8_t boardSel = 0;    // index into boardOptions_; 0 = MoonHub75
 
     // Every pin defaults to the board picked above. A soldered line is never guessed from nothing:
     // a blind default would land on octal-PSRAM, USB, UART0 or a strapping pin, and a 1/16 port
@@ -239,13 +201,11 @@ public:
         // map on an octal-PSRAM module (its b, d and b2 sit on 35-37). COLD PATH.
         {
             const char* role = nullptr;
-            const int8_t bad = unusableLine(role);
+            const char* why = nullptr;
+            const int8_t bad = unusableLine(role, why);
             if (bad >= 0) {
-                std::snprintf(statusBuf_, sizeof(statusBuf_),
-                              platform::gpioCapability(static_cast<uint8_t>(bad)).validGpio
-                                  ? "%s on GPIO %d: a flash/PSRAM pin on this chip"
-                                  : "%s on GPIO %d: no such pin on this chip package",
-                              role, int(bad));
+                std::snprintf(statusBuf_, sizeof(statusBuf_), "%s on GPIO %d %s",
+                              role, static_cast<int>(bad), why);
                 setStatus(statusBuf_, Severity::Error);
                 return;
             }
@@ -473,7 +433,8 @@ private:
         boardSel = sel;
     }
 
-    struct Line { int8_t gpio; const char* role; };   /// one HUB75 line as wired: GPIO and ribbon name
+    /// One HUB75 line as wired: the GPIO and the ribbon name it carries.
+    struct Line { int8_t gpio; const char* role; };
     static constexpr uint8_t kLineCount = 14;
 
     /// The set lines in ribbon order: the one home for which GPIOs this driver holds.
@@ -498,22 +459,29 @@ private:
         // A hidden pin control means "not in use" everywhere else; here the lines are soldered and
         // driven while hidden. An editable board's controls are visible, so the map reads those.
         if (!out || pinsEditable()) return 0;
-        Line lines[kLineCount];
+        Line wired[kLineCount];
         uint8_t n = 0;
-        for (uint8_t i = 0, count = this->lines(lines); i < count && n < max; i++) {
-            out[n++] = FixedPin{static_cast<uint8_t>(lines[i].gpio), lines[i].role};
+        for (uint8_t i = 0, count = lines(wired); i < count && n < max; i++) {
+            out[n++] = FixedPin{static_cast<uint8_t>(wired[i].gpio), wired[i].role};
         }
         return n;
     }
 
-    /// The first line on a flash/PSRAM or unbonded pin, with its role, or -1 when all are usable.
-    int8_t unusableLine(const char*& role) const {
-        Line lines[kLineCount];
-        for (uint8_t i = 0, count = this->lines(lines); i < count; i++) {
-            const auto cap = platform::gpioCapability(static_cast<uint8_t>(lines[i].gpio));
-            if (cap.validGpio && !cap.reserved) continue;
-            role = lines[i].role;
-            return lines[i].gpio;
+    /// The first line on a pin the chip refuses, with its role and why, or -1 when all are usable.
+    int8_t unusableLine(const char*& role, const char*& why) const {
+        Line wired[kLineCount];
+        for (uint8_t i = 0, count = lines(wired); i < count; i++) {
+            const uint8_t gpio = static_cast<uint8_t>(wired[i].gpio);
+            const char* refusal = platform::gpioRefusal(gpio);
+            // Every HUB75 line is driven, so an input-only pad is as unusable as a reserved one:
+            // the bus builds and the panel stays dark, which is the silent failure the rest of
+            // this guard exists to turn into a sentence.
+            if (!refusal && !platform::gpioCapability(gpio).outputCapable)
+                refusal = "is an input-only pin on this chip";
+            if (!refusal) continue;
+            role = wired[i].role;
+            why = refusal;
+            return wired[i].gpio;
         }
         return -1;
     }

@@ -1,6 +1,6 @@
 """check_docgen.py guards the generated documentation, so this guards it back.
 
-The rules it enforces (documentation-standards.md § Card size) are invisible when they
+The rules it enforces (documentation-standards.md § The card) are invisible when they
 break: a regex that stops matching makes the check print a clean run, which is
 indistinguishable from a tree with nothing wrong in it. Four `## HLS, details` headings
 lived in the tree unlinked for exactly that reason, found by adding the rule rather than
@@ -199,14 +199,56 @@ def test_a_gif_on_a_non_animated_page_is_flagged():
     assert "moonmodules/light/drivers.md" not in check_docgen.ANIMATED_PAGES
 
 
+def test_a_card_with_no_image_is_reported():
+    """Every card leads with a picture, and the rule must FIRE on one that does not: the
+    assertions beside this one read _cards() only, which is the data rather than the rule."""
+    import check_docgen
+    findings = check_docgen._card_rules("moonmodules/light/drivers.md",
+                                        list(_cards(_card()))[0])
+    assert any("no image" in why for _, why in findings)
+
+
+def test_the_image_format_rule_fires_both_ways():
+    """A png on an animated page and a gif on a static one are each half the convention,
+    and a rule that only caught one left the other unenforced for four pages."""
+    import check_docgen
+    animated = sorted(check_docgen.ANIMATED_PAGES)[0]
+    png = ('### Thing 💫 · kind\n\n<img src="../../assets/x.png" alt="x">\n\n'
+           'Short.\n\n- `a`: one.\n')
+    gif = ('### Thing 💫 · kind\n\n<img src="../../assets/x.gif" alt="x">\n\n'
+           'Short.\n\n- `a`: one.\n')
+    on_animated = check_docgen._card_rules(animated, list(_cards(png))[0])
+    assert any("image is png" in why for _, why in on_animated)
+    on_static = check_docgen._card_rules("moonmodules/light/drivers.md",
+                                         list(_cards(gif))[0])
+    assert any("image is gif" in why for _, why in on_static)
+    # And silent the right way round: a gif on the animated page, a png on the static one.
+    assert not any("image is" in why for _, why
+                   in check_docgen._card_rules(animated, list(_cards(gif))[0]))
+    assert not any("image is" in why for _, why
+                   in check_docgen._card_rules("moonmodules/light/drivers.md",
+                                               list(_cards(png))[0]))
+
+
 def test_a_baseline_entry_does_not_tolerate_growth():
     """A baseline holds a card at the size it WAS. Matching the rule word alone let a
     tolerated card grow without limit, which is the opposite of a baseline's job."""
     import check_docgen
-    word, n = check_docgen._measure("controls 678 > 600")
-    assert (word, n) == ("controls", 678)
-    word2, n2 = check_docgen._measure("no image: every card leads with one")
-    assert word2 == "no" and n2 is None
+    rule, n = check_docgen._measure("controls 678 > 600")
+    assert (rule, n) == ("controls", 678)
+    rule2, n2 = check_docgen._measure("no image: every card leads with one")
+    assert rule2 == "no image" and n2 is None
+
+
+def test_two_rules_that_share_an_opening_word_key_apart():
+    """A details table has two limits, columns and cell width, and both findings open
+    with the same two words. Keyed on that, one baselined wide table also tolerated a
+    cell growing past its limit: a second rule silently inheriting the first's licence."""
+    import check_docgen
+    cols = check_docgen._measure("details table has 5 columns (max 4)")
+    cell = check_docgen._measure("details table cell is 420 characters (max 300): prose in a grid")
+    assert cols[0] != cell[0]
+    assert (cols, cell) == (("details table has", 5), ("details table cell", 420))
 
 
 def test_an_effect_card_needs_a_gif_not_a_png():

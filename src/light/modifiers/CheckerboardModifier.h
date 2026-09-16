@@ -11,7 +11,7 @@ namespace mm {
 //
 // Prior art: MoonLight's Checkerboard modifier (M_MoonLight.h) drops lights by
 // setting position to a sentinel; our fold returns false from modifyLogical.
-/// Author: WildCats08 / @Brandon502 (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
+/// Author: WildCats08 / @Brandon502 (MoonLight), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
 /// Modifier masking the layer in a checkerboard pattern.
 /// @card CheckerboardModifier.gif
 class CheckerboardModifier : public ModifierBase {

@@ -1306,8 +1306,8 @@ protected:
     LedPeripheral* peripheral_ = nullptr;
 
     // The `peripheral` Select's state. peripheralSel_ indexes into the BOARD-FILTERED option list
-    // (only backends with lanesAvailable() > 0 on this chip), whose labels are held in peripheralOptions_
-    //: a stable member array because addSelect borrows the pointer (same pattern as presetOptions_).
+    // (only backends with lanesAvailable() > 0 on this chip), whose labels are held in peripheralOptions_,
+    // a stable member array because addSelect borrows the pointer (same pattern as presetOptions_).
     // peripheralIndex_[k] maps filtered slot k back to its registry index, so a Select change can create
     // the right backend. All three are (re)built by buildPeripheralOptions().
     uint8_t peripheralSel_ = 0;
@@ -1415,8 +1415,8 @@ protected:
     const uint8_t* encodeSrc_ = nullptr;  // when non-null, encodeRows reads this (bias-corrected) instead of sourceBuffer_
 
     /// (Re)size the ring snapshot to hold this driver's whole window (`winLen_ × srcCh`), OFF the hot path.
-    /// Called from the ring build in reinit(), so snapshotSourceForRing() on the render thread only memcpys
-    ///: never allocates (the hot-path no-alloc rule). Grow-only; a larger window later re-grows here, not
+    /// Called from the ring build in reinit(), so snapshotSourceForRing() on the render thread only
+    /// memcpys and never allocates (the hot-path no-alloc rule). Grow-only; a larger window re-grows here, not
     /// mid-frame. Returns false if it can't allocate (the ring build then degrades like any alloc failure).
     bool ensureSnapshotCap() {
         if (!sourceBuffer_) return true;   // sized on the first build that has a source; harmless if absent
@@ -1938,14 +1938,13 @@ protected:
             for (uint8_t i = 0; i < width && i < kMaxLanes; i++) {
                 const uint16_t pin = bus[i];
                 if (pin > 48) continue;                       // unset/NC: nothing routed
-                const auto cap = platform::gpioCapability(static_cast<uint8_t>(pin));
-                if (cap.validGpio && !cap.reserved) continue;
                 // A pin the package lacks fails the same silent way a flash pin does (the
-                // ESP32-PICO-V3-02 has no GPIO 18/23), so it is refused here for the same reason.
+                // ESP32-PICO-V3-02 has no GPIO 18/23), so both are refused here, in the platform's
+                // own words (platform::gpioRefusal), which every driver claiming a pin shares.
+                const char* why = platform::gpioRefusal(static_cast<uint8_t>(pin));
+                if (!why) continue;
                 std::snprintf(statusBuf_, sizeof(statusBuf_),
-                              cap.validGpio ? "GPIO %u is wired to flash/PSRAM on this chip - pick another pin"
-                                            : "GPIO %u does not exist on this chip package - pick another pin",
-                              unsigned(pin));
+                              "GPIO %u %s - pick another pin", unsigned(pin), why);
                 setStatus(statusBuf_, Severity::Error);
                 deinit();
                 return;
@@ -2022,10 +2021,10 @@ protected:
                                             dataBytes, rowBits, busClockMultiplier());
     }
 
-    /// INTRUSIVE loopback: verify the LIVE pipeline's wire, building NO bus and freeing NO ring (see the
-    /// loopbackIntrusive member doc + platform::ws2812LoopbackRide). Pins the pattern onto the tapped strand
-    /// via the snapshot hold, lets the running ring clock a few frames so the hold takes, then arms the RX to
-    /// catch one and bit-verify. `lights`/`outCh` come from runLoopbackSelfTest (its cap + channel count).
+    /// INTRUSIVE loopback: verify the LIVE pipeline's wire, building NO bus and freeing NO ring
+    /// (loopbackIntrusive's member doc and platform::ws2812LoopbackRide carry the rest). Pins the
+    /// pattern on the tapped strand via the snapshot hold, lets the ring clock a few frames so it
+    /// takes, then arms the RX to catch one and bit-verify.
     void runIntrusiveLoopback(nrOfLightsType lights, uint8_t outCh) {
         if (loopbackRxPin < 0) {
             clearFailBuf();

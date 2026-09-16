@@ -17,9 +17,9 @@ namespace mm {
 /// WLED-MM "GEQ 3D" effect. The perspective-bar geometry, the projector split, the per-face
 /// darkening, and the `depth` line-shorten are reproduced exactly here, written fresh on EffectBase
 /// + the shared draw primitives. Reads AudioService::latestFrame(); silence → flat → dark, safe on
-/// any target and grid size. (MoonLight's `softHack` anti-alias toggle is dropped — draw::line is a
+/// any target and grid size. (MoonLight's `softHack` anti-alias toggle is dropped, draw::line is a
 /// crisp Bresenham; the `soft` arg has no projectMM equivalent.)
-/// Author: @TroyHacks (MoonModules, GPLv3) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
+/// Author: @TroyHacks (MoonModules, GPLv3), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
 /// Audio-reactive 3D graphic-equaliser effect.
 class GEQ3DEffect : public EffectBase {
 public:

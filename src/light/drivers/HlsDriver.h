@@ -54,7 +54,7 @@ namespace mm {
 /// Driver that publishes the layer as an H.264/HLS stream.
 ///
 /// Origin: projectMM. Encoding by the user's ffmpeg on desktop, the P4's H.264 block on
-/// device. HLS is Apple's RFC 8216.
+/// device. HLS was created by Apple and is described in the informational RFC 8216.
 class HlsDriver : public DriverBase {
 public:
     static constexpr const char* kTags = "🖥️";

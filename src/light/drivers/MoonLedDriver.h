@@ -619,8 +619,8 @@ public:
     // board hung (whole-session freeze); it also raced the prime fork's shared helper state (the bottom-16
     // flicker). Priming alone keeps the parallel win without either failure.
 
-    /// True when the fork-join should engage: the helper task is up AND this caller is running on core 1
-    ///: i.e. the render/encode split is active and core 0 is the idle one to hand the bottom half. On
+    /// True when the fork-join should engage: the helper task is up AND this caller runs on core 1, so
+    /// the render/encode split is active and core 0 is the idle one to hand the bottom half. On
     /// core 0 (single-core, or the split disengaged), there is no idle second core, so stay serial and
     /// avoid spawning contention onto the core doing the render.
     bool snapHelperReady() const override {

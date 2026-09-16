@@ -29,8 +29,11 @@ uint8_t boardNamed(const Hub75Driver& d, const char* label) {
         const ControlDescriptor& c = d.controls()[i];
         if (std::strcmp(c.name, "board") != 0) continue;
         const char* const* options = reinterpret_cast<const char* const*>(c.aux);
-        for (uint8_t k = 0; k < c.max; k++)
-            if (std::strcmp(options[k], label) == 0) return k;
+        // int32_t to match the descriptor's own `max`: a uint8_t counter compared against a
+        // wider signed type is the narrowing CodeQL flags, and it would never terminate on a
+        // select with more options than a byte holds.
+        for (int32_t k = 0; k < c.max; k++)
+            if (std::strcmp(options[k], label) == 0) return static_cast<uint8_t>(k);
     }
     return 0xFF;
 }
@@ -41,6 +44,16 @@ void selectBoard(Hub75Driver& d, const char* label) {
     d.boardSel = k;
     d.onControlChanged("board");   // writes the board's map into the pins and re-renders, as the API does
 }
+
+// The capability override is global, so it must come off on EVERY exit path: a failing REQUIRE
+// unwinds past a trailing clearTestGpioCapability() and leaks the fake pin into later cases.
+struct ScopedGpioCapability {
+    ScopedGpioCapability(uint8_t gpio, platform::GpioCapability cap) {
+        platform::clearTestGpioCapability();
+        platform::setTestGpioCapability(gpio, cap);
+    }
+    ~ScopedGpioCapability() { platform::clearTestGpioCapability(); }
+};
 
 struct LaneModule : MoonModule {
     int8_t lane = 18;
@@ -128,10 +141,9 @@ TEST_CASE("PinsModule flags a HUB75 board line colliding with an LED lane") {
 // LCD bus there resets the chip with no panic, so the driver refuses before init and names the
 // line, the same guard ParallelLedDriver applies to its lanes.
 TEST_CASE("Hub75Driver refuses a line on a flash/PSRAM pin and names it, rather than resetting") {
-    platform::clearTestGpioCapability();
     platform::GpioCapability psram;
     psram.reserved = true;
-    platform::setTestGpioCapability(36, psram);   // MatrixPortal's b line
+    const ScopedGpioCapability held(36, psram);   // MatrixPortal's b line
 
     Layouts layouts; GridLayout grid; Layer layer; Hub75Driver d;
     grid.width = 64; grid.height = 64; grid.depth = 1;
@@ -148,5 +160,4 @@ TEST_CASE("Hub75Driver refuses a line on a flash/PSRAM pin and names it, rather 
     CHECK(d.severity() == MoonModule::Severity::Error);
     CHECK(std::strstr(d.status(), "b on GPIO 36") != nullptr);
     CHECK(std::strstr(d.status(), "PSRAM") != nullptr);
-    platform::clearTestGpioCapability();
 }

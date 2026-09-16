@@ -118,7 +118,7 @@ Two columns. **Module** leads with the image, then the name and description; **D
 
 Every card leads with an image: `.gif` on effects, modifiers and layouts, which show motion, `.png` elsewhere.
 
-A control reads `` - `name`: what it does ``. The colon separates the name from its description, and the build styles the two differently. An em-dash separates as well, because 143 lines still use one, but it is not the form to write.
+A control reads `` - `name`: what it does ``. The colon separates the name from its description, and the build styles the two differently.
 
 | | Limit |
 |---|---|
@@ -161,7 +161,7 @@ The first four cut and the last adds, deliberately: the result is a short line o
 
 **Use `//` sparingly.** A comment restating what the code does is a naming failure, and the fix is a better name rather than a better sentence. What survives is the WHY a reader cannot recover from the code.
 
-Enforced by [`check_docgen.py`](../moondeck/check/check_docgen.py) over `src/light/drivers` for now, widening as each area is swept.
+Enforced by [`check_docgen.py`](../moondeck/check/check_docgen.py), which names the areas it covers.
 
 
 ### Writing a `///` that generates correctly
@@ -177,5 +177,5 @@ These are traps, not style: each one silently loses content from the generated p
 - **Write "such as", not "e.g."** The brief ends at the first period.
 - **A weasel that CONTRASTS is information.** "bytes actually allocated" against requested, "the factor actually in use" against configured: the word carries the distinction the comment exists to draw. Vale flags the word rather than the use, which is why its Weasel rule is a suggestion.
 - **A `"\u2014"` string literal is not prose.** The dash a control shows for an unset value is UI text: converting it changes what the device displays. Vale flags it, and it stays.
-- **`@xref`, `@card` and `@moreinfo` are ours, and Doxygen must not know them.** Each survives as plain text precisely because it is not a Doxygen command, and a post-process turns it into a link, an image or a section afterwards. Declaring them as `ALIASES` makes Doxygen consume them and the post-process finds nothing left: every card image, cross-reference and More info section goes. This is also why the marker is `@xref` rather than `@ref`, which Doxygen does own.
+- **`@xref`, `@card` and `@moreinfo` are ours, and Doxygen must not know them.** Each survives as plain text precisely because it is not a Doxygen command, and a post-process turns it into a link, an image or a section afterward. Declaring them as `ALIASES` makes Doxygen consume them and the post-process finds nothing left: every card image, cross-reference and More info section goes. This is also why the marker is `@xref` rather than `@ref`, which Doxygen does own.
 - **Doxygen's own warnings stay off.** `WARN_IF_DOC_ERROR` reports only the three commands above, so on this codebase it is noise by construction rather than a signal being silenced.

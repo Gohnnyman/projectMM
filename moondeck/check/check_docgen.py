@@ -16,7 +16,7 @@ checker is the thing the documentation sweep exists to delete.
 
 A card is one table row, and a row is read across. Text that outgrows its cell turns the
 column into a ribbon: at the worst, 3,416 characters of description in a cell 44% of the
-page wide. The rule and its limits are in documentation-standards.md § Card size; this
+page wide. The rule and its limits are in documentation-standards.md § The card; this
 script owns the measuring.
 
 Where the overflow goes is the point, and there are exactly two homes:
@@ -148,7 +148,7 @@ def _structure(text: str, rel: str):
     lines = text.split("\n")
 
     last_card = max((i for i, l in enumerate(lines) if h._H3_RE.match(l)), default=-1)
-    card_names = {re.split(r"\s+[^\w(]", h._H3_RE.match(l).group("title"))[0].strip()
+    card_names = {h.card_name(h._H3_RE.match(l).group("title"))
                   for l in lines if h._H3_RE.match(l)}
 
     # One section per card. Two headings with the same name both slug to the same anchor,
@@ -208,8 +208,8 @@ def _rendered_links(rel: str, text: str):
             if f"{label}:" not in SECOND_COLUMN_LINKS:
                 name = re.search(r'class="mm-name">([^<]*)', cells[0])
                 out.append((f"{rel}::{name.group(1) if name else '?'}",
-                            f"second column links to `{label}:`, but it carries only "
-                            f"Tests and API: put the rest in the description"))
+                            f"second column links to `{label}:`, which is not one of "
+                            f"{', '.join(sorted(SECOND_COLUMN_LINKS))}: put it in the description"))
     return out
 
 
@@ -251,15 +251,37 @@ def _details_tables(rel: str, text: str):
     return list(dict.fromkeys(out))
 
 
+# Every rule this check emits, longest first so "details table cell" wins over
+# "details table". The FULL name, not a first word: "no image" and "one control" each
+# truncate to a word that names nothing, and the two details-table rules share theirs.
+_RULE_NAMES = (
+    "details table cell", "details table has", "details section", "details heading",
+    "public function has no", "public variable has no", "second column",
+    "class comment", "member comment", "no image", "image is", "one control",
+    "description", "controls", "doc line", "appendix",
+)
+
+
+def _rule_name(reason: str) -> str:
+    """Which rule a finding reports, as a stable key for the baseline and the report."""
+    head = reason.split(":")[0]
+    for name in _RULE_NAMES:
+        if head.startswith(name):
+            return name
+    return head.split(" ")[0]
+
+
 def _measure(reason: str):
-    """The rule word and its number, or None where a rule carries no number.
+    """The rule name and its number, or None where a rule carries no number.
 
     A baseline entry is tolerated at the number it recorded, so both halves are needed:
-    the word says which rule, the number says how far over it was allowed to be.
+    the name says which rule, the number says how far over it was allowed to be. The
+    FULL rule name, not its first word: "details table has N columns" and "details table
+    cell is N characters" share one, so keying on the word let a tolerated wide table
+    also grow a wide cell unseen.
     """
-    word = reason.split(":")[0].split(" ")[0]
     m = re.match(r"\D*(\d+)", reason)
-    return word, (int(m.group(1)) if m else None)
+    return _rule_name(reason), (int(m.group(1)) if m else None)
 
 
 def _headers():
@@ -281,6 +303,23 @@ def _doc_runs(lines):
             i = j
         else:
             i += 1
+
+
+def _declared_key(decl: str, start: int) -> str:
+    """The baseline key for a declaration: its name, plus its arity where it takes one.
+
+    Two overloads share a name, so keying on the name alone put both under one entry and
+    the baseline then tolerated whichever the check happened to measure first (the tree
+    has `PreviewDriver::emit` twice today). The parameter COUNT separates them without
+    depending on how a signature is spelled, which a normalized type list would.
+    """
+    name = _declared_name(decl, start)
+    m = re.search(r"\(([^)]*)\)", decl)
+    if not m or "(" not in decl:
+        return name
+    args = m.group(1).strip()
+    n = 0 if not args or args == "void" else args.count(",") + 1
+    return f"{name}/{n}"
 
 
 def _declared_name(decl: str, start: int) -> str:
@@ -309,6 +348,11 @@ def _declared_name(decl: str, start: int) -> str:
 
 _CLASS_RE = re.compile(r"^(class|struct)\s+\w+")
 _FUNC_RE = re.compile(r"^[\w:<>,\s\*&]+\s+(\w+)\s*\([^)]*\)\s*(const)?\s*(override)?\s*[;{]")
+# A constructor and a destructor have no return type, and a pure virtual ends `= 0;`, so the
+# form above matches none of them: three public declarations the "needs a ///" rule never saw.
+_SPECIAL_FUNC_RE = re.compile(
+    r"^(?:explicit\s+|virtual\s+)*~?(\w+)\s*\([^)]*\)\s*"
+    r"(?:const\s*)?(?:noexcept\s*)?(?:override\s*)?(?:=\s*(?:0|default|delete)\s*)?[;{:]")
 _VAR_RE = re.compile(r"^[\w:<>,\s\*&]+\s+(\w+)\s*(=[^;]+)?;")
 
 
@@ -327,11 +371,16 @@ def _header_rules(rel: str, text: str):
     for start, end, nxt in _doc_runs(lines):
         n = end - start
         if _CLASS_RE.match(nxt):
+            # The LEAD only: the run ends at @moreinfo, whose own lines are the appendix and
+            # are measured against MAX_MOREINFO below. Counting both here would put the
+            # documented budget (10 lead + 20 appendix) out of reach of any header.
+            head = next((k for k in range(start, end) if "@moreinfo" in lines[k]), end)
+            n = head - start
             if n > MAX_CLASS_DOC:
                 out.append((f"{rel}::{nxt.split()[1].rstrip('{:')}",
                             f"class comment {n} lines > {MAX_CLASS_DOC}"))
         elif n > MAX_MEMBER_DOC:
-            out.append((f"{rel}::{_declared_name(nxt, start)}",
+            out.append((f"{rel}::{_declared_key(nxt, start)}",
                         f"member comment {n} lines > {MAX_MEMBER_DOC}: "
                         f"a deep dive goes after @moreinfo"))
         for k in range(start, end):
@@ -389,10 +438,42 @@ def _header_rules(rel: str, text: str):
         prev = lines[i - 1].lstrip() if i else ""
         if prev.startswith("///") or "///" in ln:
             continue
-        if _FUNC_RE.match(st):
-            out.append((f"{rel}::{_declared_name(st, i)}", "public function has no ///"))
+        if _FUNC_RE.match(st) or _SPECIAL_FUNC_RE.match(st):
+            out.append((f"{rel}::{_declared_key(st, i)}", "public function has no ///"))
         elif "(" not in st and _VAR_RE.match(st):
             out.append((f"{rel}::{_declared_name(st, i)}", "public variable has no ///"))
+    return out
+
+
+def _card_rules(rel: str, c: dict):
+    """Every rule that reads ONE card: its sizes and its image.
+
+    A function rather than a loop body inside _violations, so a test can hand it a card
+    and assert the rule fires. Read through the page's rendered form, the rules stayed
+    untested against anything but the real tree, which is where a rule that had stopped
+    matching would look like a clean run.
+    """
+    out = []
+    key = f"{rel}::{c['title']}"
+    if c["desc"] > MAX_DESC:
+        out.append((key, f"description {c['desc']} > {MAX_DESC}"))
+    if c["controls"] > MAX_CONTROLS:
+        out.append((key, f"controls {c['controls']} > {MAX_CONTROLS}"))
+    if c["widest"] > MAX_CONTROL:
+        out.append((key, f"one control {c['widest']} > {MAX_CONTROL}: "
+                         f"{c['widest_text'][:60]}..."))
+    # A card leads with its picture. The image is the first thing the eye reaches on a
+    # row, and a card without one starts with a name against blank space, which reads as
+    # a gap rather than as a module that happens to be invisible.
+    if not c["img"]:
+        out.append((key, "no image: every card leads with one"))
+    else:
+        want = ".gif" if rel in ANIMATED_PAGES else ".png"
+        if not c["img_src"].lower().endswith(want):
+            why = ("an effect, modifier or layout shows motion" if want == ".gif"
+                   else "a card or control is sharper and smaller as a png")
+            out.append((key, f"image is {c['img_src'].rsplit('.', 1)[-1]}, "
+                             f"not a {want.lstrip('.')}: {why}"))
     return out
 
 
@@ -406,27 +487,8 @@ def _violations():
         out.extend(_structure(text, rel))
         out.extend(_rendered_links(rel, text))
         out.extend(_details_tables(rel, text))
-        for c in _cards(text):
-            key = f"{rel}::{c['title']}"
-            if c["desc"] > MAX_DESC:
-                out.append((key, f"description {c['desc']} > {MAX_DESC}"))
-            if c["controls"] > MAX_CONTROLS:
-                out.append((key, f"controls {c['controls']} > {MAX_CONTROLS}"))
-            if c["widest"] > MAX_CONTROL:
-                out.append((key, f"one control {c['widest']} > {MAX_CONTROL}: "
-                                 f"{c['widest_text'][:60]}..."))
-            # A card leads with its picture. The image is the first thing the eye reaches
-            # on a row, and a card without one starts with a name against blank space,
-            # which reads as a gap rather than as a module that happens to be invisible.
-            if not c["img"]:
-                out.append((key, "no image: every card leads with one"))
-            else:
-                want = ".gif" if rel in ANIMATED_PAGES else ".png"
-                if not c["img_src"].lower().endswith(want):
-                    why = ("an effect, modifier or layout shows motion" if want == ".gif"
-                           else "a card or control is sharper and smaller as a png")
-                    out.append((key, f"image is {c['img_src'].rsplit('.', 1)[-1]}, "
-                                     f"not a {want.lstrip('.')}: {why}"))
+        for card in _cards(text):
+            out.extend(_card_rules(rel, card))
 
     for rel in _headers():
         out.extend(_header_rules(str(rel), (ROOT / rel).read_text()))
@@ -448,19 +510,7 @@ def _write_report(found) -> None:
     for key, why in found:
         page, _, title = key.partition("::")
         by_page[page].append((title, why))
-    # The RULE, not its first word: "no image" and "one control" both truncate to a word
-    # that names nothing. A reader of the report needs to know which rule, so map to it.
-    def _rule(why: str) -> str:
-        head = why.split(":")[0]
-        for name in ("no image", "image is", "one control", "description", "controls",
-                     "details table", "details section", "details heading", "second column",
-                     "class comment", "member comment", "doc line", "appendix",
-                     "public function has no", "public variable has no"):
-            if head.startswith(name):
-                return name
-        return head.split(" ")[0]
-
-    rules = Counter(_rule(why) for _, why in found)
+    rules = Counter(_rule_name(why) for _, why in found)
 
     out = ["# Docgen", "",
            "Generated by [`moondeck/check/check_docgen.py`](../../../moondeck/check/check_docgen.py) "
@@ -576,7 +626,7 @@ def main() -> int:
     print("\nMove the overflow, do not trim it: module behavior into the header's ///"
           "\n(the technical page the card links), cross-module rationale into a"
           "\n`## <Name>, details` section on the same page."
-          "\nRules: docs/contributing/documentation-standards.md § Card size.")
+          "\nRules: docs/contributing/documentation-standards.md § The card.")
     return 1
 
 

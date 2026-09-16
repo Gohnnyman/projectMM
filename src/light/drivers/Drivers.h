@@ -945,8 +945,8 @@ private:
         return true;
     }
 
-    // Is there an enabled driver child at all? The split only engages when there's output work to move
-    //: with no driver there is nothing for core 1 to do, so we don't spawn a task or claim a buffer.
+    // Is there an enabled driver child at all? The split only engages when there's output work to
+    // move: with no driver there is nothing for core 1 to do, so we don't spawn a task or claim a buffer.
     bool anyDriver() const {
         for (uint8_t i = 0; i < childCount(); i++) {
             MoonModule* c = child(i);

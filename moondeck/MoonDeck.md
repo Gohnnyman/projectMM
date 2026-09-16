@@ -174,6 +174,13 @@ Reads the pages the docs build renders as card tables and reports, per card:
 - a details table past 4 columns, or a cell past 300 characters
 - any link in the second column that is not Tests, API or Details
 
+And per header, over the directories it names in `HEADER_DIRS`:
+
+- a class comment past 10 lines, or its `@moreinfo` appendix past 20
+- a member comment past one line: a deep dive goes after `@moreinfo`
+- one `///` line past 20 words
+- a public function or variable with no `///` at all
+
 `--report` writes [docs/reference/metrics/docgen.md](../docs/reference/metrics/docgen.md), the tracked state of the sweep: totals per rule and per page, then every finding. Current state only, so its git history is the trend, the same shape repo-health.md uses.
 
 `docgen_baseline.txt` holds what the tree already breaks, so the check passes today and still fails on anything new. An entry tolerates a card **at the size it recorded**: shrink it and nothing needs refreshing, grow it and the check fails naming the old number. `--baseline` has no card on purpose, since a button that rewrites the grandfather list is a button that clears a violation.

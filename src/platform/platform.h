@@ -237,6 +237,11 @@ struct GpioCapability {
     bool reserved = false;      // wired to flash / PSRAM / native USB: routing I/O here corrupts the device
 };
 GpioCapability gpioCapability(uint8_t gpio);
+// Why a driver must refuse this pin, or null when it may use it. ONE wording for a rule three
+// drivers enforce: routing a signal onto a flash/PSRAM pad corrupts the device and onto a pad the
+// package lacks wedges the flash cache, and both fail as a reset naming nothing, so every driver
+// that claims a pin asks this before init rather than each inventing its own sentence.
+const char* gpioRefusal(uint8_t gpio);
 // Test-only (desktop): make gpioCapability(gpio) return `cap` for one specific gpio, so PinsModule's
 // severity derivation (reserved→error, driven-role-on-strap/input-only→warn) is testable on the host
 // where every real pin is otherwise "safe". Call per gpio under test; reset in release.

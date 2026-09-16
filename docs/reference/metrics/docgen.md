@@ -10,11 +10,11 @@ Every place the generated documentation breaks the shape [the standards](../../c
 
 | Rule | Count |
 |---|---:|
-| member comment | 374 |
-| public function has no | 70 |
+| member comment | 373 |
+| public function has no | 74 |
 | public variable has no | 53 |
 | no image | 49 |
-| doc line | 39 |
+| doc line | 36 |
 | one control | 35 |
 | description | 27 |
 | controls | 18 |
@@ -37,25 +37,25 @@ Every place the generated documentation breaks the shape [the standards](../../c
 
 | File | Findings |
 |---|---:|
-| `src/light/drivers/ParallelLedDriver.h` | 76 |
+| `src/light/drivers/ParallelLedDriver.h` | 75 |
 | `src/light/drivers/MoonLedDriver.h` | 71 |
 | `src/light/drivers/Drivers.h` | 41 |
 | `src/light/drivers/HueDriver.h` | 33 |
+| `src/light/drivers/LightPresetsModule.h` | 31 |
 | `src/light/drivers/RmtLedDriver.h` | 31 |
-| `src/light/drivers/LightPresetsModule.h` | 30 |
 | `src/light/drivers/PreviewDriver.h` | 30 |
-| `src/light/drivers/Hub75Driver.h` | 29 |
+| `src/light/drivers/Hub75Driver.h` | 28 |
 | `src/light/drivers/DriverBase.h` | 27 |
 | `src/light/drivers/PanelCardDriver.h` | 27 |
 | `src/light/drivers/NetworkSendDriver.h` | 25 |
-| `src/light/drivers/MultiPinLedDriver.h` | 23 |
+| `src/light/drivers/MultiPinLedDriver.h` | 21 |
 | `src/light/drivers/Correction.h` | 18 |
 | `src/light/drivers/ParallelSlots.h` | 18 |
+| `src/light/drivers/HlsDriver.h` | 16 |
 | `src/light/drivers/Hub75Slots.h` | 16 |
-| `src/light/drivers/HlsDriver.h` | 15 |
 | `src/light/drivers/ParlioLedDriver.h` | 15 |
-| `src/light/drivers/LedPeripheral.h` | 12 |
-| `src/light/drivers/NdiDriver.h` | 10 |
+| `src/light/drivers/LedPeripheral.h` | 13 |
+| `src/light/drivers/NdiDriver.h` | 11 |
 | `src/light/drivers/LedDriverConfig.h` | 3 |
 | `src/light/drivers/PinList.h` | 1 |
 
@@ -213,8 +213,8 @@ Every place the generated documentation breaks the shape [the standards](../../c
 
 ### src/light/drivers/Correction.h
 
-- **apply**: member comment 18 lines > 1: a deep dive goes after @moreinfo
-- **cieLuminance**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **apply/3**: member comment 18 lines > 1: a deep dive goes after @moreinfo
+- **cieLuminance/1**: member comment 7 lines > 1: a deep dive goes after @moreinfo
 - **curve**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **hasMotion**: public variable has no ///
 - **kAbsent**: public variable has no ///
@@ -228,55 +228,55 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **offUV**: public variable has no ///
 - **offWarmWhite**: public variable has no ///
 - **offYellow**: public variable has no ///
-- **rebuild**: public function has no ///
-- **rebuildBrightness**: public function has no ///
+- **rebuild/3**: public function has no ///
+- **rebuildBrightness/1**: public function has no ///
 - **uint8_t**: member comment 17 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/DriverBase.h
 
-- **addWindowControls**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **correction**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **correctionForTest**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **addWindowControls/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **correction/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **correctionForTest/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **curveSel_**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **defineControls**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **defineCorrectionControls**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **defineDriverControls**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **ensureWire**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **hasCorrectionControls**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **hwBlock**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **isCorrectionControl**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **isWindowControl**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **defineControls/0**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **defineCorrectionControls/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **defineDriverControls/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **ensureWire/1**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **hasCorrectionControls/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **hwBlock/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **isCorrectionControl/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **isWindowControl/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **kWindowAll**: member comment 13 lines > 1: a deep dive goes after @moreinfo
-- **layer**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **motionHeld**: public function has no ///
-- **onControlChanged**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **onCorrectionChanged**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **rebuildCorrection**: member comment 9 lines > 1: a deep dive goes after @moreinfo
-- **release**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **resolveWindowLenForTest**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **role**: member comment 8 lines > 1: a deep dive goes after @moreinfo
-- **setDefaultPresetName**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **setLayer**: member comment 8 lines > 1: a deep dive goes after @moreinfo
-- **setMotionHeld**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **setWindow**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **layer/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **motionHeld/0**: public function has no ///
+- **onControlChanged/1**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **onCorrectionChanged/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **rebuildCorrection/1**: member comment 9 lines > 1: a deep dive goes after @moreinfo
+- **release/0**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **resolveWindowLenForTest/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **role/0**: member comment 8 lines > 1: a deep dive goes after @moreinfo
+- **setDefaultPresetName/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **setLayer/1**: member comment 8 lines > 1: a deep dive goes after @moreinfo
+- **setMotionHeld/1**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **setWindow/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **windowSlice**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **windowStart**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **windowStart/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/Drivers.h
 
 - **Drivers**: class comment 53 lines > 10
-- **acceptsChildRoles**: public function has no ///
-- **affectsPrepare**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **applyRelay**: member comment 9 lines > 1: a deep dive goes after @moreinfo
+- **acceptsChildRoles/0**: public function has no ///
+- **affectsPrepare/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **applyRelay/0**: member comment 9 lines > 1: a deep dive goes after @moreinfo
 - **brightness**: member comment 9 lines > 1: a deep dive goes after @moreinfo
-- **defineControls**: public function has no ///
-- **effectiveBrightness**: public function has no ///
-- **firstOutputRgb**: public function has no ///
-- **fixtureChannels**: public function has no ///
+- **defineControls/0**: public function has no ///
+- **effectiveBrightness/0**: public function has no ///
+- **firstOutputRgb/1**: public function has no ///
+- **fixtureChannels/0**: public function has no ///
 - **kMaxRelays**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **lastRelayCount_**: public variable has no ///
-- **latestSummary**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **line 117**: member comment 8 lines > 1: a deep dive goes after @moreinfo
+- **latestSummary/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **line 117/0**: member comment 8 lines > 1: a deep dive goes after @moreinfo
 - **line 212**: member comment 14 lines > 1: a deep dive goes after @moreinfo
 - **line 322**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **line 538**: member comment 2 lines > 1: a deep dive goes after @moreinfo
@@ -286,82 +286,82 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **multicore**: member comment 21 lines > 1: a deep dive goes after @moreinfo
 - **offSeconds_**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **on**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **onControlChanged**: public function has no ///
+- **onControlChanged/1**: public function has no ///
 - **palette**: member comment 5 lines > 1: a deep dive goes after @moreinfo
 - **paletteScriptModule_**: public variable has no ///
-- **prepare**: public function has no ///
-- **publishFixtureChannels**: member comment 9 lines > 1: a deep dive goes after @moreinfo
-- **quiesce**: public function has no ///
-- **quiesceEncodeForTest**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **quiesceRenderSplit**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **rebuildAllCorrections**: member comment 9 lines > 1: a deep dive goes after @moreinfo
-- **refreshLivePalettes**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **release**: public function has no ///
-- **renderSplitActive**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **renderWaitPeakUs**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **setEffects**: public function has no ///
-- **setLayer**: public function has no ///
-- **setup**: public function has no ///
-- **tick1s**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **tickNonDriverChildren**: public function has no ///
-- **updateMotionHold**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **prepare/0**: public function has no ///
+- **publishFixtureChannels/0**: member comment 9 lines > 1: a deep dive goes after @moreinfo
+- **quiesce/0**: public function has no ///
+- **quiesceEncodeForTest/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **quiesceRenderSplit/0**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **rebuildAllCorrections/0**: member comment 9 lines > 1: a deep dive goes after @moreinfo
+- **refreshLivePalettes/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **release/0**: public function has no ///
+- **renderSplitActive/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **renderWaitPeakUs/0**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **setEffects/1**: public function has no ///
+- **setLayer/1**: public function has no ///
+- **setup/0**: public function has no ///
+- **tick1s/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **tickNonDriverChildren/0**: public function has no ///
+- **updateMotionHold/0**: member comment 7 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/HlsDriver.h
 
-- **affectsPrepare**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **autoBitrateKbit**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **autoScale**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **defineDriverControls**: public function has no ///
+- **HlsDriver/0**: public function has no ///
+- **affectsPrepare/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **autoBitrateKbit/0**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **autoScale/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **defineDriverControls/0**: public function has no ///
 - **kMaxEncodeWidth**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **kMaxScale**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **kMinEncodeSize**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **kSegmentDir**: public variable has no ///
 - **kTags**: public variable has no ///
 - **line 2**: member comment 39 lines > 1: a deep dive goes after @moreinfo
-- **prepare**: public function has no ///
-- **release**: public function has no ///
+- **prepare/0**: public function has no ///
+- **release/0**: public function has no ///
 - **scale**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **setSourceBuffer**: public function has no ///
-- **tags**: public function has no ///
+- **setSourceBuffer/1**: public function has no ///
+- **tags/0**: public function has no ///
 
 ### src/light/drivers/Hub75Driver.h
 
-- **Hub75Driver**: class comment 75 lines > 10
+- **Hub75Driver**: class comment 23 lines > 10
 - **addrA**: public variable has no ///
-- **affectsPrepare**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **applyBoard**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **affectsPrepare/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **applyBoard/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **b2**: public variable has no ///
 - **bitDepth**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **boardSel**: member comment 8 lines > 1: a deep dive goes after @moreinfo
-- **buildBackendOptions**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **buildBoardOptions**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **buildBackendOptions/0**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **buildBoardOptions/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **clk**: public variable has no ///
-- **defineDriverControls**: public function has no ///
+- **defineDriverControls/0**: public function has no ///
 - **e**: public variable has no ///
 - **editable**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **hwBlock**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **hwBlock/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **label**: public variable has no ///
-- **line 67**: doc line 25 words > 20
 - **oe**: public variable has no ///
-- **onControlChanged**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **onCorrectionChanged**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **onControlChanged/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **onCorrectionChanged/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **peripheralSel_**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **prepare**: public function has no ///
+- **prepare/0**: public function has no ///
 - **r1**: public variable has no ///
 - **r2**: public variable has no ///
-- **release**: public function has no ///
+- **release/0**: public function has no ///
 - **scanSel**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **setSourceBuffer**: public function has no ///
-- **tags**: public function has no ///
-- **tick1s**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **toPin**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **setSourceBuffer/1**: public function has no ///
+- **tags/0**: public function has no ///
+- **tick1s/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **toPin/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/Hub75Slots.h
 
 - **a**: public variable has no ///
 - **bitDepth**: public variable has no ///
-- **frameBytes**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **frameSlots**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **frameBytes/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **frameSlots/0**: member comment 6 lines > 1: a deep dive goes after @moreinfo
 - **height**: public variable has no ///
 - **hub75Encode**: member comment 10 lines > 1: a deep dive goes after @moreinfo
 - **kBytesPerSlot**: member comment 3 lines > 1: a deep dive goes after @moreinfo
@@ -369,47 +369,47 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **line 8**: member comment 45 lines > 1: a deep dive goes after @moreinfo
 - **r1**: public variable has no ///
 - **r2**: public variable has no ///
-- **rowsPerScan**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **rowsPerScan/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **scanRate**: public variable has no ///
-- **scanRows**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **valid**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **scanRows/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **valid/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **width**: public variable has no ///
 
 ### src/light/drivers/HueDriver.h
 
 - **HueDriver**: class comment 25 lines > 10
-- **HueDriver**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **bodyLooksComplete**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **buildLightOptions**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **containsKey**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **defineDriverControls**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **diffAndFormat**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **ensureNameBuffers**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **fetchGroups**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **HueDriver/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **bodyLooksComplete/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **buildLightOptions/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **containsKey/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **defineDriverControls/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **diffAndFormat/6**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **ensureNameBuffers/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **fetchGroups/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **lightNames_**: member comment 5 lines > 1: a deep dive goes after @moreinfo
 - **line 219**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **line 260**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **line 277**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **onControlChanged**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **parseGroups**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **parseGroupsForTest**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **parseId**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **parseLights**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **parseStringIn**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **pollPairing**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **pushOneChangedLight**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **rebuildDriven**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **refreshStatus**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **release**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **reportBridge**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **rgbToHsv**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **roomColorLights**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **roomMaskFor**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **setRoomForTest**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **tick**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **tick1s**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **transitionDeciseconds**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **wouldPushForTest**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **onControlChanged/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **parseGroups/1**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **parseGroupsForTest/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **parseId/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **parseLights/1**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **parseStringIn/5**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **pollPairing/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **pushOneChangedLight/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **rebuildDriven/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **refreshStatus/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **release/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **reportBridge/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **rgbToHsv/6**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **roomColorLights/1**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **roomMaskFor/2**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **setRoomForTest/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **tick/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **tick1s/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **transitionDeciseconds/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **wouldPushForTest/6**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/LedDriverConfig.h
 
@@ -420,80 +420,82 @@ Every place the generated documentation breaks the shape [the standards](../../c
 ### src/light/drivers/LedPeripheral.h
 
 - **LedPeripheral**: class comment 20 lines > 10
-- **attach**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **busContentionCleared**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **busInit**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **busTransmit**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **clockPinForBus**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **dmaBudgetBytes**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **hwBlock**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **loopbackFullWidth**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **spareLanesNeedPad**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **supportsDoubleBuffer**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **attach/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **busContentionCleared/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **busInit/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **busTransmit/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **clockPinForBus/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **dmaBudgetBytes/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **hwBlock/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **line 41/0**: public function has no ///
+- **loopbackFullWidth/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **spareLanesNeedPad/0**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **supportsDoubleBuffer/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
 - **uint8_t**: member comment 5 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/LightPresetsModule.h
 
 - **LightPresetsModule**: class comment 29 lines > 10
-- **active**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **addListRow**: public function has no ///
+- **LightPresetsModule/0**: public function has no ///
+- **active/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **addListRow/1**: public function has no ///
 - **channelCount**: public variable has no ///
-- **defaultId**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **defineControls**: public function has no ///
-- **deleteListRow**: public function has no ///
-- **deriveCorrection**: public function has no ///
+- **defaultId/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **defineControls/0**: public function has no ///
+- **deleteListRow/1**: public function has no ///
+- **deriveCorrection/3**: public function has no ///
 - **id**: public variable has no ///
-- **idAt**: public function has no ///
-- **indexOfId**: public function has no ///
-- **isEditableList**: public function has no ///
+- **idAt/1**: public function has no ///
+- **indexOfId/1**: public function has no ///
+- **isEditableList/0**: public function has no ///
 - **kMaxPresets**: public variable has no ///
 - **line 168**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **line 81**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **listRowCount**: public function has no ///
+- **line 81/0**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **listRowCount/0**: public function has no ///
 - **locked**: public variable has no ///
-- **moveListRow**: public function has no ///
-- **nameAt**: public function has no ///
-- **prepare**: public function has no ///
-- **presetCount**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **presetHasSynthChannel**: public function has no ///
-- **release**: public function has no ///
-- **restoreList**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **setListRowField**: public function has no ///
-- **setup**: public function has no ///
-- **userEditable**: public function has no ///
-- **writeListOptionSets**: public function has no ///
-- **writeListRow**: public function has no ///
-- **writeListRowDetail**: public function has no ///
+- **moveListRow/2**: public function has no ///
+- **nameAt/1**: public function has no ///
+- **prepare/0**: public function has no ///
+- **presetCount/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **presetHasSynthChannel/1**: public function has no ///
+- **release/0**: public function has no ///
+- **restoreList/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **setListRowField/3**: public function has no ///
+- **setup/0**: public function has no ///
+- **userEditable/0**: public function has no ///
+- **writeListOptionSets/1**: public function has no ///
+- **writeListRow/2**: public function has no ///
+- **writeListRowDetail/2**: public function has no ///
 
 ### src/light/drivers/MoonLedDriver.h
 
 - **@moreinfo**: appendix 160 lines > 20
-- **MoonI80Peripheral**: class comment 180 lines > 10
-- **addBusControls**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **addRingControls**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **busBuffer**: public function has no ///
-- **busCapacity**: public function has no ///
-- **busControlTriggersBuild**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **busDeinit**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **busInit**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **busInitRing**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **busIsRing**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **busLastTransmitUs**: public function has no ///
+- **MoonI80Peripheral**: class comment 19 lines > 10
+- **addBusControls/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **addRingControls/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **busBuffer/1**: public function has no ///
+- **busCapacity/0**: public function has no ///
+- **busControlTriggersBuild/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **busDeinit/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **busInit/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **busInitRing/2**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **busIsRing/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **busLastTransmitUs/0**: public function has no ///
 - **busLoopback**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **busRingMode**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **busTransmit**: public function has no ///
-- **busTransmitRing**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **busWait**: public function has no ///
+- **busRingMode/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **busTransmit/2**: public function has no ///
+- **busTransmitRing/0**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **busWait/2**: public function has no ///
 - **clockPin**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **clockPinForBus**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **ensureSnapHelper**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **extraBusPinsCurrent**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **helperJoin**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **helperKick**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **hwBlock**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **initFailMsg**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **clockPinForBus/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **ensureSnapHelper/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **extraBusPinsCurrent/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **helperJoin/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **helperKick/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **hwBlock/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **initFailMsg/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **kSnapJoinTimeoutMs**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **lanesAvailable**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **lanesAvailable/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **line 100**: doc line 21 words > 20
 - **line 120**: doc line 27 words > 20
 - **line 121**: doc line 32 words > 20
@@ -514,106 +516,105 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **line 273**: doc line 21 words > 20
 - **line 75**: doc line 21 words > 20
 - **line 99**: doc line 21 words > 20
-- **loopbackFullWidth**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **powerOfTwoBus**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **refreshBusKpi**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **loopbackFullWidth/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **powerOfTwoBus/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **refreshBusKpi/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **ringAuto**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **ringBufs**: member comment 6 lines > 1: a deep dive goes after @moreinfo
 - **ringEncodeTrampoline**: member comment 12 lines > 1: a deep dive goes after @moreinfo
 - **ringPadUs**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **ringRows**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **runHelperJob**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **runHelperJob/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **shiftOverclock**: member comment 8 lines > 1: a deep dive goes after @moreinfo
 - **snapHelperBroken_**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **snapHelperDone_**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **snapHelperParked_**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **snapHelperReady**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **snapHelperTramp**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **snapHelperReady/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **snapHelperTramp/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **snapHelper_**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **spareLanesNeedPad**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **stopSnapHelper**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **supportsDoubleBuffer**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **supportsPinExpander**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **spareLanesNeedPad/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **stopSnapHelper/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **supportsDoubleBuffer/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **supportsPinExpander/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **useRing**: member comment 9 lines > 1: a deep dive goes after @moreinfo
-- **validateBusFatal**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **validateBusPins**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **wantsRing**: member comment 9 lines > 1: a deep dive goes after @moreinfo
+- **validateBusFatal/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **validateBusPins/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **wantsRing/0**: member comment 9 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/MultiPinLedDriver.h
 
 - **I80Peripheral**: class comment 32 lines > 10
-- **addBusControls**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **busBuffer**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **busContentionCleared**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **busInit**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **addBusControls/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **busBuffer/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **busContentionCleared/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **busInit/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **busLoopback**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **busTransmit**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **busTransmit/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **clockPin**: member comment 50 lines > 1: a deep dive goes after @moreinfo
-- **clockPinForBus**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **clockPinForBus/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **dcPin**: public variable has no ///
-- **dmaBudgetBytes**: member comment 10 lines > 1: a deep dive goes after @moreinfo
-- **extraBusPinsCurrent**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **hwBlock**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **initFailMsg**: public function has no ///
-- **lanesAvailable**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **line 228**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **line 30**: doc line 21 words > 20
-- **loopbackFullWidth**: public function has no ///
-- **powerOfTwoBus**: public function has no ///
-- **recordBusPins**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **supportsPinExpander**: member comment 12 lines > 1: a deep dive goes after @moreinfo
-- **validateBusFatal**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **validateBusPins**: public function has no ///
+- **dmaBudgetBytes/0**: member comment 10 lines > 1: a deep dive goes after @moreinfo
+- **extraBusPinsCurrent/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **hwBlock/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **initFailMsg/0**: public function has no ///
+- **lanesAvailable/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **loopbackFullWidth/0**: public function has no ///
+- **powerOfTwoBus/0**: public function has no ///
+- **recordBusPins/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **supportsPinExpander/0**: member comment 12 lines > 1: a deep dive goes after @moreinfo
+- **validateBusFatal/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **validateBusPins/2**: public function has no ///
 
 ### src/light/drivers/NdiDriver.h
 
-- **defineDriverControls**: public function has no ///
+- **NdiDriver/0**: public function has no ///
+- **defineDriverControls/0**: public function has no ///
 - **fps**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **kTags**: public variable has no ///
 - **line 14**: doc line 21 words > 20
 - **line 156**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **line 2**: member comment 24 lines > 1: a deep dive goes after @moreinfo
-- **prepare**: public function has no ///
-- **release**: public function has no ///
-- **setSourceBuffer**: public function has no ///
-- **tags**: public function has no ///
+- **prepare/0**: public function has no ///
+- **release/0**: public function has no ///
+- **setSourceBuffer/1**: public function has no ///
+- **tags/0**: public function has no ///
 
 ### src/light/drivers/NetworkSendDriver.h
 
 - **@moreinfo**: appendix 43 lines > 20
-- **NetworkSendDriver**: class comment 67 lines > 10
-- **NetworkSendDriver**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **affectsPrepare**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **correctedBuffer**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **defineDriverControls**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **destinationAt**: public function has no ///
-- **destinationCount**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **e131MulticastAddr**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **NetworkSendDriver**: class comment 23 lines > 10
+- **NetworkSendDriver/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **affectsPrepare/1**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **correctedBuffer/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **defineDriverControls/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **destinationAt/1**: public function has no ///
+- **destinationCount/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **e131MulticastAddr/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **kMaxDestinations**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **kProtoE131Multicast**: public variable has no ///
 - **kProtocolCount**: public variable has no ///
-- **lightsAt**: public function has no ///
+- **lightsAt/1**: public function has no ///
 - **line 112**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **line 116**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **line 90**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **onCorrectionChanged**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **prepare**: member comment 8 lines > 1: a deep dive goes after @moreinfo
+- **onCorrectionChanged/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **prepare/0**: member comment 8 lines > 1: a deep dive goes after @moreinfo
 - **protocol**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **resizeCorrected**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **setSourceBuffer**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **setup**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **resizeCorrected/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **setSourceBuffer/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **setup/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **socket_**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **tick**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **tick/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **universeStart**: member comment 5 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/PanelCardDriver.h
 
 - **@moreinfo**: appendix 66 lines > 20
-- **PanelCardDriver**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **affectsPrepare**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **PanelCardDriver/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **affectsPrepare/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **claimed_**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **correctedBuffer**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **defineDriverControls**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **correctedBuffer/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **defineDriverControls/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **framesDroppedTotal_**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **framesSent_**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **interfaceSel_**: member comment 5 lines > 1: a deep dive goes after @moreinfo
@@ -621,64 +622,63 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **kFirmwareCount**: public variable has no ///
 - **kFormatCount**: public variable has no ///
 - **lastResolvedSel_**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **line 10**: member comment 98 lines > 1: a deep dive goes after @moreinfo
+- **line 10/1**: member comment 98 lines > 1: a deep dive goes after @moreinfo
 - **line 123**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **line 131**: member comment 15 lines > 1: a deep dive goes after @moreinfo
 - **line 157**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **line 585**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **line 598**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **packRow**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **prepare**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **resizeCorrected**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **prepare/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **resizeCorrected/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **restartFailed_**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **restartTried_**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **tick**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **tick1s**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **writeLinkStatus**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **tick/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **tick1s/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **writeLinkStatus/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/ParallelLedDriver.h
 
-- **ParallelLedDriver**: class comment 49 lines > 10
-- **ParallelLedDriver**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **activeForTest**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **affectsPrepare**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **ParallelLedDriver**: class comment 34 lines > 10
+- **ParallelLedDriver/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **activeForTest/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **affectsPrepare/1**: member comment 7 lines > 1: a deep dive goes after @moreinfo
 - **busLoopbackRide**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **busPinCount**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **busPinList**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **busWaitIfBusy**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **copyRange**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **correction**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **defineDriverControls**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **busPinCount/0**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **busPinList/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **busWaitIfBusy/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **copyRange/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **correction/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **defineDriverControls/0**: member comment 6 lines > 1: a deep dive goes after @moreinfo
 - **doubleBuffer**: member comment 22 lines > 1: a deep dive goes after @moreinfo
-- **drainInFlight**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **driverHeapBytes**: member comment 11 lines > 1: a deep dive goes after @moreinfo
-- **encodeFrameClose**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **ensureSnapshotCap**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **freeSnapshot**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **hwBlock**: member comment 8 lines > 1: a deep dive goes after @moreinfo
-- **isTestParamControl**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **drainInFlight/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **driverHeapBytes/0**: member comment 11 lines > 1: a deep dive goes after @moreinfo
+- **encodeFrameClose/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **ensureSnapshotCap/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **freeSnapshot/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **hwBlock/0**: member comment 8 lines > 1: a deep dive goes after @moreinfo
+- **isTestParamControl/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **kLoopbackTestLights**: member comment 9 lines > 1: a deep dive goes after @moreinfo
 - **kMaxLanes**: member comment 6 lines > 1: a deep dive goes after @moreinfo
 - **kMaxStrands**: member comment 26 lines > 1: a deep dive goes after @moreinfo
-- **laneCount**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **laneList**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **latchBit**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **laneCount/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **laneList/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **latchBit/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **latchPin**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **line 1059**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **line 1076**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **line 1108**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **line 117**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **line 117/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **line 1340**: member comment 5 lines > 1: a deep dive goes after @moreinfo
 - **line 1392**: doc line 22 words > 20
 - **line 173**: member comment 8 lines > 1: a deep dive goes after @moreinfo
 - **line 182**: member comment 10 lines > 1: a deep dive goes after @moreinfo
 - **line 198**: doc line 21 words > 20
-- **line 2027**: doc line 21 words > 20
 - **line 254**: doc line 21 words > 20
 - **line 270**: doc line 21 words > 20
 - **line 272**: doc line 25 words > 20
 - **line 315**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line 548**: member comment 10 lines > 1: a deep dive goes after @moreinfo
+- **line 548/0**: member comment 10 lines > 1: a deep dive goes after @moreinfo
 - **line 59**: doc line 22 words > 20
 - **line 901**: member comment 14 lines > 1: a deep dive goes after @moreinfo
 - **line 920**: member comment 6 lines > 1: a deep dive goes after @moreinfo
@@ -688,32 +688,32 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **loopbackStrand**: member comment 10 lines > 1: a deep dive goes after @moreinfo
 - **loopbackTest**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **loopbackTxPin**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **maxLanesForTarget**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **onControlChanged**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **onCorrectionChanged**: member comment 15 lines > 1: a deep dive goes after @moreinfo
-- **outputsPerPin**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **maxLanesForTarget/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **onControlChanged/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **onCorrectionChanged/0**: member comment 15 lines > 1: a deep dive goes after @moreinfo
+- **outputsPerPin/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **peripheral_**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **pinExpander**: member comment 27 lines > 1: a deep dive goes after @moreinfo
-- **prefillShiftConstantsIfNeeded**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **prepare**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **publishHeapBytesForTest**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **registerPeripheral**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **release**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **reportLoopbackResult**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **reportOverCapacity**: member comment 39 lines > 1: a deep dive goes after @moreinfo
+- **prefillShiftConstantsIfNeeded/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **prepare/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **publishHeapBytesForTest/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **registerPeripheral/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **release/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **reportLoopbackResult/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **reportOverCapacity/2**: member comment 39 lines > 1: a deep dive goes after @moreinfo
 - **ringSnapshot**: member comment 8 lines > 1: a deep dive goes after @moreinfo
-- **ringSnapshotRef**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **runIntrusiveLoopback**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **setPeripheralForTest**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **setup**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **snapLineAlignedHalf**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **snapshotBuf**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **snapshotSourceForRing**: member comment 10 lines > 1: a deep dive goes after @moreinfo
-- **tick1s**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **tickAsync**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **tickRing**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **tickSync**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **waitBudgetMs**: member comment 8 lines > 1: a deep dive goes after @moreinfo
+- **ringSnapshotRef/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **runIntrusiveLoopback/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **setPeripheralForTest/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **setup/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **snapLineAlignedHalf/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **snapshotBuf/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **snapshotSourceForRing/0**: member comment 10 lines > 1: a deep dive goes after @moreinfo
+- **tick1s/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **tickAsync/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **tickRing/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **tickSync/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **waitBudgetMs/0**: member comment 8 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/ParallelSlots.h
 
@@ -731,28 +731,28 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **line 58**: doc line 22 words > 20
 - **line 59**: doc line 21 words > 20
 - **line 9**: member comment 46 lines > 1: a deep dive goes after @moreinfo
-- **transposeBits8x8**: member comment 12 lines > 1: a deep dive goes after @moreinfo
-- **transposeBits8x8Pair**: member comment 12 lines > 1: a deep dive goes after @moreinfo
-- **transposeLanes16x8**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **transposeLanes8x8**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **transposeBits8x8/1**: member comment 12 lines > 1: a deep dive goes after @moreinfo
+- **transposeBits8x8Pair/2**: member comment 12 lines > 1: a deep dive goes after @moreinfo
+- **transposeLanes16x8/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **transposeLanes8x8/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/ParlioLedDriver.h
 
 - **ParlioPeripheral**: class comment 12 lines > 10
-- **addBusControls**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **busBuffer**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **busInit**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **addBusControls/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **busBuffer/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **busInit/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **busLoopback**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **busTransmit**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **dmaBudgetBytes**: public function has no ///
-- **hwBlock**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **initFailMsg**: public function has no ///
+- **busTransmit/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **dmaBudgetBytes/0**: public function has no ///
+- **hwBlock/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **initFailMsg/0**: public function has no ///
 - **kClockHz**: public variable has no ///
-- **lanesAvailable**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **lanesAvailable/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **line 16**: doc line 21 words > 20
-- **loopbackFullWidth**: public function has no ///
-- **powerOfTwoBus**: public function has no ///
-- **supportsPinExpander**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **loopbackFullWidth/0**: public function has no ///
+- **powerOfTwoBus/0**: public function has no ///
+- **supportsPinExpander/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/PinList.h
 
@@ -761,45 +761,45 @@ Every place the generated documentation breaks the shape [the standards](../../c
 ### src/light/drivers/PreviewDriver.h
 
 - **PreviewDriver**: class comment 25 lines > 10
-- **affectsPrepare**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **buildCoordTable**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **defineDriverControls**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **downscaleForTest**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **driverHeapBytes**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **emit**: public function has no ///
-- **emit**: public function has no ///
-- **emit**: public function has no ///
-- **ensureStaging**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **freePreviewBuffers**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **affectsPrepare/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **buildCoordTable/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **defineDriverControls/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **downscaleForTest/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **driverHeapBytes/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **emit/1**: public function has no ///
+- **emit/1**: public function has no ///
+- **emit/3**: public function has no ///
+- **ensureStaging/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **freePreviewBuffers/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **line 13**: member comment 8 lines > 1: a deep dive goes after @moreinfo
-- **line 190**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **line 190/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
 - **line 22**: member comment 25 lines > 1: a deep dive goes after @moreinfo
-- **onClientGone**: public function has no ///
-- **onClientMessage**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **onClientGone/1**: public function has no ///
+- **onClientMessage/3**: member comment 7 lines > 1: a deep dive goes after @moreinfo
 - **out**: public variable has no ///
 - **out**: public variable has no ///
-- **prepare**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **refreshStatus**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **release**: public function has no ///
+- **prepare/0**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **refreshStatus/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **release/0**: public function has no ///
 - **self**: public variable has no ///
-- **sendAim**: member comment 10 lines > 1: a deep dive goes after @moreinfo
-- **sendCoordTable**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **setBroadcaster**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **setSourceBuffer**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **sendAim/0**: member comment 10 lines > 1: a deep dive goes after @moreinfo
+- **sendCoordTable/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **setBroadcaster/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **setSourceBuffer/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **targetFps**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **tick1s**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **tick1s/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **tiltOff**: public variable has no ///
-- **userEditable**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **userEditable/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 
 ### src/light/drivers/RmtLedDriver.h
 
 - **RmtLedDriver**: class comment 30 lines > 10
-- **RmtLedDriver**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **affectsPrepare**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **applyTiming**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **defineDriverControls**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **driverHeapBytes**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **frameBuffer**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **RmtLedDriver/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **affectsPrepare/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **applyTiming/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **defineDriverControls/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **driverHeapBytes/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **frameBuffer/0**: member comment 5 lines > 1: a deep dive goes after @moreinfo
 - **kMaxPins**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **kResolutionHz**: public variable has no ///
 - **line 22**: doc line 21 words > 20
@@ -809,19 +809,19 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **loopbackFrame**: member comment 7 lines > 1: a deep dive goes after @moreinfo
 - **loopbackTest**: member comment 7 lines > 1: a deep dive goes after @moreinfo
 - **loopbackTxPin**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **nsToTicks**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **onControlChanged**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **onCorrectionChanged**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **nsToTicks/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **onControlChanged/1**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **onCorrectionChanged/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **periodNs**: public variable has no ///
-- **prepare**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **pushBitTiming**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **release**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **setSourceBuffer**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **setup**: member comment 14 lines > 1: a deep dive goes after @moreinfo
+- **prepare/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **pushBitTiming/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **release/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **setSourceBuffer/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **setup/0**: member comment 14 lines > 1: a deep dive goes after @moreinfo
 - **t0hNs**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **t1hNs**: public variable has no ///
-- **tick**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **tick/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **timing**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **waitForPins**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **wireTimingForTest**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **waitForPins/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **wireTimingForTest/0**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 

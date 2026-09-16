@@ -267,7 +267,7 @@ An encoder your ffmpeg lacks starts and exits immediately; the status then reads
 
 **On the ESP32-P4** there is no ffmpeg and no filesystem in the path: the chip's own H.264 block encodes and projectMM packages the MPEG-TS itself. Segments are served from a RAM ring rather than written to flash, which at one segment per second would wear it for nothing. The `encoder` control is absent, since the hardware offers only one.
 
-**Sizing the picture.** The P4's encoder takes only EVEN dimensions between 80x80 and 1920x2032; An odd wall has its scale doubled so both axes come out even. A wall whose scaled size exceeds the maximum is refused with a status rather than streaming something the hardware cannot encode. Desktop ffmpeg has none of these limits. The floor is what the auto scale exists for: the P4 will not accept a frame smaller than 80x80, and a small wall streamed 1:1 arrives as a postage stamp in the player. `scale` at 0 (the default) therefore picks the smallest whole factor that lifts *both* axes to 80: a 20x10 wall streams as 160x80 rather than being refused, and a wall already past 80 stays 1:1. One factor serves both axes, so the aspect ratio is preserved and each light stays a square block. Raising `scale` by hand on an already-large wall costs real time (a 128x128 wall at scale 4 measures about 60 ms per frame against 1 ms at 1:1) and buys nothing a player's own zoom does not.
+**Sizing the picture.** The P4's encoder takes only EVEN dimensions between 80x80 and 1920x2032, so an odd wall has its scale doubled so both axes come out even. A wall whose scaled size exceeds the maximum is refused with a status rather than streaming something the hardware cannot encode. Desktop ffmpeg has none of these limits. The floor is what the auto scale exists for: the P4 will not accept a frame smaller than 80x80, and a small wall streamed 1:1 arrives as a postage stamp in the player. `scale` at 0 (the default) therefore picks the smallest whole factor that lifts *both* axes to 80: a 20x10 wall streams as 160x80 rather than being refused, and a wall already past 80 stays 1:1. One factor serves both axes, so the aspect ratio is preserved and each light stays a square block. Raising `scale` by hand on an already-large wall costs real time (a 128x128 wall at scale 4 measures about 60 ms per frame against 1 ms at 1:1) and buys nothing a player's own zoom does not.
 
 **The bitrate is derived, not a setting.** It follows from the grid size and `targetFps` at about 0.1 bits per pixel per frame, which puts a 512x512 wall at 30 fps near 800 kbit; a 128x128 lands under the 500 kbit floor the derivation clamps to. `targetFps` is the knob for bandwidth, and the better trade for LED content: fewer frames rather than a blockier picture.
 
@@ -310,7 +310,25 @@ An encoder your ffmpeg lacks starts and exits immediately; the status then reads
 
 **Which silicon.** A chip with an LCD_CAM or Parlio block. The classic ESP32 has neither, and is excluded on pins before memory is even a question: it has 13 usable output GPIOs and a 1/16 port needs all 13, leaving nothing for a strand, a button or a microphone.
 
-**Where the pins come from.** The `board` select fills all fourteen lines on first use. A published map (MoonHub75, MatrixPortal S3, Waveshare RGB Matrix) hides the pin rows, because those lines are soldered and there is nothing to act on; the generic per-chip sets and Custom show them. Hidden rows stay bound, so the values persist, still drive the panel, and still show in the pin map. A line on a pin the chip has wired to flash or PSRAM is refused before init with the line named, which is why the MatrixPortal S3 (quad PSRAM, three lines on 35-37) runs the `esp32s3-zero` image and is refused by the octal N8R8/N16R8 ones. Wiring your own: the per-chip free sets are in [GPIO usage](../../reference/hardware/gpio-usage.md).
+**Where the pins come from.** The `board` select fills all fourteen lines on first use. A published map (MoonHub75, MatrixPortal S3, Waveshare RGB Matrix) hides the pin rows, because those lines are soldered and there is nothing to act on; the generic per-chip sets and Custom show them. Hidden rows stay bound, so the values persist, still drive the panel, and still show in the pin map. A line on a pin the chip has wired to flash or PSRAM is refused before init, with the line named. That is why the MatrixPortal S3 runs the `esp32s3-zero` image: three of its lines sit on 35-37, which the octal N8R8/N16R8 images hold for PSRAM. Wiring your own: the per-chip free sets are in [GPIO usage](../../reference/hardware/gpio-usage.md).
+
+**The published board maps.** Each is taken from that board's own source, written in this driver's control order (clk, lat, oe). A panel's ribbon numbers its color lines R1/G1/B1 (upper half) and R2/G2/B2 (lower half); some board docs call the same pairs R0/G0/B0 and R1/G1/B1, which is the one naming trap worth knowing before wiring.
+
+```text
+MoonHub75             r1  1   g1  5   b1  6    r2  7   g2 13   b2  9
+                      a  16   b  48   c  47    d 21    e  38
+                      clk 18  lat 8   oe  4
+
+MatrixPortal S3       r1 42   g1 41   b1 40    r2 38   g2 39   b2 37
+                      a  45   b  36   c  48    d 35    e  21
+                      clk 2   lat 47  oe 14
+
+Waveshare RGB Matrix  r1  4   g1  5   b1  6    r2  7   g2 15   b2 16
+                      a  18   b   8   c   3    d 42    e   9
+                      clk 41  lat 40  oe  2
+```
+
+The [MoonHub75 PCB](https://moonmodules.org/projects/hardware/#moonhub75-pcb) is a Lilygo T7-S3 on a passive adapter, designed by Sören (lost-hope); its map comes from the hardware repository's own README, and the same board carries an INMP441 microphone socket on IO10/11/12, so an audio-reactive effect and a panel run together on it. The Adafruit MatrixPortal S3 map is from the board's CircuitPython `pins.c`. The Waveshare is SKU 34422, not to be confused with the Waveshare ESP32-S3-Matrix, a different product with an onboard 8x8 WS2812 matrix and no HUB75 connector. A 1/32-scan panel needs `e`; on 1/16 panels that pin is free.
 
 **Two controls a panel cannot tell you.** `scanRate` is the panel's own, and two panels of identical dimensions can scan differently, so it is read off the panel rather than calculated from its size. `peripheral` is yours rather than the driver's: a P4 has one LCD_CAM and one Parlio, so a board already driving WS2812 strips from one needs the panel on the other, and only you know which way round.
 

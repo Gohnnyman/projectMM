@@ -3,11 +3,13 @@
 #include "light/drivers/ParallelLedDriver.h"   // shared driver body + LedPeripheral
 #include "platform/platform.h"
 
+#include <cstdio>   // snprintf: the refusal message
+
 
 namespace mm {
 
 /// Output driver: parallel 8-or-16-lane WS2812B over the ESP-IDF [esp_lcd i80 bus](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/lcd/index.html)
-///: the parallel scale path on **all three i80-capable ESP32 families**. RMT gives a chip 4-8
+/// (the parallel scale path on **all three i80-capable ESP32 families**). RMT gives a chip 4-8
 /// channels; this gives 8-16 lanes for the wall time of one. The magic is that ESP-IDF exposes ONE
 /// public i80 API (`esp_i80_new_i80_bus` / `esp_i80_panel_io_tx_color`) and routes it to whichever
 /// peripheral the silicon has: so this single backend serves every chip:
@@ -25,9 +27,9 @@ namespace mm {
 ///    both, and the "exactly 8 or 16 pins" rule (the i80 layer rejects a partial bus). A sub-16 board
 ///    parks unused lanes + WR/DC on one spare GPIO (the ghost-pin trick).
 ///  - **The 3-slot-per-bit wire contract:** each WS2812 bit becomes three bus slots at 2.67 MHz
-///    (slot = 375 ns): all-active-lanes HIGH, the data bits, then all LOW: so a `1` is HIGH 750 ns
-///    and a `0` 375 ns, approximating RMT's 700/350. The slot is deliberately NOT the lineage's
-///    ~416 ns: newer WS2812B revisions spec T0H max ≈ 380 ns, and a longer `0` on a direct 3.3 V line
+///    (slot = 375 ns): all-active-lanes HIGH, the data bits, then all LOW, so a `1` is HIGH
+///    750 ns and a `0` 375 ns, approximating RMT's 700/350. The slot is NOT the lineage's
+///    ~416 ns: newer WS2812B revisions spec T0H max around 380 ns, and a longer `0` on 3.3 V
 ///    gets misread as `1` (the strip washes white). One bus word per slot (bus bit L = the L-th pin);
 ///    unequal strands idle LOW once exhausted. Slot layout: ParallelSlots.h.
 ///  - Both silicon paths do **whole-frame chained DMA** (autonomous, CPU out of the timing loop), so the
@@ -201,15 +203,19 @@ public:
         // both fail silently. The driver's own sweep covers the bus LANES, but WR only rides that
         // list when there are spare lanes to park it on and DC never does, so the pair is checked
         // here, where it lives.
+        // The platform owns WHY a pin is refused (platform::gpioRefusal), one wording shared with
+        // every other driver that claims a pin; naming the role is what this seam adds.
         if (clockPin >= 0) {
-            const auto cap = platform::gpioCapability(static_cast<uint8_t>(clockPin));
-            if (!cap.validGpio) return "clockPin (WR) does not exist on this chip package - pick another pin";
-            if (cap.reserved)   return "clockPin (WR) is wired to flash/PSRAM on this chip - pick another pin";
+            if (const char* why = platform::gpioRefusal(static_cast<uint8_t>(clockPin))) {
+                std::snprintf(refusal_, sizeof(refusal_), "clockPin (WR) %s - pick another pin", why);
+                return refusal_;
+            }
         }
         if (dcPin >= 0) {
-            const auto cap = platform::gpioCapability(static_cast<uint8_t>(dcPin));
-            if (!cap.validGpio) return "dcPin (DC) does not exist on this chip package - pick another pin";
-            if (cap.reserved)   return "dcPin (DC) is wired to flash/PSRAM on this chip - pick another pin";
+            if (const char* why = platform::gpioRefusal(static_cast<uint8_t>(dcPin))) {
+                std::snprintf(refusal_, sizeof(refusal_), "dcPin (DC) %s - pick another pin", why);
+                return refusal_;
+            }
         }
         // The '595 latch is a BUS LANE, so it needs its own GPIO: sharing it with WR would make the
         // pixel clock double as the latch (the '595 would present a byte on every shift cycle), and
@@ -218,20 +224,19 @@ public:
         // GPIO 10, which is the first pin a user reaches for when picking a latch.)
         if (owner_->pinExpanderMode() && owner_->latchPin >= 0) {
             if (owner_->latchPin == clockPin)
-                return "latchPin is on clockPin (WR) — the latch needs its own GPIO";
+                return "latchPin is on clockPin (WR) - the latch needs its own GPIO";
             if (owner_->latchPin == dcPin)
                 return "latchPin is on dcPin (DC) - the latch needs its own GPIO";
         }
         return nullptr;
     }
 
-    /// Reject a data lane that collides with the WR (clockPin) or DC pin. The i80
-    /// peripheral routes a distinct output signal to each of the 8 data lanes plus
-    /// WR + DC via the GPIO matrix; IDF does NOT check that they differ, so a data
-    /// pin equal to clockPin/dcPin gets two signals on one GPIO and that lane emits
-    /// the clock/DC waveform instead of pixel data (silent corruption: the strip on
-    /// that lane shows garbage). Fail loud + idle instead, same shape as the other
-    /// parse errors.
+    /// Reject a data lane that collides with the WR (clockPin) or DC pin.
+    // The i80 peripheral routes a distinct output signal to each of the 8 data lanes plus WR and
+    // DC via the GPIO matrix, and IDF does NOT check that they differ: a data pin equal to
+    // clockPin or dcPin gets two signals on one GPIO, and that lane emits the clock or DC
+    // waveform instead of pixel data. The strip on it shows garbage, silently, so this fails
+    // loud and idles instead, the same shape as the other parse errors.
     // Returns a WARNING string (not an error) if a data lane sits on clockPin (WR) or
     // dcPin: that lane emits the bus-control waveform instead of pixel data. It's a
     // warning because on a board that wires all 8/16 lanes but drives fewer strands,
@@ -242,9 +247,9 @@ public:
         for (uint8_t i = 0; i < n; i++) {
             // clockPin/dcPin are int8_t (-1 = unset); only a real GPIO can collide.
             if (clockPin >= 0 && lanes[i] == static_cast<uint16_t>(clockPin))
-                return "a LED pin is on clockPin (WR) — that lane carries the clock, not pixels";
+                return "a LED pin is on clockPin (WR): that lane carries the clock, not pixels";
             if (dcPin >= 0 && lanes[i] == static_cast<uint16_t>(dcPin))
-                return "a LED pin is on dcPin — that lane carries DC, not pixels";
+                return "a LED pin is on dcPin: that lane carries DC, not pixels";
         }
         return nullptr;
     }
@@ -317,6 +322,7 @@ private:
     platform::I80Ws2812Handle i80_;
     int8_t lastClockPin_ = -1;
     int8_t lastDcPin_ = -1;
+    mutable char refusal_[96] = {};   // one refusal message, formatted by the const validators
 };
 
 // Register the esp_lcd-i80 backend into the ParallelLedDriver peripheral registry once, at static-init.

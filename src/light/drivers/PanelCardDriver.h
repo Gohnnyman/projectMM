@@ -46,8 +46,8 @@ namespace mm {
 /// 256×256 panel at 40 fps is only ~65 Mbit/s of payload, which 100 Mbit would seem to carry. But
 /// the cards are dumb receivers with no buffering and no flow control: they latch on the sync frame,
 /// so an entire frame must arrive inside the inter-frame window. At 100 Mbit the same bytes take ten
-/// times as long on the wire: a 256×256 frame is ~16 ms of transmission against ~1.6 ms at gigabit
-///: which overruns the frame budget and breaks the timing the sync depends on.
+/// times as long on the wire: a 256×256 frame is ~16 ms of transmission against ~1.6 ms at gigabit,
+/// which overruns the frame budget and breaks the timing the sync depends on.
 ///
 /// The failure mode is the confusing part: nothing errors. Frames go out, the link is up, and the
 /// panels tear, show wrong rows, or never latch. That is why this driver reads the NEGOTIATED speed
@@ -58,18 +58,18 @@ namespace mm {
 /// ## Running this on a host
 ///
 /// The desktop build sends real frames too, via `platform::ethBindRawInterface`: so a Raspberry
-///
-/// Origin: the ColorLight 5A-75 documented byte layout. Inspired by FPP (Falcon Player),
-/// https://github.com/FalconChristmas/fpp, the show player that drives these cards from a
-/// Raspberry Pi: a board already rendering those frames can send them itself and remove the
-/// host from the installation. FPP is also the reference point for what good looks like
-/// here, sustaining 50 fps.
 /// Pi, a Mac or a Windows PC running projectMM is a panel controller, which is the deployment this
 /// replaces. Linux uses AF_PACKET and macOS BPF, both needing root or CAP_NET_RAW; Windows has no
 /// kernel path for raw L2 at all and goes through Npcap, resolved at run time so the binary still
 /// builds and runs without it. Without the privilege or the driver, or with `interface` left blank,
 /// the host records frames instead of sending them, which is what lets the unit tests pin the wire
 /// format with no hardware and no privileges.
+///
+/// Origin: the ColorLight 5A-75 documented byte layout. Inspired by FPP (Falcon Player),
+/// https://github.com/FalconChristmas/fpp, the show player that drives these cards from a
+/// Raspberry Pi: a board already rendering those frames can send them itself and remove the
+/// host from the installation. FPP is also the reference point for what good looks like
+/// here, sustaining 50 fps.
 ///
 /// `interface` names the NIC: the kernel name on Linux and macOS (`eth0`, `en0`), and on Windows any
 /// distinctive part of the adapter description (`Realtek`), because a capture device there is spelled
@@ -400,8 +400,8 @@ public:
                 // A failed frame is dropped, not retried: the cards have no acknowledgement to wait
                 // for, and stalling the render tick to retry would cost the next frame too.
                 // Set on a frame that reached the wire, not on reaching the row: a link
-                // that drops mid-frame fails every send, and latching then would blank the panels
-                //: which is the case the sync guard below exists to prevent.
+                // that drops mid-frame fails every send, and latching then would blank the panels,
+                // which is the case the sync guard below exists to prevent.
                 if (platform::ethSendRaw(packet_, len)) { framesSent_++; anyRowSent = true; }
                 else framesDroppedTotal_++;
             }

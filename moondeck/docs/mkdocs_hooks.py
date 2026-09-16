@@ -155,6 +155,16 @@ ANIMATED_TYPES = ("effects", "modifiers", "layouts")
 ANIMATED_PAGES = frozenset(f"moonmodules/light/{t}.md" for t in ANIMATED_TYPES)
 
 _H3_RE = re.compile(r'^###\s+(?P<title>.+?)\s*$')
+# A card title is `Name <emoji> · qualifier`: the name runs until the first word that does
+# not start with a letter, digit or "(". Written as a class rather than a list of the emoji
+# in use, because every new emoji silently broke the previous form (a name kept its emoji,
+# so its `## <Name>, details` section stopped resolving) and nothing failed loudly.
+_CARD_NAME_RE = re.compile(r"\s+[^\w(]")
+
+
+def card_name(title: str) -> str:
+    """The card's name: its title up to the first emoji or separator."""
+    return _CARD_NAME_RE.split(title)[0].strip()
 _H2_RE = re.compile(r'^##\s+')                         # any level-2 heading = section boundary
 _ANCHOR_RE = re.compile(r'^<a id="(?P<id>[^"]+)"></a>\s*$')
 _IMG_RE = re.compile(r'^<img\b.*?>\s*$')
@@ -263,9 +273,9 @@ def _emit_row(b: dict, details_names: set) -> str:
             col2_parts.append(f'<span class="mm-param">{p}</span>')
     col2 = "".join(col2_parts) if col2_parts else "—"
 
-    # TWO links, and ALWAYS both: Tests and API. A card offers the same two doors on every
-    # row, so a reader learns their position once instead of re-reading a list whose length
-    # changes per card. Everything else was prose wearing a link's clothes: attribution
+    # THREE links, and always all three: Tests, API and Details. A card offers the same
+    # doors on every row, so a reader learns their position once instead of re-reading a
+    # list whose length changes per card. Everything else was prose wearing a link's clothes: attribution
     # belongs in the header's /// (it travels with the code it credits), and the details
     # section is already named in the card's own description, so a `More:` row restated a
     # sentence the reader had just read.
@@ -279,11 +289,10 @@ def _emit_row(b: dict, details_names: set) -> str:
               else '<span class="mm-missing">none yet</span>')
     links = [f":material-test-tube: **Tests:** {tests}",
              f":material-api: **API:** {detail}"]
-    # Details is the THIRD fixed row, not a per-card extra. Most cards have one and a
-    # reader follows it often, so it earns a standing position: the three rows sit in the
-    # same place on every card and the eye learns them once. Any other link a card wants
-    # is made in the description, in the sentence that needs it.
-    name = re.split(r'\s+[💫🦅🐙📊🌙⚡️·]', b["title"])[0].strip()
+    # Details is a fixed row, not a per-card extra: most cards have one and a reader
+    # follows it often, so it earns a standing position. Any other link a card wants is
+    # made in the description, in the sentence that needs it.
+    name = card_name(b["title"])
     details = (f"[{name}, details](#{_slug(name + ', details')})" if name in details_names
                else '<span class="mm-missing">none yet</span>')
     links.append(f":material-text-long: **Details:** {details}")
@@ -338,8 +347,7 @@ def _render_catalog_table(markdown: str) -> str:
             cur = {"anchors": pending_anchors, "title": _H3_RE.match(ln).group("title"),
                    "desc": [], "img": None, "params": [], "origin": None,
                    "tests": None, "testsMulti": None, "detail": None,
-                   "testsName": re.split(r'\s+[💫🦅🐙📊🌙⚡️·]',
-                                         _H3_RE.match(ln).group("title"))[0].strip()}
+                   "testsName": card_name(_H3_RE.match(ln).group("title"))}
             pending_anchors = []
             continue
         if _H2_RE.match(ln):                       # section boundary: close block + table
@@ -519,7 +527,7 @@ def on_page_content(html, page, config, files):
 
 def on_page_markdown(markdown, page, config, files):
     """Repoint out-of-docs source links to GitHub blob URLs, then (on the catalog
-    pages) render the prose ### blocks as a MoonLight-style 3-column table. Source
+    pages) render the prose ### blocks as a MoonLight-style 2-column table. Source
     .md stays authored as readable blocks; the table is build-time only."""
     markdown = _rewrite_out_of_docs_links(markdown, page.file.src_uri)
     if page.file.src_uri in _CATALOG_PAGES:

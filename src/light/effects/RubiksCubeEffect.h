@@ -19,7 +19,7 @@ namespace mm {
 // fresh on EffectBase + the shared draw primitive. projectMM has no per-cell mapping mask, so every
 // in-bounds voxel is treated as mapped (the source's isMapped()-skip and the mapping-driven
 // sizeX++/sizeY++/sizeZ++ adjustments are dropped; the projection uses sizeX = max(size.x-1, 1)).
-/// Author: WildCats08 / @Brandon502 (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+/// Author: WildCats08 / @Brandon502 (MoonLight), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Effect rendering a rotating Rubik's cube on a 3D layout.
 class RubiksCubeEffect : public EffectBase {
 public:

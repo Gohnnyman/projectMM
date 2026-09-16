@@ -471,6 +471,14 @@ GpioCapability gpioCapability(uint8_t gpio) {
         if (o.set && o.gpio == gpio) return o.cap;
     return GpioCapability{};
 }
+
+const char* gpioRefusal(uint8_t gpio) {
+    const GpioCapability c = gpioCapability(gpio);
+    if (!c.validGpio) return "does not exist on this chip package";
+    if (c.reserved)   return "is wired to flash/PSRAM on this chip";
+    return nullptr;
+}
+
 void setTestGpioCapability(uint8_t gpio, GpioCapability cap) {
     for (auto& o : g_gpioCapOverrides)
         if (!o.set || o.gpio == gpio) { o = {gpio, cap, true}; return; }

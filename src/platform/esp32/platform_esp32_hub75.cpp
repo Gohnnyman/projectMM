@@ -17,9 +17,8 @@
 // queue wait in an ISR is an interrupt watchdog panic (bench-verified, CPU0, every board preset).
 //
 // Gated on SOC_LCDCAM_I80_LCD_SUPPORTED (S3/P4/S31) rather than the broader SOC_LCD_I80_SUPPORTED:
-// the classic ESP32's I2S-backed i80 cannot DMA from PSRAM, and § GPIO requirements in the plan
-// rules the classic out on pin count before memory is even considered. So there is no classic
-// backend to write, and the broad macro would only compile dead code onto it.
+// a HUB75 port needs fourteen pins on one bus, which rules the classic ESP32 out. So there is no
+// classic backend to write, and the broad macro would only compile dead code onto it.
 
 #include "platform/platform.h"
 // The wire format, for the frame size: one home for it, shared with the driver that encodes.
@@ -41,7 +40,6 @@
 #include "driver/parlio_tx.h"
 #endif
 #include "esp_heap_caps.h"
-#include "esp_cache.h"   // writeback: the CPU fills the frame, the DMA reads it
 #include "esp_timer.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -83,8 +81,6 @@ struct Hub75State {
 #endif
     uint8_t* frame = nullptr;
     size_t   frameBytes = 0;
-    size_t   frameAlloc = 0;      // what was allocated: rounded up to whole cache lines
-    bool     framePsram = false;  // cached external memory, so writes need a flush
     // ATOMIC: the ISR callbacks read this to decide whether to touch `frame`, and teardown clears
     // it from a task. A plain bool orders nothing between the two, so a callback could pass the
     // check and then read a freed frame.
@@ -162,12 +158,17 @@ void destroyState(Hub75State* st) {
     if (st->refill) {
         // The refill task is inside tx_color until the current scan ends (about a millisecond),
         // then reads the flag and parks. It must be gone before io_del, which drains the same done
-        // queue. The wait is bounded so a peripheral that never completes cannot hang teardown.
-        for (int i = 0; i < 100 && !st->refillParked.load(std::memory_order_acquire); i++) {
-            vTaskDelay(1);
+        // queue. A peripheral that never completes leaves the task unparked, and io_del would then
+        // wait on that queue forever (portMAX_DELAY, esp_lcd_panel_io_i80.c), so the wait times out
+        // and teardown skips io_del: a leaked device handle beats a hung teardown.
+        bool parked = false;
+        for (int i = 0; i < 100 && !parked; i++) {
+            parked = st->refillParked.load(std::memory_order_acquire);
+            if (!parked) vTaskDelay(1);
         }
         vTaskDelete(st->refill);
         st->refill = nullptr;
+        if (!parked) st->io = nullptr;
     }
     if (st->io) esp_lcd_panel_io_del(st->io);
     if (st->bus) esp_lcd_del_i80_bus(st->bus);
@@ -418,29 +419,15 @@ bool hub75Init(Hub75Handle& h, Hub75Backend backend, const Hub75Pins& pins,
 #endif
     }
 
-    // Internal DRAM first. The S3's LCD_CAM cannot be fed from PSRAM at this clock: the LCD keeps
-    // clocking at 40 MB/s while the GDMA falls behind on PSRAM reads, signals "done" with
-    // descriptors still owned by the DMA, and every following mount fails with "gdma-link: lli
-    // full" (bench-measured here with a 16.5 KB frame, and platform_esp32_i80.cpp records the same
-    // cliff for LED frames). A single 64x64 panel at 4 bits is 16.5 KB and four are 66 KB, both
-    // internal-sized. PSRAM is the fallback for a frame that does not fit, so a large wall still
-    // starts and degrades visibly rather than refusing.
+    // Internal DMA-capable DRAM, and only that. The LCD_CAM cannot be fed from PSRAM at this
+    // clock: the LCD keeps clocking at 40 MB/s while the GDMA falls behind on PSRAM reads, signals
+    // "done" with descriptors still owned by the DMA, and every following mount fails with
+    // "gdma-link: lli full" (bench-measured with a 16.5 KB frame; platform_esp32_i80.cpp records
+    // the same cliff for LED frames). The S3 forecloses it anyway: its SPIRAM region carries no
+    // MALLOC_CAP_DMA at all. So a frame that does not fit is refused with the depth to lower,
+    // which is a panel that says why rather than one that scans torn.
+    // A single 64x64 panel at 4 bits is 16.5 KB and four are 66 KB, both internal-sized.
     st->frame = static_cast<uint8_t*>(heap_caps_calloc(1, frameBytesPre, MALLOC_CAP_DMA));
-    st->frameAlloc = frameBytesPre;
-    if (!st->frame) {
-        // ALIGNED, and the size rounded up to match: a PSRAM DMA buffer must start on a cache-line
-        // boundary and span whole lines, or the writeback flushes a partial line and the burst
-        // reads a neighbour's bytes. heap_caps_calloc gives neither guarantee.
-        // 64 bytes is the external-memory cache line on every chip with PSRAM (S3, P4, S31). The
-        // IDF query for it lives in esp_private/, and reaching into a private header to learn a
-        // constant the silicon fixes is a worse dependency than naming the constant.
-        constexpr size_t kCacheLine = 64;
-        const size_t frameAlloc = ((frameBytesPre + kCacheLine - 1) / kCacheLine) * kCacheLine;
-        st->frame = static_cast<uint8_t*>(
-            heap_caps_aligned_calloc(kCacheLine, 1, frameAlloc, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
-        st->frameAlloc = frameAlloc;
-        st->framePsram = st->frame != nullptr;
-    }
     if (!st->frame) {
         g_lastError = "the panel frame does not fit in memory: lower the bit depth";
         destroyState(st);

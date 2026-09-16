@@ -4,7 +4,7 @@
 
 namespace mm {
 
-/// Author: FastLED rainbow (Mark Kriegsman) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_FastLED.h
+/// Author: FastLED rainbow (Mark Kriegsman), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_FastLED.h
 /// Palette-cycling diagonal rainbow effect — the default/test effect.
 /// @card RainbowEffect.png
 class RainbowEffect : public EffectBase {

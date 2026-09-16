@@ -22,7 +22,7 @@
 // weakened in place.
 //
 /// Prior art: John Hart's sphere tracing, and Iñigo Quilez's distance-function and raymarching
-/// articles (iquilezles.org) — the primitives, the gradient normal and the operators are his
+/// articles (iquilezles.org), the primitives, the gradient normal and the operators are his
 /// descriptions, implemented fresh.
 
 #if MM_HEAVY_COMPUTE
