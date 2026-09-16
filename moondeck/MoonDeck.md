@@ -157,6 +157,29 @@ Reads the added lines of the branch diff and the working tree, so pre-existing p
 merely touched is out of scope. Run by hand: the tree still holds instances that predate the
 check, so it is not in the gate table until those are swept.
 
+### check_docgen
+
+Report every place the generated documentation breaks the shape the standards define, and refuse a new one. Two surfaces, one check: the catalog pages that render as card tables, and the `///` comments that become the technical pages beside them.
+
+```bash
+uv run moondeck/check/check_docgen.py
+uv run moondeck/check/check_docgen.py --baseline    # rewrite the grandfather list
+```
+
+Reads the pages the docs build renders as card tables and reports, per card:
+
+- the sizes: 600 characters of description, 600 of controls, 120 for one control
+- a missing image, or the wrong format for its page
+- a details section placed above a card, or named for a card that does not exist
+- a details table past 4 columns, or a cell past 300 characters
+- any link in the second column that is not Tests, API or Details
+
+`--report` writes [docs/reference/metrics/docgen.md](../docs/reference/metrics/docgen.md), the tracked state of the sweep: totals per rule and per page, then every finding. Current state only, so its git history is the trend, the same shape repo-health.md uses.
+
+`docgen_baseline.txt` holds what the tree already breaks, so the check passes today and still fails on anything new. An entry tolerates a card **at the size it recorded**: shrink it and nothing needs refreshing, grow it and the check fails naming the old number. `--baseline` has no card on purpose, since a button that rewrites the grandfather list is a button that clears a violation.
+
+The rules are in [documentation-standards.md](../docs/contributing/documentation-standards.md#the-card), and the check itself is pinned by `test/python/test_check_docgen.py`: every rule is tested firing on a page built to break it, because a regex that silently stopped matching would report a clean run.
+
 ### check_platform_boundary
 
 Verify that platform-specific code stays inside `src/platform/`.

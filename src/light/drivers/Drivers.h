@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/PinList.h"        // parsePinList: the relay list, same parser the LED drivers use
-#include "light/drivers/DriverBase.h"  // DriverBase — the Drivers container casts its children to it
+#include "light/drivers/DriverBase.h"  // DriverBase: the Drivers container casts its children to it
 #include "core/MoonModule.h"
 #include "core/ActiveInstance.h"  // the summary-seat election (the seat + its RAII vacate)
 #include "light/layers/Buffer.h"
@@ -16,11 +16,11 @@
 #include "platform/platform.h"
 
 #include <cstring>  // std::strcmp in onControlChanged
-#include <atomic>   // encodeDone_ — the render↔encode cross-core handoff flag
+#include <atomic>   // encodeDone_: the render↔encode cross-core handoff flag
 
 namespace mm {
 
-/// Top-level container for one or more drivers — the consumer side of the pipeline.
+/// Top-level container for one or more drivers: the consumer side of the pipeline.
 /// Owns the shared output buffer (when memory allows) and performs blend+map from
 /// every layer's buffer into it each frame.
 ///
@@ -30,10 +30,10 @@ namespace mm {
 /// running" (same rule for `Layouts`/layout and `Effects`/effect).
 ///
 /// **Shared output buffer.** Necessary because blend+map writes to arbitrary physical
-/// positions via LUT — the output is not filled sequentially, so a driver cannot read
+/// positions via LUT: the output is not filled sequentially, so a driver cannot read
 /// chunk-by-chunk until the full buffer is populated. It uses the same `Buffer` type a
 /// Layer does, sized by the Layouts container. Exception: when exactly one layer is
-/// enabled AND its mapping is 1:1 unshuffled (no LUT — grid layout, no serpentine),
+/// enabled AND its mapping is 1:1 unshuffled (no LUT: grid layout, no serpentine),
 /// Drivers skips its own buffer and lets drivers read directly from the layer's buffer
 /// (the zero-copy fast path, at the cost of parallelism).
 ///
@@ -54,37 +54,37 @@ namespace mm {
 /// it reads the source buffer; Preview ignores it (shows the raw logical buffer). Drivers owns
 /// only the GLOBAL `brightness` (plus `on` and `palette`); on a power/brightness change it
 /// calls each child's `rebuildCorrection(globalBrightness)`, which bakes global × that driver's
-/// local brightness into its LUT. So outputs on one board can differ — a GRB strip and an RGBW
-/// panel, each at its own brightness — while every driver still sees the same composited RGB
+/// local brightness into its LUT. So outputs on one board can differ: a GRB strip and an RGBW
+/// panel, each at its own brightness: while every driver still sees the same composited RGB
 /// source. Palette model + names follow FastLED's, credited as prior art; implementation in
 /// `src/light/Palette.h`.
 ///
 /// **Per-driver source window (`start` / `count`).** A window-aware output driver reads
-/// the shared source buffer and outputs a contiguous slice of it — its *window* — making
+/// the shared source buffer and outputs a contiguous slice of it: its *window*, making
 /// light distribution explicit and order-independent: each driver names its own slice, so
 /// reordering drivers does not change which lights each outputs (only tick order). The
 /// motivating case: an onboard status LED with window `[0, 1)` and a main strip with
 /// window `[1, …)` as two driver instances on the same buffer, neither stealing the
 /// other's lights. `DriverBase::addWindowControls()` opts a driver in (see there); a driver
-/// that outputs the whole buffer (such as PreviewDriver) simply doesn't call it.
+/// that outputs the whole buffer (such as PreviewDriver) doesn't call it.
 ///
-/// **Prior art:** MoonLight's PhysicalLayer — owns `channelsD` (display buffer),
+/// **Prior art:** MoonLight's PhysicalLayer: owns `channelsD` (display buffer),
 /// `compositeLayers()` maps virtualChannels → channelsD, parallelism via a semaphore
 /// (driver signals completion, compositor writes)
 /// (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h).
 /// @card Drivers.png
 class Drivers : public MoonModule {
 public:
-    // Accepts output drivers only, so the "+ add" picker under Drivers offers just the drivers — not
+    // Accepts output drivers only, so the "+ add" picker under Drivers offers the drivers: not
     // every generic system module (Devices, Filesystem, …), which would bury them. The one non-driver
     // child, the boot-wired LightPresetsModule (ModuleRole::Generic), is added directly at boot via
-    // addChild — that path bypasses acceptsChildRoles — and is userEditable(false), a non-deletable
+    // addChild: that path bypasses acceptsChildRoles, and is userEditable(false), a non-deletable
     // singleton, so it never needs to be user-added and `generic` isn't needed in this accept list.
     const char* acceptsChildRoles() const override { return "driver"; }
 
     /// The live light-pipeline summary (light count, channels), for the domain-neutral core
     /// consumers (WLED /json shim, MQTT). Static so a factory-created consumer reaches it without
-    /// a wiring inject — the same shape as `AudioService::latestFrame()`. Points at the active
+    /// a wiring inject: the same shape as `AudioService::latestFrame()`. Points at the active
     /// Drivers' summary (set in prepare, vacated in release); a default all-zero summary
     /// when no Drivers is in the tree, so a consumer always reads a valid POD, never null.
     static const LightSummary* latestSummary() {
@@ -117,7 +117,7 @@ public:
     /// Stop the core-1 task on destruction too, not only on release(). The worker holds a `this`
     /// pointer and calls into the driver children, so a Drivers destroyed without an explicit
     /// release() (a stack instance in a test, a tree torn down by its owner) would leave a thread
-    /// dereferencing freed memory. Same dangling-static guard the summary seat uses — a destructor
+    /// dereferencing freed memory. Same dangling-static guard the summary seat uses: a destructor
     /// is the only place that can't be skipped.
     /// The palette seam is cleared here TOO, not only in release(): a destructor is the one place
     /// that cannot be skipped, and a Drivers torn down without an explicit release() would leave
@@ -126,7 +126,7 @@ public:
         stopEncodeTask();
         LivePalettes::clear(livePtrs_);
         MoonLivePalette::clearActiveInstance(&paletteScriptModule_);
-        // Free the compiled script too, not just detach the seam: release() may never run (a stack
+        // Free the compiled script too, not detach the seam: release() may never run (a stack
         // instance in a test, a tree torn down by its owner) and the engine holds an exec block.
         // release() is idempotent, so the ordinary path that calls both frees once.
         paletteScriptModule_.release();
@@ -136,7 +136,7 @@ public:
     /// free tree nodes without the worker dereferencing them mid-tick. The worker ticks the driver
     /// children, and a driver walks the whole Layouts/Layer tree (PreviewDriver::sendFrame →
     /// Layouts::placeLights), so freeing ANY layout/layer/driver node while core 1 runs is a
-    /// use-after-free — a LoadProhibited fault (e.g. replacing a layout on a running split device). The
+    /// use-after-free: a LoadProhibited fault (e.g. replacing a layout on a running split device). The
     /// mutation path (HttpServerModule) calls this before the free; the trailing prepareTree() re-engages
     /// the split. Idempotent + safe when the split is off (stopEncodeTask guards on the task handle).
     void quiesceRenderSplit() {
@@ -192,7 +192,7 @@ public:
 
     /// Global brightness (0–255). Scales every channel through a 256-entry LUT
     /// (`(v × brightness) / 255`); changing it rebuilds only the LUT on the cheap
-    /// `onControlChanged` tier — no pipeline realloc, so the slider is fluent. Gamma /
+    /// `onControlChanged` tier: no pipeline realloc, so the slider is fluent. Gamma /
     /// white-balance fold into this LUT later as a per-channel R/G/B split.
     ///
     /// Default low (≈8%). A fresh device with LEDs wired but no power budget set
@@ -202,10 +202,10 @@ public:
     uint8_t brightness = 20;
     /// Master power. `on=false` outputs black without touching `brightness`, so toggling back
     /// to `on=true` restores the exact level. Implemented by scaling the correction LUT to zero
-    /// (effectiveBrightness()) — the same cold-path rebuild brightness uses, no hot-path branch.
+    /// (effectiveBrightness()): the same cold-path rebuild brightness uses, no hot-path branch.
     /// This is the single power control every consumer drives: the UI toggle, IR's on/off action,
     /// the WLED app / Home Assistant (`{"on":…}`), and MQTT/Homebridge all set THIS control through
-    /// `Scheduler::setControl` — define-once, reuse everywhere (the first slice of a global
+    /// `Scheduler::setControl`: define-once, reuse everywhere (the first slice of a global
     /// lights-control surface). Default on so a freshly-flashed board lights up.
     bool on = true;
 
@@ -228,27 +228,27 @@ public:
     /// Multicore render↔encode split (Step 2a): run the drivers' encode+transmit on the
     /// second core while the render loop draws the next frame on core 0, so a frame costs
     /// `max(render, encode)` instead of `render + encode`. The encode is the dominant CPU cost at
-    /// scale (~3 µs/light — 50 ms at 16K lights), so moving it off the render core both lifts fps and
+    /// scale (~3 µs/light: 50 ms at 16K lights), so moving it off the render core both lifts fps and
     /// stops the encode starving the network stack, which also lives on core 0 (a 19 ms inline encode
-    /// dropped the Ethernet link — the measured contention that motivated this).
+    /// dropped the Ethernet link: the measured contention that motivated this).
     ///
-    /// It lives HERE, not on a driver: this container owns the whole mechanism — the cross-core handoff
+    /// It lives HERE, not on a driver: this container owns the whole mechanism: the cross-core handoff
     /// buffer (`outputBuffer_`), the core-1 task, and the frame boundary. There is one split, not one
-    /// per driver, and no per-driver opt-out: when it is on, the WHOLE output stage moves — the LED
+    /// per driver, and no per-driver opt-out: when it is on, the WHOLE output stage moves: the LED
     /// encode (the dominant CPU cost) and the network/preview frame building alike. A driver that writes
-    /// a socket still lands in lwIP, which is pinned to core 0 — so the CPU half offloads while the send
+    /// a socket still lands in lwIP, which is pinned to core 0: so the CPU half offloads while the send
     ///
-    /// **ON is simply the better configuration — the switch exists to A/B it (and as an escape hatch),
+    /// **ON is the better configuration: the switch exists to A/B it (and as an escape hatch),
     /// not because some setups should run it OFF.** OFF forces every driver's tick() back inline on
-    /// core 0 — the proven single-core path, byte-for-byte. The split also declines to engage on its
+    /// core 0: the proven single-core path, byte-for-byte. The split also declines to engage on its
     /// own when no driver exists or
     /// the handoff buffer won't fit (memory-tight board): allocate-and-degrade, never a crash. Toggling
     /// applies live (it re-runs prepare(), which quiesces core 1 before it reallocates and spawns or
-    /// stops the task) — no reboot. Sibling of the driver's `doubleBuffer`: that hides the WIRE wait
+    /// stops the task): no reboot. Sibling of the driver's `doubleBuffer`: that hides the WIRE wait
     /// behind DMA on one core; this hides the ENCODE behind the render on the other core. They stack.
     bool multicore = true;
     // The physical wire format (channel order, RGBW white, per-driver brightness) is owned
-    // per driver on DriverBase (defineCorrectionControls) — a GRB strip and an RGBW panel on
+    // per driver on DriverBase (defineCorrectionControls): a GRB strip and an RGBW panel on
     // the same board each carry their own preset. The container owns only the GLOBAL brightness
     // above, which each driver's LUT multiplies with its local brightness.
     /// The global active color palette (index into `mm::palettes::kBuiltins`;
@@ -302,7 +302,7 @@ public:
                 const char* tmp = livePtrs_[j]; livePtrs_[j] = livePtrs_[j - 1]; livePtrs_[j - 1] = tmp;
             }
         // The tags each script declared, from the catalog. A `.mlp` the catalog does not know is a
-        // script the user wrote: it keeps its place in the list and simply carries no chips, which
+        // script the user wrote: it keeps its place in the list and carries no chips, which
         // is why the lookup falls back to an empty string rather than skipping the file.
         for (uint8_t i = 0; i < liveCount_; i++) {
             liveTags_[i] = "";
@@ -328,7 +328,7 @@ public:
 
     // Two ways to wire the source Layer:
     //  - setEffects(Effects*): bind the container; layer_ is re-resolved from
-    //    activeLayer() at every prepareTree. This makes the link self-healing —
+    //    activeLayer() at every prepareTree. This makes the link self-healing:
     //    a Layer cleared and rebuilt via the API (clear_children + add_module)
     //    is picked up on the next prepareTree without re-running main.cpp wiring.
     //  - setLayer(Layer*): pin a specific Layer directly (test rigs that build a
@@ -342,7 +342,7 @@ public:
         layer_ = layer;
     }
 
-    // The brightness actually fed to the LUT: 0 when powered off, else the set brightness. Keeping
+    // The brightness fed to the LUT: 0 when powered off, else the set brightness. Keeping
     // `on` and `brightness` independent means "off" never clobbers the level the user chose.
     uint8_t effectiveBrightness() const { return on ? brightness : 0; }
 
@@ -369,7 +369,7 @@ public:
     bool     movableNow_ = false;
 
     void defineControls() override {
-        controls_.addControl("on", on);   // master power — first so it renders at the top of the card
+        controls_.addControl("on", on);   // master power: first so it renders at the top of the card
         // The GPIOs that switch the LED supply, for a board that gates power behind a relay: a
         // comma-separated list, because a board can have one per output (a Dig-Quad has four). Empty
         // on everything else, which is most boards: a deviceModel fills it in, the same way it fills
@@ -407,10 +407,10 @@ public:
         controls_.setAdvanced(controls_.count() - 1);   // a tuning knob, not a user setting
         // Read-only KPI, the multicore sibling of the driver's frameTime: how long core 0 waited at the
         // frame boundary for core 1's encode. ~0 = render and encode overlap perfectly (the split pays
-        // off fully). A large value = the effect is far cheaper than the encode, so core 0 idles — the
+        // off fully). A large value = the effect is far cheaper than the encode, so core 0 idles: the
         // measured signal that a second (ping-pong) handoff buffer would recover that time. Refreshed
         // in tick1s(). Hidden while `multicore` is off: with no split there is no boundary to wait at,
-        // so the number is meaningless — the same add-then-setHidden shape the loopback fields use.
+        // so the number is meaningless: the same add-then-setHidden shape the loopback fields use.
         // Expert-only too, since it only reads on the control it reports for.
         controls_.addReadOnly("renderWait", renderWaitStr_, sizeof(renderWaitStr_));
         controls_.setHidden(controls_.count() - 1, !multicore);
@@ -419,7 +419,7 @@ public:
     }
 
     // A global power / brightness change re-bakes every driver's LUT (global × that driver's
-    // local brightness) — cheap, no pipeline realloc, which keeps the brightness slider fluent
+    // local brightness): cheap, no pipeline realloc, which keeps the brightness slider fluent
     // (affectsPrepare stays false for Drivers, so handleSetControl skips prepareTree). The
     // per-driver channel order / white / local brightness live on each driver and rebuild there.
     void onControlChanged(const char* controlName) override {
@@ -489,7 +489,7 @@ public:
     /// at 0 is how a WLED-style client says "off" without touching `on`.
     void applyRelay() {
         const bool closed = on && brightness > 0;
-        // Release a pin the user just cleared, or it stays asserted forever on a GPIO nothing owns.
+        // Release a pin the user cleared, or it stays asserted forever on a GPIO nothing owns.
         // The same reasoning InfraredService applies when its pin is unset.
         if (!relayPins[0]) {
             for (uint8_t i = 0; i < lastRelayCount_; i++)
@@ -535,7 +535,7 @@ public:
     /// eight leaves room without costing anything, the list being text.
     static constexpr uint8_t kMaxRelays = 8;
 
-    /// The pins actually driven last time, so clearing the list can release them. The control's text
+    /// The pins driven last time, so clearing the list can release them. The control's text
     /// is gone by then, which is why the numbers are kept rather than re-parsed.
     uint8_t lastRelayPins_[kMaxRelays] = {};
     uint8_t lastRelayCount_ = 0;
@@ -550,7 +550,7 @@ public:
 
     /// Refresh the read-only `renderWait` KPI once a second (off the hot path, same tier as the driver's
     /// frameTime). Reports the PEAK core-0 wait at the handoff boundary over the last second, not a
-    /// single frame's — a lone sample lands wherever tick1s happens to fall and reads ~0 even when the
+    /// single frame's: a lone sample lands wherever tick1s happens to fall and reads ~0 even when the
     /// core is idling most frames. The peak is the number the Step 2b (ping-pong buffer) decision
     /// wants: how much time core 0 gives up at worst. A dash when the split isn't running.
     void tick1s() MM_NONBLOCKING override {
@@ -609,10 +609,10 @@ public:
     /// Correction, WITHOUT re-preparing the tree. This is the correction-only path: a global
     /// brightness change AND a light-preset edit both need it, but neither is a structural
     /// change, so routing them through prepare() would needlessly reinit each driver's output
-    /// peripheral (an RMT channel teardown blanks the strip for a tick — Live-reconfiguration
+    /// peripheral (an RMT channel teardown blanks the strip for a tick: Live-reconfiguration
     /// says a config change applies with no visible glitch). rebuildCorrection() calls the
     /// driver's onCorrectionChanged() (resize the correction buffer) but never its prepare(),
-    /// so the peripheral is left running. The LightPresetsModule (role Generic) is skipped — only
+    /// so the peripheral is left running. The LightPresetsModule (role Generic) is skipped: only
     /// a Driver owns a correction.
     void rebuildAllCorrections() {
         for (uint8_t i = 0; i < childCount(); i++) {
@@ -642,11 +642,11 @@ public:
         // defineControls() also runs on detached instances (the /api/modules probe builds one to
         // read its controls, then destroys it): such a probe would take the seam and empty it on
         // its way out, and every `.mlp` vanished from the running picker. prepare() runs only on a
-        // module the scheduler actually mounted, which is exactly the owner the seam wants.
+        // module the scheduler mounted, which is exactly the owner the seam wants.
         const uint8_t hadLive = liveCount_;
         refreshLivePalettes();
         LivePalettes::set(livePtrs_, liveTags_, liveCount_);
-        // A CHANGED count needs the control rebuilt, not just the seam republished: `palette`'s
+        // A CHANGED count needs the control rebuilt, not the seam republished: `palette`'s
         // maximum is baked in defineControls() as liveCount_ + kCount, so a palette downloaded
         // while running was listed by the picker and then REFUSED with "value out of range",
         // because the control still carried the old cap. A write reaches here through
@@ -654,23 +654,23 @@ public:
         if (liveCount_ != hadLive) rebuildControls();
         // Re-resolve the active Layer from the bound container so a Layer that
         // was cleared and rebuilt via the API is picked up here (self-healing).
-        // setLayer() pins a Layer directly and leaves effects_ null — skip then.
+        // setLayer() pins a Layer directly and leaves effects_ null: skip then.
         if (effects_) layer_ = effects_->activeLayer();
         // The output (composition) buffer is needed when we must blend into a
         // physical-space buffer rather than hand a driver a Layer's logical buffer
         // directly: whenever ≥2 layers composite, OR a single layer has a LUT
         // (logical≠physical). A lone no-LUT layer needs no output buffer (drivers
-        // read its buffer directly — the zero-copy fast path).
-        // If allocation fails (no contiguous heap — a real risk on no-PSRAM ESP32
+        // read its buffer directly: the zero-copy fast path).
+        // If allocation fails (no contiguous heap: a real risk on no-PSRAM ESP32
         // with fragmented DRAM), outputBuffer_ stays data_=nullptr; tick() checks
-        // that before blending (else a null deref panics — same defensive pattern
+        // that before blending (else a null deref panics: same defensive pattern
         // Layer::allocateBuffer uses). Sized from the active layer: every layer
         // composites into the same physical space, so its physicalLightCount() /
         // channelsPerLight() is the composite extent.
         // Output selection keys off an *enabled* source layer, never the disabled
         // fallback activeLayer() may return (which exists only so geometry stays
         // queryable while every layer is toggled off). With no enabled layer there
-        // is nothing to emit, so no output buffer — drivers go idle (see
+        // is nothing to emit, so no output buffer: drivers go idle (see
         // passBufferToDrivers). A pinned setLayer() (effects_ null) is always treated
         // as the live source.
         Layer* const out = effects_ ? effects_->firstEnabledLayer() : layer_;
@@ -678,12 +678,12 @@ public:
         const bool needOutput = out && (enabled > 1 || out->lut().hasLUT());
 
         // The render↔encode split wants an outputBuffer_ EVEN in the identity case (a lone no-LUT
-        // layer that would otherwise be zero-copy) — it's the stable frame core 1 reads while core 0
+        // layer that would otherwise be zero-copy): it's the stable frame core 1 reads while core 0
         // renders the next one. So force the buffer when the split is wanted and there are lights to
-        // drive. If it can't allocate (low memory) the split simply won't engage below and we fall
-        // back to the inline zero-copy path — the memory-tight board pays nothing and never lands in
+        // drive. If it can't allocate (low memory) the split won't engage below and we fall
+        // back to the inline zero-copy path: the memory-tight board pays nothing and never lands in
         // a half-split state (no task is spawned, so there is no cross-core wait to deadlock on).
-        // A source with ZERO lights (every layout toggled off) is not a buffer to claim — allocate(0)
+        // A source with ZERO lights (every layout toggled off) is not a buffer to claim: allocate(0)
         // fails and would print a spurious DEGRADE, so gate on a real light count.
         publishFixtureChannels();
 
@@ -691,11 +691,11 @@ public:
         const bool splitWanted = multicore && anyDriver() && haveLights;
         const bool wantOutput = (needOutput && haveLights) || splitWanted;
 
-        // Core 1 may be mid-encode from the current outputBuffer_ — wait it out before free/realloc.
+        // Core 1 may be mid-encode from the current outputBuffer_: wait it out before free/realloc.
         // If it does NOT come back (a wedged worker), do NOT then free the buffer it may still be
         // reading: tear the task down first. stopEncodeTask() joins, so once it returns nothing can
         // touch outputBuffer_ and the realloc below is safe. This is the cold path, so a blocking join
-        // is allowed here — unlike the tick() boundary, which must never block indefinitely.
+        // is allowed here: unlike the tick() boundary, which must never block indefinitely.
         if (!quiesceEncode()) stopEncodeTask();
         if (wantOutput) {
             if (!outputBuffer_.allocate(out->physicalLightCount(), out->channelsPerLight())) {
@@ -709,20 +709,20 @@ public:
         setDynamicBytes(outputBuffer_.bytes());
 
         // Engage predicate: split ON iff multicore is on, a driver exists with lights, AND the handoff
-        // buffer actually allocated. Decided from the alloc OUTCOME (no if constexpr(hasPsram)) — so a
+        // buffer allocated. Decided from the alloc OUTCOME (no if constexpr(hasPsram)): so a
         // memory-tight board that can't claim the buffer never enters a half-split state: no task is
         // spawned, every driver ticks inline on core 0, and the driver reads the layer buffer
         // (zero-copy). It still keeps doubleBuffer's DMA overlap, which needs no handoff buffer.
-        // This is a live-reconfigure — a grid resize, a layer add/delete, or the `multicore` switch
+        // This is a live-reconfigure: a grid resize, a layer add/delete, or the `multicore` switch
         // flips it, applied here with no reboot:
         //   - newly engaged: spawn the core-1 task.
         //   - newly disengaged (switch off, config reverted, or the buffer no longer fits): stop+join.
         const bool shouldSplit = splitWanted && outputBuffer_.data();
         if (shouldSplit && !renderSplitActive_) {
             renderSplitActive_ = true;
-            startEncodeTask();                 // spawns the task (at boot it just parks in waitNotify)
+            startEncodeTask();                 // spawns the task (at boot it parks in waitNotify)
             // The task couldn't be created (startEncodeTask cleared the flag): drop the handoff buffer
-            // too. It exists ONLY to be read by core 1 — keeping it would leave passBufferToDrivers()
+            // too. It exists ONLY to be read by core 1: keeping it would leave passBufferToDrivers()
             // pointing every driver at a buffer nothing composites into, so they'd render the last
             // frame forever. Freeing it re-selects the layer buffer (the inline zero-copy path).
             if (!renderSplitActive_ && !needOutput) {
@@ -746,9 +746,9 @@ public:
         passBufferToDrivers();
     }
 
-    // First output light as RGB — the live color of pixel 0, read from whichever buffer
+    // First output light as RGB: the live color of pixel 0, read from whichever buffer
     // tick() is currently driving (the composited outputBuffer_ when allocated, else the
-    // first enabled layer's own buffer — the zero-copy single-layer path). The WLED shim
+    // first enabled layer's own buffer: the zero-copy single-layer path). The WLED shim
     // tints the app's device card with this. RGB is the buffer's logical channel order
     // (0,1,2); the per-strip wire reorder is applied later by the physical drivers, not here.
     bool firstOutputRgb(uint8_t out[3]) const override {
@@ -764,26 +764,26 @@ public:
 
     void tick() MM_NONBLOCKING override {
         // Split active: core 1 is encoding the PREVIOUS frame from outputBuffer_. Wait for it to
-        // finish before overwriting the shared buffer (the boundary). The stall is timed — it's the
+        // finish before overwriting the shared buffer (the boundary). The stall is timed: it's the
         // Step 2b trigger metric: ~0 when render ≈ encode (heavy effect), large when render ≪ encode.
         if (renderSplitActive_) {
             uint32_t s0 = platform::micros();
-            // A TIMED-OUT quiesce means the worker is wedged — quiesceEncode() cleared renderSplitActive_
+            // A TIMED-OUT quiesce means the worker is wedged: quiesceEncode() cleared renderSplitActive_
             // so future ticks run inline, but THIS tick is about to composite outputBuffer_ and tick every
             // driver inline on core 0 while the wedged worker may STILL be inside a driver's tick() on core
             // 1 (two cores in one driver → double transmit, corrupted inFlight_). So JOIN it first, exactly
-            // as prepare() and quiesce() do — the join is slow, but this is the declared-broken path.
+            // as prepare() and quiesce() do: the join is slow, but this is the declared-broken path.
             if (!quiesceEncode()) stopEncodeTask();
             renderWaitUs_ = static_cast<uint32_t>(platform::micros() - s0);
             if (renderWaitUs_ > renderWaitPeakUs_) renderWaitPeakUs_ = renderWaitUs_;   // the 1 s window's worst, for the KPI
         }
         // Composite into outputBuffer_ when one is allocated (≥2 enabled layers,
-        // or a single layer with a LUT — see prepare). A null data_ means
+        // or a single layer with a LUT: see prepare). A null data_ means
         // prepare couldn't claim a block (heap fragmentation): skip the blend;
         // drivers then read the raw Layer buffer / send nothing.
         //
         // The single-layer source, resolved ONCE: both single-layer branches below need the same
-        // value, and declaring it per-branch in an if-init shadowed the outer one (MSVC C4456 —
+        // value, and declaring it per-branch in an if-init shadowed the outer one (MSVC C4456:
         // legitimately: two `Layer* out` in one chain reads as a bug even when it isn't).
         Layer* srcLayer = effects_ ? effects_->firstEnabledLayer() : layer_;
 
@@ -792,7 +792,7 @@ public:
             // The first (bottom) layer clears + overwrites; each subsequent layer
             // blends onto the accumulated frame per its own blendMode + opacity.
             // blendMap resolves the op/opacity branch once per layer (a tight
-            // specialized loop each — no-LUT layers blend 1:1, LUT layers map),
+            // specialized loop each: no-LUT layers blend 1:1, LUT layers map),
             // and a full-opacity additive/overwrite layer pays no alpha math, so
             // cost scales with enabled-layer count only.
             effects_->forEachEnabledLayer([&](Layer* L, bool first) {
@@ -811,21 +811,21 @@ public:
         } else if (renderSplitActive_ && outputBuffer_.data() && srcLayer) {
             // Split active + the identity case (a lone no-LUT layer): normally drivers would read the
             // layer's buffer directly (zero-copy), but core 1 must NOT read a buffer core 0's effects
-            // are mutating — so copy the frame into the split-owned outputBuffer_ (a 1:1 map through
+            // are mutating: so copy the frame into the split-owned outputBuffer_ (a 1:1 map through
             // an identity LUT). This is why prepare() forces outputBuffer_ in split mode even here.
             blendMap(srcLayer->buffer(), outputBuffer_, srcLayer->lut(), srcLayer->channelsPerLight());
         }
         // (Split OFF + a lone no-LUT layer: outputBuffer_ is null, drivers read the logical buffer
-        // directly — the zero-copy path set in passBufferToDrivers, unchanged.)
+        // directly: the zero-copy path set in passBufferToDrivers, unchanged.)
         //
         // Split active: hand the freshly-composited frame to core 1, which runs the WHOLE output stage
-        // (every driver's tick). Core 0 returns immediately to render the next frame — it ticks only
+        // (every driver's tick). Core 0 returns immediately to render the next frame: it ticks only
         // the non-Driver children (the LightPresetsModule). Note what does NOT move: a driver that
         // writes a socket (NetworkSend's sendto, Preview's WebSocket) still lands in lwIP, which is
-        // pinned to core 0 — so the CPU half (packet/frame building) offloads while the send executes
+        // pinned to core 0: so the CPU half (packet/frame building) offloads while the send executes
         // on the network stack's own core. That's the intent, not a leak: core 1 becomes the producer,
         // core 0's network task stays the sender.
-        // Split off: tick every child inline as before — the proven single-core path.
+        // Split off: tick every child inline as before: the proven single-core path.
         if (renderSplitActive_) {
             encodeDone_.store(false, std::memory_order_release);
             platform::notifyTask(encodeTask_);
@@ -837,20 +837,20 @@ public:
 
     // Core 0 keeps every child that is NOT a Driver while the split runs (today the LightPresetsModule,
     // role Generic); the core-1 worker takes the Drivers. Both sides go through core's one
-    // tickChildren gate+timing loop — this container picks the SIDE, it does not re-implement the rule.
+    // tickChildren gate+timing loop: this container picks the SIDE, it does not re-implement the rule.
     void tickNonDriverChildren() { tickChildren(&MoonModule::tick, RoleFilter::Except, ModuleRole::Driver); }
 
     // Stop the core-1 worker from reading our child array / a child we're about to free. Core calls
-    // this before every structural mutation (addChild / removeChild / replaceChildAt — see
+    // this before every structural mutation (addChild / removeChild / replaceChildAt: see
     // MoonModule::quiesce), which is what makes a live driver delete safe while an encode is in flight:
     // without it, core 0 frees the driver's DMA buffers and the object while core 1 is inside its
     // tick(). Waiting out the in-flight encode is sufficient (the worker only runs between a notify and
-    // encodeDone_, and the next notify can't come until core 0 returns to tick() — same thread as the
+    // encodeDone_, and the next notify can't come until core 0 returns to tick(): same thread as the
     // mutation), so the task stays alive and the split survives the mutation; prepare() re-evaluates
-    // right after and stops the task if the last driver just left.
+    // right after and stops the task if the last driver left.
     //
-    // If the worker does NOT come back within the timeout, the caller is about to DELETE the very
-    // object it may still be inside — so tear the task down (a join) before returning. Letting a
+    // If the worker does NOT come back within the timeout, the caller is about to DELETE the
+    // object it may still be inside: so tear the task down (a join) before returning. Letting a
     // timed-out quiesce return is the use-after-free this whole hook exists to prevent.
     void quiesce() override { if (!quiesceEncode()) stopEncodeTask(); }
 
@@ -859,26 +859,26 @@ private:
     Layer* layer_ = nullptr;
     Buffer outputBuffer_;
 
-    // Published to core via latestSummary(). The seat points at the Drivers whose summary is live —
+    // Published to core via latestSummary(). The seat points at the Drivers whose summary is live:
     // claimed in prepare(), vacated in release() and (via the ActiveInstance destructor) on teardown,
     // so a removed Drivers never leaves latestSummary() dangling. Only one Drivers exists in the
-    // pinned tree, so claim-if-empty needs no re-election dance — but the RAII vacate is the same
+    // pinned tree, so claim-if-empty needs no re-election dance: but the RAII vacate is the same
     // dangling-static guard the mic + registry seats use (see ActiveInstance.h).
     LightSummary summary_;
     ActiveInstance<Drivers> seat_{*this};
 
     // --- Multicore render↔encode split (Step 2a) ------------------------------------------------
-    // When engaged, the OFFLOADABLE driver children (I80/Parlio — pure SWAR encode + DMA) run their
+    // When engaged, the OFFLOADABLE driver children (I80/Parlio: pure SWAR encode + DMA) run their
     // tick() on a core-1 task, reading outputBuffer_, while core 0 renders the next frame. The
     // boundary is one shared outputBuffer_: core 0 waits encodeDone_ before overwriting it (the
-    // cheap composite is the only serialization; the two heavy stages — render, encode — overlap).
+    // cheap composite is the only serialization; the two heavy stages: render, encode, overlap).
     // Not engaged (multicore off, low memory, no driver, or an identity buffer that won't fit) → every
     // child ticks inline exactly as before. See docs/work/past/plans/Plan-20260713 - Multicore Step 2.
     platform::WorkerTask encodeTask_{};
     std::atomic<bool> encodeDone_{true};   // core 1 sets true when its encode finishes; core 0 waits it
     std::atomic<bool> encodeStop_{false};  // stop flag the worker fn observes via a woken waitNotify
                                            // (atomic, not volatile: volatile is not a thread primitive
-                                           // in C++ — a cross-thread flag is a data race without it)
+                                           // in C++: a cross-thread flag is a data race without it)
     bool renderSplitActive_ = false;   // the split is engaged (task spawned, boundary in effect)
     bool encodeStalled_ = false;       // a stall warning is showing, so recovery can clear it
     uint32_t renderWaitUs_ = 0;                 // last frame's core-0 wait at the boundary (the tick-line KPI)
@@ -887,7 +887,7 @@ private:
 
     // Core-1 body: block for a notify, run EVERY driver child's tick() against the finished frame in
     // outputBuffer_, signal done. Reached only while renderSplitActive_. One rule, no per-driver
-    // opt-out: when the split is on, the whole output stage lives on core 1 — the LED encode (the
+    // opt-out: when the split is on, the whole output stage lives on core 1: the LED encode (the
     // dominant CPU cost) and the network send (ArtNet at 16K is the other big one) both leave the
     // render core. Each driver's tick() is unchanged; only which core calls it differs.
     void runEncodeLoop() {
@@ -915,7 +915,7 @@ private:
     // ParallelLedDriver::drainInFlight.
     //
     // The timeout is the robustness floor, not the expected path: a wedged core-1 task, a starved
-    // worker, or a lost notify would otherwise spin the RENDER loop forever — and a permanent wedge
+    // worker, or a lost notify would otherwise spin the RENDER loop forever: and a permanent wedge
     // ranks below "degraded" in the robustness rule (a device must keep running, even poorly). So
     // give up after kQuiesceTimeoutMs and DISENGAGE the split: every driver falls back to ticking
     // inline on core 0, which is the same single-core path a memory-tight board already takes. Slower,
@@ -946,7 +946,7 @@ private:
     }
 
     // Is there an enabled driver child at all? The split only engages when there's output work to move
-    // — with no driver there is nothing for core 1 to do, so we don't spawn a task or claim a buffer.
+    //: with no driver there is nothing for core 1 to do, so we don't spawn a task or claim a buffer.
     bool anyDriver() const {
         for (uint8_t i = 0; i < childCount(); i++) {
             MoonModule* c = child(i);
@@ -961,7 +961,7 @@ public:
     /// True while the render↔encode split is engaged (multicore on, a driver exists, AND outputBuffer_
     /// allocated AND the core-1 task is live). Diagnostics / tests read it.
     bool renderSplitActive() const { return renderSplitActive_; }
-    /// The WORST core-0 wait at the frame boundary in the current 1 s window (µs) — time given up
+    /// The WORST core-0 wait at the frame boundary in the current 1 s window (µs): time given up
     /// waiting for core 1 to finish the output stage. This is the number both the `renderWait` control and
     /// the tick line report: a single frame's value lands wherever the once-a-second sample happens to
     /// fall and reads ~0 even when the core idles most frames, so the peak is the honest signal. It is
@@ -977,14 +977,14 @@ public:
 private:
     // Spawn the core-1 encode task. PRIVATE: the task's lifetime is owned by the engage predicate in
     // prepare(), and renderSplitActive_ is the single source of truth for "is the split on". An outside
-    // caller could desync the two — stop the task while the flag stays true, and tick() would notify a
+    // caller could desync the two: stop the task while the flag stays true, and tick() would notify a
     // dead task while quiesceEncode() waited on an encodeDone_ nobody will ever set. Safe to call again
     // (guards on encodeTask_.impl). Degrades to inline if the task can't be created.
     void startEncodeTask() {
         if (!renderSplitActive_ || encodeTask_.impl) return;
         encodeStop_.store(false, std::memory_order_release);
         encodeDone_.store(true, std::memory_order_release);
-        // Core 1, priority 5, 8 KB — matches the OTA/improv worker precedent; drivers own their DMA
+        // Core 1, priority 5, 8 KB: matches the OTA/improv worker precedent; drivers own their DMA
         // buffers so the task stack is light.
         if (!platform::spawnPinnedTask(encodeTask_, "mmEncode", &encodeTrampoline, this, 8192, 5, 1))
             renderSplitActive_ = false;   // couldn't create the task → inline path
@@ -998,32 +998,32 @@ private:
     }
 
     void passBufferToDrivers() {
-        // No active Layer (e.g. the last Layer was just deleted): clear every
+        // No active Layer (e.g. the last Layer was deleted): clear every
         // driver's Layer + source-buffer pointers rather than leaving them at
         // their previous values. An early return here left drivers holding a
-        // dangling layer_ pointing at the freed Layer — PreviewDriver then read
+        // dangling layer_ pointing at the freed Layer: PreviewDriver then read
         // layer_->layouts() on freed memory and crashed (LoadProhibited). A
         // driver with a null layer/buffer is a well-defined idle state.
-        // Drivers read outputBuffer_ whenever prepare() allocated one — it did so because we
+        // Drivers read outputBuffer_ whenever prepare() allocated one: it did so because we
         // composite (≥2 enabled layers), must LUT-map a single layer, OR the multicore split needs a
         // stable frame for core 1. Otherwise (no buffer: the lone no-LUT layer with the split off, or
-        // an allocation that degraded) the layer's own buffer is handed directly — the zero-copy fast
+        // an allocation that degraded) the layer's own buffer is handed directly: the zero-copy fast
         // path. Keying off `outputBuffer_.data()` rather than re-deriving the reason keeps ONE
-        // decision (prepare's) instead of two that can disagree — a driver pointed at the layer buffer
+        // decision (prepare's) instead of two that can disagree: a driver pointed at the layer buffer
         // while the split encodes from outputBuffer_ would output a stale frame.
         // The source is the first *enabled* layer, never the disabled fallback activeLayer() returns
-        // when all layers are off — with no enabled layer buf stays null and every driver idles (its
+        // when all layers are off: with no enabled layer buf stays null and every driver idles (its
         // last frame is not re-sent). A pinned setLayer() (effects_ null) is always the live source.
         Layer* const out = effects_ ? effects_->firstEnabledLayer() : layer_;
         Buffer* buf = out ? (outputBuffer_.data() ? &outputBuffer_ : &out->buffer())
                           : nullptr;
         for (uint8_t i = 0; i < childCount(); i++) {
             // Skip the non-driver child (the LightPresetsModule, role Generic): it has no source
-            // buffer / correction to wire — only output drivers do.
+            // buffer / correction to wire: only output drivers do.
             if (child(i)->role() != ModuleRole::Driver) continue;
             auto* drv = static_cast<DriverBase*>(child(i));
             drv->setSourceBuffer(buf);
-            // Geometry uses layer_ (activeLayer()'s fallback — valid even when every
+            // Geometry uses layer_ (activeLayer()'s fallback: valid even when every
             // layer is disabled) so a PreviewDriver keeps its width/height/depth and
             // coordinate table; buf above uses the enabled source only, so output
             // still idles (no stale frame) when nothing is enabled. layer_ is null

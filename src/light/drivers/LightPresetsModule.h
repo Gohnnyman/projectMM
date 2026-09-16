@@ -16,7 +16,7 @@
 
 namespace mm {
 
-/// The reusable light-preset library — a Drivers submodule (child role `preset`) that owns a set
+/// The reusable light-preset library: a Drivers submodule (child role `preset`) that owns a set
 /// of NAMED channel-role wirings, each editable in its own row and referenced by many drivers.
 ///
 /// A "light preset" is a channel-role layout: role `r` at channel `i` says channel `i` of a light
@@ -30,11 +30,11 @@ namespace mm {
 /// makes it reusable across every driver, and reordering / deleting other presets never disturbs a
 /// reference (the id is invariant; the row index is not).
 ///
-/// **Storage is uncapped.** A preset is exactly as wide as its fixture — role bytes live in one
+/// **Storage is uncapped.** A preset is exactly as wide as its fixture: role bytes live in one
 /// dynamic pool (`rolePool_`, a ScratchBuffer), each preset a `{poolOffset, channelCount}` slice.
 /// No fixed channel ceiling: a moving head can declare as many channels as it has. The pool is
 /// touched only on the cold path (edit / restore); nothing binds a control to it, so it is free to
-/// reallocate — the control-bind stable-address rule that pins DriverBase's arrays does not apply.
+/// reallocate: the control-bind stable-address rule that pins DriverBase's arrays does not apply.
 ///
 /// It's the first consumer of the editable-list primitive (`EditableListSource`): the whole
 /// add / delete / reorder / per-field-edit UI comes from that, reused rather than re-built (custom
@@ -51,14 +51,14 @@ public:
 
     // A boot-wired singleton (exactly one, added under Drivers at boot): not user-deletable, the same
     // as the boot-wired PreviewDriver. Drivers accepts only `driver` children, so a deleted preset
-    // library could never be re-added — and every driver resolves its preset through this one, so
+    // library could never be re-added: and every driver resolves its preset through this one, so
     // losing it would break them all. The one library is permanent; the presets INSIDE it are editable.
     bool userEditable() const override { return false; }
 
     static constexpr uint8_t kMaxPresets = 32;   // bounded row count; a device won't wire more light types
 
     /// The boot library (exactly one under Drivers). A driver resolves its preset reference through
-    /// this static seam — no compile-time dependency on the module's address, same shape as
+    /// this static seam: no compile-time dependency on the module's address, same shape as
     /// DevicesModule::active() / AudioService::latestFrame().
     static LightPresetsModule* active() { return ActiveInstance<LightPresetsModule>::active(); }
 
@@ -68,7 +68,7 @@ public:
 
     /// Row count / name / id accessors so a driver can build its `preset` Select (names for the
     /// options, ids for the stable reference it stores). The Select's chosen INDEX maps to a preset
-    /// id via idAt(index); a driver keeps the id, not the index — so reorder/delete never re-points
+    /// id via idAt(index); a driver keeps the id, not the index: so reorder/delete never re-points
     /// it. indexOfId() is the inverse, for rendering the Select at the currently-referenced preset.
     uint8_t presetCount() const { return count_; }
     const char* nameAt(uint8_t i) const { return i < count_ ? presets_[i].name : ""; }
@@ -78,16 +78,16 @@ public:
         return 0;   // a dangling id renders at the first preset; rebuildCorrection falls back to it too
     }
 
-    /// Resolve `id` into `out` — fill its brightness LUT + channel-role offsets from the preset's
+    /// Resolve `id` into `out`: fill its brightness LUT + channel-role offsets from the preset's
     /// wiring. Returns true if the id resolved; on a missing id (a deleted preset) returns false and
     /// leaves `out` untouched, so the caller keeps its safe default (never crashes). COLD PATH: a
     /// driver calls this from rebuildCorrection, never from the render loop. This is the single point
-    /// a preset's roles become a driver's flat `Correction` cache — the render path never sees a role.
+    /// a preset's roles become a driver's flat `Correction` cache: the render path never sees a role.
     /// Does the preset carry a White channel? A driver uses this to hide its whiteMode control when
     /// the referenced preset has no white to synthesise (an RGB/GRB strip). Missing id → false.
-    // True when the preset carries any channel apply() SYNTHESISES from RGB via whiteMode —
+    // True when the preset carries any channel apply() SYNTHESISES from RGB via whiteMode:
     // White, WarmWhite, Yellow, or UV. Drives the whiteMode control's visibility: the control
-    // governs all four, so it shows whenever any is present (not just White). A motion/fixture
+    // governs all four, so it shows whenever any is present (not White). A motion/fixture
     // role (Pan/Tilt/…) is not synthesised, so it doesn't count.
     bool presetHasSynthChannel(uint32_t id) const {
         const Preset* p = find(id);
@@ -110,13 +110,13 @@ public:
         const Preset* p = find(id);
         if (!p) return false;
         // The pool stores role bytes as indices into kChannelRoleOptions, which are index-aligned
-        // with the ChannelRole enum (enum : uint8_t) — so a role byte IS a ChannelRole value. The
-        // reinterpret is a view of the same bytes, no copy (the array can be wide — a moving head).
+        // with the ChannelRole enum (enum : uint8_t): so a role byte IS a ChannelRole value. The
+        // reinterpret is a view of the same bytes, no copy (the array can be wide: a moving head).
         out.rebuild(brightness, reinterpret_cast<const ChannelRole*>(roleAt(*p)), p->channelCount);
         return true;
     }
 
-    // The singleton seat is claimed at CONSTRUCTION, not in prepare() — a driver resolves the library
+    // The singleton seat is claimed at CONSTRUCTION, not in prepare(): a driver resolves the library
     // via active() while building its `preset` Select in defineControls() (phase 1) and rebuildControls
     // (phase 2b), both BEFORE the module's own prepare() (phase 4). Claiming later left active() null
     // then, so every driver's preset dropdown showed "(none)". Exactly one instance exists (boot-wired
@@ -130,14 +130,14 @@ public:
         refreshStatus();
     }
 
-    void prepare() override { seat_.claim(); }   // idempotent — no-op while we already hold the seat
+    void prepare() override { seat_.claim(); }   // idempotent: no-op while we already hold the seat
     void release() override { seat_.vacate(); MoonModule::release(); }
 
     void defineControls() override {
         MoonModule::defineControls();
         // Seed the curated built-ins if the set is empty, so a driver building its preset Select in
         // this same phase-1 pass sees real names (not "(none)"). restoreList (phase 2) replaces the
-        // set with the persisted rows — which INCLUDE the built-ins — so this never double-seeds.
+        // set with the persisted rows: which INCLUDE the built-ins, so this never double-seeds.
         if (count_ == 0) seedBuiltins();
         controls_.addList("presets", *this);   // this module is the (editable) ListSource
     }
@@ -147,13 +147,13 @@ public:
 
     // The row SUMMARY is also the PERSISTED form (only the List value round-trips to the saved file,
     // not the detail), so it must be complete: id, name, channel count, the roles array, and locked.
-    // restoreList reads exactly these fields back — a custom preset's full wiring survives a reboot.
+    // restoreList reads exactly these fields back: a custom preset's full wiring survives a reboot.
     void writeListRow(JsonSink& sink, uint8_t row) const override {
         const Preset& p = presets_[row];
         const uint8_t* roles = roleAt(p);
         // name via writeJsonString (escapes `"` / `\` / control bytes), NOT raw %s: this row IS the
         // persisted form, so a name with a quote emitted raw would produce malformed JSON that fails to
-        // parse on the next boot — silently wiping every custom preset. (DevicesModule::writeListRow
+        // parse on the next boot: silently wiping every custom preset. (DevicesModule::writeListRow
         // writes its name the same way for the same reason.)
         sink.appendf("{\"id\":%lu,\"name\":", static_cast<unsigned long>(p.id));
         sink.writeJsonString(p.name);
@@ -166,13 +166,13 @@ public:
     }
 
     /// The row's editable field descriptors: name (text), channels (the fixture width), and one role
-    /// Select per channel — rendered generically by the editable-list primitive. Every channel is
+    /// Select per channel: rendered generically by the editable-list primitive. Every channel is
     /// shown (including unmapped "—" ones), so the editor mirrors the fixture's full width. A locked
     /// (built-in) row still emits its fields; the row's `locked` flag makes the UI render them
-    /// read-only. (A sparse editor — showing only mapped channels + an add-channel affordance — is a
+    /// read-only. (A sparse editor: showing only mapped channels + an add-channel affordance, is a
     /// future refinement; kept dense here so it's straightforward and reliable.)
     // The 14 channel-role option strings, emitted ONCE per list (referenced by every ch<N> select via
-    // "optionsRef" below) instead of inlined per channel per row — a 32-channel fixture × 13 rows would
+    // "optionsRef" below) instead of inlined per channel per row: a 32-channel fixture × 13 rows would
     // otherwise repeat this identical array 400+ times, the bulk of the periodic state push.
     void writeListOptionSets(JsonSink& sink) const override {
         sink.append("\"channelRole\":[");
@@ -192,7 +192,7 @@ public:
                      static_cast<unsigned>(p.channelCount));
         for (uint8_t c = 0; c < p.channelCount; c++) {
             // Reference the shared "channelRole" option set (writeListOptionSets) instead of inlining
-            // the 14 strings — the whole point of the hoist.
+            // the 14 strings: the whole point of the hoist.
             sink.appendf(",{\"name\":\"ch%u\",\"type\":\"select\",\"value\":%u,\"optionsRef\":\"channelRole\"}",
                          static_cast<unsigned>(c), static_cast<unsigned>(roles[c]));
         }
@@ -207,7 +207,7 @@ public:
         p = Preset{};
         p.id = nextId_++;
         p.channelCount = 3;
-        // %u on a uint32 could in principle print 10 digits, which "preset " + name[16] cannot hold —
+        // %u on a uint32 could in principle print 10 digits, which "preset " + name[16] cannot hold:
         // GCC flags the truncation even though nextId_ never gets near it. Print the id modulo 10^5:
         // the default name is a placeholder the user renames, and 5 digits provably fits.
         std::snprintf(p.name, sizeof(p.name), "preset %u",
@@ -308,9 +308,9 @@ public:
         rebuildPool();
         // The role pool is heap-backed; on an out-of-memory boot (fragmented / exhausted heap on ESP32)
         // rolePool_.resize() leaves data() null. Writing roles through a null base would be a hard fault,
-        // so degrade to an empty list instead — the device runs, setup()'s count_==0 gate re-seeds the
-        // built-ins, and the customs are simply not restored this boot. (Desktop malloc effectively never
-        // fails at these sizes, so this only trips on a memory-tight device — exactly where a crash is
+        // so degrade to an empty list instead: the device runs, setup()'s count_==0 gate re-seeds the
+        // built-ins, and the customs are not restored this boot. (Desktop malloc effectively never
+        // fails at these sizes, so this only trips on a memory-tight device: exactly where a crash is
         // least acceptable.)
         if (!rolePool_.data() && count_ > 0) { count_ = 0; return true; }
         // Second pass: fill each preset's roles now that the pool is sized.
@@ -321,7 +321,7 @@ public:
             const int rn = (roles && roles->type == mm::json::JsonType::Array)
                                ? mm::json::arraySize(doc, roles) : 0;
             // Clamp each persisted role to the valid ChannelRole range, matching setListRowField's
-            // validation — a hand-edited / corrupt file can carry an out-of-range byte, and an unclamped
+            // validation: a hand-edited / corrupt file can carry an out-of-range byte, and an unclamped
             // cast would store a value the UI mis-renders and the Correction silently drops.
             for (uint8_t c = 0; c < presets_[idx].channelCount; c++) {
                 const long rv = (c < rn) ? mm::json::readInt(mm::json::element(doc, roles, c), 0) : 0;
@@ -374,7 +374,7 @@ private:
     // poolOffset, PRESERVING existing role bytes across the re-pack. resize() reallocates + zero-
     // fills, so the old bytes are copied into a transient buffer first, then back at the new offsets.
     // Cold path only (add / delete / move / channel-count change / restore); a transient alloc here
-    // is fine. No channel cap — the pool grows to whatever the presets need.
+    // is fine. No channel cap: the pool grows to whatever the presets need.
     void rebuildPool() {
         const uint32_t oldPoolLen = static_cast<uint32_t>(rolePool_.count());
         uint32_t newOff[kMaxPresets] = {};
@@ -385,7 +385,7 @@ private:
         // PREVIOUS layout) into a temp laid out at the NEW offsets, then resize + copy back. The copy
         // length is min(poolLen, channelCount): a grow keeps the old bytes + leaves the tail zeroed
         // for the caller to fill, a shrink keeps the surviving head. poolLen (the real old slice size,
-        // tracked explicitly) is what makes this robust — never inferred from neighbours or from
+        // tracked explicitly) is what makes this robust: never inferred from neighbours or from
         // channelCount, which may already hold the new value. A fresh preset has poolLen 0 (nothing
         // to keep). After the repack, poolOffset/poolLen are updated to the new layout.
         uint8_t* keep = total ? static_cast<uint8_t*>(platform::alloc(total)) : nullptr;
@@ -426,12 +426,12 @@ private:
 
     // The curated built-in wirings, each a dense role array of exactly its fixture's width. Data,
     // not code: a preset of any width seeds directly (the old LightPreset-enum path capped at 4
-    // channels via a roles[4] — a wide moving head couldn't be expressed). The color orders are the
-    // real ones (WS2812 GRB, ws2814 WRGB, sk6812 GRBW, …); RBG/GBR/BRG are deliberately omitted — no
+    // channels via a roles[4]: a wide moving head couldn't be expressed). The color orders are the
+    // real ones (WS2812 GRB, ws2814 WRGB, sk6812 GRBW, …); RBG/GBR/BRG are deliberately omitted: no
     // real fixture ships them, so they'd be permutation noise in the built-in list (a user adds a
     // custom preset if ever needed). The moving-head maps are migrated from MoonLight's DriverNode
     // offset tables; a channel whose role this project doesn't drive yet (RGBW sub-cells, and any
-    // fixture function past Pan/Tilt/Zoom/Gobo/Dimmer) stays None — a correct DMX map whose extra
+    // fixture function past Pan/Tilt/Zoom/Gobo/Dimmer) stays None: a correct DMX map whose extra
     // channels are inert until the moving-head effect writers land.
     void seedBuiltins() {
         using R = ChannelRole;
@@ -478,7 +478,7 @@ private:
             {"MH Mini 10W 11", kMHMini11, 11},
         };
         // A built-in name that overflows Preset::name would truncate silently (and break a lookup by
-        // name), so fail LOUD at BUILD time if one is too long — the fix is a shorter name, not a
+        // name), so fail LOUD at BUILD time if one is too long: the fix is a shorter name, not a
         // wider buffer (the buffer is ×kMaxPresets standing DRAM on classic ESP32). constexpr scan
         // over the table, checked by static_assert; a bad name never reaches a boot.
         constexpr auto namesFit = [](const Builtin* t, size_t n) {

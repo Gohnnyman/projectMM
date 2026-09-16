@@ -70,10 +70,16 @@ uint32_t packageId() {
 }
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
 // ESP32-S3: flash 26-32 always; 33-37 are octal-PSRAM's SPIIO4-7 + DQS, reserved only on an octal-PSRAM
-// module (N16R8/R8). Straps 0,45,46 (GPIO3 is a soft strap). JTAG/UART0/USB are role-conflicts, not
-// reserved — they stay usable as GPIO, so they are NOT flagged reserved here (a claim on them is legal).
+// module (N16R8/R8). The mode is the IMAGE's (CONFIG_SPIRAM_MODE_OCT), so a quad-PSRAM build leaves
+// 33-37 free: the MatrixPortal S3 (2 MB quad) drives three HUB75 lines on them, and an octal image
+// cannot run on that part anyway. Straps 0,45,46 (GPIO3 is a soft strap). JTAG/UART0/USB are
+// role-conflicts, not reserved: they stay usable as GPIO, so they are NOT flagged reserved here.
 constexpr uint8_t kReserved[]        = {26, 27, 28, 29, 30, 31, 32};
+#if CONFIG_SPIRAM_MODE_OCT
 constexpr uint8_t kReservedIfPsram[] = {33, 34, 35, 36, 37};
+#else
+constexpr uint8_t kReservedIfPsram[] = {};
+#endif
 constexpr uint8_t kStrap[]           = {0, 3, 45, 46};
 #elif defined(CONFIG_IDF_TARGET_ESP32P4)
 // ESP32-P4: flash/PSRAM are module-internal (the SDK's valid-GPIO query already excludes the

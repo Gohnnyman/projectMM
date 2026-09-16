@@ -145,10 +145,9 @@ def _module_block(source_path, spec):
     stem = source_path.name          # e.g. "BlurzEffect.h"
     base = source_path.stem          # e.g. "BlurzEffect"
     lines = spec.splitlines()
-    # Find the line tying this module to its block. Two link shapes across catalog
-    # pages: a direct `source [<stem>.h]` (effects/modifiers/layouts) or a detail-page
-    # reference `[<base>.md]` / `alt="<base> controls"` (drivers link to detail pages),
-    # or a `Detail: [technical](../moxygen/<base>.md)` line (the consistent card link).
+    # Which line ties this module to its block. Several link shapes across the catalog
+    # pages: a direct `source [<stem>.h]`, a detail-page reference, or the card's own
+    # `Detail: [technical](moxygen/<base>.md)`.
     def _match(ln):
         return (f"[{stem}]" in ln or f"[{base}.md]" in ln
                 or f"moxygen/{base}.md" in ln
@@ -156,12 +155,11 @@ def _module_block(source_path, spec):
     link_i = next((i for i, ln in enumerate(lines) if _match(ln)), None)
     if link_i is None:
         return spec  # per-module page (or no matching link) — whole file
-    # Block start: the nearest `### ` heading at or above the link.
-    start = next((i for i in range(link_i, -1, -1) if lines[i].startswith("### ")), 0)
-    # Block end: the next `### ` or `## ` heading after the link.
-    end = next((i for i in range(link_i + 1, len(lines))
-                if lines[i].startswith(("### ", "## "))), len(lines))
-    return "\n".join(lines[start:end])
+    # WHERE a block starts and ends is the build's rule, not a second copy of it.
+    for _title, start, end in split_blocks(spec):
+        if start <= link_i < end:
+            return "\n".join(lines[start:end])
+    return spec
 
 
 # Range-bearing control forms: addControl("name", var, MIN, MAX).
@@ -217,12 +215,12 @@ def _check_author_url_drift(source, spec):
 # a table, so a trailing `## Source` list would just duplicate every row's link —
 # removed as redundant). These pages are checked by validating those per-block
 # source links resolve, NOT by requiring a `## Source` section.
-CATALOG_PAGES = {
-    SPECS / "light" / "effects" / "effects.md",
-    SPECS / "light" / "modifiers" / "modifiers.md",
-    SPECS / "light" / "layouts" / "layouts.md",
-    SPECS / "light" / "drivers" / "drivers.md",
-}
+# From the build's own list rather than a copy. The copy this replaces named four pages at
+# paths that stopped existing when docs/ was restructured, so the catalog branch below had
+# been unreachable and every catalog page took the `## Source` path instead.
+sys.path.insert(0, str(ROOT / "moondeck" / "docs"))
+from mkdocs_hooks import _CATALOG_PAGES, split_blocks  # noqa: E402
+CATALOG_PAGES = {SPECS.parent / rel for rel in _CATALOG_PAGES}
 
 
 def _resolve_link(md, href):

@@ -1,4 +1,4 @@
-"""catalog_scripts.py reads what a script declares about itself.
+"""MoonLive's catalog_scripts.py reads what a shipped script declares about itself.
 
 The catalog carries each factory script's `dimensions()` and `tags()` so the picker can show a row
 before the script is downloaded. That makes the generator a SECOND reader of the MoonLive language,

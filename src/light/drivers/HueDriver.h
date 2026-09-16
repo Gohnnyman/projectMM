@@ -3,29 +3,29 @@
 #include "light/drivers/DriverBase.h"
 
 #include "core/JsonUtil.h"          // parse the bridge's JSON responses
-#include "core/FilesystemModule.h"  // noteDirty — persist the app key after pairing
-#include "core/DevicesModule.h"     // DevicesModule::active() — list the bridge as a device
+#include "core/FilesystemModule.h"  // noteDirty: persist the app key after pairing
+#include "core/DevicesModule.h"     // DevicesModule::active(): list the bridge as a device
 #include "platform/platform.h"
 
 namespace mm {
 
-/// Output driver: sends the buffer to Philips Hue bulbs as pixels — a driver, not a listed device.
+/// Output driver: sends the buffer to Philips Hue bulbs as pixels: a driver, not a listed device.
 /// The bulbs are pixels of an effect: make a small grid (e.g. 4×1×1), run any effect, and this
 /// driver reads its window of the shared buffer and pushes each light's color to the bridge. Same
 /// shape as NetworkSendDriver (read a window, send it out), but over the Hue v1 HTTP API not UDP.
 ///
-/// It's HTTP, not a wire protocol, so the rate is bounded by connection churn — each PUT opens a
+/// It's HTTP, not a wire protocol, so the rate is bounded by connection churn: each PUT opens a
 /// fresh TCP connection (the bridge speaks `Connection: close`), giving smooth ambient color, not
 /// real-time (see `kPutIntervalMs`). The shared output Correction applies as on the LED/network
 /// drivers, so brightness and color-order reach the Hue lights too. Only color-capable, reachable
 /// lights are driven (`parseLights`); the `room` / `light` dropdowns narrow that (`rebuildDriven`).
 ///
-/// **Wire contract (Hue v1 API, plain HTTP, no TLS — bench-confirmed on a BSB002 bridge, API 1.77):**
-///  - Pair — `POST http://<bridgeIp>/api` `{"devicetype":"projectMM#device"}`; before the link
+/// **Wire contract (Hue v1 API, plain HTTP, no TLS: bench-confirmed on a BSB002 bridge, API 1.77):**
+///  - Pair: `POST http://<bridgeIp>/api` `{"devicetype":"projectMM#device"}`; before the link
 ///    button, the bridge returns `link button not pressed`; after, `[{"success":{"username":"<key>"}}]`.
-///  - List lights — `GET http://<bridgeIp>/api/<appKey>/lights` → `{"1":{…},"2":{…}}` (window index → light id).
-///  - List rooms — `GET http://<bridgeIp>/api/<appKey>/groups` → `{"1":{"name":…,"lights":["1","2"],"type":"Room"},…}`.
-///  - Set a light — `PUT http://<bridgeIp>/api/<appKey>/lights/<id>/state`
+///  - List lights: `GET http://<bridgeIp>/api/<appKey>/lights` → `{"1":{…},"2":{…}}` (window index → light id).
+///  - List rooms: `GET http://<bridgeIp>/api/<appKey>/groups` → `{"1":{"name":…,"lights":["1","2"],"type":"Room"},…}`.
+///  - Set a light: `PUT http://<bridgeIp>/api/<appKey>/lights/<id>/state`
 ///    `{"on":true,"bri":0-254,"hue":0-65535,"sat":0-254,"transitiontime":N}` (or `{"on":false}` for a black pixel).
 ///
 /// Prior art: the [Hue v1 CLIP API](https://developers.meethue.com/develop/hue-api/) (public docs);
@@ -38,14 +38,14 @@ class HueDriver : public DriverBase {
 public:
     /// HueDriver reads apply()'s output back as R,G,B to convert to HSV for the bridge, so it
     /// references the "RGB" preset (a GRB reorder would corrupt the hue). It opts out of the
-    /// correction controls (hasCorrectionControls() → false), so the order stays RGB — only the
+    /// correction controls (hasCorrectionControls() → false), so the order stays RGB: only the
     /// global × local brightness varies. (A future refinement guards against a non-RGB wiring being
     /// pointed at a Hue light; today it's the vanilla RGB passthrough.)
     HueDriver() { setDefaultPresetName("RGB"); }
 
     /// The bridge's LAN IP, entered in the UI (4 octets).
     uint8_t  bridgeIp[4] = {};
-    /// The Hue username/app key — filled by the Pair button, then persisted.
+    /// The Hue username/app key: filled by the Pair button, then persisted.
     char     appKey[48] = {};
 
     /// Hue converts to HSV, RGB-fixed, so there is no correction UI to show.
@@ -65,9 +65,9 @@ public:
         buildLightOptions();
         controls_.addSelect("room", room_, roomOptions_, roomOptionCount_);
         controls_.addSelect("light", light_, lightOptions_, lightOptionCount_);
-        addWindowControls();                                    // start / count — its slice of the buffer
+        addWindowControls();                                    // start / count: its slice of the buffer
         // The generic "status" line (setStatus) carries the pairing state + driven-of-total light
-        // count — see refreshStatus(); no separate hueStatus / colorLights controls.
+        // count: see refreshStatus(); no separate hueStatus / colorLights controls.
         refreshStatus();
     }
 
@@ -87,8 +87,8 @@ public:
             resetLightCache();   // re-fetch the light list + groups for the new bridge/key
         } else if (controlName && std::strcmp(controlName, "room") == 0) {
             // Room changed: the light dropdown's options now describe a different set, so the old
-            // light_ index may point past the new (shorter) list — clamp it back to "All". The
-            // option arrays themselves were already rebuilt by the rebuildControls() that ran just
+            // light_ index may point past the new (shorter) list: clamp it back to "All". The
+            // option arrays themselves were already rebuilt by the rebuildControls() that ran immediately
             // before this onControlChanged (it re-ran defineControls() against the new room_). Recompute
             // the driven subset and refresh the status line.
             if (light_ >= lightOptionCount_) light_ = 0;
@@ -102,7 +102,7 @@ public:
     }
 
     /// Runs every render tick, but does at most ONE bounded PUT and only when the rate-limit
-    /// interval has elapsed (a millis() gate, NOT work-every-tick) — otherwise a synchronous HTTP
+    /// interval has elapsed (a millis() gate, NOT work-every-tick): otherwise a synchronous HTTP
     /// round-trip would stall the single-thread render loop (the "never block the loop" rule,
     /// lessons.md). One PUT every kPutIntervalMs, round-robined across the lights; pairing + the
     /// bridge announce ride the slow 1 Hz tick.
@@ -110,14 +110,14 @@ public:
         if (pairTicksLeft_ > 0) return;            // pairing owns the bridge during its window
         if (!appKey[0] || !haveBridge() || lightCount_ == 0) return;
         const uint32_t now = platform::millis();
-        if (now - lastPutMs_ < kPutIntervalMs) return;   // not time yet — return instantly, no I/O
+        if (now - lastPutMs_ < kPutIntervalMs) return;   // not time yet: return instantly, no I/O
         lastPutMs_ = now;
         pushOneChangedLight();                     // exactly one bounded PUT this tick
     }
 
     /// The 1 Hz tick handles the non-render-critical, slower bridge work: the pairing poll, the
     /// one-shot light + group fetch, and the periodic DevicesModule announce. Each is at most one
-    /// bridge call per second — acceptable on a 1 Hz tick, and never in the per-frame tick().
+    /// bridge call per second: acceptable on a 1 Hz tick, and never in the per-frame tick().
     void tick1s() MM_NONBLOCKING override {
         if (pairTicksLeft_ > 0) { pollPairing(); DriverBase::tick1s(); return; }
         if (!appKey[0] || !haveBridge()) { DriverBase::tick1s(); return; }
@@ -135,7 +135,7 @@ public:
         DriverBase::release();
     }
 
-    /// Test seam: drive the changed-light diff + PUT formatting without a live bridge — feed a
+    /// Test seam: drive the changed-light diff + PUT formatting without a live bridge: feed a
     /// light's RGB and get back whether it would PUT + the body it would send. Records the push
     /// (like pushChangedLights does) so a follow-up call with the same RGB exercises the
     /// unchanged-skip path.
@@ -158,13 +158,13 @@ public:
     int8_t colorCountForTest() const { return colorCount_; }
 
     /// Test seam: parse a real /groups JSON body through fetchGroups' Room extractor. Call
-    /// parseLightsForTest FIRST — room membership resolves against the known color lights (hueId_),
+    /// parseLightsForTest FIRST: room membership resolves against the known color lights (hueId_),
     /// exactly as production order guarantees (fetchGroups runs only after fetchLights).
     void parseGroupsForTest(const char* json) { parseGroups(json); rebuildDriven(); }
     /// Count of kept Rooms (bridge groups with type=="Room").
     uint8_t roomCountForTest() const { return roomCount_; }
 
-    /// Test seams for the room→light filtering: mirror what a UI Select change does — write the
+    /// Test seams for the room→light filtering: mirror what a UI Select change does: write the
     /// index, then re-derive the driven subset.
     /// Select room `r` and re-derive the driven subset, as the UI dropdown does.
     void setRoomForTest(uint8_t r) { room_ = r; if (light_ >= lightOptionCount_) light_ = 0; rebuildDriven(); refreshStatus(); }
@@ -172,7 +172,7 @@ public:
     void setLightForTest(uint8_t l) { light_ = l; rebuildDriven(); refreshStatus(); }
     /// Recompute the status line without waiting for a tick.
     void refreshStatusForTest() { refreshStatus(); }
-    /// How many lights survive the room+light filter — the set pushOneChangedLight walks.
+    /// How many lights survive the room+light filter: the set pushOneChangedLight walks.
     uint8_t drivenCountForTest() const { return drivenLightCount_; }
     /// The bridge light id at filtered index `i`, or 0 when out of range.
     uint16_t drivenIdForTest(uint8_t i) const { return i < drivenLightCount_ ? hueId_[drivenIdx_[i]] : 0; }
@@ -190,23 +190,23 @@ private:
     static constexpr uint8_t kMaxRooms  = 16;        // bounded room count; option index 0 is "All"
     static constexpr uint8_t kNameLen   = 24;        // per-light / per-room friendly-name buffer
     // kMaxLights == 32 == the width of a uint32_t, so a Room's color-light membership fits one
-    // bitmask (bit i ⇔ color light hueId_[i]) — resolved at parse time, since fetchGroups runs
+    // bitmask (bit i ⇔ color light hueId_[i]): resolved at parse time, since fetchGroups runs
     // after fetchLights (the sawGroups_ gate), so hueId_ is already populated. A bitmask is the
     // textbook small-set membership (a bit test replaces a per-id scan), and 16×4 B = 64 B beats a
     // 16×32 id-list's 1 KB inline. static_assert pins the width assumption.
     static_assert(kMaxLights == 32, "Room membership bitmask (roomMask_) assumes 32 color lights");
     // One PUT at most every kPutIntervalMs (a millis() gate in tick()). Each PUT opens a fresh
     // TCP connection (the bridge speaks Connection: close), so the rate is bounded by connection
-    // CHURN, not just Hue's command budget: at ~7/s the TIME_WAIT sockets pile into the hundreds
+    // CHURN, not Hue's command budget: at ~7/s the TIME_WAIT sockets pile into the hundreds
     // and the bridge starts refusing connections (PUTs fail, lights freeze). 500 ms → ~2 PUTs/s
     // keeps TIME_WAIT small and is plenty for smooth ambient color (each light glides over its
     // ~2 s refresh via the matched transitiontime). Real-time would need keep-alive or the
-    // Entertainment API — out of scope; this is the standard API's comfortable rate.
+    // Entertainment API: out of scope; this is the standard API's comfortable rate.
     static constexpr uint32_t kPutIntervalMs = 500;
     static constexpr int     kPairWindowTicks = 30;  // ~30 s pairing window (link-button press)
     static constexpr uint16_t kReportEverySec = 30;  // re-announce the bridge to DevicesModule
     // Per-frame PUT (tick()) timeout. A successful PUT to a LAN bridge returns in ~20-50 ms, so
-    // this only bounds the WORST case (an unreachable/overloaded bridge) — not the normal cost.
+    // this only bounds the WORST case (an unreachable/overloaded bridge): not the normal cost.
     // 200 ms gives comfortable margin over the real latency (a 60 ms cap intermittently tripped
     // under rapid back-to-back PUTs, failing them) while still bounding a bad frame. kSlowTimeoutMs
     // is for the 1 Hz calls (pair / fetch / announce), where the 8 KB /lights GET wants headroom.
@@ -216,27 +216,27 @@ private:
     /// The shared layer buffer this driver reads its window from; null until setSourceBuffer.
     Buffer* sourceBuffer_ = nullptr;
 
-    /// Window index → the bridge's light id, learned from GET /api/<key>/lights. Holds ONLY
-    /// color-capable lights (the bridge's "Extended color light"s) — a dimmable-only white or an
+    /// Window index to the bridge's light id, learned from `GET /api/<key>/lights`. Holds ONLY
+    /// color-capable lights (the bridge's "Extended color light"s): a dimmable-only white or an
     /// on/off plug is skipped, so every window pixel maps to a bulb that can show the full color.
     uint16_t hueId_[kMaxLights] = {};
-    /// The last RGB pushed per light — what the changed-only filter compares against.
+    /// The last RGB pushed per light: what the changed-only filter compares against.
     uint8_t  lastRgb_[kMaxLights][3] = {};
     /// Whether this light has been pushed at least once (the first send is never "unchanged").
     bool     sent_[kMaxLights] = {};
-    /// How many color-capable lights survived the filter — the length of hueId_.
+    /// How many color-capable lights survived the filter: the length of hueId_.
     uint8_t  lightCount_ = 0;
     /// The same count as the read-only control / bridge field.
     int8_t   colorCount_ = 0;
     /// fetchLights has run, so the list is trustworthy.
     bool     sawLights_ = false;
-    /// Friendly light names for the dropdown — `kMaxLights × kNameLen`, indexed by lightNameAt().
+    /// Friendly light names for the dropdown: `kMaxLights × kNameLen`, indexed by lightNameAt().
     /// Heap, NOT inline: the block is allocated lazily on first parse and freed in release(), so
     /// an unconfigured driver pays nothing and sizeof(HueDriver) stays small (the lightsBuf_
     /// stack-overflow lesson, applied to the names). The capacity is the kMax bound, not the live
-    /// count — the parser fills it incrementally and the count is not known until it finishes.
+    /// count: the parser fills it incrementally and the count is not known until it finishes.
     char*    lightNames_ = nullptr;
-    /// Friendly room names, same shape — `kMaxRooms × kNameLen`, indexed by roomNameAt().
+    /// Friendly room names, same shape: `kMaxRooms × kNameLen`, indexed by roomNameAt().
     char*    roomNames_  = nullptr;
     /// Pointer to light `i`'s name inside the lightNames_ block, or null before it is allocated.
     char* lightNameAt(uint8_t i) { return lightNames_ ? lightNames_ + static_cast<size_t>(i) * kNameLen : nullptr; }
@@ -245,19 +245,19 @@ private:
     /// Allocate the two name blocks lazily on first parse (so an unconfigured driver pays nothing),
     /// and free them on release / cache reset (so a removed-then-readded bridge starts clean). The
     /// blocks are sized to the kMax bound, not the live count, because the parser fills them
-    /// incrementally and the count isn't known until it finishes — keeping the names off the
+    /// incrementally and the count isn't known until it finishes: keeping the names off the
     /// resident sizeof(HueDriver) is the win (the lightsBuf_ stack-probe lesson), not per-byte fit.
     void ensureNameBuffers() {
         if (!lightNames_) lightNames_ = static_cast<char*>(platform::alloc(static_cast<size_t>(kMaxLights) * kNameLen));
         if (!roomNames_)  roomNames_  = static_cast<char*>(platform::alloc(static_cast<size_t>(kMaxRooms)  * kNameLen));
     }
-    /// Release both name blocks and null the pointers — a re-add re-fetches and re-allocates.
+    /// Release both name blocks and null the pointers: a re-add re-fetches and re-allocates.
     void freeNameBuffers() {
         platform::free(lightNames_); lightNames_ = nullptr;
         platform::free(roomNames_);  roomNames_  = nullptr;
     }
 
-    /// Rooms from GET /api/<key>/groups (type=="Room"): bit i set ⇔ this Room references color
+    /// Rooms from `GET /api/<key>/groups` (type=="Room"): bit i set ⇔ this Room references color
     /// light hueId_[i].
     uint32_t roomMask_[kMaxRooms] = {};
     /// Number of Rooms kept.
@@ -269,9 +269,9 @@ private:
     uint8_t  room_ = 0;
     /// Light filter: 0 = "All", else the n-th light of the current option list.
     uint8_t  light_ = 0;
-    /// Color-light array indices actually driven, after the room+light filter.
+    /// Color-light array indices driven, after the room+light filter.
     uint8_t  drivenIdx_[kMaxLights] = {};
-    /// Size of drivenIdx_ — the set pushOneChangedLight walks.
+    /// Size of drivenIdx_: the set pushOneChangedLight walks.
     uint8_t  drivenLightCount_ = 0;
 
     /// Stable option pointers for the room Select. addSelect BORROWS the pointer, so these live
@@ -285,11 +285,11 @@ private:
     /// How many entries of lightOptions_ are live.
     uint8_t     lightOptionCount_ = 1;
 
-    /// Round-robin position across the lights — one bounded PUT per tick, not a whole sweep.
+    /// Round-robin position across the lights: one bounded PUT per tick, not a whole sweep.
     uint8_t  pushCursor_ = 0;
     /// Lights driven this pass (n), the basis for the fade time.
     uint8_t  drivenCount_ = 0;
-    /// millis() of the last PUT — the rate gate tick() checks before doing any work.
+    /// millis() of the last PUT: the rate gate tick() checks before doing any work.
     uint32_t lastPutMs_ = 0;
     /// Remaining 1 Hz ticks to keep polling for the link-button press; 0 = not pairing.
     int      pairTicksLeft_ = 0;
@@ -304,10 +304,10 @@ private:
     static constexpr size_t kLightsBufInitial = 2048;
     static constexpr size_t kLightsBufMax     = 16384;
 
-    /// True once a bridge IP has been set — any non-zero octet counts.
+    /// True once a bridge IP has been set: any non-zero octet counts.
     bool haveBridge() const { return bridgeIp[0] || bridgeIp[1] || bridgeIp[2] || bridgeIp[3]; }
 
-    /// Does the JSON span [begin, end) contain `key` (e.g. "\"hue\"") — used to read a light's
+    /// Does the JSON span [begin, end) contain `key` (e.g. "\"hue\""): used to read a light's
     /// capabilities off its state block (a color light has "hue"; the bridge omits it otherwise).
     static bool containsKey(const char* begin, const char* end, const char* key) {
         const size_t kl = std::strlen(key);
@@ -316,7 +316,7 @@ private:
         return false;
     }
 
-    /// Read a `"<key>":"<value>"` string from WITHIN a JSON object span [begin, end) — the
+    /// Read a `"<key>":"<value>"` string from WITHIN a JSON object span [begin, end): the
     /// span-bounded analogue of containsKey, used to grab one light's / one room's "name" without
     /// matching the first "name" elsewhere in the bridge's big response. Copies the raw value up to
     /// its closing quote (the bridge's names carry no escapes worth decoding) into out[cap], NUL-
@@ -355,19 +355,19 @@ private:
         setStatus(statusBuf_);
     }
 
-    /// One pairing attempt: POST /api {"devicetype":"projectMM#<name>"} and, if the user has
+    /// One pairing attempt: `POST /api {"devicetype":"projectMM#<name>"}` and, if the user has
     /// pressed the bridge's link button, keep the app key it returns.
     void pollPairing() {
         if (!haveBridge()) { pairTicksLeft_ = 0; std::snprintf(statusBuf_, sizeof(statusBuf_), "set bridge IP first"); setStatus(statusBuf_); return; }
         char host[16]; bridgeStr(host);
         // The pairing body is tiny, but httpRequest reads headers + body into one buffer and the
-        // bridge's headers run ~700 bytes — size past them or the success body gets squeezed out.
+        // bridge's headers run ~700 bytes: size past them or the success body gets squeezed out.
         char resp[1024];
         int st = platform::httpRequest("POST", host, 80, "/api",
                                        "{\"devicetype\":\"projectMM#device\"}", kSlowTimeoutMs,
                                        resp, sizeof(resp));
         if (st == 200 && std::strstr(resp, "\"username\"")) {
-            // [{"success":{"username":"<key>"}}] — extract the username.
+            // [{"success":{"username":"<key>"}}]: extract the username.
             char key[48] = {};
             mm::json::parseString(resp, "username", key, sizeof(key));
             if (key[0]) {
@@ -408,7 +408,7 @@ private:
 
     /// A complete /lights response is a JSON object: its last non-whitespace char is '}'. A read cut
     /// short by a too-small buffer ends mid-content, so this is the truncation signal fetchLights
-    /// grows against. (Not a full JSON validator — the bridge's well-formed body is the contract;
+    /// grows against. (Not a full JSON validator: the bridge's well-formed body is the contract;
     /// this only distinguishes "whole" from "cut off".)
     static bool bodyLooksComplete(const char* body) {
         size_t len = std::strlen(body);
@@ -418,12 +418,12 @@ private:
     }
 
     /// The bridge id a quoted JSON key opens with (`"7":{…}` → 7), or 0 when `s` does not start
-    /// with a positive integer that fits `hueId_` — the value every caller already treats as
+    /// with a positive integer that fits `hueId_`: the value every caller already treats as
     /// "not an id". The range bound is the point: an id too large would otherwise narrow into a
     /// DIFFERENT valid light (`"65537"` → light 1).
     static uint16_t parseId(const char* s) {
         // Digits only. `strtol` skips leading whitespace and accepts a sign, so `" 7"` and `"+7"`
-        // would both read as light 7 — a key shape the bridge never emits, and accepting it means
+        // would both read as light 7: a key shape the bridge never emits, and accepting it means
         // a malformed response silently addresses a REAL light. The scan hands us the character
         // right after the opening quote, so the first one must already be a digit.
         if (!s || *s < '0' || *s > '9') return 0;
@@ -441,7 +441,7 @@ private:
         // silently drop trailing lights from parseLights' linear scan), double and refetch until it
         // fits or we hit the cap. A typical home (a few lights) fits the first try; only a large
         // bridge grows. The buffer lives on the heap (PSRAM when present) for the fetch and is freed
-        // after — fetchLights runs at 1 Hz, off the render loop, so the alloc/refetch isn't hot-path.
+        // after: fetchLights runs at 1 Hz, off the render loop, so the alloc/refetch isn't hot-path.
         // It is NOT an inline member: an 8 KB member would make sizeof(HueDriver) overflow the
         // main-task stack when registerType<HueDriver> constructs a throwaway probe.
         for (size_t cap = kLightsBufInitial; cap <= kLightsBufMax; cap *= 2) {
@@ -468,14 +468,14 @@ private:
 
     /// List the bridge in DevicesModule (so it shows alongside discovered WLED/projectMM peers,
     /// carrying its dimmable-light count for layout sizing). The bridge isn't a UDP-presence
-    /// device, so it's registered explicitly through the static seam — no compile-time core↔light
+    /// device, so it's registered explicitly through the static seam: no compile-time core↔light
     /// dependency beyond the same DevicesModule::active() shape AudioService::latestFrame() uses.
     void reportBridge() {
         auto* dev = DevicesModule::active();
         if (!dev || !haveBridge()) return;
         char host[16]; bridgeStr(host);
         // httpRequest reads headers + body into this one buffer, and the bridge's response
-        // headers alone run ~700 bytes — so size for headers + the small config body, not just
+        // headers alone run ~700 bytes: so size for headers + the small config body, not only
         // the body, or the body gets squeezed out.
         char cfg[1024], name[24] = {};
         if (platform::httpRequest("GET", host, 80, "/api/0/config", "", kSlowTimeoutMs, cfg, sizeof(cfg)) == 200)
@@ -486,7 +486,7 @@ private:
     /// Extract the COLOR-capable, REACHABLE light ids from a /lights body ({"1":{…},"5":{…},…}),
     /// so the window maps every pixel to a bulb an effect can animate right now. Color lights
     /// carry a "hue" field; a dimmable white or on/off plug does not, and an unpowered light
-    /// reports "reachable":false. A forward scan, not the recursive JSON reader — the ~8 KB
+    /// reports "reachable":false. A forward scan, not the recursive JSON reader: the ~8 KB
     /// response exceeds its node arena.
     void parseLights(const char* resp) {
         ensureNameBuffers();
@@ -499,7 +499,7 @@ private:
                 && containsKey(pendingStart, objEnd, "\"hue\"")
                 && containsKey(pendingStart, objEnd, "\"reachable\":true")) {
                 hueId_[lightCount_] = static_cast<uint16_t>(pendingId);
-                // Keep the friendly name for the dropdown — read the "name" string from this
+                // Keep the friendly name for the dropdown: read the "name" string from this
                 // light's object span (bounded, NUL-terminated). Falls back to the id if absent.
                 char* name = lightNameAt(lightCount_);
                 parseStringIn(pendingStart, objEnd, "name", name, kNameLen);
@@ -526,8 +526,8 @@ private:
         rebuildDriven();   // the color-light set changed → re-derive the filtered driven subset
     }
 
-    /// --- Learn the bridge's Rooms (GET /api/<key>/groups). Same dynamic grow-and-retry read as
-    /// fetchLights — the /groups body grows with the room+zone count, so size the heap buffer up
+    /// --- Learn the bridge's Rooms (`GET /api/<key>/groups`). Same dynamic grow-and-retry read as
+    /// fetchLights: the /groups body grows with the room+zone count, so size the heap buffer up
     /// until the response parses whole. fetchGroups runs at 1 Hz, off the render loop, after
     /// fetchLights (gated by sawGroups_), so this alloc/refetch is never hot-path.
     void fetchGroups() {
@@ -588,7 +588,7 @@ private:
 
     /// Resolve a Room's "lights":["3","5",…] array (within [begin, end)) to a color-light
     /// membership bitmask: for each listed bridge id, set bit i if it equals a kept color light
-    /// hueId_[i]. Ids the Room lists that aren't color-capable (a white bulb, a plug) simply don't
+    /// hueId_[i]. Ids the Room lists that aren't color-capable (a white bulb, a plug) don't
     /// match and are dropped. Scans from the "lights" key to the array's ']' so a later array
     /// (e.g. a Zone's "lights" in a wider scan) can't bleed in.
     uint32_t roomMaskFor(const char* begin, const char* end) const {
@@ -614,7 +614,7 @@ private:
     /// Writes up to kMaxLights indices into `out` and returns the count. The single source of
     /// truth for both the light-dropdown options and the driven set, so the two cannot disagree.
     ///
-    /// `out` is a reference-to-array so the bound lives in the TYPE and the compiler checks it —
+    /// `out` is a reference-to-array so the bound lives in the TYPE and the compiler checks it:
     /// with a bare `uint8_t*` GCC cannot see the caller's size and warns (-Wstringop-overflow).
     uint8_t roomColorLights(uint8_t (&out)[kMaxLights]) const {
         uint8_t n = 0;
@@ -648,10 +648,10 @@ private:
         lightOptionCount_ = n;
     }
 
-    /// Derive drivenIdx_ from the current room+light filter — the subset pushOneChangedLight walks.
-    ///   room=All & light=All → every color light (the original behaviour, unchanged).
+    /// Derive drivenIdx_ from the current room+light filter: the subset pushOneChangedLight walks.
+    ///   room=All & light=All → every color light (the original behavior, unchanged).
     ///   room=X               → that room's color lights.
-    ///   light=Y              → just that one light (the Y-th of the current room's list).
+    ///   light=Y              → that one light (the Y-th of the current room's list).
     void rebuildDriven() {
         drivenLightCount_ = 0;
         uint8_t idx[kMaxLights];
@@ -676,17 +676,17 @@ private:
         if (cpl < 3) return;
         const uint8_t* base = sourceBuffer_->data();
         // Walk the FILTERED driven set (drivenIdx_), not every color light: room=All & light=All
-        // makes it the full color-light set (unchanged behaviour), a room/light pick narrows it.
+        // makes it the full color-light set (unchanged behavior), a room/light pick narrows it.
         const uint8_t n = drivenLightCount_ < winLen ? drivenLightCount_ : static_cast<uint8_t>(winLen);
         if (n == 0) return;
-        drivenCount_ = n;   // the round-robin size — drives the Hue fade time (transitionDeciseconds)
+        drivenCount_ = n;   // the round-robin size: drives the Hue fade time (transitionDeciseconds)
 
         for (uint8_t step = 0; step < n; step++) {
             const uint8_t i = (pushCursor_ + step) % n;        // position within the driven window
             const uint8_t li = drivenIdx_[i];                  // the color-light array index it maps to
             const uint8_t* px = base + static_cast<size_t>(winStart + i) * cpl;
             // Apply the shared Correction (brightness LUT + channel order) so the global
-            // brightness slider and a swapped color order reach Hue too — same as the physical
+            // brightness slider and a swapped color order reach Hue too: same as the physical
             // drivers. apply() writes outChannels bytes; we read the first three (RGB) for HSV.
             // apply() writes outChannels bytes at the fixture's DERIVED offsets, and a preset
             // declares its own width: the seeded moving heads are 15, 24 and 32 channels and the
@@ -703,29 +703,29 @@ private:
                 char path[96];
                 std::snprintf(path, sizeof(path), "/api/%s/lights/%u/state", appKey, hueId_[li]);
                 const int st = platform::httpRequest("PUT", host, 80, path, body, kHttpTimeoutMs, nullptr, 0);
-                // Mark the light sent only on a successful PUT — on a failure/timeout it stays
+                // Mark the light sent only on a successful PUT: on a failure/timeout it stays
                 // eligible so the next lap retries it instead of skipping it as "already sent".
                 if (st == 200) {
                     lastRgb_[li][0] = rgb[0]; lastRgb_[li][1] = rgb[1]; lastRgb_[li][2] = rgb[2];
                     sent_[li] = true;
                 }
                 pushCursor_ = static_cast<uint8_t>((i + 1) % n);   // resume after this one next time
-                return;                                            // ONE PUT attempt — done
+                return;                                            // ONE PUT attempt: done
             }
         }
-        // No light changed this lap — nothing to send. Cursor stays put.
+        // No light changed this lap: nothing to send. Cursor stays put.
     }
 
     /// The changed-only diff + the Hue state body. Returns true (and fills `out`) when light
     /// `idx`'s RGB differs from the last push (or was never sent). Every driven light is
     /// color-capable (parseLights keeps only those), so the body carries on/off plus bri + hue +
     /// sat from a textbook RGB→HSV. `transitiontime` is the bridge's fade: its 400 ms default is
-    /// too long for our cadence — it smears and looks frozen — so transitionDeciseconds() sizes it
+    /// too long for our cadence: it smears and looks frozen, so transitionDeciseconds() sizes it
     /// to the actual refresh rate.
     bool diffAndFormat(uint8_t idx, uint8_t r, uint8_t g, uint8_t b, char* out, size_t cap) {
         if (idx >= kMaxLights) return false;
         if (sent_[idx] && lastRgb_[idx][0] == r && lastRgb_[idx][1] == g && lastRgb_[idx][2] == b)
-            return false;   // unchanged — skip
+            return false;   // unchanged: skip
         const uint8_t tt = transitionDeciseconds();
         if ((r | g | b) == 0) { std::snprintf(out, cap, "{\"on\":false,\"transitiontime\":%u}", tt); return true; }
         uint16_t hue; uint8_t sat, val;
@@ -737,11 +737,11 @@ private:
 
     /// Fade time matched to how often THIS light is refreshed: with n lights round-robined one
     /// per kPutIntervalMs, each light's turn comes every (n × kPutIntervalMs) ms. Convert to
-    /// deciseconds and clamp to ≥1 (0 = snap) so the fade lasts about until the next update —
+    /// deciseconds and clamp to ≥1 (0 = snap) so the fade lasts about until the next update:
     /// continuous glide, no visible steps.
     uint8_t transitionDeciseconds() const {
-        // Use the count actually driven this pass (n = min(lightCount_, window)), not the full
-        // discovered lightCount_ — a partial window refreshes each of its lights sooner, so a
+        // Use the count driven this pass (n = min(lightCount_, window)), not the full
+        // discovered lightCount_: a partial window refreshes each of its lights sooner, so a
         // lightCount_-based fade would overshoot and lag. drivenCount_ is set by pushOneChangedLight.
         const uint8_t driven = drivenCount_ ? drivenCount_ : (lightCount_ ? lightCount_ : 1);
         const uint32_t intervalMs = static_cast<uint32_t>(driven) * kPutIntervalMs;
@@ -750,7 +750,7 @@ private:
     }
 
     /// Textbook RGB→HSV mapped to Hue's ranges: hue 0..65535 (Hue's 16-bit wheel), sat 0..254,
-    /// val(=bri) 0..254. Integer math, no float — the standard max/min/chroma formulation.
+    /// val(=bri) 0..254. Integer math, no float: the standard max/min/chroma formulation.
     static void rgbToHsv(uint8_t r, uint8_t g, uint8_t b, uint16_t& hueOut, uint8_t& satOut, uint8_t& valOut) {
         const uint8_t mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
         const uint8_t mn = r < g ? (r < b ? r : b) : (g < b ? g : b);

@@ -11,14 +11,14 @@ namespace mm {
 
 /// Output driver: WS2812B-class addressable LEDs over the ESP32 [RMT (Remote Control
 /// Transceiver)](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/rmt.html)
-/// peripheral — one GPIO and one RMT TX channel per strand, fed consecutive slices of the source
+/// peripheral: one GPIO and one RMT TX channel per strand, fed consecutive slices of the source
 /// buffer (8-bit, GRB). The default LED driver for classic-ESP32 and S3 board entries, and the
 /// readable EXAMPLE future LED drivers copy: a sibling of NetworkSendDriver (same DriverBase hooks,
 /// same per-light `correction_.apply()` guard, same once-allocated owned buffer sized off the hot
 /// path); only the emit differs: this fuses the correction into the wire-byte frame into one pass
 /// (the encode is `RmtSymbol.h`, host-tested) then hands per-pin slices to the platform.
 ///
-/// **Wire contract — [WS2812B](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf):** 1-wire NRZ
+/// **Wire contract: [WS2812B](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf):** 1-wire NRZ
 /// at 800 kHz, no clock line. Each bit is a 1.25 µs cell that starts HIGH then drops LOW; the HIGH
 /// duration encodes the bit (`0` = 350 ns high, `1` = 700 ns high), MSB-first per byte. Channel
 /// order (GRB, GRBW, …) is applied by `Correction` before the encode, so the encoder is
@@ -27,13 +27,13 @@ namespace mm {
 /// only the peripheral (`platform::rmtWs2812*`); on a chip without RMT TX channels those calls are
 /// inert stubs, so it compiles everywhere. The peripheral half uses the modern RMT driver (ESP-IDF
 /// 5.x "RMT v2": `rmt_new_tx_channel` / a copy encoder / `rmt_transmit`), not the legacy
-/// channel-numbered API — not a preference: the legacy driver was removed entirely in ESP-IDF v6
+/// channel-numbered API: not a preference: the legacy driver was removed entirely in ESP-IDF v6
 /// (the build IDF), so v2 is the only API that exists. On chips whose RMT has a DMA backend
-/// (`SOC_RMT_SUPPORT_DMA` — the P4; the classic ESP32 has none) the whole-frame loopback capture
+/// (`SOC_RMT_SUPPORT_DMA`: the P4; the classic ESP32 has none) the whole-frame loopback capture
 /// uses it.
 ///
 /// **Flicker on LEDs that should be off** is almost always a data-line signal-integrity problem
-/// (3.3 V drive into a 5 V strip), not firmware — the "LED signal integrity" use-case guide has the
+/// (3.3 V drive into a 5 V strip), not firmware: the "LED signal integrity" use-case guide has the
 /// confirm-firmware-innocent playbook (`loopbackFrame`, the TX-power sweep) and the electrical fixes.
 /// @card RmtLedDriver.png
 ///
@@ -47,25 +47,25 @@ public:
     RmtLedDriver() { setDefaultPresetName("GRB"); }
 
     /// Hard cap on the pin arrays: the largest RMT TX group of any supported chip (8 on
-    /// classic ESP32; the S3 has 4 — enforced per target via maxPinsForTarget()). A fixed
+    /// classic ESP32; the S3 has 4: enforced per target via maxPinsForTarget()). A fixed
     /// array bounded by a hardware constant, not a dynamic list: the bound can't grow at runtime.
     static constexpr uint8_t kMaxPins = 8;
 
     /// Comma-separated GPIO list, one RMT TX channel per pin ("18,17,16"). Text control so one
-    /// field holds N pins — per-output (pin, count) rows are the WLED LED-settings pattern. The
+    /// field holds N pins: per-output (pin, count) rows are the WLED LED-settings pattern. The
     /// peripheral validates each pin at init; a parse error or failing pin lands in the status
     /// field and the driver idles. 24 bytes fit kMaxPins 2-digit GPIOs plus separators. Defaults
     /// to UNSET: the strand is user-soldered to whatever GPIO the user wired, so a hard-coded pin
-    /// would be a guess that could drive a pin committed elsewhere — empty until set, idle
+    /// would be a guess that could drive a pin committed elsewhere: empty until set, idle
     /// meanwhile (the "default only when it cannot do harm" rule; see lessons.md). Bench pin "18".
     char pins[24] = "";
 
-    /// Comma-separated lights-per-pin ("100,100,50"), matched to `pins` by position — each pin
+    /// Comma-separated lights-per-pin ("100,100,50"), matched to `pins` by position: each pin
     /// takes the next consecutive slice of the source buffer, in list order (pin 1 = `[0,n₁)`,
     /// pin 2 = `[n₁,n₁+n₂)`, …). May be empty or shorter than `pins`: the unassigned remainder
     /// splits evenly over the remaining pins (last takes the rounding remainder), so the empty
     /// default splits the whole buffer evenly. Each pin is capped at a WS2812 per-pin ceiling
-    /// (2048 lights — a 1-wire line clocks ~30 µs/light, so 2048 is already ~16 FPS): a pin over
+    /// (2048 lights: a 1-wire line clocks ~30 µs/light, so 2048 is already ~16 FPS): a pin over
     /// the ceiling is clamped (output stays lit) with a Warning status, guarding the common
     /// misconfig of a whole grid on one pin. Use the start/count window to drive fewer lights,
     /// not this safety cap.
@@ -98,7 +98,7 @@ public:
         "custom",                  // the three fields below
     };
 
-    /// On-device loopback self-test — RMT is a transceiver, so the driver verifies its own output
+    /// On-device loopback self-test: RMT is a transceiver, so the driver verifies its own output
     /// on real silicon (replaces the old standalone test firmware). Tick to run a one-shot RMT
     /// TX→RX round-trip: jumper the first pin (TX) to `loopbackRxPin`, it transmits a known WS2812
     /// pattern, captures it back, decodes, compares → `loopback PASS` / `FAIL: …` / `jumper not
@@ -108,7 +108,7 @@ public:
     bool     loopbackTest = false;  // checkbox: on = run + keep re-running on change
     /// Optional TX override for the test: when set (>= 0), the loopback transmits on THIS pin in
     /// place of pins[0], so the test can run on a dedicated jumper without re-typing the
-    /// operational `pins`. Falls back to pins[0] when unset (-1). Test-only — normal output uses
+    /// operational `pins`. Falls back to pins[0] when unset (-1). Test-only: normal output uses
     /// `pins`. int8_t + addPin (not uint16): single-GPIO controls use the standard Pin control,
     /// and -1 = unset lets GPIO 0 be a valid loopback pin (0-as-unset wouldn't).
     int8_t   loopbackTxPin = -1;
@@ -118,7 +118,7 @@ public:
     /// Whole-frame stress variant: instead of a 24-bit burst, transmit a real frame the size of
     /// the first pin's slice, back to back, and bit-verify the WHOLE capture. This is the one that
     /// catches frame-rate corruption and RF interference on the data line (the flicker class of
-    /// bug) — a 24-bit burst passes through a wire that mangles a sustained frame. Shown only in
+    /// bug): a 24-bit burst passes through a wire that mangles a sustained frame. Shown only in
     /// test mode; the status names the first corrupted light on failure. On the classic ESP32,
     /// which has no RMT DMA, the capture is capped to one channel's worth of symbols (~2 RGB lights)
     /// and still clocked back to back; the S3/P4 capture the full frame via DMA.
@@ -130,14 +130,14 @@ public:
     static constexpr uint32_t kResolutionHz = 40'000'000;
 
     // The pin/count list parsing (parsePinList / assignCounts) lives in
-    // PinList.h, shared with MultiPinLedDriver — both drivers slice the source
+    // PinList.h, shared with MultiPinLedDriver: both drivers slice the source
     // buffer from the same two text controls.
 
     /// Bind the driver's controls: the window (start/count), the `pins` and
     /// `ledsPerPin` text lists, and the loopback self-test controls (the TX/RX pin
     /// overrides and frame-stress flag are always bound but shown only in test mode).
     void defineDriverControls() override {
-        addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
+        addWindowControls();   // start / count: the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
         controls_.addSelect("timing", timing, kTimingOptions,
@@ -156,7 +156,7 @@ public:
         controls_.addControl("loopbackTest", loopbackTest);
         controls_.setAdvanced(controls_.count() - 1);   // expert-mode: a bench self-test, not a normal-use control
         // loopbackTxPin / loopbackRxPin are always bound (so persistence can load
-        // them any time) but only shown while the test mode is on — same always-
+        // them any time) but only shown while the test mode is on: same always-
         // add-then-setHidden shape NetworkModule uses for its static-IP fields. The
         // rebuild after every control change (HttpServerModule) re-runs this and
         // flips the flag. txPin is the optional override: -1 (unset) = transmit on
@@ -184,9 +184,9 @@ public:
     }
 
     /// React to a control change (runs off the render loop, in the HTTP/API
-    /// handler context — a blocking self-test here is fine). loopbackTest is a
+    /// handler context: a blocking self-test here is fine). loopbackTest is a
     /// persistent on/off mode. While it's ON, the test (re-)runs on every relevant
-    /// change — turning it on, OR editing pins / loopbackRxPin — so the pins can be
+    /// change: turning it on, OR editing pins / loopbackRxPin, so the pins can be
     /// set in any order and the result always reflects the current pins. Turning it
     /// OFF clears the result.
     void onControlChanged(const char* name) override {
@@ -197,7 +197,7 @@ public:
                                 || std::strcmp(name, "loopbackFrame") == 0;
         if (isTestControl && !loopbackTest) {
             // Toggling the test off clears the loopback verdict, then re-derives
-            // the real driver status — a config/init error must survive (a blind
+            // the real driver status: a config/init error must survive (a blind
             // clearStatus() would hide it).
             clearFailBuf();
             clearStatus();
@@ -206,14 +206,14 @@ public:
         } else if (loopbackTest && (isTestControl || isPinControl)) {
             // A `pins` edit changes pinList_/pinCount_, but onControlChanged runs BEFORE the
             // prepare() sweep re-parses (and loopbackRxPin/loopbackFrame don't
-            // trigger that sweep at all), so refresh here before testing — otherwise
+            // trigger that sweep at all), so refresh here before testing: otherwise
             // the self-test would transmit on the STALE pinList_[0] and show a verdict
             // for the previous pin. Mirrors ParallelLedDriver::onControlChanged.
             if (std::strcmp(name, "pins") == 0) { parseConfig(); reinit(); }
             runLoopbackSelfTest();
         }
         // Chain to the base so a correction-control edit (localBrightness / preset / whiteMode)
-        // rebuilds this driver's correction LUT — without this the LED driver's brightness/preset
+        // rebuilds this driver's correction LUT: without this the LED driver's brightness/preset
         // controls were dead (only the global-brightness push reached the LUT).
         DriverBase::onControlChanged(name);
     }
@@ -226,11 +226,11 @@ public:
     ///   - RMT CHANNELS (hardware): reinit() / deinitAll(), RMT-targets-only
     ///     (if constexpr).
     /// The original bug put the buffer free inside the hardware deinit(), which
-    /// reinit() (a rebuild) calls — so a rebuild freed the buffer tick() needs.
+    /// reinit() (a rebuild) calls: so a rebuild freed the buffer tick() needs.
     /// Keeping the two apart makes that mistake impossible here and lets the host
     /// unit test (unit_RmtLedDriver_lifecycle.cpp) pin it.
     /// One-time wiring only (parse the pin lists into members); the RMT/buffer acquire lives
-    /// in prepare(), the sole resource-lifecycle gate. Enabled-independent — the acquire
+    /// in prepare(), the sole resource-lifecycle gate. Enabled-independent: the acquire
     /// happens in the prepareTree sweep that always follows.
     void setup() override { parseConfig(); }
     /// Release the RMT channels and free the symbol buffer, then clear the shared
@@ -242,7 +242,7 @@ public:
     }
 
     /// Pure build (see MoonModule::prepare): re-parse, resize the symbol buffer, and (re)init the
-    /// RMT channels off the hot path (tick() never allocates). No enabled() check — core's applyState()
+    /// RMT channels off the hot path (tick() never allocates). No enabled() check: core's applyState()
     /// only calls this when effectively-enabled and routes to release() (release) otherwise, so the
     /// channels + buffer free when the driver, or a parent, is disabled.
     void prepare() override {
@@ -266,12 +266,12 @@ public:
         // Re-assert the resting "driving N of M lights" status after the full build. parseConfig sets it
         // too, but only when a buffer is already wired (txLightCount_ > 0); on the boot path setup()'s
         // parseConfig runs before the source buffer exists, so it's skipped and the status stays blank
-        // (or shows a stale loopback verdict) until the user touches a control. Re-deriving here — once
-        // pins + buffer + counts are all settled — makes it the default resting state, the way MoonLed's
+        // (or shows a stale loopback verdict) until the user touches a control. Re-deriving here: once
+        // pins + buffer + counts are all settled: makes it the default resting state, the way MoonLed's
         // shows. Gated on inited_: reinit() reports a per-pin "RMT init failed" at Severity::Error without
         // touching configErr_/configWarn_, so the `!warn` rule alone would overwrite that error with a
         // false "driving N lights" while tick() bails and the strand stays dark. Only assert the resting
-        // status when the channels actually came up.
+        // status when the channels came up.
         // frameUnusable_ joins inited_ here for the same reason: resizeFrame reports the
         // no-transmit case at Severity::Error without touching configErr_/configWarn_, so the
         // `!warn` rule alone would replace it with a false "driving N lights" while the strip sits
@@ -280,7 +280,7 @@ public:
             setDrivingInfo(txLightCount_, winLen_, correction_.outChannels);
     }
 
-    /// Preset toggle (RGB↔RGBW) changes outChannels without a structural rebuild —
+    /// Preset toggle (RGB↔RGBW) changes outChannels without a structural rebuild:
     /// the per-pin symbol offsets scale with outChannels, so re-derive them too. Skipped
     /// while (effectively) disabled (would re-alloc the symbol buffer a disabled driver released).
     void onCorrectionChanged() override { if (!effectivelyEnabled()) return; parseConfig(); resizeFrame(); }
@@ -302,12 +302,12 @@ public:
         if constexpr (platform::rmtTxChannels == 0) return;  // inert off RMT chips
         if (!inited_ || !sourceBuffer_ || !sourceBuffer_->data()) return;
 
-        // Encode only the lights the pins actually transmit (Σ pinCounts_), NOT the whole source
+        // Encode only the lights the pins transmit (Σ pinCounts_), NOT the whole source
         // buffer: a strand config of e.g. 64 leds/pin on a 16K-light grid drives 64, so encoding
         // all 16384 would burn ~100× the work the output needs (the rest is never clocked out).
         // Bounded by the buffer too, in case config outruns the current frame.
         // Encode within this driver's window only. winLen_ is the slice length;
-        // txLightCount_ (Σ pinCounts_) is what the pins clock out — n is the min,
+        // txLightCount_ (Σ pinCounts_) is what the pins clock out: n is the min,
         // so a window smaller than the configured pin total never reads past it.
         // A frame still on the wire OWNS frame_: the peripheral expands its bytes straight out of it,
         // so re-encoding now rewrites bytes the peripheral is mid-way through clocking. That is not
@@ -340,17 +340,17 @@ public:
         for (nrOfLightsType i = 0; i < n; i++) {
             correction_.apply(src + (winStart_ + i) * srcCh, frame_ + static_cast<size_t>(i) * outCh, srcCh);
         }
-        // Start every pin's slice before waiting on any — the channels clock out
+        // Start every pin's slice before waiting on any: the channels clock out
         // concurrently, so the tick is charged the longest strand, not the sum.
         // The shared reset gap (the WS2812 latch) runs once, after the last wait.
         // Wait ONLY on channels whose transmit started: a failed transmit gives
         // no done-callback, so waiting on it would block the full 1000 ms timeout
         // and a single bad pin would stall the tick (the same guard the LCD /
         // Parlio loops use, here per channel).
-        // Transmit only up to the n lights actually encoded this frame: pins are laid out
+        // Transmit only up to the n lights encoded this frame: pins are laid out
         // contiguously from light 0, so pin i covers lights [pinStart, pinStart+pinCounts_[i]).
         // Normally Σ pinCounts_ == n, but if the buffer shrank since the last parseConfig (a grid
-        // resize lands a tick before the config re-parse) n can be below Σ pinCounts_ — cap each
+        // resize lands a tick before the config re-parse) n can be below Σ pinCounts_: cap each
         // pin at the encoded boundary so it never clocks out stale symbols past what we wrote.
         const size_t bytesPerLight = static_cast<size_t>(outCh);
         bool started[kMaxPins] = {};
@@ -368,7 +368,7 @@ public:
         if (cfg_.reset_us) platform::delayUs(cfg_.reset_us);
     }
 
-    /// Wait on every pin that actually started, and report whether they all finished. A pin whose
+    /// Wait on every pin that started, and report whether they all finished. A pin whose
     /// transmit never started is not waited on: with no done-callback coming, that would spend the
     /// full timeout and let one bad pin stall the tick.
     bool waitForPins() MM_NONBLOCKING {
@@ -415,7 +415,7 @@ private:
     uint16_t       pinList_[kMaxPins] = {};    // parsed pins, list order
     nrOfLightsType pinCounts_[kMaxPins] = {};  // lights per pin (slice lengths)
     size_t         pinOffsets_[kMaxPins] = {}; // slice start in frame_, bytes
-    nrOfLightsType txLightCount_ = 0;          // Σ pinCounts_ — lights actually transmitted/encoded
+    nrOfLightsType txLightCount_ = 0;          // Σ pinCounts_: lights actually transmitted/encoded
     nrOfLightsType winStart_ = 0;              // first source-buffer light this driver reads (the window)
     nrOfLightsType winLen_ = 0;                // window length (lights), clamped to the buffer
     uint8_t pinCount_ = 0;                     // 0 = idle (parse error / no pins)
@@ -528,13 +528,13 @@ private:
             txLightCount_ = static_cast<nrOfLightsType>(txLightCount_ + pinCounts_[i]);
         }
         clearConfigErr();
-        // assignCounts sets `warn` when it clamped a pin to the WS2812 ceiling — the output
+        // assignCounts sets `warn` when it clamped a pin to the WS2812 ceiling: the output
         // still runs (the first 2048/pin), so it's a Warning, not an idling error. Passing it
         // (or null when nothing clamped) to setConfigWarn tracks the live state and retracts a
         // stale warning once the user drops back under the ceiling.
         setConfigWarn(warn);
-        // With nothing more urgent to show AND lights actually driven, report the lights
-        // this driver consumes (Σ pinCounts_) of the window — real consumption, not a
+        // With nothing more urgent to show AND lights driven, report the lights
+        // this driver consumes (Σ pinCounts_) of the window: real consumption, not a
         // grid×pins guess. An idle driver (no pins) stays statusless, not "driving 0 of 0".
         if (!warn && txLightCount_ > 0) setDrivingInfo(txLightCount_, winLen_, outCh);
         return true;
@@ -543,15 +543,15 @@ private:
     // --- symbol buffer (plain heap; runs on every platform) ---
 
     // (Re)allocate the symbol buffer for the current source + correction. Off the
-    // hot path. Grows only — keeps a big-enough existing allocation.
+    // hot path. Grows only: keeps a big-enough existing allocation.
     void resizeFrame() {
         if (!sourceBuffer_) return;
-        // Size for the lights this driver actually CLOCKS OUT, not the whole window. The window (start,
+        // Size for the lights this driver CLOCKS OUT, not the whole window. The window (start,
         // count) can be far larger than the pins encode: `ledsPerPin` (or fewer pins than the window has
         // lights) caps the transmitted total at `txLightCount_` (Σ pinCounts_), and tick() only ever
         // encodes that many (n = min(txLightCount_, winLen_) there). Sizing to the window instead made an
         // 8×8 strip on one pin (ledsPerPin 64) inside a 70×82 grid (count=all, window 5740) try to alloc
-        // ~550 KB of symbols for lights it never encodes — the alloc failed on a small-heap classic ESP32,
+        // ~550 KB of symbols for lights it never encodes: the alloc failed on a small-heap classic ESP32,
         // frame_ stayed null, and tick() bailed, so the strip went dark even though only 64 lights were
         // wanted. Bound to txLightCount_ so the buffer matches the real output. Fall back to the window
         // when no pins are parsed yet (txLightCount_ == 0), so the buffer is ready before pins are set.
@@ -607,10 +607,10 @@ private:
     }
 
 protected:
-    // Matches DriverBase's visibility — a private override would silently hide the hook from any
+    // Matches DriverBase's visibility: a private override would silently hide the hook from any
     // future caller holding a DriverBase*. ParallelLedDriver keeps it protected for the same reason.
     /// This driver's heap = the base scratch + the RMT frame buffer (one byte per output channel per light,
-    /// the driver's largest buffer). Summed for the per-module memory readout — see
+    /// the driver's largest buffer). Summed for the per-module memory readout: see
     /// DriverBase::driverHeapBytes.
     size_t driverHeapBytes() const override {
         return DriverBase::driverHeapBytes() + frameCap_;
@@ -622,9 +622,9 @@ private:
 
     // Run the one-shot RMT TX→RX loopback on the FIRST pin and report via the
     // MoonModule status slot. The slot stores a const char* (no copy), so PASS /
-    // jumper-missing / not-supported are flash literals — zero RAM. Only the
+    // jumper-missing / not-supported are flash literals: zero RAM. Only the
     // FAIL case needs the captured hex, so it borrows a buffer allocated ON
-    // DEMAND and freed by clearFailBuf() (release + every non-FAIL outcome) —
+    // DEMAND and freed by clearFailBuf() (release + every non-FAIL outcome):
     // no permanent member.
     void runLoopbackSelfTest() {
         if constexpr (platform::rmtTxChannels == 0) {
@@ -646,7 +646,7 @@ private:
             return;
         }
         // The test reconfigures the first data pin as TX, so release ALL our TX
-        // channels first — this also guarantees the test's RX channel can always
+        // channels first: this also guarantees the test's RX channel can always
         // allocate RMT memory, even with every TX channel otherwise claimed;
         // reinit() restores them after.
         deinitAll();
@@ -660,7 +660,7 @@ private:
         platform::RmtLoopbackResult r;
         if (loopbackFrame) {
             // Whole-frame stress test on the first pin's slice (or 64 lights if
-            // no buffer is wired yet) — the size that actually exposes
+            // no buffer is wired yet): the size that exposes
             // frame-rate / RF corruption.
             const uint16_t lights = pinCounts_[0] > 0
                 ? static_cast<uint16_t>(pinCounts_[0]) : 64;
@@ -684,7 +684,7 @@ private:
         } else {
             failBufEnsure();
             if (failBuf_ && loopbackFrame) {
-                // bits per light = outChannels × 8 (24 for RGB, 32 for RGBW) —
+                // bits per light = outChannels × 8 (24 for RGB, 32 for RGBW):
                 // the same channel count the frame was built with, not a
                 // hardcoded /24, so the light index is right for RGBW too.
                 const unsigned bitsPerLight =
@@ -716,14 +716,14 @@ private:
     void reinit() {
         if constexpr (platform::rmtTxChannels == 0) return;
         deinitAll();
-        if (pinCount_ == 0) return;   // parse error — already in the status slot
+        if (pinCount_ == 0) return;   // parse error: already in the status slot
         for (uint8_t i = 0; i < pinCount_; i++) {
             if (platform::rmtWs2812Init(rmt_[i], static_cast<uint8_t>(pinList_[i]),
                                         kResolutionHz, cfg_.invert)
                 && pushBitTiming(i)) {   // the expander needs the bit shapes before the first frame
                 continue;
             }
-            // Surface which pin failed instead of silently no-op'ing in tick() —
+            // Surface which pin failed instead of silently no-op'ing in tick():
             // the status tells the user why output is dark (usually a bad pin),
             // rather than leaving them to wonder why nothing lights.
             deinitAll();
@@ -747,9 +747,9 @@ private:
         if (status() == kInitFailMsg) clearStatus();
     }
 
-    // Releases only the RMT channels — NOT the symbol buffer (that's
+    // Releases only the RMT channels: NOT the symbol buffer (that's
     // freeFrame(), owned by release). reinit() calls this on every rebuild,
-    // so freeing the buffer here would strand tick() — the original bug.
+    // so freeing the buffer here would strand tick(): the original bug.
     void deinitAll() {
         if constexpr (platform::rmtTxChannels == 0) return;
         for (uint8_t i = 0; i < kMaxPins; i++) {

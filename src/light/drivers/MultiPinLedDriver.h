@@ -7,16 +7,16 @@
 namespace mm {
 
 /// Output driver: parallel 8-or-16-lane WS2812B over the ESP-IDF [esp_lcd i80 bus](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/lcd/index.html)
-/// — the parallel scale path on **all three i80-capable ESP32 families**. RMT gives a chip 4-8
+///: the parallel scale path on **all three i80-capable ESP32 families**. RMT gives a chip 4-8
 /// channels; this gives 8-16 lanes for the wall time of one. The magic is that ESP-IDF exposes ONE
 /// public i80 API (`esp_i80_new_i80_bus` / `esp_i80_panel_io_tx_color`) and routes it to whichever
-/// peripheral the silicon has — so this single backend serves every chip:
+/// peripheral the silicon has: so this single backend serves every chip:
 ///  - **ESP32-S3 / -P4 / -S31:** backed by the dedicated **LCD_CAM** peripheral.
 ///  - **classic ESP32:** backed by the **I2S peripheral in i80/LCD mode** (the classic has no LCD_CAM;
 ///    I2S-i80 is its only >8-lane route). IDF's own CMake picks the backend by chip; the two are
 ///    mutually exclusive per silicon, so `lanesAvailable()` reads whichever lane-count constant is
 ///    non-zero. Named for the **i80 bus** (the shared API), not a peripheral, since it isn't one
-///    peripheral — same reason its sibling backend is named `Parlio` (its own API).
+///    peripheral: same reason its sibling backend is named `Parlio` (its own API).
 ///
 /// The shared body (slicing, the whole-frame async double-buffer DMA, the fused encode, the loopback
 /// self-test, the `frameTime` KPI) lives in ParallelLedDriver; this backend adds only the i80-specific
@@ -25,50 +25,50 @@ namespace mm {
 ///    both, and the "exactly 8 or 16 pins" rule (the i80 layer rejects a partial bus). A sub-16 board
 ///    parks unused lanes + WR/DC on one spare GPIO (the ghost-pin trick).
 ///  - **The 3-slot-per-bit wire contract:** each WS2812 bit becomes three bus slots at 2.67 MHz
-///    (slot = 375 ns): all-active-lanes HIGH, the data bits, then all LOW — so a `1` is HIGH 750 ns
+///    (slot = 375 ns): all-active-lanes HIGH, the data bits, then all LOW: so a `1` is HIGH 750 ns
 ///    and a `0` 375 ns, approximating RMT's 700/350. The slot is deliberately NOT the lineage's
 ///    ~416 ns: newer WS2812B revisions spec T0H max ≈ 380 ns, and a longer `0` on a direct 3.3 V line
 ///    gets misread as `1` (the strip washes white). One bus word per slot (bus bit L = the L-th pin);
 ///    unequal strands idle LOW once exhausted. Slot layout: ParallelSlots.h.
 ///  - Both silicon paths do **whole-frame chained DMA** (autonomous, CPU out of the timing loop), so the
-///    classic I2S path is WiFi-underrun-immune by construction — it does NOT need the ISR-refilled
+///    classic I2S path is WiFi-underrun-immune by construction: it does NOT need the ISR-refilled
 ///    ring / large `nbDmaBuffer` cushion the raw-register I2S-clockless lineage requires.
 ///  - The platform::i80Ws2812* calls (ESP-IDF's esp_lcd i80 bus + GDMA).
 ///
 /// Prior art: Adafruit's LCD_CAM discovery, hpwit's I2SClockless lineage (classic-ESP32 I2S parallel),
-/// FastLED's S3 driver — architecture studied, never copied. We build on IDF's maintained esp_lcd i80
+/// FastLED's S3 driver: architecture studied, never copied. We build on IDF's maintained esp_lcd i80
 /// abstraction rather than tracing the raw-register I2S driver (*Industry standards, our own code*).
 class I80Peripheral : public LedPeripheral {
 public:
     // Data pins + loopback pin default to UNSET: they are user-soldered (the strand
     // runs to whatever GPIOs the user wired), so a hard-coded default would be a
-    // guess that could drive a pin the user committed elsewhere — empty until set,
+    // guess that could drive a pin the user committed elsewhere: empty until set,
     // the driver idles meanwhile (the "default only when it cannot do harm" rule;
     // see lessons.md). The ESP32-S3 N16R8 Dev bench wiring is pins "1,2,4,5,6,7,8,9",
     // loopbackRxPin 12 (kept clear of the octal-PSRAM pins 26-37, USB 19/20, and
-    // strapping pins) — set those again to reproduce the bench. (The orchestrator declares
+    // strapping pins): set those again to reproduce the bench. (The orchestrator declares
     // pins="" and loopbackRxPin=0, so the empty default needs no code here.)
 
     /// WR (pixel clock) and DC: the IDF i80 bus *requires* both on real GPIOs
     /// (esp_i80_panel_io_i80.c: `wr_gpio_num >= 0 && dc_gpio_num >= 0`), yet the WS2812 strands
-    /// ignore both — they are peripheral-fixed, not user-strand wiring, so a sensible overridable
+    /// ignore both: they are peripheral-fixed, not user-strand wiring, so a sensible overridable
     /// default cannot do harm (same class as the chip-fixed Ethernet pins). The data pins gate
     /// startup, so the bus stays idle until the user sets them regardless. (Dropping WR/DC entirely
-    /// needs a direct-LCD_CAM backend that bypasses esp_lcd, hpwit-style — that is MoonI80Peripheral,
+    /// needs a direct-LCD_CAM backend that bypasses esp_lcd, hpwit-style: that is MoonI80Peripheral,
     /// backlogged as this increment's sibling.)
     ///
     /// **`clockPin` is ONE pin doing TWO jobs, and with a 74HCT595 expander the second one is
-    /// load-bearing.** WR toggles once per bus word in hardware — which is exactly what a '595's
-    /// SRCLK (shift clock) needs — so the same wire serves both: the i80 pixel clock IS the shift
+    /// load-bearing.** WR toggles once per bus word in hardware: which is exactly what a '595's
+    /// SRCLK (shift clock) needs: so the same wire serves both: the i80 pixel clock IS the shift
     /// clock. That is the trick that makes the expander cost zero DMA bytes for its clock (hpwit
     /// routes `LCD_PCLK_IDX` straight to the register's clock pin for the same reason).
     ///
     /// Two consequences worth knowing before editing this pin:
     ///  - Every bus word clocks a bit INTO the shift register. That is why the LATCH must ride a
-    ///    *data lane* (a bit in every bus word) rather than a second clock output — the peripheral
-    ///    only gives us one — and why the latch's word position is so delicate (ParallelSlots.h).
+    ///    *data lane* (a bit in every bus word) rather than a second clock output: the peripheral
+    ///    only gives us one: and why the latch's word position is so delicate (ParallelSlots.h).
     ///  - In shift mode this pin is wired to the physical '595 clock line on the expander board.
-    ///    Changing it means re-wiring hardware, not just re-configuring.
+    ///    Changing it means re-wiring hardware, not re-configuring.
     ///
     /// **Unset (-1) means "no pin", and what that costs depends on the chip.** Nothing on a WS2812
     /// strand reads WR or DC (bench-proven: 4096 lights over 16 lanes and 1440 through a '595 both
@@ -105,15 +105,15 @@ public:
     // --- LedPeripheral descriptors ---
 
     /// The number of i80 lanes this chip provides (0 = no i80 bus on this chip); the orchestrator's
-    /// inert-on-wrong-chip guards key off it. Reads whichever backend the silicon has —
-    /// `lcdLanes` (LCD_CAM, S3/P4/S31) or `i2sLanes` (I2S-i80, classic ESP32) — which are mutually
+    /// inert-on-wrong-chip guards key off it. Reads whichever backend the silicon has:
+    /// `lcdLanes` (LCD_CAM, S3/P4/S31) or `i2sLanes` (I2S-i80, classic ESP32): which are mutually
     /// exclusive per chip (at most one is non-zero), so the sum picks the right one.
     uint8_t lanesAvailable() const MM_NONBLOCKING override { return platform::lcdLanes + platform::i2sLanes; }
     bool powerOfTwoBus() const override { return true; }   // the BUS rounds to 8/16; the pin count is free
 
     /// Whole-frame DMA byte budget. On the classic ESP32 the i80 is the I2S peripheral: its DMA is
     /// INTERNAL-RAM only (no PSRAM) and it holds the whole frame (no streaming ring), so a frame larger
-    /// than the free internal DMA block simply cannot allocate — and the failing esp_lcd path can busy-
+    /// than the free internal DMA block cannot allocate: and the failing esp_lcd path can busy-
     /// wait to a watchdog reset. reinit() pre-checks against this and idles with a clear status instead.
     /// Budget = the largest free internal block minus a fixed reserve for the bus descriptors + other
     /// allocations that land between this query and the alloc; sized for ONE frame, since busInit()
@@ -133,7 +133,7 @@ public:
     }
 
     // The i80 loopback can't build a 1-lane private bus, so it rebuilds the FULL-WIDTH bus and
-    // carries the pattern on lane 0 — the loopback frame must be encoded at the operational bus
+    // carries the pattern on lane 0: the loopback frame must be encoded at the operational bus
     // width (16-bit for a 16-lane driver) to match. (Parlio can do a 1-lane unit, so its backend
     // sets false.)
     bool loopbackFullWidth() const override { return true; }
@@ -181,7 +181,7 @@ public:
 
     /// FATAL bus-pin check → routed to the ERROR path (idles the driver), unlike validateBusPins'
     /// per-lane WARNINGS. WR and DC on the SAME GPIO breaks the i80 bus outright (it needs two
-    /// distinct control lines — the bus won't init), so it can't be a warn-and-run like a data-lane
+    /// distinct control lines: the bus won't init), so it can't be a warn-and-run like a data-lane
     /// collision (which only corrupts that one lane). null = no fatal condition.
     const char* validateBusFatal() const override {
         // Unset (-1) is fine on the classic ESP32, where the platform sinks the line onto an
@@ -213,8 +213,8 @@ public:
         }
         // The '595 latch is a BUS LANE, so it needs its own GPIO: sharing it with WR would make the
         // pixel clock double as the latch (the '595 would present a byte on every shift cycle), and
-        // sharing it with DC would latch on the command phase. Both are fatal — the bus builds, but
-        // the strands get garbage — so this is an error, not a warning. (Bench-found: WR defaults to
+        // sharing it with DC would latch on the command phase. Both are fatal: the bus builds, but
+        // the strands get garbage: so this is an error, not a warning. (Bench-found: WR defaults to
         // GPIO 10, which is the first pin a user reaches for when picking a latch.)
         if (owner_->pinExpanderMode() && owner_->latchPin >= 0) {
             if (owner_->latchPin == clockPin)
@@ -229,13 +229,13 @@ public:
     /// peripheral routes a distinct output signal to each of the 8 data lanes plus
     /// WR + DC via the GPIO matrix; IDF does NOT check that they differ, so a data
     /// pin equal to clockPin/dcPin gets two signals on one GPIO and that lane emits
-    /// the clock/DC waveform instead of pixel data (silent corruption — the strip on
+    /// the clock/DC waveform instead of pixel data (silent corruption: the strip on
     /// that lane shows garbage). Fail loud + idle instead, same shape as the other
     /// parse errors.
     // Returns a WARNING string (not an error) if a data lane sits on clockPin (WR) or
     // dcPin: that lane emits the bus-control waveform instead of pixel data. It's a
     // warning because on a board that wires all 8/16 lanes but drives fewer strands,
-    // parking WR/DC on an unused data pin is a valid choice — only a lane driving a
+    // parking WR/DC on an unused data pin is a valid choice: only a lane driving a
     // real strand shows garbage. The orchestrator routes this to setConfigWarn, the driver
     // keeps running. null when the WR/DC pins are clear of the data set.
     const char* validateBusPins(const uint16_t* lanes, uint8_t n) const override {
@@ -251,10 +251,10 @@ public:
 
     /// Create the i80 bus + its DMA buffer(s) sized for `frameBytes` on the current data lanes plus
     /// the WR/DC pins; `wantSecondBuffer` requests the async double-buffer's second frame buffer
-    /// (allocated only if it fits — else single-buffer). Returns whether init succeeded.
+    /// (allocated only if it fits: else single-buffer). Returns whether init succeeded.
     /// **LCD_CAM** is the one silicon path that can host the 74HCT595 expander: it reaches PSRAM (so the
     /// ×8 frame fits), it has no single-transfer cap, and its WR pixel-clock pin IS the shift clock a
-    /// '595 needs. The classic ESP32 shares this backend but not that silicon path — its i80 is the I2S
+    /// '595 needs. The classic ESP32 shares this backend but not that silicon path: its i80 is the I2S
     /// peripheral, whose DMA cannot read PSRAM at all, so a 154 KB frame has nowhere to live. Keying
     /// the flag on `platform::hasLcdCam` makes the refusal a compile-time property of the silicon
     /// rather than a runtime surprise, and the orchestrator then reports it as a config error instead
@@ -283,7 +283,7 @@ public:
     bool  busTransmit(uint8_t i, size_t bytes) override { return platform::i80Ws2812Transmit(i80_, i, bytes); }
     /// Block up to `ms` for buffer `i`'s in-flight transfer to complete.
     bool  busWait(uint8_t i, uint32_t ms) override      { return platform::i80Ws2812Wait(i80_, i, ms); }
-    /// The most recent DMA transfer's wire time (µs) — the WS2812 output floor.
+    /// The most recent DMA transfer's wire time (µs): the WS2812 output floor.
     uint32_t busLastTransmitUs() const override         { return platform::i80Ws2812LastTransmitUs(i80_); }
     /// Tear down the i80 bus and its DMA buffer.
     void     busDeinit() override                 { platform::i80Ws2812Deinit(i80_); }
@@ -294,7 +294,7 @@ public:
     platform::RmtLoopbackResult busLoopback(const uint8_t* frame, size_t frameBytes,
                                             size_t dataBytes, uint8_t rowBits) override {
         // The private bus is built from the orchestrator's bus pin list (which appends the latch in
-        // shift mode — the latch is a bus lane) and at the shift-mode pclk, so the test transmits
+        // shift mode: the latch is a bus lane) and at the shift-mode pclk, so the test transmits
         // exactly what the render loop does. In direct mode both reduce to today's behavior.
         return platform::i80Ws2812Loopback(owner_->busPinList(), owner_->busPinCount(),
                                            static_cast<uint16_t>(clockPin),
@@ -305,7 +305,7 @@ public:
     }
 
     /// Store WR/DC alongside the data pins, so a clockPin/dcPin edit rebuilds the
-    /// bus too (not just a data-pin change).
+    /// bus too (not a data-pin change).
     void recordBusPins() override { lastClockPin_ = clockPin; lastDcPin_ = dcPin; }
     /// Whether the live bus's WR/DC pins still match the current clockPin/dcPin (so
     /// the orchestrator can skip a rebuild).
@@ -326,7 +326,7 @@ private:
 //
 // It names the PERIPHERAL, not the bus protocol. "i80" is the Intel 8080 bus shape esp_lcd speaks, and
 // it matches nothing a user can look up: on the classic ESP32 this backend IS the I2S peripheral, on
-// LCD_CAM chips it is the LCD peripheral (see hwBlock()). So the label follows the silicon — and says
+// LCD_CAM chips it is the LCD peripheral (see hwBlock()). So the label follows the silicon: and says
 // `-IDF` because this backend drives it through esp_lcd, against the MoonI80 backend's `-MM` (our
 // own GDMA layer below esp_lcd). Peripheral + who drives it is the whole choice a user is making.
 inline constexpr const char* kI80Label = (platform::i2sLanes > 0) ? "I2S-IDF" : "LCD-IDF";

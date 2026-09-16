@@ -1,6 +1,6 @@
 # Drivers
 
-A driver sends lights somewhere. It reads its slice of the [Drivers](moxygen/Drivers.md) container's shared buffer, applies its own [output correction](moxygen/DriverBase.md), and outputs: over a wire (WS2812), to a HUB75 panel on the board's own pins, over the network (Art-Net / E1.31 / DDP), to a smart-light hub (Hue), or to the web UI (Preview).
+A driver sends lights somewhere. It reads its slice of the [Drivers](moxygen/Drivers.md) container's shared buffer and applies its own [output correction](moxygen/DriverBase.md). Where it sends them varies: over a wire (WS2812), to a HUB75 panel on the board's own pins, over the network (Art-Net / E1.31 / DDP), to a smart-light hub (Hue), or to the web UI (Preview).
 
 Several drivers can share one buffer, each driving its own slice. Every driver starts with the same [shared controls](#shared-driver-controls), then adds its own. Drivers are added per board through the catalog ([`deviceModels.json`](../../../mooninstaller/deviceModels.json)); `PreviewDriver` is the one boot-wired driver.
 
@@ -14,13 +14,13 @@ Added once by [`DriverBase`](moxygen/DriverBase.md) so no driver re-implements i
 
 <img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="Shared driver controls: localBrightness, lightPreset, whiteMode, start, count">
 
-- `localBrightness` — this driver's dim (0–255), multiplied with the global brightness. Both sliders reach the output.
-- `lightPreset` — the [light preset](supporting.md) applied per light: channel order and RGBW synthesis.
-- `whiteMode` — how W is derived on an RGBW strip, when the preset carries a W channel.
-- `start` — first light of the shared buffer this driver reads (default `0`).
-- `count` — how many lights from `start`. **Blank drives all of them.**
+- `localBrightness`: this driver's dim (0–255), multiplied with the global brightness. Both sliders reach the output.
+- `lightPreset`: the [light preset](supporting.md) applied per light: channel order and RGBW synthesis.
+- `whiteMode`: how W is derived on an RGBW strip, when the preset carries a W channel.
+- `start`: first light of the shared buffer this driver reads (default `0`).
+- `count`: how many lights from `start`. **Blank drives all of them.**
 
-Detail: [technical](moxygen/DriverBase.md) · [⌄ details](#shared-details)
+Detail: [technical](moxygen/DriverBase.md)
 
 ## LED drivers
 
@@ -38,12 +38,12 @@ Addressable WS2812B-class LEDs over a wire: **RMT** for a few strands, **Paralle
 
 Plus the [shared controls](#shared-driver-controls) above:
 
-- `pins` — data GPIO list: `18,17,16`, or ranges like `20-23`, mixed freely. Empty idles until set.
-- `ledsPerPin` — lights per strand. Blank splits evenly, one number applies to all, a list is per strand.
-- `timing` (RMT only) — the wire bit rate. Default suits WS2812/WS2812B/SK6812; a 12V WS2811 needs `400kHz`.
-- `peripheral` — the DMA peripheral, filtered to what the chip supports. It divides the card.
-- `doubleBuffer`, `pinExpander`, bus pins — shown per peripheral, so the set changes with it.
-- 🔧 `loopbackTest` — a TX to RX self-test, verdict in the status field.
+- `pins`: data GPIO list: `18,17,16`, or ranges like `20-23`, mixed freely. Empty idles until set.
+- `ledsPerPin`: lights per strand. Blank splits evenly, one number applies to all, a list is per strand.
+- `timing` (RMT only): the wire bit rate. Default suits WS2812/WS2812B/SK6812; a 12V WS2811 needs `400kHz`.
+- `peripheral`: the DMA peripheral, filtered to what the chip supports. It divides the card.
+- `doubleBuffer`, `pinExpander`, bus pins: shown per peripheral, so the set changes with it.
+- 🔧 `loopbackTest`: a TX to RX self-test, verdict in the status field.
 
 Tests: [RMT](../../reference/tests/unit-tests.md#rmtleddriver) · [shared + peripherals](../../reference/tests/unit-tests.md#parallelleddriver)
 
@@ -53,16 +53,18 @@ Detail: [RMT](moxygen/RmtLedDriver.md) · [Parallel](moxygen/ParallelLedDriver.m
 
 ### HUB75 🟦 · panels on your own pins
 
+<img src="../../assets/light/drivers/Hub75Driver.png" width="300" alt="HUB75 driver controls">
+
 Drives **HUB75 LED panels straight from the board's GPIO**, with no receiving card in between. The sibling of [Panel Card](#panelcard), which drives the same panels over Ethernet instead; which one a wall wants is a size question, answered in [the details below](#hub75-details).
 
-- `board` — the wiring to use; picking one fills in the fourteen pins.
-- `r1 g1 b1` / `r2 g2 b2` — the six color lines, upper half-panel and lower.
-- `a b c d e` — the row address. `d` on 1/16 panels, `e` on 1/32.
-- `clk lat oe` — shift clock, latch, output enable.
-- `peripheral` — `LCD_CAM` or `Parlio`, where the chip has both and the frame fits.
-- `scanRate` — 1/8, 1/16 or 1/32, **read off the panel**, not calculated.
-- `bitDepth` (2 to 4) — color precision against refresh and memory.
-- `refresh` — the **measured** rate. The number to report if a panel flickers.
+- `board`: the wiring to use; picking one fills in the fourteen pins.
+- `r1 g1 b1` / `r2 g2 b2`: the six color lines, upper half-panel and lower.
+- `a b c d e`: the row address. `d` on 1/16 panels, `e` on 1/32.
+- `clk lat oe`: shift clock, latch, output enable.
+- `peripheral`: `LCD_CAM` or `Parlio`, where the chip has both and the frame fits.
+- `scanRate`: 1/8, 1/16 or 1/32, **read off the panel**, not calculated.
+- `bitDepth` (2 to 4): color precision against refresh and memory.
+- `refresh`: the **measured** rate. The number to report if a panel flickers.
 
 **New, and not yet run on a wall we own.** Built from the panel's documented behavior with its encoder pinned by [host tests](../../reference/tests/unit-tests.md#hub75driver), which is not hardware verification. Reports welcome: `refresh` plus your geometry is what makes one useful.
 
@@ -78,11 +80,11 @@ Detail: [technical](moxygen/Hub75Driver.md)
 
 Streams the buffer over UDP as **Art-Net**, **E1.31 / sACN** or **DDP**, one burst per frame, to Falcon/Advatek controllers, xLights and LedFx. Feeds several receivers from one driver, each its own slice. Mixed DMX fixtures and the addressing rules are in [the details below](#network-send-details).
 
-- `protocol` — Art-Net / E1.31 / DDP / E1.31 multicast (default Art-Net); the port follows.
-- `ips` — the receivers. **Blank idles**, so it never sends uninvited traffic. A range or list works: `192.168.1.70-74`.
-- `lightsPerIp` — lights per receiver. Blank splits evenly, one number applies to all, a list is per receiver.
-- `universe_start` — first universe for Art-Net / E1.31, restarting per receiver. DDP ignores it.
-- `fps` — frame-rate limit (default 50, 1–120).
+- `protocol`: Art-Net / E1.31 / DDP / E1.31 multicast (default Art-Net); the port follows.
+- `ips`: the receivers. **Blank idles**, so it never sends uninvited traffic. A range or list works: `192.168.1.70-74`.
+- `lightsPerIp`: lights per receiver. Blank splits evenly, one number applies to all, a list is per receiver.
+- `universe_start`: first universe for Art-Net / E1.31, restarting per receiver. DDP ignores it.
+- `fps`: frame-rate limit (default 50, 1–120).
 
 [Tests](../../reference/tests/unit-tests.md#networksenddriver)
 
@@ -96,15 +98,15 @@ Detail: [technical](moxygen/NetworkSendDriver.md)
 
 Streams the buffer to **ColorLight 5A-75 receiving cards** as raw Ethernet, taking the place of the sending card that normally feeds them. The board renders and sends, so it replaces a host PC driving the same wall. The link requirement and the protocol lineage are in [the details below](#panel-card-details).
 
-- `format` — the card's wire format (ColorLight 5A-75).
-- `firmware` — `v12 and older` (default) or `v13 and newer`. Wrong choice, and the wall updates once every few seconds.
-- **No geometry controls** — the wall comes from the [Layout](layouts.md), cut into card rows.
-- `interface` — which NIC to send from, by adapter name. Desktop only; raw sending needs privileges.
-- `fps` — frame-rate limit (default 40, 1 to 120).
+- `format`: the card's wire format (ColorLight 5A-75).
+- `firmware`: `v12 and older` (default) or `v13 and newer`. Wrong choice, and the wall updates once every few seconds.
+- **No geometry controls**: the wall comes from the [Layout](layouts.md), cut into card rows.
+- `interface`: which NIC to send from, by adapter name. Desktop only; raw sending needs privileges.
+- `fps`: frame-rate limit (default 40, 1 to 120).
 
 [Tests](../../reference/tests/unit-tests.md#panelcarddriver)
 
-Detail: [technical](moxygen/PanelCardDriver.md) · [⌄ details](#panel-card-details)
+Detail: [technical](moxygen/PanelCardDriver.md)
 
 ## Smart light drivers
 
@@ -114,12 +116,12 @@ Detail: [technical](moxygen/PanelCardDriver.md) · [⌄ details](#panel-card-det
 
 <img src="../../assets/light/drivers/HueDriver.png" width="300" alt="A HueDriver in the UI">
 
-Drives **Philips Hue bulbs as pixels**: each color bulb in the driver's window becomes one pixel, pushed to the bridge over its HTTP API. Paced to the bridge's ~10 cmd/s limit — smooth ambient color, not strobing.
+Drives **Philips Hue bulbs as pixels**: each color bulb in the driver's window becomes one pixel, pushed to the bridge over its HTTP API. Paced to the bridge's ~10 cmd/s limit, so smooth ambient color, not strobing.
 
-- `bridgeIp` — the bridge's LAN IPv4.
-- `appKey` — the Hue app key; filled by `pair`, persisted.
-- `pair` — button: press it, then the bridge's physical link button within ~30 s to claim a key.
-- `room` / `light` — dropdowns narrowing which color lights are driven (both default `All`).
+- `bridgeIp`: the bridge's LAN IPv4.
+- `appKey`: the Hue app key; filled by `pair`, persisted.
+- `pair`: button: press it, then the bridge's physical link button within ~30 s to claim a key.
+- `room` / `light`: dropdowns narrowing which color lights are driven (both default `All`).
 
 [Tests](../../reference/tests/unit-tests.md#huedriver)
 
@@ -137,7 +139,7 @@ Streams a true-shape 3D preview to the web UI as a **point list**, only the real
 
 It streams on its own WebSocket channel so a large frame never delays the control plane, and only while a viewer is watching. Moving heads show their beam. How the rate and detail trade off is in [the details below](#preview-details).
 
-- `targetFps` — the rate to aim for (default 24, 1–60). **Lower for detail, raise for smoothness.**
+- `targetFps`: the rate to aim for (default 24, 1–60). **Lower for detail, raise for smoothness.**
 
 [Tests](../../reference/tests/unit-tests.md#previewdriver)
 
@@ -147,12 +149,14 @@ Detail: [technical](moxygen/PreviewDriver.md)
 
 ### NDI 🖥️ · video out
 
+<img src="../../assets/light/drivers/NdiDriver.png" width="300" alt="NDI driver controls">
+
 Publishes the layer as an **NDI video source**, so OBS, Resolume, TouchDesigner or any other NDI receiver picks projectMM up by name, on this machine or another on the network. Where the Preview driver draws the lights for a person, this hands the same frame to a production tool as video.
 
 The grid becomes the frame, one light per pixel, output correction applied, so a receiver sees what the wall sees. **Desktop only, and you install the NDI runtime yourself**; without it the driver says so and nothing else changes. See [the details below](#ndi-details).
 
-- `sourceName` — the name a receiver lists. Blank uses the device's own name.
-- `fps` — frame-rate ceiling (default 30, 1–120), declared in every frame.
+- `sourceName`: the name a receiver lists. Blank uses the device's own name.
+- `fps`: frame-rate ceiling (default 30, 1–120), declared in every frame.
 
 Detail: [technical](moxygen/NdiDriver.md)
 
@@ -160,14 +164,16 @@ Detail: [technical](moxygen/NdiDriver.md)
 
 ### HLS 🖥️ · video out
 
-Streams the layer as **H.264 over HLS** from the device's own HTTP server: open the `url` the card shows in VLC, a browser, or hand it to an Apple TV (VLC for tvOS, or open it in Safari and AirPlay the video). Where NDI feeds production tools, this feeds anything that plays video.
+<img src="../../assets/light/drivers/HlsDriver.png" width="300" alt="HLS driver controls">
+
+Streams the layer as **H.264 over HLS** from the device's own HTTP server. Open the `url` the card shows in VLC or a browser, or hand it to an Apple TV. Where NDI feeds production tools, this feeds anything that plays video.
 
 The grid becomes the frame, output correction applied. Latency is HLS's own, **2-5 seconds**, so this is for watching rather than live-control feedback. Runs on desktop (you install ffmpeg) and on the **ESP32-P4**, which encodes in hardware. See [the details below](#hls-details).
 
-- `targetFps` — encode-rate ceiling (default 30, 1–120). Also the bandwidth knob: bitrate is derived.
-- `scale` — video pixels per light (0 = auto). Each light is a solid block, never a blur.
-- `encoder` — which ffmpeg encoder (desktop only).
-- read-only — `url` to play, plus a status line for state, drops, or why the encoder stopped.
+- `targetFps`: encode-rate ceiling (default 30, 1–120). Also the bandwidth knob: bitrate is derived.
+- `scale`: video pixels per light (0 = auto). Each light is a solid block, never a blur.
+- `encoder`: which ffmpeg encoder (desktop only).
+- read-only: `url` to play, plus a status line for state, drops, or why the encoder stopped.
 
 Detail: [technical](moxygen/HlsDriver.md)
 
@@ -205,11 +211,11 @@ Start with `i80`. Choose `MoonI80` only when you hit one of those two limits: it
 
 RMT is its own driver rather than a `peripheral`, and runs on any ESP32: one strand per RMT channel, which is 8 on the classic and 4 on an S3 or P4.
 
-**Two limits worth knowing before you wire.** On the classic ESP32 the `i80` bus cannot reach PSRAM, so it caps at **2,048 lights**; on the LCD_CAM chips it reaches PSRAM and caps at **16,384**. Past the cap the driver idles with a status rather than crashing. And `MoonI80`'s streaming ring is wall-proven for frames that fit its buffer pool, while very long strands have a known last-row sparkle, tracked in [the backlog](../../work/future/backlog-light.md).
+**Two limits worth knowing before you wire.** On the classic ESP32 the `i80` bus cannot reach PSRAM, so it caps at **2,048 lights**; on the LCD_CAM chips it reaches PSRAM and caps at **16,384**. Past the cap the driver idles with a status rather than crashing. And `MoonI80`'s streaming ring is wall-proven for frames that fit its buffer pool, while the longest strands have a known last-row sparkle, tracked in [the backlog](../../work/future/backlog-light.md).
 
 **Lane, pin, strand.** A lane is one bus data line, a strand is one chain of LEDs. Wired directly, one pin is one lane is one strand. Through an expander each data pin feeds one '595 and fans out to 8 strands, so 8 data pins reach the driver's ceiling of 64.
 
-How the frame is actually built, the DMA each peripheral programs, and the expert `ring*` tuning are on the API pages: [Parallel LED](moxygen/ParallelLedDriver.md), [i80](moxygen/MultiPinLedDriver.md), [MoonI80](moxygen/MoonLedDriver.md), [Parlio](moxygen/ParlioLedDriver.md), [RMT](moxygen/RmtLedDriver.md), [slot encoder](moxygen/ParallelSlots.md).
+How the frame is built, the DMA each peripheral programs, and the expert `ring*` tuning are on the API pages: [Parallel LED](moxygen/ParallelLedDriver.md), [i80](moxygen/MultiPinLedDriver.md), [MoonI80](moxygen/MoonLedDriver.md), [Parlio](moxygen/ParlioLedDriver.md), [RMT](moxygen/RmtLedDriver.md), [slot encoder](moxygen/ParallelSlots.md).
 
 <a id="network-send-details"></a>
 
@@ -244,16 +250,24 @@ An effect writes `setPan` for every light in its layer, so a formation spanning 
 
 **Card firmware.** v13 and newer act on the *second* copy of the brightness and sync frames, so both are sent twice; v12 and older act on the first and take a second sync as another latch. Reading and changing a card's version: [the tutorial](../../how-to/panel-cards.md#7-card-firmware-and-the-flicker).
 
-Protocol references: [FPP's ColorLight-5a-75.cpp](https://github.com/FalconChristmas/fpp/blob/master/src/channeloutput/ColorLight-5a-75.cpp) is the implementation this driver's byte layout agrees with, and Harald Kubota's [5A-75B protocol write-up](https://hkubota.wordpress.com/2022/01/31/winter-project-colorlight-5a-75b-protocol/) documents the same wire format independently, including the brightness and color-temperature bytes and the discovery exchange. Read it with its comments: a reader supplied the controller-number field that makes multiple cards on one segment distinguishable, and the article's own MAC pair is printed the other way round from FPP's (destination `11:22:33:44:55:66`, source `22:22:33:44:55:66`, which is what this driver sends and what the cards filter on). Its lineage runs back to the [original mplayer-colorlight reverse engineering](http://www.mylifesucks.de/oss/mplayer-colorlight/).
+Protocol references: [FPP's ColorLight-5a-75.cpp](https://github.com/FalconChristmas/fpp/blob/master/src/channeloutput/ColorLight-5a-75.cpp) is the implementation this driver's byte layout agrees with. Harald Kubota's [5A-75B protocol write-up](https://hkubota.wordpress.com/2022/01/31/winter-project-colorlight-5a-75b-protocol/) documents the same wire format independently, including the brightness and color-temperature bytes and the discovery exchange.
+
+Read the write-up with its comments: a reader supplied the controller-number field that makes multiple cards on one segment distinguishable. The article's own MAC pair is printed the other way round from FPP's (destination `11:22:33:44:55:66`, source `22:22:33:44:55:66`, which is what this driver sends and what the cards filter on). Its lineage runs back to the [original mplayer-colorlight reverse engineering](http://www.mylifesucks.de/oss/mplayer-colorlight/).
 
 <a id="hls-details"></a>
 
 ## HLS, details
-**On desktop you install ffmpeg yourself** (any 5.x+, on PATH), projectMM never ships or links an encoder: `brew install ffmpeg` (macOS), `winget install ffmpeg` (Windows), `sudo apt install ffmpeg` (Debian/Ubuntu/Raspberry Pi OS). Without it the driver reports `ffmpeg not found` and nothing else changes. The `encoder` control picks which one ffmpeg uses: `libx264` (the default, in practically every build) is software, while `h264_videotoolbox` on a Mac (~10% CPU for a 1024x1024 stream on Apple Silicon), `h264_v4l2m2m` on a Raspberry Pi and `h264_nvenc` on NVIDIA offload it to hardware and are worth picking on large grids. An encoder your ffmpeg lacks starts and exits immediately; the status then reads `encoder exited - check ffmpeg`.
+**On desktop you install ffmpeg yourself** (any 5.x+, on PATH), because projectMM never ships or links an encoder. Install it with `brew` on macOS, `winget` on Windows, or `apt` on Debian, Ubuntu and Raspberry Pi OS. Without it the driver reports `ffmpeg not found` and nothing else changes.
 
-**On the ESP32-P4** there is no ffmpeg and no filesystem in the path: the chip's own H.264 block encodes, projectMM packages the MPEG-TS itself, and segments are served from a RAM ring rather than written to flash, which at one segment per second would wear it for nothing. The `encoder` control is absent, since the hardware offers only one.
+The `encoder` control picks which one ffmpeg uses: `libx264` (the default, in practically every build) is software.
 
-**Sizing the picture.** The P4's encoder takes only EVEN dimensions between 80x80 and 1920x2032; an odd wall has its scale doubled so both axes come out even, and a wall whose scaled size exceeds the maximum is refused with a status saying so rather than streaming something the hardware cannot encode. Desktop ffmpeg has none of these limits. The floor is what the auto scale exists for: the P4 will not accept a frame smaller than 80x80, and a small wall streamed 1:1 arrives as a postage stamp in the player. `scale` at 0 (the default) therefore picks the smallest whole factor that lifts *both* axes to 80: a 20x10 wall streams as 160x80 rather than being refused, and a wall already past 80 stays 1:1. One factor serves both axes, so the aspect ratio is preserved and each light stays a square block. Raising `scale` by hand on an already-large wall costs real time (a 128x128 wall at scale 4 measures about 60 ms per frame against 1 ms at 1:1) and buys nothing a player's own zoom does not.
+Three hardware encoders offload it instead, and are worth picking on large grids: `h264_videotoolbox` on a Mac (~10% CPU for a 1024x1024 stream on Apple Silicon), `h264_v4l2m2m` on a Raspberry Pi, and `h264_nvenc` on NVIDIA.
+
+An encoder your ffmpeg lacks starts and exits immediately; the status then reads `encoder exited - check ffmpeg`.
+
+**On the ESP32-P4** there is no ffmpeg and no filesystem in the path: the chip's own H.264 block encodes and projectMM packages the MPEG-TS itself. Segments are served from a RAM ring rather than written to flash, which at one segment per second would wear it for nothing. The `encoder` control is absent, since the hardware offers only one.
+
+**Sizing the picture.** The P4's encoder takes only EVEN dimensions between 80x80 and 1920x2032; An odd wall has its scale doubled so both axes come out even. A wall whose scaled size exceeds the maximum is refused with a status rather than streaming something the hardware cannot encode. Desktop ffmpeg has none of these limits. The floor is what the auto scale exists for: the P4 will not accept a frame smaller than 80x80, and a small wall streamed 1:1 arrives as a postage stamp in the player. `scale` at 0 (the default) therefore picks the smallest whole factor that lifts *both* axes to 80: a 20x10 wall streams as 160x80 rather than being refused, and a wall already past 80 stays 1:1. One factor serves both axes, so the aspect ratio is preserved and each light stays a square block. Raising `scale` by hand on an already-large wall costs real time (a 128x128 wall at scale 4 measures about 60 ms per frame against 1 ms at 1:1) and buys nothing a player's own zoom does not.
 
 **The bitrate is derived, not a setting.** It follows from the grid size and `targetFps` at about 0.1 bits per pixel per frame, which puts a 512x512 wall at 30 fps near 800 kbit; a 128x128 lands under the 500 kbit floor the derivation clamps to. `targetFps` is the knob for bandwidth, and the better trade for LED content: fewer frames rather than a blockier picture.
 
@@ -264,7 +278,7 @@ Protocol references: [FPP's ColorLight-5a-75.cpp](https://github.com/FalconChris
 ## Preview, details
 **Close the preview when you do not need it.** The device renders preview frames only while the preview pane is open. Dismissing it stops that work entirely, which frees the device for rendering and keeps the UI responsive on a large layout, worth doing while you are editing effects on a big wall.
 
-**The preview thins itself out.** When the connection cannot carry full detail, the preview shows a regular sample of the lights rather than all, the status reads `preview 1/4` and so on. The device reports every frame it had to drop, and your browser reacts: persistent drops trade detail for rate, drop-free stretches earn the detail back one step at a time, and a step that brings the drops back is taken back with growing patience, so a borderline connection settles instead of flickering between sizes. A slow *effect* drops nothing, so it never costs preview detail. A fast connection previews everything, with nothing to configure.
+**The preview thins itself out.** When the connection cannot carry full detail, the preview shows a regular sample of the lights rather than all, the status reads `preview 1/4` and so on. The device reports every frame it had to drop and your browser reacts. Persistent drops trade detail for rate, drop-free stretches earn it back a step at a time, and a step that brings the drops back is undone with growing patience, so a borderline connection settles instead of flickering between sizes. A slow *effect* drops nothing, so it never costs preview detail. A fast connection previews everything, with nothing to configure.
 
 **If the preview looks choppy**, it is the connection rather than the device: frames are dropped rather than queued, so the wall itself is never held up by the preview. Lower `targetFps` if you would rather keep full detail at a slower rate.
 
@@ -296,7 +310,7 @@ Protocol references: [FPP's ColorLight-5a-75.cpp](https://github.com/FalconChris
 
 **Which silicon.** A chip with an LCD_CAM or Parlio block. The classic ESP32 has neither, and is excluded on pins before memory is even a question: it has 13 usable output GPIOs and a 1/16 port needs all 13, leaving nothing for a strand, a button or a microphone.
 
-**Where the pins come from.** The `board` select fills all fourteen lines on first use. A published map (MoonHub75, MatrixPortal S3, Waveshare RGB Matrix) hides the pin rows, because those lines are soldered and there is nothing to act on; the generic per-chip sets and Custom show them. Hidden rows stay bound, so the values persist and still drive the panel. Wiring your own: the per-chip free sets are in [GPIO usage](../../reference/hardware/gpio-usage.md).
+**Where the pins come from.** The `board` select fills all fourteen lines on first use. A published map (MoonHub75, MatrixPortal S3, Waveshare RGB Matrix) hides the pin rows, because those lines are soldered and there is nothing to act on; the generic per-chip sets and Custom show them. Hidden rows stay bound, so the values persist, still drive the panel, and still show in the pin map. A line on a pin the chip has wired to flash or PSRAM is refused before init with the line named, which is why the MatrixPortal S3 (quad PSRAM, three lines on 35-37) runs the `esp32s3-zero` image and is refused by the octal N8R8/N16R8 ones. Wiring your own: the per-chip free sets are in [GPIO usage](../../reference/hardware/gpio-usage.md).
 
 **Two controls a panel cannot tell you.** `scanRate` is the panel's own, and two panels of identical dimensions can scan differently, so it is read off the panel rather than calculated from its size. `peripheral` is yours rather than the driver's: a P4 has one LCD_CAM and one Parlio, so a board already driving WS2812 strips from one needs the panel on the other, and only you know which way round.
 

@@ -66,9 +66,9 @@ namespace mm {
 /// **Four of the MatrixPortal's lines sit on pins the generic S3 free set excludes**: b2 = 37,
 /// b = 36 and d = 35 are octal-PSRAM pins, and a = 45 is a boot strap. That is not an error in the
 /// map, it is what a board designer can do and a user cannot: the MatrixPortal ships quad-PSRAM,
-/// which frees 33-37, and its strapping level is fixed by the board rather than by whatever the
-/// panel drives. It is worth knowing because [PinsModule](../../core/system.md) flags those pins
-/// from the chip-level table and will mark them, correctly, as a conflict it cannot see past.
+/// which frees 33-37, and its strapping level is fixed by the board. So this map runs on the
+/// quad-PSRAM image (esp32s3-zero) and the pre-init guard refuses it on an octal one (N8R8/N16R8),
+/// where 35-37 are the PSRAM bus and driving them resets the chip.
 ///
 /// **Waveshare ESP32-S3-RGB-Matrix** (SKU 34422), from WLED's `WAVESHARE_S3_PINOUT`:
 ///
@@ -125,7 +125,7 @@ public:
 
     /// The peripheral block this driver holds, for the sibling claim guard in DriverBase: two live
     /// drivers on one LCD_CAM corrupt each other, and the guard already arbitrates that for the
-    /// parallel LED drivers. Reported only while the bus is actually up, so a driver that failed to
+    /// parallel LED drivers. Reported only while the bus is up, so a driver that failed to
     /// init does not phantom-claim the block away from a working sibling.
     LedHwBlock hwBlock() const override {
         if (!running_) return LedHwBlock::None;
@@ -157,7 +157,7 @@ public:
         // HIDDEN when a published board map is selected: those fourteen lines are soldered, so
         // showing them is fourteen rows of noise on a card nobody can act on. The generic sets and
         // Custom keep them, because those exist to be adjusted. Hidden controls stay BOUND: the
-        // values still persist and still drive the panel, they are simply not rendered.
+        // values still persist and still drive the panel, they are not rendered.
         const bool editable = pinsEditable();
         const char* const kPinNames[] = {"r1", "g1", "b1", "r2", "g2", "b2", "a", "b", "c",
                                          "d", "e", "clk", "lat", "oe"};
@@ -174,7 +174,7 @@ public:
         controls_.addControl("bitDepth", bitDepth, 2, 4);
 
         // The MEASURED refresh, not a calculation. The docs carry a predicted table; this is what
-        // the panel actually achieved, which is what makes a report of "it flickers" into a number
+        // the panel achieved, which is what makes a report of "it flickers" into a number
         // someone can act on.
         controls_.addReadOnly("refresh", refreshStr_, sizeof(refreshStr_));
     }
@@ -185,7 +185,7 @@ public:
         if (name && std::strcmp(name, "board") == 0) {
             applyBoard();
             // rebuildControls(), not defineControls(): the former CLEARS the list first and fires
-            // the schema-resync hook only when the schema really changed. Calling defineControls()
+            // the schema-resync hook only when the schema changed. Calling defineControls()
             // bare appended a second set of fourteen pin rows on every board change, because
             // defineControls is documented as "clear + addX" and mine was only doing the addX half.
             rebuildControls();
@@ -231,6 +231,24 @@ public:
                           geo_.width, geo_.height, geo_.scanRate);
             setStatus(statusBuf_, Severity::Error);
             return;
+        }
+
+        // REFUSE a line the chip has wired to flash or PSRAM, the guard ParallelLedDriver applies
+        // to its bus lanes: routing I/O onto one corrupts the device rather than failing, and what
+        // a user sees is a reset with no panic naming nothing. Bench-measured with the MatrixPortal
+        // map on an octal-PSRAM module (its b, d and b2 sit on 35-37). COLD PATH.
+        {
+            const char* role = nullptr;
+            const int8_t bad = unusableLine(role);
+            if (bad >= 0) {
+                std::snprintf(statusBuf_, sizeof(statusBuf_),
+                              platform::gpioCapability(static_cast<uint8_t>(bad)).validGpio
+                                  ? "%s on GPIO %d: a flash/PSRAM pin on this chip"
+                                  : "%s on GPIO %d: no such pin on this chip package",
+                              role, int(bad));
+                setStatus(statusBuf_, Severity::Error);
+                return;
+            }
         }
 
         platform::Hub75Pins pins;
@@ -398,15 +416,12 @@ private:
     static bool chipIsS31() { return platform::isEsp32S31; }
 
     /// The boards this driver knows, and the per-chip generic sets.
-    ///
-    /// MoonHub75 leads because it is MoonModules' own board (a passive adapter from a Lilygo T7-S3),
-    /// it is the one the request naming these boards calls out, and its map is the only one taken
-    /// from a schematic this project controls. That is a reason to default to it, not evidence that
-    /// it is the most used: nobody has counted.
-    ///
-    /// The `-generic` rows are NOT boards. They are fourteen pins from the chip's own documented free
-    /// list (gpio-usage.md), so someone wiring a bare module has a set that works rather than a blank
-    /// card. They are still editable, because a generic set cannot know what else is on the board.
+    // MoonHub75 leads because it is MoonModules' own board (a passive adapter from a Lilygo T7-S3)
+    // and its map is the only one taken from a schematic this project controls: a reason to default
+    // to it, not evidence that it is the most used. The `-generic` rows are NOT boards: fourteen pins
+    // from the chip's documented free list (gpio-usage.md), so a bare module starts from a working
+    // set rather than a blank card, and still editable because a generic set cannot know what else
+    // is on the board.
     static constexpr BoardPins kBoards[] = {
         // MoonHub75 PCB (Lilygo T7-S3). MOONHUB75/README.md names the upper half R0/G0/B0.
         {"MoonHub75",   1,  5,  6,   7, 13,  9,  16, 48, 47, 21, 38,  18,  8,  4, chipIsS3, false},
@@ -458,10 +473,49 @@ private:
         boardSel = sel;
     }
 
+    struct Line { int8_t gpio; const char* role; };   /// one HUB75 line as wired: GPIO and ribbon name
+    static constexpr uint8_t kLineCount = 14;
+
+    /// The set lines in ribbon order: the one home for which GPIOs this driver holds.
+    uint8_t lines(Line* out) const {
+        const Line all[kLineCount] = {
+            {r1, "r1"}, {g1, "g1"}, {b1, "b1"}, {r2, "r2"}, {g2, "g2"}, {b2, "b2"},
+            {addrA, "a"}, {addrB, "b"}, {addrC, "c"}, {addrD, "d"}, {addrE, "e"},
+            {clk, "clk"}, {lat, "lat"}, {oe, "oe"}};
+        uint8_t n = 0;
+        for (const Line& l : all) if (l.gpio >= 0) out[n++] = l;
+        return n;
+    }
+
     /// Are the pin controls the user's to edit, for the board currently selected?
     bool pinsEditable() const {
         if (boardSel >= boardOptionCount_) return true;   // no board resolved: never hide
         return kBoards[boardIndex_[boardSel]].editable;
+    }
+
+    /// A published board's lines for the pin map, since their hidden controls read as free there.
+    uint8_t fixedPins(FixedPin* out, uint8_t max) const override {
+        // A hidden pin control means "not in use" everywhere else; here the lines are soldered and
+        // driven while hidden. An editable board's controls are visible, so the map reads those.
+        if (!out || pinsEditable()) return 0;
+        Line lines[kLineCount];
+        uint8_t n = 0;
+        for (uint8_t i = 0, count = this->lines(lines); i < count && n < max; i++) {
+            out[n++] = FixedPin{static_cast<uint8_t>(lines[i].gpio), lines[i].role};
+        }
+        return n;
+    }
+
+    /// The first line on a flash/PSRAM or unbonded pin, with its role, or -1 when all are usable.
+    int8_t unusableLine(const char*& role) const {
+        Line lines[kLineCount];
+        for (uint8_t i = 0, count = this->lines(lines); i < count; i++) {
+            const auto cap = platform::gpioCapability(static_cast<uint8_t>(lines[i].gpio));
+            if (cap.validGpio && !cap.reserved) continue;
+            role = lines[i].role;
+            return lines[i].gpio;
+        }
+        return -1;
     }
 
     /// Write the chosen board's map into the pin controls. Custom writes nothing: it is the "leave

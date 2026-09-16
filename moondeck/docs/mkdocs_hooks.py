@@ -128,6 +128,11 @@ def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
 
 # The consolidated catalog pages whose ### effect/modifier/layout blocks are rendered
 # as a table (source stays authored as readable prose blocks; the table is build-time).
+# The ONE list of pages rendered as card tables, and the one home for it: this is the code
+# that renders them, so a page is a catalog page exactly when the build treats it as one.
+# check_specs and check_docgen import this rather than keeping their own (check_specs kept a
+# four-entry copy whose paths stopped existing at the docs restructure, so its catalog branch
+# quietly never ran).
 _CATALOG_PAGES = {
     "moonmodules/light/effects.md",
     "moonmodules/light/modifiers.md",
@@ -141,6 +146,13 @@ _CATALOG_PAGES = {
     "moonmodules/core/services.md",
     "moonmodules/light/supporting.md",
 }
+
+# The module types whose preview is MOTION, so their image is a .gif rather than a .png:
+# a still frame of a moving effect says almost nothing about it. One home, because three
+# places act on it: check_docgen enforces the format, screenshot_modules captures it, and
+# the catalog pages carry the result.
+ANIMATED_TYPES = ("effects", "modifiers", "layouts")
+ANIMATED_PAGES = frozenset(f"moonmodules/light/{t}.md" for t in ANIMATED_TYPES)
 
 _H3_RE = re.compile(r'^###\s+(?P<title>.+?)\s*$')
 _H2_RE = re.compile(r'^##\s+')                         # any level-2 heading = section boundary
@@ -158,6 +170,38 @@ _DETAIL_RE = re.compile(r'^Detail:\s*(?P<body>.+?)\s*$')   # `Detail: [Foo.md](.
 # (documentation-standards.md), and a heading form the build requires must not be the
 # one character the prose rules forbid.
 _DETAILS_RE = re.compile(r'^##\s+(?P<name>.+?),\s+details\s*$')
+
+
+def _split_control(text: str):
+    """A control line as (name, separator, description).
+
+    Written `- `name`: what it does`. The em-dash form is read too, because the tree still
+    holds 143 of them, but it is not the form to write: see documentation-standards.md.
+    """
+    for sep in (": ", " — "):
+        head, found, tail = text.partition(sep)
+        if found:
+            return head, found, tail
+    return text, "", ""
+
+
+def split_blocks(markdown: str):
+    """Every `### ` block on a catalog page, as (title, start, end) line indices.
+
+    Where a card begins and ends is ONE rule, and three readers need it: this renderer,
+    check_specs looking for the block that documents a module, and check_docgen measuring
+    a card against the standards. Each had its own copy, and check_specs' drifted far
+    enough that its block-finding accepted four different link shapes to compensate.
+
+    A `### ` opens a block; the next `### ` or `## ` closes it, which is what keeps a
+    `## <Name>, details` section out of the card it follows.
+    """
+    lines = markdown.split("\n")
+    starts = [i for i, ln in enumerate(lines) if _H3_RE.match(ln)]
+    for n, i in enumerate(starts):
+        end = next((j for j in range(i + 1, len(lines))
+                    if _H3_RE.match(lines[j]) or _H2_RE.match(lines[j])), len(lines))
+        yield _H3_RE.match(lines[i]).group("title"), i, end
 
 
 def _cell(s: str) -> str:
@@ -200,14 +244,18 @@ def _emit_row(b: dict, details_names: set) -> str:
     col1 = _cell(f'{img_html}{name}<br><span class="mm-desc">{desc}</span>'
                  if desc else f'{img_html}{name}')
 
-    # Col 2: controls, one per line. Split each at the em-dash into the name part
-    # (before — keeps its `code` chips, styled accent) and the description (after —
-    # greyed via .mm-pdesc, matching the muted module description). Controls without a
-    # dash render whole in the name part.
+    # Col 2: controls, one per line, split into the name part (keeps its `code` chips,
+    # styled accent) and the description (greyed via .mm-pdesc).
+    #
+    # The separator is a COLON or an em-dash. Only the colon should be written: em-dashes
+    # are banned repo-wide, so a format that required one made the renderer and the prose
+    # rules contradict each other. The em-dash stays readable because 143 lines in the tree
+    # still use it, and a card is not the place to fail over punctuation. A control with
+    # neither renders whole in the name part.
     col2_parts = []
     for p in b["params"]:
         p = re.sub(r'^-\s+', '', p)
-        head, sep, tail = p.partition(" — ")
+        head, sep, tail = _split_control(p)
         if sep:
             col2_parts.append(f'<span class="mm-param">{head}'
                               f' — <span class="mm-pdesc">{tail}</span></span>')
@@ -236,9 +284,9 @@ def _emit_row(b: dict, details_names: set) -> str:
     # same place on every card and the eye learns them once. Any other link a card wants
     # is made in the description, in the sentence that needs it.
     name = re.split(r'\s+[💫🦅🐙📊🌙⚡️·]', b["title"])[0].strip()
-    if name in details_names:
-        links.append(f":material-text-long: **Details:** "
-                     f"[{name}, details](#{_slug(name + ', details')})")
+    details = (f"[{name}, details](#{_slug(name + ', details')})" if name in details_names
+               else '<span class="mm-missing">none yet</span>')
+    links.append(f":material-text-long: **Details:** {details}")
     # Controls and links share ONE cell: the links column was 18% of the page, which made
     # a three-link card taller than its own controls. Stacked under the controls they read
     # as what the card offers and where it continues.
