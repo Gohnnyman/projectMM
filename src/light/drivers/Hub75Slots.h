@@ -159,7 +159,7 @@ inline size_t hub75Encode(const uint8_t* rgb, uint8_t* out,
             for (uint16_t x = 0; x < geo.width; x++) {
                 // Pair `p` of address step `r` is panel row r + p*scanRate, paired with
                 // the row half a panel below it. On the common two-row panel this is
-                // simply r and r + height/2.
+                // r and r + height/2.
                 const uint16_t upRow = static_cast<uint16_t>(r + pair * geo.scanRate);
                 const size_t up = (static_cast<size_t>(upRow) * geo.width + x) * 3;
                 const size_t lo = (static_cast<size_t>(upRow + pairSpan) * geo.width + x) * 3;

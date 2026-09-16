@@ -1,0 +1,507 @@
+"""check_docgen.py guards the generated documentation, so this guards it back.
+
+The rules it enforces (documentation-standards.md § The card) are invisible when they
+break: a regex that stops matching makes the check print a clean run, which is
+indistinguishable from a tree with nothing wrong in it. Four `## HLS, details` headings
+lived in the tree unlinked for exactly that reason, found by adding the rule rather than
+by the rule working.
+
+So each rule is pinned twice: it FIRES on a page written to break it, and it stays SILENT
+on a page that obeys. A test that only asserted the silence would pass against a check
+that had stopped reading anything at all.
+"""
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT / "moondeck" / "check"))
+sys.path.insert(0, str(ROOT / "moondeck" / "docs"))
+
+from check_docgen import (MAX_CONTROL, MAX_CONTROLS, MAX_DESC,  # noqa: E402
+                           _cards, _structure)
+
+
+def _card(desc: str = "Short.", controls=("- `a` — one.",)) -> str:
+    return "### Thing 💫 · kind\n\n" + desc + "\n\n" + "\n".join(controls) + "\n"
+
+
+# ---- sizes ----
+
+def test_description_over_the_limit_is_measured():
+    card = list(_cards(_card(desc="x" * (MAX_DESC + 50))))[0]
+    assert card["desc"] > MAX_DESC
+
+
+def test_a_card_within_the_limits_measures_under_them():
+    card = list(_cards(_card()))[0]
+    assert card["desc"] <= MAX_DESC
+    assert card["controls"] <= MAX_CONTROLS
+    assert card["widest"] <= MAX_CONTROL
+
+
+def test_controls_are_summed_not_counted_individually():
+    # Ten short controls are fine one by one and too much together: the column height is
+    # what the reader pays, so the sum is the thing that matters.
+    many = [f"- `p{i}` — {'y' * 80}." for i in range(10)]
+    card = list(_cards(_card(controls=many)))[0]
+    assert card["controls"] > MAX_CONTROLS
+    assert card["widest"] < MAX_CONTROL
+
+
+def test_the_widest_control_is_reported_with_its_text():
+    card = list(_cards(_card(controls=("- `a` — ok.", "- `b` — " + "z" * 200)))) [0]
+    assert card["widest"] > MAX_CONTROL
+    assert "zzz" in card["widest_text"]
+
+
+def test_links_and_image_lines_are_not_counted_as_description():
+    # A card's Detail:/Tests:/Origin: lines and its <img> render in other cells, so
+    # counting them as description would fail a card for text the column never holds.
+    page = ('### Thing 💫 · kind\n\nShort.\n\n'
+            '<img src="../../assets/x.png" alt="x">\n'
+            '- `a` — one.\n'
+            'Origin: Someone · source [x.h](../../src/x.h)\n'
+            '[Tests](../../reference/tests/unit-tests.md#x)\n'
+            'Detail: [technical](moxygen/X.md)\n')
+    card = list(_cards(page))[0]
+    assert card["desc"] == len("Short.")
+
+
+def test_a_details_section_is_not_counted_into_the_card():
+    # `## ` closes the block: the details prose belongs to the section, not the row.
+    page = _card() + "\n## Thing — details\n\n" + "w" * 5000 + "\n"
+    card = list(_cards(page))[0]
+    assert card["desc"] <= MAX_DESC
+
+
+# ---- structure ----
+
+def test_details_above_a_card_is_flagged():
+    page = _card() + "\n## Thing, details\n\nWhy.\n\n### Other 💫 · kind\n\nShort.\n"
+    issues = _structure(page, "p.md")
+    assert issues and "above the last card" in issues[0][1]
+
+
+def test_details_below_every_card_is_accepted():
+    page = _card() + "\n### Other 💫 · kind\n\nShort.\n\n## Thing, details\n\nWhy.\n"
+    assert _structure(page, "p.md") == []
+
+
+def test_a_details_heading_without_a_comma_is_flagged():
+    # The build matches `, details` exactly to link a row to its section, so any other
+    # punctuation renders a section nothing points at. The em-dash form is in this list
+    # because it is banned repo-wide, not merely unmatched.
+    for bad in ("## Thing — details", "## Thing: details", "## Thing details"):
+        page = _card() + "\n" + bad + "\n\nWhy.\n"
+        issues = _structure(page, "p.md")
+        assert issues and "comma" in issues[0][1], bad
+
+
+def test_details_naming_no_card_is_flagged():
+    page = _card() + "\n## Ghost, details\n\nWhy.\n"
+    issues = _structure(page, "p.md")
+    assert issues and "names no card" in issues[0][1]
+
+
+def test_two_details_sections_with_one_name_are_flagged():
+    """Both slug to the same anchor, so the row's More: link reaches one and the other
+    is unreachable. A sweep that adds a section where one already exists does this
+    silently, which is how drivers.md ended up with two LED driver sections."""
+    page = (_card() + "\n## Thing, details\n\nOne.\n\n## Thing, details\n\nTwo.\n")
+    issues = _structure(page, "p.md")
+    assert issues and "second details section" in issues[0][1]
+
+
+def test_one_details_section_per_name_is_accepted():
+    page = (_card() + "\n### Other 💫 · kind\n\nShort.\n\n"
+            "## Thing, details\n\nOne.\n\n## Other, details\n\nTwo.\n")
+    assert _structure(page, "p.md") == []
+
+
+def test_a_section_heading_that_is_not_details_is_left_alone():
+    # `## LED drivers` is a group header, not a details section: it must not be judged
+    # by the details rules, or every catalog page would fail on its own structure.
+    page = "## LED drivers\n\n" + _card() + "\n## Network drivers\n\n" + _card()
+    assert _structure(page, "p.md") == []
+
+
+# ---- the rendered row: two columns, labelled links ----
+
+def _row(md: str) -> str:
+    """One rendered table row, through the build's own renderer."""
+    import mkdocs_hooks
+    return mkdocs_hooks._render_catalog_table(md)
+
+
+def test_a_row_renders_as_two_columns():
+    """Two, not three or four. Every added column divides the page again, which is what
+    turned a long description into a ribbon and made a three-link card taller than its
+    own controls."""
+    out = _row(_card())
+    row = [l for l in out.split("\n") if l.startswith("| ") and "Module |" not in l
+           and not l.startswith("|--")][0]
+    assert row.count(" |") == 2, row
+
+
+def test_the_header_names_the_two_columns():
+    out = _row(_card())
+    assert "| Module | Details |" in out
+
+
+def test_links_are_labelled_not_only_iconed():
+    """An icon alone made the reader decode a glyph, and the tests and API rows both
+    render as a list of near-identical module names. The WORD carries the distinction."""
+    page = ('### Thing 💫 · kind\n\nShort.\n\n- `a` — one.\n'
+            '[Tests](../../reference/tests/unit-tests.md#thing)\n'
+            'Detail: [technical](moxygen/Thing.md)\n')
+    out = _row(page)
+    assert "**Tests:**" in out and "**API:**" in out
+
+
+def test_attribution_is_not_linked_in_the_second_column():
+    """Attribution travels with the code it credits, in the header's `///` where the
+    generated page shows it. A `Source:` row under the controls duplicated it and made the
+    row length vary per card."""
+    page = ('### Thing 💫 · kind\n\nShort.\n\n- `a` — one.\n'
+            '[Tests](../../reference/tests/unit-tests.md#thing)\n'
+            'Detail: [technical](moxygen/Thing.md)\n'
+            'Origin: projectMM, by somebody\n')
+    out = _row(page)
+    assert "**Source:**" not in out
+    assert "by somebody" not in out
+
+
+def test_all_three_links_show_even_when_a_target_is_missing():
+    """A card with no tests is a gap worth seeing. A row that silently drops the label
+    hides it, and the three rows stop being in the same place on every card."""
+    out = _row(_card())
+    for label in ("**Tests:**", "**API:**", "**Details:**"):
+        assert label in out, label
+    assert out.count("none yet") == 3
+
+
+def test_the_three_labels_keep_their_order():
+    """Same three, same sequence, so position carries meaning across cards."""
+    import re as _re
+    out = _row(_card())
+    assert _re.findall(r"\*\*(Tests|API|Details):\*\*", out) == ["Tests", "API", "Details"]
+
+
+def test_a_gif_on_a_non_animated_page_is_flagged():
+    """The format rule runs both ways: a png on effects was caught, a gif on drivers was
+    not, so half the convention went unenforced."""
+    import check_docgen
+    gif = ('### Thing 💫 · kind\n\n<img src="../../assets/x.gif" alt="x">\n\n'
+           'Short.\n\n- `a` — one.\n')
+    card = list(_cards(gif))[0]
+    assert card["img_src"].endswith(".gif")
+    assert "moonmodules/light/drivers.md" not in check_docgen.ANIMATED_PAGES
+
+
+def test_a_card_with_no_image_is_reported():
+    """Every card leads with a picture, and the rule must FIRE on one that does not: the
+    assertions beside this one read _cards() only, which is the data rather than the rule."""
+    import check_docgen
+    findings = check_docgen._card_rules("moonmodules/light/drivers.md",
+                                        list(_cards(_card()))[0])
+    assert any("no image" in why for _, why in findings)
+
+
+def test_the_image_format_rule_fires_both_ways():
+    """A png on an animated page and a gif on a static one are each half the convention,
+    and a rule that only caught one left the other unenforced for four pages."""
+    import check_docgen
+    animated = sorted(check_docgen.ANIMATED_PAGES)[0]
+    png = ('### Thing 💫 · kind\n\n<img src="../../assets/x.png" alt="x">\n\n'
+           'Short.\n\n- `a`: one.\n')
+    gif = ('### Thing 💫 · kind\n\n<img src="../../assets/x.gif" alt="x">\n\n'
+           'Short.\n\n- `a`: one.\n')
+    on_animated = check_docgen._card_rules(animated, list(_cards(png))[0])
+    assert any("image is png" in why for _, why in on_animated)
+    on_static = check_docgen._card_rules("moonmodules/light/drivers.md",
+                                         list(_cards(gif))[0])
+    assert any("image is gif" in why for _, why in on_static)
+    # And silent the right way round: a gif on the animated page, a png on the static one.
+    assert not any("image is" in why for _, why
+                   in check_docgen._card_rules(animated, list(_cards(gif))[0]))
+    assert not any("image is" in why for _, why
+                   in check_docgen._card_rules("moonmodules/light/drivers.md",
+                                               list(_cards(png))[0]))
+
+
+def test_a_baseline_entry_does_not_tolerate_growth():
+    """A baseline holds a card at the size it WAS. Matching the rule word alone let a
+    tolerated card grow without limit, which is the opposite of a baseline's job."""
+    import check_docgen
+    rule, n = check_docgen._measure("controls 678 > 600")
+    assert (rule, n) == ("controls", 678)
+    rule2, n2 = check_docgen._measure("no image: every card leads with one")
+    assert rule2 == "no image" and n2 is None
+
+
+def test_two_rules_that_share_an_opening_word_key_apart():
+    """A details table has two limits, columns and cell width, and both findings open
+    with the same two words. Keyed on that, one baselined wide table also tolerated a
+    cell growing past its limit: a second rule silently inheriting the first's licence."""
+    import check_docgen
+    cols = check_docgen._measure("details table has 5 columns (max 4)")
+    cell = check_docgen._measure("details table cell is 420 characters (max 300): prose in a grid")
+    assert cols[0] != cell[0]
+    assert (cols, cell) == (("details table has", 5), ("details table cell", 420))
+
+
+def test_an_effect_card_needs_a_gif_not_a_png():
+    """Effects, modifiers and layouts show MOTION: a still frame of a moving effect says
+    almost nothing about it. Everything else is cards and controls, where a png is
+    sharper and smaller."""
+    import check_docgen
+    png = ('### Thing 💫 · 2D\n\n<img src="../../assets/x.png" alt="x">\n\nShort.\n\n- `a` — one.\n')
+    issues = check_docgen._structure(png, "moonmodules/light/effects.md")
+    # _structure covers placement; the format rule lives with the per-card checks, so
+    # exercise it the way _violations does.
+    card = list(_cards(png))[0]
+    assert card["img_src"].endswith(".png")
+    assert "moonmodules/light/effects.md" in check_docgen.ANIMATED_PAGES
+    assert "moonmodules/light/drivers.md" not in check_docgen.ANIMATED_PAGES
+
+
+def test_the_image_source_is_captured_for_the_format_rule():
+    gif = ('### Thing 💫 · 2D\n\n<img src="../../assets/x.gif" alt="x">\n\nShort.\n\n- `a` — one.\n')
+    assert list(_cards(gif))[0]["img_src"].endswith(".gif")
+
+
+def test_the_second_column_carries_only_tests_api_and_details():
+    """Three doors, always the same three, in the same place. They are followed often
+    enough to earn a standing position. A how-to, an explanation or a sibling module is a
+    link the DESCRIPTION makes in a sentence, where the reader meets it in context instead
+    of as a bare label under the controls."""
+    import check_docgen
+    assert check_docgen.SECOND_COLUMN_LINKS == ("Tests:", "API:", "Details:")
+    page = ('### Thing 💫 · kind\n\n<img src="../../assets/x.png" alt="x">\n\nShort.\n\n'
+            '- `a` — one.\n[Tests](../../reference/tests/unit-tests.md#thing)\n'
+            'Detail: [technical](moxygen/Thing.md)\n')
+    assert check_docgen._rendered_links("p.md", page) == []
+
+
+def test_a_third_link_in_the_second_column_is_flagged():
+    """The rule has to FIRE, or it is indistinguishable from a check that reads nothing.
+    Renders a row, then asserts an extra label in cell 2 is caught."""
+    import check_docgen, mkdocs_hooks
+    real = mkdocs_hooks._emit_row
+
+    def patched(b, names):
+        row = real(b, names)
+        cells = row.strip("| ").split(" | ")
+        cells[1] += '<span class="mm-links">**More:** [x](#x)</span>'
+        return "| " + " | ".join(cells) + " |"
+
+    mkdocs_hooks._emit_row = patched
+    try:
+        page = ('### Thing 💫 · kind\n\nShort.\n\n- `a` — one.\n')
+        issues = check_docgen._rendered_links("p.md", page)
+    finally:
+        mkdocs_hooks._emit_row = real
+    assert issues and "More:" in issues[0][1]
+
+
+# ---- details sections ----
+
+def test_a_wide_details_table_is_flagged():
+    """A details section continues the card, so it is for the same reader. Past four
+    columns a table stops being scannable and starts being a spec sheet."""
+    import check_docgen
+    page = (_card() + "\n## Thing, details\n\n"
+            "| a | b | c | d | e |\n|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 |\n")
+    issues = check_docgen._details_tables("p.md", page)
+    assert issues and "5 columns" in issues[0][1]
+
+
+def test_a_details_table_cell_carrying_an_essay_is_flagged():
+    """The widest cell is where implementation prose hides: one Notes cell reached 991
+    characters of GDMA chains and ISR refills, which belongs on the API page."""
+    import check_docgen
+    page = (_card() + "\n## Thing, details\n\n"
+            "| a | b |\n|---|---|\n| 1 | " + "z" * 400 + " |\n")
+    issues = check_docgen._details_tables("p.md", page)
+    assert issues and "prose in a grid" in issues[0][1]
+
+
+def test_a_narrow_details_table_is_accepted():
+    import check_docgen
+    page = (_card() + "\n## Thing, details\n\n"
+            "| a | b |\n|---|---|\n| 1 | short enough |\n")
+    assert check_docgen._details_tables("p.md", page) == []
+
+
+def test_a_table_outside_a_details_section_is_not_judged():
+    """The rule is about details sections. A table in the page intro or in a card is a
+    different thing with its own reasons."""
+    import check_docgen
+    page = "| a | b | c | d | e |\n|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 |\n" + _card()
+    assert check_docgen._details_tables("p.md", page) == []
+
+
+def test_a_card_without_an_image_is_flagged():
+    """Every card leads with its picture: a row that starts with a name against blank
+    space reads as a gap rather than as a module that happens to be invisible."""
+    import check_docgen
+    cards = list(_cards(_card()))
+    assert cards[0]["img"] is False
+    page_with = ('### Thing 💫 · kind\n\n<img src="../../assets/x.png" alt="x">\n\n'
+                 'Short.\n\n- `a` — one.\n')
+    assert list(_cards(page_with))[0]["img"] is True
+
+
+def test_links_share_the_controls_cell():
+    """Not their own column: stacked under the controls they cost no page width."""
+    page = ('### Thing 💫 · kind\n\nShort.\n\n- `a` — one.\n'
+            'Detail: [technical](moxygen/Thing.md)\n')
+    row = [l for l in _row(page).split("\n") if l.startswith("| ") and "Module |" not in l
+           and not l.startswith("|--")][0]
+    cells = row.strip("| ").split(" | ")
+    assert "mm-param" in cells[1] and "mm-links" in cells[1]
+
+
+def test_the_preview_image_leads_the_first_cell():
+    """Above the name, not beside it: an image in its own column forced every text
+    column into a quarter of the page."""
+    page = ('### Thing 💫 · kind\n\n<img src="../../assets/x.png" alt="x">\n\nShort.\n\n- `a` — one.\n')
+    row = [l for l in _row(page).split("\n") if l.startswith("| ") and "Module |" not in l
+           and not l.startswith("|--")][0]
+    cells = row.strip("| ").split(" | ")
+    assert cells[0].index("mm-preview") < cells[0].index("mm-name")
+
+
+def test_the_catalog_pages_actually_yield_cards():
+    """A check that reads NOTHING reports a clean run. Emptying split_blocks makes every
+    rule pass on zero cards, which is indistinguishable from a tree with nothing wrong in
+    it, so the count itself is pinned: these pages have cards, and a change that stops
+    finding them fails here rather than going quiet."""
+    import check_docgen
+    from pathlib import Path as _P
+    total = 0
+    for rel in check_docgen._pages():
+        path = ROOT / "docs" / rel
+        if path.exists():
+            total += len(list(_cards(path.read_text())))
+    assert total > 100, f"only {total} cards found across the catalog pages"
+
+
+def test_split_blocks_is_the_shared_boundary_rule():
+    """check_specs and check_docgen both ask the build where a card starts and ends. One
+    rule, so a page cannot be split two ways by two readers."""
+    import mkdocs_hooks
+    page = ("### One 💫 · kind\n\nA.\n\n- `a` — one.\n\n"
+            "### Two 💫 · kind\n\nB.\n\n## One, details\n\nprose\n")
+    blocks = list(mkdocs_hooks.split_blocks(page))
+    assert [t.split()[0] for t, _, _ in blocks] == ["One", "Two"]
+    # The details section closes the second block rather than joining it.
+    _t, start, end = blocks[1]
+    assert "prose" not in "\n".join(page.split("\n")[start:end])
+
+
+# ---- the header `///` budget ----
+
+def _hdr(text: str):
+    import check_docgen
+    return check_docgen._header_rules("h.h", text)
+
+
+def test_a_class_comment_past_ten_lines_is_flagged():
+    """The class `///` is the module's summary, not its manual: a deep dive goes after
+    `@moreinfo`, where a post-process moves it below the member lists."""
+    doc = "\n".join(f"/// line {i}" for i in range(12))
+    issues = _hdr(doc + "\nclass Foo : public Bar {")
+    assert issues and "class comment 12 lines" in issues[0][1]
+
+
+def test_a_ten_line_class_comment_is_accepted():
+    doc = "\n".join(f"/// line {i}" for i in range(10))
+    assert not [i for i in _hdr(doc + "\nclass Foo {") if "class comment" in i[1]]
+
+
+def test_a_member_comment_past_one_line_is_flagged():
+    """One line beside the thing it describes. The generated page shows the first
+    sentence as the summary, so a second line is the author still talking."""
+    issues = _hdr("/// one\n/// two\nvoid doThing();")
+    assert issues and "member comment 2 lines" in issues[0][1]
+
+
+def test_a_one_line_member_comment_is_accepted():
+    assert not [i for i in _hdr("/// one\nvoid doThing();") if "member comment" in i[1]]
+
+
+def test_a_long_doc_line_is_flagged():
+    long = "/// " + " ".join(["word"] * 25)
+    issues = _hdr(long + "\nvoid doThing();")
+    assert any("doc line 25 words" in why for _, why in issues)
+
+
+def test_a_moreinfo_appendix_past_twenty_lines_is_flagged():
+    body = "\n".join(f"/// deep {i}" for i in range(25))
+    issues = _hdr("/// @moreinfo\n" + body + "\nclass Foo {")
+    assert any("appendix 25 lines" in why for _, why in issues)
+
+
+def test_an_undocumented_public_member_is_flagged():
+    """A member with no `///` renders as a bare signature, which tells a reader nothing
+    the declaration did not."""
+    src = "class Foo {\npublic:\n  uint8_t count = 0;\n  void doThing();\n};"
+    issues = _hdr(src)
+    whys = [why for _, why in issues]
+    assert "public variable has no ///" in whys
+    assert "public function has no ///" in whys
+
+
+def test_a_documented_public_member_is_accepted():
+    src = ("class Foo {\npublic:\n  /// how many\n  uint8_t count = 0;\n"
+           "  /// does the thing\n  void doThing();\n};")
+    assert not [i for i in _hdr(src) if "has no ///" in i[1]]
+
+
+def test_a_private_member_needs_no_doc():
+    """The budget is about the GENERATED page, and a private member never reaches it."""
+    src = "class Foo {\nprivate:\n  uint8_t hidden_ = 0;\n};"
+    assert not [i for i in _hdr(src) if "has no ///" in i[1]]
+
+
+def test_a_statement_inside_a_function_body_is_not_a_member():
+    """`return true;` and a local variable parse as declarations, and an inline body keeps
+    `public:` in scope, so 251 statements were reported as undocumented public members
+    before the brace depth was tracked."""
+    src = ("class Foo {\npublic:\n"
+           "  /// does the thing\n"
+           "  bool doThing() {\n"
+           "    Preset& p = presets_[count_];\n"
+           "    return true;\n"
+           "  }\n};")
+    assert not [i for i in _hdr(src) if "has no ///" in i[1]]
+
+
+def test_a_real_member_beside_an_inline_body_is_still_seen():
+    """The guard must not silence the rule: a genuine undocumented member declared after
+    a function with an inline body is still reported."""
+    src = ("class Foo {\npublic:\n"
+           "  /// does the thing\n"
+           "  bool doThing() { return true; }\n"
+           "  uint8_t undocumented = 0;\n};")
+    assert [i for i in _hdr(src) if "public variable has no ///" in i[1]]
+
+
+def test_the_headers_are_actually_scanned():
+    """A rule that reads no files reports a clean run, which looks exactly like a clean
+    tree. The count is pinned so an empty scan fails here instead of going quiet."""
+    import check_docgen
+    assert len(list(check_docgen._headers())) > 10
+
+
+def test_the_real_pages_obey_the_structure_rules():
+    """The tree itself, as the control: the synthetic cases above prove the rules fire,
+    and this proves they are satisfied where it counts. Sizes are excluded (a baseline
+    grandfathers those); structure has no baseline and must hold everywhere."""
+    import check_docgen
+    for rel in check_docgen._pages():
+        path = ROOT / "docs" / rel
+        if path.exists():
+            assert _structure(path.read_text(), rel) == [], rel

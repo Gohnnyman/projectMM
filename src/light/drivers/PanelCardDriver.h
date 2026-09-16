@@ -8,8 +8,8 @@
 namespace mm {
 
 /// Output driver: streams the buffer to LED panel cards over **raw Ethernet frames**, below IP.
-/// These cards take a sender-card feed rather than a pixel protocol — row-addressed data plus a
-/// sync frame that latches — so they need an L2 seam (`platform::ethSendRaw`) rather than a socket.
+/// These cards take a sender-card feed rather than a pixel protocol: row-addressed data plus a
+/// sync frame that latches: so they need an L2 seam (`platform::ethSendRaw`) rather than a socket.
 /// The wire format lives in ColorLight5A75Packet.h; this driver owns the window, the correction and
 /// the chunking, exactly as NetworkSendDriver does for ArtNet/E1.31/DDP.
 ///
@@ -23,7 +23,7 @@ namespace mm {
 /// card's place, and the cards it talks to are receiving cards. "Panel card" is the plainer name for
 /// the same hardware, and the one that keeps reading correctly when a second vendor's format lands.
 ///
-/// **No geometry controls.** The panel arrangement belongs to the Layout — `PanelsLayout` states
+/// **No geometry controls.** The panel arrangement belongs to the Layout: `PanelsLayout` states
 /// how many panels there are, their size, their wiring order and snaking, and maps every light to
 /// an (x, y). This driver reads the finished picture and cuts it into card rows, so a wall is
 /// described in exactly one place.
@@ -46,24 +46,30 @@ namespace mm {
 /// 256×256 panel at 40 fps is only ~65 Mbit/s of payload, which 100 Mbit would seem to carry. But
 /// the cards are dumb receivers with no buffering and no flow control: they latch on the sync frame,
 /// so an entire frame must arrive inside the inter-frame window. At 100 Mbit the same bytes take ten
-/// times as long on the wire — a 256×256 frame is ~16 ms of transmission against ~1.6 ms at gigabit
-/// — which overruns the frame budget and breaks the timing the sync depends on.
+/// times as long on the wire: a 256×256 frame is ~16 ms of transmission against ~1.6 ms at gigabit,
+/// which overruns the frame budget and breaks the timing the sync depends on.
 ///
 /// The failure mode is the confusing part: nothing errors. Frames go out, the link is up, and the
 /// panels tear, show wrong rows, or never latch. That is why this driver reads the NEGOTIATED speed
 /// (`platform::ethLinkSpeedMbps`) and says so in its status rather than letting a slow link look
-/// like a format bug. It still SENDS at 100 Mbit — a small panel may be fine, and the measurement
+/// like a format bug. It still SENDS at 100 Mbit: a small panel may be fine, and the measurement
 /// is more useful than a refusal.
 ///
 /// ## Running this on a host
 ///
-/// The desktop build sends real frames too, via `platform::ethBindRawInterface` — so a Raspberry
+/// The desktop build sends real frames too, via `platform::ethBindRawInterface`: so a Raspberry
 /// Pi, a Mac or a Windows PC running projectMM is a panel controller, which is the deployment this
 /// replaces. Linux uses AF_PACKET and macOS BPF, both needing root or CAP_NET_RAW; Windows has no
 /// kernel path for raw L2 at all and goes through Npcap, resolved at run time so the binary still
 /// builds and runs without it. Without the privilege or the driver, or with `interface` left blank,
 /// the host records frames instead of sending them, which is what lets the unit tests pin the wire
 /// format with no hardware and no privileges.
+///
+/// Origin: the ColorLight 5A-75 documented byte layout. Inspired by FPP (Falcon Player),
+/// https://github.com/FalconChristmas/fpp, the show player that drives these cards from a
+/// Raspberry Pi: a board already rendering those frames can send them itself and remove the
+/// host from the installation. FPP is also the reference point for what good looks like
+/// here, sustaining 50 fps.
 ///
 /// `interface` names the NIC: the kernel name on Linux and macOS (`eth0`, `en0`), and on Windows any
 /// distinctive part of the adapter description (`Realtek`), because a capture device there is spelled
@@ -88,13 +94,13 @@ namespace mm {
 /// **Contributions welcome.** Adding one is a `*Packet.h` beside ColorLight5A75Packet.h plus an
 /// entry in `kFormatOptions`: the window, the correction, the chunking and the platform seam are
 /// already shared, and the desktop capture path lets the byte layout be pinned by unit tests with no
-/// hardware. What it actually costs is the research, not the code.
+/// hardware. What it costs is the research, not the code.
 ///
 /// Two things to know before starting. Each vendor speaks its **own proprietary L2 protocol**, so a
 /// ColorLight frame will not drive a NovaStar card and the byte layout has to be obtained per
 /// vendor. And whether another format fits this driver's row-plus-sync model is **unverified**: the
 /// shape is an invitation, not a promise, and a format that addresses panels differently may need
-/// the driver to grow rather than just gain a packet file.
+/// the driver to grow rather than gain a packet file.
 ///
 /// Huidu is the one to approach with care: its controllers are largely asynchronous, playing from
 /// onboard storage rather than being fed live, which is a different product category from a
@@ -105,7 +111,7 @@ namespace mm {
 // installation. The wire format is the ColorLight 5A-75 documented byte layout, not FPP's code.
 class PanelCardDriver : public DriverBase {
 public:
-    /// Panel cards are RGB, so this references the "RGB" preset rather than the strips' "GRB" —
+    /// Panel cards are RGB, so this references the "RGB" preset rather than the strips' "GRB":
     /// same per-driver default the network sinks use. The user can still pick any preset.
     PanelCardDriver() { setDefaultPresetName("RGB"); }
 
@@ -216,7 +222,7 @@ public:
                                 static_cast<uint8_t>(n < 255 ? n : 255));
             controls_.setPersistLabel(controls_.count() - 1);
         }
-        addWindowControls();   // start / count — which slice of the shared buffer this sink sends
+        addWindowControls();   // start / count: which slice of the shared buffer this sink sends
         controls_.addControl("fps", fps, 1, 120);
     }
 
@@ -246,16 +252,16 @@ public:
         resizeCorrected();
 
         // Tell the network layer this interface is ours: we drive it below IP, so its DHCP cascade
-        // should not report a leaseless link as a fault. Claimed HERE rather than on first send —
+        // should not report a leaseless link as a fault. Claimed HERE rather than on first send:
         // stating it before any frame goes out cannot race the cascade's own timeout. Idempotent
         // across re-prepares via claimed_.
         if (!claimed_) { platform::ethClaimRawL2(true); claimed_ = true; }
 
         // A host needs a named NIC to reach the wire; ESP32 accepts and ignores it. Every prepare
-        // re-syncs the binding, INCLUDING the blank case — clearing the field must return the host
+        // re-syncs the binding, INCLUDING the blank case: clearing the field must return the host
         // to capture-only rather than leaving the last interface bound until release(). A bind
         // failure is a Warning rather than an Error: the driver still runs and still records frames,
-        // which is what a test or a dry run wants — it just is not driving panels.
+        // which is what a test or a dry run wants: it is not driving panels.
         const char* ifName = nullptr;
         if constexpr (platform::hasNamedNetInterfaces) {
             // Remember the adapter behind the current row, so a later rebuild that re-enumerates
@@ -273,7 +279,7 @@ public:
             ifName = platform::rawInterfaceName(interfaceSel_);
         }
         if (!platform::ethBindRawInterface(ifName)) {
-            // Two very different causes reach here and the fixes are opposite: a name that matches
+            // Two different causes reach here and the fixes are opposite: a name that matches
             // no adapter (a typo, or an OS naming the NIC differently) versus the privilege raw L2
             // needs. Blaming root for a typo sends the reader to sudo, which cannot help. Name the
             // string we failed to match so the likelier cause is the one they read first.
@@ -311,7 +317,7 @@ public:
         if (now - lastSendTime_ < interval) return;
         lastSendTime_ = now;
 
-        // The wall comes from the Layout — a PanelsLayout already states how many panels there are,
+        // The wall comes from the Layout: a PanelsLayout already states how many panels there are,
         // how big each one is, and how they are wired, and it has mapped every light to an (x, y).
         // So this driver needs no panel geometry of its own: it reads the finished picture and cuts
         // it into card rows. Restating the panel arrangement here would be a second place to get it
@@ -349,7 +355,7 @@ public:
             stride = srcCh;
         }
 
-        // Nothing to send if the buffer covers no row at all — bail before putting the brightness
+        // Nothing to send if the buffer covers no row at all: bail before putting the brightness
         // pair on the wire, so a misconfigured window is silent rather than emitting frames per tick.
         if (nLights < static_cast<nrOfLightsType>(wallW)) return;
 
@@ -359,7 +365,7 @@ public:
         // Index 1 is v13-and-newer, which acts on the SECOND copy, so it needs both sent.
         const int frameCopies = (firmware == 1) ? 2 : 1;
 
-        // Brightness first, ahead of the rows — the order the cards expect. Advisory: older card
+        // Brightness first, ahead of the rows: the order the cards expect. Advisory: older card
         // firmware ignores it, and the driver never depends on it having landed (our own Correction
         // has already applied brightness to the pixel data, so this only sets the card's own gain).
         {
@@ -375,7 +381,7 @@ public:
         }
 
         // One card row per wall row, in order. The card's own row numbering runs across its outputs
-        // (a stack of panels is several outputs), and that matches wall rows top to bottom — which is
+        // (a stack of panels is several outputs), and that matches wall rows top to bottom: which is
         // what the vendor tool configured the card to expect.
         bool anyRowSent = false;
         for (lengthType row = 0; row < wallH; row++) {
@@ -393,15 +399,15 @@ public:
                                            static_cast<uint16_t>(n), data + first * stride, stride);
                 // A failed frame is dropped, not retried: the cards have no acknowledgement to wait
                 // for, and stalling the render tick to retry would cost the next frame too.
-                // Set on a frame that actually reached the wire, not on reaching the row: a link
-                // that drops mid-frame fails every send, and latching then would blank the panels
-                // — which is the case the sync guard below exists to prevent.
+                // Set on a frame that reached the wire, not on reaching the row: a link
+                // that drops mid-frame fails every send, and latching then would blank the panels,
+                // which is the case the sync guard below exists to prevent.
                 if (platform::ethSendRaw(packet_, len)) { framesSent_++; anyRowSent = true; }
                 else framesDroppedTotal_++;
             }
         }
 
-        // The sync frame latches everything above, so it goes LAST and only if something was sent —
+        // The sync frame latches everything above, so it goes LAST and only if something was sent:
         // latching an empty frame would blank the panels on a misconfigured window.
         if (anyRowSent) {
             const size_t len = buildColorLightSyncPacket(packet_, kCardGain);
@@ -420,7 +426,7 @@ public:
     }
 
     /// Report what the wire is doing: no link, a link too slow for the cards, or the packet rate
-    /// reaching it. A user debugging a dark panel needs to tell those apart. Sends regardless — the
+    /// reaching it. A user debugging a dark panel needs to tell those apart. Sends regardless: the
     /// class note says why a slow link is reported rather than refused. Runs on the 1 Hz path, so
     /// the snprintf here is the same accepted trade SystemModule makes.
     void writeLinkStatus() MM_NONBLOCKING {
@@ -439,7 +445,7 @@ public:
         //
         // A short streak is ordinary back-pressure: the DMA ring fills while we push a whole frame
         // in one tick, the frame is dropped, the next one goes. Measured on a 128x128 wall at ~1900
-        // packets/s, streaks of 1-4 come and go and always clear themselves — reporting those as an
+        // packets/s, streaks of 1-4 come and go and always clear themselves: reporting those as an
         // error cries wolf and would bury the case below.
         //
         // A LONG streak is the wedge worth naming: esp_eth_transmit refuses every frame while the IDF
@@ -499,9 +505,9 @@ public:
         // Total frames the MAC refused since boot. A dropped frame is tolerated (the cards have no
         // acknowledgement, so a retry would cost the next frame instead), but it is NOT invisible:
         // a rising total says the sender is outrunning the wire, which is a real thing to know when
-        // a wall looks like it is stuttering. Shown only once something has actually dropped.
+        // a wall looks like it is stuttering. Shown only once something has dropped.
         const uint32_t dropped = framesDroppedTotal_;
-        // Frames actually handed to the MAC since the last report — the one number that separates
+        // Frames handed to the MAC since the last report: the one number that separates
         // "the driver is not sending" from "the driver sends and the card ignores it".
         const uint32_t sent = framesSent_ - framesReported_;
         framesReported_ = framesSent_;
@@ -541,7 +547,7 @@ public:
 
 private:
     /// Build one row packet into packet_. Pixels are copied one at a time because the source stride
-    /// (3 for RGB, 4 for RGBW) need not match the wire's 3 bytes — the card takes RGB, so a 4-channel
+    /// (3 for RGB, 4 for RGBW) need not match the wire's 3 bytes: the card takes RGB, so a 4-channel
     /// correction contributes its first three channels and the white channel has nowhere to go.
     size_t packRow(uint16_t row, uint16_t pixelOffset, uint16_t pixelCount,
                    const uint8_t* src, uint8_t stride) MM_NONBLOCKING {
@@ -560,7 +566,7 @@ private:
         return COLORLIGHT_ROW_PREFIX + static_cast<size_t>(pixelCount) * COLORLIGHT_BYTES_PER_PIXEL;
     }
 
-    /// Size corrected_ for the current source and correction. Called only off the hot path — that
+    /// Size corrected_ for the current source and correction. Called only off the hot path: that
     /// placement IS the no-allocation-in-the-send-loop contract.
     void resizeCorrected() {
         if (!sourceBuffer_) return;
@@ -579,12 +585,12 @@ private:
     /// One reused frame buffer, sized for the largest packet the format builds. Static per driver
     /// rather than per send, which is what keeps tick() allocation-free.
     uint8_t packet_[COLORLIGHT_MAX_FRAME] = {};
-    /// millis() of the last frame sent — the `fps` limiter's reference.
+    /// millis() of the last frame sent: the `fps` limiter's reference.
     uint32_t lastSendTime_ = 0;
-    /// Frames the MAC accepted since boot, and the value at the last status write — their
+    /// Frames the MAC accepted since boot, and the value at the last status write: their
     /// difference is the per-second rate the card shows.
     uint32_t framesSent_ = 0;
-    /// framesSent_ at the last status write — subtracting gives the rate without a timer.
+    /// framesSent_ at the last status write: subtracting gives the rate without a timer.
     uint32_t framesReported_ = 0;
     /// Frames the MAC refused since boot. Cumulative on purpose: the per-second rate hides a slow
     /// trickle of drops, and a rising total is the signal that the sender is outrunning the wire.

@@ -19,7 +19,7 @@ namespace mm {
 // kick, and the palette-index spacing are reproduced exactly here, written fresh on EffectBase + the
 // shared draw primitives. Per-column ball state lives on the heap (sized to width()×maxNumBalls),
 // allocated in prepare and freed in release — never a large inline member.
-// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
+/// Author: Andrew Tuline (WLED-SR), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Physics effect: gravity-bounced balls trailing along the layer.
 class BouncingBallsEffect : public EffectBase {
 public:

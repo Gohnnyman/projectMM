@@ -35,11 +35,13 @@
 namespace mm {
 
 /// Driver that publishes the layer as an NDI video source.
+///
+/// Origin: projectMM, against NewTek/Vizrt's documented NDI C API.
 class NdiDriver : public DriverBase {
 public:
     static constexpr const char* kTags = "🖥️";
 
-    // ScratchBuffer registers with its owning module, so it takes *this — that registration is what
+    // ScratchBuffer registers with its owning module, so it takes *this: that registration is what
     // puts these buffers in the memory report rather than leaving them untracked.
     NdiDriver() : rgb_(*this), corrScratch_(*this) {}
 
@@ -67,7 +69,7 @@ public:
         height_ = layer_->physicalHeight() > 0 ? layer_->physicalHeight() : 1;
 
         if (!platform::ndiAvailable()) {
-            // Not an error: the feature is simply not installed, and the fix is a user action.
+            // Not an error: the feature is not installed, and the fix is a user action.
             setStatus("NDI runtime not installed - see the docs", Severity::Warning);
             return;
         }
@@ -84,7 +86,7 @@ public:
         // scratch when the wiring emits more channels than the three NDI carries.
         const size_t pixels = static_cast<size_t>(width_) * height_;
         if (!rgb_.resize(pixels * 3)) {
-            release();                       // closes the sender we just opened
+            release();                       // closes the sender we opened
             setStatus("out of memory for the NDI frame", Severity::Error);
             return;
         }

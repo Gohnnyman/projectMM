@@ -20,9 +20,9 @@ namespace mm {
 // it plays them in sequence — the FastLED DemoReel100 / WLED preset-cycle pattern. The child's own
 // controls aren't surfaced (they run at their defaults); the reel exposes only the cycle controls.
 //
-// Prior art: FastLED's DemoReel100 sketch (Mark Kriegsman) — the canonical "rotate through a list of
-// patterns on a timer" demo; the registry-driven, self-skipping variant is ours.
-// Author: projectMM original, on Mark Kriegsman's FastLED DemoReel100 pattern — https://github.com/FastLED/FastLED/blob/master/examples/DemoReel100/DemoReel100.ino
+/// Prior art: FastLED's DemoReel100 sketch (Mark Kriegsman), the canonical "rotate through a list of
+/// patterns on a timer" demo; the registry-driven, self-skipping variant is ours.
+/// Author: projectMM original, on Mark Kriegsman's FastLED DemoReel100 pattern, https://github.com/FastLED/FastLED/blob/master/examples/DemoReel100/DemoReel100.ino
 /// Showcase effect: cycles through other effects with a name overlay.
 class DemoReelEffect : public EffectBase {
 public:

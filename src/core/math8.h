@@ -8,8 +8,8 @@
 // arithmetic, and a fast PRNG. The recognisable "lib8tion" surface — same names an
 // embedded/LED developer knows — written fresh against projectMM's architecture.
 //
-// Prior art: FastLED's lib8tion (Mark Kriegsman). We carry the ideas + names
-// (sin8/beatsin8/qadd8/nscale8/random8) and the textbook algorithms; the code is ours.
+/// Prior art: FastLED's lib8tion (Mark Kriegsman). We carry the ideas + names
+/// (sin8/beatsin8/qadd8/nscale8/random8) and the textbook algorithms; the code is ours.
 //
 // All integer, LUT-backed where it pays, no float, no heap — safe in the render loop.
 // Time-dependent helpers (beat8/beatsin8) take the current time in ms as a parameter so

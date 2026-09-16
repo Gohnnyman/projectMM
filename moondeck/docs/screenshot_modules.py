@@ -126,6 +126,14 @@ MODULES = [
     # Drivers
     ("NetworkSendDriver",    "Drivers",  {}, False),
     ("PreviewDriver",       "Drivers",  {}, False),
+    # These three carry no card image yet. The desktop build links every driver
+    # (MM_LINKS_ALL_LED_DRIVERS), so each renders its controls here even where the
+    # silicon or the runtime is absent: HUB75 wants LCD_CAM or Parlio, NDI wants a
+    # runtime the user installs. The card and its controls are what a screenshot is
+    # for, and those are real on any host.
+    ("Hub75Driver",         "Drivers",  {}, False),
+    ("NdiDriver",           "Drivers",  {}, False),
+    ("HlsDriver",           "Drivers",  {}, False),
 ]
 
 # Container types that exist in the pipeline but are not added via REST

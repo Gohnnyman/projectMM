@@ -15,8 +15,8 @@ namespace mm {
 /// The preview is a POINT LIST, not a dense grid: only the real lights are sent,
 /// at their real (x,y,z) positions. This is the proven MoonLight model (virtual
 /// grid → physical sparse lights; positions sent once at mapping time, channels
-/// per frame). Two message types — PreviewDriver owns both wire formats; the
-/// HTTP server is a domain-neutral BinaryBroadcaster that just writes the bytes:
+/// per frame). Two message types: PreviewDriver owns both wire formats; the
+/// HTTP server is a domain-neutral BinaryBroadcaster that writes the bytes:
 ///
 // --8<-- [start:wire-format]
 ///   0x03 coordinate table (sent ONLY in answer to a client's [0x52] request; the client
@@ -46,8 +46,8 @@ namespace mm {
 ///        [0x52][stride]       one-shot: send me the coordinate table
 // --8<-- [end:wire-format]
 ///
-/// `count` is the number of points actually kept after lattice downsampling (the
-/// lights whose position satisfies `pos ≡ 0 mod stride`) — a client sizes its buffer
+/// `count` is the number of points kept after lattice downsampling (the
+/// lights whose position satisfies `pos ≡ 0 mod stride`): a client sizes its buffer
 /// from this `count`, not from the light total. `stride` rises above 1 when a client
 /// requests it, or when the memory cap forces a floor; with no cap in play every light
 /// is sent (stride 1), so a sparse layout streams in full.
@@ -58,6 +58,9 @@ namespace mm {
 /// for that mixed-criticality pairing.
 ///
 /// **Resolution is client-driven.** The browser reads the drops counter each frame carries (the
+///
+/// Origin: projectMM, on MoonLight's PhysicalLayer model,
+/// https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h.
 /// device's own congestion signal) and posts the `[0x51][stride][fps]` standing request it wants;
 /// the device serves the most conservative request across viewers. The memory cap
 /// (`maxPreviewPoints()`) is the only floor a request cannot go finer than.
@@ -71,7 +74,7 @@ class PreviewDriver : public DriverBase, public BinaryBroadcaster::ClientMessage
 public:
     /// The 3D preview the web UI renders streams from this driver. Deleting or
     /// replacing it from the UI would silently kill that preview, so it opts out
-    /// of user-editing — it stays a fixed child of Drivers.
+    /// of user-editing: it stays a fixed child of Drivers.
     bool userEditable() const override { return false; }
 
     /// The frame rate the preview aims for (Hz), independent of render FPS. User-tunable 1-60.
@@ -130,20 +133,20 @@ public:
 
     /// Point the driver at the sparse driver buffer the LED/ArtNet drivers also read
     /// (the MappingLUT fills it with exactly the real lights). The driver streams
-    /// straight from it — no preview-side copy.
+    /// straight from it: no preview-side copy.
     void setSourceBuffer(Buffer* buf) override {
         sourceBuffer_ = buf;
     }
 
-    /// A rebuild (layout add/replace/remove, resize, modifier change) ran — the
+    /// A rebuild (layout add/replace/remove, resize, modifier change) ran: the
     /// light set / positions may have changed, so rebuild + broadcast the coordinate
     /// table (the MoonLight "positions once at mapping time"). Cancels any in-flight
     /// color send *first*: a resize frees+reallocs the producer buffer, so
-    /// a half-sent frame would read freed memory — a use-after-free guard pinned by a
+    /// a half-sent frame would read freed memory: a use-after-free guard pinned by a
     /// test. This coupling spans PreviewDriver ↔ HttpServerModule ↔ the Layer buffer.
     void prepare() override {
         // A resize frees+reallocs the producer buffer, so any in-flight color send holds
-        // a pointer that's about to dangle — cancel it BEFORE the rebuild (the browser discards the
+        // a pointer that's about to dangle: cancel it BEFORE the rebuild (the browser discards the
         // half-sent message and gets the fresh table + frame next tick). Guards a use-after-free.
         if (broadcaster_) broadcaster_->cancelBufferedSend();
         else freePreviewBuffers();            // no broadcaster wired: nothing streams, release the buffers
@@ -188,7 +191,7 @@ public:
     /// changed, then stream one color frame if the previous one finished draining.
     /// The frame rate self-limits to what the link sustains (sheds rate first, then
     /// spatial resolution via adaptive downscale), so a large grid never stalls the
-    /// loop or tears — it always delivers a complete frame.
+    /// loop or tears: it always delivers a complete frame.
     // REPORTED AS BLOCKING, deliberately: sendFrame() writes to a socket and
     // buildCoordTable() resizes keptIdx_. Both are real and both are on the render path,
     // so clang-hotpath lists them rather than hiding them. Backlogged (backlog-core: hot path).
@@ -270,8 +273,8 @@ public:
     }
 
     /// Build (or rebuild) the cached coordinate table from the layout's real lights
-    /// and broadcast it (the `0x03` message). Above the point cap — `min(display,
-    /// memory)`, memory from `maxAllocBlock()` — lights are kept on a spatial lattice
+    /// and broadcast it (the `0x03` message). Above the point cap: `min(display,
+    /// memory)`, memory from `maxAllocBlock()`: lights are kept on a spatial lattice
     /// (position ≡ 0 mod stride), sampling positions not indices so there is no moiré.
     /// Public so tests can drive it deterministically.
     void buildCoordTable() {
@@ -284,14 +287,14 @@ public:
         // Box EXTENT = the maximum coordinate the positions reach, which is (size − 1): placeLights
         // emits x in [0, width−1], so an 8-wide grid spans 0..7 and its extent is 7, NOT 8. The
         // header carries these extents and the browser centers the cloud by dividing by the largest,
-        // so they must match the packed coordinates' span exactly — using the size (8) instead drew
+        // so they must match the packed coordinates' span exactly: using the size (8) instead drew
         // the wireframe box one cell too large and shifted the lights off-center.
         auto extent = [](lengthType size) -> lengthType { return size > 0 ? size - 1 : 0; };
         const lengthType ex = extent(layer_->physicalWidth());
         const lengthType ey = extent(layer_->physicalHeight());
         const lengthType ez = extent(layer_->physicalDepth());
         // Positions are 1 byte/axis. To support layouts whose extent exceeds 255 on an axis (a
-        // 512-wide grid, say), scale every axis by the same factor so the largest edge maps to 255 —
+        // 512-wide grid, say), scale every axis by the same factor so the largest edge maps to 255:
         // preserving aspect ratio. For extents ≤255/axis the factor is 1 (exact integer positions).
         lengthType maxEdge = ex;
         if (ey > maxEdge) maxEdge = ey;
@@ -303,9 +306,9 @@ public:
         bz_ = scaleAxis(ez);
 
         // Per-axis downsample step s (lattice skip x%s && y%s && z%s). The cell count of the
-        // bounding box is the upper bound on kept lights, so grow s until it fits the cap — but
-        // ONLY when the layout has more lights than the cap (a sparse layout — big box, few
-        // lights — fits at s==1 and must not be downsampled for its box size alone). The wire
+        // bounding box is the upper bound on kept lights, so grow s until it fits the cap: but
+        // ONLY when the layout has more lights than the cap (a sparse layout: big box, few
+        // lights: fits at s==1 and must not be downsampled for its box size alone). The wire
         // "stride" field carries s to the browser (1 = full res; >1 = "1/s shown, link limited").
         const lengthType ax = layer_->physicalWidth()  > 0 ? layer_->physicalWidth()  : 1;
         const lengthType ay = layer_->physicalHeight() > 0 ? layer_->physicalHeight() : 1;
@@ -324,7 +327,7 @@ public:
         previewStride_ = s;
 
         // Count the lights the lattice keeps. A dense grid in natural order (no LUT) is a regular
-        // box, so the kept count is closed-form: ceil(size/s) per axis — no walk. A sparse/mapped
+        // box, so the kept count is closed-form: ceil(size/s) per axis: no walk. A sparse/mapped
         // layout (LUT) has an arbitrary index↔position map, so it's counted by one placeLights
         // pass applying the same lattice predicate the color/coord passes use (color[k] ↔ coord[k]
         // line up by shared order, no stored index map).
@@ -335,7 +338,7 @@ public:
             struct CountCtx { nrOfLightsType s, out; };
             CountCtx cc{s, 0};
             // A gap is a real preview position (drawn dark at its (x,y,z)), so count/emit it like any
-            // light — blackCb null → blackPixel falls back to the same handler.
+            // light: blackCb null → blackPixel falls back to the same handler.
             layouts->placeLights(CoordSink{[](void* c, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<CountCtx*>(c);
                 if (x % p->s == 0 && y % p->s == 0 && z % p->s == 0) p->out++;
@@ -343,7 +346,7 @@ public:
             coordCount_ = cc.out;
             // Size the kept-index cache to EXACTLY this count (grow-only) BEFORE the emit pass fills it,
             // so the cache can never truncate: coordCount_ is recomputed every rebuild (adaptive stride,
-            // memory-driven cap), so sizing it here — not lazily to a stale point-cap — is what keeps
+            // memory-driven cap), so sizing it here: not lazily to a stale point-cap, is what keeps
             // keptCount_ == coordCount_ and the per-frame gather complete. An alloc miss leaves the
             // cache too small; the gather then falls back to the full lattice walk (correct, slower).
             if (keptIdxCap_ < coordCount_) {
@@ -353,7 +356,7 @@ public:
                     keptIdx_ = grown;
                     keptIdxCap_ = coordCount_;
                     keptIdxAllocFailed_ = false;
-                    publishHeapBytes();   // the index cache grew — refresh the memory readout
+                    publishHeapBytes();   // the index cache grew: refresh the memory readout
                 } else {
                     keptIdxAllocFailed_ = true;   // degraded: the gather walks placeLights per frame
                 }
@@ -388,7 +391,7 @@ public:
                 for (lengthType y = 0; y < ay; y += s)
                     for (lengthType x = 0; x < ax; x += s) pc.emit(x, y, z);
         } else {
-            // While emitting coords, CACHE the kept lights' buffer indices — the per-frame color
+            // While emitting coords, CACHE the kept lights' buffer indices: the per-frame color
             // gather then loops this index map instead of re-walking placeLights over every light
             // (an O(total-lights) callback walk per firing, measured ~8 ms at 12K lights on the
             // encode worker). The map's lifecycle IS the coord table's: same pass, same invalidation.
@@ -423,7 +426,7 @@ public:
         return broadcaster_->sendBufferedFrame(h, sizeof(h), staging_, stagingUsed_);
     }
 
-    /// Stream one per-frame `0x02` RGB message straight from the producer buffer — no
+    /// Stream one per-frame `0x02` RGB message straight from the producer buffer: no
     /// intermediate copy. Returns whether every client got it (false → tick() drives
     /// adaptive downscaling). Public so tests can drive it without tick()'s rate-limit.
     /// Stream one per-frame `0x04` AIM message, so the preview can draw where each moving head
@@ -528,7 +531,7 @@ public:
 
         if (s == 1 && cpl == 3 && coordCount_ <= n) {
             // FULL RES, RGB: the producer buffer IS the payload. Hand it to the RESUMABLE buffered
-            // send (header copied, body = the producer buffer, a stable pointer) — it drains across
+            // send (header copied, body = the producer buffer, a stable pointer): it drains across
             // transport ticks without a copy and without spinning this loop, the fix for the
             // large-frame stall. The common case (any grid ≤ cap, incl. 16K on a no-PSRAM classic).
             // prepare cancels it before a resize frees the buffer (use-after-free guard).
@@ -573,7 +576,7 @@ public:
             for (nrOfLightsType k = 0; k < keptCount_; k++) col.emit(keptIdx_[k]);
         } else {
             // Fallback (index-map alloc miss): the full lattice walk, s as the FULL stride (not
-            // clamped) — must match buildAndSendCoordTable's.
+            // clamped): must match buildAndSendCoordTable's.
             struct Skip { ColCtx* col; nrOfLightsType s; } sk{&col, s};
             layer_->layouts()->placeLights(CoordSink{[](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<Skip*>(c);
@@ -649,7 +652,7 @@ private:
     nrOfLightsType keptIdxCap_ = 0, keptCount_ = 0;
 
 protected:
-    // Matches DriverBase's visibility — a private override would silently hide the hook from any
+    // Matches DriverBase's visibility: a private override would silently hide the hook from any
     // future caller holding a DriverBase*. ParallelLedDriver keeps it protected for the same reason.
     /// This driver's heap = the base scratch + the kept-index cache, summed for the per-module
     /// memory readout (see DriverBase::driverHeapBytes). PreviewDriver holds no wire_ scratch, but
@@ -663,12 +666,12 @@ protected:
 private:
 
     // Frame cap: the most points one preview frame carries before the spatial-lattice downsample
-    // engages — derived at runtime from free contiguous memory, not a fixed per-board constant
+    // engages: derived at runtime from free contiguous memory, not a fixed per-board constant
     // (architecture.md § Scaling to available memory: "sizes determined at runtime based on
     // available memory"). There is no per-frame buffer; the cap bounds the transient work the coord
     // table build (3 bytes/point in flight to the socket) imposes. So
     // a fragmented classic downscales SOONER (less contiguous RAM) while a roomy PSRAM board goes
-    // far higher — one rule, every board, measured not assumed. The spatial-lattice downsample is
+    // far higher: one rule, every board, measured not assumed. The spatial-lattice downsample is
     // the graceful fallback above the cap.
     // True when the source is a dense grid in natural box order (no mapping LUT): driver index i is
     // exactly box cell i, so the kept-light set + each light's buffer index are CLOSED-FORM from the
@@ -682,7 +685,7 @@ private:
     nrOfLightsType maxPreviewPoints() const {
         // NO display cap: the only bounds are MEMORY (staging + index tables must fit this
         // board's largest free block) and the index type. Everything else self-degrades where it
-        // actually binds: a link that cannot carry full-res frames reports drops and the client
+        // binds: a link that cannot carry full-res frames reports drops and the client
         // asks coarser; a browser that cannot RENDER the points measures its own low fps and asks
         // coarser too. Pre-capping "for the client's sake" only withheld detail from clients that
         // could take it (deduction: the S31's RAM and a desktop GPU both dwarf any fixed number).

@@ -25,9 +25,9 @@ namespace mm {
 // wall drop `octaves` to 1 (or `warp` to 0) and it degrades to a plain polar noise that still
 // reads well. The controls are deliberately the cost knobs, not just the look knobs.
 //
-// Prior art: Stefan Petrick's polar/noise effect vocabulary (a friend of projectMM) and Iñigo
-// Quilez's domain-warping article. Implemented fresh in fixed point over our own noise.
-// @card PolarNoiseEffect.png
+/// Prior art: Stefan Petrick's polar/noise effect vocabulary (a friend of projectMM) and Iñigo
+/// Quilez's domain-warping article. Implemented fresh in fixed point over our own noise.
+/// @card PolarNoiseEffect.png
 /// Effect: a warped, kaleidoscopic noise field in polar coordinates.
 class PolarNoiseEffect : public EffectBase {
 public:

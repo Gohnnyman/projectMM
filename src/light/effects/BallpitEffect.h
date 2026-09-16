@@ -23,9 +23,9 @@ namespace mm {
 // `collide` is called once per frame before the move. At 40 balls that is 780 pair checks, nearly
 // all of them rejected on the X test alone.
 //
-// Prior art: the WLED Particle System's ballpit family (Damian Schneider, @DedeHai); the impulse
-// response and the single-particle overlap push are the kernel's.
-// @card BallpitEffect.png
+/// Prior art: the WLED Particle System's ballpit family (Damian Schneider, @DedeHai); the impulse
+/// response and the single-particle overlap push are the kernel's.
+/// @card BallpitEffect.png
 /// Effect: falling balls that pile up and push each other aside.
 class BallpitEffect : public EffectBase {
 public:

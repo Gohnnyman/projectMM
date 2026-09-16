@@ -20,7 +20,7 @@ namespace mm {
 // delays, and the step-machine values 0/1/2/>2) and the color rules are reproduced from the
 // MoonLight spec, written fresh on EffectBase + the shared draw primitives. One drop per X column;
 // safe at any grid size.
-// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
+/// Author: Andrew Tuline (WLED-SR), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Tetris-style effect: falling, stacking blocks.
 class TetrixEffect : public EffectBase {
 public:

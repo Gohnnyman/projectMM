@@ -112,6 +112,29 @@ Two scales below a page: **a module** has exactly one reference page written and
 
 **No per-module detail page.** Cross-file rationale that no single `.h` owns goes in a prose section under its group's summary page. Rationale shared by sibling modules lives once on their base class.
 
+### The card
+
+Two columns. **Module** leads with the image, then the name and description; **Details** carries the controls, then three links below a rule: **Tests**, **API** (the generated page), **Details** (the section below the cards). Those three always show, greyed when there is no target, so their position is learned once. Every other link is prose, made in the sentence that needs it.
+
+Every card leads with an image: `.gif` on effects, modifiers and layouts, which show motion, `.png` elsewhere.
+
+A control reads `` - `name`: what it does ``. The colon separates the name from its description, and the build styles the two differently.
+
+| | Limit |
+|---|---|
+| Description | 600 characters |
+| Controls, together | 600 |
+| One control | 120 |
+| Details table | 4 columns, 300 characters a cell |
+
+Over a limit the text **moves rather than shrinks**, and its home follows from what it is. Behavior of the module goes in the header's `///`, reaching the reader as the generated page. What a reader needs before choosing between siblings goes in a `## <Name>, details` section below the cards, which the build links from the row. Trimming to fit is the one wrong answer, for the reason [Comments](#comments) gives.
+
+A details section continues the card, so it is written for the same reader. Implementation belongs in the `///`. The heading takes a comma, never an em-dash: the build matches `## <Name>, details` exactly, and [em-dashes are banned](#writing) everywhere.
+
+The card rules are enforced by [`check_docgen.py`](../moondeck/check/check_docgen.py), pinned by [`test_check_docgen.py`](../../test/python/test_check_docgen.py). Where a card begins and ends is the build's own rule, shared: the renderer, `check_docgen` and `check_specs` all ask `split_blocks` rather than each deciding for itself. A check that silently stopped matching would report a clean run, so each rule is tested firing as well as staying quiet.
+
+**Prose is Vale's**, wherever it sits: a page, a `///` block, a comment. One checker for what text says, so a rule has one home and one vocabulary.
+
 ## Comments
 
 - **Comments say WHY.** Restating what the line does is noise, and usually a naming failure: see [prefer naming over commenting](coding-standards.md#writing-a-line-of-code).
@@ -121,6 +144,25 @@ Two scales below a page: **a module** has exactly one reference page written and
 - **Say each fact once.** A restatement for emphasis reads as new information and costs the reader a second pass to learn it is not.
 - **A heading inside a comment means it is not a comment.** Needing signposts is the signal to cut. The one exception is `@moreinfo`, whose `##` sections become the generated page's own headings; inside a lead comment a heading wants to be a page, or wants to not exist.
 - **MoonLive scripts get three comments, one line each**: what the script is, what each `addControl` knob does, what each function it defines does. Lifecycle functions need none. A script is read in the device's own editor, where prose buries the effect.
+
+### The `///` budget
+
+A card is read across a row; a member comment is read beside the thing it describes, and the generated page shows its first sentence as the summary. So the budget is one line, and a deep dive goes after `@moreinfo`.
+
+| | Limit |
+|---|---|
+| Class `///` | 10 lines |
+| `@moreinfo` appendix | 20 lines |
+| Any other `///` run | 1 line |
+| One `///` line | 20 words |
+| Every public member | carries one |
+
+The first four cut and the last adds, deliberately: the result is a short line on everything rather than an essay on a few things. The word limit comes from the tree, where a member line is 14 words at the median and 19 at p95, so it bites the outliers and leaves the normal case alone.
+
+**Use `//` sparingly.** A comment restating what the code does is a naming failure, and the fix is a better name rather than a better sentence. What survives is the WHY a reader cannot recover from the code.
+
+Enforced by [`check_docgen.py`](../moondeck/check/check_docgen.py), which names the areas it covers.
+
 
 ### Writing a `///` that generates correctly
 
@@ -133,3 +175,7 @@ These are traps, not style: each one silently loses content from the generated p
 - **No relative `.md` links.** Doxygen keeps only `http(s)://` links. For an in-page link use `@xref{anchor|label}`.
 - **Wrap any `<tag>` in backticks**, or it renders as a live element and swallows the page.
 - **Write "such as", not "e.g."** The brief ends at the first period.
+- **A weasel that CONTRASTS is information.** "bytes actually allocated" against requested, "the factor actually in use" against configured: the word carries the distinction the comment exists to draw. Vale flags the word rather than the use, which is why its Weasel rule is a suggestion.
+- **A `"\u2014"` string literal is not prose.** The dash a control shows for an unset value is UI text: converting it changes what the device displays. Vale flags it, and it stays.
+- **`@xref`, `@card` and `@moreinfo` are ours, and Doxygen must not know them.** Each survives as plain text precisely because it is not a Doxygen command, and a post-process turns it into a link, an image or a section afterward. Declaring them as `ALIASES` makes Doxygen consume them and the post-process finds nothing left: every card image, cross-reference and More info section goes. This is also why the marker is `@xref` rather than `@ref`, which Doxygen does own.
+- **Doxygen's own warnings stay off.** `WARN_IF_DOC_ERROR` reports only the three commands above, so on this codebase it is noise by construction rather than a signal being silenced.

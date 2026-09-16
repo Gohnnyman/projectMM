@@ -5,7 +5,7 @@
 namespace mm {
 
 // Wire timing for a clockless addressable-LED chipset (WS2812B by default).
-// Pure data — no platform include — so the encoder that reads it is host-testable.
+// Pure data: no platform include, so the encoder that reads it is host-testable.
 //
 // WS2812-class chips are a 1-wire NRZ protocol at 800 kHz: every bit is a
 // `period_ns` cell that starts HIGH and drops LOW, where the HIGH duration

@@ -4,7 +4,7 @@
 
 namespace mm {
 
-// Author: Mark Kriegsman's Fire2012 (FastLED); MoonLight adapts MatrixFireFast by toggledbits — https://github.com/toggledbits/MatrixFireFast
+/// Author: Mark Kriegsman's Fire2012 (FastLED); MoonLight adapts MatrixFireFast by toggledbits, https://github.com/toggledbits/MatrixFireFast
 /// Fire2012-style heat field: sparks at the base rise and cool through the active
 /// palette (heat = palette index, cold at the low end, hottest at the high end);
 /// spark count scales with width. The flame color comes from the active palette —

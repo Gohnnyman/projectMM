@@ -1,0 +1,684 @@
+# Cards over the size limits when the check was introduced. Each line is one
+# card+rule that check_docgen.py tolerates. The list only SHRINKS: a card
+# edited back under the limit loses its line, and nothing is ever added.
+# Empty this file and the check is enforced everywhere. Regenerate: --baseline
+moonmodules/core/services.md::Analog	controls 678 > 600
+moonmodules/core/services.md::Analog	description 1093 > 600
+moonmodules/core/services.md::Analog	no image
+moonmodules/core/services.md::Analog	one control 259 > 120
+moonmodules/core/services.md::Audio	controls 3061 > 600
+moonmodules/core/services.md::Audio	description 2055 > 600
+moonmodules/core/services.md::Audio	one control 501 > 120
+moonmodules/core/services.md::Button	controls 1237 > 600
+moonmodules/core/services.md::Button	description 722 > 600
+moonmodules/core/services.md::Button	no image
+moonmodules/core/services.md::Button	one control 400 > 120
+moonmodules/core/services.md::Infrared	description 686 > 600
+moonmodules/core/services.md::Infrared	no image
+moonmodules/core/services.md::Infrared	one control 254 > 120
+moonmodules/core/services.md::MoonLiveService	description 1510 > 600
+moonmodules/core/services.md::MoonLiveService	no image
+moonmodules/core/services.md::OSC	description 1686 > 600
+moonmodules/core/supporting.md::Control	no image
+moonmodules/core/supporting.md::Filesystem	no image
+moonmodules/core/supporting.md::MoonModule	no image
+moonmodules/core/supporting.md::Scheduler	no image
+moonmodules/core/system.md::Devices	description 858 > 600
+moonmodules/core/system.md::File Manager	controls 1675 > 600
+moonmodules/core/system.md::File Manager	one control 676 > 120
+moonmodules/core/system.md::I2C scan	one control 189 > 120
+moonmodules/core/system.md::MQTT	controls 797 > 600
+moonmodules/core/system.md::MQTT	one control 446 > 120
+moonmodules/core/system.md::MoonCloud	controls 1565 > 600
+moonmodules/core/system.md::MoonCloud	description 2227 > 600
+moonmodules/core/system.md::MoonCloud	no image
+moonmodules/core/system.md::MoonCloud	one control 364 > 120
+moonmodules/core/system.md::Pins	controls 1294 > 600
+moonmodules/core/system.md::Pins	description 1152 > 600
+moonmodules/core/system.md::Pins	no image
+moonmodules/core/system.md::Pins	one control 1294 > 120
+moonmodules/core/system.md::System	one control 171 > 120
+moonmodules/core/system.md::Tasks	controls 889 > 600
+moonmodules/core/system.md::Tasks	no image
+moonmodules/core/system.md::Tasks	one control 786 > 120
+moonmodules/light/effects.md::AudioSpectrum 💫🎶	one control 139 > 120
+moonmodules/light/effects.md::Aurora 💫🖌️🌫️🎡 · 3D	controls 836 > 600
+moonmodules/light/effects.md::Aurora 💫🖌️🌫️🎡 · 3D	description 908 > 600
+moonmodules/light/effects.md::Aurora 💫🖌️🌫️🎡 · 3D	one control 212 > 120
+moonmodules/light/effects.md::BeatRipples 💫🎶🖌️ · 2D	description 672 > 600
+moonmodules/light/effects.md::BeatRipples 💫🎶🖌️ · 2D	no image
+moonmodules/light/effects.md::ColorTrails 💫🖌️💨🌫️ · 3D	description 993 > 600
+moonmodules/light/effects.md::ColorTrails 💫🖌️💨🌫️ · 3D	no image
+moonmodules/light/effects.md::DemoReel 💫 · 3D	description 697 > 600
+moonmodules/light/effects.md::Fish Tank 💫🎶✨👾 · 2D	controls 681 > 600
+moonmodules/light/effects.md::Fish Tank 💫🎶✨👾 · 2D	description 771 > 600
+moonmodules/light/effects.md::Fish Tank 💫🎶✨👾 · 2D	one control 222 > 120
+moonmodules/light/effects.md::FixedPoint 💫🖌️ · 2D	description 2126 > 600
+moonmodules/light/effects.md::FixedPoint 💫🖌️ · 2D	no image
+moonmodules/light/effects.md::Fluid 💫🖌️🌊💨 · 3D	description 1690 > 600
+moonmodules/light/effects.md::Fluid 💫🖌️🌊💨 · 3D	one control 142 > 120
+moonmodules/light/effects.md::Flying Toasters 💫🎶✨👾 · 2D	one control 222 > 120
+moonmodules/light/effects.md::GameOfLife 💫🌙🧬 · 2D/3D	controls 786 > 600
+moonmodules/light/effects.md::MovingHead 💫🎶🎯 · 1D	description 2040 > 600
+moonmodules/light/effects.md::Nebula 💫🖌️💨🌫️ · 3D	controls 929 > 600
+moonmodules/light/effects.md::Nebula 💫🖌️💨🌫️ · 3D	description 623 > 600
+moonmodules/light/effects.md::Nebula 💫🖌️💨🌫️ · 3D	one control 318 > 120
+moonmodules/light/effects.md::NetworkReceive 📡🌙	one control 196 > 120
+moonmodules/light/effects.md::Noise ⚡️💫🌙🐙🌫️ · 1D/2D/3D	controls 640 > 600
+moonmodules/light/effects.md::Noise ⚡️💫🌙🐙🌫️ · 1D/2D/3D	one control 547 > 120
+moonmodules/light/effects.md::Pacman 💫🎶✨👾 · 2D	controls 621 > 600
+moonmodules/light/effects.md::Pacman 💫🎶✨👾 · 2D	description 859 > 600
+moonmodules/light/effects.md::Pacman 💫🎶✨👾 · 2D	one control 222 > 120
+moonmodules/light/effects.md::PolarNoise 💫🖌️🌫️🎡 · 3D	controls 943 > 600
+moonmodules/light/effects.md::PolarNoise 💫🖌️🌫️🎡 · 3D	one control 443 > 120
+moonmodules/light/effects.md::Pong 💫🎵👾 · 2D	controls 679 > 600
+moonmodules/light/effects.md::Pong 💫🎵👾 · 2D	description 822 > 600
+moonmodules/light/effects.md::Pong 💫🎵👾 · 2D	one control 157 > 120
+moonmodules/light/effects.md::Praxis 💫 · 2D	one control 122 > 120
+moonmodules/light/effects.md::RadialSpectrum 💫🎶🖌️🎡 · 3D	description 790 > 600
+moonmodules/light/effects.md::RadialSpectrum 💫🎶🖌️🎡 · 3D	no image
+moonmodules/light/effects.md::RadialSpectrum 💫🎶🖌️🎡 · 3D	one control 181 > 120
+moonmodules/light/effects.md::Raymarch 💫🖌️ · 2D	description 1100 > 600
+moonmodules/light/effects.md::Solid 💫 · 3D	one control 166 > 120
+moonmodules/light/effects.md::Space Invaders 💫🎵👾 · 2D	description 996 > 600
+moonmodules/light/effects.md::Space Invaders 💫🎵👾 · 2D	one control 140 > 120
+moonmodules/light/effects.md::Sprite Fountain 💫🎶✨👾 · 2D	controls 642 > 600
+moonmodules/light/effects.md::Sprite Fountain 💫🎶✨👾 · 2D	description 818 > 600
+moonmodules/light/effects.md::Sprite Fountain 💫🎶✨👾 · 2D	one control 207 > 120
+moonmodules/light/effects.md::Trails 💫🖌️💨🌫️ · 3D	description 700 > 600
+moonmodules/light/effects.md::Truchet 💫🖌️ · 2D	description 727 > 600
+moonmodules/light/effects.md::VuMeters 💫🎶🖌️ · 3D	description 1004 > 600
+moonmodules/light/effects.md::VuMeters 💫🎶🖌️ · 3D	no image
+moonmodules/light/effects.md::VuMeters 💫🎶🖌️ · 3D	one control 149 > 120
+moonmodules/light/layouts.md::Cube	no image
+moonmodules/light/layouts.md::Grid	no image
+moonmodules/light/layouts.md::GridBlacks	no image
+moonmodules/light/layouts.md::Human-Sized Cube	no image
+moonmodules/light/layouts.md::Panel	no image
+moonmodules/light/layouts.md::Panels	no image
+moonmodules/light/layouts.md::Ring	no image
+moonmodules/light/layouts.md::Rings 241	no image
+moonmodules/light/layouts.md::Rings 241	one control 288 > 120
+moonmodules/light/layouts.md::Single Column	no image
+moonmodules/light/layouts.md::Single Row	no image
+moonmodules/light/layouts.md::Sphere	no image
+moonmodules/light/layouts.md::Sphere	one control 123 > 120
+moonmodules/light/layouts.md::Spiral	no image
+moonmodules/light/layouts.md::Tubes	no image
+moonmodules/light/layouts.md::Wheel	no image
+moonmodules/light/modifiers.md::Block 💫 · static	no image
+moonmodules/light/modifiers.md::Circle 💫 · static	no image
+moonmodules/light/modifiers.md::Mirror 💫 · static	no image
+moonmodules/light/modifiers.md::Mirror 💫 · static	one control 144 > 120
+moonmodules/light/modifiers.md::Multiply 💫 · static	one control 143 > 120
+moonmodules/light/modifiers.md::Pinwheel 💫 · static	no image
+moonmodules/light/modifiers.md::RandomMap · dynamic	no image
+moonmodules/light/modifiers.md::Region · static	no image
+moonmodules/light/modifiers.md::Region · static	one control 267 > 120
+moonmodules/light/modifiers.md::RippleXZ 💫 · static	no image
+moonmodules/light/modifiers.md::Rotate · dynamic	no image
+moonmodules/light/modifiers.md::Transpose 💫 · static	no image
+moonmodules/light/supporting.md::Buffer	no image
+moonmodules/light/supporting.md::Driver base	no image
+moonmodules/light/supporting.md::Drivers	controls 873 > 600
+moonmodules/light/supporting.md::Drivers	one control 272 > 120
+moonmodules/light/supporting.md::Effect base	no image
+moonmodules/light/supporting.md::Layout base	no image
+moonmodules/light/supporting.md::LightPresets	no image
+moonmodules/light/supporting.md::LightPresets	one control 207 > 120
+moonmodules/light/supporting.md::MappingLUT	no image
+moonmodules/light/supporting.md::Modifier base	no image
+moonmodules/light/supporting.md::Parallel LED driver base	no image
+moonmodules/light/supporting.md::Pin list	no image
+moonmodules/light/supporting.md::Slot encoder	no image
+src/light/drivers/Correction.h::apply/3	member comment 18 lines > 1
+src/light/drivers/Correction.h::cieLuminance/1	member comment 7 lines > 1
+src/light/drivers/Correction.h::curve	member comment 3 lines > 1
+src/light/drivers/Correction.h::hasMotion	public variable has no ///
+src/light/drivers/Correction.h::kAbsent	public variable has no ///
+src/light/drivers/Correction.h::motionHeld	member comment 14 lines > 1
+src/light/drivers/Correction.h::offBlue	public variable has no ///
+src/light/drivers/Correction.h::offDimmer	public variable has no ///
+src/light/drivers/Correction.h::offGreen	public variable has no ///
+src/light/drivers/Correction.h::offPan	public variable has no ///
+src/light/drivers/Correction.h::offRed	public variable has no ///
+src/light/drivers/Correction.h::offRotate	public variable has no ///
+src/light/drivers/Correction.h::offUV	public variable has no ///
+src/light/drivers/Correction.h::offWarmWhite	public variable has no ///
+src/light/drivers/Correction.h::offYellow	public variable has no ///
+src/light/drivers/Correction.h::rebuild/3	public function has no ///
+src/light/drivers/Correction.h::rebuildBrightness/1	public function has no ///
+src/light/drivers/Correction.h::uint8_t	member comment 17 lines > 1
+src/light/drivers/DriverBase.h::addWindowControls/0	member comment 3 lines > 1
+src/light/drivers/DriverBase.h::correction/0	member comment 2 lines > 1
+src/light/drivers/DriverBase.h::correctionForTest/0	member comment 4 lines > 1
+src/light/drivers/DriverBase.h::curveSel_	member comment 5 lines > 1
+src/light/drivers/DriverBase.h::defineControls/0	member comment 6 lines > 1
+src/light/drivers/DriverBase.h::defineCorrectionControls/0	member comment 5 lines > 1
+src/light/drivers/DriverBase.h::defineDriverControls/0	member comment 2 lines > 1
+src/light/drivers/DriverBase.h::ensureWire/1	member comment 6 lines > 1
+src/light/drivers/DriverBase.h::hasCorrectionControls/0	member comment 3 lines > 1
+src/light/drivers/DriverBase.h::hwBlock/0	member comment 4 lines > 1
+src/light/drivers/DriverBase.h::isCorrectionControl/1	member comment 2 lines > 1
+src/light/drivers/DriverBase.h::isWindowControl/1	member comment 2 lines > 1
+src/light/drivers/DriverBase.h::kWindowAll	member comment 13 lines > 1
+src/light/drivers/DriverBase.h::layer/0	member comment 2 lines > 1
+src/light/drivers/DriverBase.h::motionHeld/0	public function has no ///
+src/light/drivers/DriverBase.h::onControlChanged/1	member comment 5 lines > 1
+src/light/drivers/DriverBase.h::onCorrectionChanged/0	member comment 5 lines > 1
+src/light/drivers/DriverBase.h::rebuildCorrection/1	member comment 9 lines > 1
+src/light/drivers/DriverBase.h::release/0	member comment 6 lines > 1
+src/light/drivers/DriverBase.h::resolveWindowLenForTest/1	member comment 4 lines > 1
+src/light/drivers/DriverBase.h::role/0	member comment 8 lines > 1
+src/light/drivers/DriverBase.h::setDefaultPresetName/1	member comment 3 lines > 1
+src/light/drivers/DriverBase.h::setLayer/1	member comment 8 lines > 1
+src/light/drivers/DriverBase.h::setMotionHeld/1	member comment 6 lines > 1
+src/light/drivers/DriverBase.h::setWindow/2	member comment 3 lines > 1
+src/light/drivers/DriverBase.h::windowSlice	member comment 5 lines > 1
+src/light/drivers/DriverBase.h::windowStart/0	member comment 2 lines > 1
+src/light/drivers/Drivers.h::Drivers	class comment 53 lines > 10
+src/light/drivers/Drivers.h::acceptsChildRoles/0	public function has no ///
+src/light/drivers/Drivers.h::affectsPrepare/1	member comment 4 lines > 1
+src/light/drivers/Drivers.h::applyRelay/0	member comment 9 lines > 1
+src/light/drivers/Drivers.h::brightness	member comment 9 lines > 1
+src/light/drivers/Drivers.h::defineControls/0	public function has no ///
+src/light/drivers/Drivers.h::effectiveBrightness/0	public function has no ///
+src/light/drivers/Drivers.h::firstOutputRgb/1	public function has no ///
+src/light/drivers/Drivers.h::fixtureChannels/0	public function has no ///
+src/light/drivers/Drivers.h::kMaxRelays	member comment 2 lines > 1
+src/light/drivers/Drivers.h::lastRelayCount_	public variable has no ///
+src/light/drivers/Drivers.h::latestSummary/0	member comment 5 lines > 1
+src/light/drivers/Drivers.h::line 117/0	member comment 8 lines > 1
+src/light/drivers/Drivers.h::line 212	member comment 14 lines > 1
+src/light/drivers/Drivers.h::line 322	member comment 4 lines > 1
+src/light/drivers/Drivers.h::line 538	member comment 2 lines > 1
+src/light/drivers/Drivers.h::liveCount_	public variable has no ///
+src/light/drivers/Drivers.h::motionHold	member comment 10 lines > 1
+src/light/drivers/Drivers.h::movableNow_	member comment 4 lines > 1
+src/light/drivers/Drivers.h::multicore	member comment 21 lines > 1
+src/light/drivers/Drivers.h::offSeconds_	member comment 2 lines > 1
+src/light/drivers/Drivers.h::on	member comment 7 lines > 1
+src/light/drivers/Drivers.h::onControlChanged/1	public function has no ///
+src/light/drivers/Drivers.h::palette	member comment 5 lines > 1
+src/light/drivers/Drivers.h::paletteScriptModule_	public variable has no ///
+src/light/drivers/Drivers.h::prepare/0	public function has no ///
+src/light/drivers/Drivers.h::publishFixtureChannels/0	member comment 9 lines > 1
+src/light/drivers/Drivers.h::quiesce/0	public function has no ///
+src/light/drivers/Drivers.h::quiesceEncodeForTest/0	member comment 4 lines > 1
+src/light/drivers/Drivers.h::quiesceRenderSplit/0	member comment 7 lines > 1
+src/light/drivers/Drivers.h::rebuildAllCorrections/0	member comment 9 lines > 1
+src/light/drivers/Drivers.h::refreshLivePalettes/0	member comment 5 lines > 1
+src/light/drivers/Drivers.h::release/0	public function has no ///
+src/light/drivers/Drivers.h::renderSplitActive/0	member comment 2 lines > 1
+src/light/drivers/Drivers.h::renderWaitPeakUs/0	member comment 6 lines > 1
+src/light/drivers/Drivers.h::setEffects/1	public function has no ///
+src/light/drivers/Drivers.h::setLayer/1	public function has no ///
+src/light/drivers/Drivers.h::setup/0	public function has no ///
+src/light/drivers/Drivers.h::tick1s/0	member comment 5 lines > 1
+src/light/drivers/Drivers.h::tickNonDriverChildren/0	public function has no ///
+src/light/drivers/Drivers.h::updateMotionHold/0	member comment 7 lines > 1
+src/light/drivers/HlsDriver.h::HlsDriver/0	public function has no ///
+src/light/drivers/HlsDriver.h::affectsPrepare/1	member comment 2 lines > 1
+src/light/drivers/HlsDriver.h::autoBitrateKbit/0	member comment 7 lines > 1
+src/light/drivers/HlsDriver.h::autoScale/0	member comment 5 lines > 1
+src/light/drivers/HlsDriver.h::defineDriverControls/0	public function has no ///
+src/light/drivers/HlsDriver.h::kMaxEncodeWidth	member comment 2 lines > 1
+src/light/drivers/HlsDriver.h::kMaxScale	member comment 4 lines > 1
+src/light/drivers/HlsDriver.h::kMinEncodeSize	member comment 2 lines > 1
+src/light/drivers/HlsDriver.h::kSegmentDir	public variable has no ///
+src/light/drivers/HlsDriver.h::kTags	public variable has no ///
+src/light/drivers/HlsDriver.h::line 2	member comment 39 lines > 1
+src/light/drivers/HlsDriver.h::prepare/0	public function has no ///
+src/light/drivers/HlsDriver.h::release/0	public function has no ///
+src/light/drivers/HlsDriver.h::scale	member comment 2 lines > 1
+src/light/drivers/HlsDriver.h::setSourceBuffer/1	public function has no ///
+src/light/drivers/HlsDriver.h::tags/0	public function has no ///
+src/light/drivers/Hub75Driver.h::Hub75Driver	class comment 23 lines > 10
+src/light/drivers/Hub75Driver.h::addrA	public variable has no ///
+src/light/drivers/Hub75Driver.h::affectsPrepare/1	member comment 2 lines > 1
+src/light/drivers/Hub75Driver.h::applyBoard/0	member comment 2 lines > 1
+src/light/drivers/Hub75Driver.h::b2	public variable has no ///
+src/light/drivers/Hub75Driver.h::bitDepth	member comment 3 lines > 1
+src/light/drivers/Hub75Driver.h::boardSel	member comment 8 lines > 1
+src/light/drivers/Hub75Driver.h::buildBackendOptions/0	member comment 6 lines > 1
+src/light/drivers/Hub75Driver.h::buildBoardOptions/0	member comment 2 lines > 1
+src/light/drivers/Hub75Driver.h::clk	public variable has no ///
+src/light/drivers/Hub75Driver.h::defineDriverControls/0	public function has no ///
+src/light/drivers/Hub75Driver.h::e	public variable has no ///
+src/light/drivers/Hub75Driver.h::editable	member comment 3 lines > 1
+src/light/drivers/Hub75Driver.h::hwBlock/0	member comment 4 lines > 1
+src/light/drivers/Hub75Driver.h::label	public variable has no ///
+src/light/drivers/Hub75Driver.h::oe	public variable has no ///
+src/light/drivers/Hub75Driver.h::onControlChanged/1	member comment 2 lines > 1
+src/light/drivers/Hub75Driver.h::onCorrectionChanged/0	member comment 3 lines > 1
+src/light/drivers/Hub75Driver.h::peripheralSel_	member comment 4 lines > 1
+src/light/drivers/Hub75Driver.h::prepare/0	public function has no ///
+src/light/drivers/Hub75Driver.h::r1	public variable has no ///
+src/light/drivers/Hub75Driver.h::r2	public variable has no ///
+src/light/drivers/Hub75Driver.h::release/0	public function has no ///
+src/light/drivers/Hub75Driver.h::scanSel	member comment 2 lines > 1
+src/light/drivers/Hub75Driver.h::setSourceBuffer/1	public function has no ///
+src/light/drivers/Hub75Driver.h::tags/0	public function has no ///
+src/light/drivers/Hub75Driver.h::tick1s/0	member comment 4 lines > 1
+src/light/drivers/Hub75Driver.h::toPin/1	member comment 2 lines > 1
+src/light/drivers/Hub75Slots.h::a	public variable has no ///
+src/light/drivers/Hub75Slots.h::bitDepth	public variable has no ///
+src/light/drivers/Hub75Slots.h::frameBytes/0	member comment 5 lines > 1
+src/light/drivers/Hub75Slots.h::frameSlots/0	member comment 6 lines > 1
+src/light/drivers/Hub75Slots.h::height	public variable has no ///
+src/light/drivers/Hub75Slots.h::hub75Encode	member comment 10 lines > 1
+src/light/drivers/Hub75Slots.h::kBytesPerSlot	member comment 3 lines > 1
+src/light/drivers/Hub75Slots.h::lat	public variable has no ///
+src/light/drivers/Hub75Slots.h::line 8	member comment 45 lines > 1
+src/light/drivers/Hub75Slots.h::r1	public variable has no ///
+src/light/drivers/Hub75Slots.h::r2	public variable has no ///
+src/light/drivers/Hub75Slots.h::rowsPerScan/0	member comment 4 lines > 1
+src/light/drivers/Hub75Slots.h::scanRate	public variable has no ///
+src/light/drivers/Hub75Slots.h::scanRows/0	member comment 2 lines > 1
+src/light/drivers/Hub75Slots.h::valid/0	member comment 3 lines > 1
+src/light/drivers/Hub75Slots.h::width	public variable has no ///
+src/light/drivers/HueDriver.h::HueDriver	class comment 25 lines > 10
+src/light/drivers/HueDriver.h::HueDriver/0	member comment 5 lines > 1
+src/light/drivers/HueDriver.h::bodyLooksComplete/1	member comment 4 lines > 1
+src/light/drivers/HueDriver.h::buildLightOptions/0	member comment 3 lines > 1
+src/light/drivers/HueDriver.h::containsKey/3	member comment 2 lines > 1
+src/light/drivers/HueDriver.h::defineDriverControls/0	member comment 3 lines > 1
+src/light/drivers/HueDriver.h::diffAndFormat/6	member comment 6 lines > 1
+src/light/drivers/HueDriver.h::ensureNameBuffers/0	member comment 5 lines > 1
+src/light/drivers/HueDriver.h::fetchGroups/0	member comment 4 lines > 1
+src/light/drivers/HueDriver.h::lightNames_	member comment 5 lines > 1
+src/light/drivers/HueDriver.h::line 219	member comment 3 lines > 1
+src/light/drivers/HueDriver.h::line 260	member comment 2 lines > 1
+src/light/drivers/HueDriver.h::line 277	member comment 3 lines > 1
+src/light/drivers/HueDriver.h::onControlChanged/1	member comment 3 lines > 1
+src/light/drivers/HueDriver.h::parseGroups/1	member comment 5 lines > 1
+src/light/drivers/HueDriver.h::parseGroupsForTest/1	member comment 3 lines > 1
+src/light/drivers/HueDriver.h::parseId/1	member comment 4 lines > 1
+src/light/drivers/HueDriver.h::parseLights/1	member comment 5 lines > 1
+src/light/drivers/HueDriver.h::parseStringIn/5	member comment 5 lines > 1
+src/light/drivers/HueDriver.h::pollPairing/0	member comment 2 lines > 1
+src/light/drivers/HueDriver.h::pushOneChangedLight/0	member comment 4 lines > 1
+src/light/drivers/HueDriver.h::rebuildDriven/0	member comment 4 lines > 1
+src/light/drivers/HueDriver.h::refreshStatus/0	member comment 4 lines > 1
+src/light/drivers/HueDriver.h::release/0	member comment 2 lines > 1
+src/light/drivers/HueDriver.h::reportBridge/0	member comment 4 lines > 1
+src/light/drivers/HueDriver.h::rgbToHsv/6	member comment 2 lines > 1
+src/light/drivers/HueDriver.h::roomColorLights/1	member comment 7 lines > 1
+src/light/drivers/HueDriver.h::roomMaskFor/2	member comment 5 lines > 1
+src/light/drivers/HueDriver.h::setRoomForTest/1	member comment 3 lines > 1
+src/light/drivers/HueDriver.h::tick/0	member comment 5 lines > 1
+src/light/drivers/HueDriver.h::tick1s/0	member comment 3 lines > 1
+src/light/drivers/HueDriver.h::transitionDeciseconds/0	member comment 4 lines > 1
+src/light/drivers/HueDriver.h::wouldPushForTest/6	member comment 4 lines > 1
+src/light/drivers/LedDriverConfig.h::invert	public variable has no ///
+src/light/drivers/LedDriverConfig.h::t0h_ns	public variable has no ///
+src/light/drivers/LedDriverConfig.h::t1h_ns	public variable has no ///
+src/light/drivers/LedPeripheral.h::LedPeripheral	class comment 20 lines > 10
+src/light/drivers/LedPeripheral.h::attach/1	member comment 3 lines > 1
+src/light/drivers/LedPeripheral.h::busContentionCleared/0	member comment 5 lines > 1
+src/light/drivers/LedPeripheral.h::busInit/2	member comment 2 lines > 1
+src/light/drivers/LedPeripheral.h::busTransmit/2	member comment 2 lines > 1
+src/light/drivers/LedPeripheral.h::clockPinForBus/0	member comment 4 lines > 1
+src/light/drivers/LedPeripheral.h::dmaBudgetBytes/0	member comment 2 lines > 1
+src/light/drivers/LedPeripheral.h::hwBlock/0	member comment 3 lines > 1
+src/light/drivers/LedPeripheral.h::line 41/0	public function has no ///
+src/light/drivers/LedPeripheral.h::loopbackFullWidth/0	member comment 2 lines > 1
+src/light/drivers/LedPeripheral.h::spareLanesNeedPad/0	member comment 6 lines > 1
+src/light/drivers/LedPeripheral.h::supportsDoubleBuffer/0	member comment 5 lines > 1
+src/light/drivers/LedPeripheral.h::uint8_t	member comment 5 lines > 1
+src/light/drivers/LightPresetsModule.h::LightPresetsModule	class comment 29 lines > 10
+src/light/drivers/LightPresetsModule.h::LightPresetsModule/0	public function has no ///
+src/light/drivers/LightPresetsModule.h::active/0	member comment 3 lines > 1
+src/light/drivers/LightPresetsModule.h::addListRow/1	public function has no ///
+src/light/drivers/LightPresetsModule.h::channelCount	public variable has no ///
+src/light/drivers/LightPresetsModule.h::defaultId/0	member comment 2 lines > 1
+src/light/drivers/LightPresetsModule.h::defineControls/0	public function has no ///
+src/light/drivers/LightPresetsModule.h::deleteListRow/1	public function has no ///
+src/light/drivers/LightPresetsModule.h::deriveCorrection/3	public function has no ///
+src/light/drivers/LightPresetsModule.h::id	public variable has no ///
+src/light/drivers/LightPresetsModule.h::idAt/1	public function has no ///
+src/light/drivers/LightPresetsModule.h::indexOfId/1	public function has no ///
+src/light/drivers/LightPresetsModule.h::isEditableList/0	public function has no ///
+src/light/drivers/LightPresetsModule.h::kMaxPresets	public variable has no ///
+src/light/drivers/LightPresetsModule.h::line 168	member comment 6 lines > 1
+src/light/drivers/LightPresetsModule.h::line 81/0	member comment 7 lines > 1
+src/light/drivers/LightPresetsModule.h::listRowCount/0	public function has no ///
+src/light/drivers/LightPresetsModule.h::locked	public variable has no ///
+src/light/drivers/LightPresetsModule.h::moveListRow/2	public function has no ///
+src/light/drivers/LightPresetsModule.h::nameAt/1	public function has no ///
+src/light/drivers/LightPresetsModule.h::prepare/0	public function has no ///
+src/light/drivers/LightPresetsModule.h::presetCount/0	member comment 4 lines > 1
+src/light/drivers/LightPresetsModule.h::presetHasSynthChannel/1	public function has no ///
+src/light/drivers/LightPresetsModule.h::release/0	public function has no ///
+src/light/drivers/LightPresetsModule.h::restoreList/2	member comment 3 lines > 1
+src/light/drivers/LightPresetsModule.h::setListRowField/3	public function has no ///
+src/light/drivers/LightPresetsModule.h::setup/0	public function has no ///
+src/light/drivers/LightPresetsModule.h::userEditable/0	public function has no ///
+src/light/drivers/LightPresetsModule.h::writeListOptionSets/1	public function has no ///
+src/light/drivers/LightPresetsModule.h::writeListRow/2	public function has no ///
+src/light/drivers/LightPresetsModule.h::writeListRowDetail/2	public function has no ///
+src/light/drivers/MoonLedDriver.h::@moreinfo	appendix 160 lines > 20
+src/light/drivers/MoonLedDriver.h::MoonI80Peripheral	class comment 19 lines > 10
+src/light/drivers/MoonLedDriver.h::addBusControls/1	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::addRingControls/1	member comment 3 lines > 1
+src/light/drivers/MoonLedDriver.h::busBuffer/1	public function has no ///
+src/light/drivers/MoonLedDriver.h::busCapacity/0	public function has no ///
+src/light/drivers/MoonLedDriver.h::busControlTriggersBuild/1	member comment 3 lines > 1
+src/light/drivers/MoonLedDriver.h::busDeinit/0	member comment 5 lines > 1
+src/light/drivers/MoonLedDriver.h::busInit/2	member comment 4 lines > 1
+src/light/drivers/MoonLedDriver.h::busInitRing/2	member comment 6 lines > 1
+src/light/drivers/MoonLedDriver.h::busIsRing/0	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::busLastTransmitUs/0	public function has no ///
+src/light/drivers/MoonLedDriver.h::busLoopback	member comment 3 lines > 1
+src/light/drivers/MoonLedDriver.h::busRingMode/0	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::busTransmit/2	public function has no ///
+src/light/drivers/MoonLedDriver.h::busTransmitRing/0	member comment 6 lines > 1
+src/light/drivers/MoonLedDriver.h::busWait/2	public function has no ///
+src/light/drivers/MoonLedDriver.h::clockPin	member comment 4 lines > 1
+src/light/drivers/MoonLedDriver.h::clockPinForBus/0	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::ensureSnapHelper/0	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::extraBusPinsCurrent/0	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::helperJoin/0	member comment 3 lines > 1
+src/light/drivers/MoonLedDriver.h::helperKick/0	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::hwBlock/0	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::initFailMsg/0	member comment 3 lines > 1
+src/light/drivers/MoonLedDriver.h::kSnapJoinTimeoutMs	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::lanesAvailable/0	member comment 3 lines > 1
+src/light/drivers/MoonLedDriver.h::line 100	doc line 21 words > 20
+src/light/drivers/MoonLedDriver.h::line 120	doc line 27 words > 20
+src/light/drivers/MoonLedDriver.h::line 121	doc line 32 words > 20
+src/light/drivers/MoonLedDriver.h::line 122	doc line 27 words > 20
+src/light/drivers/MoonLedDriver.h::line 155	doc line 43 words > 20
+src/light/drivers/MoonLedDriver.h::line 156	doc line 22 words > 20
+src/light/drivers/MoonLedDriver.h::line 158	doc line 33 words > 20
+src/light/drivers/MoonLedDriver.h::line 159	doc line 30 words > 20
+src/light/drivers/MoonLedDriver.h::line 160	doc line 26 words > 20
+src/light/drivers/MoonLedDriver.h::line 161	doc line 39 words > 20
+src/light/drivers/MoonLedDriver.h::line 164	doc line 35 words > 20
+src/light/drivers/MoonLedDriver.h::line 166	doc line 25 words > 20
+src/light/drivers/MoonLedDriver.h::line 168	doc line 21 words > 20
+src/light/drivers/MoonLedDriver.h::line 169	doc line 24 words > 20
+src/light/drivers/MoonLedDriver.h::line 171	doc line 21 words > 20
+src/light/drivers/MoonLedDriver.h::line 177	doc line 21 words > 20
+src/light/drivers/MoonLedDriver.h::line 247	member comment 7 lines > 1
+src/light/drivers/MoonLedDriver.h::line 273	doc line 21 words > 20
+src/light/drivers/MoonLedDriver.h::line 75	doc line 21 words > 20
+src/light/drivers/MoonLedDriver.h::line 99	doc line 21 words > 20
+src/light/drivers/MoonLedDriver.h::loopbackFullWidth/0	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::powerOfTwoBus/0	member comment 4 lines > 1
+src/light/drivers/MoonLedDriver.h::refreshBusKpi/0	member comment 3 lines > 1
+src/light/drivers/MoonLedDriver.h::ringAuto	member comment 3 lines > 1
+src/light/drivers/MoonLedDriver.h::ringBufs	member comment 6 lines > 1
+src/light/drivers/MoonLedDriver.h::ringEncodeTrampoline	member comment 12 lines > 1
+src/light/drivers/MoonLedDriver.h::ringPadUs	member comment 3 lines > 1
+src/light/drivers/MoonLedDriver.h::ringRows	member comment 3 lines > 1
+src/light/drivers/MoonLedDriver.h::runHelperJob/0	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::shiftOverclock	member comment 8 lines > 1
+src/light/drivers/MoonLedDriver.h::snapHelperBroken_	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::snapHelperDone_	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::snapHelperParked_	member comment 4 lines > 1
+src/light/drivers/MoonLedDriver.h::snapHelperReady/0	member comment 4 lines > 1
+src/light/drivers/MoonLedDriver.h::snapHelperTramp/1	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::snapHelper_	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::spareLanesNeedPad/0	member comment 3 lines > 1
+src/light/drivers/MoonLedDriver.h::stopSnapHelper/0	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::supportsDoubleBuffer/0	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::supportsPinExpander/0	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::useRing	member comment 9 lines > 1
+src/light/drivers/MoonLedDriver.h::validateBusFatal/0	member comment 3 lines > 1
+src/light/drivers/MoonLedDriver.h::validateBusPins/2	member comment 2 lines > 1
+src/light/drivers/MoonLedDriver.h::wantsRing/0	member comment 9 lines > 1
+src/light/drivers/MultiPinLedDriver.h::I80Peripheral	class comment 32 lines > 10
+src/light/drivers/MultiPinLedDriver.h::addBusControls/1	member comment 2 lines > 1
+src/light/drivers/MultiPinLedDriver.h::busBuffer/1	member comment 2 lines > 1
+src/light/drivers/MultiPinLedDriver.h::busContentionCleared/0	member comment 4 lines > 1
+src/light/drivers/MultiPinLedDriver.h::busInit/2	member comment 4 lines > 1
+src/light/drivers/MultiPinLedDriver.h::busLoopback	member comment 3 lines > 1
+src/light/drivers/MultiPinLedDriver.h::busTransmit/2	member comment 2 lines > 1
+src/light/drivers/MultiPinLedDriver.h::clockPin	member comment 50 lines > 1
+src/light/drivers/MultiPinLedDriver.h::clockPinForBus/0	member comment 4 lines > 1
+src/light/drivers/MultiPinLedDriver.h::dcPin	public variable has no ///
+src/light/drivers/MultiPinLedDriver.h::dmaBudgetBytes/0	member comment 10 lines > 1
+src/light/drivers/MultiPinLedDriver.h::extraBusPinsCurrent/0	member comment 2 lines > 1
+src/light/drivers/MultiPinLedDriver.h::hwBlock/0	member comment 2 lines > 1
+src/light/drivers/MultiPinLedDriver.h::initFailMsg/0	public function has no ///
+src/light/drivers/MultiPinLedDriver.h::lanesAvailable/0	member comment 4 lines > 1
+src/light/drivers/MultiPinLedDriver.h::loopbackFullWidth/0	public function has no ///
+src/light/drivers/MultiPinLedDriver.h::powerOfTwoBus/0	public function has no ///
+src/light/drivers/MultiPinLedDriver.h::recordBusPins/0	member comment 2 lines > 1
+src/light/drivers/MultiPinLedDriver.h::supportsPinExpander/0	member comment 12 lines > 1
+src/light/drivers/MultiPinLedDriver.h::validateBusFatal/0	member comment 4 lines > 1
+src/light/drivers/MultiPinLedDriver.h::validateBusPins/2	public function has no ///
+src/light/drivers/NdiDriver.h::NdiDriver/0	public function has no ///
+src/light/drivers/NdiDriver.h::defineDriverControls/0	public function has no ///
+src/light/drivers/NdiDriver.h::fps	member comment 2 lines > 1
+src/light/drivers/NdiDriver.h::kTags	public variable has no ///
+src/light/drivers/NdiDriver.h::line 14	doc line 21 words > 20
+src/light/drivers/NdiDriver.h::line 156	member comment 2 lines > 1
+src/light/drivers/NdiDriver.h::line 2	member comment 24 lines > 1
+src/light/drivers/NdiDriver.h::prepare/0	public function has no ///
+src/light/drivers/NdiDriver.h::release/0	public function has no ///
+src/light/drivers/NdiDriver.h::setSourceBuffer/1	public function has no ///
+src/light/drivers/NdiDriver.h::tags/0	public function has no ///
+src/light/drivers/NetworkSendDriver.h::@moreinfo	appendix 43 lines > 20
+src/light/drivers/NetworkSendDriver.h::NetworkSendDriver	class comment 23 lines > 10
+src/light/drivers/NetworkSendDriver.h::NetworkSendDriver/0	member comment 4 lines > 1
+src/light/drivers/NetworkSendDriver.h::affectsPrepare/1	member comment 5 lines > 1
+src/light/drivers/NetworkSendDriver.h::correctedBuffer/0	member comment 3 lines > 1
+src/light/drivers/NetworkSendDriver.h::defineDriverControls/0	member comment 3 lines > 1
+src/light/drivers/NetworkSendDriver.h::destinationAt/1	public function has no ///
+src/light/drivers/NetworkSendDriver.h::destinationCount/0	member comment 4 lines > 1
+src/light/drivers/NetworkSendDriver.h::e131MulticastAddr/2	member comment 3 lines > 1
+src/light/drivers/NetworkSendDriver.h::kMaxDestinations	member comment 4 lines > 1
+src/light/drivers/NetworkSendDriver.h::kProtoE131Multicast	public variable has no ///
+src/light/drivers/NetworkSendDriver.h::kProtocolCount	public variable has no ///
+src/light/drivers/NetworkSendDriver.h::lightsAt/1	public function has no ///
+src/light/drivers/NetworkSendDriver.h::line 112	member comment 3 lines > 1
+src/light/drivers/NetworkSendDriver.h::line 116	member comment 3 lines > 1
+src/light/drivers/NetworkSendDriver.h::line 90	member comment 2 lines > 1
+src/light/drivers/NetworkSendDriver.h::onCorrectionChanged/0	member comment 2 lines > 1
+src/light/drivers/NetworkSendDriver.h::prepare/0	member comment 8 lines > 1
+src/light/drivers/NetworkSendDriver.h::protocol	member comment 7 lines > 1
+src/light/drivers/NetworkSendDriver.h::resizeCorrected/0	member comment 4 lines > 1
+src/light/drivers/NetworkSendDriver.h::setSourceBuffer/1	member comment 3 lines > 1
+src/light/drivers/NetworkSendDriver.h::setup/0	member comment 3 lines > 1
+src/light/drivers/NetworkSendDriver.h::socket_	member comment 2 lines > 1
+src/light/drivers/NetworkSendDriver.h::tick/0	member comment 2 lines > 1
+src/light/drivers/NetworkSendDriver.h::universeStart	member comment 5 lines > 1
+src/light/drivers/PanelCardDriver.h::@moreinfo	appendix 66 lines > 20
+src/light/drivers/PanelCardDriver.h::PanelCardDriver/0	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::affectsPrepare/1	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::claimed_	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::correctedBuffer/0	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::defineDriverControls/0	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::framesDroppedTotal_	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::framesSent_	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::interfaceSel_	member comment 5 lines > 1
+src/light/drivers/PanelCardDriver.h::kCardGain	member comment 3 lines > 1
+src/light/drivers/PanelCardDriver.h::kFirmwareCount	public variable has no ///
+src/light/drivers/PanelCardDriver.h::kFormatCount	public variable has no ///
+src/light/drivers/PanelCardDriver.h::lastResolvedSel_	member comment 4 lines > 1
+src/light/drivers/PanelCardDriver.h::line 10/1	member comment 98 lines > 1
+src/light/drivers/PanelCardDriver.h::line 123	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::line 131	member comment 15 lines > 1
+src/light/drivers/PanelCardDriver.h::line 157	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::line 585	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::line 598	member comment 3 lines > 1
+src/light/drivers/PanelCardDriver.h::packRow	member comment 3 lines > 1
+src/light/drivers/PanelCardDriver.h::prepare/0	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::resizeCorrected/0	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::restartFailed_	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::restartTried_	member comment 3 lines > 1
+src/light/drivers/PanelCardDriver.h::tick/0	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::tick1s/0	member comment 2 lines > 1
+src/light/drivers/PanelCardDriver.h::writeLinkStatus/0	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::ParallelLedDriver	class comment 34 lines > 10
+src/light/drivers/ParallelLedDriver.h::ParallelLedDriver/0	member comment 5 lines > 1
+src/light/drivers/ParallelLedDriver.h::activeForTest/0	member comment 2 lines > 1
+src/light/drivers/ParallelLedDriver.h::affectsPrepare/1	member comment 7 lines > 1
+src/light/drivers/ParallelLedDriver.h::busLoopbackRide	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::busPinCount/0	member comment 6 lines > 1
+src/light/drivers/ParallelLedDriver.h::busPinList/0	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::busWaitIfBusy/1	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::copyRange/2	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::correction/0	member comment 2 lines > 1
+src/light/drivers/ParallelLedDriver.h::defineDriverControls/0	member comment 6 lines > 1
+src/light/drivers/ParallelLedDriver.h::doubleBuffer	member comment 22 lines > 1
+src/light/drivers/ParallelLedDriver.h::drainInFlight/0	member comment 2 lines > 1
+src/light/drivers/ParallelLedDriver.h::driverHeapBytes/0	member comment 11 lines > 1
+src/light/drivers/ParallelLedDriver.h::encodeFrameClose/1	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::ensureSnapshotCap/0	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::freeSnapshot/0	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::hwBlock/0	member comment 8 lines > 1
+src/light/drivers/ParallelLedDriver.h::isTestParamControl/1	member comment 2 lines > 1
+src/light/drivers/ParallelLedDriver.h::kLoopbackTestLights	member comment 9 lines > 1
+src/light/drivers/ParallelLedDriver.h::kMaxLanes	member comment 6 lines > 1
+src/light/drivers/ParallelLedDriver.h::kMaxStrands	member comment 26 lines > 1
+src/light/drivers/ParallelLedDriver.h::laneCount/0	member comment 2 lines > 1
+src/light/drivers/ParallelLedDriver.h::laneList/0	member comment 2 lines > 1
+src/light/drivers/ParallelLedDriver.h::latchBit/0	member comment 2 lines > 1
+src/light/drivers/ParallelLedDriver.h::latchPin	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::line 1059	member comment 2 lines > 1
+src/light/drivers/ParallelLedDriver.h::line 1076	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::line 1108	member comment 7 lines > 1
+src/light/drivers/ParallelLedDriver.h::line 117/0	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::line 1340	member comment 5 lines > 1
+src/light/drivers/ParallelLedDriver.h::line 1392	doc line 22 words > 20
+src/light/drivers/ParallelLedDriver.h::line 173	member comment 8 lines > 1
+src/light/drivers/ParallelLedDriver.h::line 182	member comment 10 lines > 1
+src/light/drivers/ParallelLedDriver.h::line 198	doc line 21 words > 20
+src/light/drivers/ParallelLedDriver.h::line 254	doc line 21 words > 20
+src/light/drivers/ParallelLedDriver.h::line 270	doc line 21 words > 20
+src/light/drivers/ParallelLedDriver.h::line 272	doc line 25 words > 20
+src/light/drivers/ParallelLedDriver.h::line 315	member comment 2 lines > 1
+src/light/drivers/ParallelLedDriver.h::line 548/0	member comment 10 lines > 1
+src/light/drivers/ParallelLedDriver.h::line 59	doc line 22 words > 20
+src/light/drivers/ParallelLedDriver.h::line 901	member comment 14 lines > 1
+src/light/drivers/ParallelLedDriver.h::line 920	member comment 6 lines > 1
+src/light/drivers/ParallelLedDriver.h::line 969	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::loopbackIntrusive	member comment 6 lines > 1
+src/light/drivers/ParallelLedDriver.h::loopbackRxPin	member comment 22 lines > 1
+src/light/drivers/ParallelLedDriver.h::loopbackStrand	member comment 10 lines > 1
+src/light/drivers/ParallelLedDriver.h::loopbackTest	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::loopbackTxPin	member comment 7 lines > 1
+src/light/drivers/ParallelLedDriver.h::maxLanesForTarget/0	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::onControlChanged/1	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::onCorrectionChanged/0	member comment 15 lines > 1
+src/light/drivers/ParallelLedDriver.h::outputsPerPin/0	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::peripheral_	member comment 2 lines > 1
+src/light/drivers/ParallelLedDriver.h::pinExpander	member comment 27 lines > 1
+src/light/drivers/ParallelLedDriver.h::prefillShiftConstantsIfNeeded/0	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::prepare/0	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::publishHeapBytesForTest/0	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::registerPeripheral/2	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::release/0	member comment 2 lines > 1
+src/light/drivers/ParallelLedDriver.h::reportLoopbackResult/2	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::reportOverCapacity/2	member comment 39 lines > 1
+src/light/drivers/ParallelLedDriver.h::ringSnapshot	member comment 8 lines > 1
+src/light/drivers/ParallelLedDriver.h::ringSnapshotRef/0	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::runIntrusiveLoopback/2	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::setPeripheralForTest/1	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::setup/0	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::snapLineAlignedHalf/2	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::snapshotBuf/0	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::snapshotSourceForRing/0	member comment 10 lines > 1
+src/light/drivers/ParallelLedDriver.h::tick1s/0	member comment 4 lines > 1
+src/light/drivers/ParallelLedDriver.h::tickAsync/1	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::tickRing/1	member comment 3 lines > 1
+src/light/drivers/ParallelLedDriver.h::tickSync/1	member comment 2 lines > 1
+src/light/drivers/ParallelLedDriver.h::waitBudgetMs/0	member comment 8 lines > 1
+src/light/drivers/ParallelSlots.h::kPinExpanderOutputs	member comment 51 lines > 1
+src/light/drivers/ParallelSlots.h::line 144	member comment 6 lines > 1
+src/light/drivers/ParallelSlots.h::line 209	doc line 23 words > 20
+src/light/drivers/ParallelSlots.h::line 224	doc line 21 words > 20
+src/light/drivers/ParallelSlots.h::line 227	doc line 21 words > 20
+src/light/drivers/ParallelSlots.h::line 228	doc line 21 words > 20
+src/light/drivers/ParallelSlots.h::line 244	doc line 22 words > 20
+src/light/drivers/ParallelSlots.h::line 256	member comment 13 lines > 1
+src/light/drivers/ParallelSlots.h::line 274	member comment 11 lines > 1
+src/light/drivers/ParallelSlots.h::line 372	member comment 31 lines > 1
+src/light/drivers/ParallelSlots.h::line 451	member comment 5 lines > 1
+src/light/drivers/ParallelSlots.h::line 58	doc line 22 words > 20
+src/light/drivers/ParallelSlots.h::line 59	doc line 21 words > 20
+src/light/drivers/ParallelSlots.h::line 9	member comment 46 lines > 1
+src/light/drivers/ParallelSlots.h::transposeBits8x8/1	member comment 12 lines > 1
+src/light/drivers/ParallelSlots.h::transposeBits8x8Pair/2	member comment 12 lines > 1
+src/light/drivers/ParallelSlots.h::transposeLanes16x8/2	member comment 4 lines > 1
+src/light/drivers/ParallelSlots.h::transposeLanes8x8/2	member comment 4 lines > 1
+src/light/drivers/ParlioLedDriver.h::ParlioPeripheral	class comment 12 lines > 10
+src/light/drivers/ParlioLedDriver.h::addBusControls/1	member comment 2 lines > 1
+src/light/drivers/ParlioLedDriver.h::busBuffer/1	member comment 2 lines > 1
+src/light/drivers/ParlioLedDriver.h::busInit/2	member comment 3 lines > 1
+src/light/drivers/ParlioLedDriver.h::busLoopback	member comment 3 lines > 1
+src/light/drivers/ParlioLedDriver.h::busTransmit/2	member comment 2 lines > 1
+src/light/drivers/ParlioLedDriver.h::dmaBudgetBytes/0	public function has no ///
+src/light/drivers/ParlioLedDriver.h::hwBlock/0	member comment 2 lines > 1
+src/light/drivers/ParlioLedDriver.h::initFailMsg/0	public function has no ///
+src/light/drivers/ParlioLedDriver.h::kClockHz	public variable has no ///
+src/light/drivers/ParlioLedDriver.h::lanesAvailable/0	member comment 2 lines > 1
+src/light/drivers/ParlioLedDriver.h::line 16	doc line 21 words > 20
+src/light/drivers/ParlioLedDriver.h::loopbackFullWidth/0	public function has no ///
+src/light/drivers/ParlioLedDriver.h::powerOfTwoBus/0	public function has no ///
+src/light/drivers/ParlioLedDriver.h::supportsPinExpander/0	member comment 5 lines > 1
+src/light/drivers/PinList.h::line 11	member comment 9 lines > 1
+src/light/drivers/PreviewDriver.h::PreviewDriver	class comment 25 lines > 10
+src/light/drivers/PreviewDriver.h::affectsPrepare/1	member comment 2 lines > 1
+src/light/drivers/PreviewDriver.h::buildCoordTable/0	member comment 5 lines > 1
+src/light/drivers/PreviewDriver.h::defineDriverControls/0	member comment 4 lines > 1
+src/light/drivers/PreviewDriver.h::downscaleForTest/0	member comment 2 lines > 1
+src/light/drivers/PreviewDriver.h::driverHeapBytes/0	member comment 3 lines > 1
+src/light/drivers/PreviewDriver.h::emit/1	public function has no ///
+src/light/drivers/PreviewDriver.h::emit/1	public function has no ///
+src/light/drivers/PreviewDriver.h::emit/3	public function has no ///
+src/light/drivers/PreviewDriver.h::ensureStaging/1	member comment 3 lines > 1
+src/light/drivers/PreviewDriver.h::freePreviewBuffers/0	member comment 2 lines > 1
+src/light/drivers/PreviewDriver.h::line 13	member comment 8 lines > 1
+src/light/drivers/PreviewDriver.h::line 190/0	member comment 5 lines > 1
+src/light/drivers/PreviewDriver.h::line 22	member comment 25 lines > 1
+src/light/drivers/PreviewDriver.h::onClientGone/1	public function has no ///
+src/light/drivers/PreviewDriver.h::onClientMessage/3	member comment 7 lines > 1
+src/light/drivers/PreviewDriver.h::out	public variable has no ///
+src/light/drivers/PreviewDriver.h::out	public variable has no ///
+src/light/drivers/PreviewDriver.h::prepare/0	member comment 6 lines > 1
+src/light/drivers/PreviewDriver.h::refreshStatus/0	member comment 4 lines > 1
+src/light/drivers/PreviewDriver.h::release/0	public function has no ///
+src/light/drivers/PreviewDriver.h::self	public variable has no ///
+src/light/drivers/PreviewDriver.h::sendAim/0	member comment 10 lines > 1
+src/light/drivers/PreviewDriver.h::sendCoordTable/0	member comment 4 lines > 1
+src/light/drivers/PreviewDriver.h::setBroadcaster/1	member comment 4 lines > 1
+src/light/drivers/PreviewDriver.h::setSourceBuffer/1	member comment 3 lines > 1
+src/light/drivers/PreviewDriver.h::targetFps	member comment 2 lines > 1
+src/light/drivers/PreviewDriver.h::tick1s/0	member comment 2 lines > 1
+src/light/drivers/PreviewDriver.h::tiltOff	public variable has no ///
+src/light/drivers/PreviewDriver.h::userEditable/0	member comment 3 lines > 1
+src/light/drivers/RmtLedDriver.h::RmtLedDriver	class comment 30 lines > 10
+src/light/drivers/RmtLedDriver.h::RmtLedDriver/0	member comment 3 lines > 1
+src/light/drivers/RmtLedDriver.h::affectsPrepare/1	member comment 3 lines > 1
+src/light/drivers/RmtLedDriver.h::applyTiming/0	member comment 4 lines > 1
+src/light/drivers/RmtLedDriver.h::defineDriverControls/0	member comment 3 lines > 1
+src/light/drivers/RmtLedDriver.h::driverHeapBytes/0	member comment 3 lines > 1
+src/light/drivers/RmtLedDriver.h::frameBuffer/0	member comment 5 lines > 1
+src/light/drivers/RmtLedDriver.h::kMaxPins	member comment 3 lines > 1
+src/light/drivers/RmtLedDriver.h::kResolutionHz	public variable has no ///
+src/light/drivers/RmtLedDriver.h::line 22	doc line 21 words > 20
+src/light/drivers/RmtLedDriver.h::line 479	doc line 28 words > 20
+src/light/drivers/RmtLedDriver.h::line 54	member comment 7 lines > 1
+src/light/drivers/RmtLedDriver.h::line 63	member comment 9 lines > 1
+src/light/drivers/RmtLedDriver.h::loopbackFrame	member comment 7 lines > 1
+src/light/drivers/RmtLedDriver.h::loopbackTest	member comment 7 lines > 1
+src/light/drivers/RmtLedDriver.h::loopbackTxPin	member comment 5 lines > 1
+src/light/drivers/RmtLedDriver.h::nsToTicks/2	member comment 2 lines > 1
+src/light/drivers/RmtLedDriver.h::onControlChanged/1	member comment 6 lines > 1
+src/light/drivers/RmtLedDriver.h::onCorrectionChanged/0	member comment 3 lines > 1
+src/light/drivers/RmtLedDriver.h::periodNs	public variable has no ///
+src/light/drivers/RmtLedDriver.h::prepare/0	member comment 4 lines > 1
+src/light/drivers/RmtLedDriver.h::pushBitTiming/1	member comment 3 lines > 1
+src/light/drivers/RmtLedDriver.h::release/0	member comment 2 lines > 1
+src/light/drivers/RmtLedDriver.h::setSourceBuffer/1	member comment 3 lines > 1
+src/light/drivers/RmtLedDriver.h::setup/0	member comment 14 lines > 1
+src/light/drivers/RmtLedDriver.h::t0hNs	member comment 3 lines > 1
+src/light/drivers/RmtLedDriver.h::t1hNs	public variable has no ///
+src/light/drivers/RmtLedDriver.h::tick/0	member comment 4 lines > 1
+src/light/drivers/RmtLedDriver.h::timing	member comment 7 lines > 1
+src/light/drivers/RmtLedDriver.h::waitForPins/0	member comment 3 lines > 1
+src/light/drivers/RmtLedDriver.h::wireTimingForTest/0	member comment 4 lines > 1

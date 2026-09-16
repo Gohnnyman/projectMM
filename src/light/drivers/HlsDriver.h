@@ -33,7 +33,7 @@
 /// frame's arrival lets one late tick shift the schedule for good. Either drifts against the
 /// player's clock until it stalls to re-buffer, which is a periodic hiccup rather than an
 /// obvious fault. The bitrate is DERIVED for the same reason a control was removed: it follows
-/// from pixels x fps (see autoBitrateKbit), and `targetFps` is the knob a user actually wants.
+/// from pixels x fps (see autoBitrateKbit), and `targetFps` is the knob a user wants.
 ///
 /// Prior art: HLS is Apple's (RFC 8216); ffmpeg does the encoding. The frame-pacing, packing and
 /// status shape follow NdiDriver, the other driver that turns the rendered buffer into video.
@@ -52,6 +52,9 @@
 namespace mm {
 
 /// Driver that publishes the layer as an H.264/HLS stream.
+///
+/// Origin: projectMM. Encoding by the user's ffmpeg on desktop, the P4's H.264 block on
+/// device. HLS was created by Apple and is described in the informational RFC 8216.
 class HlsDriver : public DriverBase {
 public:
     static constexpr const char* kTags = "🖥️";
@@ -197,7 +200,7 @@ public:
         if (static_cast<int32_t>(platform::millis() - warmupUntilMs_) < 0) return;
 
         // targetFps is a CEILING, the NdiDriver/PreviewDriver pacing pattern: the render loop
-        // runs faster, frames beyond the rate are simply not encoded.
+        // runs faster, frames beyond the rate are not encoded.
         //
         // Paced on a FIXED schedule rather than from each frame's arrival time. Two reasons, both
         // measured on the bench: `1000/fps` truncates (30 fps asks for 33 ms, so 30 frames span
@@ -215,7 +218,7 @@ public:
         if (static_cast<int32_t>(now - nextSendMs_) > static_cast<int32_t>(periodMs * 4)) {
             // Far behind (a re-prepare, or a render loop that was paused): restart the schedule
             // from this frame rather than firing a burst to catch up. The next frame is due one
-            // period out, NOT immediately -- resyncing to `now` makes the very next tick due and
+            // period out, NOT immediately -- resyncing to `now` makes the next tick due and
             // sends a second frame straight away (caught by the rate-ceiling test).
             sendEpochMs_ = now;
             // ONE, not zero: this tick's frame is the schedule's frame 0, so the next one is
@@ -371,7 +374,7 @@ private:
     /// P4's hardware encoder refuses anything under 80x80, and a player showing a 32x32 stream
     /// renders a postage stamp, so the default blows a small wall up rather than failing or
     /// under-filling. Upscaling is integer, so each light is a solid square and the picture stays
-    /// exactly what the wall shows -- 1:1 in the sense that matters, just bigger.
+    /// exactly what the wall shows -- 1:1 in the sense that matters, bigger.
     uint8_t autoScale() const {
         uint32_t f = 1;
         while (f < kMaxScale &&
@@ -381,7 +384,7 @@ private:
 
     /// The encode bitrate, derived rather than asked for. There is no bitrate control: the value
     /// follows from what the picture costs (bits-per-pixel-per-frame x pixels x fps), and the one
-    /// knob a user actually wants for bandwidth is `targetFps`, which is the more meaningful trade
+    /// knob a user wants for bandwidth is `targetFps`, which is the more meaningful trade
     /// for LED content. 0.1 bpp is the usual working figure for H.264 on this kind of material
     /// (flat regions, strong temporal correlation): a 512x512 grid at 30 fps lands near 800 kbit,
     /// and a 128x128 under the 500 kbit floor. Clamped so a tiny grid still looks clean and a

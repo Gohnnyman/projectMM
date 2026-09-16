@@ -93,7 +93,7 @@ ModuleFactory is core infrastructure ([`src/core/ModuleFactory.h`](../../src/cor
 
 **Self-reporting.** Every MoonModule reports its own footprint and cost: `classSize()` (the `sizeof` of the class instance, captured at registration), `dynamicBytes()` (heap allocated during `prepare`), and `tickTimeUs()` (average time its `tick` took, accumulated per tick). These surface in `/api/system`, console output, and scenario tests: the same numbers for an effect, a driver, or a system service, because they're a base-class feature, not a light-domain one.
 
-Each MoonModule has two documentation surfaces under `docs/moonmodules/`. An end-user **summary page** gives it one 4-column table row in its group's page, and a **generated technical page** is built from the header's `///` comments. See [documentation-standards § Module pages](../../contributing/documentation-standards.md#module-pages) for the full model.
+Each MoonModule has two documentation surfaces under `docs/moonmodules/`. An end-user **summary page** gives it one table row in its group's page, and a **generated technical page** is built from the header's `///` comments. See [documentation-standards § Module pages](../../contributing/documentation-standards.md#module-pages) for the full model.
 
 ## Disabling a module releases its resources
 

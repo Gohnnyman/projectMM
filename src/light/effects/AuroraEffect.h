@@ -35,6 +35,7 @@ namespace mm {
 // polar address is a table read. Targets in performance.md.
 // @card AuroraEffect.png
 /// Effect: layered noise curtains in polar coordinates, each layer on its own oscillators.
+/// Prior art: the shader vocabulary Stefan Petrick made recognizable in the LED world.
 class AuroraEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️🌫️🎡"; }   // power-function showcase

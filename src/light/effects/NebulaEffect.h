@@ -27,6 +27,8 @@ namespace mm {
 // at whatever scale and rate the levers ask for. Targets in performance.md.
 // @card NebulaEffect.png
 /// Effect: a noise field births light, a curl flow carries it, and the two make a folding cloud.
+/// Prior art: the shader vocabulary Stefan Petrick made recognizable in the LED world, and
+/// Bridson's curl noise (SIGGRAPH 2007) for the flow.
 class NebulaEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️💨🌫️"; }   // power-function showcase
