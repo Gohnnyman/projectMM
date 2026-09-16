@@ -238,21 +238,20 @@ def _emit_row(b: dict, details_names: set) -> str:
     # merged card (e.g. the LED-output drivers) carries several ids so each old
     # per-driver anchor still resolves onto the one row.
     anchor_spans = "".join(f'<span id="{a}"></span>' for a in b.get("anchors", []))
-    # The preview leads the cell, ABOVE the name: an image in its own column forced
-    # every text column into a quarter of the page, so a 900-character description
-    # rendered as a ribbon. Stacked, the picture keeps its width and the prose gets
-    # a third of the table instead of a quarter. A card with no image simply starts
-    # at its name, with no empty cell to explain.
+    # The NAME leads the cell and the preview sits under it: a reader scanning the
+    # table is looking for a name, and a picture above it pushes the thing they are
+    # scanning for down the row. The image stays in this column rather than its own,
+    # which is what kept a 900-character description from rendering as a ribbon.
     img_html = ""
     if b["img"]:
         img = re.sub(r'\s+(width|height)="[^"]*"', "", b["img"])
-        img_html = img.replace("<img ", '<img class="mm-preview" ', 1) + "<br>"
-    # Name in a distinct styled span, description below in a muted span — so the two
+        img_html = "<br>" + img.replace("<img ", '<img class="mm-preview" ', 1)
+    # Name in a distinct styled span, description below in a muted span, so the two
     # read as title + subtitle rather than one run-on line (styled in extra.css).
     name = f'{anchor_spans}<span class="mm-name">{b["title"]}</span>'
     desc = " ".join(b["desc"])
-    col1 = _cell(f'{img_html}{name}<br><span class="mm-desc">{desc}</span>'
-                 if desc else f'{img_html}{name}')
+    col1 = _cell(f'{name}{img_html}<br><span class="mm-desc">{desc}</span>'
+                 if desc else f'{name}{img_html}')
 
     # Col 2: controls, one per line, split into the name part (keeps its `code` chips,
     # styled accent) and the description (greyed via .mm-pdesc).

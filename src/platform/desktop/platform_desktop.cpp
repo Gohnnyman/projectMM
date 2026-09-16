@@ -891,6 +891,30 @@ const char* fsRootPath() {
     return cached.c_str();
 }
 
+// Open a file for writing, owner-only (0600) where the OS has file modes.
+//
+// std::fopen creates with 0666 & ~umask, so on a typical umask 022 the file lands world-readable
+// and these are /.config/*.json, which hold WiFi PSKs and MQTT passwords. Nothing here is
+// multi-user on ESP32 (LittleFS has no modes at all, so the platform layer's ESP32 half is
+// unaffected), but the desktop build runs on real machines with real other users.
+//
+// POSIX gets O_CREAT|O_EXCL with an explicit 0600: EXCL because a pre-existing file at one of
+// these paths is either a crashed run's leftover or someone else's, and inheriting its mode would
+// defeat the point. Windows has no mode_t; its files inherit the parent directory's ACL, which is
+// the platform's own answer to the same question, so it keeps plain fopen.
+static FILE* openOwnerOnly(const char* path) {
+#ifdef _WIN32
+    return std::fopen(path, "wb");
+#else
+    ::unlink(path);                       // clear a leftover so O_EXCL cannot fail on our own file
+    const int fd = ::open(path, O_WRONLY | O_CREAT | O_EXCL | O_TRUNC, 0600);
+    if (fd < 0) return nullptr;
+    FILE* f = ::fdopen(fd, "wb");
+    if (!f) ::close(fd);                  // fdopen failure leaves the descriptor ours to release
+    return f;
+#endif
+}
+
 bool fsMount() {
     // Desktop has no volume to mount, but it DOES have a root that may not exist yet and may not
     // be writable. Establishing that here is what turns an unusable location into ONE line at
@@ -901,10 +925,13 @@ bool fsMount() {
     // Existence does not imply writability: a read-only extraction, a protected folder, or a
     // directory owned by another user all exist happily and reject the first write. create_
     // directories is silent about all three, so probe with the operation that actually matters.
+    // Owner-only, through the same helper the config writes use: plain fopen takes the process
+    // umask, so on a permissive one the probe is world-writable for as long as it exists. It holds
+    // nothing, but a file this code creates should not be the loosest thing in the directory.
     const auto probe = fsRoot_ / ".mm-write-probe";
     std::error_code rm;
     std::filesystem::remove(probe, rm);
-    FILE* f = std::fopen(probe.string().c_str(), "wb");
+    FILE* f = openOwnerOnly(probe.string().c_str());
     if (!f) return false;
     std::fclose(f);
     std::filesystem::remove(probe, rm);
@@ -942,36 +969,13 @@ int fsRead(const char* path, char* buf, size_t maxLen) {
     return static_cast<int>(n);
 }
 
-// Open a temp file for atomic-write, owner-only (0600) where the OS has file modes.
-//
-// std::fopen creates with 0666 & ~umask, so on a typical umask 022 the file lands world-readable
-// — and these are /.config/*.json, which hold WiFi PSKs and MQTT passwords. Nothing here is
-// multi-user on ESP32 (LittleFS has no modes at all, so the platform layer's ESP32 half is
-// unaffected), but the desktop build runs on real machines with real other users.
-//
-// POSIX gets O_CREAT|O_EXCL with an explicit 0600 — EXCL because a pre-existing temp file is
-// either a crashed run's leftover or someone else's, and inheriting its mode would defeat the
-// point. Windows has no mode_t; its files inherit the parent directory's ACL, which is the
-// platform's own answer to the same question, so it keeps plain fopen.
-static FILE* openTempOwnerOnly(const char* path) {
-#ifdef _WIN32
-    return std::fopen(path, "wb");
-#else
-    ::unlink(path);                       // clear a leftover so O_EXCL cannot fail on our own temp
-    const int fd = ::open(path, O_WRONLY | O_CREAT | O_EXCL | O_TRUNC, 0600);
-    if (fd < 0) return nullptr;
-    FILE* f = ::fdopen(fd, "wb");
-    if (!f) ::close(fd);                  // fdopen failure leaves the descriptor ours to release
-    return f;
-#endif
-}
 
 bool fsWriteAtomic(const char* path, const char* data, size_t len) {
     auto target = toFsPath(path);
     auto tmp = target;
     tmp += ".tmp";
 
-    FILE* f = openTempOwnerOnly(tmp.string().c_str());
+    FILE* f = openOwnerOnly(tmp.string().c_str());
     if (!f) return false;
     size_t written = std::fwrite(data, 1, len, f);
     if (written != len) {
@@ -1023,7 +1027,7 @@ bool fsWriteStream(const char* path, FsWriteSrc src, void* user) {
     auto tmp = target;
     tmp += ".tmp";
 
-    FILE* f = openTempOwnerOnly(tmp.string().c_str());
+    FILE* f = openOwnerOnly(tmp.string().c_str());
     if (!f) return false;
     // Pull chunks from the source and write each straight through — fixed buffer, any file size.
     // `abort` set by the source (a short/timed-out upload) means the data is incomplete → discard.

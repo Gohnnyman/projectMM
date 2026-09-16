@@ -56,7 +56,7 @@ constexpr uint8_t lcdLanes = 16;
 constexpr bool hasLcdCam = true;
 constexpr uint8_t parlioLanes = 16;
 
-// MultiPinLedDriver's lanesAvailable() reads lcdLanes + i2sLanes, so this stays 0 — otherwise the
+// I80Peripheral's lanesAvailable() reads lcdLanes + i2sLanes, so this stays 0 — otherwise the
 // i80 backend would claim 32 lanes, which no real chip offers.
 constexpr uint8_t i2sLanes = 0;
 

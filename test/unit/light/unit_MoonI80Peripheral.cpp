@@ -1,16 +1,16 @@
-// @module MoonLedDriver
-// @also MultiPinLedDriver, ParallelLedDriver
+// @module MoonI80Peripheral
+// @also I80Peripheral, ParallelLedDriver
 
 #include "doctest.h"
 #include "light/drivers/Correction.h"
 #include "correction_presets.h"
-#include "light/drivers/MoonLedDriver.h"
+#include "light/drivers/MoonI80Peripheral.h"
 #include "light/layers/Buffer.h"
 #include "unit/core/conditional_controls.h"  // controlIndex/setControlValue — clockPin now lives on the backend
 
 #include <cstring>
 
-// MoonLedDriver is the SAME LCD_CAM output as MultiPinLedDriver, on our own DMA code instead of
+// MoonI80Peripheral is the SAME LCD_CAM output as I80Peripheral, on our own DMA code instead of
 // esp_lcd. It is a thin ParallelLedDriver subclass whose constructor wires a
 // MoonI80Peripheral backend (a runtime LedPeripheral strategy, not compile-time CRTP), so the
 // orchestrator's whole body — lane slicing, frame sizing, the fused encode, the async double-buffer,
@@ -57,7 +57,7 @@ void wire(mm::ParallelLedDriver& d, mm::MoonI80Peripheral& peripheral, mm::Buffe
 
 } // namespace
 
-// **The load-bearing difference from its sibling.** MultiPinLedDriver runs on the i80 *bus* — LCD_CAM on
+// **The load-bearing difference from its sibling.** I80Peripheral runs on the i80 *bus* — LCD_CAM on
 // the S3/P4 AND the I2S peripheral on the classic ESP32 (IDF's esp_lcd picks the backend). MoonI80
 // programs LCD_CAM directly, so it must NOT claim the classic chip: `lanesAvailable()` reads
 // `lcdLanes` alone, without the `+ i2sLanes` its sibling adds. Getting this wrong would offer the
@@ -66,7 +66,7 @@ void wire(mm::ParallelLedDriver& d, mm::MoonI80Peripheral& peripheral, mm::Buffe
 // lanesAvailable()/kSupportsPinExpander/kPowerOfTwoBus/kLoopbackFullWidth moved from static constexpr
 // on the driver to virtuals on the MoonI80Peripheral backend — a bare instance reaches them without a
 // live driver's peripheral_ (protected on ParallelLedDriver).
-TEST_CASE("MoonLedDriver is LCD_CAM-only — it does not claim the classic ESP32's I2S i80") {
+TEST_CASE("MoonI80Peripheral is LCD_CAM-only — it does not claim the classic ESP32's I2S i80") {
     mm::MoonI80Peripheral peripheral;
     CHECK(peripheral.lanesAvailable() == mm::platform::lcdLanes);
     // The expander needs LCD_CAM silicon — `hasLcdCam`, not `lcdLanes > 0`. The two used to be
@@ -78,7 +78,7 @@ TEST_CASE("MoonLedDriver is LCD_CAM-only — it does not claim the classic ESP32
 // The i80 BUS is 8 or 16 bits wide whatever the pin count, so the base rounds it up (powerOfTwoBus())
 // and parks the lanes the board does not use. And the loopback cannot build a 1-lane private bus, so
 // its test frame is encoded at the full operational width.
-TEST_CASE("MoonLedDriver keeps the i80 bus rules: power-of-two bus, full-width loopback") {
+TEST_CASE("MoonI80Peripheral keeps the i80 bus rules: power-of-two bus, full-width loopback") {
     mm::MoonI80Peripheral peripheral;
     CHECK(peripheral.powerOfTwoBus());
     CHECK(peripheral.loopbackFullWidth());
@@ -95,7 +95,7 @@ TEST_CASE("MoonLedDriver keeps the i80 bus rules: power-of-two bus, full-width l
 // The observable consequence, and what this case pins: in DIRECT mode `clockPin` may freely name a
 // GPIO that a strand also uses, because the signal never leaves the peripheral. Rejecting that would
 // forbid a working config to protect a signal nobody reads.
-TEST_CASE("MoonLedDriver direct mode: clockPin is unrouted, so it cannot collide") {
+TEST_CASE("MoonI80Peripheral direct mode: clockPin is unrouted, so it cannot collide") {
     mm::MoonI80Peripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -109,7 +109,7 @@ TEST_CASE("MoonLedDriver direct mode: clockPin is unrouted, so it cannot collide
 // Under the expander WR IS routed (it clocks the '595s), so now it can collide — and a data lane
 // sharing it is silent corruption: the matrix drives both signals onto the one pad and that strand
 // emits the shift clock instead of pixel data.
-TEST_CASE("MoonLedDriver shift mode: a data pin on clockPin (WR) is caught") {
+TEST_CASE("MoonI80Peripheral shift mode: a data pin on clockPin (WR) is caught") {
     ExpanderMoonI80 peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -125,9 +125,9 @@ TEST_CASE("MoonLedDriver shift mode: a data pin on clockPin (WR) is caught") {
 // shift clock), so it must not land on WR — the latch would ride the shift clock itself and nothing
 // would ever latch, which looks like a dead strip rather than a config error.
 //
-// clockPin now lives on the MoonI80Peripheral backend (not a MoonLedDriver member), so it is read/set
+// clockPin now lives on the MoonI80Peripheral backend (not a MoonI80Peripheral member), so it is read/set
 // through the control API defineDriverControls() binds — the same mechanism the UI and persistence use.
-TEST_CASE("MoonLedDriver rejects a latchPin on WR") {
+TEST_CASE("MoonI80Peripheral rejects a latchPin on WR") {
     ExpanderMoonI80 peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -145,7 +145,7 @@ TEST_CASE("MoonLedDriver rejects a latchPin on WR") {
 // The '595's shift clock IS WR, so shift mode needs clockPin on a real GPIO. Unset (-1) would route
 // the peripheral's WR signal to GPIO 65535 — catch it as a config error, not a bad pad write. Direct
 // mode does not care (WR is unrouted there), so the same unset pin is fine without the expander.
-TEST_CASE("MoonLedDriver shift mode requires a clockPin; direct mode does not") {
+TEST_CASE("MoonI80Peripheral shift mode requires a clockPin; direct mode does not") {
     ExpanderMoonI80 peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -173,7 +173,7 @@ TEST_CASE("MoonLedDriver shift mode requires a clockPin; direct mode does not") 
 // Sanity: with a valid config the driver is a working CRTP sibling — it slices lanes and reports the
 // lights it drives, exactly like its sibling. (The lane/frame ARITHMETIC itself is the base's, and is
 // covered once, in unit_I80LedDriver and the Mock suites.)
-TEST_CASE("MoonLedDriver drives a valid config like its sibling") {
+TEST_CASE("MoonI80Peripheral drives a valid config like its sibling") {
     mm::MoonI80Peripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;

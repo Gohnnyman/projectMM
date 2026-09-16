@@ -832,7 +832,7 @@ TEST_CASE("FilesystemModule restores a user-module reorder in the saved order") 
     mm::platform::fsSetRoot(".");
 }
 
-// The EXACT shiffy scenario: an UNKNOWN/renamed type mid-list (a pre-consolidation MoonLedDriver that no
+// The EXACT shiffy scenario: an UNKNOWN/renamed type mid-list (a pre-consolidation MoonI80Peripheral that no
 // longer registers) followed by a real USER module. The renamed entry must drop WITHOUT taking the user
 // module after it — the old `break` dropped the tail, so the user's real driver vanished on every reboot.
 // This is the dominant cause on shiffy (distinct from the code-wired-reorder case above), pinned here.
@@ -847,7 +847,7 @@ TEST_CASE("FilesystemModule skips an unknown type mid-list and keeps the user mo
     mm::ModuleFactory::registerType<mm::Layer>("Layer");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier");
-    // Deliberately do NOT register "GoneEffect" — it stands in for a renamed/removed type (MoonLedDriver).
+    // Deliberately do NOT register "GoneEffect" — it stands in for a renamed/removed type (MoonI80Peripheral).
 
     // Saved file: Rainbow(0), GoneEffect(1, unregistered), Multiply(2, a real user module AFTER the dead one).
     {

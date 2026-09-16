@@ -163,7 +163,6 @@ Report every place the generated documentation breaks the shape the standards de
 
 ```bash
 uv run moondeck/check/check_docgen.py
-uv run moondeck/check/check_docgen.py --baseline    # rewrite the grandfather list
 ```
 
 Reads the pages the docs build renders as card tables and reports, per card:
@@ -183,7 +182,7 @@ And per header, over the directories it names in `HEADER_DIRS`:
 
 `--report` writes [docs/reference/metrics/docgen.md](../docs/reference/metrics/docgen.md), the tracked state of the sweep: totals per rule and per page, then every finding. Current state only, so its git history is the trend, the same shape repo-health.md uses.
 
-`docgen_baseline.txt` holds what the tree already breaks, so the check passes today and still fails on anything new. An entry tolerates a card **at the size it recorded**: shrink it and nothing needs refreshing, grow it and the check fails naming the old number. `--baseline` has no card on purpose, since a button that rewrites the grandfather list is a button that clears a violation.
+**There is no tolerated list.** The limits are the limits, and the check is red until the tree meets them. A grandfather list was tried and removed: while one exists, the cheapest way to make the check green is to add to it, which is how the comment budget eroded in the first place.
 
 The rules are in [documentation-standards.md](../docs/contributing/documentation-standards.md#the-card), and the check itself is pinned by `test/python/test_check_docgen.py`: every rule is tested firing on a page built to break it, because a regex that silently stopped matching would report a clean run.
 
@@ -468,7 +467,7 @@ Then every declaration, ranked by how far it sits from the ideal:
 
 ```
   DOC DEVIATION  DOC WORDS  DEV WORDS  VIS   DECL       NAME               FILE:LINE
-         +1135%       1606          0  pub   class      MoonI80Peripheral  MoonLedDriver.h:10
+         +1135%       1606          0  pub   class      MoonI80Peripheral  MoonI80Peripheral.h:10
           +797%       1166          0  pub   class      HttpServerModule   HttpServerModule.h:17
           -100%          0         61  priv  method     driversOn          Scheduler.h:138
 ```

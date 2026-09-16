@@ -47,7 +47,7 @@ Plus the [shared controls](#shared-driver-controls) above:
 
 Tests: [RMT](../../reference/tests/unit-tests.md#rmtleddriver) · [shared + peripherals](../../reference/tests/unit-tests.md#parallelleddriver)
 
-Detail: [RMT](moxygen/RmtLedDriver.md) · [Parallel](moxygen/ParallelLedDriver.md) · peripherals: [i80](moxygen/MultiPinLedDriver.md) · [MoonI80](moxygen/MoonLedDriver.md) · [Parlio](moxygen/ParlioLedDriver.md)
+Detail: [RMT](moxygen/RmtLedDriver.md) · [Parallel](moxygen/ParallelLedDriver.md) · peripherals: [i80](moxygen/I80Peripheral.md) · [MoonI80](moxygen/MoonI80Peripheral.md) · [Parlio](moxygen/ParlioPeripheral.md)
 
 <a id="hub75"></a>
 
@@ -68,7 +68,7 @@ Drives **HUB75 LED panels straight from the board's GPIO**, with no receiving ca
 
 **New, and not yet run on a wall we own.** Built from the panel's documented behavior with its encoder pinned by [host tests](../../reference/tests/unit-tests.md#hub75driver), which is not hardware verification. Reports welcome: `refresh` plus your geometry is what makes one useful.
 
-Detail: [technical](moxygen/Hub75Driver.md)
+Detail: [technical](moxygen/Hub75Driver.md) · encoder: [Hub75Slots](moxygen/Hub75Slots.md)
 
 ## Network drivers
 
@@ -188,6 +188,12 @@ Detail: [technical](moxygen/HlsDriver.md)
 
 ## LED driver, details
 
+**`doubleBuffer`: leave it on.** The driver encodes the next frame into a second DMA buffer while the current one clocks out, so a tick costs `max(encode, wire)` rather than `encode + wire`. Measured on a P4 at 16x256 lights it lifted the whole board from about 48 to 76 fps, moving a 7.7 ms wire into background DMA. It costs one extra DMA buffer and one frame of output latency, roughly 8 to 20 ms, which sits inside the perceptual audio-to-visual window and is small next to the wire itself. There is no setup, audio-reactive included, that should turn it off for latency. A board whose second buffer will not fit degrades to the synchronous path on its own.
+
+**The 74HCT595 pin expander is experimental and size-limited.** Each data pin feeds one '595, so the driver drives `pins` x 8 strands. It buys pins, not memory: the register is serial-in, so presenting 8 bits costs 8 shift cycles and the DMA frame grows eightfold, about 1.1 KB per light. Above roughly 96 lights per strand that frame exceeds internal DMA RAM. The `i80` peripheral is capped there, because above it the frame falls to PSRAM, which the S3's GDMA cannot sustain at the expander's 26.67 MHz clock. `MoonI80` lifts that with a streaming ring and drives 128 lights per strand reliably; past 128 a residual refill race still stalls it. The ceiling is 64 strands, set by the encoder's 64-bit active-strand mask. Full status and the measurements: [the analysis](../../work/future/shift-register-driver-analysis.md).
+
+**Wiring the loopback jumper through a '595.** In direct mode you jumper a data GPIO straight to `loopbackRxPin`. In shift mode a data GPIO carries the serial stream into the register, not pixel data, so the wire must come from a register OUTPUT. Strand S sits on data pin `S / 8`'s register at shift position `S % 8`, and a '595 shifts MSB-first, so position `p` appears on output `Q(7 - p)`: strand 0 is Q7. Set `loopbackStrand` to the strand whose output you tapped, and walking it 0 to N-1 until the test passes identifies the strand empirically. **The '595 runs at 5 V and an ESP32 GPIO is not 5 V tolerant**: use a divider (1 kOhm from the output to the GPIO, 2 kOhm from the GPIO to ground) or a level shifter, or the pin can be damaged. No continuity pre-check runs in shift mode, so a mis-wired jumper shows as a bit failure rather than "jumper not detected".
+
 **Whose work this is.** The clockless I2S / RMT / Parlio techniques come from [hpwit (Yves Bazin)](https://github.com/hpwit), whose work is why a single board can drive dozens of parallel strands at all ([analysis](../../work/future/leddriver-analysis-top-down.md)), on WS2812B prior art from FastLED and WLED.
 
 **Which one do I want?**
@@ -215,7 +221,7 @@ RMT is its own driver rather than a `peripheral`, and runs on any ESP32: one str
 
 **Lane, pin, strand.** A lane is one bus data line, a strand is one chain of LEDs. Wired directly, one pin is one lane is one strand. Through an expander each data pin feeds one '595 and fans out to 8 strands, so 8 data pins reach the driver's ceiling of 64.
 
-How the frame is built, the DMA each peripheral programs, and the expert `ring*` tuning are on the API pages: [Parallel LED](moxygen/ParallelLedDriver.md), [i80](moxygen/MultiPinLedDriver.md), [MoonI80](moxygen/MoonLedDriver.md), [Parlio](moxygen/ParlioLedDriver.md), [RMT](moxygen/RmtLedDriver.md), [slot encoder](moxygen/ParallelSlots.md).
+How the frame is built, the DMA each peripheral programs, and the expert `ring*` tuning are on the API pages: [Parallel LED](moxygen/ParallelLedDriver.md), [i80](moxygen/I80Peripheral.md), [MoonI80](moxygen/MoonI80Peripheral.md), [Parlio](moxygen/ParlioPeripheral.md), [RMT](moxygen/RmtLedDriver.md), [slot encoder](moxygen/ParallelSlots.md).
 
 <a id="network-send-details"></a>
 
@@ -331,5 +337,9 @@ Waveshare RGB Matrix  r1  4   g1  5   b1  6    r2  7   g2 15   b2 16
 The [MoonHub75 PCB](https://moonmodules.org/projects/hardware/#moonhub75-pcb) is a Lilygo T7-S3 on a passive adapter, designed by Sören (lost-hope); its map comes from the hardware repository's own README, and the same board carries an INMP441 microphone socket on IO10/11/12, so an audio-reactive effect and a panel run together on it. The Adafruit MatrixPortal S3 map is from the board's CircuitPython `pins.c`. The Waveshare is SKU 34422, not to be confused with the Waveshare ESP32-S3-Matrix, a different product with an onboard 8x8 WS2812 matrix and no HUB75 connector. A 1/32-scan panel needs `e`; on 1/16 panels that pin is free.
 
 **Two controls a panel cannot tell you.** `scanRate` is the panel's own, and two panels of identical dimensions can scan differently, so it is read off the panel rather than calculated from its size. `peripheral` is yours rather than the driver's: a P4 has one LCD_CAM and one Parlio, so a board already driving WS2812 strips from one needs the panel on the other, and only you know which way round.
+
+**How a HUB75 panel works, in two facts.** It is *scanned*, not addressed: two rows light at once, the upper half-panel through R1/G1/B1 and the lower through R2/G2/B2, selected by a row address on A/B/C (and D/E on finer panels). The controller walks every scan row in turn and persistence of vision does the rest, so a 64-row panel has 32 scan rows and row `r` drives panel rows `r` and `r + 32` together.
+
+And brightness is *time*, not amplitude. A HUB75 pixel is a switch, on or off, so intensity comes from binary coded modulation: bit plane `p` is displayed for 2^p time units, and a value lights its planes for a total proportional to itself. That weighting is the peripheral's output-enable window, and it is not built yet, which is why the depth cap below exists. Either way the encoder stores each plane once: emitting plane `p` 2^p times is the obvious reading and it is wrong, since 255 passes at 8-bit is 1,060,800 bytes for a single 64x64 panel where storing once is 33,280.
 
 **What depth costs, and why it stops at 4.** Every bit plane is a full scan, so depth costs refresh and memory linearly, and each slot on the wire is 2 bytes because the address, latch and output-enable lines sit above bit 7 of a 16-bit word. One 64x64 panel at 1/32 scan is 16,640 bytes a frame at 4-bit. The planes are emitted once each rather than weighted for 2^p time, so bit 3 lights as long as bit 0 and a fifth plane would buy nothing the eye can find. The weighting is [backlogged](https://github.com/MoonModules/projectMM/blob/main/docs/work/future/backlog-light.md), and the cap lifts with it.

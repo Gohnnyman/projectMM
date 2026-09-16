@@ -1,11 +1,11 @@
-// @module ParlioLedDriver
-// @also Drivers, Correction
+// @module ParlioPeripheral
+// @also ParallelLedDriver, Drivers, Correction
 
 #include "doctest.h"
 #include "host_bus.h"
 #include "light/drivers/Correction.h"
 #include "correction_presets.h"
-#include "light/drivers/ParlioLedDriver.h"
+#include "light/drivers/ParlioPeripheral.h"
 #include "light/layers/Buffer.h"
 #include "unit/core/conditional_controls.h"  // shared conditional-control helpers
 
@@ -62,7 +62,7 @@ size_t expectFrame(mm::nrOfLightsType maxLights, uint8_t outCh, uint8_t slotByte
 
 // Three lanes (Parlio accepts any 1..8 count) slice the buffer consecutively;
 // the frame is sized by the LONGEST lane.
-TEST_CASE("ParlioLedDriver slices lanes and sizes the frame by the longest") {
+TEST_CASE("ParlioPeripheral slices lanes and sizes the frame by the longest") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -84,7 +84,7 @@ TEST_CASE("ParlioLedDriver slices lanes and sizes the frame by the longest") {
 
 // Empty ledsPerPin (the default) splits evenly over the 8 lanes — shared PinList
 // semantics, same as the RMT/LCD drivers.
-TEST_CASE("ParlioLedDriver even split over 8 lanes") {
+TEST_CASE("ParlioPeripheral even split over 8 lanes") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -99,7 +99,7 @@ TEST_CASE("ParlioLedDriver even split over 8 lanes") {
 }
 
 // The Parlio-vs-LCD difference: 1..8 pins are ALL valid (no exactly-8 rule).
-TEST_CASE("ParlioLedDriver accepts any lane count from 1 to 8") {
+TEST_CASE("ParlioPeripheral accepts any lane count from 1 to 8") {
     mm::Correction corr;
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
     for (const char* pinList : {"36", "36,37", "36,37,38,39,40", "36,37,38,39,40,41,42,43"}) {
@@ -121,7 +121,7 @@ TEST_CASE("ParlioLedDriver accepts any lane count from 1 to 8") {
 }
 
 // 9..16 pins are accepted (Parlio drives 1..16, the 16-bit bus); more than 16 is rejected.
-TEST_CASE("ParlioLedDriver accepts 9..16 pins, rejects more than 16") {
+TEST_CASE("ParlioPeripheral accepts 9..16 pins, rejects more than 16") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -145,7 +145,7 @@ TEST_CASE("ParlioLedDriver accepts 9..16 pins, rejects more than 16") {
 // A 16-lane (>8) config uses the 16-bit bus, so each slot is 2 bytes: the frame is
 // DOUBLE the byte size of the same per-lane lights at ≤8 lanes. Pins the slotBytes
 // threading through frameBytesFor (including the doubled latch pad).
-TEST_CASE("ParlioLedDriver 16-lane frame doubles the byte size (16-bit bus)") {
+TEST_CASE("ParlioPeripheral 16-lane frame doubles the byte size (16-bit bus)") {
     mm::Buffer src;
     mm::Correction corr;
     {   // 8 lanes × 50 lights → 8-bit bus (slotBytes = 1)
@@ -173,7 +173,7 @@ TEST_CASE("ParlioLedDriver 16-lane frame doubles the byte size (16-bit bus)") {
 }
 
 // An RGB→RGBW preset toggle grows the frame (32 vs 24 slot bytes per light).
-TEST_CASE("ParlioLedDriver frame grows on RGBW preset") {
+TEST_CASE("ParlioPeripheral frame grows on RGBW preset") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -199,7 +199,7 @@ TEST_CASE("ParlioLedDriver frame grows on RGBW preset") {
 // hardware-only (the host bus allocates but enforces no Parlio transfer ceiling), verified on the P4 (LEDs burn at 8×896 RGB/lane; the
 // driver reports a status error above the ceiling). Catches the ceiling shifting if the encoding
 // changes. Mirrors the platform constant.
-TEST_CASE("ParlioLedDriver frame at the Parlio single-transfer ceiling (byte limit, channel-relative)") {
+TEST_CASE("ParlioPeripheral frame at the Parlio single-transfer ceiling (byte limit, channel-relative)") {
     constexpr size_t kParlioMaxTransferBytes = 0x7FFFF / 8;   // 65535, matches platform_esp32_parlio.cpp
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
@@ -221,7 +221,7 @@ TEST_CASE("ParlioLedDriver frame at the Parlio single-transfer ceiling (byte lim
 }
 
 // A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
-TEST_CASE("ParlioLedDriver bad pins → status error → recovery") {
+TEST_CASE("ParlioPeripheral bad pins → status error → recovery") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -245,7 +245,7 @@ TEST_CASE("ParlioLedDriver bad pins → status error → recovery") {
 // strand is user-soldered). A fresh, unconfigured driver idles, never grabbing a
 // GPIO. (wire() back-fills empty pins for the slicing cases, so this one wires
 // the buffer directly to keep pins empty.)
-TEST_CASE("ParlioLedDriver with the empty default pins idles cleanly") {
+TEST_CASE("ParlioPeripheral with the empty default pins idles cleanly") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -266,7 +266,7 @@ TEST_CASE("ParlioLedDriver with the empty default pins idles cleanly") {
 }
 
 // A 0×0×0 grid is a clean idle: zero counts, zero frame, no crash.
-TEST_CASE("ParlioLedDriver tolerates a zero-light buffer") {
+TEST_CASE("ParlioPeripheral tolerates a zero-light buffer") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -282,7 +282,7 @@ TEST_CASE("ParlioLedDriver tolerates a zero-light buffer") {
 
 // tick() is crash-safe across single-pin / multi-pin / pre-init configs (the
 // transmit path is gated out on the host; this pins the reachable contract).
-TEST_CASE("ParlioLedDriver tick is crash-safe for every pin configuration") {
+TEST_CASE("ParlioPeripheral tick is crash-safe for every pin configuration") {
     mm::Correction corr;
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
 
@@ -312,7 +312,7 @@ TEST_CASE("ParlioLedDriver tick is crash-safe for every pin configuration") {
 }
 
 // setup/release cycles leave no residue (status clean, ASAN-checked heap).
-TEST_CASE("ParlioLedDriver setup/release is repeatable") {
+TEST_CASE("ParlioPeripheral setup/release is repeatable") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -334,7 +334,7 @@ TEST_CASE("ParlioLedDriver setup/release is repeatable") {
 }
 
 // loopbackRxPin is bound always, visible only while loopbackTest is on.
-TEST_CASE("ParlioLedDriver loopbackRxPin tracks the loopbackTest toggle") {
+TEST_CASE("ParlioPeripheral loopbackRxPin tracks the loopbackTest toggle") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
     d.setPeripheralForTest(&peripheral);
@@ -354,7 +354,7 @@ TEST_CASE("ParlioLedDriver loopbackRxPin tracks the loopbackTest toggle") {
 // lane-0 substitution is hardware-only (parlioLanes==0 on desktop); the visibility
 // contract is host-testable here via the shared helper (toggles loopbackTest both
 // ways and asserts the control stays bound while flipping visibility).
-TEST_CASE("ParlioLedDriver loopbackTxPin tracks the loopbackTest toggle") {
+TEST_CASE("ParlioPeripheral loopbackTxPin tracks the loopbackTest toggle") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
     d.setPeripheralForTest(&peripheral);
@@ -368,14 +368,14 @@ TEST_CASE("ParlioLedDriver loopbackTxPin tracks the loopbackTest toggle") {
 // The host bus is REAL MEMORY, not a refusal: `busInit` used to return false on desktop, so
 // every bus assertion was unreachable off-device and the driver's encode path only ever ran
 // on hardware. The contract is identical for all three peripherals, so it lives in one place.
-TEST_CASE("ParlioLedDriver allocates a real host bus the driver can encode into") {
+TEST_CASE("ParlioPeripheral allocates a real host bus the driver can encode into") {
     mm::test::checkHostBusAllocates<mm::ParlioPeripheral>();
 }
 
-TEST_CASE("ParlioLedDriver gives the host bus two distinct buffers when asked") {
+TEST_CASE("ParlioPeripheral gives the host bus two distinct buffers when asked") {
     mm::test::checkHostBusDoubleBuffer<mm::ParlioPeripheral>();
 }
 
-TEST_CASE("ParlioLedDriver counts the DMA buffers in its memory readout") {
+TEST_CASE("ParlioPeripheral counts the DMA buffers in its memory readout") {
     mm::test::checkHostBusCountedInHeapReadout<mm::ParlioPeripheral>();
 }

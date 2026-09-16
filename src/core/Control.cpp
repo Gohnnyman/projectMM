@@ -202,10 +202,11 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
         case ControlType::Select: {
             sink.append(",\"options\":[");
             auto* options = reinterpret_cast<const char* const*>(c.aux);
-            // addSelect takes a uint8_t option count, so c.max can never exceed 255 and the
-            // counter cannot wrap.
-            // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
-            for (uint8_t o = 0; o < c.max; o++) {
+            // int32_t, the type of the bound it is compared against: a uint8_t counter against a
+            // wider signed max is a wrap that only today's uint8_t option count keeps unreachable,
+            // and the suppression that hid it outlived the reason for it. Same form as the hash
+            // walk in MoonModule.h.
+            for (int32_t o = 0; o < c.max; o++) {
                 if (o > 0) sink.append(",");
                 // Escaped, not a raw %s: most option lists are our own literals, but the panel-card
                 // interface Select carries OS-supplied adapter descriptions, and one containing a

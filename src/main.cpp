@@ -127,13 +127,13 @@
 // into ParallelLedDriver's peripheral registry (gated by the chip's CONFIG_SOC_*), so including the ones
 // this silicon supports is what populates the `peripheral` control's options.
 #if defined(CONFIG_SOC_LCD_I80_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
-#include "light/drivers/MultiPinLedDriver.h"      // esp_lcd i80 backend (I80Peripheral)
+#include "light/drivers/I80Peripheral.h"      // esp_lcd i80 backend (I80Peripheral)
 #endif
 #if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
-#include "light/drivers/MoonLedDriver.h"          // MoonI80 own-GDMA backend (MoonI80Peripheral)
+#include "light/drivers/MoonI80Peripheral.h"          // MoonI80 own-GDMA backend (MoonI80Peripheral)
 #endif
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
-#include "light/drivers/ParlioLedDriver.h"        // Parlio backend (ParlioPeripheral)
+#include "light/drivers/ParlioPeripheral.h"        // Parlio backend (ParlioPeripheral)
 #endif
 // Panel receiver cards over raw Ethernet — opt-in PER FIRMWARE (MM_PANEL_CARDS), not per chip.
 // The panels need a gigabit link, and no SOC capability macro separates the boards that have one
@@ -324,7 +324,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::Hub75Driver>("Hub75Driver", "light/drivers.md#hub75");
 #endif
     // Register only the LED drivers this chip's silicon can run (see the gated
-    // includes above) — keeps the type picker honest (no MultiPinLedDriver offered on a
+    // includes above) — keeps the type picker honest (no I80Peripheral offered on a
     // chip without an i80 bus) and the binary lean.
 #if defined(CONFIG_SOC_RMT_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers.md#rmtled");

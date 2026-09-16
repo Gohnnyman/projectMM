@@ -1,9 +1,9 @@
-// @module MultiPinLedDriver
+// @module I80Peripheral
 // @also ParallelLedDriver
 
 #include "doctest.h"
 #include "light/drivers/ParallelLedDriver.h"
-#include "light/drivers/MultiPinLedDriver.h"   // I80Peripheral: the i80 clock/DC defaults
+#include "light/drivers/I80Peripheral.h"   // I80Peripheral: the i80 clock/DC defaults
 #include "correction_presets.h"
 
 #include <cstring>

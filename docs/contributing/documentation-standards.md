@@ -31,16 +31,14 @@ flowchart TB
     entry -.-> rules
     rules -.-> outside
 
-    style entry fill:#2d3561,stroke:#7b88c9,color:#fff
-    style tut fill:#3d2d61,stroke:#a07bc9,color:#fff
-    style how fill:#3d2d61,stroke:#a07bc9,color:#fff
-    style exp fill:#3d2d61,stroke:#a07bc9,color:#fff
-    style ref fill:#3d2d61,stroke:#a07bc9,color:#fff
-    style mod fill:#1f4d3d,stroke:#5fb89a,color:#fff
-    style mox fill:#1f4d3d,stroke:#5fb89a,color:#fff
-    style hdr fill:#1f4d3d,stroke:#5fb89a,color:#fff
-    style rules fill:#4d3d1f,stroke:#c9a95f,color:#fff
-    style outside fill:#4d3d1f,stroke:#c9a95f,color:#fff
+    classDef entryCell fill:#2d3561,stroke:#7b88c9,color:#fff
+    classDef diataxis fill:#3d2d61,stroke:#a07bc9,color:#fff
+    classDef generated fill:#1f4d3d,stroke:#5fb89a,color:#fff
+    classDef outsideGrid fill:#4d3d1f,stroke:#c9a95f,color:#fff
+    class entry entryCell
+    class tut,how,exp,ref diataxis
+    class mod,mox,hdr generated
+    class rules,outside outsideGrid
 ```
 
 Each level says what a thing is and links down for the rest. A fact stated above its home is a second copy that drifts.
@@ -145,7 +143,7 @@ The card rules are enforced by [`check_docgen.py`](../moondeck/check/check_docge
 - **A heading inside a comment means it is not a comment.** Needing signposts is the signal to cut. The one exception is `@moreinfo`, whose `##` sections become the generated page's own headings; inside a lead comment a heading wants to be a page, or wants to not exist.
 - **MoonLive scripts get three comments, one line each**: what the script is, what each `addControl` knob does, what each function it defines does. Lifecycle functions need none. A script is read in the device's own editor, where prose buries the effect.
 
-### The `///` budget
+### The comment budget
 
 A card is read across a row; a member comment is read beside the thing it describes, and the generated page shows its first sentence as the summary. So the budget is one line, and a deep dive goes after `@moreinfo`.
 
@@ -154,12 +152,15 @@ A card is read across a row; a member comment is read beside the thing it descri
 | Class `///` | 10 lines |
 | `@moreinfo` appendix | 20 lines |
 | Any other `///` run | 1 line |
-| One `///` line | 20 words |
+| One comment line, `///` or `//` | 20 words |
+| A `//` run beside code | 1 line |
 | Every public member | carries one |
 
-The first four cut and the last adds, deliberately: the result is a short line on everything rather than an essay on a few things. The word limit comes from the tree, where a member line is 14 words at the median and 19 at p95, so it bites the outliers and leaves the normal case alone.
+The first five cut and the last adds, deliberately: the result is a short line on everything rather than an essay on a few things. The word limit comes from the tree, where a member line is 14 words at the median and 19 at p95, so it bites the outliers and leaves the normal case alone.
 
 **Use `//` sparingly.** A comment restating what the code does is a naming failure, and the fix is a better name rather than a better sentence. What survives is the WHY a reader cannot recover from the code.
+
+**`//` carries the same one-line budget as `///`, and that is what makes the `///` cap mean anything.** Without it the one-line rule moves text rather than removing it: a fifty-line member comment re-spelled as `//` satisfies every other rule and leaves the file exactly as long. One line is room to say why; past that the reasoning belongs after `@moreinfo`, or on the module's page where a reader will find it. The `//` block above the first class is exempt, being the non-Doxygen sibling of the class comment.
 
 Enforced by [`check_docgen.py`](../moondeck/check/check_docgen.py), which names the areas it covers.
 

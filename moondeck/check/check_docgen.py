@@ -39,7 +39,6 @@ with nothing wrong in it. So every rule here is tested firing on a page built to
 not only staying quiet on one that obeys.
 
     uv run moondeck/check/check_docgen.py
-    uv run moondeck/check/check_docgen.py --baseline    # rewrite the grandfather list
 """
 
 import argparse
@@ -86,9 +85,10 @@ HEADER_DIRS = ("src/light/drivers",)
 MAX_CLASS_DOC = 10      # lines of `///` directly above `class X`
 MAX_MOREINFO = 20       # lines of the `@moreinfo` appendix
 MAX_MEMBER_DOC = 1      # lines of a `///` run that is NOT a class comment
-MAX_DOC_WORDS = 20      # words on one `///` line
+MAX_DOC_WORDS = 20      # words on one comment line, `///` or `//`
+MAX_CODE_COMMENT = 1    # lines of a `//` run inside a class body
 
-BASELINE = ROOT / "moondeck" / "check" / "docgen_baseline.txt"
+
 
 
 def _pages():
@@ -271,19 +271,6 @@ def _rule_name(reason: str) -> str:
     return head.split(" ")[0]
 
 
-def _measure(reason: str):
-    """The rule name and its number, or None where a rule carries no number.
-
-    A baseline entry is tolerated at the number it recorded, so both halves are needed:
-    the name says which rule, the number says how far over it was allowed to be. The
-    FULL rule name, not its first word: "details table has N columns" and "details table
-    cell is N characters" share one, so keying on the word let a tolerated wide table
-    also grow a wide cell unseen.
-    """
-    m = re.match(r"\D*(\d+)", reason)
-    return _rule_name(reason), (int(m.group(1)) if m else None)
-
-
 def _headers():
     """Every header the rules cover, repo-relative."""
     for d in HEADER_DIRS:
@@ -357,19 +344,35 @@ _VAR_RE = re.compile(r"^[\w:<>,\s\*&]+\s+(\w+)\s*(=[^;]+)?;")
 
 
 def _header_rules(rel: str, text: str):
-    """The `///` budget, on one header.
+    """The comment budget, on one header.
 
-    Five rules, all counted rather than judged: a class comment of at most ten lines, an
+    Six rules, all counted rather than judged: a class comment of at most ten lines, an
     `@moreinfo` appendix of at most twenty, ONE line for any other `///`, twenty words on
-    a line, and a `///` on every public member. The first four cut; the last adds, and
-    they are meant to pull against each other: the result is a short line on everything
-    rather than an essay on a few things.
+    a comment line, ONE line for a `//` run, and a `///` on every public member. The first five cut;
+    the last adds, and they are meant to pull against each other: the result is a short line
+    on everything rather than an essay on a few things.
+
+    `//` and `///` carry the same one-line budget, because without that the `///` cap moves
+    text rather than removing it: a fifty-line member comment re-spelled as `//` satisfies
+    every other rule and leaves the file exactly as long. Past one line the reasoning belongs
+    after `@moreinfo` or on the module's page.
     """
     out = []
     lines = text.split("\n")
 
     for start, end, nxt in _doc_runs(lines):
         n = end - start
+        # A run that opens a @defgroup documents the FILE, not a member: it precedes an include,
+        # a constant or nothing at all, so the one-line member budget measured the whole block and
+        # reported a 45-line finding on every such header. It is a lead comment, so it is held to
+        # the class budget and splits at @moreinfo the same way.
+        if any("@defgroup" in lines[k] for k in range(start, end)):
+            head = next((k for k in range(start, end) if "@moreinfo" in lines[k]), end)
+            n = head - start
+            if n > MAX_CLASS_DOC:
+                out.append((f"{rel}::line {start + 1}",
+                            f"class comment {n} lines > {MAX_CLASS_DOC}"))
+            continue
         if _CLASS_RE.match(nxt):
             # The LEAD only: the run ends at @moreinfo, whose own lines are the appendix and
             # are measured against MAX_MOREINFO below. Counting both here would put the
@@ -399,6 +402,35 @@ def _header_rules(rel: str, text: str):
             if n > MAX_MOREINFO:
                 out.append((f"{rel}::@moreinfo", f"appendix {n} lines > {MAX_MOREINFO}"))
 
+    # `//` carries the SAME one-line budget as `///`, or the `///` cap only MOVES text:
+    # re-spelling a fifty-line member comment as `//` satisfies every other rule and leaves the
+    # file the same length, which is what a first pass through these headers produced.
+    # File-level `//` (above the first class, explaining the compilation unit) is exempt: it is
+    # the non-Doxygen sibling of the class comment, and has no member to sit beside.
+    first_class = next((i for i, ln in enumerate(lines) if _CLASS_RE.match(ln.strip())), len(lines))
+    i = 0
+    while i < len(lines):
+        st = lines[i].strip()
+        if st.startswith("//") and not st.startswith("///"):
+            j = i
+            while j < len(lines) and lines[j].strip().startswith("//") \
+                    and not lines[j].strip().startswith("///"):
+                j += 1
+            if j - i > MAX_CODE_COMMENT and i > first_class:
+                nxt = next((lines[k].strip() for k in range(j, len(lines)) if lines[k].strip()), "")
+                out.append((f"{rel}::{_declared_key(nxt, i) if nxt else f'line {i + 1}'}",
+                            f"code comment {j - i} lines > {MAX_CODE_COMMENT}"))
+            # The same word budget as a `///` line, and for the same reason: one line is a
+            # sentence, not a paragraph that happens to lack line breaks.
+            for k in range(i, j):
+                words = len(re.sub(r"^\s*//+\s*", "", lines[k]).split())
+                if words > MAX_DOC_WORDS:
+                    out.append((f"{rel}::line {k + 1}",
+                                f"comment line {words} words > {MAX_DOC_WORDS}"))
+            i = j
+        else:
+            i += 1
+
     # Every public member carries one. A generated page shows a member with no `///` as a
     # bare signature, which tells a reader nothing the declaration did not.
     # Only declarations in the CLASS BODY itself. A `{` opens a function body, and
@@ -418,8 +450,13 @@ def _header_rules(rel: str, text: str):
         before = depth
         depth += opens - closes
         if _CLASS_RE.match(st) and opens:
+            # A NESTED struct inherits the enclosing access: one declared after `private:` is
+            # private however it is spelled, and demanding a `///` on its fields asked a file to
+            # document what no reader of the generated page can see. Only a top-level struct
+            # (nothing open above it) starts public.
+            nested = class_depth is not None or before > 1
             class_depth = before + 1
-            public = st.startswith("struct")     # a struct is public by default
+            public = st.startswith("struct") and not (nested and not public)
             continue
         if class_depth is not None and depth < class_depth:
             class_depth = None                   # the class body closed
@@ -477,6 +514,30 @@ def _card_rules(rel: str, c: dict):
     return out
 
 
+def _orphan_pages():
+    """Generated pages nothing links to: a technical page a reader cannot reach.
+
+    Every `.h` under src/{core,light} gets a page, so a header nobody references from a
+    catalog card, another page, or another header's `///` is documentation that exists and
+    is unreachable. The link may come from anywhere: a card's Detail line, a prose page, or
+    a sibling header naming the file (the hook retargets a `.h` mention at its page).
+    """
+    pages = {p.stem for p in (ROOT / "docs" / "moonmodules").rglob("moxygen/*.md")}
+    linked = set()
+    for md in (ROOT / "docs").rglob("*.md"):
+        if "moxygen" in md.parts:
+            continue
+        for m in re.finditer(r"moxygen/(\w+)\.md", md.read_text(errors="ignore")):
+            linked.add(m.group(1))
+    for d in ("core", "light"):
+        for h in (ROOT / "src" / d).rglob("*.h"):
+            for m in re.finditer(r"\b(\w+)\.h\b", h.read_text(errors="ignore")):
+                if m.group(1) != h.stem:
+                    linked.add(m.group(1))
+    return [(f"moonmodules::{name}", "generated page nothing links to: unreachable")
+            for name in sorted(pages - linked)]
+
+
 def _violations():
     out = []
     for rel in _pages():
@@ -492,6 +553,7 @@ def _violations():
 
     for rel in _headers():
         out.extend(_header_rules(str(rel), (ROOT / rel).read_text()))
+    out.extend(_orphan_pages())
     return out
 
 
@@ -562,8 +624,6 @@ def _report(entries, heading: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--baseline", action="store_true",
-                    help="rewrite the grandfather list from what the tree holds now")
     ap.add_argument("--report", action="store_true",
                     help="write docs/reference/metrics/docgen.md, the tracked state of the sweep")
     args = ap.parse_args()
@@ -574,55 +634,14 @@ def main() -> int:
         _write_report(found)
         return 0
 
-    if args.baseline:
-        BASELINE.write_text(
-            "# Cards over the size limits when the check was introduced. Each line is one\n"
-            "# card+rule that check_docgen.py tolerates. The list only SHRINKS: a card\n"
-            "# edited back under the limit loses its line, and nothing is ever added.\n"
-            "# Empty this file and the check is enforced everywhere. Regenerate: --baseline\n"
-            + "".join(f"{k}\t{v.split(':')[0]}\n" for k, v in sorted(found)))
-        print(f"Docgen baseline: {len(found)} tolerated violation(s) written to "
-              f"{BASELINE.relative_to(ROOT)}")
+    if not found:
+        print(f"Docgen check: clean. Limits: description {MAX_DESC}, controls "
+              f"{MAX_CONTROLS}, one control {MAX_CONTROL}, one comment line, "
+              f"{MAX_DOC_WORDS} words.")
         return 0
 
-    # A baseline entry tolerates a card at the size it WAS, not at any size. Matching the
-    # rule word alone let a 678-character control block grow to 5,000 and stay quiet,
-    # which is the opposite of what a baseline is for. The stored number is the ceiling:
-    # an edit that shortens a card needs no refresh, one that lengthens it fails.
-    tolerated = {}
-    if BASELINE.exists():
-        for ln in BASELINE.read_text().split("\n"):
-            if ln.strip() and not ln.startswith("#"):
-                key, _, reason = ln.partition("\t")
-                word, n = _measure(reason)
-                # The LARGEST value wins where a key repeats: keeping the last one
-                # lets a colliding sibling read as growth on the next run, which is a
-                # false failure the tree cannot clear.
-                prev = tolerated.get((key, word))
-                if prev is None or (n is not None and n > prev):
-                    tolerated[(key, word)] = n
-
-    fresh = []
-    for k, v in found:
-        word, now = _measure(v)
-        if (k, word) not in tolerated:
-            fresh.append((k, v))
-            continue
-        was = tolerated[(k, word)]
-        if now is not None and was is not None and now > was:
-            fresh.append((k, f"{v} (was {was} in the baseline: it grew)"))
-
-    if not fresh:
-        print(f"Docgen check: {len(found)} finding(s), all in the baseline. "
-              f"Limits: description {MAX_DESC}, controls {MAX_CONTROLS}, "
-              f"one control {MAX_CONTROL}.\n")
-        _report(found, "Tolerated, from the baseline. The list only shrinks:")
-        print("\nNothing new. An entry already here may not grow: the baseline holds each at "
-              "the size it recorded.")
-        return 0
-
-    print(f"Docgen check: {len(fresh)} finding(s).\n")
-    _report(fresh, "New, not in the baseline:")
+    print(f"Docgen check: {len(found)} finding(s).\n")
+    _report(found, "Every finding. There is no tolerated list: these are the limits.")
     print("\nMove the overflow, do not trim it: module behavior into the header's ///"
           "\n(the technical page the card links), cross-module rationale into a"
           "\n`## <Name>, details` section on the same page."

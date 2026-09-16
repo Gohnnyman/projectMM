@@ -1,11 +1,11 @@
-// @module MultiPinLedDriver
-// @also Drivers, Correction
+// @module I80Peripheral
+// @also ParallelLedDriver, Drivers, Correction
 
 #include "doctest.h"
 #include "host_bus.h"
 #include "light/drivers/Correction.h"
 #include "correction_presets.h"
-#include "light/drivers/MultiPinLedDriver.h"
+#include "light/drivers/I80Peripheral.h"
 #include "light/layers/Buffer.h"
 #include "unit/core/conditional_controls.h"  // shared conditional-control helpers
 
@@ -61,7 +61,7 @@ size_t expectFrame(mm::nrOfLightsType maxLights, uint8_t outCh, uint8_t slotByte
 // Explicit counts slice the buffer consecutively; the frame is sized by the
 // LONGEST lane. The bus always has all 8 lanes — unused strands take the
 // 0-light remainder and idle LOW.
-TEST_CASE("MultiPinLedDriver slices lanes and sizes the frame by the longest") {
+TEST_CASE("I80Peripheral slices lanes and sizes the frame by the longest") {
     mm::I80Peripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -83,7 +83,7 @@ TEST_CASE("MultiPinLedDriver slices lanes and sizes the frame by the longest") {
 }
 
 // Empty ledsPerPin splits evenly — same PinList semantics the RMT driver uses.
-TEST_CASE("MultiPinLedDriver even split over the default 8 lanes") {
+TEST_CASE("I80Peripheral even split over the default 8 lanes") {
     mm::I80Peripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -98,7 +98,7 @@ TEST_CASE("MultiPinLedDriver even split over the default 8 lanes") {
 }
 
 // An RGB→RGBW preset toggle grows the frame (32 vs 24 slot bytes per light).
-TEST_CASE("MultiPinLedDriver frame grows on RGBW preset") {
+TEST_CASE("I80Peripheral frame grows on RGBW preset") {
     mm::I80Peripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -120,7 +120,7 @@ TEST_CASE("MultiPinLedDriver frame grows on RGBW preset") {
 // classic-i80 branch is compiled out). Pins the "budget 0 = no bound" contract — the gate is inert off
 // the classic chip, so this refactor changes nothing on every non-classic target. The hardware behavior
 // (a too-big frame on the real classic i80 idles with the clear "over DMA" status) is proven on the Olimex.
-TEST_CASE("MultiPinLedDriver: the DMA-fit gate is inert off the classic i80 (budget 0)") {
+TEST_CASE("I80Peripheral: the DMA-fit gate is inert off the classic i80 (budget 0)") {
     mm::I80Peripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -140,7 +140,7 @@ TEST_CASE("MultiPinLedDriver: the DMA-fit gate is inert off the classic i80 (bud
 // desktop (budget always 0), so exercise it directly with synthetic budgets. A FINITE budget rejects an
 // oversized frame and accepts one that fits; a ZERO budget ("no bound", the LCD_CAM/PSRAM/desktop case)
 // never rejects, whatever the frame size.
-TEST_CASE("MultiPinLedDriver::frameFitsDmaBudget rejects only over a finite budget") {
+TEST_CASE("I80Peripheral::frameFitsDmaBudget rejects only over a finite budget") {
     // frameFitsDmaBudget is a protected static on ParallelLedDriver; a tiny subclass exposes it for
     // the test without widening the production class surface.
     struct Expose : mm::ParallelLedDriver {
@@ -155,7 +155,7 @@ TEST_CASE("MultiPinLedDriver::frameFitsDmaBudget rejects only over a finite budg
 }
 
 // A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
-TEST_CASE("MultiPinLedDriver bad pins → status error → recovery") {
+TEST_CASE("I80Peripheral bad pins → status error → recovery") {
     mm::I80Peripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -179,7 +179,7 @@ TEST_CASE("MultiPinLedDriver bad pins → status error → recovery") {
 // strand is user-soldered). A fresh, unconfigured driver idles, never grabbing
 // the 8 data GPIOs on its own. (wire() back-fills empty pins for the slicing
 // cases, so this one wires the buffer directly to keep pins empty.)
-TEST_CASE("MultiPinLedDriver with the empty default pins idles cleanly") {
+TEST_CASE("I80Peripheral with the empty default pins idles cleanly") {
     mm::I80Peripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -204,7 +204,7 @@ TEST_CASE("MultiPinLedDriver with the empty default pins idles cleanly") {
 // nothing requires every bit to reach a GPIO — busPinList() parks the lanes the board doesn't use on
 // WR, where the peripheral already drives and no strand reads them. So a 5-pin board is 5 data lanes
 // on an 8-bit bus, not a config error, and needs no fake "ghost" pins to pad the list out.
-TEST_CASE("MultiPinLedDriver drives any pin count; the bus rounds up around it") {
+TEST_CASE("I80Peripheral drives any pin count; the bus rounds up around it") {
     mm::Buffer src;
     mm::Correction corr;
     {   // 3 pins → 3 lanes on the 8-bit bus, the spare 5 parked on WR.
@@ -253,14 +253,14 @@ TEST_CASE("MultiPinLedDriver drives any pin count; the bus rounds up around it")
         CHECK(d.maxLaneLights() == 10);
         CHECK(d.frameBytes() == expectFrame(10, 3, /*slotBytes=*/2));
     }
-    // (0 pins → idles: covered by "MultiPinLedDriver with the empty default pins idles cleanly" above.)
+    // (0 pins → idles: covered by "I80Peripheral with the empty default pins idles cleanly" above.)
 }
 
 // WR and DC are lines the LEDs never read, so what an UNSET one costs is the chip's business:
 // the classic ESP32 sinks it onto an input-only pad (no GPIO spent), the LCD_CAM chips need a real
 // pad because an invalid number reaches the ROM's matrix routine. The desktop emulates the LCD_CAM
 // backend, so here an unset WR idles the driver with a status that names the chip's rule.
-TEST_CASE("MultiPinLedDriver idles with a named status when DC is unset, on every chip") {
+TEST_CASE("I80Peripheral idles with a named status when DC is unset, on every chip") {
     mm::I80Peripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -280,7 +280,7 @@ TEST_CASE("MultiPinLedDriver idles with a named status when DC is unset, on ever
     CHECK(std::strstr(d.status() ? d.status() : "", "needs a real GPIO") != nullptr);
 }
 
-TEST_CASE("MultiPinLedDriver on an LCD_CAM chip idles with a named status when WR is unset") {
+TEST_CASE("I80Peripheral on an LCD_CAM chip idles with a named status when WR is unset") {
     mm::I80Peripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -300,7 +300,7 @@ TEST_CASE("MultiPinLedDriver on an LCD_CAM chip idles with a named status when W
 // A pin the PACKAGE lacks fails the same silent way a flash pin does: the ESP32-PICO-V3-02 has no
 // GPIO 18/23, and routing the i80 clock there wedged its flash cache with no panic. The platform
 // knows the package; the driver must refuse by name before the peripheral touches the pad.
-TEST_CASE("MultiPinLedDriver refuses a WR/DC pin this chip package does not have") {
+TEST_CASE("I80Peripheral refuses a WR/DC pin this chip package does not have") {
     mm::platform::GpioCapability absent;
     absent.validGpio = false;
     mm::platform::setTestGpioCapability(20, absent);
@@ -328,7 +328,7 @@ TEST_CASE("MultiPinLedDriver refuses a WR/DC pin this chip package does not have
 // board that wires all 8/16 lanes yet drives fewer strands, parking WR/DC on an
 // unused data pin is a valid choice — so the driver still runs and flags a warning.
 // clockPin/dcPin default to 10/11.
-TEST_CASE("MultiPinLedDriver warns (does not idle) when a data pin is on clockPin/dcPin") {
+TEST_CASE("I80Peripheral warns (does not idle) when a data pin is on clockPin/dcPin") {
     mm::Buffer src;
     mm::Correction corr;
     {   // lane on GPIO 10 == default clockPin → warns but still drives all 8 lanes
@@ -404,7 +404,7 @@ TEST_CASE("MultiPinLedDriver warns (does not idle) when a data pin is on clockPi
 }
 
 // A 0×0×0 grid is a clean idle: zero counts, zero frame (no pad for an empty frame), no crash.
-TEST_CASE("MultiPinLedDriver tolerates a zero-light buffer") {
+TEST_CASE("I80Peripheral tolerates a zero-light buffer") {
     mm::I80Peripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -419,7 +419,7 @@ TEST_CASE("MultiPinLedDriver tolerates a zero-light buffer") {
 }
 
 // setup/release cycles leave no residue (status clean, ASAN-checked heap).
-TEST_CASE("MultiPinLedDriver setup/release is repeatable") {
+TEST_CASE("I80Peripheral setup/release is repeatable") {
     mm::I80Peripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
@@ -441,7 +441,7 @@ TEST_CASE("MultiPinLedDriver setup/release is repeatable") {
 }
 
 // loopbackRxPin is bound always, visible only while loopbackTest is on.
-TEST_CASE("MultiPinLedDriver loopbackRxPin tracks the loopbackTest toggle") {
+TEST_CASE("I80Peripheral loopbackRxPin tracks the loopbackTest toggle") {
     mm::I80Peripheral peripheral;
     mm::ParallelLedDriver d;
     d.setPeripheralForTest(&peripheral);
@@ -461,7 +461,7 @@ TEST_CASE("MultiPinLedDriver loopbackRxPin tracks the loopbackTest toggle") {
 // lane-0 substitution is hardware-only (lcdLanes==0 on desktop); the visibility
 // contract is host-testable here via the shared helper (toggles loopbackTest both
 // ways and asserts the control stays bound while flipping visibility).
-TEST_CASE("MultiPinLedDriver loopbackTxPin tracks the loopbackTest toggle") {
+TEST_CASE("I80Peripheral loopbackTxPin tracks the loopbackTest toggle") {
     mm::I80Peripheral peripheral;
     mm::ParallelLedDriver d;
     d.setPeripheralForTest(&peripheral);
@@ -482,7 +482,7 @@ TEST_CASE("MultiPinLedDriver loopbackTxPin tracks the loopbackTest toggle") {
 // kSupportsPinExpander moved from a static constexpr on the driver to a virtual on the I80Peripheral
 // backend (supportsPinExpander()) — a bare I80Peripheral instance reaches it without needing a live
 // driver's peripheral_ (which is protected).
-TEST_CASE("MultiPinLedDriver hides pinExpander where the chip can't host it") {
+TEST_CASE("I80Peripheral hides pinExpander where the chip can't host it") {
     mm::I80Peripheral peripheral;
     // Tied to the capability flag, not to a hard-coded value: the host now EMULATES LCD_CAM (so
     // the expander path is reachable off-device), and a classic ESP32 still reports false. The
@@ -507,14 +507,14 @@ TEST_CASE("MultiPinLedDriver hides pinExpander where the chip can't host it") {
 // The host bus is REAL MEMORY, not a refusal: `busInit` used to return false on desktop, so
 // every bus assertion was unreachable off-device and the driver's encode path only ever ran
 // on hardware. The contract is identical for all three peripherals, so it lives in one place.
-TEST_CASE("MultiPinLedDriver allocates a real host bus the driver can encode into") {
+TEST_CASE("I80Peripheral allocates a real host bus the driver can encode into") {
     mm::test::checkHostBusAllocates<mm::I80Peripheral>();
 }
 
-TEST_CASE("MultiPinLedDriver gives the host bus two distinct buffers when asked") {
+TEST_CASE("I80Peripheral gives the host bus two distinct buffers when asked") {
     mm::test::checkHostBusDoubleBuffer<mm::I80Peripheral>();
 }
 
-TEST_CASE("MultiPinLedDriver counts the DMA buffers in its memory readout") {
+TEST_CASE("I80Peripheral counts the DMA buffers in its memory readout") {
     mm::test::checkHostBusCountedInHeapReadout<mm::I80Peripheral>();
 }

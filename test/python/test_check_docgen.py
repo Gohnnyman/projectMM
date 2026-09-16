@@ -230,27 +230,6 @@ def test_the_image_format_rule_fires_both_ways():
                                                list(_cards(png))[0]))
 
 
-def test_a_baseline_entry_does_not_tolerate_growth():
-    """A baseline holds a card at the size it WAS. Matching the rule word alone let a
-    tolerated card grow without limit, which is the opposite of a baseline's job."""
-    import check_docgen
-    rule, n = check_docgen._measure("controls 678 > 600")
-    assert (rule, n) == ("controls", 678)
-    rule2, n2 = check_docgen._measure("no image: every card leads with one")
-    assert rule2 == "no image" and n2 is None
-
-
-def test_two_rules_that_share_an_opening_word_key_apart():
-    """A details table has two limits, columns and cell width, and both findings open
-    with the same two words. Keyed on that, one baselined wide table also tolerated a
-    cell growing past its limit: a second rule silently inheriting the first's licence."""
-    import check_docgen
-    cols = check_docgen._measure("details table has 5 columns (max 4)")
-    cell = check_docgen._measure("details table cell is 420 characters (max 300): prose in a grid")
-    assert cols[0] != cell[0]
-    assert (cols, cell) == (("details table has", 5), ("details table cell", 420))
-
-
 def test_an_effect_card_needs_a_gif_not_a_png():
     """Effects, modifiers and layouts show MOTION: a still frame of a moving effect says
     almost nothing about it. Everything else is cards and controls, where a png is
@@ -363,14 +342,15 @@ def test_links_share_the_controls_cell():
     assert "mm-param" in cells[1] and "mm-links" in cells[1]
 
 
-def test_the_preview_image_leads_the_first_cell():
-    """Above the name, not beside it: an image in its own column forced every text
-    column into a quarter of the page."""
-    page = ('### Thing 💫 · kind\n\n<img src="../../assets/x.png" alt="x">\n\nShort.\n\n- `a` — one.\n')
+def test_the_card_name_leads_the_first_cell():
+    """The name first, the preview under it: a reader scanning the table is looking for a
+    name, and a picture above it pushes that down the row. The image stays in this column
+    rather than its own, which is what kept a long description from rendering as a ribbon."""
+    page = ('### Thing 💫 · kind\n\n<img src="../../assets/x.png" alt="x">\n\nShort.\n\n- `a`: one.\n')
     row = [l for l in _row(page).split("\n") if l.startswith("| ") and "Module |" not in l
            and not l.startswith("|--")][0]
     cells = row.strip("| ").split(" | ")
-    assert cells[0].index("mm-preview") < cells[0].index("mm-name")
+    assert cells[0].index("mm-name") < cells[0].index("mm-preview")
 
 
 def test_the_catalog_pages_actually_yield_cards():
@@ -430,6 +410,37 @@ def test_a_member_comment_past_one_line_is_flagged():
 
 def test_a_one_line_member_comment_is_accepted():
     assert not [i for i in _hdr("/// one\nvoid doThing();") if "member comment" in i[1]]
+
+
+def test_a_code_comment_run_past_one_line_is_flagged():
+    """`//` carries the same one-line budget as `///`. Without that the `///` cap moves text
+    rather than removing it: a fifty-line member comment re-spelled as `//` passes every other
+    rule and the file is exactly as long, which is what a first sweep of these headers did."""
+    run = "\n".join(f"// line {i}" for i in range(2))
+    issues = _hdr("class Foo {\npublic:\n" + run + "\n/// does a thing\nvoid doThing();\n};")
+    assert any("code comment 2 lines" in why for _, why in issues)
+
+
+def test_a_long_code_comment_line_is_flagged():
+    """A `//` line carries the same word budget as a `///` one: without it the line cap is
+    satisfied by one very long line, which is a paragraph that happens to lack line breaks."""
+    long = "// " + " ".join(["word"] * 25)
+    issues = _hdr("class Foo {\npublic:\n" + long + "\n/// does a thing\nvoid doThing();\n};")
+    assert any("comment line 25 words" in why for _, why in issues)
+
+
+def test_a_one_line_code_comment_is_accepted():
+    """One line is room to say WHY. The rule cuts essays, not reasons."""
+    issues = _hdr("class Foo {\npublic:\n// why\n/// does a thing\nvoid doThing();\n};")
+    assert not [i for i in issues if "code comment" in i[1]]
+
+
+def test_a_file_level_code_comment_is_exempt():
+    """The `//` block above the first class explains the compilation unit: it is the
+    non-Doxygen sibling of the class comment and has no member to sit beside."""
+    run = "\n".join(f"// line {i}" for i in range(12))
+    issues = _hdr(run + "\nclass Foo {\npublic:\n/// does a thing\nvoid doThing();\n};")
+    assert not [i for i in issues if "code comment" in i[1]]
 
 
 def test_a_long_doc_line_is_flagged():
@@ -498,8 +509,8 @@ def test_the_headers_are_actually_scanned():
 
 def test_the_real_pages_obey_the_structure_rules():
     """The tree itself, as the control: the synthetic cases above prove the rules fire,
-    and this proves they are satisfied where it counts. Sizes are excluded (a baseline
-    grandfathers those); structure has no baseline and must hold everywhere."""
+    and this proves they are satisfied where it counts. Structure must hold everywhere,
+    with no tolerated list to fall back on."""
     import check_docgen
     for rel in check_docgen._pages():
         path = ROOT / "docs" / rel

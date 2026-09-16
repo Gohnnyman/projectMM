@@ -1,4 +1,4 @@
-// @module MultiPinLedDriver
+// @module I80Peripheral
 // @also Correction
 
 #include "doctest.h"

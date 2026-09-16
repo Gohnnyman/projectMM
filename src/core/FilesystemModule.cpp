@@ -406,7 +406,7 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
     //   - a stale slot over a code-wired child (the file predates the wired child, or names a different
     //     type where it now sits): keep the wired instance, advance past it;
     //   - a renamed/removed module type (a documented break rather than a migration, e.g. a pre-consolidation
-    //     MoonLedDriver/MultiPinLedDriver entry): that entry drops, the rest stay.
+    //     MoonI80Peripheral/I80Peripheral entry): that entry drops, the rest stay.
     uint8_t pos = 0;
     for (uint8_t i = 0; ; i++) {
         char typeKey[MAX_KEY];
