@@ -21,9 +21,9 @@
 // everywhere; this is the one bounded exception, and it is a whole-header gate rather than a rule
 // weakened in place.
 //
-// Prior art: John Hart's sphere tracing, and Iñigo Quilez's distance-function and raymarching
-// articles (iquilezles.org) — the primitives, the gradient normal and the operators are his
-// descriptions, implemented fresh.
+/// Prior art: John Hart's sphere tracing, and Iñigo Quilez's distance-function and raymarching
+/// articles (iquilezles.org) — the primitives, the gradient normal and the operators are his
+/// descriptions, implemented fresh.
 
 #if MM_HEAVY_COMPUTE
 

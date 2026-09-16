@@ -112,6 +112,25 @@ Two scales below a page: **a module** has exactly one reference page written and
 
 **No per-module detail page.** Cross-file rationale that no single `.h` owns goes in a prose section under its group's summary page. Rationale shared by sibling modules lives once on their base class.
 
+### The card
+
+Two columns. **Module** leads with the image, then the name and description; **Details** carries the controls, then three links below a rule: **Tests**, **API** (the generated page), **Details** (the section below the cards). Those three always show, greyed when there is no target, so their position is learned once. Every other link is prose, made in the sentence that needs it.
+
+Every card leads with an image: `.gif` on effects, modifiers and layouts, which show motion, `.png` elsewhere.
+
+| | Limit |
+|---|---|
+| Description | 600 characters |
+| Controls, together | 600 |
+| One control | 120 |
+| Details table | 4 columns, 300 characters a cell |
+
+Over a limit the text **moves rather than shrinks**, and its home follows from what it is: behavior of the module goes in the header's `///`, reaching the reader as the generated page; what a reader needs before choosing between siblings goes in a `## <Name>, details` section below the cards, which the build links from the row. Trimming to fit is the one wrong answer, for the reason [Comments](#comments) gives.
+
+A details section continues the card, so it is written for the same reader. Implementation belongs in the `///`. The heading takes a comma, never an em-dash: the build matches `## <Name>, details` exactly, and [em-dashes are banned](#writing) everywhere.
+
+All of it is enforced by [`check_catalog.py`](../moondeck/check/check_catalog.py), pinned by [`test_check_catalog.py`](../../test/python/test_check_catalog.py). A check that silently stopped matching would report a clean run, so each rule is tested firing as well as staying quiet.
+
 ## Comments
 
 - **Comments say WHY.** Restating what the line does is noise, and usually a naming failure: see [prefer naming over commenting](coding-standards.md#writing-a-line-of-code).

@@ -456,8 +456,8 @@ inline void line(const Canvas& cv, Coord3D a, Coord3D b, RGB c, uint8_t shorten 
 // a control, audio, a particle position: rather than from the sine paths the current callers use.
 // A kernel that hard-coded one set of constants would have made every future effect look the same.
 //
-// Prior art: Jim Blinn's 1982 blobby model; the integer inverse-square form follows WLED's metaball
-// effects rather than Blinn's exponential.
+/// Prior art: Jim Blinn's 1982 blobby model; the integer inverse-square form follows WLED's metaball
+/// effects rather than Blinn's exponential.
 
 /// One blob's orbit: where it sits at time `t` on a grid of `w` by `h`.
 struct BlobPath {

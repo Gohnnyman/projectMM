@@ -24,6 +24,7 @@ namespace mm {
 // small grid; the numbers per target are in performance.md rather than promised here.
 // @card FluidEffect.png
 /// Effect: dye poured into a simulated fluid, carried by the flow the medium itself works out.
+/// Prior art: Stam 1999, "Stable Fluids".
 class FluidEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️🌊💨"; }   // power-function showcase

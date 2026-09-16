@@ -25,9 +25,9 @@ namespace mm {
 // the shapes are cheap and the palette lookup dominates. `blend` controls the melt radius; at 0 the
 // shapes union hard, which is the classic "two circles" look.
 //
-// Prior art: Iñigo Quilez's 2D distance-function catalogue and his polynomial smooth-minimum
-// (iquilezles.org). Implemented fresh in fixed point against those descriptions.
-// @card SdfShapesEffect.png
+/// Prior art: Iñigo Quilez's 2D distance-function catalogue and his polynomial smooth-minimum
+/// (iquilezles.org). Implemented fresh in fixed point against those descriptions.
+/// @card SdfShapesEffect.png
 /// Effect: two SDF shapes orbiting and melting together, with a soft edge and an outline.
 class SdfShapesEffect : public EffectBase {
 public:

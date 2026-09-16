@@ -58,6 +58,8 @@ namespace mm {
 /// stopped answering. On WiFi it is worse: broadcast goes out at the lowest basic rate, unACKed, to
 /// every station, waking them all from power-save (RFC 9119).
 ///
+///
+/// Origin: MoonLight D_NetworkOut; the Art-Net 4, E1.31 and DDP specifications.
 /// **What the choice is NOT about.** "Unicast means sending the same data N times" only bites when
 /// several nodes need the SAME universe (mirroring). When each node owns a DIFFERENT slice — the
 /// normal case, and what this driver models — unicast duplicates nothing: the sender emits exactly

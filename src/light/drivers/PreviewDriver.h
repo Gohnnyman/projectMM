@@ -58,6 +58,9 @@ namespace mm {
 /// for that mixed-criticality pairing.
 ///
 /// **Resolution is client-driven.** The browser reads the drops counter each frame carries (the
+///
+/// Origin: projectMM, on MoonLight's PhysicalLayer model,
+/// https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h.
 /// device's own congestion signal) and posts the `[0x51][stride][fps]` standing request it wants;
 /// the device serves the most conservative request across viewers. The memory cap
 /// (`maxPreviewPoints()`) is the only floor a request cannot go finer than.

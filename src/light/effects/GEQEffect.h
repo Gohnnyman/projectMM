@@ -17,14 +17,14 @@ namespace mm {
 // live bar is shorter, the remembered peak is drawn as a single dot and decays downward at a rate set
 // by `ripple` (0 = the peak dot is disabled; otherwise it falls one row every `ripple` frames).
 //
-// Prior art: WLED's "GEQ" / 2D GEQ (mode_2DGEQ, Aircoookie / Andrew Tuline lineage), carried into
-// MoonLight as the GEQ effect. The band→column mapping, the 7·band + 3·prev + 3·next smoothing weights,
-// the bottom-up bar fill, the colorBars / smoothBars toggles, and the falling-peak dot are reproduced
-// here, written fresh on projectMM's EffectBase + the shared draw / palette primitives. Reads
-// AudioService::latestFrame(); silence → bars flat → peaks fall away → dark, safe on any target and grid
-// size. The per-column peak-fall state lives on the heap (sized to width()), allocated in prepare
-// and freed in release — never a large inline member.
-// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
+/// Prior art: WLED's "GEQ" / 2D GEQ (mode_2DGEQ, Aircoookie / Andrew Tuline lineage), carried into
+/// MoonLight as the GEQ effect. The band→column mapping, the 7·band + 3·prev + 3·next smoothing weights,
+/// the bottom-up bar fill, the colorBars / smoothBars toggles, and the falling-peak dot are reproduced
+/// here, written fresh on projectMM's EffectBase + the shared draw / palette primitives. Reads
+/// AudioService::latestFrame(); silence → bars flat → peaks fall away → dark, safe on any target and grid
+/// size. The per-column peak-fall state lives on the heap (sized to width()), allocated in prepare
+/// and freed in release — never a large inline member.
+/// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Audio-reactive graphic-equaliser effect: 16 bands as vertical bars.
 class GEQEffect : public EffectBase {
 public:

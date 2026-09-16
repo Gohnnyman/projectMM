@@ -20,14 +20,14 @@ namespace mm {
 // Layer::extrude fans that single column across x (and z on a cube) on wider layers, so the same
 // code renders a strip or tiles a panel.
 //
-// Prior art: WLED's "Freqmatrix" audio-reactive effect (Andrew Tuline / the WLED SR fork), carried
-// into MoonLight (E_MoonModules / MoonModules). The shift-register scroll, the
-// pixVal = level·fx·sensitivity/256 brightness, the 80 Hz / quarter-volume gate, the
-// upperLimit = 80 + 42·highBin / lowerLimit = 80 + 3·lowBin frequency window, and the
-// map(peakHz, lower, upper, 0, 255) hue index are reproduced here, written fresh on EffectBase + the
-// shared draw/palette primitives. Reads AudioService::latestFrame() (null-safe via the static silence
-// frame); safe on any target and grid size.
-// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
+/// Prior art: WLED's "Freqmatrix" audio-reactive effect (Andrew Tuline / the WLED SR fork), carried
+/// into MoonLight (E_MoonModules / MoonModules). The shift-register scroll, the
+/// pixVal = level·fx·sensitivity/256 brightness, the 80 Hz / quarter-volume gate, the
+/// upperLimit = 80 + 42·highBin / lowerLimit = 80 + 3·lowBin frequency window, and the
+/// map(peakHz, lower, upper, 0, 255) hue index are reproduced here, written fresh on EffectBase + the
+/// shared draw/palette primitives. Reads AudioService::latestFrame() (null-safe via the static silence
+/// frame); safe on any target and grid size.
+/// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 //
 // Fidelity-scale note: WLED's volume threshold is `volumeSmth > 0.25` on a 0..~1 normalised volume,
 // and its brightness divisor is 256.0 on that same 0..1 scale. projectMM's AudioFrame::level is a

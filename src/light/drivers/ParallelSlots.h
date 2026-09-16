@@ -176,7 +176,7 @@ inline void MM_RAMFUNC encodeWs2812ParallelSlots(const uint8_t* wire, Slot activ
 // Named for the hardware (a shift register is what it is); the lineage this
 // studied calls it a "virtual" driver, but nothing here is virtual — the '595s,
 // the latch line and the level shifter are all physically on the board.
-// Prior art: hpwit's I2SClocklessVirtualLedDriver — studied, not copied.
+/// Prior art: hpwit's I2SClocklessVirtualLedDriver — studied, not copied.
 //
 // A '595 is SERIAL-IN, parallel-out: presenting 8 bits takes 8 clock cycles. So
 // each of the 3 WS2812 slots above becomes `outputsPerPin` SHIFT CYCLES here —

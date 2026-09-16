@@ -19,7 +19,7 @@ namespace mm {
 //            without going anywhere. On a panel this is the classic plasma-like wash. On a
 //            volumetric fixture there is no axis left for depth, so every slice is the same.
 //
-// Author: FastLED inoise field (Mark Kriegsman), and MoonLight's Noise2D for the morph form.
+/// Author: FastLED inoise field (Mark Kriegsman), and MoonLight's Noise2D for the morph form.
 /// Effect: a gradient-noise field through the palette, drifting across the fixture or morphing in place.
 /// @card NoiseEffect.gif
 class NoiseEffect : public EffectBase {

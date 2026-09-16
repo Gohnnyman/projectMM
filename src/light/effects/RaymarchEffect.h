@@ -25,8 +25,8 @@ namespace mm {
 // 4096 lights runs it in 1.64 ms and still holds 409 fps, about 0.4 us per pixel. `steps` caps how
 // far each ray may search, so halving it roughly halves the cost.
 //
-// Prior art: Iñigo Quilez's distance-function and raymarching articles (iquilezles.org).
-// @card RaymarchEffect.png
+/// Prior art: Iñigo Quilez's distance-function and raymarching articles (iquilezles.org).
+/// @card RaymarchEffect.png
 /// Effect: a raymarched 3D scene of melting spheres, lit by a normal derived from the field.
 class RaymarchEffect : public EffectBase {
 public:

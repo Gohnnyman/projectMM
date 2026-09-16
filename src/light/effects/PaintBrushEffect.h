@@ -9,14 +9,14 @@ namespace mm {
 // sweep. The field fades a little each frame so the moving lines leave brush strokes rather than
 // redrawing cleanly. A line only draws when it's longer than `minLength`, so quiet bands stay dark.
 //
-// Prior art: MoonLight's PaintBrush (@TroyHacks, E_MoonModules, MoonModules). Behaviour reproduced
-// exactly — the same six oscillating endpoints, the per-band Euclidean length fed back through the
-// draw-line shorten parameter (this is what makes the strokes curve), the per-frame fade and the
-// length gate — written fresh on projectMM's EffectBase + the shared primitives (beatsin8, map8,
-// draw::line, draw::fade, the audio frame). Reads AudioService::latestFrame(); silence → no lines →
-// fades to dark, safe on any target and any grid size. The 'soft' anti-alias control is omitted
-// (the one approved omission — draw::line is crisp, projectMM has no Xiaolin-Wu line yet).
-// Author: @TroyHacks (WLED MoonModules, GPLv3) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
+/// Prior art: MoonLight's PaintBrush (@TroyHacks, E_MoonModules, MoonModules). Behaviour reproduced
+/// exactly — the same six oscillating endpoints, the per-band Euclidean length fed back through the
+/// draw-line shorten parameter (this is what makes the strokes curve), the per-frame fade and the
+/// length gate — written fresh on projectMM's EffectBase + the shared primitives (beatsin8, map8,
+/// draw::line, draw::fade, the audio frame). Reads AudioService::latestFrame(); silence → no lines →
+/// fades to dark, safe on any target and any grid size. The 'soft' anti-alias control is omitted
+/// (the one approved omission — draw::line is crisp, projectMM has no Xiaolin-Wu line yet).
+/// Author: @TroyHacks (WLED MoonModules, GPLv3) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
 /// Effect that paints moving brush-stroke lines across the layer.
 class PaintBrushEffect : public EffectBase {
 public:

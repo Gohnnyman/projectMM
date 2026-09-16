@@ -36,6 +36,9 @@ namespace mm {
 /// (3.3 V drive into a 5 V strip), not firmware — the "LED signal integrity" use-case guide has the
 /// confirm-firmware-innocent playbook (`loopbackFrame`, the TX-power sweep) and the electrical fixes.
 /// @card RmtLedDriver.png
+///
+/// Origin: WS2812B on FastLED and WLED prior art, and the clockless I2S / RMT / Parlio
+/// techniques of hpwit (Yves Bazin), https://github.com/hpwit.
 class RmtLedDriver : public DriverBase {
 public:
     /// WS2812/SK6812 strips are physically GRB-wired, so a fresh RMT driver references the "GRB"

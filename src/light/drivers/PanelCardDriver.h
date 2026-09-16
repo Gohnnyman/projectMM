@@ -58,6 +58,12 @@ namespace mm {
 /// ## Running this on a host
 ///
 /// The desktop build sends real frames too, via `platform::ethBindRawInterface` — so a Raspberry
+///
+/// Origin: the ColorLight 5A-75 documented byte layout. Inspired by FPP (Falcon Player),
+/// https://github.com/FalconChristmas/fpp, the show player that drives these cards from a
+/// Raspberry Pi: a board already rendering those frames can send them itself and remove the
+/// host from the installation. FPP is also the reference point for what good looks like
+/// here, sustaining 50 fps.
 /// Pi, a Mac or a Windows PC running projectMM is a panel controller, which is the deployment this
 /// replaces. Linux uses AF_PACKET and macOS BPF, both needing root or CAP_NET_RAW; Windows has no
 /// kernel path for raw L2 at all and goes through Npcap, resolved at run time so the binary still

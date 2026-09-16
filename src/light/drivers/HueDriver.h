@@ -31,6 +31,9 @@ namespace mm {
 /// Prior art: the [Hue v1 CLIP API](https://developers.meethue.com/develop/hue-api/) (public docs);
 /// the effect-as-output mapping is projectMM's own.
 /// @card HueDriver.png
+///
+/// Origin: projectMM, on the Hue v1 CLIP API,
+/// https://developers.meethue.com/develop/hue-api/.
 class HueDriver : public DriverBase {
 public:
     /// HueDriver reads apply()'s output back as R,G,B to convert to HSV for the bridge, so it

@@ -162,8 +162,7 @@ rather than two.
 
 Detail: [technical](moxygen/MoonLiveService.md)
 
-## Audio — details
-
+## Audio, details
 #### WLED audio sync: what is on the wire
 
 Sending and receiving both use the **multicast address 239.0.0.1**, which is what WLED's own
@@ -215,8 +214,7 @@ value would drive effects harder than locally analyzed audio ever could.
 
 Prior art: the WLED-MM audio-reactive usermod by **Frank ([@softhack007](https://github.com/softhack007))**, the most-used open-source audio-reactive LED implementation, whose adaptive noise-gate concept the analysis here descends from (analyzed with his permission); and **[@troyhacks](https://github.com/troyhacks/WLED)**, who reworked that DSP onto Espressif's [esp-dsp](https://github.com/espressif/esp-dsp) FFT, the same choice this service makes. The line-in path exists because **wladi ([myhome-control](https://shop.myhome-control.de))** supplied the hardware and pinout for the [MHC-WLED ESP32-P4 shield](../../reference/hardware/mhc-wled-esp32-p4-shield.md): its onboard PCM1808 I2S ADC is what `mclkPin` is for.
 
-## OSC — details
-
+## OSC, details
 **Addresses.** These are a public contract: a TouchOSC layout built against them keeps working, so
 they stay small and boring.
 
@@ -290,8 +288,7 @@ placeholder rather than as part of the contract above.
 **It does not reach a Mackie desk.** The X-Touch and QCon Pro G2 speak Mackie Control over MIDI,
 not OSC: see [control surfaces](../../reference/hardware/control-surfaces.md) for what would.
 
-## Infrared: details
-
+## Infrared, details
 Nothing is fixed in firmware. A row IS the binding: learn a key onto it, pick what it drives from
 the target dropdown, and pick whether the press toggles that control, or nudges it by a value. A
 handset with twenty keys is twenty rows. `set` is offered only where an input reports a release, so

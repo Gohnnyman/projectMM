@@ -210,8 +210,7 @@ A read-only diagnostic that shows **which module owns each GPIO, for what role, 
 
 Detail: [technical](moxygen/PinsModule.md)
 
-## MQTT — details
-
+## MQTT, details
 The topic prefix is `projectMM/<mac>` — a **stable** identifier (the last 6 hex of the device's MAC), fixed for the device's life. Renaming the device does **not** change its topics, so a hub's config never breaks on a rename (the WLED/Tasmota/Home-Assistant convention). It's derived, not a stored control.
 
 **Topics** (for a device whose MAC ends `563cfe`): the device SUBSCRIBEs to the `set` topics and PUBLISHes the `get` topics on change (and on connect, so a controller never reads "No Response"). It also publishes its friendly `deviceName` on the retained `name` topic, so a hub can show the human name while the topics stay MAC-stable:
@@ -259,8 +258,7 @@ Home Assistant adopts the device two ways, both zero-config:
 
 Both can be on at once. Setup walkthrough (including exposing HA to Apple Home via HA's HomeKit Bridge, no Homebridge needed) in the [Home Assistant recipe](../../how-to/home-automation.md#adopt-in-home-assistant).
 
-## File Manager — details
-
+## File Manager, details
 The panel is a lazy folder **tree** (each folder loads its children on first expand) plus an inline text editor. Dot-prefixed entries (the `.config` persistence dir) are hidden unless `show hidden` is on.
 
 - Click a folder's row to select it and toggle its expansion (▸/▾); click a selected file to open the editor.

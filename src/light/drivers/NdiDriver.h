@@ -35,6 +35,8 @@
 namespace mm {
 
 /// Driver that publishes the layer as an NDI video source.
+///
+/// Origin: projectMM, against NewTek/Vizrt's documented NDI C API.
 class NdiDriver : public DriverBase {
 public:
     static constexpr const char* kTags = "🖥️";

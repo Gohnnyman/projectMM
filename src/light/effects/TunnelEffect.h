@@ -20,9 +20,9 @@ namespace mm {
 // Cost: one divide, one atan and one noise sample per pixel. The divide is the expensive part on a
 // chip without hardware division; `depth` sets how fine the wall texture is, not how much it costs.
 //
-// Prior art: the standard demoscene tunnel (angle + 1/r texture mapping), and Iñigo Quilez's
-// write-ups of it. Implemented fresh in fixed point.
-// @card TunnelEffect.png
+/// Prior art: the standard demoscene tunnel (angle + 1/r texture mapping), and Iñigo Quilez's
+/// write-ups of it. Implemented fresh in fixed point.
+/// @card TunnelEffect.png
 /// Effect: a texture-mapped tunnel flying toward a vanishing point.
 class TunnelEffect : public EffectBase {
 public:

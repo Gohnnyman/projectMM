@@ -14,12 +14,12 @@ namespace mm {
 // reads as one wide block of light without the effect duplicating the broadcast itself (that is the
 // framework's job; see architecture.md § Dimensionality).
 //
-// Prior art: WLED's "Noisemeter" audio-reactive effect (Andrew Tuline / WLED-SR). The fadeRate/width
-// knobs, the level→length mapping, the inoise8(row·level + aux0, aux1 + row·level) field sampling, and
-// the bottom-up fill are reproduced here, written fresh on projectMM's EffectBase + the shared draw /
-// palette / noise / beatsin8 primitives. Reads AudioService::latestFrame(); silence → level 0 →
-// maxLen 0 → the panel fades to dark, safe on any target and grid size.
-// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
+/// Prior art: WLED's "Noisemeter" audio-reactive effect (Andrew Tuline / WLED-SR). The fadeRate/width
+/// knobs, the level→length mapping, the inoise8(row·level + aux0, aux1 + row·level) field sampling, and
+/// the bottom-up fill are reproduced here, written fresh on projectMM's EffectBase + the shared draw /
+/// palette / noise / beatsin8 primitives. Reads AudioService::latestFrame(); silence → level 0 →
+/// maxLen 0 → the panel fades to dark, safe on any target and grid size.
+/// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Audio-reactive effect: a noise field modulated by sound level.
 class NoiseMeterEffect : public EffectBase {
 public:
