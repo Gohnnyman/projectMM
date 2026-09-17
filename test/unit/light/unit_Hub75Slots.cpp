@@ -50,8 +50,8 @@ TEST_CASE("HUB75 encode: the frame is bit-plane major, one blanking byte per row
 
     // 2 planes x 2 scan rows x (8 columns x 1 pair + 1 blank) = 36 slots, and 2 bytes
     // each because the bus is 16 bits wide.
-    CHECK(geo.frameSlots() == 36);
-    CHECK(geo.frameBytes() == 72);
+    CHECK(geo.frameSlots() == 36 + 1);        // + the frame's dark tail word
+    CHECK(geo.frameBytes() == (36 + 1) * 2);
 
     auto rgb = blackFrame(geo.width, geo.height);
     std::vector<uint8_t> out(geo.frameBytes(), 0xAA);
@@ -174,8 +174,8 @@ TEST_CASE("HUB75 encode: a panel driving four rows per address step encodes ever
 
     CHECK(geo.rowsPerScan() == 4);
     // 4 planes x 2 scan rows x (2 columns x 2 pairs + 1 blank) = 40 slots, 80 bytes.
-    CHECK(geo.frameSlots() == 40);
-    CHECK(geo.frameBytes() == 80);
+    CHECK(geo.frameSlots() == 40 + 1);        // + the frame's dark tail word
+    CHECK(geo.frameBytes() == (40 + 1) * 2);
 
     auto rgb = blackFrame(geo.width, geo.height);
     setPixel(rgb, geo.width, 0, 2, 0xFF, 0, 0);   // row 2 = address step 0, pair 1, upper
@@ -204,6 +204,41 @@ TEST_CASE("HUB75 encode: the blanking byte blanks before it latches") {
     const size_t blank = geo.width;   // the byte after the columns
     CHECK((slot(out, blank) & (1u << lay.oe)) != 0);    // dark
     CHECK((slot(out, blank) & (1u << lay.lat)) != 0);   // and latching
+}
+
+TEST_CASE("HUB75 encode: the frame ends dark, so the DMA wrap does not double row 0") {
+    // The peripheral LOOPS this buffer forever: there is no per-frame transmit, so the word
+    // after the last one is the FIRST word of the same buffer again. Every row is blanked by
+    // the word that closes it, and the next row's first column then drives OE low again.
+    //
+    // The last row of the last plane has no next row inside the frame. Its blanking word is
+    // followed by row 0's first column, so row 0 is lit for its own time PLUS the time that
+    // belonged to the final row. On a wall that is one row brighter than every other, which
+    // reads as a row the brightness curve was never applied to.
+    //
+    // So the frame must end with a word that leaves OE HIGH and selects no row: the wrap point
+    // is then dark, and every row gets exactly its own window.
+    mm::Hub75Geometry geo;
+    geo.width = 2; geo.height = 4; geo.scanRate = 2; geo.bitDepth = 2;
+    mm::Hub75Layout lay;
+    lay.lat = 6; lay.oe = 7;
+    lay.a = 8; lay.b = 9; lay.c = 10; lay.d = 11; lay.e = 12;
+
+    // Every pixel white: row 0 lit twice is then unmistakable on a wall, and here it is the
+    // final word that says whether it happens.
+    std::vector<uint8_t> rgb(static_cast<size_t>(geo.width) * geo.height * 3, 255);
+    std::vector<uint8_t> out(geo.frameBytes(), 0);
+    REQUIRE(mm::hub75Encode(rgb.data(), out.data(), geo, lay) == geo.frameBytes());
+
+    const size_t last = geo.frameSlots() - 1;
+    const uint16_t tail = slot(out, last);
+    CHECK((tail & (1u << lay.oe)) != 0);      // dark across the wrap
+    // No row selected: the address lines are what a lit row needs, and holding one here
+    // would light whichever row the last address happened to name.
+    const uint16_t addrMask = static_cast<uint16_t>((1u << lay.a) | (1u << lay.b) |
+                                                    (1u << lay.c) | (1u << lay.d) |
+                                                    (1u << lay.e));
+    CHECK((tail & addrMask) == 0);
 }
 
 TEST_CASE("HUB75 encode: an unusable geometry writes nothing") {
@@ -239,20 +274,21 @@ TEST_CASE("HUB75 frame size is what decides the peripheral") {
     // format cannot silently move the Parlio cliff. Parlio's single-shot cap is
     // 65,535 bytes; the i80/LCD_CAM path allocates from PSRAM and has no such wall.
     // Two bytes a slot: the bus is 16 bits wide, which is what doubles these against a
-    // byte-per-slot encoder that could not reach the address lines at all.
+    // byte-per-slot encoder that could not reach the address lines at all. The trailing
+    // +1 slot is the frame's dark tail word, one per frame rather than one per row.
     // 4-bit throughout: the deepest the driver offers while planes are unweighted.
     mm::Hub75Geometry one;    // one 64x64 panel, 1/32 scan
     one.width = 64; one.height = 64; one.scanRate = 32; one.bitDepth = 4;
-    CHECK(one.frameBytes() == 4 * 32 * (64 * 1 + 1) * 2);      // 16,640
+    CHECK(one.frameBytes() == (4 * 32 * (64 * 1 + 1) + 1) * 2);      // 16,642
     CHECK(one.frameBytes() < 65535u);                          // Parlio carries one panel
 
     mm::Hub75Geometry four;   // 128x128, 1/32 scan
     four.width = 128; four.height = 128; four.scanRate = 32; four.bitDepth = 4;
-    CHECK(four.frameBytes() == 4 * 32 * (128 * 2 + 1) * 2);    // 65,792
-    CHECK(four.frameBytes() > 65535u);                         // four panels miss the cap by 257 B
+    CHECK(four.frameBytes() == (4 * 32 * (128 * 2 + 1) + 1) * 2);    // 65,794
+    CHECK(four.frameBytes() > 65535u);                         // four panels miss the cap by 259 B
 
     mm::Hub75Geometry sixteen;   // 256x256, 1/32 scan
     sixteen.width = 256; sixteen.height = 256; sixteen.scanRate = 32; sixteen.bitDepth = 4;
-    CHECK(sixteen.frameBytes() == 4 * 32 * (256 * 4 + 1) * 2);  // 262,400
+    CHECK(sixteen.frameBytes() == (4 * 32 * (256 * 4 + 1) + 1) * 2);  // 262,402
     CHECK(sixteen.frameBytes() > 65535u);                       // Parlio cannot carry it
 }

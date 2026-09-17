@@ -22,11 +22,11 @@ Measured from the encoder's own formula (`Hub75Geometry::frameBytes`, pinned by 
 
 | Panels | Geometry | 6-bit | 8-bit | Parlio (65,535 B cap) | i80/LCD_CAM (PSRAM) |
 |---|---|---:|---:|:--|:--:|
-| 1 | 64×64 | 12,480 B | 16,640 B | ✅ both | ✅ |
-| 4 | 128×128 | 49,344 B | 65,792 B | ✅ 6-bit, ❌ 8-bit | ✅ |
-| 16 | 256×256 | 196,800 B | 262,400 B | ❌ | ✅ |
+| 1 | 64×64 | 12,480 B | 16,642 B | ✅ both | ✅ |
+| 4 | 128×128 | 49,344 B | 65,794 B | ✅ 6-bit, ❌ 8-bit | ✅ |
+| 16 | 256×256 | 196,800 B | 262,402 B | ❌ | ✅ |
 
-**Four panels at 8-bit misses the Parlio cap by 257 bytes.** That is worth stating precisely rather than as "borderline": a user with four panels gets full depth on an S3 and 6-bit on a Parlio-only chip, and the driver picks the backend that can carry what they asked for.
+**Four panels at 8-bit misses the Parlio cap by 259 bytes.** That is worth stating precisely rather than as "borderline": a user with four panels gets full depth on an S3 and 6-bit on a Parlio-only chip, and the driver picks the backend that can carry what they asked for.
 
 **This is the fact the issue does not account for.** #102 proposes the P4-Nano as lead candidate because Espressif's reference uses PARLIO, but [platform_esp32_parlio.cpp:238](../../../src/platform/esp32/platform_esp32_parlio.cpp) records the hardware cap: `kParlioMaxTransferBytes = 0x7FFFF / 8` = 65,535 bytes, width-invariant. PARLIO carries one panel comfortably, reaches its limit at four, and cannot do sixteen at any useful depth.
 
@@ -119,7 +119,7 @@ Two backends behind it, and **the user picks which**, through a `peripheral` sel
 
 **An earlier draft of this plan had the platform choose, on memory alone. That was wrong, and the reason is contention rather than capacity.** A P4 has both peripherals and only one of each. A user driving WS2812 strips from PARLIO needs HUB75 on LCD_CAM; another user wants the reverse. Both are correct, the difference is what else is plugged into that board, and the platform cannot know it. The sibling claim guard stops two drivers colliding on one block, but it cannot guess which driver should win — that is the user's call, and a select is how the repo already asks it.
 
-The default is whichever backend fits the geometry, so a fresh driver works without a decision. What the plan does NOT do is silently downgrade: four panels at 8-bit is 65,792 bytes against PARLIO's 65,535-byte cap, and the driver says so rather than quietly dropping to 6-bit.
+The default is whichever backend fits the geometry, so a fresh driver works without a decision. What the plan does NOT do is silently downgrade: four panels at 8-bit is 65,794 bytes against PARLIO's 65,535-byte cap, and the driver says so rather than quietly dropping to 6-bit.
 
 A desktop stub returning false from everything keeps `mm_tests` and every non-HUB75 target compiling untouched.
 
