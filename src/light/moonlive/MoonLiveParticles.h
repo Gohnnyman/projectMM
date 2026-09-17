@@ -1,8 +1,8 @@
 #pragma once
 
-#include "core/MoonModule.h"
-#include "core/ScratchBuffer.h"
-#include "light/particles.h"
+#include "core/module/MoonModule.h"
+#include "core/util/ScratchBuffer.h"
+#include "light/powerfunctions/particles.h"
 
 namespace mm::moonlive {
 

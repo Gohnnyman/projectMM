@@ -163,18 +163,17 @@ Report every place the generated documentation breaks the shape the standards de
 
 ```bash
 uv run moondeck/check/check_docgen.py
-uv run moondeck/check/check_docgen.py --baseline    # rewrite the grandfather list
 ```
 
 Reads the pages the docs build renders as card tables and reports, per card:
 
-- the sizes: 600 characters of description, 600 of controls, 120 for one control
+- the sizes: 600 characters of description and 100 for any one control, 400 and 80 on the visual catalogs
 - a missing image, or the wrong format for its page
 - a details section placed above a card, or named for a card that does not exist
 - a details table past 4 columns, or a cell past 300 characters
 - any link in the second column that is not Tests, API or Details
 
-And per header, over the directories it names in `HEADER_DIRS`:
+And per header, over every `.h` under `HEADER_ROOT` (`src/`) except the vendored paths:
 
 - a class comment past 10 lines, or its `@moreinfo` appendix past 20
 - a member comment past one line: a deep dive goes after `@moreinfo`
@@ -183,7 +182,7 @@ And per header, over the directories it names in `HEADER_DIRS`:
 
 `--report` writes [docs/reference/metrics/docgen.md](../docs/reference/metrics/docgen.md), the tracked state of the sweep: totals per rule and per page, then every finding. Current state only, so its git history is the trend, the same shape repo-health.md uses.
 
-`docgen_baseline.txt` holds what the tree already breaks, so the check passes today and still fails on anything new. An entry tolerates a card **at the size it recorded**: shrink it and nothing needs refreshing, grow it and the check fails naming the old number. `--baseline` has no card on purpose, since a button that rewrites the grandfather list is a button that clears a violation.
+**There is no tolerated list.** The limits are the limits, and the check is red until the tree meets them. A grandfather list was tried and removed: while one exists, the cheapest way to make the check green is to add to it, which is how the comment budget eroded in the first place.
 
 The rules are in [documentation-standards.md](../docs/contributing/documentation-standards.md#the-card), and the check itself is pinned by `test/python/test_check_docgen.py`: every rule is tested firing on a page built to break it, because a regex that silently stopped matching would report a clean run.
 
@@ -468,7 +467,7 @@ Then every declaration, ranked by how far it sits from the ideal:
 
 ```
   DOC DEVIATION  DOC WORDS  DEV WORDS  VIS   DECL       NAME               FILE:LINE
-         +1135%       1606          0  pub   class      MoonI80Peripheral  MoonLedDriver.h:10
+         +1135%       1606          0  pub   class      MoonI80Peripheral  MoonI80Peripheral.h:10
           +797%       1166          0  pub   class      HttpServerModule   HttpServerModule.h:17
           -100%          0         61  priv  method     driversOn          Scheduler.h:138
 ```
@@ -1221,7 +1220,7 @@ Exit codes: `0` = all checks passed, `1` = device-side failure (probe or provisi
 
 **Why this exists.** The browser-side Improv flow (ESP Web Tools' modal) is awkward to automate and harder to reproduce on demand: needs Chrome, Web Serial, and a click-through. This script exercises the **device-side** Improv implementation — which is the part we own and the part most likely to break across firmware changes. ESP Web Tools' Improv handling is upstream-maintained and stable. Recommended pre-commit test for any change to:
 
-- [src/core/ImprovFrame.h](../src/core/ImprovFrame.h) — the on-device parser
+- [src/core/util/ImprovFrame.h](../src/core/util/ImprovFrame.h) — the on-device parser
 - [src/platform/esp32/platform_esp32_improv.cpp](../src/platform/esp32/platform_esp32_improv.cpp) — the UART listener task
 - [mooninstaller/index.html](../mooninstaller/index.html) — the web installer page
 - [src/ui/install-picker.js](../src/ui/install-picker.js) — the picker driving the install flow

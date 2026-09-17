@@ -1,13 +1,13 @@
 // @module MoonStatsReport
 
 #include "doctest.h"
-#include "core/MoonStatsModule.h"
-#include "core/AudioService.h"
+#include "core/system/MoonStatsModule.h"
+#include "core/services/AudioService.h"
 
 #include <cstring>
 #include <string>
 
-#include "core/SystemModule.h"
+#include "core/system/SystemModule.h"
 #include "light/drivers/PreviewDriver.h"   // the one type the report excludes as boot wiring
 
 namespace {

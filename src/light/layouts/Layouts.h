@@ -1,8 +1,8 @@
 #pragma once
 
 #include "light/layouts/LayoutBase.h"  // LayoutBase + CoordCallback — the Layouts container casts its children to it
-#include "core/MoonModule.h"
-#include "light/light_types.h" // lengthType, nrOfLightsType
+#include "core/module/MoonModule.h"
+#include "light/util/light_types.h" // lengthType, nrOfLightsType
 
 #include <cstdio> // std::snprintf for the status line
 

@@ -1,9 +1,9 @@
 // @module MoonStatsModule
 
 #include "doctest.h"
-#include "core/FilesystemModule.h"
-#include "core/MoonStatsModule.h"
-#include "core/Scheduler.h"
+#include "core/system/FilesystemModule.h"
+#include "core/system/MoonStatsModule.h"
+#include "core/module/Scheduler.h"
 
 #include <cstdio>
 #include <cstring>

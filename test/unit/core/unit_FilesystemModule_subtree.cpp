@@ -10,9 +10,9 @@
 // set up, with children that must be created, replaced or destroyed while the device runs.
 
 #include "doctest.h"
-#include "core/FilesystemModule.h"
-#include "core/ModuleFactory.h"
-#include "core/Scheduler.h"
+#include "core/system/FilesystemModule.h"
+#include "core/util/ModuleFactory.h"
+#include "core/module/Scheduler.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/layers/Layer.h"

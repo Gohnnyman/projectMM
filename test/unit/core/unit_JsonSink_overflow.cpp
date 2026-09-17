@@ -8,7 +8,7 @@
 // anywhere. Two causes, one per test below.
 
 #include "doctest.h"
-#include "core/JsonSink.h"
+#include "core/util/JsonSink.h"
 #include "platform/platform.h"
 
 #include <cstring>

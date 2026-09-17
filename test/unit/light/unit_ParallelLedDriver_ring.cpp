@@ -1,4 +1,4 @@
-// @module MoonLedDriver
+// @module MoonI80Peripheral
 // @also ParallelLedDriver
 
 #include "doctest.h"
@@ -37,7 +37,7 @@ namespace {
 using mm::nrOfLightsType;
 
 // The mock's own geometry, deliberately SMALL and independent of the platform's (which is a runtime
-// control now — see MoonLedDriver::ringRows/ringBufs). A 4-buffer pool forces buffer REUSE at few slices
+// control now — see MoonI80Peripheral::ringRows/ringBufs). A 4-buffer pool forces buffer REUSE at few slices
 // (a 200-light frame = 13 slices reuses buffers 0..4), which is the path the recycled / short-last-slice
 // tests exist to exercise. 16 rows/buffer keeps a slice MULTI-row on purpose: a 1-row slice cannot express
 // a tiling bug (every buffer would hold exactly one light, so a stride error has nowhere to show).

@@ -1,9 +1,9 @@
 // @module AudioService
 
 #include "doctest.h"
-#include "core/AudioLevel.h"
-#include "core/AudioService.h"
-#include "core/ModuleFactory.h"
+#include "core/services/AudioLevel.h"
+#include "core/services/AudioService.h"
+#include "core/util/ModuleFactory.h"
 #include "light/effects/AudioSpectrumEffect.h"
 
 #include <cmath>

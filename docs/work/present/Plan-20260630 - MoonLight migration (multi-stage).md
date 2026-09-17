@@ -14,7 +14,7 @@ Two cross-cutting rules govern every stage, from [CLAUDE.md](../../../CLAUDE.md)
 
 ## What exists today (baseline)
 
-- **Primitives:** `src/core/color.h` has `RGB`, `hsvToRgb`, `scale8`, `sin8`/`cos8` (LUT). `src/light/light_types.h` has `Coord3D`, `Dim`, `lengthType`. That's it — no beat/noise/blend/random helpers, no shared palette, no draw primitives.
+- **Primitives:** `src/core/util/color.h` has `RGB`, `hsvToRgb`, `scale8`, `sin8`/`cos8` (LUT). `src/light/util/light_types.h` has `Coord3D`, `Dim`, `lengthType`. That's it — no beat/noise/blend/random helpers, no shared palette, no draw primitives.
 - **Palette:** none shared. `PlasmaPaletteEffect` hard-codes a 256-entry `RGB palette_[256]` in flash — the pattern to generalise.
 - **Effects:** ~21 already ported (Rainbow, Noise, Plasma, Fire, Particles, Metaballs, GameOfLife, Wave, …). GameOfLife (272 lines) is flagged by the product owner as **not faithful — re-port from the real algorithm**.
 - **Modifiers:** Multiply, Rotate, Region, Checkerboard, RandomMap. **Layouts:** Grid, Sphere, Wheel.

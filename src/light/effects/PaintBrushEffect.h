@@ -4,61 +4,75 @@
 
 namespace mm {
 
-// Audio-reactive "paintbrush": a set of lines whose endpoints oscillate in 3D on the beat, each
-// line shortened toward its first endpoint by an audio band's magnitude so the strokes curve and
-// sweep. The field fades a little each frame so the moving lines leave brush strokes rather than
-// redrawing cleanly. A line only draws when it's longer than `minLength`, so quiet bands stay dark.
-//
-/// Prior art: MoonLight's PaintBrush (@TroyHacks, E_MoonModules, MoonModules). Behavior reproduced
-/// exactly, the same six oscillating endpoints, the per-band Euclidean length fed back through the
-/// draw-line shorten parameter (this is what makes the strokes curve), the per-frame fade and the
-/// length gate, written fresh on projectMM's EffectBase + the shared primitives (beatsin8, map8,
-/// draw::line, draw::fade, the audio frame). Reads AudioService::latestFrame(); silence → no lines →
-/// fades to dark, safe on any target and any grid size. The 'soft' anti-alias control is omitted
-/// (the one approved omission, draw::line is crisp, projectMM has no Xiaolin-Wu line yet).
-/// Author: @TroyHacks (WLED MoonModules, GPLv3), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
 /// Effect that paints moving brush-stroke lines across the layer.
+/// @card PaintBrushEffect.gif
+/// Author: @TroyHacks (WLED MoonModules, GPLv3), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
+///
+/// Lines whose endpoints oscillate in 3D on the beat, each shortened by a band's magnitude.
+/// That shortening is what makes the strokes curve and sweep.
+/// The field fades each frame, so the lines leave brush strokes rather than redrawing cleanly.
+///
+/// Prior art: MoonLight's PaintBrush, whose six endpoints and length feedback this reproduces.
+///
+/// @moreinfo
+///
+/// ## What a line does
+///
+/// Each line takes one band, and its Euclidean span scaled by that band becomes the shorten amount.
+/// A line draws only when it runs longer than `minLength`, so quiet bands stay dark.
+/// Silence leaves no lines at all, and the field fades to black.
+///
+/// The soft anti-alias control is omitted, since `draw::line` is crisp and has no Xiaolin-Wu form.
 class PaintBrushEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🌙🎶"; }  // MoonLight origin · MoonModules · audio
+    /// Catalog tags: MoonLight origin, MoonModules, audio-reactive.
+    const char* tags() const override { return "💫🌙🎶"; }
+    /// Volumetric: the endpoints oscillate on all three axes.
     Dim dimensions() const override { return Dim::D3; }
 
-    uint8_t oscillatorOffset = 6 * 160 / 255;  // = 3; phase-spread multiplier (0..16)
-    uint8_t numLines   = 255;                  // parallel animated lines (2..255)
-    uint8_t fadeRate   = 40;                   // background decay per frame (0..128)
-    uint8_t minLength  = 0;                    // a line draws only if longer than this (slider 0..255)
-    bool    color_chaos = false;               // per-line hue variation vs a per-band gradient
-    bool    phase_chaos = false;               // random per-frame phase jitter
+    /// The phase-spread multiplier between the six endpoint oscillators.
+    uint8_t oscillatorOffset = 6 * 160 / 255;
+    /// How many lines are animated in parallel.
+    uint8_t numLines   = 255;
+    /// How fast the background decays, which is the brush-stroke trail.
+    uint8_t fadeRate   = 40;
+    /// A line draws only when it runs longer than this.
+    uint8_t minLength  = 0;
+    /// Vary the hue per line rather than running a gradient across the bands.
+    bool    color_chaos = false;
+    /// Jitter every endpoint's phase once a frame.
+    bool    phase_chaos = false;
 
+    /// Publish the oscillators, the line count, the trail and the two chaos switches.
     void defineControls() override {
         controls_.addControl("oscillatorOffset", oscillatorOffset, 0, 16);
         controls_.addControl("numLines", numLines, 2, 255);
         controls_.addControl("fadeRate", fadeRate, 0, 128);
-        controls_.addControl("minLength", minLength);   // slider over the full 0..255 range
+        controls_.addControl("minLength", minLength);   // the full range, so a slider covers it
         controls_.addControl("color_chaos", color_chaos);
         controls_.addControl("phase_chaos", phase_chaos);
     }
 
+    /// Fade the field, then draw each line between its two oscillating endpoints.
     void tick() MM_NONBLOCKING override {
         const lengthType cols = width(), rows = height(), depth = this->depth();
 
         const draw::Canvas cv = canvas();
 
-        // Per-frame: advance the hue, then fade the whole field toward black (a decaying trail).
+        // Advance the hue, then fade the field toward black, which is the trail.
         aux0Hue++;
         layer()->fadeToBlackBy(fadeRate);
 
-        // Optional per-frame phase jitter shared by every endpoint this frame.
+        // One jitter value, shared by every endpoint this frame.
         aux1Chaos = phase_chaos ? rng_.next8() : 0;
 
         const AudioFrame* f = AudioService::latestFrame();
-        if (!f) return;   // silence frame is non-null in practice; guard before dereferencing bands[]
+        if (!f) return;   // a silence frame is non-null in practice, but guard before dereferencing
         const uint32_t ms = elapsed();
-        // bass term added to every oscillator bpm (MoonLight's bands[0]/NUM_GEQ_CHANNELS).
+        // The bass term, added to every oscillator's rate.
         const uint8_t base = static_cast<uint8_t>(f->bands[0] / kBands);
 
-        // The loop visits i in [0, numLines), so the map input-high is numLines-1 — otherwise the
-        // top band/hue (the value produced at i == numLines) is never reached (off-by-one).
+        // The loop stops below `numLines`, so the map's input high is one less or the top is never reached.
         const int lineHi = numLines - 1;
 
         for (size_t i = 0; i < numLines; i++) {
@@ -66,11 +80,7 @@ public:
                 map(static_cast<int>(i), 0, lineHi, 0, kBands - 1));
             const uint8_t band = f->bands[bin];
 
-            // Six endpoints: each axis pair oscillates at a multiple of oscillatorOffset (+ a bass
-            // term), timebased on the band magnitude, phase-jittered by aux1Chaos. beatsin8's range
-            // args are uint8 (0..255), so the oscillator is generated full-range and then scaled to
-            // the grid extent with map() — passing (cols-1)/(rows-1)/(depth-1) directly would
-            // truncate to 8 bits and collapse the strokes into a corner on grids wider than 256.
+            // Generated full-range then mapped, since beatsin8's 8-bit range truncates a wide grid.
             const lengthType x1 = osc(static_cast<uint8_t>(oscillatorOffset * 1 + base), ms, band, cols);
             const lengthType x2 = osc(static_cast<uint8_t>(oscillatorOffset * 2 + base), ms, band, cols);
             const lengthType y1 = osc(static_cast<uint8_t>(oscillatorOffset * 3 + base), ms, band, rows);
@@ -86,10 +96,7 @@ public:
                 length = isqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
             }
 
-            // The Euclidean span scaled by the band magnitude becomes the shorten amount: louder
-            // bands draw a longer fraction of the line, so the strokes curve as the length pulses.
-            // shorten is a 0..255 fraction, so clamp before the uint8 cast — on a >256 grid the raw
-            // span can exceed 255 and would otherwise wrap.
+            // The band scales the span into the shorten amount, clamped before the cast against a wrap.
             length = map8(band, 0, static_cast<uint8_t>(length > 255 ? 255 : length));
 
             if (length > MAX(1, minLength)) {
@@ -103,31 +110,28 @@ public:
     }
 
 private:
-    // The audio frame's frequency-band count (MoonLight's NUM_GEQ_CHANNELS), tied to the array so
-    // the band-index map and the bass term stay in sync with AudioFrame::bands if it ever changes.
+    /// The spectrum's width, tied to the array so the band map stays in sync with it.
     static constexpr int kBands = static_cast<int>(sizeof(AudioFrame::bands) / sizeof(AudioFrame::bands[0]));
 
-    uint16_t aux0Hue = 0;    // running hue, incremented each frame
-    uint8_t  aux1Chaos = 0;  // per-frame phase jitter (0 unless phase_chaos)
-    Random8  rng_{0xB17EB00Bu};
+    uint16_t aux0Hue = 0;    ///< the running hue, advanced each frame
+    uint8_t  aux1Chaos = 0;  ///< this frame's phase jitter, 0 unless `phase_chaos`
+    Random8  rng_{0xB17EB00Bu};   ///< fixed-seed, so the goldens reproduce
 
-    // One endpoint on an axis of extent `len`: an 8-bit sine (0..255) scaled to [0, len-1] so grids
-    // wider than 256 keep their full sweep (beatsin8's range params are only 8-bit). len==0 → 0.
+    /// One endpoint on an axis, generated full-range then mapped so a wide grid keeps its sweep.
     lengthType osc(uint8_t bpm, uint32_t ms, uint8_t timebase, lengthType len) const {
         const uint8_t s = beatsin8(bpm, ms, 0, 255, timebase, aux1Chaos);
         return static_cast<lengthType>(map(s, 0, 255, 0, len > 0 ? len - 1 : 0));
     }
 
-    // FastLED-style MAX/map kept local so the loop reads like the MoonLight source.
+    /// Kept local so the loop above reads like the MoonLight source it follows.
     static constexpr int MAX(int a, int b) { return a > b ? a : b; }
 
-    // Standard integer map (outlo + (i-inlo)*(outhi-outlo)/(inhi-inlo)); guards a zero input span.
+    /// The standard integer map, guarding a zero input span.
     static constexpr int map(int i, int inlo, int inhi, int outlo, int outhi) {
         return inhi == inlo ? outlo : outlo + (i - inlo) * (outhi - outlo) / (inhi - inlo);
     }
 
-    // Integer square root (binary digit-by-digit) — the true Euclidean length the source takes via
-    // float sqrt(), without floats in the hot path; dist8() is an octagonal approximation, not this.
+    /// Integer square root: the true Euclidean length, where `dist8` is an octagonal approximation.
     static int isqrt(int n) {
         if (n <= 0) return 0;
         unsigned int x = static_cast<unsigned int>(n), res = 0, bit = 1u << 30;

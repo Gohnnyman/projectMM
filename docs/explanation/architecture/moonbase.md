@@ -69,7 +69,7 @@ raw `esp_partition_erase_range` + `esp_partition_write`, which also forfeits the
 Everything that can reject it is therefore decided from its FIRST CHUNK, before a byte is erased:
 the image magic, the chip id, and the descriptor naming `projectMM-moonbase` rather than the app.
 The chip id matters because there is one MoonBase per chip, one paste apart, and a checksum does
-not catch a swap. Those rules live in `src/core/FirmwareImage.h` so
+not catch a swap. Those rules live in `src/core/util/FirmwareImage.h` so
 a host test can drive them. What remains is a window, during the write, in which the device holds
 no recovery image; the app keeps running throughout, so the answer to a failure is to retry.
 

@@ -1,7 +1,7 @@
 // @module MoonModule
 
 #include "doctest.h"
-#include "core/MoonModule.h"
+#include "core/module/MoonModule.h"
 
 #include <string>  // MSVC STL doesn't pull this in via doctest.h
 

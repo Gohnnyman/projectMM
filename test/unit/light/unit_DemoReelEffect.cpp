@@ -5,7 +5,7 @@
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "light/draw.h"                // draw::fill — clear the buffer between hosted renders
+#include "light/powerfunctions/draw.h"                // draw::fill — clear the buffer between hosted renders
 
 #include <cstring>
 

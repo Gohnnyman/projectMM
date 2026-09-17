@@ -7,7 +7,7 @@
 // drift. (Same rigor as the Improv frame golden vector.)
 
 #include "doctest.h"
-#include "light/WLEDAudioSyncPacket.h"
+#include "light/util/WLEDAudioSyncPacket.h"
 
 #include <cstdint>
 #include <cstring>

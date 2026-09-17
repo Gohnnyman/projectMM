@@ -10,8 +10,8 @@
 // value MEANS, which no rendering flag expresses.
 
 #include "doctest.h"
-#include "core/Control.h"
-#include "core/JsonSink.h"
+#include "core/module/Control.h"
+#include "core/util/JsonSink.h"
 
 #include <cstring>
 #include <string>

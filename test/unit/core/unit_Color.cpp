@@ -2,7 +2,7 @@
 
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
-#include "core/color.h"
+#include "core/util/color.h"
 
 // Hue 0 is pure red.
 TEST_CASE("hsvToRgb red at h=0") {

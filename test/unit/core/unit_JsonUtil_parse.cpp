@@ -8,7 +8,7 @@
 // truncated, garbage, null, and oversized inputs must fail cleanly with no crash.
 
 #include "doctest.h"
-#include "core/JsonUtil.h"
+#include "core/util/JsonUtil.h"
 
 #include <cstring>
 #include <string>

@@ -1,9 +1,9 @@
 // @module MoonTalkModule
 
 #include "doctest.h"
-#include "core/MoonTalkModule.h"
-#include "core/Scheduler.h"
-#include "core/SystemModule.h"
+#include "core/system/MoonTalkModule.h"
+#include "core/module/Scheduler.h"
+#include "core/system/SystemModule.h"
 
 #include <string>
 

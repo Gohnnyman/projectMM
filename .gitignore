@@ -82,7 +82,7 @@ moondeck/.last_flash.json
 # Generated files. These change on every build (a git hash, a build date, a minified blob), so
 # tracking them would put a diff of their own volatility in every commit.
 src/ui/ui_embedded.h
-src/core/build_info.h
+src/core/util/build_info.h
 
 # script_catalog.h is generated too, but it is TRACKED on purpose: it changes only when a script
 # is added, removed, or edits its dimensions()/tags(), which is exactly the change worth reviewing.

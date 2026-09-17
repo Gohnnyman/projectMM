@@ -1,7 +1,7 @@
 // @module draw
 
 #include "doctest.h"
-#include "light/draw.h"
+#include "light/powerfunctions/draw.h"
 
 #include <cstdlib>
 #include <vector>   // the upscale tests' planes: GCC needs it named

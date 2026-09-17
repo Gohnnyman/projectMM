@@ -778,7 +778,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 if exp_block is not None and exp_block > 0:
                     # max_block of 0 always fails when a positive floor is
                     # asserted: maxBlock is always served by current firmware
-                    # (src/core/HttpServerModule.cpp), so 0 means the device
+                    # (src/core/system/HttpServerModule.cpp), so 0 means the device
                     # reports zero contiguous heap — a real failure, not a
                     # missing field. (Contrast with free_heap on desktop where 0
                     # is the "unlimited" sentinel — that's a desktop-only

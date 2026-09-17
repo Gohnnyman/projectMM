@@ -11,7 +11,7 @@
 // fallback).
 
 #include "doctest.h"
-#include "core/Control.h"
+#include "core/module/Control.h"
 
 #include <cstring>
 #include <string>

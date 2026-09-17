@@ -1,8 +1,8 @@
 // @module ModuleFactory
 
 #include "doctest.h"
-#include "core/ModuleFactory.h"
-#include "core/MoonModule.h"
+#include "core/util/ModuleFactory.h"
+#include "core/module/MoonModule.h"
 
 namespace {
 

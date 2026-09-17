@@ -16,7 +16,7 @@
 #pragma once
 
 #include "doctest.h"
-#include "core/MoonModule.h"
+#include "core/module/MoonModule.h"
 #include <cstring>
 #include <cstdint>
 

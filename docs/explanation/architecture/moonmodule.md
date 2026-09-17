@@ -87,7 +87,7 @@ This means a container module gets correct lifecycle handling for its children w
 ModuleFactory::registerType<NoiseEffect>("NoiseEffect");
 ```
 
-ModuleFactory is core infrastructure ([`src/core/ModuleFactory.h`](../../src/core/ModuleFactory.h)), not itself a MoonModule.
+ModuleFactory is core infrastructure ([`src/core/util/ModuleFactory.h`](../../src/core/util/ModuleFactory.h)), not itself a MoonModule.
 
 **Dynamic over fixed-size.** Children, module lists, control sets, anything structural, grow on demand from the heap during `setup()`. Fixed-size arrays impose arbitrary limits, waste memory on instances that don't use the full capacity, and cost memory on instances that need none (such as leaf modules with zero children). The hot path only iterates these arrays: same pointer arithmetic as a fixed array, no performance difference.
 

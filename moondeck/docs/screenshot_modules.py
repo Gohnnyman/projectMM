@@ -152,10 +152,16 @@ CORE_MODULES = [
     "MqttModule",
     "FileManagerModule",
     "DevicesModule",
+    "MoonCloudModule",
+    "MoonStatsModule",
+    "MoonTalkModule",
+    "TasksModule",
+    "PinsModule",
     # Present only in an ESP32 tree (services / provisioning) — skipped on desktop
     # (not in state); capture these against a board when needed.
     "ImprovProvisioningModule",
     "AudioService",
+    "AnalogService",
     "I2cScanModule",
     "InfraredService",
     "ButtonService",
@@ -167,6 +173,12 @@ CORE_MODULES = [
 # then screenshots the child's own card. Everything not listed here is a top-level card.
 CORE_NAV_ROOT = {
     "MqttModule": "NetworkModule",
+    # Tasks and Pins are fixed System children (wired-by-code), so they have no nav entry.
+    "TasksModule": "SystemModule",
+    "PinsModule": "SystemModule",
+    # Stats and Talk are MoonCloud children, each carrying its own consent.
+    "MoonStatsModule": "MoonCloudModule",
+    "MoonTalkModule": "MoonCloudModule",
     "DevicesModule": "NetworkModule",
     "ImprovProvisioningModule": "NetworkModule",
     # Audio / infrared are user-added Services (children of the Services container); I2cScan is a
@@ -174,6 +186,7 @@ CORE_NAV_ROOT = {
     # the desktop tree — so they're captured against an ESP32, where these entries route the
     # shot to the right nav root.
     "AudioService": "Services",
+    "AnalogService": "Services",
     "InfraredService": "Services",
     "ButtonService": "Services",
     "MoonLiveService": "Services",

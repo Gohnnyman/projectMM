@@ -11,10 +11,10 @@
 // "compiled and scripted are interchangeable" means.
 
 #include "doctest.h"
-#include "core/MoonLiveService.h"
-#include "core/Scheduler.h"
-#include "core/MoonModule.h"
-#include "core/FilesystemModule.h"
+#include "core/services/MoonLiveService.h"
+#include "core/module/Scheduler.h"
+#include "core/module/MoonModule.h"
+#include "core/system/FilesystemModule.h"
 #include "platform/platform.h"
 
 #include <cstdio>

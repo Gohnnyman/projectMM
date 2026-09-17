@@ -54,7 +54,7 @@ def render(stems):
 // the order the tests happen to run in.
 #pragma once
 
-#include "core/MoonModule.h"
+#include "core/module/MoonModule.h"
 {includes}
 
 namespace mm {{

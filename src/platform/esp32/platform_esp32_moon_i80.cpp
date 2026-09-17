@@ -1,6 +1,6 @@
 // Parallel WS2812 output over the ESP32-S3/P4 LCD_CAM i80 peripheral, driven by OUR OWN DMA
-// sequencing instead of IDF's esp_lcd component — the peripheral half of MoonLedDriver
-// (src/light/drivers/MoonLedDriver.h), which does all the domain work: applies Correction and
+// sequencing instead of IDF's esp_lcd component — the peripheral half of MoonI80Peripheral
+// (src/light/drivers/MoonI80Peripheral.h), which does all the domain work: applies Correction and
 // 3-slot-encodes every light into the DMA frame buffer (ParallelSlots.h). This file owns only the
 // peripheral — the LCD_CAM registers, the GDMA channel + descriptor chain, the frame buffer(s),
 // transmit + wait, and the loopback test's TX side. No domain logic here.

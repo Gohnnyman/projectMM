@@ -9,9 +9,9 @@
 // cases inject a fake capability via setTestGpioCapability (as unit_TasksModule injects a snapshot).
 
 #include "doctest.h"
-#include "core/PinsModule.h"
-#include "core/Scheduler.h"
-#include "core/JsonSink.h"
+#include "core/system/PinsModule.h"
+#include "core/module/Scheduler.h"
+#include "core/util/JsonSink.h"
 #include "platform/platform.h"   // setTestGpioCapability — inject an unsafe pin for the severity cases
 
 #include <cstring>

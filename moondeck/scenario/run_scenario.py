@@ -74,7 +74,7 @@ _RUNNER_SKIP_PARTS = {"build", "__pycache__", ".git"}
 # run writes scenario baselines and repo-health metrics, which dirties the tree, which flips the
 # suffix, which makes every binary look stale on the NEXT run. A build id is not code, so it cannot
 # make the runner "report on code that is no longer there", which is what this guard is for.
-_RUNNER_GENERATED = {"src/ui/ui_embedded.h", "src/core/build_info.h"}
+_RUNNER_GENERATED = {"src/ui/ui_embedded.h", "src/core/util/build_info.h"}
 
 
 def _stale_runner_reason() -> str:

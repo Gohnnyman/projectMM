@@ -1,49 +1,56 @@
 #pragma once
 
-#include "core/math16.h"              // BeatPhase, hashInt
+#include "core/util/math16.h"              // BeatPhase, hashInt
 #include "light/effects/EffectBase.h"
-#include "light/particles.h"
+#include "light/powerfunctions/particles.h"
 
 namespace mm {
 
-// Fireworks: shells rise, stall, and burst into a shower of sparks that arc over and fall.
-//
-// This is the particle kernel end to end — every stage of a firework is a kernel call, and the
-// effect itself only decides when to launch and what colour:
-//
-//   launch   -> pool.spawn        a shell with upward velocity
-//   rise     -> pool.gravity      the shell decelerates on its own; no timer decides the apex
-//   burst    -> pool.angleEmit    a ring of sparks from wherever the shell actually stalled
-//   fall     -> gravity + drag    the arc, and air resistance flattening it
-//   fade     -> pool.age          brightness rides ttl, so a spark dies as it dims
-//
-// The apex is worth pointing at: nothing schedules it. The shell is launched upward, gravity acts
-// on it every frame, and the burst fires when its vertical velocity crosses zero — the physics
-// decides, which is why a faster launch bursts higher without a second control.
-//
-// Trails come from the Layer's `fadeToBlackBy`, not from the pool: one decay path for the whole
-// system rather than a second hidden inside particles.
-//
-// Cost: one pass per force over a pool the effect sizes itself, plus a sub-pixel splat per live
-// spark. At the default 120 particles that is well inside the budget on any target.
-//
-/// Prior art: the WLED Particle System's firework family (Damian Schneider, @DedeHai) for the effect
-/// vocabulary; the physics is the kernel's.
-/// @card FireworksEffect.png
 /// Effect: shells that rise, stall, and burst into falling sparks.
+/// @card FireworksEffect.gif
+///
+/// The particle kernel end to end, where every stage of a firework is one kernel call.
+/// The effect itself decides only when to launch and in what color.
+///
+/// Prior art: the WLED Particle System's firework family, where the physics here is the kernel's.
+///
+/// @moreinfo
+///
+/// ## Nothing schedules the apex
+///
+/// A shell is spawned with upward velocity, and gravity acts on it every frame.
+/// The burst fires when its vertical velocity crosses zero, so the physics decides where.
+/// That is why a faster launch bursts higher without a second control.
+///
+/// ## Each stage is a kernel call
+///
+/// `spawn` launches, `gravity` slows the rise, and `angleEmit` bursts a ring where it stalled.
+/// Gravity and drag then shape the fall, and `age` fades a spark as it dies.
+/// Trails come from the Layer's own decay rather than a second one hidden in the pool.
+/// Cost is one pass per force over a pool the effect sizes itself, plus a splat per live spark.
 class FireworksEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫✨"; }   // power-function showcase
-    Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
+    /// Catalog tags: this effect is the power-function showcase.
+    const char* tags() const override { return "💫✨"; }
+    /// Writes the z=0 slice, which extrude fills through a volume.
+    Dim dimensions() const override { return Dim::D2; }
 
-    uint8_t launchRate = 30;    // how often a new shell goes up
-    uint8_t launchSpeed = 150;  // how hard it is thrown, and so how high it bursts
-    uint8_t gravity = 6;        // how fast everything falls, per 60 Hz step
-    uint8_t sparks = 20;        // sparks per burst
-    uint8_t sparkLife = 200;    // how long a spark survives
-    uint8_t drag = 3;           // air resistance flattening the arc
-    uint8_t fade = 25;          // trail length (the Layer's decay, not the pool's)
+    /// How often a new shell goes up.
+    uint8_t launchRate = 30;
+    /// How hard a shell is thrown, and so how high it bursts.
+    uint8_t launchSpeed = 150;
+    /// How fast everything falls.
+    uint8_t gravity = 6;
+    /// How many sparks each burst throws.
+    uint8_t sparks = 20;
+    /// How long a spark survives.
+    uint8_t sparkLife = 200;
+    /// Air resistance, which flattens the arc.
+    uint8_t drag = 3;
+    /// Trail length, which is the Layer's decay rather than the pool's.
+    uint8_t fade = 25;
 
+    /// Publish the launch, the physics, the burst and the trail.
     void defineControls() override {
         controls_.addControl("launchRate", launchRate, 1, 255);
         controls_.addControl("launchSpeed", launchSpeed, 10, 255);
@@ -54,9 +61,9 @@ public:
         controls_.addControl("fade", fade, 1, 255);
     }
 
+    /// Size the spark pool and reset the shell.
     void prepare() override {
-        // The pool is sized once here and never reallocated. Shells are tracked separately because
-        // a shell is not a spark: it bursts rather than simply dying.
+        // A shell is tracked apart from the pool, since it bursts rather than dying.
         x_.resize(kPool); y_.resize(kPool); vx_.resize(kPool); vy_.resize(kPool);
         ttl_.resize(kPool); hue_.resize(kPool);
         if (x_ && y_ && vx_ && vy_ && ttl_ && hue_) {
@@ -72,6 +79,7 @@ public:
         time_.reset();
     }
 
+    /// Simulate this frame's slice of time, then draw the sparks and any rising shell.
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
         const lengthType w = width(), h = height();
@@ -82,23 +90,18 @@ public:
         const draw::pos_t wSub = draw::toSub(w - 1);
         const draw::pos_t hSub = draw::toSub(h - 1);
 
-        // EVERY frame simulates, by the fraction of a reference frame it actually covered. The
-        // controls are written against 60 fps, so a device rendering at 600 takes ten steps a tenth
-        // the size — the same trajectory at ten times the resolution. Quantising to a fixed 60 Hz
-        // and skipping frames would throw away exactly the smoothness the extra frames buy.
+        // Every frame simulates its own fraction, so a fast device gets the same arc more smoothly.
         const uint32_t scale = time_.advance(elapsed());
         if (scale > 0) {
             frame_++;
             simulate(gy, wSub, hSub, scale);
-            // The trail decays per unit TIME, which the Layer now does for every fading effect:
-            // fadeToBlackBy takes a RATE and the Layer scales it by the elapsed frame.
+            // The Layer takes a rate and scales it by the elapsed frame, as every fading effect does.
             layer()->fadeToBlackBy(fade);
         }
 
         pool_.render(cv, sparkLife);
 
-        // Draw the rising shell as a single bright point, so the launch reads as a shell rather
-        // than as nothing happening until the burst.
+        // One bright point, so a launch reads as a shell rather than as nothing until the burst.
         if (shellLive_)
             draw::splat(cv, shellX_, shellY_, colorFromPalette(*Palettes::active(), shellHue_, 255));
     }
@@ -115,17 +118,15 @@ private:
             shellVy_ = static_cast<draw::pos_t>(shellVy_ + sc(gy));   // gravity acts on the shell too
             shellY_  = static_cast<draw::pos_t>(shellY_ + sc(shellVy_));
             shellX_  = static_cast<draw::pos_t>(shellX_ + sc(shellVx_));
-            // Burst when it stops rising: the apex is where the physics puts it, not a timer.
+            // Burst when it stops rising, so the apex is where the physics puts it.
             if (shellVy_ >= 0 || shellY_ <= 0) {
                 pool_.angleEmit(shellX_, shellY_, 0, static_cast<draw::pos_t>(launchSpeed * 2),
                                 65535, sparks, sparkLife, shellHue_, frame_);
                 shellLive_ = false;
             }
-        // Compare against the full 0..1023 range rather than dividing the rate by 4: the divide
-        // truncated launchRate 1-3 (its own minimum is 1) to zero, so the slowest settings the
-        // control offers never launched anything at all.
+        // Compared over the full range: dividing the rate truncated its slowest settings to never launching.
         } else if ((hashInt(frame_, 0, 0, kSeed) % 1024u) < launchRate) {
-            // Launch from a point along the floor, thrown up and slightly sideways.
+            // From a point along the floor, thrown up and a little sideways.
             shellX_  = static_cast<draw::pos_t>(hashInt(frame_, 1, 0, kSeed) % static_cast<uint32_t>(wSub ? wSub : 1));
             shellY_  = hSub;
             shellVy_ = -static_cast<draw::pos_t>(launchSpeed);
@@ -142,21 +143,21 @@ private:
         pool_.age(1, scale);
     }
 
+    /// The spark pool's size, which the default burst count sits well inside.
     static constexpr uint16_t kPool = 120;
-    static constexpr uint32_t kSeed = 0xF17E;
+    static constexpr uint32_t kSeed = 0xF17E;   ///< fixed, so two devices launch alike
 
     ScratchBuffer<draw::pos_t> x_{*this}, y_{*this}, vx_{*this}, vy_{*this};
-    ScratchBuffer<uint16_t> ttl_{*this};   // wide: life beyond 255 frames
-    ScratchBuffer<uint8_t> hue_{*this};
-    particles::Pool pool_;
-    particles::FrameTime time_{60};    // controls are written against 60 fps
+    ScratchBuffer<uint16_t> ttl_{*this};   ///< wide, for a life beyond 255 frames
+    ScratchBuffer<uint8_t> hue_{*this};    ///< each spark's palette entry
+    particles::Pool pool_;                 ///< the view over those arrays
+    particles::FrameTime time_{60};        ///< the reference rate the controls are written against
 
-    // The shell is one object with its own state: it bursts rather than dying, which is not
-    // something the pool models.
+    // The shell keeps its own state, since bursting is not something the pool models.
     draw::pos_t shellX_ = 0, shellY_ = 0, shellVx_ = 0, shellVy_ = 0;
-    uint8_t shellHue_ = 0;
-    bool shellLive_ = false;
-    uint32_t frame_ = 0;
+    uint8_t shellHue_ = 0;       ///< the color its burst will take
+    bool shellLive_ = false;     ///< whether a shell is currently rising
+    uint32_t frame_ = 0;         ///< hashed for the launch, so two devices agree
 };
 
 }  // namespace mm

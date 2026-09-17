@@ -14,9 +14,9 @@
 // float trig, and the small standard helpers coordinate folds use. Unused declarations cost zero firmware
 // bytes; a modifier needing something outside this surface adds that one extra include.
 
-#include "core/MoonModule.h"
-#include "light/light_types.h" // lengthType, nrOfLightsType, Dim
-#include "core/math8.h"        // sin8/cos8 — integer trig for a rotate/affine modifier
+#include "core/module/MoonModule.h"
+#include "light/util/light_types.h" // lengthType, nrOfLightsType, Dim
+#include "core/util/math8.h"        // sin8/cos8 — integer trig for a rotate/affine modifier
 
 #include <cmath>              // std::sqrt / sin / cos — float trig (circle/pinwheel folds)
 #include <cstdint>           // fixed-width ints

@@ -7,7 +7,7 @@
 
 #include "doctest.h"
 #include "light/drivers/LightPresetsModule.h"
-#include "core/JsonSink.h"
+#include "core/util/JsonSink.h"
 
 #include <cstdint>
 #include <cstring>

@@ -40,7 +40,9 @@ TEMPLATES = Path(__file__).resolve().parent / "moxygen-templates" / "cpp"
 # (doxygen parsed nothing, moxygen emitted nothing, the class→header map is empty) —
 # raise rather than write a near-empty API set. Set well under the real count (~114
 # today) so it only trips on genuine breakage, not on adding/removing a few headers.
-_MIN_EXPECTED_PAGES = 50
+# The tree holds ~190 headers; 150 is a floor that catches a generator regression (a filter
+# that drops real pages, an empty XML) while leaving room for headers to come and go.
+_MIN_EXPECTED_PAGES = 150
 
 
 class GenApiError(RuntimeError):
@@ -364,6 +366,22 @@ def _class_to_header(xml_dir: Path) -> dict[str, str]:
     the Doxygen XML `<location file=...>` of every class/struct compound. The key is
     moxygen's `--classes` filename stem: the fully-qualified name with `::` → `-`
     (e.g. `mm::ControlList` → `mm-ControlList`), matching moxygen's `%s` substitution."""
+    # Every compound declared INSIDE a class or struct, by qualified name. Doxygen lists them
+    # as <innerclass> children of the enclosing compound, which is the only reliable way to
+    # tell `mm::Hub75Driver::BoardPins` (nested in a class) from `mm::json::JsonDoc` (in a
+    # namespace): the qualified names are the same shape.
+    class_nested: set[str] = set()
+    for cx in list(xml_dir.glob("class*.xml")) + list(xml_dir.glob("struct*.xml")):
+        try:
+            cd = ET.parse(cx).getroot().find("compounddef")
+        except ET.ParseError:
+            continue
+        if cd is None or cd.get("kind") not in ("class", "struct"):
+            continue
+        for inner in cd.findall("innerclass"):
+            if inner.text:
+                class_nested.add(inner.text.strip())
+
     mapping: dict[str, str] = {}
     for cx in list(xml_dir.glob("class*.xml")) + list(xml_dir.glob("struct*.xml")):
         try:
@@ -377,7 +395,21 @@ def _class_to_header(xml_dir: Path) -> dict[str, str]:
         loc = cd.find("location")
         if not name or loc is None:
             continue
-        header = loc.get("file")                      # e.g. "src/core/Control.h"
+        # An undocumented CLASS-NESTED compound never reaches a page. Doxygen emits a
+        # struct*.xml for every compound it parses, and HIDE_UNDOC_CLASSES only keeps those
+        # out of lists and inheritance graphs, so a private helper struct
+        # (Hub75Driver::BoardPins, ParallelLedDriver::PeripheralEntry) rendered as a
+        # top-level section above the class it belongs to, listing its fields as public API.
+        #
+        # Nested in a CLASS, read from the enclosing compound's <innerclass>, not guessed from
+        # the `::` count: `mm::json::JsonDoc` has just as many and is a real page. A top-level
+        # type documented with a file-level `//` block has no brief either, so filtering on the
+        # brief alone dropped 22 real pages (AudioFrame, raymarch, crc...).
+        if name in class_nested:
+            brief = cd.find("briefdescription")
+            if brief is None or not "".join(brief.itertext()).strip():
+                continue
+        header = loc.get("file")                      # e.g. "src/core/module/Control.h"
         if header:
             mapping[name.replace("::", "-")] = header
     return mapping
@@ -554,4 +586,17 @@ def generate() -> dict[str, str]:
             raise GenApiError(
                 f"only {len(pages)} API pages generated (expected ≥ {_MIN_EXPECTED_PAGES}) "
                 f"— doxygen/moxygen ran but produced almost nothing")
+
+        # Remove a page whose header is gone. The output directory is gitignored and never
+        # cleaned, so a renamed header left its old page behind: reachable by URL, linked by
+        # nothing, and reporting as an orphan that no source explains. AFTER the count guard,
+        # so a broken toolchain cannot empty the tree.
+        # Keyed by (DOMAIN, name), not by name alone: core/ and light/ each have their own
+        # moxygen tree, so a page sharing a filename across the two would mask the other and
+        # a delete could take the wrong one.
+        keep = {(uri.split("/")[-3], uri.rsplit("/", 1)[-1]) for uri in pages}
+        for domain in ("core", "light"):
+            for stale in (DOCS_MOONMODULES / domain / "moxygen").glob("*.md"):
+                if (domain, stale.name) not in keep:
+                    stale.unlink()
         return pages

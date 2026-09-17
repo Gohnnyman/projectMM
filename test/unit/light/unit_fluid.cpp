@@ -7,8 +7,8 @@
 // field at rest STAYS at rest rather than drifting on its own rounding.
 
 #include "doctest.h"
-#include "light/fluid.h"
-#include "core/MoonModule.h"
+#include "light/powerfunctions/fluid.h"
+#include "core/module/MoonModule.h"
 #include "golden_frame.h"                 // the effect harness: Layouts, Grid, Layer
 #include "light/effects/FluidEffect.h"
 

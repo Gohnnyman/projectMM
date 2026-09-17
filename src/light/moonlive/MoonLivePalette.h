@@ -3,7 +3,7 @@
 #include "core/moonlive/MoonLive.h"
 #include "light/moonlive/MoonLiveScript.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
-#include "light/Palette.h"
+#include "light/util/Palette.h"
 
 // MoonLivePalette: a PALETTE authored as a script rather than stored as data.
 //

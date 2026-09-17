@@ -1,5 +1,5 @@
 // Parlio (Parallel IO) WS2812 output — the peripheral half of the Parlio LED
-// driver (ESP32-P4). The driver (src/light/drivers/ParlioLedDriver.h) does all
+// driver (ESP32-P4). The driver (src/light/drivers/ParlioPeripheral.h) does all
 // the domain work: applies Correction and 3-slot-encodes every light into the
 // DMA frame buffer (ParallelSlots.h, the SAME encoder the LCD_CAM driver uses — one
 // bus byte per slot, bit L = data line L). This file owns only the peripheral:

@@ -1,7 +1,7 @@
 // @module SystemModule
 
 #include "doctest.h"
-#include "core/SystemModule.h"
+#include "core/system/SystemModule.h"
 
 #include <cstring>
 #include <string>

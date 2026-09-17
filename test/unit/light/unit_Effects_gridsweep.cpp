@@ -32,7 +32,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layers/Layer.h"
-#include "light/Palette.h"
+#include "light/util/Palette.h"
 // Generated at build time from src/light/effects/*.h — see test/CMakeLists.txt. Supplies
 // forEachEffect(), so this file names no individual effect and cannot drift.
 #include "effect_sweep.h"

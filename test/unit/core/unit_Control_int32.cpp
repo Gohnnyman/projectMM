@@ -5,8 +5,8 @@
 // type that can hold it without wrapping — the failure Uint16/Int16 would produce silently.
 
 #include "doctest.h"
-#include "core/Control.h"
-#include "core/JsonSink.h"
+#include "core/module/Control.h"
+#include "core/util/JsonSink.h"
 
 #include <cstdint>
 #include <cstring>

@@ -1,52 +1,62 @@
 #pragma once
 
-#include "core/math16.h"            // map32 — the shared, fencepost-safe range map
+#include "core/util/math16.h"            // map32: the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
 
 namespace mm {
 
-// GEQ 3D: a 3D-perspective graphic equaliser. The 16 audio bands rise as bars on a 2D grid, drawn
-// with faked depth. Each bar's side faces and top surface are drawn as lines that run FROM a bar
-// pixel TOWARD a sweeping "projector" vanishing point at (projector, horizon), each line shortened
-// by `depth` so it stops partway — that converging foreshortening is the defining look. The
-// projector sweeps left↔right; bands left of it are painted right-to-left, bands right of it
-// left-to-right, so the perspective always points away from the moving vanishing point. The bar
-// front faces are filled flat (frontFill), and an optional border outlines each bar.
-//
-/// Prior art: MoonLight's GEQ3D (E_MoonModules / MoonModules, TroyHacks), itself descended from the
-/// WLED-MM "GEQ 3D" effect. The perspective-bar geometry, the projector split, the per-face
-/// darkening, and the `depth` line-shorten are reproduced exactly here, written fresh on EffectBase
-/// + the shared draw primitives. Reads AudioService::latestFrame(); silence → flat → dark, safe on
-/// any target and grid size. (MoonLight's `softHack` anti-alias toggle is dropped, draw::line is a
-/// crisp Bresenham; the `soft` arg has no projectMM equivalent.)
+/// Audio-reactive 3D graphic-equalizer effect.
+/// @card GEQ3DEffect.gif
 /// Author: @TroyHacks (MoonModules, GPLv3), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
-/// Audio-reactive 3D graphic-equaliser effect.
+///
+/// The 16 bands rise as bars on a 2D grid, drawn with faked depth.
+/// GEQEffect in this folder draws the same data flat instead.
+///
+/// Prior art: MoonLight's GEQ3D, descended from the WLED-MM effect.
+///
+/// @moreinfo
+///
+/// ## The projector is the vanishing point
+///
+/// Each bar's side and top faces are lines running from the bar toward a sweeping projector.
+/// `depth` shortens each line so it stops partway, and that converging foreshortening is the look.
+/// The projector sweeps left and right, and each band is painted away from it.
+/// So the perspective always points away from the moving vanishing point.
+/// The front faces fill flat, and a border optionally outlines each bar.
+///
+/// MoonLight's anti-alias toggle is dropped, since `draw::line` is a crisp Bresenham.
 class GEQ3DEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🌙🎶"; }  // MoonLight origin · MoonModules · audio
+    /// Catalog tags: MoonLight origin, MoonModules, audio-reactive.
+    const char* tags() const override { return "💫🌙🎶"; }
+    /// The perspective is faked on a plane, so this is a 2D effect.
     Dim dimensions() const override { return Dim::D2; }
 
-    uint8_t speed     = 2;     // projector sweep rate (1..10; higher = faster). Time-based (BPM), so
-                               // the sweep is at the same wall-clock position on every device — a
-                               // fast board just renders it more smoothly, a slow board choppier.
-    uint8_t frontFill = 228;   // bar front-face fill strength (0..255)
-    uint8_t horizon   = 0;     // vanishing-point Y row (0..rows-1); the projector sits at this row
-    uint8_t depth     = 176;   // perspective depth: how far the side/top lines reach toward the projector
-    uint8_t numBands  = 16;    // bands shown (2..16); fewer = wider bars
-    bool    borders   = true;  // outline each bar
+    /// The projector's sweep rate, timed in BPM so every device agrees on its position.
+    uint8_t speed     = 2;
+    /// How strongly a bar's front face fills.
+    uint8_t frontFill = 228;
+    /// The row the vanishing point sits on.
+    uint8_t horizon   = 0;
+    /// How far the side and top lines reach toward the projector.
+    uint8_t depth     = 176;
+    /// How many bands are shown, where fewer gives wider bars.
+    uint8_t numBands  = 16;
+    /// Outline each bar.
+    bool    borders   = true;
 
+    /// Publish the sweep, the perspective and the bar's faces.
     void defineControls() override {
         controls_.addControl("speed", speed, 1, 10);
         controls_.addControl("frontFill", frontFill, 0, 255);
-        // MoonLight's horizon range is 0..size.x-1 (set at runtime). The control descriptor here is a
-        // fixed 0..255 slider — the source's row index — and the value is clamped to the live row
-        // count in tick(). A width/height-relative descriptor range isn't expressible at build time.
+        // A fixed slider, clamped to the live row count in tick(): a relative range is not expressible here.
         controls_.addControl("horizon", horizon, 0, 255);
         controls_.addControl("depth", depth, 0, 255);
         controls_.addControl("numBands", numBands, 2, 16);
         controls_.addControl("borders", borders);
     }
 
+    /// Sweep the projector, then draw each bar's faces converging toward it.
     void tick() MM_NONBLOCKING override {
         if (numBands == 0) return;
 
@@ -55,45 +65,34 @@ public:
 
         const draw::Canvas cv = canvas();
 
-        // Motion trail: dim the whole buffer each frame instead of clearing it (source:
-        // layer->fadeToBlackBy(16) per frame).
+        // The motion trail: dim the buffer each frame rather than clearing it.
         layer()->fadeToBlackBy(16);
 
-        // Projector (vanishing point) position along X, as a TIME-BASED triangle wave: it sweeps
-        // 0→cols→0 driven by elapsed(), so at any wall-clock instant every device shows the projector
-        // at the same place — a fast board renders the sweep more smoothly, a slow one choppier, but
-        // neither is throttled to the other's pace. (MoonLight advanced it by a per-frame counter, so
-        // its sweep ran faster on a high-FPS device; this is the frame-rate-independent improvement.)
-        // triwave8(beat8(bpm)) is the textbook time triangle: beat8 ramps 0..255 at `bpm`, triwave8
-        // folds it into an up-then-down 0..255, scaled to the column span. speed 1..10 → ~3..30 BPM.
+        // A time-based triangle, so every device shows the projector at the same place.
         const uint8_t bpm = static_cast<uint8_t>(speed * 3);
-        const uint8_t sweep = triwave8(beat8(bpm, elapsed()));   // 0..255 triangle over time
-        // Clamp the drawn band count to the column count: MoonLight's bar width is `cols / NUM_BANDS`,
-        // which truncates to 0 when there are fewer columns than bands (e.g. 8 cols, 16 bands), so
-        // every bar piles at x=0. Capping bands to cols keeps the width ≥ 1 so the bars spread across
-        // the available width. Invisible on normal grids (cols ≥ numBands → this is a no-op); it only
-        // fixes the degenerate narrow-grid case. Once per frame, off the per-pixel path.
+        const uint8_t sweep = triwave8(beat8(bpm, elapsed()));   // a triangle over time
+        // Capped to the column count, or a narrow grid truncates each bar's width to 0 and piles them at x=0.
         const int NUM_BANDS = numBands <= cols ? static_cast<int>(numBands) : cols;
         const int projector = static_cast<int>(static_cast<uint32_t>(sweep) * cols / 255u);
-        // horizon is a Y row used as the vanishing point's y; clamp the 0..255 control to the grid.
+        // The control is clamped to the grid, since it spans a fixed range.
         const int hzn = horizon < rows ? horizon : rows - 1;
         const int split = map32(projector, 0, cols, 0, NUM_BANDS - 1);
 
         const AudioFrame* f = AudioService::latestFrame();
 
-        // Bar heights: map each band magnitude onto maxHeight (slightly reduced on small panels).
+        // Each band's magnitude mapped onto the bar height, reduced a little on a small panel.
         uint8_t heights[16] = {0};
         const int maxHeight = lroundf(float(rows) * ((rows < 18) ? 0.75f : 0.85f));
         for (int i = 0; i < NUM_BANDS; i++) {
             int band = i;
-            if (NUM_BANDS < 16) band = map32(band, 0, NUM_BANDS, 0, 16);  // always use the full 16-band range
+            if (NUM_BANDS < 16) band = map32(band, 0, NUM_BANDS, 0, 16);  // spread over all 16 bands
             if (band > 15) band = 15;
             heights[i] = map8(f->bands[band], 0, static_cast<uint8_t>(maxHeight));
         }
 
         const RGB black{0, 0, 0};
 
-        // Right vertical faces + top — bands at/left of the split, painted LEFT to RIGHT.
+        // Right faces and tops, for the bands at or left of the split, painted left to right.
         for (int i = 0; i <= split; i++) {
             const uint16_t colorIndex = map32(cols / NUM_BANDS * i, 0, cols, 0, 256);
             const RGB ledColor = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(colorIndex));
@@ -102,7 +101,7 @@ public:
             if (heights[i] > 1) {
                 const RGB sideColor = blend(ledColor, black, static_cast<uint8_t>(255 - 32));
                 const int pPos = MAXi(0, linex + (cols / NUM_BANDS) - 1);
-                // Right side face: stacked perspective lines from the bar's right edge toward the projector.
+                // Stacked perspective lines from the bar's right edge toward the projector.
                 for (int y = (i < NUM_BANDS - 1) ? heights[i + 1] : 0; y <= heights[i]; y++) {
                     if (rows - y > 0)
                         draw::line(cv, {static_cast<lengthType>(pPos), static_cast<lengthType>(rows - y - 1), 0},
@@ -110,7 +109,7 @@ public:
                 }
 
                 const RGB topColor = blend(ledColor, black, static_cast<uint8_t>(255 - 128));
-                // Top surface: skip when directly under the projector (handled as a special case below).
+                // Skipped directly under the projector, which the pass below handles.
                 if (heights[i] < rows - hzn && (projector <= linex || projector >= pPos)) {
                     if (rows - heights[i] > 1) {
                         for (int x = linex; x <= pPos; x++)
@@ -121,7 +120,7 @@ public:
             }
         }
 
-        // Left vertical faces + top — bands right of the split, painted RIGHT to LEFT.
+        // Left faces and tops, for the bands right of the split, painted right to left.
         for (int i = NUM_BANDS - 1; i > split; i--) {
             const uint16_t colorIndex = map32(cols / NUM_BANDS * i, 0, cols - 1, 0, 255);
             const RGB ledColor = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(colorIndex));
@@ -130,7 +129,7 @@ public:
 
             if (heights[i] > 1) {
                 const RGB sideColor = blend(ledColor, black, static_cast<uint8_t>(255 - 32));
-                // Left side face: stacked perspective lines from the bar's left edge toward the projector.
+                // Stacked perspective lines from the bar's left edge toward the projector.
                 for (int y = (i > 0) ? heights[i - 1] : 0; y <= heights[i]; y++) {
                     if (rows - y > 0)
                         draw::line(cv, {static_cast<lengthType>(linex), static_cast<lengthType>(rows - y - 1), 0},
@@ -148,7 +147,7 @@ public:
             }
         }
 
-        // Projector special-case top + front fill + borders, all bands left to right.
+        // The projector's own bar, the front fills and the borders, all bands left to right.
         for (int i = 0; i < NUM_BANDS; i++) {
             const uint16_t colorIndex = map32(cols / NUM_BANDS * i, 0, cols - 1, 0, 255);
             const RGB ledColor = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(colorIndex));
@@ -156,7 +155,7 @@ public:
             const int pPos  = linex + (cols / NUM_BANDS) - 1;
             const int pPos1 = linex + (cols / NUM_BANDS);
 
-            // Special case: top perspective for the bar directly under the projector (skipped above).
+            // The top of the bar directly under the projector, which the passes above skipped.
             if (projector >= linex && projector <= pPos) {
                 if ((heights[i] > 1) && (heights[i] < rows - hzn) && (rows - heights[i] > 1)) {
                     const RGB topColor = blend(ledColor, black, static_cast<uint8_t>(255 - 128));
@@ -168,13 +167,13 @@ public:
 
             if ((heights[i] > 1) && (rows - heights[i] > 0)) {
                 RGB frontColor = blend(ledColor, black, static_cast<uint8_t>(255 - frontFill));
-                // Front fill: vertical lines across the bar face from the floor up to its height.
+                // Vertical lines across the bar face, from the floor up to its height.
                 for (int x = linex; x < pPos1; x++)
                     draw::line(cv, {static_cast<lengthType>(x), static_cast<lengthType>(rows - 1), 0},
                                {static_cast<lengthType>(x), static_cast<lengthType>(rows - heights[i] - 1), 0}, frontColor);
 
                 if (!borders && heights[i] > rows - hzn) {
-                    // Match the side fill in blackout mode, then draw a top line to simulate hidden top fill.
+                    // Match the side fill, then a top line standing in for the hidden top.
                     if (frontFill == 0) frontColor = blend(ledColor, black, static_cast<uint8_t>(255 - 32));
                     draw::line(cv, {static_cast<lengthType>(linex), static_cast<lengthType>(rows - heights[i] - 1), 0},
                                {static_cast<lengthType>(linex + (cols / NUM_BANDS) - 1), static_cast<lengthType>(rows - heights[i] - 1), 0}, frontColor);
@@ -196,8 +195,9 @@ public:
     }
 
 private:
+    /// The larger of two, kept local so the loops above read like the source they follow.
     static int MAXi(int a, int b) { return a > b ? a : b; }
-    // The member `depth` (control) hides the inherited grid-depth accessor name; qualify it.
+    // The `depth` control hides the inherited grid-depth accessor, so qualify that one where used.
 };
 
 } // namespace mm

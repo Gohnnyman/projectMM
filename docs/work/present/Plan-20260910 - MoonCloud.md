@@ -62,7 +62,7 @@ The first member, and the one that proves the plumbing every later one uses.
 
 ### 1. The report builder, as a pure function (DONE)
 
-`buildMoonStatsReport` in `src/core/MoonStatsModule.h`: one function from the live module tree to a JSON string, with no network, consent or persistence involved. It reads what is already in memory: `chip`, `flash`, `psramType`, `sdk` and `deviceModel` from SystemModule, `version` from FirmwareUpdateModule, and the modules a user ADDED, each tagged by its role, from the tree.
+`buildMoonStatsReport` in `src/core/system/MoonStatsModule.h`: one function from the live module tree to a JSON string, with no network, consent or persistence involved. It reads what is already in memory: `chip`, `flash`, `psramType`, `sdk` and `deviceModel` from SystemModule, `version` from FirmwareUpdateModule, and the modules a user ADDED, each tagged by its role, from the tree.
 
 **Fields are named one at a time and copied by name**, which is the design rather than an implementation detail: `deviceName`, `mac`, `ssid` and `password` are live controls sitting beside `chip` and `flash`, so a builder that emitted what it found would leak on its first run.
 
@@ -70,7 +70,7 @@ The first member, and the one that proves the plumbing every later one uses.
 
 ### 2. The installation id (DONE)
 
-`src/core/sha256.{h,cpp}` plus `installationId()` in `src/core/MoonCloudModule.h`, implementing the scheme above.
+`src/core/sha256.{h,cpp}` plus `installationId()` in `src/core/system/MoonCloudModule.h`, implementing the scheme above.
 
 **SHA-256 is vendored, about 150 lines.** ESP-IDF ships mbedtls and the desktop would link something else, so a library means two implementations of one function that must agree byte for byte, where a divergence produces ids that silently differ between platforms. One file is the smaller thing to own, the algorithm is frozen, and `unit_sha256.cpp` pins it against the published FIPS 180-4 vectors (verified independently against Python's `hashlib` before being trusted), including the 55/56/64-byte cases where padding bugs hide.
 
@@ -78,7 +78,7 @@ The id is gated on consent: `Never` yields an empty string, so a user who declin
 
 ### 3. Consent, and the one-time trigger (DONE)
 
-`src/core/MoonStatsModule.h`: `consent` (a checkbox, off by default) and `reportedVersion`, both persisted like any other control. `reportDue()` is true when consent is on and the running version differs from the recorded one, so a reboot sends nothing and an upgrade sends exactly one report.
+`src/core/system/MoonStatsModule.h`: `consent` (a checkbox, off by default) and `reportedVersion`, both persisted like any other control. `reportDue()` is true when consent is on and the running version differs from the recorded one, so a reboot sends nothing and an upgrade sends exactly one report.
 
 Install and upgrade are told apart by `reportedVersion` alone: empty means this install has never reported. **Control-checked by sabotage**: removing the consent gate fails the test.
 

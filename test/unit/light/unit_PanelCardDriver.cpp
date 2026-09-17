@@ -14,7 +14,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/PanelsLayout.h"
-#include "core/JsonSink.h"   // writeControlMetadata: the schema the UI parses
+#include "core/util/JsonSink.h"   // writeControlMetadata: the schema the UI parses
 #include <string>   // status() substring checks
 
 namespace {

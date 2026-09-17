@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/MoonModule.h"
+#include "core/module/MoonModule.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include "light/moonlive/MoonLiveScriptFile.h"
 

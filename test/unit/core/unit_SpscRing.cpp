@@ -7,7 +7,7 @@
 // concurrency.
 
 #include "doctest.h"
-#include "core/SpscRing.h"
+#include "core/util/SpscRing.h"
 
 #include <cstdint>
 #include <thread>

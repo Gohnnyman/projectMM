@@ -4,58 +4,61 @@
 
 namespace mm {
 
-// Aurora: several noise fields, each drifting on its own clock, read in polar coordinates and
-// composited into light.
-//
-// This is the shader idiom rather than a picture of anything: no aurora is simulated. Layers of the
-// same field, sampled at different scales and moved by different oscillators, are combined, and the
-// interference between them is what reads as curtains of light folding through each other. Nothing
-// here is specific to auroras, which is the point: it is the vocabulary this library exists to
-// provide, and the effect is a composition in it.
-//
-// Four pieces, each a power function:
-//
-//   - `PolarLut` gives every pixel its angle and radius once, so the field is addressed around the
-//     center rather than across the grid, and the address is not recomputed per frame.
-//   - `OscillatorBank` drives the motion. Each layer has its own drift, its own breathing scale and
-//     its own rotation, and because the bank holds their phases together the layers keep their
-//     relationships instead of sliding into each other over an evening.
-//   - `fbm8` over gradient noise is the field itself: octaves of noise, so each layer has both a
-//     broad shape and fine structure on it.
-//   - A contrast window then decides what is visible. This is what separates a shader from a blur:
-//     most of the field is pushed to black and only the top of it lights, so the result reads as
-//     distinct curtains rather than as an evenly cloudy panel.
-//
-// The layers are combined by taking the strongest at each pixel, and the pixel's color comes from
-// WHICH layer won and how far it exceeded the window, read through the palette. So the palette
-// controls the mood and the layers control the structure, which is the split that makes the effect
-// worth handing someone: every palette gives a different aurora and none of them look wrong.
-//
-// Cost: one fbm per layer per pixel, so `layers` is the cost knob and `octaves` multiplies it. The
-// polar address is a table read. Targets in performance.md.
-// @card AuroraEffect.png
 /// Effect: layered noise curtains in polar coordinates, each layer on its own oscillators.
 /// Prior art: the shader vocabulary Stefan Petrick made recognizable in the LED world.
+/// @card AuroraEffect.gif
+///
+/// The shader idiom rather than a picture: no aurora is simulated.
+/// Layers of one field at different scales, moved by different oscillators, are composited.
+/// The interference between them reads as curtains folding through each other.
+///
+/// @moreinfo
+///
+/// ## Four power functions
+///
+/// `PolarLut` gives every pixel its angle and radius once, addressing the field around the center.
+/// `OscillatorBank` drives the motion, holding the layers' phases together so they keep their relationships.
+/// `fbm8` over gradient noise is the field, giving each layer a broad shape and fine structure.
+/// A contrast window then decides what is visible, which is what separates a shader from a blur.
+///
+/// ## Palette and structure are separate
+///
+/// The strongest layer at each pixel wins, and its color comes from which layer won.
+/// So the palette controls the mood and the layers control the structure.
+/// Every palette gives a different aurora and none of them look wrong.
+///
+/// Cost: one fbm per layer per pixel, so `layers` is the cost knob and `octaves` multiplies it.
 class AuroraEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🖌️🌫️🎡"; }   // power-function showcase
-    Dim dimensions() const override { return Dim::D3; }  // volumetric: the curtains have depth
+    /// Catalog tags: this effect is the power-function showcase.
+    const char* tags() const override { return "💫🖌️🌫️🎡"; }
+    /// Volumetric: the curtains have depth.
+    Dim dimensions() const override { return Dim::D3; }
 
+    /// The compositing ceiling, and the width of the oscillator bank.
     static constexpr uint8_t kMaxLayers = 4;
 
-    uint8_t speed    = 30;   // master rate: every layer's motion scales from this
-    uint8_t scale    = 40;   // noise cells across the grid: low = broad curtains, high = fine detail
-    uint8_t layers   = 3;    // how many fields are composited, and the main cost knob
-    uint8_t warp     = 60;   // how far the field displaces its own sample angle
-    uint8_t twist    = 40;   // how much the radius shears the angle, giving the curtains their lean
-    uint8_t segments = 1;    // kaleidoscope fold; 1 leaves the composition unfolded
-    uint8_t contrast = 140;  // the visibility window: higher = fewer, sharper curtains
-    uint8_t octaves  = 2;    // detail within each layer, multiplying the cost knob
+    /// Master rate: every layer's motion scales from this.
+    uint8_t speed    = 30;
+    /// Noise cells across the grid. Low gives broad curtains, high gives fine detail.
+    uint8_t scale    = 40;
+    /// How many fields are composited, and the main cost knob.
+    uint8_t layers   = 3;
+    /// How far the field displaces its own sample angle.
+    uint8_t warp     = 60;
+    /// How much the radius shears the angle, giving the curtains their lean.
+    uint8_t twist    = 40;
+    /// Kaleidoscope fold. 1 leaves the composition unfolded.
+    uint8_t segments = 1;
+    /// The visibility window. Higher gives fewer, sharper curtains.
+    uint8_t contrast = 140;
+    /// Detail within each layer, multiplying the cost knob.
+    uint8_t octaves  = 2;
 
-    /// The polar address: whether to read it from a table, at what precision, and how a
-    /// volumetric fixture's coordinates become an angle and a radius (light/polar.h).
+    /// The polar address: the table, its precision, and how a volumetric fixture maps to angle and radius.
     PolarLut::Controls polar;
 
+    /// Publish the layers, the field's shape, the visibility window and the polar address.
     void defineControls() override {
         controls_.addControl("speed", speed, 0, 120);
         controls_.addControl("scale", scale, 1, 255);
@@ -68,21 +71,19 @@ public:
         PolarLut::addControls(controls_, polar);
     }
 
+    /// Build the polar address table for the current geometry.
     void prepare() override {
-        // The polar address is built here, not in tick(): prepare() is where a module builds state
-        // and where allocation is allowed, and it runs again on every resize and control change, so
-        // the table is always current without the render path ever allocating.
+        // Built here rather than in tick(), so the render path never allocates.
         lut_.prepareFor(polar, width(), height(), EffectBase::depth());
     }
 
+    /// Composite every layer through the visibility window, one pixel at a time.
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
         const lengthType w = width(), h = height(), dep = depth();
         const uint8_t n = layers < 1 ? 1 : (layers > kMaxLayers ? kMaxLayers : layers);
 
-        // Each layer gets three oscillators: how far it has drifted, how its scale breathes, and how
-        // far it has rotated. Rates are deliberately unequal and not multiples of each other, so the
-        // layers drift in and out of alignment for a long time before repeating.
+        // Three oscillators a layer: drift, breathing scale and rotation, at rates sharing no multiple.
         for (uint8_t i = 0; i < kMaxLayers; i++) {
             const uint16_t rate = static_cast<uint16_t>(speed) * (7 + i * 5) / 10;
             bank_.set(static_cast<uint8_t>(i * 3 + 0),
@@ -110,11 +111,7 @@ public:
             if (layerScale[i] == 0) layerScale[i] = 1;
         }
 
-        // The window sits at `contrast` of the way up the field's own range, which the previous
-        // frame measured. The field drifts slowly, so last frame's range is this frame's to within a
-        // step, and the alternative (a pass to measure, then a pass to draw) doubles the cost.
-        // Anchored on the measured LOW, not the midpoint, so contrast 0 lights the whole field and
-        // contrast 255 leaves only its peaks.
+        // The window sits at `contrast` up the field's own range, measured on the previous frame.
         const uint8_t lowEnd = floor_ < peak_ ? floor_ : static_cast<uint8_t>(peak_ > 8 ? peak_ - 8 : 0);
         const uint8_t threshold = static_cast<uint8_t>(
             lowEnd + (static_cast<uint32_t>(peak_ - lowEnd) * contrast) / 272u);
@@ -126,9 +123,7 @@ public:
             for (lengthType x = 0; x < w; x++, idx++) {
                 angle16 baseAngle;
                 uint32_t r;
-                // The depth coordinate the field samples along. Under cylindrical the address is
-                // the same at every height, so this is what separates the slices; under the other
-                // two the address already carries depth and this rides along with it.
+                // The depth the field samples along, which is what separates a cylinder's slices.
                 int32_t along;
                 if (table) {
                     baseAngle = lut_.angle(idx);
@@ -148,9 +143,7 @@ public:
                                                               : static_cast<int32_t>(z) - cz;
                 }
 
-                // The strongest layer at this pixel wins, and how far it exceeds the visibility
-                // window is the brightness. Taking the maximum rather than a sum is what keeps the
-                // curtains distinct: summing would average them into an even haze.
+                // The strongest layer wins: a sum would average the curtains into an even haze.
                 uint8_t best = 0;
                 uint8_t winner = 0;
                 for (uint8_t i = 0; i < n; i++) {
@@ -160,27 +153,16 @@ public:
 
                     const uint32_t fx = (static_cast<uint32_t>(a) >> 6) * layerScale[i] / 16u;
                     const uint32_t fy = (r * layerScale[i]) + (drift[i] >> 6) + i * 4096u;
-                    // Depth is the field's third axis, so a volumetric fixture samples through the
-                    // field rather than repeating one slice. On a panel `along` is 0 at every light
-                    // and this reduces to the 2D sample exactly.
+                    // The field's third axis, which is 0 on a panel and reduces to the 2D sample.
                     const uint32_t fz = static_cast<uint32_t>(along * static_cast<int32_t>(layerScale[i]));
 
-                    // The field displaces its own sample angle, which is what makes a curtain fold
-                    // over itself rather than merely sweep past.
+                    // The field displaces its own sample angle, so a curtain folds over itself.
                     const uint8_t v = warp > 0 ? warp8(fx, fy, fz, static_cast<uint16_t>(warp) * 4, octaves)
                                                : fbm8(fx, fy, fz, octaves);
                     if (v > best) { best = v; winner = i; }
                 }
 
-                // The visibility window: everything below the threshold is dark, and what is above
-                // it is stretched back over the full range, so a small part of the field becomes the
-                // whole of the light. This is the control that decides curtains against cloud.
-                //
-                // The window is placed against the field's OWN range, measured on the previous
-                // frame, not against 0..255. A field of noise rarely reaches either end on a small
-                // grid, so a fixed threshold left the brightest curtain at two thirds of full and no
-                // setting could fix it. Tracking the range means `contrast` says what fraction of
-                // the field lights, on any grid, at any octave count, in any palette.
+                // Below the threshold is dark, and above it stretches over the full range.
                 uint8_t bri = 0;
                 if (best > threshold) {
                     const uint32_t span = peak_ > threshold ? peak_ - threshold : 1u;
@@ -190,19 +172,13 @@ public:
                 if (best > frameMax) frameMax = best;
                 if (best < frameMin) frameMin = best;
 
-                // Which layer won picks the region of the palette: the layers stay separable
-                // colors rather than one averaged hue. Nothing else enters the index. An earlier
-                // version added a term from the field's own value, which moved the hue as the
-                // brightness moved and wrapped past the end of the palette, so a brightening
-                // curtain jumped from one end of it to the other. Brightness belongs in the
-                // brightness.
+                // Which layer won picks the palette region, and nothing else enters the index.
                 const uint8_t index = static_cast<uint8_t>((winner * 255u) / n);
                 draw::pixel(cv, {x, y, z}, colorFromPalette(*Palettes::active(), index, bri));
             }
         }
 
-        // Carry this frame's range into the next one's window. Eased rather than assigned, so a
-        // single bright frame cannot make the whole composition flinch.
+        // Eased rather than assigned, so one bright frame cannot make the composition flinch.
         peak_  = static_cast<uint8_t>((peak_ * 7u + (frameMax < 32 ? 32 : frameMax)) / 8u);
         floor_ = static_cast<uint8_t>((floor_ * 7u + frameMin) / 8u);
     }

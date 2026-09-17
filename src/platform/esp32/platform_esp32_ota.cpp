@@ -8,7 +8,7 @@
 
 #include "platform/platform.h"
 
-#include "core/FirmwareImage.h"  // identify/moonBaseRejection: vetting a MoonBase image
+#include "core/util/FirmwareImage.h"  // identify/moonBaseRejection: vetting a MoonBase image
 
 #include "esp_https_ota.h"
 #include "esp_ota_ops.h"

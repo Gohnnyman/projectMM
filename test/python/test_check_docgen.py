@@ -18,8 +18,9 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "moondeck" / "check"))
 sys.path.insert(0, str(ROOT / "moondeck" / "docs"))
 
-from check_docgen import (MAX_CONTROL, MAX_CONTROLS, MAX_DESC,  # noqa: E402
-                           _cards, _structure)
+from check_docgen import (ANIMATED_PAGES, MAX_CONTROL, MAX_CONTROL_VISUAL,  # noqa: E402
+                           MAX_DESC, MAX_DESC_VISUAL, _card_rules, _cards,
+                           _header_rules, _structure)
 
 
 def _card(desc: str = "Short.", controls=("- `a` — one.",)) -> str:
@@ -36,17 +37,119 @@ def test_description_over_the_limit_is_measured():
 def test_a_card_within_the_limits_measures_under_them():
     card = list(_cards(_card()))[0]
     assert card["desc"] <= MAX_DESC
-    assert card["controls"] <= MAX_CONTROLS
     assert card["widest"] <= MAX_CONTROL
 
 
-def test_controls_are_summed_not_counted_individually():
-    # Ten short controls are fine one by one and too much together: the column height is
-    # what the reader pays, so the sum is the thing that matters.
-    many = [f"- `p{i}` — {'y' * 80}." for i in range(10)]
+def test_a_wrapped_sentence_in_a_class_comment_is_a_finding():
+    # The one-line budget cannot reach here: a class comment is ALLOWED ten lines, so a
+    # sentence carried onto the next line passes every other rule.
+    header = ("#pragma once\nnamespace mm {\n"
+              "/// A sentence that runs long and wraps onto\n"
+              "/// a second line, which is what this catches.\n"
+              "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    wraps = [w for _, w in _header_rules("probe.h", header) if "hard wrap" in w]
+    assert len(wraps) == 1
+
+
+def test_a_continuation_that_does_not_start_lowercase_is_still_a_wrap():
+    # The test is the PREVIOUS line's unfinished sentence, not the next line's case. A
+    # continuation beginning with a digit or an identifier is most of a technical comment,
+    # and a lowercase-only test missed every one of them.
+    digit = ("#pragma once\nnamespace mm {\n"
+             "/// A sentence that does not end here and gives\n"
+             "/// 8-16 lanes for the wall time of one.\n"
+             "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    ident = ("#pragma once\nnamespace mm {\n"
+             "/// The wire format is\n"
+             "/// ParallelSlots.h in the same directory.\n"
+             "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    for header in (digit, ident):
+        assert len([w for _, w in _header_rules("probe.h", header) if "hard wrap" in w]) == 1
+
+
+def test_an_indented_block_keeps_its_layout():
+    # A wire table, a listing or a diagram is a BLOCK: joining its lines destroys the layout
+    # that carries the meaning. Collapsing one produced a 43-word "sentence" of protocol bytes
+    # in PreviewDriver.h, which is the worst of both readings.
+    table = ("#pragma once\nnamespace mm {\n"
+             "/// Lead.\n///\n/// @moreinfo\n///\n/// ## S\n///\n"
+             "///     POST /api            pair, once pressed\n"
+             "///     GET  /api/lights     the lights by id\n"
+             "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    assert not [w for _, w in _header_rules("probe.h", table) if "hard wrap" in w]
+
+
+def test_a_colon_or_semicolon_does_not_end_a_sentence():
+    # A colon INTRODUCES what follows and a semicolon joins two clauses, so neither ends a
+    # thought. Unicode's sentence-boundary rules, Vale's own detector and the standards line
+    # agree ("joined by a comma or a colon that a full stop should have been"). Treating them
+    # as terminators passed every `Prior art: ...` block that wrapped mid-sentence.
+    colon = ("#pragma once\nnamespace mm {\n"
+             "/// Prior art: one discovery, one lineage, one driver:\n"
+             "/// architecture studied, never copied.\n"
+             "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    semi = ("#pragma once\nnamespace mm {\n"
+            "/// The difference is underneath;\n"
+            "/// it buys two things the other cannot give.\n"
+            "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    for header in (colon, semi):
+        assert len([w for _, w in _header_rules("probe.h", header) if "hard wrap" in w]) == 1
+
+
+def test_structure_is_not_read_as_a_wrapped_sentence():
+    # A list item, a heading and a table row continue across lines as STRUCTURE. Reading
+    # one as wrapped prose would fire on every appendix that carries a table.
+    header = ("#pragma once\nnamespace mm {\n"
+              "/// A finished sentence.\n"
+              "///\n"
+              "/// @moreinfo\n"
+              "///\n"
+              "/// ## A section\n"
+              "///\n"
+              "/// - an item that continues\n"
+              "///   onto the next line\n"
+              "///\n"
+              "/// | a | b |\n"
+              "/// |---|---|\n"
+              "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    assert not [w for _, w in _header_rules("probe.h", header) if "hard wrap" in w]
+
+
+def test_many_short_controls_are_not_a_finding():
+    # A module with twelve honest controls is not worse documented than one with three.
+    # Only a control that runs to a paragraph makes a card unreadable, so the cap is per
+    # LINE: ten short ones stay clean however tall the column gets.
+    many = [f"- `p{i}` — short." for i in range(10)]
     card = list(_cards(_card(controls=many)))[0]
-    assert card["controls"] > MAX_CONTROLS
     assert card["widest"] < MAX_CONTROL
+
+
+def test_the_visual_catalogs_are_held_tighter():
+    # An effect's gif says what it looks like, so its prose says only what the eye cannot
+    # see. The SAME card passes off a still-image page and fails on a gif one, which is the
+    # whole rule: asserting the constants alone would pass against a _card_rules that never
+    # read them.
+    VISUAL, PLAIN = "moonmodules/light/effects.md", "moonmodules/light/drivers.md"
+    assert VISUAL in ANIMATED_PAGES and PLAIN not in ANIMATED_PAGES
+
+    def findings(rel, desc_len, control_len):
+        text = _card(desc="x" * desc_len, controls=("- `a` — " + "z" * control_len + ".",))
+        card = list(_cards(text))[0]
+        card["img"], card["img_src"] = True, ("a.gif" if rel in ANIMATED_PAGES else "a.png")
+        return [w for _, w in _card_rules(rel, card)]
+
+    # Just under the tighter caps: clean on both pages.
+    assert findings(VISUAL, MAX_DESC_VISUAL - 50, MAX_CONTROL_VISUAL - 30) == []
+    assert findings(PLAIN, MAX_DESC_VISUAL - 50, MAX_CONTROL_VISUAL - 30) == []
+
+    # Between the two caps: the visual page reports, the plain page stays silent.
+    over = findings(VISUAL, MAX_DESC_VISUAL + 50, MAX_CONTROL_VISUAL + 10)
+    assert any("description" in w for w in over)
+    assert any("one control" in w for w in over)
+    assert findings(PLAIN, MAX_DESC_VISUAL + 50, MAX_CONTROL_VISUAL + 10) == []
+
+    # Past the loose caps: both pages report.
+    assert findings(PLAIN, MAX_DESC + 50, MAX_CONTROL + 10)
 
 
 def test_the_widest_control_is_reported_with_its_text():
@@ -208,6 +311,21 @@ def test_a_card_with_no_image_is_reported():
     assert any("no image" in why for _, why in findings)
 
 
+def test_a_summary_page_row_needs_no_image():
+    """The image rule is a CATALOG rule: a reader picks an effect by looking at it, where a
+    summary row names a base class with no card in the UI to capture. The exemption is scoped
+    to that one rule, so an over-long description on the same page is still reported."""
+    import check_docgen
+    page = sorted(check_docgen.PREVIEWLESS_PAGES)[0]
+    assert page not in check_docgen.ANIMATED_PAGES
+    # Silent on the missing image...
+    plain = list(_cards(_card()))[0]
+    assert not any("no image" in why for _, why in check_docgen._card_rules(page, plain))
+    # ...and still loud on everything else the card rules measure.
+    fat = list(_cards(_card(desc="x" * (MAX_DESC + 50))))[0]
+    assert any("description" in why for _, why in check_docgen._card_rules(page, fat))
+
+
 def test_the_image_format_rule_fires_both_ways():
     """A png on an animated page and a gif on a static one are each half the convention,
     and a rule that only caught one left the other unenforced for four pages."""
@@ -228,27 +346,6 @@ def test_the_image_format_rule_fires_both_ways():
     assert not any("image is" in why for _, why
                    in check_docgen._card_rules("moonmodules/light/drivers.md",
                                                list(_cards(png))[0]))
-
-
-def test_a_baseline_entry_does_not_tolerate_growth():
-    """A baseline holds a card at the size it WAS. Matching the rule word alone let a
-    tolerated card grow without limit, which is the opposite of a baseline's job."""
-    import check_docgen
-    rule, n = check_docgen._measure("controls 678 > 600")
-    assert (rule, n) == ("controls", 678)
-    rule2, n2 = check_docgen._measure("no image: every card leads with one")
-    assert rule2 == "no image" and n2 is None
-
-
-def test_two_rules_that_share_an_opening_word_key_apart():
-    """A details table has two limits, columns and cell width, and both findings open
-    with the same two words. Keyed on that, one baselined wide table also tolerated a
-    cell growing past its limit: a second rule silently inheriting the first's licence."""
-    import check_docgen
-    cols = check_docgen._measure("details table has 5 columns (max 4)")
-    cell = check_docgen._measure("details table cell is 420 characters (max 300): prose in a grid")
-    assert cols[0] != cell[0]
-    assert (cols, cell) == (("details table has", 5), ("details table cell", 420))
 
 
 def test_an_effect_card_needs_a_gif_not_a_png():
@@ -363,14 +460,15 @@ def test_links_share_the_controls_cell():
     assert "mm-param" in cells[1] and "mm-links" in cells[1]
 
 
-def test_the_preview_image_leads_the_first_cell():
-    """Above the name, not beside it: an image in its own column forced every text
-    column into a quarter of the page."""
-    page = ('### Thing 💫 · kind\n\n<img src="../../assets/x.png" alt="x">\n\nShort.\n\n- `a` — one.\n')
+def test_the_card_name_leads_the_first_cell():
+    """The name first, the preview under it: a reader scanning the table is looking for a
+    name, and a picture above it pushes that down the row. The image stays in this column
+    rather than its own, which is what kept a long description from rendering as a ribbon."""
+    page = ('### Thing 💫 · kind\n\n<img src="../../assets/x.png" alt="x">\n\nShort.\n\n- `a`: one.\n')
     row = [l for l in _row(page).split("\n") if l.startswith("| ") and "Module |" not in l
            and not l.startswith("|--")][0]
     cells = row.strip("| ").split(" | ")
-    assert cells[0].index("mm-preview") < cells[0].index("mm-name")
+    assert cells[0].index("mm-name") < cells[0].index("mm-preview")
 
 
 def test_the_catalog_pages_actually_yield_cards():
@@ -432,10 +530,49 @@ def test_a_one_line_member_comment_is_accepted():
     assert not [i for i in _hdr("/// one\nvoid doThing();") if "member comment" in i[1]]
 
 
-def test_a_long_doc_line_is_flagged():
+def test_a_code_comment_run_past_one_line_is_flagged():
+    """`//` carries the same one-line budget as `///`. Without that the `///` cap moves text
+    rather than removing it: a fifty-line member comment re-spelled as `//` passes every other
+    rule and the file is exactly as long, which is what a first sweep of these headers did."""
+    run = "\n".join(f"// line {i}" for i in range(2))
+    issues = _hdr("class Foo {\npublic:\n" + run + "\n/// does a thing\nvoid doThing();\n};")
+    assert any("code comment 2 lines" in why for _, why in issues)
+
+
+def test_a_long_code_comment_line_is_flagged():
+    """A `//` line carries the same word budget as a `///` one: without it the line cap is
+    satisfied by one very long line, which is a paragraph that happens to lack line breaks."""
+    long = "// " + " ".join(["word"] * 25)
+    issues = _hdr("class Foo {\npublic:\n" + long + "\n/// does a thing\nvoid doThing();\n};")
+    assert any("comment line 25 words" in why for _, why in issues)
+
+
+def test_a_one_line_code_comment_is_accepted():
+    """One line is room to say WHY. The rule cuts essays, not reasons."""
+    issues = _hdr("class Foo {\npublic:\n// why\n/// does a thing\nvoid doThing();\n};")
+    assert not [i for i in issues if "code comment" in i[1]]
+
+
+def test_a_file_level_code_comment_is_exempt():
+    """The `//` block above the first class explains the compilation unit: it is the
+    non-Doxygen sibling of the class comment and has no member to sit beside."""
+    run = "\n".join(f"// line {i}" for i in range(12))
+    issues = _hdr(run + "\nclass Foo {\npublic:\n/// does a thing\nvoid doThing();\n};")
+    assert not [i for i in issues if "code comment" in i[1]]
+
+
+def test_a_long_doc_sentence_is_flagged():
     long = "/// " + " ".join(["word"] * 25)
     issues = _hdr(long + "\nvoid doThing();")
-    assert any("doc line 25 words" in why for _, why in issues)
+    assert any("doc sentence 25 words" in why for _, why in issues)
+
+
+def test_several_short_sentences_on_one_line_are_not_flagged():
+    # The no-wrap rule makes a line a paragraph, so the cap counts SENTENCES. Counting the
+    # line would fail correct prose and pass nothing the standards ask for.
+    line = "/// " + " ".join("A short thought here." for _ in range(4))
+    issues = _hdr(line + "\nvoid doThing();")
+    assert not [i for i in issues if "doc sentence" in i[1]]
 
 
 def test_a_moreinfo_appendix_past_twenty_lines_is_flagged():
@@ -489,6 +626,45 @@ def test_a_real_member_beside_an_inline_body_is_still_seen():
     assert [i for i in _hdr(src) if "public variable has no ///" in i[1]]
 
 
+def test_a_public_member_after_a_nested_type_is_still_seen():
+    """A nested type opens its own body, and the enclosing class resumes when it closes.
+    Tracking one depth instead of a stack meant the nested struct overwrote the class that
+    held it, so closing the struct read as closing the class and every public member after
+    one escaped this check: a class with a nested type reported nothing at all."""
+    nested = ("class Foo {\npublic:\n"
+              "  /// documented\n"
+              "  void before() {}\n"
+              "  /// a nested type\n"
+              "  struct Inner { uint8_t a; };\n"
+              "  void after();\n"
+              "  uint8_t alsoAfter = 0;\n};")
+    whys = [why for _, why in _hdr(nested) if "has no ///" in why]
+    assert "public function has no ///" in whys
+    assert "public variable has no ///" in whys
+
+
+def test_a_private_nested_type_stays_exempt():
+    """The stack must not undo what it replaced: a type declared after `private:` is private
+    however it is spelled, and its fields never reach the generated page."""
+    src = ("class Foo {\npublic:\n"
+           "  /// documented\n"
+           "  void ok() {}\n"
+           "private:\n"
+           "  struct Hidden { uint8_t undocumentedField; };\n"
+           "  uint8_t alsoPrivate_ = 0;\n};")
+    assert not [i for i in _hdr(src) if "has no ///" in i[1]]
+
+
+def test_a_friend_declaration_is_not_a_member():
+    """`friend class X;` grants access rather than declaring anything: it reaches no generated
+    page, so asking it for a `///` would document a line no reader ever sees."""
+    src = ("class Foo {\npublic:\n"
+           "  /// documented\n"
+           "  void ok() {}\n"
+           "  friend class ScratchBufferBase;\n};")
+    assert not [i for i in _hdr(src) if "has no ///" in i[1]]
+
+
 def test_the_headers_are_actually_scanned():
     """A rule that reads no files reports a clean run, which looks exactly like a clean
     tree. The count is pinned so an empty scan fails here instead of going quiet."""
@@ -498,8 +674,8 @@ def test_the_headers_are_actually_scanned():
 
 def test_the_real_pages_obey_the_structure_rules():
     """The tree itself, as the control: the synthetic cases above prove the rules fire,
-    and this proves they are satisfied where it counts. Sizes are excluded (a baseline
-    grandfathers those); structure has no baseline and must hold everywhere."""
+    and this proves they are satisfied where it counts. Structure must hold everywhere,
+    with no tolerated list to fall back on."""
     import check_docgen
     for rel in check_docgen._pages():
         path = ROOT / "docs" / rel

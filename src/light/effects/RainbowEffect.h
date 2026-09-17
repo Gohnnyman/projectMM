@@ -4,38 +4,41 @@
 
 namespace mm {
 
+/// Palette-cycling diagonal rainbow effect, and the default the tests reach for.
+/// @card RainbowEffect.gif
 /// Author: FastLED rainbow (Mark Kriegsman), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_FastLED.h
-/// Palette-cycling diagonal rainbow effect — the default/test effect.
-/// @card RainbowEffect.png
+///
+/// A pixel's hue comes from its own x plus y, walked by the clock, so the bands run diagonally.
 class RainbowEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫"; }  // MoonLight origin
-    // Writes only the z=0 slice — Layer::extrude duplicates it across z on
-    // 3D layouts. Opt-in to that promise so the framework doesn't iterate z.
+    /// Catalog tags: MoonLight origin.
+    const char* tags() const override { return "💫"; }
+    /// Writes the z=0 slice, which extrude duplicates through a volume.
     Dim dimensions() const override { return Dim::D2; }
 
-    uint8_t speed = 20; // BPM — one full hue cycle every 3 s; 60 (a whole rainbow per second) reads too fast
+    /// How fast the rainbow cycles, where a whole one a second reads too fast.
+    uint8_t speed = 20;
 
+    /// Publish the cycle speed.
     void defineControls() override {
         controls_.addControl("speed", speed, 1, 255);
     }
 
+    /// Walk the phase, then color each pixel by its diagonal position.
     void tick() MM_NONBLOCKING override {
-        // D2 effect — writes only z=0; Layer::extrude duplicates across z.
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();
         uint8_t cpl = channelsPerLight();
 
-        // BPM to phase: one full hue cycle (256) per beat
-        // Use 64-bit to avoid overflow (uint32 overflows after ~5.5 minutes)
+        // One hue cycle a beat, widened since a 32-bit product overflows within minutes.
         uint32_t phase = static_cast<uint32_t>(
             static_cast<uint64_t>(elapsed()) * speed * 256 / 60000
         );
 
         for (lengthType y = 0; y < h; y++) {
             for (lengthType x = 0; x < w; x++) {
-                // Diagonal rainbow: hue varies with x + y + time
+                // The hue varies with x plus y and the clock, which runs the bands diagonally.
                 uint8_t hue = static_cast<uint8_t>(
                     (static_cast<uint32_t>(x + y) * 256 / (w + h)) + phase
                 );

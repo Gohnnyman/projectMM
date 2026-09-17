@@ -1,7 +1,7 @@
 // @module crc
 
 #include "doctest.h"
-#include "core/crc.h"
+#include "core/util/crc.h"
 
 #include <cstring>
 

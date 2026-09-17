@@ -190,7 +190,7 @@ def _walk_modules(modules):
 
 def _device_sort_key(d):
     """Sort devices by name (case-insensitive), IP as tiebreaker — the same order the on-device
-    DevicesModule uses (src/core/DevicesModule.h sortByName / ciLess), so MoonDeck's list and the
+    DevicesModule uses (src/core/system/DevicesModule.h sortByName / ciLess), so MoonDeck's list and the
     device's own list read the same. Used everywhere a device list is stored, so the persisted
     moondeck.json is already in display order."""
     return (d.get("deviceName", "").lower(), d.get("ip", ""))
@@ -423,7 +423,7 @@ def discover_devices(subnet=""):
     _link_last_flash(devices)
 
     # Sort by device name, case-insensitive — matching the on-device DevicesModule list
-    # (src/core/DevicesModule.h sortByName / ciLess) so both lists read the same. IP is the
+    # (src/core/system/DevicesModule.h sortByName / ciLess) so both lists read the same. IP is the
     # tiebreaker so un-named / duplicate-named devices still have a stable order.
     devices.sort(key=_device_sort_key)
     return devices, subnet

@@ -121,15 +121,15 @@ find_program(UV_EXECUTABLE NAMES uv REQUIRED
 # filesystem, network, …) ship as .h + .cpp per CLAUDE.md — list those .cpps
 # here so both the application and the test binary link them.
 add_library(mm_core STATIC
-    src/core/Control.cpp
-    src/core/JsonUtil.cpp
-    src/core/ScratchBuffer.cpp
-    src/core/HttpServerModule.cpp
-    src/core/FilesystemModule.cpp
-    src/core/FileManagerModule.cpp
-    src/core/MqttModule.cpp
-    src/core/sha256.cpp
-    src/core/Scheduler.cpp
+    src/core/module/Control.cpp
+    src/core/util/JsonUtil.cpp
+    src/core/util/ScratchBuffer.cpp
+    src/core/system/HttpServerModule.cpp
+    src/core/system/FilesystemModule.cpp
+    src/core/system/FileManagerModule.cpp
+    src/core/system/MqttModule.cpp
+    src/core/util/sha256.cpp
+    src/core/module/Scheduler.cpp
     src/core/moonlive/MoonLive.cpp
     src/core/moonlive/MoonLiveCompiler.cpp
     src/core/moonlive/MoonLiveSpill.cpp
@@ -227,7 +227,7 @@ set_target_properties(mm_platform PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)
 # rewrites the header only when its content changes, so an unchanged tree triggers no rebuild.
 add_custom_target(build_info_gen ALL
     COMMAND ${UV_EXECUTABLE} run python ${CMAKE_SOURCE_DIR}/moondeck/build/generate_build_info.py
-    BYPRODUCTS ${CMAKE_SOURCE_DIR}/src/core/build_info.h
+    BYPRODUCTS ${CMAKE_SOURCE_DIR}/src/core/util/build_info.h
     COMMENT "Generating build_info.h (git build id)"
     VERBATIM
 )

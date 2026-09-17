@@ -1,5 +1,5 @@
 // @module ParallelLedDriver
-// @also MultiPinLedDriver, ParlioLedDriver
+// @also I80Peripheral, ParlioPeripheral
 
 #include "doctest.h"
 #include "light/drivers/ParallelLedDriver.h"

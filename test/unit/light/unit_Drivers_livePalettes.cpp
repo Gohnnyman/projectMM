@@ -11,7 +11,7 @@
 
 #include "doctest.h"
 #include "light/drivers/Drivers.h"
-#include "light/Palette.h"
+#include "light/util/Palette.h"
 #include "light/moonlive/MoonLiveScriptFile.h"
 #include "platform/platform.h"
 #include "../core/conditional_controls.h"   // mm::test::controlIndex

@@ -7,9 +7,9 @@
 // covers the module's control set + that the empty-snapshot path is safe, not the populated rows.
 
 #include "doctest.h"
-#include "core/TasksModule.h"
-#include "core/Scheduler.h"
-#include "core/JsonSink.h"
+#include "core/system/TasksModule.h"
+#include "core/module/Scheduler.h"
+#include "core/util/JsonSink.h"
 
 #include <cstring>
 #include <string>

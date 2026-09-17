@@ -14,8 +14,8 @@
 
 #include "platform/platform.h"
 
-#include "core/ImprovFrame.h"
-#include "core/ImprovOpReassembler.h"
+#include "core/util/ImprovFrame.h"
+#include "core/util/ImprovOpReassembler.h"
 
 #include "driver/uart.h"
 #include "esp_log.h"

@@ -1,15 +1,14 @@
 #pragma once
-// The sprite CAST: every pixel-art character the effects share, behind one draw call.
+// The sprite cast: every pixel-art character the effects share, behind one draw call.
 //
-// Four effects own art in their own namespaces (fishart, pacart, toasterart, invart), each a plain
-// header of pixels. Two effects now want to draw ANY of them chosen at runtime: the fountain throws
-// a random species, and Pong can use one as its ball. That selection logic, a kind enum plus the
-// palette each pack needs, is the same in both, so it lives here instead of in whichever effect was
-// written first. The PIXELS are still owned by the effect that introduced them.
+// Four effects own their art in their own namespaces, each a plain header of pixels.
+// Two effects draw any of them chosen at runtime: the fountain throws a random species,
+// and Pong can use one as its ball. That selection is the same in both, so it lives here.
+// The pixels stay owned by the effect that introduced them.
 // Author: projectMM original
 
-#include "core/math16.h"
-#include "light/draw.h"
+#include "core/util/math16.h"
+#include "light/powerfunctions/draw.h"
 #include "light/effects/FishTankEffect.h"        // fishart:: the reef fish, slim fish, tiny fish
 #include "light/effects/FlyingToastersEffect.h"  // toasterart:: the toaster and its toast
 #include "light/effects/PacmanEffect.h"          // pacart:: Pacman and the ghosts
@@ -18,13 +17,11 @@
 namespace mm {
 namespace spritecast {
 
-/// The cast, in the order a kind byte selects. Fish first because there are three of them and they
-/// read best; toast and ghosts are the small ones that fill the gaps.
+/// The cast, in the order a kind byte selects, the three fish leading since they read best.
 enum : uint8_t { kFish = 0, kSlim, kTiny, kPac, kGhost, kToaster, kToast,
                  kSquid, kCrab, kOcto, kKindCount };
 
-/// The palettes are built the way each source effect builds its own, from the ACTIVE palette, so a
-/// borrowed sprite recolors with the rest of the show.
+/// A fish's palette, built from the active one so a borrowed sprite recolors with the show.
 inline void fishPalette(RGB (&pal)[fishart::kPaletteCount], uint8_t entry) {
     const RGB body = colorFromPalette(*Palettes::active(), entry);
     pal[fishart::kClear] = RGB{0, 0, 0};
@@ -45,6 +42,7 @@ inline void pacPalette(RGB (&pal)[pacart::kPaletteCount]) {
     pal[pacart::kDark]  = RGB{140, 118, 0};
 }
 
+/// A ghost's palette, keeping the white eyes that make a colored blob read as a ghost.
 inline void ghostPalette(RGB (&pal)[pacart::kPaletteCount], uint8_t entry) {
     const RGB body = colorFromPalette(*Palettes::active(), entry);
     pal[pacart::kClear] = RGB{0, 0, 0};
@@ -63,9 +61,7 @@ inline void invaderPalette(RGB (&pal)[invart::kPaletteCount], uint8_t entry) {
     pal[invart::kEye]   = RGB{10, 10, 14};
 }
 
-/// Center the sprite on (px, py) and draw it. Sprites are drawn from their top-left, so the
-/// half-extents come off first: art hanging below and right of where the physics says it is reads
-/// as lag, not as an offset.
+/// Center the sprite and draw it: art hanging below and right of the physics reads as lag.
 inline void blit(const draw::Canvas& cv, const draw::sprites::Sprite& s, uint8_t frame,
                  lengthType px, lengthType py, uint8_t sc, bool flip) {
     const lengthType ox = static_cast<lengthType>(px - (s.w * sc) / 2);
@@ -73,8 +69,7 @@ inline void blit(const draw::Canvas& cv, const draw::sprites::Sprite& s, uint8_t
     draw::sprite(cv, s, frame, ox, oy, sc, flip);
 }
 
-/// Draw cast member `kind` centered on (px, py). `entry` picks its color out of the active palette,
-/// `beat` animates whichever frame the pack has, and `flip` faces it along its travel.
+/// Draw one cast member centered, colored by `entry`, animated by `beat` and faced by `flip`.
 inline void draw(const draw::Canvas& cv, uint8_t kind, uint8_t entry,
                  lengthType px, lengthType py, uint8_t sc, bool flip, uint8_t beat) {
     switch (kind) {
@@ -114,7 +109,7 @@ inline void draw(const draw::Canvas& cv, uint8_t kind, uint8_t entry,
             break;
         }
         case kToaster:
-            // The toaster art exports a ready-made Sprite, so this one is a straight reuse.
+            // The toaster art exports a ready-made Sprite, so this is a straight reuse.
             blit(cv, toasterart::kToasterSprite, beat % toasterart::F, px, py, sc, flip);
             break;
         case kToast:
@@ -144,9 +139,9 @@ inline void draw(const draw::Canvas& cv, uint8_t kind, uint8_t entry,
     }
 }
 
-/// The widest and tallest the cast gets, in ART pixels: what a caller must leave room for when it
-/// does not know which member it will draw.
+/// The widest the cast gets in art pixels, which a caller leaves room for.
 inline constexpr uint8_t kMaxW = 16;
+/// And the tallest.
 inline constexpr uint8_t kMaxH = 11;
 
 }  // namespace spritecast

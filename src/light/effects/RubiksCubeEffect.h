@@ -12,27 +12,40 @@ namespace mm {
 // `cubeSize` is the order of the cube (2..8 are real cubes, 1 is a degenerate single block); with
 // `randomTurning` the cube tumbles through endless random moves instead of solving a stored scramble.
 //
-// Prior art: MoonLight's RubiksCube effect (E_MoonModules / MoonModules). The cube model
-// (init/rotateFace/rotateRow/rotateColumn/rotateFaceLayer and the six face rotations), the packed
-// move list + scramble/playback, and drawCube's nearest-face projection with the
-// {Red, DarkOrange, Blue, Green, Yellow, White} color map are reproduced exactly here, written
-// fresh on EffectBase + the shared draw primitive. projectMM has no per-cell mapping mask, so every
-// in-bounds voxel is treated as mapped (the source's isMapped()-skip and the mapping-driven
-// sizeX++/sizeY++/sizeZ++ adjustments are dropped; the projection uses sizeX = max(size.x-1, 1)).
-/// Author: WildCats08 / @Brandon502 (MoonLight), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Effect rendering a rotating Rubik's cube on a 3D layout.
+/// @card RubiksCubeEffect.gif
+/// Author: WildCats08 / @Brandon502 (MoonLight), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+///
+/// The cube scrambles itself, then plays the scramble back one slice at a time.
+/// Every voxel takes the color of the nearest face, which is what makes a solid read as a cube.
+///
+/// Prior art: MoonLight's RubiksCube, whose model and move list this reproduces.
+///
+/// @moreinfo
+///
+/// ## One difference from the source
+///
+/// projectMM has no per-cell mapping mask, so every in-bounds voxel counts as mapped.
+/// The source's mapping-driven size adjustments are therefore dropped.
+/// The projection uses the extent less one instead, floored at 1.
 class RubiksCubeEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫"; }  // MoonLight origin · 3D-native
+    /// Catalog tags: MoonLight origin, and 3D-native.
+    const char* tags() const override { return "💫"; }
+    /// A cube needs all three axes, so this effect is volumetric.
     Dim dimensions() const override { return Dim::D3; }
 
-    // Defaults match MoonLight's RubiksCube exactly.
-    uint8_t turnsPerSecond = 2;       // 0..20
-    uint8_t cubeSize       = 3;       // 1..8 (cube order)
+    // Defaults match MoonLight's own RubiksCube.
+    /// How many slices turn each second.
+    uint8_t turnsPerSecond = 2;
+    /// The cube's order, so 3 is the familiar 3x3x3.
+    uint8_t cubeSize       = 3;
+    /// Turn random slices rather than replaying the scramble backward.
     bool    randomTurning  = false;
-    bool    usePalette     = false;   // off = the classic 6 Rubik's face colors; on = 6 samples
-                                      // of the system-wide palette (advised: a primary-ish palette)
+    /// Take the six face colors from the active palette, where a primary-ish one stays distinct.
+    bool    usePalette     = false;
 
+    /// Publish the turn rate, the cube's order and the two coloring choices.
     void defineControls() override {
         controls_.addControl("turnsPerSecond", turnsPerSecond, 0, 20);
         controls_.addControl("cubeSize", cubeSize, 1, 8);
@@ -40,10 +53,7 @@ public:
         controls_.addControl("usePalette", usePalette);
     }
 
-    // The 6 face colors drawCube paints with. Classic Rubik's set (red, dark-orange, blue, green,
-    // yellow, white) by default; with usePalette, 6 evenly-spaced samples of the system-wide active
-    // palette (0, 51, 102, … 255) so the cube recolors to whatever palette is chosen — advised: a
-    // primary-ish palette so the 6 faces stay distinct.
+    /// The six face colors: the classic Rubik's set, or six evenly spaced palette samples.
     std::array<RGB, 6> faceColors() const {
         if (!usePalette)
             return {{{255, 0, 0}, {255, 140, 0}, {0, 0, 255}, {0, 128, 0}, {255, 255, 0}, {255, 255, 255}}};
@@ -54,13 +64,13 @@ public:
         return pal;
     }
 
-    // cubeSize / randomTurning changes re-scramble (MoonLight reinitialises on those controls). No
-    // heap state to rebuild, so the cheap onControlChanged hook is enough — flag a fresh init for the next loop.
+    /// Re-scramble when the cube's order or its turning changes, since neither rebuilds any state.
     void onControlChanged(const char* name) override {
         if (std::strcmp(name, "cubeSize") == 0 || std::strcmp(name, "randomTurning") == 0)
             doInit_ = true;
     }
 
+    /// Scramble when asked, then turn one slice per interval and redraw the cube.
     void tick() MM_NONBLOCKING override {
         const lengthType w = width(), h = height(), d = depth();
 
@@ -68,14 +78,8 @@ public:
 
         const uint32_t now = elapsed();
 
-        // (Re-)scramble on a requested re-scramble (doInit_ — set on first run and on control change,
-        // once past the initial delay), OR when `step_` is stuck unreasonably far in the future.
-        // MoonLight writes the second check as `step - 3100 > now`, but with unsigned `step_` that
-        // UNDERFLOWS whenever step_ < 3100 (the first ~3 s of uptime, and after every turn where step_
-        // is set to `now`), so it fires init EVERY frame — the cube re-scrambles each tick and the
-        // display FLASHES instead of turning one slice at a time. The fix is a wrap-safe SIGNED
-        // difference: re-init only when step_ is genuinely more than 3100 ms ahead of now.
-        const int32_t ahead = static_cast<int32_t>(step_ - now);   // how far step_ is in the future (signed)
+        // A wrap-safe signed difference: the unsigned form underflows and re-inits every frame.
+        const int32_t ahead = static_cast<int32_t>(step_ - now);
         if ((doInit_ && now > step_) || ahead > 3100) {
             step_ = now + 1000;
             doInit_ = false;
@@ -212,21 +216,14 @@ private:
             if (width >= SIZE) rotateFace(top, !clockwise);
         }
 
-        // Project the cube onto the LED volume: every in-bounds voxel is colored by the outer face
-        // it sits nearest. (MoonLight's drawCube, with the isMapped()-skip and sizeX++/etc dropped.)
-        // The 6 face colors are supplied by the caller (classic Rubik's set, or palette samples).
+        // Every in-bounds voxel takes the color of the outer face it sits nearest.
+        /// Paint every surface voxel in the color of its nearest face.
         void drawCube(const draw::Canvas& cv, lengthType sx, lengthType sy, lengthType sz,
                       const std::array<RGB, 6>& COLOR_MAP) const {
-            // This effect owns its background: drawCube writes only the SURFACE voxels (the loop has
-            // no else for the interior), and a turn moves stickers to new positions, so without a
-            // wipe the old pose's stickers linger and the cube accretes garbage — it never settles.
-            // One fill per draw (drawCube runs once per turn, not per frame), the sparse-effect idiom.
+            // Surface voxels only, so without this wipe the old pose's stickers accrete.
             draw::fill(cv, {0, 0, 0});
             const int sizeX = MAXi(sx - 1, 1), sizeY = MAXi(sy - 1, 1), sizeZ = MAXi(sz - 1, 1);
-            // Integer form of round(coord * (SIZE+1) / size): for non-negative operands round(a/b) is
-            // (2a + b) / (2b), which reproduces round(coord*scale) exactly at these magnitudes — no
-            // per-voxel float multiply or round() in the hot loop. num = 2·(SIZE+1) is the shared
-            // numerator factor; denX/Y/Z = 2·size are the doubled per-axis denominators.
+            // The integer form of a rounded divide, so the hot loop needs no float multiply.
             const int num = 2 * (SIZE + 1);
             const int denX = 2 * sizeX, denY = 2 * sizeY, denZ = 2 * sizeZ;
             const int halfX = sizeX / 2, halfY = sizeY / 2, halfZ = sizeZ / 2;
@@ -251,8 +248,7 @@ private:
         }
     };
 
-    // A move: which face turns, how many layers wide, which direction. Packed into one byte for the
-    // stored scramble list (3 bits face, 3 bits width, 1 bit direction).
+    // One move packed into a byte: 3 bits of face, 3 of width, 1 of direction.
     struct Move { uint8_t face, width, direction; };
 
     Move createRandomMoveStruct(uint8_t size, uint8_t prevFace) {
@@ -278,8 +274,7 @@ private:
         &Cube::rotateFront, &Cube::rotateBack, &Cube::rotateLeft,
         &Cube::rotateRight, &Cube::rotateTop, &Cube::rotateBottom};
 
-    // Build a fresh solved cube, give it a few random whole-cube turns, then scramble it with a
-    // stored move list (so playback can reverse it), and draw the scrambled state.
+    // A solved cube, a few whole-cube turns, then a stored scramble playback can reverse.
     void init(const draw::Canvas& cv, lengthType w, lengthType h, lengthType d) {
         cube_.init(cubeSize);
         const int moveCount = cubeSize * 10 + rng_.below(20);
@@ -301,20 +296,21 @@ private:
         cube_.drawCube(cv, w, h, d, faceColors());
     }
 
-    // Inline integer helpers (MoonLight's MIN/MAX/constrain).
+    // Kept local so the code above reads like the MoonLight source it follows.
     static int MINi(int a, int b) { return a < b ? a : b; }
     static int MAXi(int a, int b) { return a > b ? a : b; }
     static int constrainI(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-    static constexpr int kMaxMoves = 100;   // moveList capacity (cubeSize*10 + 0..19 ≤ 99 for size ≤ 8)
+    /// The move list's capacity, which the largest cube's scramble stays under.
+    static constexpr int kMaxMoves = 100;
 
-    Cube     cube_;                         // 6 × 8 × 8 = 384 bytes — small enough to keep inline
-    uint8_t  moveList_[kMaxMoves] = {};     // packed scramble for reverse playback
-    uint8_t  moveIndex_ = 0;
-    uint8_t  prevFaceMoved_ = 0;
-    uint32_t step_ = 0;                     // ms timestamp gating the next turn / hold window
-    bool     doInit_ = true;                // request a fresh scramble (first run + on control change)
-    Random8  rng_{0x52554249u};             // "RUBI"
+    Cube     cube_;                         ///< 384 bytes, small enough to keep inline
+    uint8_t  moveList_[kMaxMoves] = {};     ///< the packed scramble, for reverse playback
+    uint8_t  moveIndex_ = 0;                ///< how far through that playback the cube is
+    uint8_t  prevFaceMoved_ = 0;            ///< so a scramble never turns one face twice running
+    uint32_t step_ = 0;                     ///< when the next turn is due
+    bool     doInit_ = true;                ///< request a fresh scramble
+    Random8  rng_{0x52554249u};             ///< fixed-seed, so the goldens reproduce
 };
 
 } // namespace mm

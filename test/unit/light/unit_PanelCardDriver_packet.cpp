@@ -1,7 +1,7 @@
 // @module PanelCardDriver
 
 #include "doctest.h"
-#include "light/ColorLight5A75Packet.h"
+#include "light/drivers/ColorLight5A75Packet.h"
 
 #include <cstring>
 

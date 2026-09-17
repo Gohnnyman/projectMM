@@ -205,7 +205,7 @@ The framerate rule lives here too: everything in this group is driven by elapsed
 
 **Things that move under forces: sparks, rain, snow, smoke, confetti, debris, a swarm.**
 
-Anything that behaves like matter is the same handful of forces over the same state, and the part that differs between one look and another is *which* forces are applied and how particles are emitted — not the physics. So the state and the integrator live in [particles.h](../../../src/light/particles.h) and the character stays with the effect.
+Anything that behaves like matter is the same handful of forces over the same state, and the part that differs between one look and another is *which* forces are applied and how particles are emitted — not the physics. So the state and the integrator live in [particles.h](../../../src/light/powerfunctions/particles.h) and the character stays with the effect.
 
 Storage is structure-of-arrays over the caller's own buffers, so a pass that touches only velocity walks only velocity, and the pool never allocates after `prepare()`. Positions are the same sub-pixel type `splat` takes, so a particle at x=3.5 lands half on each pixel instead of snapping.
 
@@ -239,7 +239,7 @@ Everything above draws *into* a grid: set this pixel, walk this line, move this 
 
 That inversion is why shaders compose so freely. There is no state to keep in step and no order of operations to get right, so an effect is built by transforming the *coordinate* before answering: fold space and one shape becomes a thousand, rotate it and the whole design turns, displace it by a noise field and everything flows.
 
-[shader.h](../../../src/light/shader.h) is the standard GLSL vocabulary in fixed point, deliberately using the familiar names so anyone who has read shader code needs no translation. It runs on every target.
+[shader.h](../../../src/light/powerfunctions/shader.h) is the standard GLSL vocabulary in fixed point, deliberately using the familiar names so anyone who has read shader code needs no translation. It runs on every target.
 
 <div class="mm-pf" markdown="1">
 
@@ -260,7 +260,7 @@ That inversion is why shaders compose so freely. There is no state to keep in st
 
 Raymarching is one technique a shader can use, for rendering 3D. A scene is described as a *function*: say how far the nearest surface is from any point, and the renderer walks a ray outward until it arrives. The world is arithmetic — geometry emerges from the distance function rather than being stored.
 
-[raymarch.h](../../../src/light/raymarch.h) is compiled only where the SoC declares a hardware FPU, because a raymarch is per-pixel float by nature. That gate is the one bounded exception to the integer-only render path, and it is a whole-header switch rather than a rule weakened in place. Everything in `shader.h` stays fixed point and runs everywhere.
+[raymarch.h](../../../src/light/powerfunctions/raymarch.h) is compiled only where the SoC declares a hardware FPU, because a raymarch is per-pixel float by nature. That gate is the one bounded exception to the integer-only render path, and it is a whole-header switch rather than a rule weakened in place. Everything in `shader.h` stays fixed point and runs everywhere.
 
 <div class="mm-pf" markdown="1">
 

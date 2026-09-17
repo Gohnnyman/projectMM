@@ -1,8 +1,8 @@
 // @module InstallationId
 
 #include "doctest.h"
-#include "core/MoonCloudModule.h"
-#include "core/sha256.h"
+#include "core/system/MoonCloudModule.h"
+#include "core/util/sha256.h"
 
 #include <cstdio>
 #include <cstring>

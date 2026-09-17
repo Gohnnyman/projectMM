@@ -15,9 +15,9 @@
 // sit inside the prefix.
 
 #include "doctest.h"
-#include "core/FilesystemModule.h"
-#include "core/NetworkModule.h"
-#include "core/Scheduler.h"
+#include "core/system/FilesystemModule.h"
+#include "core/system/NetworkModule.h"
+#include "core/module/Scheduler.h"
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -104,7 +104,7 @@ TEST_CASE("the two boot images serve the OTA routes under the same names") {
         return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     };
     const std::string moonbase = read("moonbase/main/moonbase_main.cpp");
-    const std::string app      = read("src/core/HttpServerModule.cpp");
+    const std::string app      = read("src/core/system/HttpServerModule.cpp");
 
     // Push an image, and install from a URL: the two routes a browser calls across the handover.
     for (const char* route : {"/api/firmware/upload", "/api/firmware/url"}) {
@@ -151,7 +151,7 @@ TEST_CASE("the two boot images serve the OTA routes under the same names") {
     const std::string ui = read("src/ui/app.js");
     CHECK_MESSAGE(ui.find("c.name === \"image\"") != std::string::npos,
                   "the UI must detect MoonBase by the control the module actually publishes");
-    CHECK_MESSAGE(read("src/core/FirmwareUpdateModule.h").find("addSelect(\"image\"") != std::string::npos,
+    CHECK_MESSAGE(read("src/core/system/FirmwareUpdateModule.h").find("addSelect(\"image\"") != std::string::npos,
                   "the module must publish that control");
 
     // EVERY INSTALL SHOWS PROGRESS. Six ways in (a release, a URL, a file; for the app and for

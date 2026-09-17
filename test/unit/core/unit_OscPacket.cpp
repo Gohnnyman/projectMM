@@ -1,7 +1,7 @@
 // @module OscModule
 
 #include "doctest.h"
-#include "core/OscPacket.h"
+#include "core/services/OscPacket.h"
 
 #include <cstring>
 #include <vector>

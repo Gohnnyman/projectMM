@@ -7,11 +7,11 @@
 // which is exactly what the module sees on a board.
 
 #include "doctest.h"
-#include "core/ButtonService.h"
-#include "core/Scheduler.h"
-#include "core/MoonModule.h"
+#include "core/services/ButtonService.h"
+#include "core/module/Scheduler.h"
+#include "core/module/MoonModule.h"
 #include "platform/platform.h"
-#include "core/JsonSink.h"
+#include "core/util/JsonSink.h"
 
 #include <cstring>
 

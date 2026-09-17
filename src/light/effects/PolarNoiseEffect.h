@@ -4,47 +4,51 @@
 
 namespace mm {
 
-// PolarNoise: a warped noise field addressed in polar coordinates, folded into a kaleidoscope.
-//
-// The look this reaches for is the one Stefan Petrick made recognisable in the LED world: not a
-// texture scrolling past the panel, but a field that seems to turn and breathe inside it. Three
-// power functions compose to get there, and the effect itself is mostly parameter choices:
-//
-//   - `PolarLut` addresses the grid by ANGLE and RADIUS instead of x and y, which is what makes
-//     the motion rotate around the center rather than slide across it. The address is the same one
-//     `atan16` and `dist16` compute, read from a table: it does not change between frames, and
-//     computing it per pixel measured 39% of this effect's frame on an ESP32-S3.
-//   - `warp8` displaces the sample coordinate by another noise field, so the field flows and
-//     marbles instead of merely drifting (Quilez's domain warping).
-//   - `kaleido` folds the angle into n mirrored wedges, turning the field into a mandala with a
-//     single modulo — the symmetry is free because it happens before the field is ever sampled.
-//
-// Cost: `warp` is 2 noise samples plus its inner fbm, so at octaves=2 this is ~4 samples/pixel.
-// The polar address is a table read rather than an `atan16` plus a `dist16`.
-// That is a rich-field effect, appropriate on small and medium fixtures and on desktop; on a large
-// wall drop `octaves` to 1 (or `warp` to 0) and it degrades to a plain polar noise that still
-// reads well. The controls are deliberately the cost knobs, not just the look knobs.
-//
-/// Prior art: Stefan Petrick's polar/noise effect vocabulary (a friend of projectMM) and Iñigo
-/// Quilez's domain-warping article. Implemented fresh in fixed point over our own noise.
-/// @card PolarNoiseEffect.png
 /// Effect: a warped, kaleidoscopic noise field in polar coordinates.
+/// @card PolarNoiseEffect.gif
+///
+/// Not a texture scrolling past the panel, but a field that turns and breathes inside it.
+/// Three power functions compose to get there, and the effect is mostly parameter choices.
+///
+/// Prior art: Stefan Petrick's polar and noise vocabulary, and Inigo Quilez's domain warping.
+///
+/// @moreinfo
+///
+/// ## The three power functions
+///
+/// `PolarLut` addresses the grid by angle and radius, which rotates the motion around the center.
+/// That address never changes between frames, and computing it per pixel measured 39% of a frame on an S3.
+/// `warp8` displaces the sample coordinate by a second field, so the field marbles rather than drifts.
+/// `kaleido` folds the angle into mirrored wedges, and the symmetry is free before any sampling.
+///
+/// ## The controls are the cost knobs
+///
+/// `warp` is two noise samples plus its inner fbm, so at two octaves this is about four a pixel.
+/// On a large wall drop `octaves` to 1, or `warp` to 0, and it degrades to a plain polar noise.
 class PolarNoiseEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🖌️🌫️🎡"; }   // power-function showcase
-    Dim dimensions() const override { return Dim::D3; }  // volumetric: the field turns through depth
+    /// Catalog tags: this effect is the power-function showcase.
+    const char* tags() const override { return "💫🖌️🌫️🎡"; }
+    /// Volumetric: the field turns through depth.
+    Dim dimensions() const override { return Dim::D3; }
 
-    uint8_t bpm      = 8;    // how fast the field drifts
-    uint8_t scale    = 40;   // noise cells across the grid: low = broad shapes, high = fine detail
-    uint8_t segments = 6;    // kaleidoscope wedges; 1 disables the fold
-    uint8_t warp     = 90;   // domain-warp strength; 0 is a plain (unwarped) field
-    uint8_t octaves  = 2;    // fbm octaves — the main cost knob
-    uint8_t twist    = 30;   // how much the radius shears the angle, giving the field a spiral set
+    /// How fast the field drifts.
+    uint8_t bpm      = 8;
+    /// Noise cells across the grid. Low gives broad shapes, high gives fine detail.
+    uint8_t scale    = 40;
+    /// Kaleidoscope wedges, where 1 disables the fold.
+    uint8_t segments = 6;
+    /// Domain-warp strength, where 0 leaves the field plain.
+    uint8_t warp     = 90;
+    /// fbm octaves, and the main cost knob.
+    uint8_t octaves  = 2;
+    /// How much the radius shears the angle, giving the field its spiral.
+    uint8_t twist    = 30;
 
-    /// The polar address: whether to read it from a table, at what precision, and how a
-    /// volumetric fixture's coordinates become an angle and a radius (light/polar.h).
+    /// The polar address: the table, its precision, and how a volumetric fixture maps to angle and radius.
     PolarLut::Controls polar;
 
+    /// Publish the drift, the field's shape, the fold and the polar address.
     void defineControls() override {
         controls_.addControl("bpm", bpm, 0, 60);
         controls_.addControl("scale", scale, 1, 255);
@@ -52,30 +56,27 @@ public:
         controls_.addControl("warp", warp, 0, 255);
         controls_.addControl("octaves", octaves, 1, 4);
         controls_.addControl("twist", twist, 0, 255);
-        // The address tradeoff, as controls because it is the user's to make: the table costs 2
-        // bytes per pixel (4 when wide) and buys back the per-pixel atan16 and dist16.
+        // The table costs 2 bytes a pixel and buys back the per-pixel atan16 and dist16.
         PolarLut::addControls(controls_, polar);
     }
+    /// Build the polar address table for the current geometry.
     void prepare() override {
-        // The polar address is built here, not in tick(): prepare() is where a module builds state
-        // and where allocation is allowed, and it runs again on every resize and control change, so
-        // the table is always current without the render path ever allocating.
+        // Built here rather than in tick(), so the render path never allocates.
         lut_.prepareFor(polar, width(), height(), EffectBase::depth());
     }
 
 
+    /// Sample the warped field per pixel, folded into wedges around the center.
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
         const lengthType w = width(), h = height(), dep = depth();
 
-        // The drift is an oscillator: a sawtooth that only ever moves forward, which is what makes
-        // the field breathe outward rather than rock back and forth.
+        // A sawtooth, so the field breathes outward rather than rocking back and forth.
         drift_.set(0, {.rate = bpm, .low = 0, .high = 65535, .phaseOffset = 0, .wave = Wave::Saw});
         drift_.advanceTo(elapsed());
         const uint32_t t = drift_.unitValue(0);
 
-        // Build the address table if the grid changed; a rebuild is the only frame that pays for it.
-        // If it cannot be allocated the effect still renders, computing the address per pixel.
+        // Read from a table, or computed per pixel where it could not be allocated.
         const bool table = lut_.ready();
         const int32_t cx = w / 2, cy = h / 2, cz = dep / 2;
 
@@ -86,8 +87,7 @@ public:
                 // The polar address, and the radius in the pixel units the field is scaled in.
                 angle16 a;
                 uint32_t r;
-                // The axis the field is sampled along through the fixture. Zero at every light on a
-                // panel, so the volumetric form reduces exactly to the flat one there.
+                // The axis sampled through the fixture, which is 0 on a panel.
                 int32_t along;
                 if (table) {
                     a = lut_.angle(i);
@@ -96,8 +96,7 @@ public:
                           ? static_cast<int32_t>(lut_.pitch(i) >> 6)
                           : static_cast<int32_t>(z) - cz;
                 } else {
-                    // The same address the table would have held, under the same mapping: a device
-                    // too tight for the table must show the same composition, not a different one.
+                    // The same address the table would hold, so the composition matches either way.
                     const auto m = PolarLut::mappingOf(polar);
                     const auto ad = PolarLut::addressOf(m, static_cast<int32_t>(x) - cx,
                                                         static_cast<int32_t>(y) - cy,
@@ -108,17 +107,13 @@ public:
                                                               : static_cast<int32_t>(z) - cz;
                 }
 
-                // The twist shears the angle by the radius, which is what turns concentric rings
-                // into spiral arms.
+                // Shearing the angle by the radius turns concentric rings into spiral arms.
                 a = static_cast<angle16>(a + (r * twist));
 
-                // Fold into wedges BEFORE sampling, so the symmetry costs one modulo rather than a
-                // second pass over the field.
+                // Folded before sampling, so the symmetry costs one modulo rather than a pass.
                 a = kaleido(a, segments);
 
-                // Sample the field in (angle, radius) space: the angle drives one axis and the
-                // radius the other, so the field wraps around the center. Time moves the radius
-                // axis, which reads as the pattern breathing outward.
+                // Sampled in angle and radius, with time on the radius so the pattern breathes.
                 const uint32_t fx = (static_cast<uint32_t>(a) >> 6) * scale / 16u;
                 const uint32_t fy = (r * scale) + (t >> 6);
                 const uint32_t fz = static_cast<uint32_t>(along * static_cast<int32_t>(scale));
@@ -133,8 +128,8 @@ public:
     }
 
 private:
-    PolarLut            lut_{*this};
-    OscillatorBank<1>   drift_;
+    PolarLut            lut_{*this};   ///< the per-pixel angle and radius
+    OscillatorBank<1>   drift_;        ///< the field's forward drift
 };
 
 }  // namespace mm

@@ -5,7 +5,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/effects/PaintBrushEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioService.h"
+#include "core/services/AudioService.h"
 #include "platform/platform.h"   // setTestNowMs — deterministic virtual time
 
 // PaintBrushEffect is audio-driven: it draws a set of oscillating lines whose length is scaled by an

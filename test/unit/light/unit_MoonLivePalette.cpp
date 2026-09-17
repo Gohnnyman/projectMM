@@ -7,11 +7,11 @@
 
 #include "doctest.h"
 #include "light/moonlive/MoonLivePalette.h"
-#include "light/Palette.h"
+#include "light/util/Palette.h"
 #include "core/moonlive/moonlive_emit.h"
 #include "MoonLiveScriptFixture.h"
 #include "../core/moonlive_script_wrap.h"   // mmScript: the class ceremony around a bare body
-#include "core/MoonModule.h"
+#include "core/module/MoonModule.h"
 
 #include <cstring>
 #include <vector>

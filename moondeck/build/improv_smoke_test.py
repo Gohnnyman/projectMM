@@ -26,7 +26,7 @@ and the part most likely to break across firmware changes. The browser
 side is upstream-maintained and stable.
 
 Recommended developer test before any commit touching:
-  - src/core/ImprovFrame.h
+  - src/core/util/ImprovFrame.h
   - src/platform/esp32/platform_esp32_improv.cpp
   - mooninstaller/index.html
   - src/ui/install-picker.js

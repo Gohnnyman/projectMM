@@ -4,36 +4,37 @@
 
 namespace mm {
 
+/// Fire2012-style heat field: sparks at the base rise and cool as they go.
+/// @card FireEffect.gif
 /// Author: Mark Kriegsman's Fire2012 (FastLED); MoonLight adapts MatrixFireFast by toggledbits, https://github.com/toggledbits/MatrixFireFast
-/// Fire2012-style heat field: sparks at the base rise and cool through the active
-/// palette (heat = palette index, cold at the low end, hottest at the high end);
-/// spark count scales with width. The flame color comes from the active palette —
-/// the Lava palette (black->red->orange->yellow->white) gives the classic look; any
-/// palette works (Ocean/Forest turn the flame blue/green).
-/// @card FireEffect.png
+///
+/// A cell's heat is its palette index, cold at the low end and hottest at the high.
+/// So the Lava palette gives the classic look, and Ocean or Forest turn the flame blue or green.
+/// The spark count scales with width, so a wide base lights across its whole length.
 class FireEffect : public EffectBase {
 public:
-    const char* tags() const override { return "⚡️🦅🧬"; }  // FastLED origin (Fire2012-style) · David Jupijn / Rising Step
-    // Iterates y and x only; Layer::extrude fills z on 3D layers. The heat
-    // buffer covers only the z=0 plane (w*h), not the full 3D buffer.
+    /// Catalog tags: FastLED origin, David Jupijn and Rising Step.
+    const char* tags() const override { return "⚡️🦅🧬"; }
+    /// Iterates y and x, so the heat buffer covers the z=0 plane and extrude fills a volume.
     Dim dimensions() const override { return Dim::D2; }
 
+    /// How fast a cell loses heat as it rises.
     uint8_t cooling = 55;
+    /// How often the base throws a new spark.
     uint8_t sparking = 120;
 
+    /// Publish the cooling rate and the spark rate.
     void defineControls() override {
         controls_.addControl("cooling", cooling, 1, 255);
         controls_.addControl("sparking", sparking, 1, 255);
     }
 
+    /// Size the heat grid to the z=0 plane, which extrude fills through a volume.
     void prepare() override {
-        // D2 effect: heat grid covers only the z=0 plane (w*h). Extrude fills z on 3D
-        // layers — avoids allocating depth× more heap than needed. resize() reallocs
-        // only when the count changes, zero-fills, frees on 0, and keeps dynamicBytes
-        // current; the disable path frees it through MoonModule::release().
         heat_.resize(static_cast<size_t>(width()) * height());
     }
 
+    /// Cool the field, let the heat rise, spark the base, then render it through the palette.
     void tick() MM_NONBLOCKING override {
         if (!heat_) return;
 
@@ -42,14 +43,14 @@ public:
         lengthType h = height();
         uint8_t cpl = channelsPerLight();
 
-        // 1. Cool every cell by a small random amount
+        // 1. Cool every cell by a small random amount.
         uint8_t coolMax = static_cast<uint8_t>((static_cast<uint16_t>(cooling) * 10) / (h > 0 ? h : 1) + 2);
         for (nrOfLightsType i = 0; i < heat_.count(); i++) {
             uint8_t c = rand8() % coolMax;
             heat_[i] = (heat_[i] > c) ? static_cast<uint8_t>(heat_[i] - c) : 0;
         }
 
-        // 2. Heat rises: each row averages from the row below (y = h-1 is "bottom", rises to y=0)
+        // 2. Heat rises, each row averaging from the row below it.
         for (lengthType y = 0; y + 1 < h; y++) {
             for (lengthType x = 0; x < w; x++) {
                 lengthType yb = y + 1;
@@ -63,18 +64,14 @@ public:
             }
         }
 
-        // 3. Random sparks at the bottom row. Scale the number of spark attempts with width so a
-        //    wide grid lights up across its whole base instead of leaving most columns cold — a
-        //    fixed 4 sparks fills a 16-wide grid but barely speckles a 256-wide one. One attempt
-        //    per ~4 columns (min 4) keeps the bottom row evenly seeded at any width.
+        // 3. Sparks at the base, scaled with width: a fixed count barely speckles a wide grid.
         if (h > 0 && w > 0) {
             lengthType bottomRow = static_cast<lengthType>(h - 1);
             lengthType sparks = w / 4;
             if (sparks < 4) sparks = 4;
             for (lengthType i = 0; i < sparks; i++) {
                 if (rand8() < sparking) {
-                    // 16-bit random scaled by width: a single rand8 (8-bit) maps to only 256
-                    // buckets, leaving columns >256 unreachable on a wide grid (width goes to 512).
+                    // A 16-bit random, since a single byte leaves columns past 256 unreachable.
                     const uint16_t r16 = static_cast<uint16_t>((rand8() << 8) | rand8());
                     lengthType sx = static_cast<lengthType>((static_cast<uint32_t>(r16) * w) >> 16);
                     uint8_t add = static_cast<uint8_t>(160 + (rand8() & 0x5F));
@@ -84,13 +81,7 @@ public:
             }
         }
 
-        // 4. Render heat to RGB through the active palette: the heat value (0 = cold, 255 = hottest)
-        //    is the palette index, so the flame takes the palette's low→high gradient. The Lava
-        //    palette (black→red→orange→yellow→white) gives the classic fire look; any palette works
-        //    (an Ocean/Forest palette makes a blue/green "fire").
-        //    A completely cold cell (heat 0) always stays black — the "sky" above the flame — rather
-        //    than taking the palette's index-0 color (Lava's is black, but Ocean's is blue, which
-        //    would tint the whole background). Only a warm cell is colored.
+        // 4. Heat is the palette index, and a cold cell stays black rather than tinting the sky.
         const Palette& pal = *Palettes::active();
         for (nrOfLightsType i = 0; i < heat_.count(); i++) {
             RGB c = heat_[i] == 0 ? RGB{0, 0, 0} : colorFromPalette(pal, heat_[i]);
@@ -102,11 +93,9 @@ public:
     }
 
 private:
-    // One byte of "heat" per light on the z=0 plane. The buffer sizes itself in prepare(),
-    // frees itself on disable/teardown, and reports its own bytes — no free-helper, no
-    // destructor, no setDynamicBytes, no cast (see ScratchBuffer.h).
-    ScratchBuffer<uint8_t> heat_{*this};
-    Random8 rng_{0xC0FFEEu};   // the shared PRNG; rand8() adapts it to the call shape below
+    ScratchBuffer<uint8_t> heat_{*this};   ///< one byte of heat per light on the z=0 plane
+    Random8 rng_{0xC0FFEEu};               ///< fixed-seed, so the goldens reproduce
+    /// One random byte, the shape the cooling and sparking want.
     uint8_t rand8() { return rng_.next8(); }
 };
 

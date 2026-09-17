@@ -3,7 +3,7 @@
 # ///
 """Improv frame-contract tests (Python side).
 
-Pins the wire format the device C++ (src/core/ImprovFrame.h), the installer JS
+Pins the wire format the device C++ (src/core/util/ImprovFrame.h), the installer JS
 (mooninstaller/improv-frame.js), and this Python builder (moondeck/build/improv_provision.py)
 must all agree on byte-for-byte. The G1 golden vector below is the SAME one asserted
 in test/js/improv-frame.test.mjs, so the JS and Python envelope builders can't drift;

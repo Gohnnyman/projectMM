@@ -1,34 +1,20 @@
 #pragma once
-// Space Invaders, in attract mode: the formation marches, the cannon answers, nobody plays.
-//
-// The arcade's own attract mode is the model, and it is the right one for an effect: a game that
-// waits for a player is a black screen, while a game playing itself is the thing people recognize
-// from across a room. So the cannon tracks and fires on its own, the ranks march and drop, and a
-// hit takes an invader out of the formation.
-//
-// The march is the signature. In the arcade it speeds up as the ranks thin, because the machine
-// stepped every invader once per frame and fewer invaders meant a shorter loop: an accident of
-// 1978 hardware that became the game's defining tension. It is reproduced here deliberately rather
-// than inherited, since our loop has no such limit.
 // Author: projectMM original (Space Invaders, Taito 1978, is the inspiration)
 
-#include "core/AudioService.h"   // latestFrame: the beat the march steps on
-#include "core/math16.h"
-#include "light/draw.h"
+#include "core/services/AudioService.h"   // latestFrame: the beat the march steps on
+#include "core/util/math16.h"
+#include "light/powerfunctions/draw.h"
 #include "light/effects/EffectBase.h"
 
 namespace mm {
 
 namespace invart {
 
-// Palette LAYOUT: the sprites index these and the effect fills them, so one drawing serves every
-// rank in a different color. Slot 0 is draw::sprite's transparent key.
+// The sprites index these and the effect fills them, so one drawing serves every rank in a color.
 enum : uint8_t { kClear = 0, kBody = 1, kDark = 2, kEye = 3 };
 inline constexpr uint8_t kPaletteCount = 4;
 
-// The squid (top rank): 8x8, 2 frames of the tentacle wiggle that IS the march animation. Two
-// frames is not a shortcut; the arcade had exactly two, alternating on each step, and the
-// stop-motion quality is what the march looks like.
+// The squid, top rank: 8x8, and the arcade's own two frames are what the march looks like.
 inline constexpr uint8_t W = 8, H = 8, F = 2;
 inline constexpr uint8_t kSquid[] = {
     // frame 0: tentacles out
@@ -118,26 +104,38 @@ static_assert(sizeof(kCannon) == static_cast<size_t>(GW) * GH * GF, "cannon: one
 
 /// Effect: Space Invaders in attract mode, marching and firing on its own.
 /// @card SpaceInvadersEffect.gif
+///
+/// The arcade's attract mode is the model: a game playing itself is what reads across a room.
+/// The cannon tracks and fires on its own, the ranks march and drop, and a hit thins the formation.
+///
+/// @moreinfo
+///
+/// ## The march is the signature
+///
+/// In the arcade the formation speeds up as the ranks thin.
+/// The machine stepped every invader once per frame, so fewer invaders meant a shorter loop.
+/// That accident of 1978 hardware became the game's defining tension.
+/// Our loop has no such limit, so `stepInterval` reproduces the relationship deliberately.
 class SpaceInvadersEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🎵👾"; }   // audio-reactive when audioReactive is set
+    /// Catalog tags: the audio glyph applies when `audioReactive` is set.
+    const char* tags() const override { return "💫🎵👾"; }
+    /// A formation needs a floor and a height, so it is a 2D effect.
     Dim dimensions() const override { return Dim::D2; }
 
-    /// Steps per minute at full strength. The arcade had no such control: its tempo WAS the
-    /// invader count. Here that relationship is kept (see stepInterval) and this sets the top.
+    /// Steps per minute with a full formation. Thinning ranks raise it from here.
     uint8_t marchBpm = 60;
-    /// Pixels the formation slides per step, and rows it drops when it reaches an edge.
+    /// Pixels the formation slides per step.
     uint8_t stepX = 2;
+    /// Rows the formation drops when it reaches an edge.
     uint8_t dropY = 3;
-    /// Draw at this many pixels per art pixel. A 64-wide panel wants 1; a wall can afford 2.
+    /// Pixels per art pixel. A 64-wide panel wants 1, and a wall can afford 2.
     uint8_t size = 1;
 
-    /// March on the music. The arcade's own four-note loop already reads as rhythm, so stepping
-    /// the formation on the beat is the natural mapping rather than an imposed one, and the cannon
-    /// fires on a transient. In silence the formation HOLDS: a still invasion is the honest render
-    /// of no music, and it is what makes the mode read as reactive.
+    /// March on the beat and fire on a transient. Silence holds the invasion still.
     bool audioReactive = false;
 
+    /// Publish the tempo, the step and drop distances, the sprite scale and the audio switch.
     void defineControls() override {
         controls_.addControl("marchBpm", marchBpm, 10, 240);
         controls_.addControl("stepX", stepX, 1, 8);
@@ -146,11 +144,13 @@ public:
         controls_.addControl("audioReactive", audioReactive);
     }
 
+    /// Reset the march clock and deal a fresh formation.
     void prepare() override {
         formation_ = BeatPhase{};
         reset();
     }
 
+    /// Advance the march, then draw the formation, the shots and the cannon.
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
         if (width() == 0 || height() == 0) return;
@@ -158,9 +158,7 @@ public:
 
         const AudioFrame* audio = audioReactive ? AudioService::latestFrame() : nullptr;
         const bool live = audio && audio->levelSmoothed >= kSilence;
-        // A transient is the cannon's trigger, and it is also what makes a beat-driven march step:
-        // reading `level` against its own smoothed average is the same beat test the moving-head
-        // effect uses, so "a beat" means one thing across the project.
+        // `level` against its own smoothed average: the same beat test the moving-head effect uses.
         const bool beat = live && audio->level > audio->levelSmoothed + kBeatMargin;
 
         advance(beat, audio != nullptr, live);
@@ -170,7 +168,7 @@ public:
     }
 
 private:
-    // The formation, as the arcade laid it out: one rank of squids, two of crabs, two of octopuses.
+    // The arcade's own layout: one rank of squids, two of crabs, two of octopuses.
     static constexpr uint8_t kCols = 8;
     static constexpr uint8_t kRows = 5;
     static constexpr uint8_t kShots = 6;
@@ -189,9 +187,7 @@ private:
         oy_ = 0;
         dir_ = 1;
         frame_ = 0;
-        // The march latch belongs with the clock it tracks: prepare() zeroes formation_, and a
-        // latch left at the old phase disagrees with it, so the first step after a reset fires
-        // immediately instead of waiting out a beat.
+        // The latch zeroes with the clock it tracks, or the first step after a reset fires early.
         lastPhase_ = 0;
         cannonX_ = 0;
         for (uint8_t i = 0; i < kShots; i++) shotTtl_[i] = 0;
@@ -199,8 +195,7 @@ private:
 
     /// Step the whole formation one march tick, and run everything that happens between steps.
     void advance(bool beat, bool audioOn, bool live) {
-        // Shots fly every frame; only the MARCH is quantised, which is what gives the game its
-        // stop-motion look against continuously moving bullets.
+        // Shots fly every frame and only the march is quantized, which is the stop-motion look.
         moveShots();
 
         if (audioOn) {
@@ -215,14 +210,11 @@ private:
         stepFormation();
     }
 
-    /// Steps per minute, rising as the ranks thin. THE defining mechanic: the arcade sped up
-    /// because fewer invaders meant a shorter loop, and a version that marches at a constant rate
-    /// is missing the tension that made the game.
+    /// Steps per minute, rising as the ranks thin, which is the game's defining mechanic.
     uint8_t stepInterval() const {
         const uint16_t total = static_cast<uint16_t>(kRows) * kCols;
         const uint16_t left = alive_ == 0 ? 1 : alive_;
-        // Four times the base tempo when one invader is left, which is roughly the arcade's own
-        // ratio between a full screen and the last runner.
+        // Four times the base tempo at one invader, roughly the arcade's own ratio.
         const uint32_t bpm = static_cast<uint32_t>(marchBpm) * (total + 3 * (total - left)) / total;
         return static_cast<uint8_t>(bpm > 240 ? 240 : bpm);
     }
@@ -231,10 +223,7 @@ private:
         frame_ ^= 1;                                 // the two-frame wiggle IS the step
         const int16_t span = formationWidth();
         const int16_t nx = static_cast<int16_t>(ox_ + dir_ * static_cast<int16_t>(stepX));
-        // Turn and drop at the wall, the way the formation always has. On a panel NARROWER than the
-        // formation the right wall sits behind the left one, so the naive test fires at every
-        // position: the ranks would never move sideways, just drop and reset on a loop. There the
-        // formation scrolls THROUGH the panel instead, turning when its far edge clears the screen.
+        // Turn and drop at the wall, which inverts on a panel narrower than the formation.
         const int16_t rightWall = span > static_cast<int16_t>(width())
                                       ? static_cast<int16_t>(width())   // scroll the block past
                                       : static_cast<int16_t>(width()) - span;
@@ -253,21 +242,18 @@ private:
         aimCannon();
     }
 
-    // --- Geometry --------------------------------------------------------------------------
-    //
-    // Cell size comes from the WIDEST sprite, so the ranks line up in columns however their own
-    // art differs. A per-species pitch would make the formation ragged.
+    // Cell size comes from the widest sprite, so the ranks line up however their art differs.
     uint8_t cell() const { return static_cast<uint8_t>((invart::OW + 2) * scale()); }
     uint8_t rowPitch() const { return static_cast<uint8_t>((invart::OH + 2) * scale()); }
     uint8_t scale() const { return size == 0 ? 1 : size; }
     int16_t formationWidth() const { return static_cast<int16_t>(cell() * kCols); }
     int16_t formationHeight() const { return static_cast<int16_t>(rowPitch() * kRows); }
 
+    /// Draw every live invader, one palette entry per rank.
     void drawFormation(const draw::Canvas& cv) {
         RGB pal[invart::kPaletteCount];
         for (uint8_t r = 0; r < kRows; r++) {
-            // One palette entry per rank, so the ranks read as different creatures without a
-            // second drawing. The arcade used one color per rank for the same reason.
+            // One entry per rank, so they read as different creatures from one drawing.
             paletteFor(pal, static_cast<uint8_t>(r * 40 + 30));
             for (uint8_t c = 0; c < kCols; c++) {
                 if (!grid_[r][c]) continue;
@@ -296,17 +282,16 @@ private:
         }
     }
 
+    /// Draw the cannon, standing on the floor in its own green.
     void drawCannon(const draw::Canvas& cv) {
         RGB pal[invart::kPaletteCount];
-        // The cannon is green in every version of this game, and it is the one color here that is
-        // not the palette's to choose: a cannon in the formation's own color reads as an invader.
+        // Green in every version of this game, and a cannon in the formation's color reads as an invader.
         pal[invart::kClear] = RGB{0, 0, 0};
         pal[invart::kBody]  = RGB{40, 230, 60};
         pal[invart::kDark]  = RGB{20, 120, 30};
         pal[invart::kEye]   = RGB{200, 255, 200};
         const uint8_t sc = scale();
-        // Clamped: on a panel shorter than the scaled cannon this goes negative and the cannon is
-        // drawn off the top edge instead of standing on the floor.
+        // Clamped: a panel shorter than the scaled cannon would put it off the top edge.
         const int32_t top = static_cast<int32_t>(height()) - invart::GH * sc;
         const lengthType py = static_cast<lengthType>(top < 0 ? 0 : top);
         const draw::sprites::Sprite s{invart::kCannon, pal, invart::GW, invart::GH,
@@ -314,11 +299,9 @@ private:
         draw::sprite(cv, s, 0, static_cast<lengthType>(cannonX_), py, sc);
     }
 
-    // --- Shots -----------------------------------------------------------------------------
-    //
-    // A shot is three numbers rather than a particle: they fly straight up or straight down, and a
-    // pool with forces and drag would be machinery for a bullet that needs none.
+    // A shot is three numbers rather than a particle: it flies straight, needing no forces or drag.
 
+    /// Fly every live shot one step, and test the rising ones against the formation.
     void moveShots() {
         for (uint8_t i = 0; i < kShots; i++) {
             if (shotTtl_[i] == 0) continue;
@@ -329,9 +312,7 @@ private:
         }
     }
 
-    /// A rising shot takes out the invader whose cell it is in. Cell arithmetic rather than a
-    /// per-sprite test: the formation IS a grid, so asking which cell a point is in is the whole
-    /// collision, and a pixel-accurate hit would not read differently at this size.
+    /// A rising shot takes the invader whose cell it lands in, the formation being a grid.
     void hitTest(uint8_t i) {
         const int16_t rx = static_cast<int16_t>(shotX_[i] - ox_);
         const int16_t ry = static_cast<int16_t>(shotY_[i] - oy_);
@@ -347,6 +328,7 @@ private:
         if (alive_ == 0) reset();
     }
 
+    /// Draw every live shot, the cannon's pale and the invaders' amber.
     void drawShots(const draw::Canvas& cv) {
         for (uint8_t i = 0; i < kShots; i++) {
             if (shotTtl_[i] == 0) continue;
@@ -357,6 +339,7 @@ private:
         }
     }
 
+    /// Take the first free shot slot, or do nothing when all are in flight.
     void spawnShot(int16_t x, int16_t y, int8_t dir) {
         for (uint8_t i = 0; i < kShots; i++) {
             if (shotTtl_[i] != 0) continue;
@@ -365,8 +348,7 @@ private:
         }
     }
 
-    /// The lowest invader in a random column fires, which is what the arcade does: a shot from
-    /// behind the formation would pass through its own ranks.
+    /// The lowest invader in a random column fires, so no shot passes through its own ranks.
     void fireInvaderShot() {
         const uint8_t c = static_cast<uint8_t>(hashInt(tickSeed_++, 3) % kCols);
         for (int8_t r = kRows - 1; r >= 0; r--) {
@@ -377,8 +359,7 @@ private:
         }
     }
 
-    /// The cannon tracks the nearest live column and fires when it is lined up. Tracking rather
-    /// than teleporting: the slide is most of what the cannon does on screen.
+    /// The cannon slides toward the nearest live column and fires when lined up.
     void aimCannon() {
         int16_t target = cannonX_;
         for (uint8_t r = 0; r < kRows; r++) {
@@ -398,16 +379,14 @@ private:
         if (cannonX_ < 0) cannonX_ = 0;
         if (cannonX_ > maxX) cannonX_ = maxX > 0 ? maxX : 0;
 
-        // Fire when roughly lined up, and only sometimes. A cannon that hits on every step clears
-        // a full board in seconds, which is a progress bar rather than a game: the arcade takes a
-        // minute, and the watching is the point. One shot in four leaves the formation on screen
-        // long enough to see it march, thin, and speed up.
+        // One shot in four: hitting on every step clears the board in seconds, and the watching is the point.
         if (target - cannonX_ < step && cannonX_ - target < step
             && (hashInt(tickSeed_++, 9) & 3) == 0)
             spawnShot(static_cast<int16_t>(cannonX_ + (invart::GW * scale()) / 2),
                       static_cast<int16_t>(height() - invart::GH * scale()), -1);
     }
 
+    /// Fill a rank's four palette slots from one palette entry.
     void paletteFor(RGB (&pal)[invart::kPaletteCount], uint8_t entry) const {
         const RGB body = colorFromPalette(*Palettes::active(), entry);
         pal[invart::kClear] = RGB{0, 0, 0};
@@ -423,7 +402,7 @@ private:
     int16_t  ox_ = 0, oy_ = 0;
     int8_t   dir_ = 1;
     uint8_t  frame_ = 0;
-    uint32_t lastPhase_ = 0;   // full counter: a uint8_t copy stopped matching past 255 beats
+    uint32_t lastPhase_ = 0;   // the full counter: a narrower copy stops matching past 255 beats
     int16_t  cannonX_ = 0;
     int16_t  shotX_[kShots] = {}, shotY_[kShots] = {};
     int8_t   shotDir_[kShots] = {};

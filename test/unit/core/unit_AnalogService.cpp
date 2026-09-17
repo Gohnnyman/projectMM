@@ -7,9 +7,9 @@
 // on a board.
 
 #include "doctest.h"
-#include "core/AnalogService.h"
-#include "core/Scheduler.h"
-#include "core/MoonModule.h"
+#include "core/services/AnalogService.h"
+#include "core/module/Scheduler.h"
+#include "core/module/MoonModule.h"
 #include "platform/platform.h"
 
 #include <cstdio>

@@ -1,4 +1,4 @@
-#include "core/Scheduler.h"
+#include "core/module/Scheduler.h"
 #include "light/layers/Effects.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/GridBlacksLayout.h"
@@ -127,13 +127,13 @@
 // into ParallelLedDriver's peripheral registry (gated by the chip's CONFIG_SOC_*), so including the ones
 // this silicon supports is what populates the `peripheral` control's options.
 #if defined(CONFIG_SOC_LCD_I80_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
-#include "light/drivers/MultiPinLedDriver.h"      // esp_lcd i80 backend (I80Peripheral)
+#include "light/drivers/I80Peripheral.h"      // esp_lcd i80 backend (I80Peripheral)
 #endif
 #if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
-#include "light/drivers/MoonLedDriver.h"          // MoonI80 own-GDMA backend (MoonI80Peripheral)
+#include "light/drivers/MoonI80Peripheral.h"          // MoonI80 own-GDMA backend (MoonI80Peripheral)
 #endif
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
-#include "light/drivers/ParlioLedDriver.h"        // Parlio backend (ParlioPeripheral)
+#include "light/drivers/ParlioPeripheral.h"        // Parlio backend (ParlioPeripheral)
 #endif
 // Panel receiver cards over raw Ethernet — opt-in PER FIRMWARE (MM_PANEL_CARDS), not per chip.
 // The panels need a gigabit link, and no SOC capability macro separates the boards that have one
@@ -151,32 +151,32 @@
     MM_LINKS_ALL_LED_DRIVERS
 #include "light/drivers/Hub75Driver.h"
 #endif
-#include "core/HttpServerModule.h"
-#include "core/SystemModule.h"
-#include "core/ControlModule.h"
-#include "core/Services.h"
-#include "core/AudioService.h"
-#include "core/OscModule.h"
-#include "core/I2cScanModule.h"
-#include "core/TasksModule.h"
-#include "core/PinsModule.h"
-#include "core/AnalogService.h"
-#include "core/ButtonService.h"
-#include "core/InfraredService.h"
-#include "core/MoonLiveService.h"
-#include "core/FileManagerModule.h"
-#include "core/FirmwareUpdateModule.h"
-#include "core/MoonCloudModule.h"
-#include "core/MoonStatsModule.h"
-#include "core/MoonTalkModule.h"
-#include "core/ImprovProvisioningModule.h"
-#include "core/MqttModule.h"
-#include "core/DevicesModule.h"
-#include "core/FilesystemModule.h"
-#include "core/ModuleFactory.h"
+#include "core/system/HttpServerModule.h"
+#include "core/system/SystemModule.h"
+#include "core/system/ControlModule.h"
+#include "core/services/Services.h"
+#include "core/services/AudioService.h"
+#include "core/services/OscModule.h"
+#include "core/system/I2cScanModule.h"
+#include "core/system/TasksModule.h"
+#include "core/system/PinsModule.h"
+#include "core/services/AnalogService.h"
+#include "core/services/ButtonService.h"
+#include "core/services/InfraredService.h"
+#include "core/services/MoonLiveService.h"
+#include "core/system/FileManagerModule.h"
+#include "core/system/FirmwareUpdateModule.h"
+#include "core/system/MoonCloudModule.h"
+#include "core/system/MoonStatsModule.h"
+#include "core/system/MoonTalkModule.h"
+#include "core/system/ImprovProvisioningModule.h"
+#include "core/system/MqttModule.h"
+#include "core/system/DevicesModule.h"
+#include "core/system/FilesystemModule.h"
+#include "core/util/ModuleFactory.h"
 #include "platform/platform.h"
 
-#include "core/NetworkModule.h"
+#include "core/system/NetworkModule.h"
 
 #include <cstdio>
 
@@ -324,7 +324,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::Hub75Driver>("Hub75Driver", "light/drivers.md#hub75");
 #endif
     // Register only the LED drivers this chip's silicon can run (see the gated
-    // includes above) — keeps the type picker honest (no MultiPinLedDriver offered on a
+    // includes above) — keeps the type picker honest (no I80Peripheral offered on a
     // chip without an i80 bus) and the binary lean.
 #if defined(CONFIG_SOC_RMT_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers.md#rmtled");
@@ -353,8 +353,8 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/system.md#file-manager");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/system.md#firmware-update");
     mm::ModuleFactory::registerType<mm::MoonCloudModule>("MoonCloudModule", "core/system.md#mooncloud");
-    mm::ModuleFactory::registerType<mm::MoonStatsModule>("MoonStatsModule", "core/system.md#mooncloud-stats");
-    mm::ModuleFactory::registerType<mm::MoonTalkModule>("MoonTalkModule", "core/system.md#mooncloud-talk");
+    mm::ModuleFactory::registerType<mm::MoonStatsModule>("MoonStatsModule", "core/system.md#stats");
+    mm::ModuleFactory::registerType<mm::MoonTalkModule>("MoonTalkModule", "core/system.md#talk");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/system.md#improv-provisioning");
     mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/system.md#mqtt");
     mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/system.md#devices");

@@ -89,7 +89,7 @@ Arduino-ESP32 / ESP-IDF give **no central pin registry** — `pinMode`/`gpio_con
 
 ## What projectMM already has
 
-- **`ControlType::Pin`** ([Control.h](../../src/core/Control.h)) — a pin *is* its own control type, clamped to the chip's real GPIO ceiling (`MM_MAX_GPIO`, build-injected per target from `CONFIG_SOC_GPIO_PIN_COUNT`). So projectMM already models a pin as a first-class, per-chip-bounded value — ahead of "just an int."
+- **`ControlType::Pin`** ([Control.h](../../src/core/module/Control.h)) — a pin *is* its own control type, clamped to the chip's real GPIO ceiling (`MM_MAX_GPIO`, build-injected per target from `CONFIG_SOC_GPIO_PIN_COUNT`). So projectMM already models a pin as a first-class, per-chip-bounded value — ahead of "just an int."
 - **[gpio-usage.md](../../reference/hardware/gpio-usage.md)** — the per-MCU reserved / strap / role-conflict knowledge, hand-curated. The *data* ESPHome's reserved-pin validation would need; not yet wired to any check.
 - **The pin-uniqueness backlog item** ([backlog-core § Pin-uniqueness](backlog-core.md#pin-uniqueness-check-across-modules-prevents-conflicts-replaces-a-singleton-hack)) — already specs *enumerate every `Pin` control, a value seen twice is a conflict*. That's the WLED allocate-check re-expressed against our control model.
 - **No central authority today** — no `allocatePin`, no owner tracking, no conflict gate, no reserved-pin check. Each module sets its `Pin` controls independently; nothing arbitrates. **This is the gap.**

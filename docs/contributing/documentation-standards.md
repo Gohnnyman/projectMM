@@ -31,16 +31,14 @@ flowchart TB
     entry -.-> rules
     rules -.-> outside
 
-    style entry fill:#2d3561,stroke:#7b88c9,color:#fff
-    style tut fill:#3d2d61,stroke:#a07bc9,color:#fff
-    style how fill:#3d2d61,stroke:#a07bc9,color:#fff
-    style exp fill:#3d2d61,stroke:#a07bc9,color:#fff
-    style ref fill:#3d2d61,stroke:#a07bc9,color:#fff
-    style mod fill:#1f4d3d,stroke:#5fb89a,color:#fff
-    style mox fill:#1f4d3d,stroke:#5fb89a,color:#fff
-    style hdr fill:#1f4d3d,stroke:#5fb89a,color:#fff
-    style rules fill:#4d3d1f,stroke:#c9a95f,color:#fff
-    style outside fill:#4d3d1f,stroke:#c9a95f,color:#fff
+    classDef entryCell fill:#2d3561,stroke:#7b88c9,color:#fff
+    classDef diataxis fill:#3d2d61,stroke:#a07bc9,color:#fff
+    classDef generated fill:#1f4d3d,stroke:#5fb89a,color:#fff
+    classDef outsideGrid fill:#4d3d1f,stroke:#c9a95f,color:#fff
+    class entry entryCell
+    class tut,how,exp,ref diataxis
+    class mod,mox,hdr generated
+    class rules,outside outsideGrid
 ```
 
 Each level says what a thing is and links down for the rest. A fact stated above its home is a second copy that drifts.
@@ -122,10 +120,11 @@ A control reads `` - `name`: what it does ``. The colon separates the name from 
 
 | | Limit |
 |---|---|
-| Description | 600 characters |
-| Controls, together | 600 |
-| One control | 120 |
+| Description | 600 characters, 400 on effects, modifiers and layouts |
+| One control | 100 characters, 80 on effects, modifiers and layouts |
 | Details table | 4 columns, 300 characters a cell |
+
+There is no limit on the controls together: a module with twelve honest controls is not worse documented than one with three, and capping the sum only punished the richer module. The visual catalogs are tighter because the `.gif` carries the description, so the words are there for what the reader cannot see.
 
 Over a limit the text **moves rather than shrinks**, and its home follows from what it is. Behavior of the module goes in the header's `///`, reaching the reader as the generated page. What a reader needs before choosing between siblings goes in a `## <Name>, details` section below the cards, which the build links from the row. Trimming to fit is the one wrong answer, for the reason [Comments](#comments) gives.
 
@@ -135,17 +134,20 @@ The card rules are enforced by [`check_docgen.py`](../moondeck/check/check_docge
 
 **Prose is Vale's**, wherever it sits: a page, a `///` block, a comment. One checker for what text says, so a rule has one home and one vocabulary.
 
+A header reaches Vale through a **View**, `.vale/styles/config/views/CComments.yml`, which runs a tree-sitter query over the file's syntax tree and hands back the comment nodes alone. Vale has no native parser for C, so without the View it skips a header and reports nothing, which reads exactly like a clean file.
+
 ## Comments
 
 - **Comments say WHY.** Restating what the line does is noise, and usually a naming failure: see [prefer naming over commenting](coding-standards.md#writing-a-line-of-code).
 - **One line, above the code it explains.** A second line is the author still talking. A class `///` gets about ten lines and an `@moreinfo` appendix about twenty; over that, cut. A file whose comments outnumber its code has stopped being a header.
+- **Settle the `///` first, then the `//`.** The doc comment is what a reader sees on the generated page, so it is where the explanation belongs. A `//` block below one that repeats it is deleted rather than shortened, and most of them turn out to be exactly that. Working the other way round collapses a `//` into one careful line, then deletes it an hour later once the `///` above says the same thing.
 - **Keep the constraint, cut the exposition.** A constraint cannot be recovered from the code: the latch is 300 us, the DMA cannot read PSRAM at shift clock. What was tried first, and why this pattern over another, goes in the commit message.
 - **Removing a comment needs the same justification as removing code**: outdated, wrong, or it only restated the code. Never strip to hit a length target, and never delete a reason you cannot reconstruct.
 - **Say each fact once.** A restatement for emphasis reads as new information and costs the reader a second pass to learn it is not.
 - **A heading inside a comment means it is not a comment.** Needing signposts is the signal to cut. The one exception is `@moreinfo`, whose `##` sections become the generated page's own headings; inside a lead comment a heading wants to be a page, or wants to not exist.
 - **MoonLive scripts get three comments, one line each**: what the script is, what each `addControl` knob does, what each function it defines does. Lifecycle functions need none. A script is read in the device's own editor, where prose buries the effect.
 
-### The `///` budget
+### The comment budget
 
 A card is read across a row; a member comment is read beside the thing it describes, and the generated page shows its first sentence as the summary. So the budget is one line, and a deep dive goes after `@moreinfo`.
 
@@ -154,14 +156,20 @@ A card is read across a row; a member comment is read beside the thing it descri
 | Class `///` | 10 lines |
 | `@moreinfo` appendix | 20 lines |
 | Any other `///` run | 1 line |
-| One `///` line | 20 words |
+| One sentence in a comment | 20 words |
+| A `//` run beside code | 1 line |
+| A sentence in a comment | 1 line, never wrapped |
 | Every public member | carries one |
 
-The first four cut and the last adds, deliberately: the result is a short line on everything rather than an essay on a few things. The word limit comes from the tree, where a member line is 14 words at the median and 19 at p95, so it bites the outliers and leaves the normal case alone.
+The first five cut and the last adds, deliberately: the result is a short line on everything rather than an essay on a few things. The word limit counts a SENTENCE rather than a line, because the no-wrap rule makes a line a paragraph: three short sentences on one line are correct, and one rambling sentence is not. It comes from the tree, where a member line is 14 words at the median and 19 at p95, so it bites the outliers and leaves the normal case alone.
+
+**No hard wrap in a comment, for the reason markdown gives.** Let the editor soft-wrap, so a one-word edit is a one-word diff rather than a reflowed paragraph. The one-line budget already forbids this on a member or a code comment, so the rule bites where a block is allowed to be multi-line: the class comment, and the `@moreinfo` appendix that becomes a markdown page. A list item, a heading, a table row and a fenced block are structure rather than a wrapped sentence, and each is left alone.
 
 **Use `//` sparingly.** A comment restating what the code does is a naming failure, and the fix is a better name rather than a better sentence. What survives is the WHY a reader cannot recover from the code.
 
-Enforced by [`check_docgen.py`](../moondeck/check/check_docgen.py), which names the areas it covers.
+**`//` carries the same one-line budget as `///`, and that is what makes the `///` cap mean anything.** Without it the one-line rule moves text rather than removing it: a fifty-line member comment re-spelled as `//` satisfies every other rule and leaves the file exactly as long. One line is room to say why; past that the reasoning belongs after `@moreinfo`, or on the module's page where a reader will find it. The `//` block above the first class is exempt, being the non-Doxygen sibling of the class comment.
+
+Enforced by [`check_docgen.py`](../moondeck/check/check_docgen.py) over every header under `src/`, the vendored ones excepted.
 
 
 ### Writing a `///` that generates correctly

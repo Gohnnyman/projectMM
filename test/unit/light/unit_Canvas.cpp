@@ -7,7 +7,7 @@
 // private `depthDim()` helper guards against in sixteen effects, each with its own copy.
 
 #include "doctest.h"
-#include "light/draw.h"
+#include "light/powerfunctions/draw.h"
 #include "light/effects/SolidEffect.h"
 #include "light/layers/Layer.h"
 #include "light/layers/Effects.h"

@@ -20,7 +20,7 @@
 #include "light/layers/Layer.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/Layouts.h"
-#include "light/Palette.h"
+#include "light/util/Palette.h"
 #include "light/effects/EchoEffect.h"
 #include "light/effects/FireworksEffect.h"
 #include "platform/platform.h"

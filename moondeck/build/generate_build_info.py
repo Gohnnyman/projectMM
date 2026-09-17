@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate src/core/build_info.h.
+"""Generate src/core/util/build_info.h.
 
 Writes a single header carrying every compile-time identity fact the runtime
 exposes through SystemModule:
@@ -34,7 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 LIBRARY_JSON = ROOT / "library.json"
-OUT_FILE = ROOT / "src" / "core" / "build_info.h"
+OUT_FILE = ROOT / "src" / "core" / "util" / "build_info.h"
 
 data = json.loads(LIBRARY_JSON.read_text())
 version = data["version"]

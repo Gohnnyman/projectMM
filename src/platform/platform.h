@@ -1126,7 +1126,7 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
 // ---------------------------------------------------------------------------
 // i80-bus parallel WS2812 output: the LCD_CAM peripheral on the ESP32-S3/P4, the
 // I2S peripheral on the classic ESP32 (IDF's esp_lcd i80 API picks the backend per
-// chip). The driver (src/light/drivers/MultiPinLedDriver.h) pre-encodes the WHOLE frame into one
+// chip). The driver (src/light/drivers/I80Peripheral.h) pre-encodes the WHOLE frame into one
 // DMA buffer (3-slot encode in ParallelSlots.h, domain code); the platform owns
 // only the i80 bus/peripheral AND the DMA buffer itself: the buffer must be
 // DMA-capable internal RAM (platform::alloc prefers PSRAM, which the
@@ -1256,7 +1256,7 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
 // registered driver types), so the A/B needs no reflash.
 //
 // Identical contract to the i80Ws2812* family above, function for function: the domain driver
-// (src/light/drivers/MoonLedDriver.h) is the same CRTP sibling with its forwards re-pointed.
+// (src/light/drivers/MoonI80Peripheral.h) is the same CRTP sibling with its forwards re-pointed.
 // Inert on chips without LCD_CAM.
 // ---------------------------------------------------------------------------
 

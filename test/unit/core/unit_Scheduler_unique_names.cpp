@@ -1,8 +1,8 @@
 // @module Scheduler
 
 #include "doctest.h"
-#include "core/Scheduler.h"
-#include "core/MoonModule.h"
+#include "core/module/Scheduler.h"
+#include "core/module/MoonModule.h"
 
 // Pins Scheduler::ensureUniqueName and deduplicateNamesInTree. These prevent
 // the "second Layer (or any same-named module) is unreachable via parent_id"

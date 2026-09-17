@@ -1,26 +1,37 @@
 #pragma once
 
-#include "core/math16.h"            // BeatPhase — the shared BPM accumulator
+#include "core/util/math16.h"            // BeatPhase: the shared BPM accumulator
 #include "light/effects/EffectBase.h"
 
 namespace mm {
 
 // Author: projectMM original (metaballs)
 /// Metaballs effect: smooth merging blobs via a scalar field.
-/// @card MetaballsEffect.png
+/// @card MetaballsEffect.gif
+///
+/// Each ball contributes a field that falls off with distance, and the sum picks the color.
+/// Where two balls approach, their fields add and the blobs appear to merge.
+/// LavaLampEffect runs the same field slowly through a palette instead.
 class MetaballsEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step
-    // Iterates y and x only; Layer::extrude fills z on 3D layers.
+    /// Catalog tags: MoonLight origin, David Jupijn and Rising Step.
+    const char* tags() const override { return "💫🦅"; }
+    /// Iterates y and x, which extrude fills through a volume.
     Dim dimensions() const override { return Dim::D2; }
 
+    /// How fast the balls travel their orbits.
     uint8_t bpm = 30;
+    /// How far each ball's field reaches.
     uint8_t radius = 28;
-    uint8_t count = 4;   // number of balls (1..MAX_BALLS); each follows its own sine path
+    /// How many balls share the field, each on its own path.
+    uint8_t count = 4;
+    /// Walks the whole field around the palette.
     uint8_t hue_shift = 0;
 
+    /// The orbit table's size, and so the ball count's ceiling.
     static constexpr uint8_t MAX_BALLS = 8;
 
+    /// Publish the orbit speed, the ball size and count, and the palette shift.
     void defineControls() override {
         controls_.addControl("bpm", bpm, 1, 255);
         controls_.addControl("radius", radius, 4, 255);
@@ -28,24 +39,20 @@ public:
         controls_.addControl("hue_shift", hue_shift, 0, 255);
     }
 
-    // Class scope, not function-local: -Wfunction-effects flags ANY static local in a
-    // nonblocking function, including a constexpr that needs no guard variable. Same
-    // storage and value here, and these are per-effect constants anyway.
-    // This effect's own orbit constants; the shared field kernel takes them as a parameter so each
-    // effect keeps its distinct motion.
+    /// This effect's own orbits, at class scope since a static local is flagged in a nonblocking function.
     static constexpr draw::BlobPath BLOB_PATHS[MAX_BALLS] = {
         {1,   0,  64}, {2,  30,  94}, {3,  60, 124}, {1, 120, 184},
         {2, 160,  16}, {3, 200, 210}, {1,  90, 150}, {2, 220,  40},
     };
 
+    /// Place each ball on its orbit, then color every pixel by the summed field.
     void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();
         uint8_t cpl = channelsPerLight();
         uint32_t now = elapsed();
-        // Shared accumulator: raw dt·bpm in 64 bits, divided only at the read, so a sub-millisecond
-        // frame does not round to zero and freeze the animation (mm::BeatPhase owns that rule now).
+        // BeatPhase keeps its numerator wide until the read, so a fast frame cannot round to zero.
         phase_.advanceTo(now, bpm);
         const uint8_t t = static_cast<uint8_t>(phase_.phase(256));
 
@@ -54,7 +61,7 @@ public:
         int16_t by[MAX_BALLS];
         draw::blobCenters(BLOB_PATHS, n, t, w, h, bx, by);
 
-        // Field strength: sum of r^2 / (d^2 + 1)
+        // The field's strength, which falls off with the squared distance.
         int32_t r2 = static_cast<int32_t>(radius) * radius;
 
         for (lengthType y = 0; y < h; y++) {
@@ -74,8 +81,7 @@ public:
     }
 
 private:
-    // Numerator-only accumulator (units of dt*bpm). See tick() for why.
-    BeatPhase phase_;
+    BeatPhase phase_;   ///< the orbit clock
 };
 
 } // namespace mm

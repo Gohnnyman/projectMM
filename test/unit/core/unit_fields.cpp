@@ -7,8 +7,8 @@
 // symmetry) rather than specific values, because the value is only meaningful as a field.
 
 #include "doctest.h"
-#include "core/noise.h"
-#include "core/math16.h"
+#include "core/util/noise.h"
+#include "core/util/math16.h"
 
 #include <algorithm>
 #include <cmath>

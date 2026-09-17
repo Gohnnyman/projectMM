@@ -6,35 +6,42 @@ namespace mm {
 
 // Author: projectMM original (rotating spiral)
 /// Effect winding a lit spiral up a conical layout.
-/// @card SpiralEffect.png
+/// @card SpiralEffect.gif
+///
+/// Each pixel's hue comes from its angle plus its radius times `twist`, walked by the clock.
+/// So the arms wind outward, and turning `twist` up tightens them.
 class SpiralEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🦅🖌️🎡"; }  // MoonLight origin · David Jupijn / Rising Step
-    // Iterates y and x only; Layer::extrude fills z on 3D layers.
+    /// Catalog tags: MoonLight origin, David Jupijn and Rising Step.
+    const char* tags() const override { return "💫🦅🖌️🎡"; }
+    /// Iterates y and x, which extrude fills through a volume.
     Dim dimensions() const override { return Dim::D2; }
 
+    /// How fast the spiral turns.
     uint8_t bpm = 40;
+    /// How tightly the arms wind, as hue per unit radius.
     uint8_t twist = 4;
+    /// Walks every arm around the palette.
     uint8_t hue_shift = 0;
 
-    /// The polar address: whether to read it from a table, at what precision, and how a
-    /// volumetric fixture's coordinates become an angle and a radius (light/polar.h).
+    /// The polar address: the table, its precision, and how a volumetric fixture maps to angle and radius.
     PolarLut::Controls polar;
 
+    /// Publish the rotation, the winding and the polar address.
     void defineControls() override {
         controls_.addControl("bpm", bpm, 1, 255);
         controls_.addControl("twist", twist, 1, 255);
         controls_.addControl("hue_shift", hue_shift, 0, 255);
         PolarLut::addControls(controls_, polar);
     }
+    /// Build the polar address table for the current geometry.
     void prepare() override {
-        // The polar address is built here, not in tick(): prepare() is where a module builds state
-        // and where allocation is allowed, and it runs again on every resize and control change, so
-        // the table is always current without the render path ever allocating.
+        // Built here rather than in tick(), so the render path never allocates.
         lut_.prepareFor(polar, width(), height(), depth());
     }
 
 
+    /// Walk the spiral's phase, then color each pixel from its own angle and radius.
     void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         lengthType w = width();
@@ -42,19 +49,14 @@ public:
         uint8_t cpl = channelsPerLight();
 
         uint32_t now = elapsed();
-        // Shared accumulator: raw dt·rate in 64 bits, divided only at the read, so a sub-millisecond
-        // frame does not round to zero and freeze the animation (mm::BeatPhase owns that rule now).
+        // BeatPhase keeps its numerator wide until the read, so a fast frame cannot round to zero.
         phase_.advanceTo(now, bpm);
-        // Accumulate the raw (dt * bpm) product; divide only at the read site.
-        // Per-tick `dt*bpm*256/60000` rounds to 0 on desktop (dt ≈ 0..1ms) and
-        // freezes the animation; see MetaballsEffect for the same fix.
         uint8_t t = static_cast<uint8_t>(phase_.phase(256));
 
         int16_t cx = static_cast<int16_t>(w >> 1);
         int16_t cy = static_cast<int16_t>(h >> 1);
 
-        // The polar address is the same every frame, so it is read from a table; if the device
-        // cannot spare the memory the effect computes it per pixel and looks the same.
+        // Read from a table, or computed per pixel where the memory cannot be spared.
         const bool table = lut_.ready();
 
         std::size_t i = 0;
@@ -63,9 +65,7 @@ public:
             uint8_t* row = buf + static_cast<size_t>(y) * static_cast<size_t>(w) * cpl;
             for (lengthType x = 0; x < w; x++, i++) {
                 int16_t dx = static_cast<int16_t>(x) - cx;
-                // Angle and radius, both taken down to 8 bits here because hue is mod-256 by design.
-                // A true radius rather than the octagon an 8-bit distance approximates, which showed
-                // as visible corners on a large panel.
+                // A true radius, since the 8-bit approximation is an octagon with visible corners.
                 uint8_t angle, dist;
                 if (table) {
                     angle = static_cast<uint8_t>(lut_.angle(i) >> 8);
@@ -87,9 +87,8 @@ public:
     }
 
 private:
-    PolarLut lut_{*this};
-    // Numerator-only accumulator (units of dt*bpm). See tick() for why.
-    BeatPhase phase_;
+    PolarLut lut_{*this};   ///< the per-pixel angle and radius
+    BeatPhase phase_;       ///< the rotation clock
 };
 
 } // namespace mm
