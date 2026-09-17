@@ -98,7 +98,7 @@ existing rule ("the control module should be the only interface") carried to fee
 what lets two surfaces attach at once. A phone running Open Stage Control and an X-Touch on the desk
 both stay correct because each is a view of one state, not a peer syncing with the other.
 
-**The seam** (`src/core/ControlSurface.h`), implemented by `OscModule` today and an MCU module later:
+**The seam** (`src/core/util/ControlSurface.h`), implemented by `OscModule` today and an MCU module later:
 
 ```cpp
 enum class SurfaceControl : uint8_t { Switch, Encoder, Fader, Pad };
@@ -237,11 +237,11 @@ today rather than future work.
 
 ## Files
 
-1. **New `src/core/ControlSurface.h`** — the seam above. Pure interface, no transport.
-2. **`src/core/ControlModule.h`** — register/unregister a surface; hold `touched` state; notify
+1. **New `src/core/util/ControlSurface.h`** — the seam above. Pure interface, no transport.
+2. **`src/core/system/ControlModule.h`** — register/unregister a surface; hold `touched` state; notify
    surfaces on change from `tick1s`; `applyEncoderDelta`.
-3. **`src/core/OscPacket.h`** — an `encode()` beside the existing `parse()`, same constants.
-4. **`src/core/OscModule.h`** — implement `ControlSurface`; `feedback` (default off), `feedbackTo`,
+3. **`src/core/util/OscPacket.h`** — an `encode()` beside the existing `parse()`, same constants.
+4. **`src/core/services/OscModule.h`** — implement `ControlSurface`; `feedback` (default off), `feedbackTo`,
    `feedbackHz` controls; learn the peer address.
 5. **Docs** — the OSC card gains the feedback controls; `control-surfaces.md` gains the seam and the
    negative lighting result.

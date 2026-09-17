@@ -178,7 +178,7 @@ MCU/Board/Device provenance rule from
 default a pin only at the level that fixes it.) The `MM testbench S3`
 entry above adds an `AudioService` with the real, verified INMP441 mic pins
 (WS=4/SD=5/SCK=6, matching the bench wiring in
-[`AudioService.h`](../../src/core/AudioService.h)) plus an `RmtLedDriver`
+[`AudioService.h`](../../src/core/services/AudioService.h)) plus an `RmtLedDriver`
 (LEDs on `pins`=18, loopback jumper tx=13→rx=12) — a known-hardware Device on the
 maintainer's desk, so the inject is testable end-to-end. The `ESP32-16MB` sibling
 adds `RmtLedDriver` (LEDs=18, loopback tx=4/rx=5); the `P4` sibling adds

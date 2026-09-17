@@ -17,9 +17,9 @@
 // an absent key must NEVER mutate a control; a present key still applies.
 
 #include "doctest.h"
-#include "core/Control.h"
-#include "core/JsonUtil.h"
-#include "core/JsonSink.h"   // PaletteOptionsFn's JsonSink parameter (the palette-crash regression)
+#include "core/module/Control.h"
+#include "core/util/JsonUtil.h"
+#include "core/util/JsonSink.h"   // PaletteOptionsFn's JsonSink parameter (the palette-crash regression)
 
 #include <cstdint>
 #include <cstring>

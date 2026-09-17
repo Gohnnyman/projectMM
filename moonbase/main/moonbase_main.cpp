@@ -23,7 +23,7 @@
 #include "esp_event.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
-#include "core/FirmwareImage.h"  // identify(): the one shared header, see main/CMakeLists.txt
+#include "core/util/FirmwareImage.h"  // identify(): the one shared header, see main/CMakeLists.txt
 #include "esp_app_desc.h"    // esp_app_get_description: this image's own version
 #include "esp_https_ota.h"
 #include "esp_littlefs.h"

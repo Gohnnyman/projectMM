@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/MoonModule.h"
+#include "core/module/MoonModule.h"
 #include "light/moonlive/MoonLivePalette.h"   // the per-frame scripted palette, run before the layers
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"

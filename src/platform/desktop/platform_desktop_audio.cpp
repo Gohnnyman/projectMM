@@ -64,7 +64,7 @@
 // ---------------------------------------------------------------------------------------------
 
 #include "platform/platform.h"
-#include "core/SpscRing.h"
+#include "core/util/SpscRing.h"
 
 #include <cstdio>
 #include <cstring>

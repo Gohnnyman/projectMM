@@ -3,8 +3,8 @@
 // Include this one file to write a driver: it brings DriverBase plus the buffer, correction and
 // platform pieces every driver needs. A peripheral seam or a packet header stays per-driver.
 
-#include "core/MoonModule.h"
-#include "core/ScratchBuffer.h"
+#include "core/module/MoonModule.h"
+#include "core/util/ScratchBuffer.h"
 #include "light/layers/Buffer.h"
 #include "light/layers/Layer.h"
 #include "light/drivers/Correction.h"

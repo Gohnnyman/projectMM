@@ -12,9 +12,9 @@
 //     reader's forEachListElement), seeding the cached list before the first scan.
 
 #include "doctest.h"
-#include "core/Control.h"
-#include "core/JsonSink.h"
-#include "core/JsonUtil.h"
+#include "core/module/Control.h"
+#include "core/util/JsonSink.h"
+#include "core/util/JsonUtil.h"
 
 #include <cstdint>
 #include <cstring>

@@ -7,9 +7,9 @@
 // add Audio/IR, System is fixed" reduces to these two strings.
 
 #include "doctest.h"
-#include "core/Services.h"
-#include "core/SystemModule.h"
-#include "core/MoonModule.h"
+#include "core/services/Services.h"
+#include "core/system/SystemModule.h"
+#include "core/module/MoonModule.h"
 
 #include <cstring>
 

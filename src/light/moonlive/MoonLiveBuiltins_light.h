@@ -10,14 +10,14 @@
 #include <atomic>
 #include <cstdint>
 
-#include "core/math8.h"    // beatsin16: the shared time vocabulary
-#include "core/math16.h"   // beat16 / triwave16: full-range waveforms
-#include "light/shader.h"  // shader::smoothstep, the GLSL vocabulary, already in fixed point
-#include "core/noise.h"    // inoise8: the shared gradient-noise field
+#include "core/util/math8.h"    // beatsin16: the shared time vocabulary
+#include "core/util/math16.h"   // beat16 / triwave16: full-range waveforms
+#include "light/powerfunctions/shader.h"  // shader::smoothstep, the GLSL vocabulary, already in fixed point
+#include "core/util/noise.h"    // inoise8: the shared gradient-noise field
 #include <cstring>
-#include "core/AudioService.h"   // the audio vocabulary reads the latest frame
-#include "light/draw.h"    // draw::line, the shared 3D Bresenham a script draws with
-#include "light/particles.h" // particles::Pool, the kernel a scripted particle effect drives
+#include "core/services/AudioService.h"   // the audio vocabulary reads the latest frame
+#include "light/powerfunctions/draw.h"    // draw::line, the shared 3D Bresenham a script draws with
+#include "light/powerfunctions/particles.h" // particles::Pool, the kernel a scripted particle effect drives
 
 // MoonLive: the LIGHT-DOMAIN built-in registration. This is the only place the LED vocabulary
 // lives: the function NAMES (`setRGB`, `fill`, `random16`), their arg counts, and the meaning

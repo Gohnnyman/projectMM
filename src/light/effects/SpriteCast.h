@@ -7,8 +7,8 @@
 // The pixels stay owned by the effect that introduced them.
 // Author: projectMM original
 
-#include "core/math16.h"
-#include "light/draw.h"
+#include "core/util/math16.h"
+#include "light/powerfunctions/draw.h"
 #include "light/effects/FishTankEffect.h"        // fishart:: the reef fish, slim fish, tiny fish
 #include "light/effects/FlyingToastersEffect.h"  // toasterart:: the toaster and its toast
 #include "light/effects/PacmanEffect.h"          // pacart:: Pacman and the ghosts

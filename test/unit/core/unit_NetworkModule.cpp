@@ -11,7 +11,7 @@
 
 #include "doctest.h"
 #include "platform_config.h"       // pulls in platform::hasWiFi before NetworkModule.h
-#include "core/NetworkModule.h"
+#include "core/system/NetworkModule.h"
 #include "conditional_controls.h"  // shared conditional-control invariant helpers
 
 #include <cstring>

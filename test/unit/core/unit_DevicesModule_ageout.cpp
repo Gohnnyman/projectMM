@@ -13,9 +13,9 @@
 // the state the test exercises is the age-out path.
 
 #include "doctest.h"
-#include "core/DevicesModule.h"
-#include "core/WledPacket.h"
-#include "core/JsonSink.h"
+#include "core/system/DevicesModule.h"
+#include "core/system/WledPacket.h"
+#include "core/util/JsonSink.h"
 #include "platform/platform.h"
 
 #include <cstdint>

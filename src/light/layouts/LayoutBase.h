@@ -14,9 +14,9 @@
 // standard helpers coordinate placement uses. Unused declarations cost zero firmware bytes; a layout
 // needing something outside this surface adds that one extra include.
 
-#include "core/MoonModule.h"
-#include "light/light_types.h" // lengthType, nrOfLightsType, Coord3D
-#include "core/math8.h"        // sin8/cos8/atan2_8 — integer trig for circular/wheel layouts
+#include "core/module/MoonModule.h"
+#include "light/util/light_types.h" // lengthType, nrOfLightsType, Coord3D
+#include "core/util/math8.h"        // sin8/cos8/atan2_8 — integer trig for circular/wheel layouts
 
 #include <cmath>              // sinf/cosf/fmodf — float trig where a layout needs it
 #include <cstdint>          // fixed-width ints

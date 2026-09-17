@@ -2,8 +2,8 @@
 
 // One include writes an effect: this file brings EffectBase and every helper an effect may use.
 
-#include "core/MoonModule.h"
-#include "light/light_types.h" // lengthType, nrOfLightsType, Dim
+#include "core/module/MoonModule.h"
+#include "light/util/light_types.h" // lengthType, nrOfLightsType, Dim
 
 #include <cstdint>
 
@@ -92,18 +92,18 @@ public:
 
 // The effect author's helper surface, pulled in after the class so Layer.h re-enters harmlessly.
 #include "light/layers/Layer.h"   // EffectBase's out-of-line accessors
-#include "light/draw.h"           // draw::pixel / fill / line / fade / blur: write pixels by coordinate
-#include "light/Palette.h"        // colorFromPalette, Palettes::active: the palette system
-#include "core/math8.h"           // beat8 / beatsin8 / sin8 / random8: the integer animation helpers
-#include "core/noise.h"           // inoise8: the shared gradient-noise field
-#include "core/color.h"           // RGB
-#include "core/crc.h"             // crc16: grid and state fingerprints for stasis detection
-#include "core/ScratchBuffer.h"   // ScratchBuffer<T>: self-sizing scratch memory for stateful effects
-#include "core/oscillators.h"     // OscillatorBank / Wave: the motion kernel five effects share
-#include "core/math16.h"          // angle16, kaleido, halfLifeKeep: the fixed-point trig and decay
-#include "light/polar.h"          // PolarLut: the per-pixel angle and radius four radial effects read
-#include "core/AudioService.h"    // AudioService::latestFrame(): the shared audio source
-#include "core/AudioFrame.h"      // AudioFrame: level and 16-band spectrum for an audio-reactive effect
+#include "light/powerfunctions/draw.h"           // draw::pixel / fill / line / fade / blur: write pixels by coordinate
+#include "light/util/Palette.h"        // colorFromPalette, Palettes::active: the palette system
+#include "core/util/math8.h"           // beat8 / beatsin8 / sin8 / random8: the integer animation helpers
+#include "core/util/noise.h"           // inoise8: the shared gradient-noise field
+#include "core/util/color.h"           // RGB
+#include "core/util/crc.h"             // crc16: grid and state fingerprints for stasis detection
+#include "core/util/ScratchBuffer.h"   // ScratchBuffer<T>: self-sizing scratch memory for stateful effects
+#include "core/util/oscillators.h"     // OscillatorBank / Wave: the motion kernel five effects share
+#include "core/util/math16.h"          // angle16, kaleido, halfLifeKeep: the fixed-point trig and decay
+#include "light/powerfunctions/polar.h"          // PolarLut: the per-pixel angle and radius four radial effects read
+#include "core/services/AudioService.h"    // AudioService::latestFrame(): the shared audio source
+#include "core/util/AudioFrame.h"      // AudioFrame: level and 16-band spectrum for an audio-reactive effect
 
 #include <cstring>                // memset / memcpy / strcmp: buffer and control-name handling
 #include <cmath>                  // sqrtf / sinf / log10f: per-frame float math, never per-light

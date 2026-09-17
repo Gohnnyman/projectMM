@@ -47,10 +47,10 @@ Use project typedefs (`lengthType`, `nrOfLightsType`) consistently so types matc
 
 Guidelines:
 
-- **RSSI, TX power, frame counts, percentages, temperatures, voltages**: store as `int8_t` / `uint8_t` / `uint16_t`. If the UI needs a unit suffix, carry the suffix in the control descriptor (`ControlType::ReadOnlyInt` does this, see [Control.h](../src/core/Control.h)), not in a per-instance string.
+- **RSSI, TX power, frame counts, percentages, temperatures, voltages**: store as `int8_t` / `uint8_t` / `uint16_t`. If the UI needs a unit suffix, carry the suffix in the control descriptor (`ControlType::ReadOnlyInt` does this, see [Control.h](../src/core/module/Control.h)), not in a per-instance string.
 - **IPv4 addresses**: store and pass as `uint8_t[4]`, never a dotted-quad string. A getter that returns text forces every caller into a `char[16]` and one caller parsed it straight back to octets. Platform getters return octets; each consumer formats at its own output boundary. See `ControlType::IPv4`.
 - **Mode / status labels from a small fixed set**: a `char[20]` buffer is acceptable when the label is short and `snprintf`'d at a transition; for purely constant labels (`"Idle"`, `"Connected"`) a `const char*` pointed at a static literal is even cheaper. Don't combine the two: don't `snprintf` a literal into a buffer.
-- **Dynamic display strings (uptime, FPS, heap KB)**: `char[N]` buffer is the established pattern (see [SystemModule.h](../src/core/SystemModule.h)) because the value changes every second and the UI reads it by stable pointer. Size the buffer to the longest possible value; oversized buffers are waste.
+- **Dynamic display strings (uptime, FPS, heap KB)**: `char[N]` buffer is the established pattern (see [SystemModule.h](../src/core/system/SystemModule.h)) because the value changes every second and the UI reads it by stable pointer. Size the buffer to the longest possible value; oversized buffers are waste.
 
 Counter-example to avoid: storing `char rssiStr_[12]` and re-`snprintf`'ing `"-58 dBm"` into it every tick. The right shape is `int8_t rssi_` (1 byte) plus a control type that knows the unit. Saves 11 bytes per metric, scales linearly across the codebase.
 
@@ -115,11 +115,11 @@ A struct or enum that is the semantic owner of some data, such as a control desc
 
 Three concrete patterns, all already common in this codebase:
 
-- **Discriminator + free functions in the type's own file.** `ControlType` + `writeControlValue` / `applyControlValue` / `controlTypeName` in [Control.cpp](../src/core/Control.cpp); `parseDottedQuad` / `formatDottedQuad` next to `ControlType::IPv4` in [Control.h](../src/core/Control.h); `LightPreset` + `rebuild()` in [Correction.h](../src/light/drivers/Correction.h). Best when the discriminator is a plain enum and the operations are small.
-- **Methods on the owning class.** [Buffer.h](../src/light/layers/Buffer.h)'s `allocate` / `free` / `clear`; [Scheduler.h](../src/core/Scheduler.h)'s `addModule` / `tick` / `prepareTree`; [ControlList](../src/core/Control.h)'s `addX` family. Best when the class has identity and the operations naturally form a small interface.
-- **Virtual methods on a base class.** [MoonModule.h](../src/core/MoonModule.h)'s lifecycle (`setup`, `tick`, `tick1s`, `defineControls`, `prepare`, …). Best when polymorphism is already in play.
+- **Discriminator + free functions in the type's own file.** `ControlType` + `writeControlValue` / `applyControlValue` / `controlTypeName` in [Control.cpp](../src/core/module/Control.cpp); `parseDottedQuad` / `formatDottedQuad` next to `ControlType::IPv4` in [Control.h](../src/core/module/Control.h); `LightPreset` + `rebuild()` in [Correction.h](../src/light/drivers/Correction.h). Best when the discriminator is a plain enum and the operations are small.
+- **Methods on the owning class.** [Buffer.h](../src/light/layers/Buffer.h)'s `allocate` / `free` / `clear`; [Scheduler.h](../src/core/module/Scheduler.h)'s `addModule` / `tick` / `prepareTree`; [ControlList](../src/core/module/Control.h)'s `addX` family. Best when the class has identity and the operations naturally form a small interface.
+- **Virtual methods on a base class.** [MoonModule.h](../src/core/module/MoonModule.h)'s lifecycle (`setup`, `tick`, `tick1s`, `defineControls`, `prepare`, …). Best when polymorphism is already in play.
 
-Counter-example to avoid: a `switch (c.type)` on `ControlType` duplicated across the HTTP server, the filesystem module and the scenario runner. That shape forces a new ControlType to be added in four places, and the compiler can't catch a missed switch on a non-exhaustive enum. The per-type dispatch instead lives next to `ControlType` in [Control.cpp](../src/core/Control.cpp); consumers call `writeControlValue(sink, c)` and don't need to know the enum's shape.
+Counter-example to avoid: a `switch (c.type)` on `ControlType` duplicated across the HTTP server, the filesystem module and the scenario runner. That shape forces a new ControlType to be added in four places, and the compiler can't catch a missed switch on a non-exhaustive enum. The per-type dispatch instead lives next to `ControlType` in [Control.cpp](../src/core/module/Control.cpp); consumers call `writeControlValue(sink, c)` and don't need to know the enum's shape.
 
 When a `switch (type)` outside the type's home file is legitimate: the caller has a genuinely different concern (the HTTP server mapping `ApplyResult` to status codes is a transport policy, not per-type behavior; scenario_runner's `switch (JsonVal::type)` dispatches on *its own* discriminator, not `ControlType`). The rule is "per-type dispatch lives with the type", not "switches are banned".
 

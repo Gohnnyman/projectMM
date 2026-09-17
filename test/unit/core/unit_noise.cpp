@@ -1,7 +1,7 @@
 // @module noise
 
 #include "doctest.h"
-#include "core/noise.h"
+#include "core/util/noise.h"
 
 #include <cmath>   // std::abs on doubles: GCC does not get it transitively
 

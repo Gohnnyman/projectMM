@@ -2,7 +2,7 @@
 
 #include "core/moonlive/MoonLive.h"
 #include "core/moonlive/MoonLiveBuiltins.h"
-#include "core/Scheduler.h"
+#include "core/module/Scheduler.h"
 #include "platform/platform.h"   // gpioInputBegin / gpioRead / gpioWrite
 #include "core/moonlive/MoonLiveBuiltins_common.h"   // the neutral half: math, waveforms, print
 // addControl still comes from the light header: its sink machinery lives there, and moving that is

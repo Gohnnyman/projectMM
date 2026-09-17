@@ -2,7 +2,7 @@
 
 #include "light/drivers/DriverBase.h"
 
-#include "light/ColorLight5A75Packet.h"   // the first wire format (byte layout lives there)
+#include "light/drivers/ColorLight5A75Packet.h"   // the first wire format (byte layout lives there)
 #include "platform/platform.h"
 
 namespace mm {

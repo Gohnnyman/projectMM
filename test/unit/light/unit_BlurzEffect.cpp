@@ -5,7 +5,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/effects/BlurzEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioService.h"
+#include "core/services/AudioService.h"
 
 // Blurz is an audio-reactive effect: its dot is colored by the current band's magnitude and only
 // appears when there is a signal. The frame comes from AudioService::latestFrame() (a process-wide

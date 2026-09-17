@@ -1,8 +1,8 @@
 #pragma once
 // Author: projectMM original
 
-#include "core/AudioService.h"   // latestFrame: the spectrum the audio-reactive mode reads
-#include "core/math16.h"         // sin16, BeatPhase: the sweep clocks
+#include "core/services/AudioService.h"   // latestFrame: the spectrum the audio-reactive mode reads
+#include "core/util/math16.h"         // sin16, BeatPhase: the sweep clocks
 #include "light/effects/EffectBase.h"
 
 namespace mm {

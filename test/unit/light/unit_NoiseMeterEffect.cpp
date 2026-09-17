@@ -5,7 +5,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/effects/NoiseMeterEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioService.h"
+#include "core/services/AudioService.h"
 
 // NoiseMeter is an audio-reactive 1D effect: a vertical VU column whose height tracks the overall sound
 // level and whose color is a scrolling 2D noise field. It writes only the x=0 column and Layer::extrude

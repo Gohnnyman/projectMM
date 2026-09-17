@@ -1,7 +1,7 @@
 #pragma once
 
 #include "light/effects/EffectBase.h"
-#include "light/particles.h"   // FrameTime: the shared time scale
+#include "light/powerfunctions/particles.h"   // FrameTime: the shared time scale
 
 #include "platform/platform.h"      // platform::millis (the per-drop start-delay clock)
 

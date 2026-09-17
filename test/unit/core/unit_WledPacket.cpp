@@ -5,7 +5,7 @@
 // directly (the discovery tests exercise it indirectly; this is the focused contract).
 
 #include "doctest.h"
-#include "core/WledPacket.h"
+#include "core/system/WledPacket.h"
 
 #include <cstdint>
 #include <cstring>

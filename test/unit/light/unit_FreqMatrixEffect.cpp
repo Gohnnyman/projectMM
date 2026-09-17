@@ -5,7 +5,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/effects/FreqMatrixEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioService.h"
+#include "core/services/AudioService.h"
 #include "platform/platform.h"   // setTestNowMs — deterministic virtual time
 
 // FreqMatrixEffect is audio-driven: it paints the new x=0/y=0 pixel from

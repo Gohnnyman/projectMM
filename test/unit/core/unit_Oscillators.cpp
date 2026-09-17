@@ -8,7 +8,7 @@
 // pass per frame rather than one per read.
 
 #include "doctest.h"
-#include "core/oscillators.h"
+#include "core/util/oscillators.h"
 
 using namespace mm;
 

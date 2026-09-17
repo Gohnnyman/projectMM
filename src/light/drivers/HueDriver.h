@@ -2,9 +2,9 @@
 
 #include "light/drivers/DriverBase.h"
 
-#include "core/JsonUtil.h"          // parse the bridge's JSON responses
-#include "core/FilesystemModule.h"  // noteDirty: persist the app key after pairing
-#include "core/DevicesModule.h"     // DevicesModule::active(): list the bridge as a device
+#include "core/util/JsonUtil.h"          // parse the bridge's JSON responses
+#include "core/system/FilesystemModule.h"  // noteDirty: persist the app key after pairing
+#include "core/system/DevicesModule.h"     // DevicesModule::active(): list the bridge as a device
 #include "platform/platform.h"
 
 namespace mm {

@@ -10,7 +10,7 @@
 // Correction.h carries only the one role-array rebuild the device actually uses.
 
 #include "light/drivers/Correction.h"
-#include "light/ChannelRole.h"
+#include "light/drivers/ChannelRole.h"
 
 namespace mm::test {
 

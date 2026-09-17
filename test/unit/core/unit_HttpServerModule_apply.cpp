@@ -1,11 +1,11 @@
 // @module HttpServerModule
 
 #include "doctest.h"
-#include "core/HttpServerModule.h"
-#include "core/Scheduler.h"
-#include "core/ModuleFactory.h"
-#include "core/MoonModule.h"
-#include "core/JsonSink.h"
+#include "core/system/HttpServerModule.h"
+#include "core/module/Scheduler.h"
+#include "core/util/ModuleFactory.h"
+#include "core/module/MoonModule.h"
+#include "core/util/JsonSink.h"
 
 #include <cstring>
 #include <string>    // std::string: named explicitly, GCC does not pull it in transitively

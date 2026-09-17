@@ -1,11 +1,11 @@
 #pragma once
 
-#include "core/MoonModule.h"
-#include "core/ActiveInstance.h"     // the singleton seat drivers resolve the library through
-#include "core/ScratchBuffer.h"      // the dynamic (no-cap) role pool
-#include "core/JsonSink.h"
-#include "core/JsonUtil.h"           // restoreList: recursive reader for the persisted array
-#include "light/ChannelRole.h"
+#include "core/module/MoonModule.h"
+#include "core/util/ActiveInstance.h"     // the singleton seat drivers resolve the library through
+#include "core/util/ScratchBuffer.h"      // the dynamic (no-cap) role pool
+#include "core/util/JsonSink.h"
+#include "core/util/JsonUtil.h"           // restoreList: recursive reader for the persisted array
+#include "light/drivers/ChannelRole.h"
 #include "light/drivers/Correction.h"  // LightPreset + fillRolesFromPreset + the derived offsets
 
 #include <cstdint>

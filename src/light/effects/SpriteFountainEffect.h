@@ -1,12 +1,12 @@
 #pragma once
 // Author: projectMM original
 
-#include "core/AudioService.h"   // latestFrame: the spectrum the audio-reactive mode reads
-#include "core/math16.h"
-#include "light/draw.h"
+#include "core/services/AudioService.h"   // latestFrame: the spectrum the audio-reactive mode reads
+#include "core/util/math16.h"
+#include "light/powerfunctions/draw.h"
 #include "light/effects/EffectBase.h"
 #include "light/effects/SpriteCast.h"           // the shared cast: every sprite, one draw call
-#include "light/particles.h"
+#include "light/powerfunctions/particles.h"
 
 namespace mm {
 

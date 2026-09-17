@@ -1,7 +1,7 @@
 // @module PreviewDriver
 
 #include "doctest.h"
-#include "core/Scheduler.h"
+#include "core/module/Scheduler.h"
 #include "light/drivers/PreviewDriver.h"
 #include "light/drivers/Drivers.h"
 #include "light/layers/Layer.h"

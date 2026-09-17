@@ -7,8 +7,8 @@
 // network. The plugins are the "second caller" that makes the seam testable.
 
 #include "doctest.h"
-#include "core/DevicePlugin.h"
-#include "core/WledPacket.h"
+#include "core/system/DevicePlugin.h"
+#include "core/system/WledPacket.h"
 
 #include <cstdint>
 #include <cstring>

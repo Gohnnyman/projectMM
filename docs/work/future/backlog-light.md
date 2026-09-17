@@ -940,7 +940,7 @@ silently changes what the current selection points at: with `fire.mlp` active at
 downloading `beat-flash.mlp` re-sorts the scripted tail and index 60 becomes `beat-flash.mlp`. The
 stored value never moved; what it means did.
 
-[Palette.h](../../src/light/Palette.h) already reasons about exactly this and solves half of it. A
+[Palette.h](../../src/light/util/Palette.h) already reasons about exactly this and solves half of it. A
 palette selection is an index: it persists, it rides `seg[0].pal` over the WLED API, and Home
 Assistant renders `paletteNames` positionally, so scripted palettes sort AFTER the built-ins and the
 sixty built-in indices are fixed forever. What is not solved is the scripted tail among itself, and

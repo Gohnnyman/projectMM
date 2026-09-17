@@ -3,9 +3,9 @@
 
 #include "doctest.h"
 #include "light/drivers/Hub75Driver.h"
-#include "core/PinsModule.h"
-#include "core/Scheduler.h"
-#include "core/JsonSink.h"
+#include "core/system/PinsModule.h"
+#include "core/module/Scheduler.h"
+#include "core/util/JsonSink.h"
 #include "light/layers/Layer.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/Layouts.h"

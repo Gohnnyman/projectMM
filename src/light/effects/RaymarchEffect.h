@@ -5,9 +5,9 @@
 // Compiled only where the SoC declares a hardware FPU, for the reason raymarch.h carries.
 #if MM_HEAVY_COMPUTE
 
-#include "core/math16.h"              // BeatPhase
-#include "light/raymarch.h"
-#include "light/shader.h"
+#include "core/util/math16.h"              // BeatPhase
+#include "light/powerfunctions/raymarch.h"
+#include "light/powerfunctions/shader.h"
 
 namespace mm {
 

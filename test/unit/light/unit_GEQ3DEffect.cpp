@@ -5,7 +5,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/effects/GEQ3DEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioService.h"
+#include "core/services/AudioService.h"
 #include "platform/platform.h"
 
 // GEQ3D is audio-driven: it renders 16 bars from AudioService::latestFrame()->bands.

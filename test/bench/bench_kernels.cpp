@@ -15,8 +15,8 @@
 // Not a doctest: a benchmark that asserts a timing is a flaky test, and one that does not assert is
 // a report. This is the report. Run by hand or through moondeck/check/bench_kernels.py.
 
-#include "core/math16.h"
-#include "core/noise.h"
+#include "core/util/math16.h"
+#include "core/util/noise.h"
 
 #include <chrono>
 #include <cstdint>

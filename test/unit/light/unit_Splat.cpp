@@ -7,7 +7,7 @@
 // moving point would pulse brighter as it crossed cell boundaries; if less, it would dim.
 
 #include "doctest.h"
-#include "light/draw.h"
+#include "light/powerfunctions/draw.h"
 
 using namespace mm;
 

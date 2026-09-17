@@ -1,8 +1,8 @@
 #pragma once
 
-#include "core/math16.h"              // BeatPhase, sin16/cos16
+#include "core/util/math16.h"              // BeatPhase, sin16/cos16
 #include "light/effects/EffectBase.h"
-#include "light/shader.h"             // project, depthFade, rotate
+#include "light/powerfunctions/shader.h"             // project, depthFade, rotate
 
 namespace mm {
 

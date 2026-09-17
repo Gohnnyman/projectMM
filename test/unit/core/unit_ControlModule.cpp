@@ -9,10 +9,10 @@
 #include "doctest.h"
 
 #include <vector>
-#include "core/ControlModule.h"
-#include "core/FilesystemModule.h"
-#include "core/ModuleFactory.h"
-#include "core/Scheduler.h"
+#include "core/system/ControlModule.h"
+#include "core/system/FilesystemModule.h"
+#include "core/util/ModuleFactory.h"
+#include "core/module/Scheduler.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/layers/Layer.h"

@@ -7,7 +7,7 @@
 // contract rather than specific pixel values, because the value is only meaningful relative to zero.
 
 #include "doctest.h"
-#include "light/draw.h"
+#include "light/powerfunctions/draw.h"
 
 using namespace mm;
 using draw::toSub;

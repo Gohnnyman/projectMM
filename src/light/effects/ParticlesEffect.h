@@ -1,7 +1,7 @@
 #pragma once
 
 #include "light/effects/EffectBase.h"
-#include "light/particles.h"
+#include "light/powerfunctions/particles.h"
 
 namespace mm {
 

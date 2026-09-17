@@ -7,7 +7,7 @@
 // double-free here fails the build.
 
 #include "doctest.h"
-#include "core/JsonSink.h"
+#include "core/util/JsonSink.h"
 #include "platform/platform.h"
 
 #include <cstring>

@@ -9,7 +9,7 @@
 
 #include "doctest.h"
 #include "platform/platform.h"
-#include "core/TryLock.h"
+#include "core/util/TryLock.h"
 
 #include <atomic>
 #include <chrono>

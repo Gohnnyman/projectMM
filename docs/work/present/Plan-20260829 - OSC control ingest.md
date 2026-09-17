@@ -78,10 +78,10 @@ fader rates (a desk moves a handful of controls per frame, not thousands).
 
 ## Files
 
-1. **New `src/core/OscPacket.h`** — the wire format in one place, the `ArtNetPacket.h` /
+1. **New `src/core/util/OscPacket.h`** — the wire format in one place, the `ArtNetPacket.h` /
    `WLEDAudioSyncPacket.h` convention: constants plus inline `parse`, unit-tested against a golden
    byte vector. Pure logic, no socket, so it is host-testable.
-2. **New `src/core/OscModule.h`** — the module: socket lifecycle, the drain loop, address routing.
+2. **New `src/core/services/OscModule.h`** — the module: socket lifecycle, the drain loop, address routing.
 3. **`src/main.cpp`** — register the type.
 4. **Docs** — a card in `docs/moonmodules/core/services.md`, and the address table.
 

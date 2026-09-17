@@ -9,11 +9,11 @@
 // the way a decoded frame would arrive. That is the whole point of injectCodeForTest.
 
 #include "doctest.h"
-#include "core/InfraredService.h"
-#include "core/Scheduler.h"
-#include "core/MoonModule.h"
-#include "core/JsonSink.h"
-#include "core/JsonUtil.h"
+#include "core/services/InfraredService.h"
+#include "core/module/Scheduler.h"
+#include "core/module/MoonModule.h"
+#include "core/util/JsonSink.h"
+#include "core/util/JsonUtil.h"
 
 #include <cstring>
 

@@ -6,8 +6,8 @@
 // trip through writeListRow / restoreList so a persisted bridge comes back as a Hue row.
 
 #include "doctest.h"
-#include "core/DevicesModule.h"
-#include "core/JsonSink.h"
+#include "core/system/DevicesModule.h"
+#include "core/util/JsonSink.h"
 
 #include <cstdio>
 #include <cstring>

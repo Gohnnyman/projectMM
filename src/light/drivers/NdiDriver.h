@@ -1,6 +1,6 @@
 #pragma once
-#include "core/Control.h"
-#include "core/ScratchBuffer.h"
+#include "core/module/Control.h"
+#include "core/util/ScratchBuffer.h"
 #include "light/drivers/DriverBase.h"
 #include "platform/platform.h"
 

@@ -1,7 +1,7 @@
 // @module FirmwareUpdateModule
 
 #include "doctest.h"
-#include "core/FirmwareUpdateModule.h"
+#include "core/system/FirmwareUpdateModule.h"
 #include <cstring>
 
 // The `firmware` control is always present and non-empty (either a real firmware key from

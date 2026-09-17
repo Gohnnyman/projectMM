@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/math16.h"            // BeatPhase: the shared BPM accumulator
+#include "core/util/math16.h"            // BeatPhase: the shared BPM accumulator
 #include "light/effects/EffectBase.h"
 
 namespace mm {

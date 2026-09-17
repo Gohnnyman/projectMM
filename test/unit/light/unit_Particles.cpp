@@ -7,7 +7,7 @@
 // coordinates, which are an implementation detail of the fixed-point scale.
 
 #include "doctest.h"
-#include "light/particles.h"
+#include "light/powerfunctions/particles.h"
 
 #include <cmath>
 

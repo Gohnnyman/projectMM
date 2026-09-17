@@ -1,8 +1,8 @@
 #pragma once
 
-#include "core/math16.h"              // BeatPhase, hashInt
+#include "core/util/math16.h"              // BeatPhase, hashInt
 #include "light/effects/EffectBase.h"
-#include "light/particles.h"
+#include "light/powerfunctions/particles.h"
 
 namespace mm {
 

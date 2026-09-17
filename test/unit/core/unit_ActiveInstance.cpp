@@ -1,7 +1,7 @@
 // @module ActiveInstance
 
 #include "doctest.h"
-#include "core/ActiveInstance.h"
+#include "core/util/ActiveInstance.h"
 
 using namespace mm;
 

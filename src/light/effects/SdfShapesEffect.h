@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/math16.h"              // BeatPhase, sin16: the shared time base and oscillator
+#include "core/util/math16.h"              // BeatPhase, sin16: the shared time base and oscillator
 #include "light/effects/EffectBase.h"
 
 namespace mm {

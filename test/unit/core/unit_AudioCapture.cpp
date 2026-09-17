@@ -8,8 +8,8 @@
 // for the invoking terminal, expected, once.
 
 #include "doctest.h"
-#include "core/AudioService.h"
-#include "core/JsonSink.h"   // the device-Select persistence case writes a control value out
+#include "core/services/AudioService.h"
+#include "core/util/JsonSink.h"   // the device-Select persistence case writes a control value out
 #include "platform/platform.h"
 
 #include <cstring>

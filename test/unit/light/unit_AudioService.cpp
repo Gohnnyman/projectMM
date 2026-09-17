@@ -1,7 +1,7 @@
 // @module AudioService
 
 #include "doctest.h"
-#include "core/AudioService.h"
+#include "core/services/AudioService.h"
 
 #include <cstring>
 

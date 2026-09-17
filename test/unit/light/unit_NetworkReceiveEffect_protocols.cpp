@@ -3,9 +3,9 @@
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
-#include "light/ArtNetPacket.h"
-#include "light/DdpPacket.h"
-#include "light/E131Packet.h"
+#include "light/util/ArtNetPacket.h"
+#include "light/util/DdpPacket.h"
+#include "light/util/E131Packet.h"
 #include "light/effects/NetworkReceiveEffect.h"
 #include "light/layouts/GridLayout.h"
 #include "platform/platform.h"

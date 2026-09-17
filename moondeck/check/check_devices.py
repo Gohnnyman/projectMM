@@ -33,7 +33,7 @@ DOCS = ROOT / "docs"
 
 # The device stores the injected deviceModel in SystemModule's deviceModel_[32] buffer (31 usable
 # chars + NUL); a longer catalog name is truncated on-device and stops matching. Keep in step with
-# that buffer in src/core/SystemModule.h.
+# that buffer in src/core/system/SystemModule.h.
 DEVICE_MODEL_MAX = 31
 
 # Capability vocabulary. supported = what a module drives today; keep this list

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "core/math16.h"              // sin16, BeatPhase, easeInOutQuad
+#include "core/util/math16.h"              // sin16, BeatPhase, easeInOutQuad
 #include "light/effects/EffectBase.h"
-#include "light/particles.h"   // FrameTime: the shared time scale
+#include "light/powerfunctions/particles.h"   // FrameTime: the shared time scale
 
 namespace mm {
 

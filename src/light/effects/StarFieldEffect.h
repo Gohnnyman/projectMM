@@ -1,8 +1,8 @@
 #pragma once
 
-#include "core/math16.h"            // map32: the shared, fencepost-safe range map
+#include "core/util/math16.h"            // map32: the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
-#include "light/shader.h"   // project: the shared pinhole
+#include "light/powerfunctions/shader.h"   // project: the shared pinhole
 
 namespace mm {
 

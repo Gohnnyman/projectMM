@@ -13,7 +13,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/effects/EffectBase.h"
-#include "light/draw.h"
+#include "light/powerfunctions/draw.h"
 #include "platform/platform.h"   // setTestNowMs, to drive the fade clock
 #include "light/moonlive/MoonLiveEffect.h"
 #include "core/moonlive/moonlive_emit.h"   // MM_MOONLIVE_HAS_HOST_JIT

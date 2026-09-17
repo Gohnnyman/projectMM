@@ -1,9 +1,9 @@
 #pragma once
 
 #include "core/moonlive/MoonLiveBuiltins.h"
-#include "core/math8.h"    // beatsin16: the shared time vocabulary
-#include "core/math16.h"   // beat16 / sin16 / cos16: full-range waveforms
-#include "core/noise.h"    // inoise8: the shared gradient-noise field
+#include "core/util/math8.h"    // beatsin16: the shared time vocabulary
+#include "core/util/math16.h"   // beat16 / sin16 / cos16: full-range waveforms
+#include "core/util/noise.h"    // inoise8: the shared gradient-noise field
 
 #include <atomic>
 #include <cstdint>

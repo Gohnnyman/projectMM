@@ -1,10 +1,10 @@
 #pragma once
 // Author: projectMM original
 
-#include "core/math16.h"      // BeatPhase: the shared tail-beat clock
-#include "core/math8.h"       // Random8: fixed-seed spawn variation, golden-reproducible
+#include "core/util/math16.h"      // BeatPhase: the shared tail-beat clock
+#include "core/util/math8.h"       // Random8: fixed-seed spawn variation, golden-reproducible
 #include "light/effects/EffectBase.h"
-#include "light/particles.h"  // Pool: the movable-things kernel the fish ride
+#include "light/powerfunctions/particles.h"  // Pool: the movable-things kernel the fish ride
 
 namespace mm {
 

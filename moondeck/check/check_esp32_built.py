@@ -43,7 +43,7 @@ SKIP_PARTS = {"build", "managed_components", "__pycache__", ".git"}
 # A desktop build regenerates them after an ESP32 build, so treating them as inputs makes
 # the firmware look stale forever, one minute after it was built. What actually feeds them
 # — src/ui/*.js, library.json, the git hash — is already covered by the scan.
-SKIP_FILES = {"src/ui/ui_embedded.h", "src/core/build_info.h"}
+SKIP_FILES = {"src/ui/ui_embedded.h", "src/core/util/build_info.h"}
 
 # The desktop-only platform never compiles into an ESP32 image, so an edit there cannot
 # stale the firmware. Kept in step with this check's trigger in CLAUDE.md § Commit,

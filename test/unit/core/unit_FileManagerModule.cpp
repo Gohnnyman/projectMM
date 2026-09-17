@@ -8,8 +8,8 @@
 // HttpServerModule::parseFilePath directly (it's pure string→string, so it needs no socket).
 
 #include "doctest.h"
-#include "core/FileManagerModule.h"
-#include "core/HttpServerModule.h"   // parseFilePath — the shared filesystem-path guard
+#include "core/system/FileManagerModule.h"
+#include "core/system/HttpServerModule.h"   // parseFilePath — the shared filesystem-path guard
 #include "platform/platform.h"
 
 #include <cstdio>

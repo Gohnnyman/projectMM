@@ -167,7 +167,7 @@ def self_test() -> int:
     """Round-trip the framing + payload helpers without a serial cable.
 
     The script has no other test harness — the C++ parser at
-    src/core/ImprovFrame.h + test/test_improv_frame.cpp covers the device
+    src/core/util/ImprovFrame.h + test/test_improv_frame.cpp covers the device
     side; this covers the host-CLI side. Re-runnable: `uv run
     moondeck/build/improv_provision.py --self-test`.
     """

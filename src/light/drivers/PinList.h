@@ -1,7 +1,7 @@
 #pragma once
 
-#include "core/PinList.h"        // parsePinList: the domain-neutral GPIO-CSV parser (core primitive)
-#include "light/light_types.h"  // nrOfLightsType
+#include "core/util/PinList.h"        // parsePinList: the domain-neutral GPIO-CSV parser (core primitive)
+#include "light/util/light_types.h"  // nrOfLightsType
 
 #include <cstdint>
 #include <cstdlib>  // std::strtol

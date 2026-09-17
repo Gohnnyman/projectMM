@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/math16.h"              // peakHold, smoothFollow, map32
+#include "core/util/math16.h"              // peakHold, smoothFollow, map32
 #include "light/effects/EffectBase.h"
 
 namespace mm {

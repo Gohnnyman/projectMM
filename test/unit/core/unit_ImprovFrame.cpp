@@ -11,7 +11,7 @@
 // whole reason for the split.
 
 #include "doctest.h"
-#include "core/ImprovFrame.h"
+#include "core/util/ImprovFrame.h"
 
 #include <cstdint>
 #include <cstring>

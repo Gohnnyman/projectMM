@@ -6,7 +6,7 @@
 // parser is where a typo must be caught rather than turned into packets aimed at the wrong host.
 
 #include "doctest.h"
-#include "core/IpList.h"
+#include "core/util/IpList.h"
 
 namespace {
 // Compact assertion helper: "is destination i equal to a.b.c.d?"

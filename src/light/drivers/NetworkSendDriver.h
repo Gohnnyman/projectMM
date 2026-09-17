@@ -2,10 +2,10 @@
 
 #include "light/drivers/DriverBase.h"
 
-#include "light/ArtNetPacket.h"   // shared ArtNet wire formats (build + parse)
-#include "light/DdpPacket.h"      // shared DDP wire format
-#include "light/E131Packet.h"     // shared E1.31/sACN wire format
-#include "core/IpList.h"          // parseIpList: the destination-list parser (core primitive)
+#include "light/util/ArtNetPacket.h"   // shared ArtNet wire formats (build + parse)
+#include "light/util/DdpPacket.h"      // shared DDP wire format
+#include "light/util/E131Packet.h"     // shared E1.31/sACN wire format
+#include "core/util/IpList.h"          // parseIpList: the destination-list parser (core primitive)
 #include "light/drivers/PinList.h"  // assignCounts: the same window-split idiom as ledsPerPin
 #include "platform/platform.h"
 

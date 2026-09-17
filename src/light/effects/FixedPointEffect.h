@@ -13,8 +13,8 @@
 // Concept and the original fixed-point canvas demos: Sutaburosu, in FastLED, via MoonLight
 // (E_FastLED.h, "Fixed-Point Canvas Demo").
 
-#include "core/math16.h"           // sin16, cos16, BeatPhase
-#include "light/Palette.h"         // hsvToRgb: the trail's rainbow
+#include "core/util/math16.h"           // sin16, cos16, BeatPhase
+#include "light/util/Palette.h"         // hsvToRgb: the trail's rainbow
 #include "light/effects/EffectBase.h"
 
 namespace mm {

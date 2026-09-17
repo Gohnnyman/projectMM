@@ -1,8 +1,8 @@
 // @module ScratchBuffer
 
 #include "doctest.h"
-#include "core/MoonModule.h"
-#include "core/ScratchBuffer.h"
+#include "core/module/MoonModule.h"
+#include "core/util/ScratchBuffer.h"
 
 #include <cstdint>
 

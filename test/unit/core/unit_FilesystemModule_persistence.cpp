@@ -2,10 +2,10 @@
 // @also Scheduler, Layer
 
 #include "doctest.h"
-#include "core/FilesystemModule.h"
-#include "core/ModuleFactory.h"
-#include "core/Scheduler.h"
-#include "core/SystemModule.h"
+#include "core/system/FilesystemModule.h"
+#include "core/util/ModuleFactory.h"
+#include "core/module/Scheduler.h"
+#include "core/system/SystemModule.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/modifiers/MultiplyModifier.h"

@@ -8,7 +8,7 @@
 // hand-rolled accumulators on desktop.
 
 #include "doctest.h"
-#include "core/math16.h"
+#include "core/util/math16.h"
 
 #include <algorithm>
 #include <cmath>

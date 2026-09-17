@@ -4,8 +4,8 @@
 
 #include <cstdint>
 
-#include "light/ChannelRole.h"
-#include "light/FixtureChannels.h"   // kMotionBase + forEachMotionSlot: the layer-slot packing
+#include "light/drivers/ChannelRole.h"
+#include "light/util/FixtureChannels.h"   // kMotionBase + forEachMotionSlot: the layer-slot packing
 
 namespace mm {
 

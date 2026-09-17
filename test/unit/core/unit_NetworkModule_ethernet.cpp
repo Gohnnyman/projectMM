@@ -28,7 +28,7 @@
 #include "doctest.h"
 #include "platform_config.h"   // EthPhyType, EthPinConfig, hasEthernet, ethConfigDefault
 #include "platform/platform.h" // setEthConfig / ethStop / ethInit / ethConnected
-#include "core/NetworkModule.h"
+#include "core/system/NetworkModule.h"
 #include <cstring>
 
 // The enum values are a wire contract: the Select index, the ethInit() switch, and

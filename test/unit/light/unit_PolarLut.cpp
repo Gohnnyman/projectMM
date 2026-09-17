@@ -8,12 +8,12 @@
 // the tables still renders rather than crashing.
 
 #include "doctest.h"
-#include "core/MoonModule.h"
+#include "core/module/MoonModule.h"
 #include "light/effects/AuroraEffect.h"
 #include "light/effects/PolarNoiseEffect.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/TunnelEffect.h"
-#include "light/polar.h"
+#include "light/powerfunctions/polar.h"
 #include "platform/platform.h"
 
 #include <cstdint>

@@ -1,18 +1,18 @@
 #pragma once
 
-#include "core/PinList.h"        // parsePinList: the relay list, same parser the LED drivers use
+#include "core/util/PinList.h"        // parsePinList: the relay list, same parser the LED drivers use
 #include "light/drivers/DriverBase.h"  // DriverBase: the Drivers container casts its children to it
-#include "core/MoonModule.h"
-#include "core/ActiveInstance.h"  // the summary-seat election (the seat + its RAII vacate)
+#include "core/module/MoonModule.h"
+#include "core/util/ActiveInstance.h"  // the summary-seat election (the seat + its RAII vacate)
 #include "light/layers/Buffer.h"
 #include "light/layers/Layer.h"
 #include "light/layers/Effects.h"
 #include "light/layers/BlendMap.h"
 #include "light/drivers/Correction.h"
-#include "light/Palette.h"   // the global active palette + its select control
+#include "light/util/Palette.h"   // the global active palette + its select control
 #include "light/moonlive/MoonLivePalette.h"   // a palette computed per frame by a script
 #include "light/moonlive/script_catalog.h"       // the tags each factory palette declares
-#include "core/LightSummary.h"   // the POD published for the domain-neutral WLED/MQTT consumers
+#include "core/util/LightSummary.h"   // the POD published for the domain-neutral WLED/MQTT consumers
 #include "platform/platform.h"
 
 #include <cstring>  // std::strcmp in onControlChanged

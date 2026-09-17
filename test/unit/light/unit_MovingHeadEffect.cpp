@@ -1,7 +1,7 @@
 // @module MovingHeadEffect
 
 #include "doctest.h"
-#include "light/FixtureChannels.h"
+#include "light/util/FixtureChannels.h"
 #include "light/effects/MovingHeadEffect.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/Layouts.h"

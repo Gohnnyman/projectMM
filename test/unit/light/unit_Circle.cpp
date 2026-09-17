@@ -7,7 +7,7 @@
 // symmetric and hollow, the disc is solid, and the AA line spreads its light without inventing any.
 
 #include "doctest.h"
-#include "light/draw.h"
+#include "light/powerfunctions/draw.h"
 
 using namespace mm;
 

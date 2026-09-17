@@ -139,9 +139,9 @@ Against Part 1's blocks, measured on this tree:
 
 | Part 1 block | projectMM today | Status |
 |---|---|---|
-| Polar mapping | `atan16`, `dist16`, `kaleido` ([math16.h](../../src/core/math16.h)), computed per pixel; `PolarNoiseEffect` uses them | ✅ per pixel; ⬜ no precomputed LUT type |
+| Polar mapping | `atan16`, `dist16`, `kaleido` ([math16.h](../../src/core/util/math16.h)), computed per pixel; `PolarNoiseEffect` uses them | ✅ per pixel; ⬜ no precomputed LUT type |
 | Polar transforms, `uv` | `shader.h`: `uv`, `rotate`, `repeat`, `mirror`; `kaleido` | ✅ |
-| Noise | `inoise8`/`inoise16` **value** noise; `fbm8`/`fbm16`, `turbulence8`, `warp8` ([noise.h](../../src/core/noise.h)) | ✅ fBm, warp, turbulence; ⬜ gradient noise; ⬜ curl noise |
+| Noise | `inoise8`/`inoise16` **value** noise; `fbm8`/`fbm16`, `turbulence8`, `warp8` ([noise.h](../../src/core/util/noise.h)) | ✅ fBm, warp, turbulence; ⬜ gradient noise; ⬜ curl noise |
 | Oscillators | `BeatPhase`, `beat`/`beatsin`, `sin16`/`cos16`, `smoothFollow`, easings, `hashInt` | ✅ single phase; ⬜ timer bank with the four LFO shapes and modulation binding |
 | Contrast, palette | `map32`, `smoothstep`, `colorFromPalette`, `cosPalette` | ✅ |
 | Gamma, dithering | `Correction` curves at the driver | ✅ gamma at output; ⬜ temporal dithering |

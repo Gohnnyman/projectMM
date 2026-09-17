@@ -5,7 +5,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/effects/FreqSawsEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioService.h"
+#include "core/services/AudioService.h"
 
 // Helper: any non-zero byte in the layer buffer (a lit pixel somewhere).
 static bool anyLit(mm::Layer& layer) {

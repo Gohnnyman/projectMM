@@ -25,7 +25,7 @@
 #error "CONFIG_MM_HLS is set on a chip with no hardware H.264 encoder (P4 only)."
 #endif
 
-#include "light/MpegTs.h"
+#include "light/util/MpegTs.h"
 
 #include "esp_h264_enc_single_hw.h"
 #include "esp_heap_caps.h"

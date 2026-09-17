@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/math16.h"              // hashInt: drop placement without a stream RNG
+#include "core/util/math16.h"              // hashInt: drop placement without a stream RNG
 #include "light/effects/EffectBase.h"
 
 namespace mm {

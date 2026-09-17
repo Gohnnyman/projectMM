@@ -1,7 +1,7 @@
 // @module MoonModule
 
 #include "doctest.h"
-#include "core/MoonModule.h"
+#include "core/module/MoonModule.h"
 
 #include <cstring>   // std::strcpy — the in-place option-rename schemaSignature tests
 

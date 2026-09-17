@@ -2,8 +2,8 @@
 
 #include "light/drivers/DriverBase.h"
 
-#include "light/light_types.h"  // lengthType, nrOfLightsType
-#include "core/BinaryBroadcaster.h"
+#include "light/util/light_types.h"  // lengthType, nrOfLightsType
+#include "core/util/BinaryBroadcaster.h"
 #include "platform/platform.h"
 
 #include <limits>  // numeric_limits for the memory-derived point cap

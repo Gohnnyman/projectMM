@@ -1,9 +1,9 @@
 #pragma once
 // Author: projectMM original (Space Invaders, Taito 1978, is the inspiration)
 
-#include "core/AudioService.h"   // latestFrame: the beat the march steps on
-#include "core/math16.h"
-#include "light/draw.h"
+#include "core/services/AudioService.h"   // latestFrame: the beat the march steps on
+#include "core/util/math16.h"
+#include "light/powerfunctions/draw.h"
 #include "light/effects/EffectBase.h"
 
 namespace mm {

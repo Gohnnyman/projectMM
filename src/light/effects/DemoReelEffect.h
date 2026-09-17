@@ -2,8 +2,8 @@
 
 #include "light/effects/EffectBase.h"
 
-#include "core/ModuleFactory.h"      // enumerate + create the effects to cycle through
-#include "light/fonts.h"             // fonts::kFont4x6: the overlay font
+#include "core/util/ModuleFactory.h"      // enumerate + create the effects to cycle through
+#include "light/powerfunctions/fonts.h"             // fonts::kFont4x6: the overlay font
 
 namespace mm {
 

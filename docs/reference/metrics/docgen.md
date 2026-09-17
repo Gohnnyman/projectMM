@@ -37,70 +37,70 @@ Every place the generated documentation breaks the shape [the standards](../../c
 |---|---:|
 | `src/platform/platform.h` | 304 |
 | `src/light/moonlive/MoonLiveBuiltins_light.h` | 293 |
-| `src/core/HttpServerModule.h` | 216 |
-| `src/light/draw.h` | 211 |
-| `src/light/particles.h` | 124 |
+| `src/core/system/HttpServerModule.h` | 216 |
+| `src/light/powerfunctions/draw.h` | 211 |
+| `src/light/powerfunctions/particles.h` | 124 |
 | `src/light/layers/Layer.h` | 119 |
 | `src/core/moonlive/MoonLiveBuiltins.h` | 109 |
 | `src/core/moonlive/MoonLiveIr.h` | 107 |
 | `src/core/moonlive/MoonLive.h` | 94 |
-| `src/core/InputMapping.h` | 93 |
-| `src/core/math16.h` | 93 |
-| `src/core/noise.h` | 87 |
+| `src/core/util/InputMapping.h` | 93 |
+| `src/core/util/math16.h` | 93 |
+| `src/core/util/noise.h` | 87 |
 | `src/light/moonlive/MoonLiveScriptFile.h` | 87 |
 | `src/light/moonlive/MoonLiveScript.h` | 84 |
 | `src/platform/desktop/moonlive_asm_host.h` | 74 |
 | `src/platform/esp32/moonlive_asm_xtensa.h` | 74 |
-| `src/light/Palette.h` | 71 |
+| `src/light/util/Palette.h` | 71 |
 | `src/platform/esp32/moonlive_asm_riscv.h` | 67 |
-| `src/core/AudioBands.h` | 65 |
-| `src/light/polar.h` | 56 |
+| `src/core/services/AudioBands.h` | 65 |
+| `src/light/powerfunctions/polar.h` | 56 |
 | `src/platform/esp32/platform_config.h` | 51 |
-| `src/core/JsonUtil.h` | 50 |
+| `src/core/util/JsonUtil.h` | 50 |
 | `src/light/layers/MappingLUT.h` | 49 |
 | `src/light/moonlive/MoonLiveEffect.h` | 45 |
 | `src/core/moonlive/MoonLiveCompiler.h` | 44 |
 | `src/light/modifiers/ModifierBase.h` | 43 |
-| `src/core/AudioLevel.h` | 40 |
-| `src/core/JsonSink.h` | 37 |
+| `src/core/services/AudioLevel.h` | 40 |
+| `src/core/util/JsonSink.h` | 37 |
 | `src/light/layers/Effects.h` | 35 |
 | `src/light/moonlive/MoonLiveLayout.h` | 34 |
-| `src/core/oscillators.h` | 33 |
+| `src/core/util/oscillators.h` | 33 |
 | `src/light/layouts/Layouts.h` | 33 |
 | `src/light/layouts/LayoutBase.h` | 32 |
 | `src/core/moonlive/MoonLiveBuiltins_service.h` | 31 |
-| `src/light/MpegTs.h` | 31 |
-| `src/light/fluid.h` | 30 |
-| `src/light/shader.h` | 28 |
-| `src/core/ScratchBuffer.h` | 27 |
+| `src/light/util/MpegTs.h` | 31 |
+| `src/light/powerfunctions/fluid.h` | 30 |
+| `src/light/powerfunctions/shader.h` | 28 |
+| `src/core/util/ScratchBuffer.h` | 27 |
 | `src/platform/desktop/platform_config.h` | 27 |
 | `src/light/moonlive/MoonLiveModifier.h` | 25 |
 | `src/light/layouts/CubeLayout.h` | 24 |
 | `moonmodules/light` | 22 |
-| `src/core/ModuleFactory.h` | 22 |
+| `src/core/util/ModuleFactory.h` | 22 |
 | `src/light/moonlive/MoonLivePalette.h` | 21 |
 | `src/light/layers/BlendMap.h` | 20 |
 | `src/light/layers/Buffer.h` | 20 |
 | `src/light/modifiers/MultiplyModifier.h` | 20 |
-| `src/core/ActiveInstance.h` | 19 |
-| `src/core/WledPacket.h` | 19 |
+| `src/core/system/WledPacket.h` | 19 |
+| `src/core/util/ActiveInstance.h` | 19 |
 | `src/light/layouts/PanelsLayout.h` | 19 |
-| `src/core/OscPacket.h` | 18 |
+| `src/core/services/OscPacket.h` | 18 |
 | `src/light/moonlive/MoonLiveParticles.h` | 18 |
-| `src/light/raymarch.h` | 18 |
+| `src/light/powerfunctions/raymarch.h` | 18 |
 | `src/core/moonlive/moonlive_emit.h` | 17 |
 | `src/light/layouts/Rings241Layout.h` | 17 |
 | `src/light/modifiers/PinwheelModifier.h` | 17 |
 | `src/light/modifiers/RandomMapModifier.h` | 17 |
-| `src/core/ControlSurface.h` | 16 |
-| `src/core/SpscRing.h` | 16 |
-| `src/core/TryLock.h` | 16 |
+| `src/core/util/ControlSurface.h` | 16 |
+| `src/core/util/SpscRing.h` | 16 |
+| `src/core/util/TryLock.h` | 16 |
 | `src/light/layouts/GridBlacksLayout.h` | 16 |
 | `src/light/layouts/PanelLayout.h` | 16 |
-| `src/core/sha256.h` | 15 |
-| `src/light/FixtureChannels.h` | 15 |
+| `src/core/util/sha256.h` | 15 |
 | `src/light/moonlive/script_catalog.h` | 15 |
-| `src/core/ImprovFrame.h` | 14 |
+| `src/light/util/FixtureChannels.h` | 15 |
+| `src/core/util/ImprovFrame.h` | 14 |
 | `src/light/drivers/ParallelLedDriver.h` | 14 |
 | `src/light/layouts/CarLightsLayout.h` | 14 |
 | `src/light/layouts/RingLayout.h` | 14 |
@@ -110,8 +110,8 @@ Every place the generated documentation breaks the shape [the standards](../../c
 | `src/light/layouts/TubesLayout.h` | 13 |
 | `src/light/modifiers/RegionModifier.h` | 13 |
 | `src/light/modifiers/TransposeModifier.h` | 13 |
-| `src/core/DevicePlugin.h` | 12 |
-| `src/core/FirmwareImage.h` | 12 |
+| `src/core/system/DevicePlugin.h` | 12 |
+| `src/core/util/FirmwareImage.h` | 12 |
 | `src/light/layouts/GridLayout.h` | 11 |
 | `src/light/layouts/HumanSizedCubeLayout.h` | 11 |
 | `src/light/layouts/SingleRowLayout.h` | 11 |
@@ -122,19 +122,19 @@ Every place the generated documentation breaks the shape [the standards](../../c
 | `src/light/layouts/SphereLayout.h` | 10 |
 | `src/light/modifiers/BlockModifier.h` | 10 |
 | `src/light/modifiers/CircleModifier.h` | 10 |
-| `src/core/AudioFrame.h` | 9 |
-| `src/core/BinaryBroadcaster.h` | 9 |
-| `src/core/LightSummary.h` | 9 |
 | `src/core/moonlive/MoonLiveSpill.h` | 9 |
-| `src/core/ImprovOpReassembler.h` | 8 |
+| `src/core/util/AudioFrame.h` | 9 |
+| `src/core/util/BinaryBroadcaster.h` | 9 |
+| `src/core/util/LightSummary.h` | 9 |
+| `src/core/util/ImprovOpReassembler.h` | 8 |
 | `src/light/drivers/PreviewDriver.h` | 8 |
 | `src/light/modifiers/CheckerboardModifier.h` | 8 |
-| `src/core/MqttPacket.h` | 7 |
-| `src/core/math8.h` | 7 |
+| `src/core/system/MqttPacket.h` | 7 |
+| `src/core/util/math8.h` | 7 |
 | `src/light/layouts/WheelLayout.h` | 7 |
 | `moonmodules/core` | 4 |
-| `src/core/color.h` | 4 |
-| `src/light/light_types.h` | 4 |
+| `src/core/util/color.h` | 4 |
+| `src/light/util/light_types.h` | 4 |
 | `src/core/moonlive/moonlive_lower.h` | 2 |
 
 ## Every finding
@@ -217,919 +217,6 @@ Every place the generated documentation breaks the shape [the standards](../../c
 
 - **Drivers**: one control 272 > 100: `multicore` — run the output stage on the second core (defau...
 - **LightPresets**: one control 207 > 100: `presets` — the editable list of preset definitions. Each ro...
-
-### src/core/ActiveInstance.h
-
-- **ActiveInstance/1**: public function has no ///
-- **ActiveInstance/1**: public function has no ///
-- **ActiveInstance/1**: public function has no ///
-- **claim/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line 15**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 16**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 17**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 21**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 22**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 23**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 26**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 27**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 33/0**: public function has no ///
-- **line 40**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 5**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 5**: member comment 24 lines > 1: a deep dive goes after @moreinfo
-- **line 6**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 7**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 8**: hard wrap: one line per sentence, let the editor soft-wrap
-
-### src/core/AudioBands.h
-
-- **BandConditioner**: class comment 21 lines > 10
-- **BandConditioner/0**: public function has no ///
-- **best**: code comment 3 lines > 1
-- **feed**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **if/1**: code comment 2 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **if/1**: code comment 3 lines > 1
-- **kBandRise**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **kLowestAudibleHz**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **kMinRangeDb**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line 109**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 110**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 113**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 114**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 123**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 124**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 125**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 134**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 135**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 136**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 137**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 160**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 163**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 164**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 165**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 166**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 167**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 168**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 169**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 172**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 173**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 174**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 175**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 176**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 179**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 182**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 192**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 193**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 195**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 196**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 197**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 198**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 199**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 218**: code comment 2 lines > 1
-- **line 284/4**: code comment 12 lines > 1
-- **line 51**: member comment 17 lines > 1: a deep dive goes after @moreinfo
-- **line 53**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 54**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 55**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 56**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 57**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 60**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 61**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 62**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 63**: doc sentence 21 words > 20
-- **line 65**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 66**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 69**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 70**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 85**: comment line 21 words > 20
-- **primed**: public variable has no ///
-- **process**: member comment 9 lines > 1: a deep dive goes after @moreinfo
-- **range**: code comment 2 lines > 1
-- **spectralFlux/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **toByte/1**: code comment 4 lines > 1
-
-### src/core/AudioFrame.h
-
-- **flux**: code comment 3 lines > 1
-- **flux**: public variable has no ///
-- **levelSmoothed**: code comment 3 lines > 1
-- **levelSmoothed**: public variable has no ///
-- **line 29**: code comment 7 lines > 1
-- **line 37**: code comment 2 lines > 1
-- **line 46**: code comment 4 lines > 1
-- **onset**: public variable has no ///
-- **peakHz/1**: code comment 3 lines > 1
-
-### src/core/AudioLevel.h
-
-- **clamped**: code comment 8 lines > 1
-- **db/1**: code comment 2 lines > 1
-- **dbToByte/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **floorDb**: public variable has no ///
-- **gateDb/1**: code comment 6 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **kConditionerMinRangeDb**: member comment 9 lines > 1: a deep dive goes after @moreinfo
-- **kLevelMinRangeDb**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **kLevelWindowSpanDb**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **kMinRangeDb**: public variable has no ///
-- **kMuteMarginDb**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **levelWindowSpanDb/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line 102**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 103**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 106**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 107**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 109**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 113**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 114**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 118**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 119**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 120**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 121**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 122**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 126**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 132**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 133**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 137**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 138**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 139**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 26**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 75**: code comment 18 lines > 1
-- **line 94**: code comment 2 lines > 1
-- **line 97**: code comment 5 lines > 1
-- **peakDb**: public variable has no ///
-- **primed**: public variable has no ///
-- **process/3**: public function has no ///
-- **reset/0**: public function has no ///
-- **xPrev**: public variable has no ///
-- **yPrev**: public variable has no ///
-
-### src/core/BinaryBroadcaster.h
-
-- **ClientMessageSink**: code comment 7 lines > 1
-- **SendLease/1**: public function has no ///
-- **bool/0**: public function has no ///
-- **line 87/0**: public function has no ///
-- **sendBufferedFrame**: code comment 20 lines > 1
-- **setClientMessageSink/1**: public function has no ///
-- **subscriberCount/0**: code comment 2 lines > 1
-- **subscriberCount/0**: public function has no ///
-- **tryAcquireSend/0**: code comment 14 lines > 1
-
-### src/core/ControlSurface.h
-
-- **line 38**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 42**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 43**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 44**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 48**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 52/0**: public function has no ///
-- **line 54**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 58**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 70**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 71**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 9**: comment line 21 words > 20
-- **sendColors/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **sendRing/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **sendValue/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **uint8_t**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **uint8_t**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-
-### src/core/DevicePlugin.h
-
-- **DevicePlugin**: code comment 3 lines > 1
-- **MmPlugin**: code comment 5 lines > 1
-- **classifyPacket**: code comment 4 lines > 1
-- **discoveryPort/0**: code comment 4 lines > 1
-- **discoveryPort/0**: public function has no ///
-- **discoveryPort/0**: public function has no ///
-- **label/0**: public function has no ///
-- **label/0**: public function has no ///
-- **line 50/0**: public function has no ///
-- **line 68**: code comment 3 lines > 1
-- **setDeviceName/2**: code comment 2 lines > 1
-- **type**: public variable has no ///
-
-### src/core/FirmwareImage.h
-
-- **chip**: public variable has no ///
-- **identify/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line 30**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 31**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 57**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 81**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 84**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 85**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 86**: hard wrap: one line per sentence, let the editor soft-wrap
-- **memcpy/3**: code comment 2 lines > 1
-- **moonBaseRejection/2**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **uint16_t**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-
-### src/core/HttpServerModule.h
-
-- **HttpServerModule**: class comment 105 lines > 10
-- **LeafHash**: code comment 10 lines > 1
-- **MAX_PREVIEW_CLIENTS**: code comment 12 lines > 1
-- **MAX_WS_CLIENTS**: code comment 6 lines > 1
-- **PASSWORD_XOR_KEY**: code comment 4 lines > 1
-- **PreviewSend**: code comment 7 lines > 1
-- **StateSend**: code comment 4 lines > 1
-- **appearsInUi/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **applyAddModule**: code comment 3 lines > 1
-- **applyClearChildren/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **applyFileChanged/1**: member comment 16 lines > 1: a deep dive goes after @moreinfo
-- **applyOp/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **applySetControl/3**: public function has no ///
-- **applyWledState/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **baselineLeafHashes/0**: code comment 2 lines > 1
-- **baselineLeafHashesForTest/0**: public function has no ///
-- **bufferedSendIdle/0**: public function has no ///
-- **buildStatePatch/1**: code comment 3 lines > 1
-- **buildStatePatchForTest/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **cancelBufferedSend/0**: code comment 5 lines > 1
-- **cancelBufferedSend/0**: public function has no ///
-- **clearFullResyncForTest/0**: public function has no ///
-- **defineControls/0**: public function has no ///
-- **drainChunkBytes/0**: code comment 2 lines > 1
-- **drainPreviewSend/0**: code comment 3 lines > 1
-- **findHeaderCI/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **findModuleByName/1**: code comment 2 lines > 1
-- **forEachStateLeaf/1**: code comment 3 lines > 1
-- **fullResyncPendingForTest/0**: public function has no ///
-- **handleAddModule/2**: code comment 3 lines > 1
-- **handleConnection/1**: code comment 3 lines > 1
-- **handleFirmwareUrl/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **handleListAddRow/2**: code comment 3 lines > 1
-- **handleMoonBaseUpload**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **handleMoonBaseUrl/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **handleSetControl/2**: code comment 3 lines > 1
-- **handleWebSocketUpgrade**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **handleWriteFile**: code comment 3 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **installSchemaHookForTest/0**: public function has no ///
-- **leafHashes_**: code comment 4 lines > 1
-- **line 103**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 104**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 105**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 108**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 109**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 110**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 111**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 112**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 116**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 117**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 118**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 119**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 120**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 129**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 129**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **line 130**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 133**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 134**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 169**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 170**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 171**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 172**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 18**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 183**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 188**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 19**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 198**: code comment 3 lines > 1
-- **line 20**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 201**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 202**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 203**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 204**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 205**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 21**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 22**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 225**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 228**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 23**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 232**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 235**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 236**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 238**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 24**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 241**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 242**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 243**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 246**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 25**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 251**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 252**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 256**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 257**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 258**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 261**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 262**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 267**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 268**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 272**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 279**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 280**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 282**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 283**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 29**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 298**: comment line 21 words > 20
-- **line 30**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 31**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 32**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 33**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 331/1**: code comment 2 lines > 1
-- **line 339**: code comment 3 lines > 1
-- **line 34**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 35**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 36**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 37**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 38**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 385**: code comment 2 lines > 1
-- **line 39**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 40**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 44**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 45**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 46**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 47**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 48**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 490**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 491**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 50**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 503**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 504**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 505**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 506**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 507**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 52**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 521**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 522**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 53**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 531**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 532**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 535**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 552**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 553**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 554**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 559**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 560**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 564**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 565**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 569**: code comment 3 lines > 1
-- **line 57**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 572**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 58**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 60**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 61**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 62**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 63**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 64**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 65**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 66**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 67**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 68**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 69**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 70**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 71**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 72**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 73**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 74**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 75**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 76**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 77**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 78**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 82**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 83**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 84**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 88**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 89**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 90**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 91**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 92**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 93**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 94**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 95**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 96**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 97**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 98**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 99**: hard wrap: one line per sentence, let the editor soft-wrap
-- **onSchemaChanged/0**: code comment 3 lines > 1
-- **outName**: public variable has no ///
-- **parseFilePath/3**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **parsePreviewUplink/4**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **port**: public variable has no ///
-- **release/0**: public function has no ///
-- **releaseSend/0**: public function has no ///
-- **removeRecursive/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **replacementName**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **requestFullResync/0**: code comment 2 lines > 1
-- **requestFullResyncForTest/0**: public function has no ///
-- **resolveWledIdentity**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **respectsEnabled/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **sendBufferedFrame**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **serveDirListing/2**: code comment 2 lines > 1
-- **serveFileContents/2**: code comment 4 lines > 1
-- **serveModule/2**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **serveScriptCatalog/1**: code comment 3 lines > 1
-- **serveState/1**: code comment 3 lines > 1
-- **serveSystem/1**: code comment 3 lines > 1
-- **serveWledInfo/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **servedPort/0**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **setScheduler/1**: public function has no ///
-- **setUiPath/1**: public function has no ///
-- **setup/0**: public function has no ///
-- **startBufferedTextSend/2**: code comment 5 lines > 1
-- **subscriberCount/0**: public function has no ///
-- **tryAcquireSend/0**: code comment 3 lines > 1
-- **tryAcquireSend/0**: public function has no ///
-- **uint8_t**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **writeStatus/2**: code comment 3 lines > 1
-- **wsLock_**: code comment 11 lines > 1
-
-### src/core/ImprovFrame.h
-
-- **buildImprovFrame**: code comment 4 lines > 1
-- **feed/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **improvChecksum/2**: code comment 2 lines > 1
-- **lastPayload/0**: public function has no ///
-- **lastPayloadLen/0**: public function has no ///
-- **lastType/0**: public function has no ///
-- **line 34**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 35**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 36**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 54**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 55**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 60**: hard wrap: one line per sentence, let the editor soft-wrap
-- **state_**: code comment 5 lines > 1
-- **uint8_t**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-
-### src/core/ImprovOpReassembler.h
-
-- **ImprovOpReassembler/2**: code comment 2 lines > 1
-- **ImprovOpReassembler/2**: public function has no ///
-- **feed/4**: code comment 4 lines > 1
-- **feed/4**: public function has no ///
-- **if/1**: code comment 2 lines > 1
-- **len/0**: public function has no ///
-- **out/0**: public function has no ///
-- **reset/0**: public function has no ///
-
-### src/core/InputMapping.h
-
-- **InputAction**: class comment 11 lines > 10
-- **assigned/0**: public function has no ///
-- **composeTarget/4**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **ctrls/0**: code comment 2 lines > 1
-- **current**: code comment 6 lines > 1
-- **decomposeTarget/3**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **dot/2**: code comment 2 lines > 1
-- **end**: code comment 3 lines > 1
-- **end**: code comment 3 lines > 1
-- **firePadRow**: member comment 9 lines > 1: a deep dive goes after @moreinfo
-- **hi/1**: code comment 2 lines > 1
-- **hi/1**: code comment 3 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **if/1**: code comment 3 lines > 1
-- **if/3**: code comment 2 lines > 1
-- **if/3**: code comment 2 lines > 1
-- **if/3**: code comment 6 lines > 1
-- **kMaxPadNumber**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **kMinActionValue**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **kind**: public variable has no ///
-- **kindValue/1**: code comment 4 lines > 1
-- **line 100**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 130**: comment line 23 words > 20
-- **line 14**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 15**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 195**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 196**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 197**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 198**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 20**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 201**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 202**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 269**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 27**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 28**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 280**: member comment 15 lines > 1: a deep dive goes after @moreinfo
-- **line 282**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 283**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 284**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 288**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 289**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 29**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 290**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 293**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 304**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 304**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **line 305**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 306**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 318**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 324**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 33**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 333**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 334**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 34**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 364**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 367/1**: code comment 3 lines > 1
-- **line 380**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 381**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 384**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 387**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 388**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 389**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 39**: doc sentence 22 words > 20
-- **line 39**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 390**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 394**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 420**: code comment 4 lines > 1
-- **line 433**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 465**: code comment 2 lines > 1
-- **line 56**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 57**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 58**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 61**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 71**: code comment 3 lines > 1
-- **line 92**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 93**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 96**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 97**: hard wrap: one line per sentence, let the editor soft-wrap
-- **runInputAction**: member comment 12 lines > 1: a deep dive goes after @moreinfo
-- **runInputLevel**: member comment 11 lines > 1: a deep dive goes after @moreinfo
-- **setInputActionField/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **sizeof/1**: code comment 3 lines > 1
-- **span/1**: code comment 2 lines > 1
-- **targetTypeIsNumbered/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **type**: code comment 2 lines > 1
-- **type**: code comment 2 lines > 1
-- **uint8_t**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **v/2**: code comment 2 lines > 1
-- **writeInputActionFields/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **writeInputTargetDetailField/2**: member comment 18 lines > 1: a deep dive goes after @moreinfo
-- **writeInputTargetOptions/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-
-### src/core/JsonSink.h
-
-- **JsonSink/0**: public function has no ///
-- **JsonSink/1**: public function has no ///
-- **JsonSink/1**: public function has no ///
-- **JsonSink/2**: code comment 4 lines > 1
-- **JsonSink/2**: public function has no ///
-- **append/1**: public function has no ///
-- **appendf/2**: code comment 4 lines > 1
-- **big/1**: code comment 2 lines > 1
-- **data/0**: code comment 3 lines > 1
-- **data/0**: public function has no ///
-- **detach/0**: code comment 5 lines > 1
-- **detach/0**: public function has no ///
-- **ensureHeap/1**: member comment 8 lines > 1: a deep dive goes after @moreinfo
-- **flush/0**: public function has no ///
-- **if/1**: code comment 11 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **if/1**: code comment 3 lines > 1
-- **if/1**: code comment 3 lines > 1
-- **if/1**: code comment 4 lines > 1
-- **jsonEscape/3**: code comment 4 lines > 1
-- **line 234**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 236**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 237**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 238**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 239**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 51/0**: public function has no ///
-- **nameIndex/0**: code comment 5 lines > 1
-- **nameIndex/0**: public function has no ///
-- **overflowed/0**: public function has no ///
-- **overflowed_**: code comment 5 lines > 1
-- **requestName/1**: public function has no ///
-- **size/0**: public function has no ///
-- **step**: code comment 4 lines > 1
-- **writeBool/1**: public function has no ///
-- **writeJsonString/1**: public function has no ///
-- **writeNumber/1**: code comment 15 lines > 1
-- **writeNumber/1**: public function has no ///
-
-### src/core/JsonUtil.h
-
-- **JsonDoc**: code comment 5 lines > 1
-- **JsonDoc/0**: public function has no ///
-- **JsonDoc/1**: public function has no ///
-- **JsonParser**: code comment 3 lines > 1
-- **JsonParser/1**: public function has no ///
-- **alloc/0**: public function has no ///
-- **cap**: public variable has no ///
-- **count**: public variable has no ///
-- **digits/1**: code comment 5 lines > 1
-- **doc**: public variable has no ///
-- **ensureNode/0**: code comment 2 lines > 1
-- **ensureNode/0**: public function has no ///
-- **firstChild**: public variable has no ///
-- **free/1**: code comment 2 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **intValue**: public variable has no ///
-- **key**: public variable has no ///
-- **line 112**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 115**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 116**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 117**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 118**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 121**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 122**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 123**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 124**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 127**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 130**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 131**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 132**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 208/0**: public function has no ///
-- **line 30**: comment line 22 words > 20
-- **line 428**: code comment 3 lines > 1
-- **next**: public variable has no ///
-- **node/1**: public function has no ///
-- **ok**: public variable has no ///
-- **p**: public variable has no ///
-- **parse/2**: code comment 4 lines > 1
-- **parseArray/1**: public function has no ///
-- **parseIntStr/2**: member comment 22 lines > 1: a deep dive goes after @moreinfo
-- **parseListArray/3**: code comment 18 lines > 1
-- **parseStringLiteral/0**: code comment 3 lines > 1
-- **parseStringLiteral/0**: public function has no ///
-- **parseValue/1**: public function has no ///
-- **readString/3**: code comment 2 lines > 1
-- **root**: public variable has no ///
-- **rootNode/0**: public function has no ///
-- **skipWs/0**: public function has no ///
-- **type**: public variable has no ///
-- **valid/0**: public function has no ///
-
-### src/core/LightSummary.h
-
-- **LightSummary**: class comment 14 lines > 10
-- **line 10**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 11**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 14**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 15**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 19**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 7**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 8**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 9**: hard wrap: one line per sentence, let the editor soft-wrap
-
-### src/core/ModuleFactory.h
-
-- **create/1**: public function has no ///
-- **displayNameFor/2**: code comment 10 lines > 1
-- **displayNameFor/2**: public function has no ///
-- **for/1**: code comment 4 lines > 1
-- **grow/0**: code comment 2 lines > 1
-- **line 132**: code comment 2 lines > 1
-- **line 20**: code comment 15 lines > 1
-- **line 71**: code comment 3 lines > 1
-- **line 84/1**: code comment 4 lines > 1
-- **line 89/2**: code comment 5 lines > 1
-- **registerType**: code comment 4 lines > 1
-- **registerType/2**: public function has no ///
-- **suffix**: code comment 2 lines > 1
-- **typeAcceptsChildRoles/1**: code comment 4 lines > 1
-- **typeAcceptsChildRoles/1**: public function has no ///
-- **typeCount/0**: public function has no ///
-- **typeDim/1**: code comment 3 lines > 1
-- **typeDim/1**: public function has no ///
-- **typeDocPath/1**: public function has no ///
-- **typeName/1**: public function has no ///
-- **typeRole/1**: public function has no ///
-- **typeTags/1**: public function has no ///
-
-### src/core/MqttPacket.h
-
-- **body/0**: public function has no ///
-- **bodyLen/0**: public function has no ///
-- **feed/1**: public function has no ///
-- **lastFlags/0**: public function has no ///
-- **lastType/0**: public function has no ///
-- **publish/3**: code comment 2 lines > 1
-- **publish/3**: public function has no ///
-
-### src/core/OscPacket.h
-
-- **encodeFloat/4**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **for/1**: code comment 2 lines > 1
-- **if/1**: code comment 5 lines > 1
-- **isTruthy/1**: member comment 9 lines > 1: a deep dive goes after @moreinfo
-- **line 141**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 142**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 143**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 174**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 175**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 176**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 178**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 179**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 59**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 60**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 68**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 69**: hard wrap: one line per sentence, let the editor soft-wrap
-- **parse/3**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **stringLen/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-
-### src/core/ScratchBuffer.h
-
-- **ScratchBuffer/1**: public function has no ///
-- **ScratchBufferBase**: class comment 11 lines > 10
-- **ScratchBufferBase/1**: code comment 3 lines > 1
-- **ScratchBufferBase/1**: code comment 4 lines > 1
-- **ScratchBufferBase/1**: public function has no ///
-- **ScratchBufferBase/1**: public function has no ///
-- **bool/0**: public function has no ///
-- **bytes/0**: public function has no ///
-- **count/0**: public function has no ///
-- **data/0**: public function has no ///
-- **data/0**: public function has no ///
-- **line 10**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 11**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 12**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 13**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 14**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 17**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 18**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 19**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 39**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 40**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 41**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 54**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 54**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **line 55**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 56**: hard wrap: one line per sentence, let the editor soft-wrap
-- **resizeBytes/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-
-### src/core/SpscRing.h
-
-- **head_**: code comment 2 lines > 1
-- **line 11**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 12**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 13**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 16**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 17**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 18**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 19**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 20**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 23**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 30**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 55**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 9**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 9**: member comment 16 lines > 1: a deep dive goes after @moreinfo
-- **push/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **size/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-
-### src/core/TryLock.h
-
-- **LockGuard/1**: public function has no ///
-- **LockGuard/1**: public function has no ///
-- **TryLock**: class comment 17 lines > 10
-- **bool/0**: public function has no ///
-- **line 12**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 13**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 14**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 15**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 19**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 20**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 33**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 38/0**: public function has no ///
-- **line 7**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 8**: hard wrap: one line per sentence, let the editor soft-wrap
-- **release/0**: public function has no ///
-- **tryAcquire/0**: public function has no ///
-
-### src/core/WledPacket.h
-
-- **build**: code comment 4 lines > 1
-- **hasMmMarker/2**: public function has no ///
-- **isValid/2**: code comment 2 lines > 1
-- **isValid/2**: public function has no ///
-- **kId**: public variable has no ///
-- **kMarkerOff**: code comment 5 lines > 1
-- **kMarkerOff**: public variable has no ///
-- **kMmMarker**: public variable has no ///
-- **kNameMax**: public variable has no ///
-- **kNameOff**: public variable has no ///
-- **kPort**: public variable has no ///
-- **kSize**: public variable has no ///
-- **kToken**: public variable has no ///
-- **kTypeOff**: public variable has no ///
-- **len**: code comment 2 lines > 1
-- **memcpy/3**: code comment 3 lines > 1
-- **readName/3**: code comment 2 lines > 1
-- **readName/3**: public function has no ///
-- **stampMmMarker/1**: public function has no ///
-
-### src/core/color.h
-
-- **b**: public variable has no ///
-- **hsvToRgb/3**: code comment 2 lines > 1
-- **line 21**: comment line 21 words > 20
-- **scale8/2**: code comment 3 lines > 1
-
-### src/core/math16.h
-
-- **advanceTo/2**: member comment 9 lines > 1: a deep dive goes after @moreinfo
-- **atan16/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **ax/1**: code comment 4 lines > 1
-- **ax/1**: code comment 9 lines > 1
-- **ballistic/4**: member comment 10 lines > 1: a deep dive goes after @moreinfo
-- **beat16/3**: code comment 3 lines > 1
-- **dist16/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **easeOutQuad/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **fine/1**: code comment 2 lines > 1
-- **halfLifeKeep/2**: member comment 14 lines > 1: a deep dive goes after @moreinfo
-- **hashInt/4**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **idx/1**: code comment 3 lines > 1
-- **if/1**: code comment 8 lines > 1
-- **isqrt64/1**: member comment 14 lines > 1: a deep dive goes after @moreinfo
-- **kaleido/2**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **line 116**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 117**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 118**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 119**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 122**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 127**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 130**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 131**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 132**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 133**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 142**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 144**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 150**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 151**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 171**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 172**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 175**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 176**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 177**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 180**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 183**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 212/1**: code comment 12 lines > 1
-- **line 225**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 225**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line 235**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 269**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 283**: code comment 6 lines > 1
-- **line 308**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 318**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 32**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 32**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line 321**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 338**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 339**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 340**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 341**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 344**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 350**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 351**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 360**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 363**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 364**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 365**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 376**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 377**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 380**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 399**: code comment 5 lines > 1
-- **line 426**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 427**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 428**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 431**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 432**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 433**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 436**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 440**: code comment 5 lines > 1
-- **line 48**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 56**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 57**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 58**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 59**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 60**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 63**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 64**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 92**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 93**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 94**: hard wrap: one line per sentence, let the editor soft-wrap
-- **map32/5**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **numerator/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **peakHold/3**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **phase/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **r**: code comment 4 lines > 1
-- **ratio/1**: code comment 2 lines > 1
-- **reset/0**: public function has no ///
-- **sin16/1**: member comment 20 lines > 1: a deep dive goes after @moreinfo
-- **smoothFollow/3**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **step/1**: code comment 4 lines > 1
-- **triwave16/1**: code comment 3 lines > 1
-- **units/1**: code comment 2 lines > 1
-
-### src/core/math8.h
-
-- **below/1**: public function has no ///
-- **below/2**: public function has no ///
-- **line 11**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 11**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **next16/0**: public function has no ///
-- **next8/0**: public function has no ///
-- **seed/1**: public function has no ///
 
 ### src/core/moonlive/MoonLive.h
 
@@ -1584,7 +671,920 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **line 41**: hard wrap: one line per sentence, let the editor soft-wrap
 - **line 41**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 
-### src/core/noise.h
+### src/core/services/AudioBands.h
+
+- **BandConditioner**: class comment 21 lines > 10
+- **BandConditioner/0**: public function has no ///
+- **best**: code comment 3 lines > 1
+- **feed**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **if/1**: code comment 2 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **if/1**: code comment 3 lines > 1
+- **kBandRise**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **kLowestAudibleHz**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **kMinRangeDb**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **line 109**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 110**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 113**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 114**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 123**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 124**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 125**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 134**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 135**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 136**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 137**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 160**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 163**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 164**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 165**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 166**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 167**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 168**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 169**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 172**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 173**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 174**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 175**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 176**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 179**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 182**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 192**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 193**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 195**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 196**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 197**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 198**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 199**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 218**: code comment 2 lines > 1
+- **line 284/4**: code comment 12 lines > 1
+- **line 51**: member comment 17 lines > 1: a deep dive goes after @moreinfo
+- **line 53**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 54**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 55**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 56**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 57**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 60**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 61**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 62**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 63**: doc sentence 21 words > 20
+- **line 65**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 66**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 69**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 70**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 85**: comment line 21 words > 20
+- **primed**: public variable has no ///
+- **process**: member comment 9 lines > 1: a deep dive goes after @moreinfo
+- **range**: code comment 2 lines > 1
+- **spectralFlux/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **toByte/1**: code comment 4 lines > 1
+
+### src/core/services/AudioLevel.h
+
+- **clamped**: code comment 8 lines > 1
+- **db/1**: code comment 2 lines > 1
+- **dbToByte/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **floorDb**: public variable has no ///
+- **gateDb/1**: code comment 6 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **kConditionerMinRangeDb**: member comment 9 lines > 1: a deep dive goes after @moreinfo
+- **kLevelMinRangeDb**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **kLevelWindowSpanDb**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **kMinRangeDb**: public variable has no ///
+- **kMuteMarginDb**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **levelWindowSpanDb/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **line 102**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 103**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 106**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 107**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 109**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 113**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 114**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 118**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 119**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 120**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 121**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 122**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 126**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 132**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 133**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 137**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 138**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 139**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 26**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 75**: code comment 18 lines > 1
+- **line 94**: code comment 2 lines > 1
+- **line 97**: code comment 5 lines > 1
+- **peakDb**: public variable has no ///
+- **primed**: public variable has no ///
+- **process/3**: public function has no ///
+- **reset/0**: public function has no ///
+- **xPrev**: public variable has no ///
+- **yPrev**: public variable has no ///
+
+### src/core/services/OscPacket.h
+
+- **encodeFloat/4**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **for/1**: code comment 2 lines > 1
+- **if/1**: code comment 5 lines > 1
+- **isTruthy/1**: member comment 9 lines > 1: a deep dive goes after @moreinfo
+- **line 141**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 142**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 143**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 174**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 175**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 176**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 178**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 179**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 59**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 60**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 68**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 69**: hard wrap: one line per sentence, let the editor soft-wrap
+- **parse/3**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **stringLen/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+
+### src/core/system/DevicePlugin.h
+
+- **DevicePlugin**: code comment 3 lines > 1
+- **MmPlugin**: code comment 5 lines > 1
+- **classifyPacket**: code comment 4 lines > 1
+- **discoveryPort/0**: code comment 4 lines > 1
+- **discoveryPort/0**: public function has no ///
+- **discoveryPort/0**: public function has no ///
+- **label/0**: public function has no ///
+- **label/0**: public function has no ///
+- **line 50/0**: public function has no ///
+- **line 68**: code comment 3 lines > 1
+- **setDeviceName/2**: code comment 2 lines > 1
+- **type**: public variable has no ///
+
+### src/core/system/HttpServerModule.h
+
+- **HttpServerModule**: class comment 105 lines > 10
+- **LeafHash**: code comment 10 lines > 1
+- **MAX_PREVIEW_CLIENTS**: code comment 12 lines > 1
+- **MAX_WS_CLIENTS**: code comment 6 lines > 1
+- **PASSWORD_XOR_KEY**: code comment 4 lines > 1
+- **PreviewSend**: code comment 7 lines > 1
+- **StateSend**: code comment 4 lines > 1
+- **appearsInUi/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **applyAddModule**: code comment 3 lines > 1
+- **applyClearChildren/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **applyFileChanged/1**: member comment 16 lines > 1: a deep dive goes after @moreinfo
+- **applyOp/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **applySetControl/3**: public function has no ///
+- **applyWledState/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **baselineLeafHashes/0**: code comment 2 lines > 1
+- **baselineLeafHashesForTest/0**: public function has no ///
+- **bufferedSendIdle/0**: public function has no ///
+- **buildStatePatch/1**: code comment 3 lines > 1
+- **buildStatePatchForTest/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **cancelBufferedSend/0**: code comment 5 lines > 1
+- **cancelBufferedSend/0**: public function has no ///
+- **clearFullResyncForTest/0**: public function has no ///
+- **defineControls/0**: public function has no ///
+- **drainChunkBytes/0**: code comment 2 lines > 1
+- **drainPreviewSend/0**: code comment 3 lines > 1
+- **findHeaderCI/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **findModuleByName/1**: code comment 2 lines > 1
+- **forEachStateLeaf/1**: code comment 3 lines > 1
+- **fullResyncPendingForTest/0**: public function has no ///
+- **handleAddModule/2**: code comment 3 lines > 1
+- **handleConnection/1**: code comment 3 lines > 1
+- **handleFirmwareUrl/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **handleListAddRow/2**: code comment 3 lines > 1
+- **handleMoonBaseUpload**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **handleMoonBaseUrl/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **handleSetControl/2**: code comment 3 lines > 1
+- **handleWebSocketUpgrade**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **handleWriteFile**: code comment 3 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **installSchemaHookForTest/0**: public function has no ///
+- **leafHashes_**: code comment 4 lines > 1
+- **line 103**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 104**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 105**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 108**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 109**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 110**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 111**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 112**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 116**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 117**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 118**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 119**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 120**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 129**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 129**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **line 130**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 133**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 134**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 169**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 170**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 171**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 172**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 18**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 183**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 188**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 19**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 198**: code comment 3 lines > 1
+- **line 20**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 201**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 202**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 203**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 204**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 205**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 21**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 22**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 225**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 228**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 23**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 232**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 235**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 236**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 238**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 24**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 241**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 242**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 243**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 246**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 25**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 251**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 252**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 256**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 257**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 258**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 261**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 262**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 267**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 268**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 272**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 279**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 280**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 282**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 283**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 29**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 298**: comment line 21 words > 20
+- **line 30**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 31**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 32**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 33**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 331/1**: code comment 2 lines > 1
+- **line 339**: code comment 3 lines > 1
+- **line 34**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 35**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 36**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 37**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 38**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 385**: code comment 2 lines > 1
+- **line 39**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 40**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 44**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 45**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 46**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 47**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 48**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 490**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 491**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 50**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 503**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 504**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 505**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 506**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 507**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 52**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 521**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 522**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 53**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 531**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 532**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 535**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 552**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 553**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 554**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 559**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 560**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 564**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 565**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 569**: code comment 3 lines > 1
+- **line 57**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 572**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 58**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 60**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 61**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 62**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 63**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 64**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 65**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 66**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 67**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 68**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 69**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 70**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 71**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 72**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 73**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 74**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 75**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 76**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 77**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 78**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 82**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 83**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 84**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 88**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 89**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 90**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 91**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 92**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 93**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 94**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 95**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 96**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 97**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 98**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 99**: hard wrap: one line per sentence, let the editor soft-wrap
+- **onSchemaChanged/0**: code comment 3 lines > 1
+- **outName**: public variable has no ///
+- **parseFilePath/3**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **parsePreviewUplink/4**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **port**: public variable has no ///
+- **release/0**: public function has no ///
+- **releaseSend/0**: public function has no ///
+- **removeRecursive/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **replacementName**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **requestFullResync/0**: code comment 2 lines > 1
+- **requestFullResyncForTest/0**: public function has no ///
+- **resolveWledIdentity**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **respectsEnabled/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **sendBufferedFrame**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **serveDirListing/2**: code comment 2 lines > 1
+- **serveFileContents/2**: code comment 4 lines > 1
+- **serveModule/2**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **serveScriptCatalog/1**: code comment 3 lines > 1
+- **serveState/1**: code comment 3 lines > 1
+- **serveSystem/1**: code comment 3 lines > 1
+- **serveWledInfo/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **servedPort/0**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **setScheduler/1**: public function has no ///
+- **setUiPath/1**: public function has no ///
+- **setup/0**: public function has no ///
+- **startBufferedTextSend/2**: code comment 5 lines > 1
+- **subscriberCount/0**: public function has no ///
+- **tryAcquireSend/0**: code comment 3 lines > 1
+- **tryAcquireSend/0**: public function has no ///
+- **uint8_t**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **writeStatus/2**: code comment 3 lines > 1
+- **wsLock_**: code comment 11 lines > 1
+
+### src/core/system/MqttPacket.h
+
+- **body/0**: public function has no ///
+- **bodyLen/0**: public function has no ///
+- **feed/1**: public function has no ///
+- **lastFlags/0**: public function has no ///
+- **lastType/0**: public function has no ///
+- **publish/3**: code comment 2 lines > 1
+- **publish/3**: public function has no ///
+
+### src/core/system/WledPacket.h
+
+- **build**: code comment 4 lines > 1
+- **hasMmMarker/2**: public function has no ///
+- **isValid/2**: code comment 2 lines > 1
+- **isValid/2**: public function has no ///
+- **kId**: public variable has no ///
+- **kMarkerOff**: code comment 5 lines > 1
+- **kMarkerOff**: public variable has no ///
+- **kMmMarker**: public variable has no ///
+- **kNameMax**: public variable has no ///
+- **kNameOff**: public variable has no ///
+- **kPort**: public variable has no ///
+- **kSize**: public variable has no ///
+- **kToken**: public variable has no ///
+- **kTypeOff**: public variable has no ///
+- **len**: code comment 2 lines > 1
+- **memcpy/3**: code comment 3 lines > 1
+- **readName/3**: code comment 2 lines > 1
+- **readName/3**: public function has no ///
+- **stampMmMarker/1**: public function has no ///
+
+### src/core/util/ActiveInstance.h
+
+- **ActiveInstance/1**: public function has no ///
+- **ActiveInstance/1**: public function has no ///
+- **ActiveInstance/1**: public function has no ///
+- **claim/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **line 15**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 16**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 17**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 21**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 22**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 23**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 26**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 27**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 33/0**: public function has no ///
+- **line 40**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 5**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 5**: member comment 24 lines > 1: a deep dive goes after @moreinfo
+- **line 6**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 7**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 8**: hard wrap: one line per sentence, let the editor soft-wrap
+
+### src/core/util/AudioFrame.h
+
+- **flux**: code comment 3 lines > 1
+- **flux**: public variable has no ///
+- **levelSmoothed**: code comment 3 lines > 1
+- **levelSmoothed**: public variable has no ///
+- **line 29**: code comment 7 lines > 1
+- **line 37**: code comment 2 lines > 1
+- **line 46**: code comment 4 lines > 1
+- **onset**: public variable has no ///
+- **peakHz/1**: code comment 3 lines > 1
+
+### src/core/util/BinaryBroadcaster.h
+
+- **ClientMessageSink**: code comment 7 lines > 1
+- **SendLease/1**: public function has no ///
+- **bool/0**: public function has no ///
+- **line 87/0**: public function has no ///
+- **sendBufferedFrame**: code comment 20 lines > 1
+- **setClientMessageSink/1**: public function has no ///
+- **subscriberCount/0**: code comment 2 lines > 1
+- **subscriberCount/0**: public function has no ///
+- **tryAcquireSend/0**: code comment 14 lines > 1
+
+### src/core/util/ControlSurface.h
+
+- **line 38**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 42**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 43**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 44**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 48**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 52/0**: public function has no ///
+- **line 54**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 58**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 70**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 71**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 9**: comment line 21 words > 20
+- **sendColors/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **sendRing/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **sendValue/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **uint8_t**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **uint8_t**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+
+### src/core/util/FirmwareImage.h
+
+- **chip**: public variable has no ///
+- **identify/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **line 30**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 31**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 57**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 81**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 84**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 85**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 86**: hard wrap: one line per sentence, let the editor soft-wrap
+- **memcpy/3**: code comment 2 lines > 1
+- **moonBaseRejection/2**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **uint16_t**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+
+### src/core/util/ImprovFrame.h
+
+- **buildImprovFrame**: code comment 4 lines > 1
+- **feed/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **improvChecksum/2**: code comment 2 lines > 1
+- **lastPayload/0**: public function has no ///
+- **lastPayloadLen/0**: public function has no ///
+- **lastType/0**: public function has no ///
+- **line 34**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 35**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 36**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 54**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 55**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 60**: hard wrap: one line per sentence, let the editor soft-wrap
+- **state_**: code comment 5 lines > 1
+- **uint8_t**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+
+### src/core/util/ImprovOpReassembler.h
+
+- **ImprovOpReassembler/2**: code comment 2 lines > 1
+- **ImprovOpReassembler/2**: public function has no ///
+- **feed/4**: code comment 4 lines > 1
+- **feed/4**: public function has no ///
+- **if/1**: code comment 2 lines > 1
+- **len/0**: public function has no ///
+- **out/0**: public function has no ///
+- **reset/0**: public function has no ///
+
+### src/core/util/InputMapping.h
+
+- **InputAction**: class comment 11 lines > 10
+- **assigned/0**: public function has no ///
+- **composeTarget/4**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **ctrls/0**: code comment 2 lines > 1
+- **current**: code comment 6 lines > 1
+- **decomposeTarget/3**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **dot/2**: code comment 2 lines > 1
+- **end**: code comment 3 lines > 1
+- **end**: code comment 3 lines > 1
+- **firePadRow**: member comment 9 lines > 1: a deep dive goes after @moreinfo
+- **hi/1**: code comment 2 lines > 1
+- **hi/1**: code comment 3 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **if/1**: code comment 3 lines > 1
+- **if/3**: code comment 2 lines > 1
+- **if/3**: code comment 2 lines > 1
+- **if/3**: code comment 6 lines > 1
+- **kMaxPadNumber**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **kMinActionValue**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **kind**: public variable has no ///
+- **kindValue/1**: code comment 4 lines > 1
+- **line 100**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 130**: comment line 23 words > 20
+- **line 14**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 15**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 195**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 196**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 197**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 198**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 20**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 201**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 202**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 269**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 27**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 28**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 280**: member comment 15 lines > 1: a deep dive goes after @moreinfo
+- **line 282**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 283**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 284**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 288**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 289**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 29**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 290**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 293**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 304**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 304**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **line 305**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 306**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 318**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 324**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 33**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 333**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 334**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 34**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 364**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 367/1**: code comment 3 lines > 1
+- **line 380**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 381**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 384**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 387**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 388**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 389**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 39**: doc sentence 22 words > 20
+- **line 39**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 390**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 394**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 420**: code comment 4 lines > 1
+- **line 433**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 465**: code comment 2 lines > 1
+- **line 56**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 57**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 58**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 61**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 71**: code comment 3 lines > 1
+- **line 92**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 93**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 96**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 97**: hard wrap: one line per sentence, let the editor soft-wrap
+- **runInputAction**: member comment 12 lines > 1: a deep dive goes after @moreinfo
+- **runInputLevel**: member comment 11 lines > 1: a deep dive goes after @moreinfo
+- **setInputActionField/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **sizeof/1**: code comment 3 lines > 1
+- **span/1**: code comment 2 lines > 1
+- **targetTypeIsNumbered/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **type**: code comment 2 lines > 1
+- **type**: code comment 2 lines > 1
+- **uint8_t**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **v/2**: code comment 2 lines > 1
+- **writeInputActionFields/2**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **writeInputTargetDetailField/2**: member comment 18 lines > 1: a deep dive goes after @moreinfo
+- **writeInputTargetOptions/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+
+### src/core/util/JsonSink.h
+
+- **JsonSink/0**: public function has no ///
+- **JsonSink/1**: public function has no ///
+- **JsonSink/1**: public function has no ///
+- **JsonSink/2**: code comment 4 lines > 1
+- **JsonSink/2**: public function has no ///
+- **append/1**: public function has no ///
+- **appendf/2**: code comment 4 lines > 1
+- **big/1**: code comment 2 lines > 1
+- **data/0**: code comment 3 lines > 1
+- **data/0**: public function has no ///
+- **detach/0**: code comment 5 lines > 1
+- **detach/0**: public function has no ///
+- **ensureHeap/1**: member comment 8 lines > 1: a deep dive goes after @moreinfo
+- **flush/0**: public function has no ///
+- **if/1**: code comment 11 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **if/1**: code comment 3 lines > 1
+- **if/1**: code comment 3 lines > 1
+- **if/1**: code comment 4 lines > 1
+- **jsonEscape/3**: code comment 4 lines > 1
+- **line 234**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 236**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 237**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 238**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 239**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 51/0**: public function has no ///
+- **nameIndex/0**: code comment 5 lines > 1
+- **nameIndex/0**: public function has no ///
+- **overflowed/0**: public function has no ///
+- **overflowed_**: code comment 5 lines > 1
+- **requestName/1**: public function has no ///
+- **size/0**: public function has no ///
+- **step**: code comment 4 lines > 1
+- **writeBool/1**: public function has no ///
+- **writeJsonString/1**: public function has no ///
+- **writeNumber/1**: code comment 15 lines > 1
+- **writeNumber/1**: public function has no ///
+
+### src/core/util/JsonUtil.h
+
+- **JsonDoc**: code comment 5 lines > 1
+- **JsonDoc/0**: public function has no ///
+- **JsonDoc/1**: public function has no ///
+- **JsonParser**: code comment 3 lines > 1
+- **JsonParser/1**: public function has no ///
+- **alloc/0**: public function has no ///
+- **cap**: public variable has no ///
+- **count**: public variable has no ///
+- **digits/1**: code comment 5 lines > 1
+- **doc**: public variable has no ///
+- **ensureNode/0**: code comment 2 lines > 1
+- **ensureNode/0**: public function has no ///
+- **firstChild**: public variable has no ///
+- **free/1**: code comment 2 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **intValue**: public variable has no ///
+- **key**: public variable has no ///
+- **line 112**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 115**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 116**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 117**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 118**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 121**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 122**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 123**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 124**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 127**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 130**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 131**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 132**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 208/0**: public function has no ///
+- **line 30**: comment line 22 words > 20
+- **line 428**: code comment 3 lines > 1
+- **next**: public variable has no ///
+- **node/1**: public function has no ///
+- **ok**: public variable has no ///
+- **p**: public variable has no ///
+- **parse/2**: code comment 4 lines > 1
+- **parseArray/1**: public function has no ///
+- **parseIntStr/2**: member comment 22 lines > 1: a deep dive goes after @moreinfo
+- **parseListArray/3**: code comment 18 lines > 1
+- **parseStringLiteral/0**: code comment 3 lines > 1
+- **parseStringLiteral/0**: public function has no ///
+- **parseValue/1**: public function has no ///
+- **readString/3**: code comment 2 lines > 1
+- **root**: public variable has no ///
+- **rootNode/0**: public function has no ///
+- **skipWs/0**: public function has no ///
+- **type**: public variable has no ///
+- **valid/0**: public function has no ///
+
+### src/core/util/LightSummary.h
+
+- **LightSummary**: class comment 14 lines > 10
+- **line 10**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 11**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 14**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 15**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 19**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 7**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 8**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 9**: hard wrap: one line per sentence, let the editor soft-wrap
+
+### src/core/util/ModuleFactory.h
+
+- **create/1**: public function has no ///
+- **displayNameFor/2**: code comment 10 lines > 1
+- **displayNameFor/2**: public function has no ///
+- **for/1**: code comment 4 lines > 1
+- **grow/0**: code comment 2 lines > 1
+- **line 132**: code comment 2 lines > 1
+- **line 20**: code comment 15 lines > 1
+- **line 71**: code comment 3 lines > 1
+- **line 84/1**: code comment 4 lines > 1
+- **line 89/2**: code comment 5 lines > 1
+- **registerType**: code comment 4 lines > 1
+- **registerType/2**: public function has no ///
+- **suffix**: code comment 2 lines > 1
+- **typeAcceptsChildRoles/1**: code comment 4 lines > 1
+- **typeAcceptsChildRoles/1**: public function has no ///
+- **typeCount/0**: public function has no ///
+- **typeDim/1**: code comment 3 lines > 1
+- **typeDim/1**: public function has no ///
+- **typeDocPath/1**: public function has no ///
+- **typeName/1**: public function has no ///
+- **typeRole/1**: public function has no ///
+- **typeTags/1**: public function has no ///
+
+### src/core/util/ScratchBuffer.h
+
+- **ScratchBuffer/1**: public function has no ///
+- **ScratchBufferBase**: class comment 11 lines > 10
+- **ScratchBufferBase/1**: code comment 3 lines > 1
+- **ScratchBufferBase/1**: code comment 4 lines > 1
+- **ScratchBufferBase/1**: public function has no ///
+- **ScratchBufferBase/1**: public function has no ///
+- **bool/0**: public function has no ///
+- **bytes/0**: public function has no ///
+- **count/0**: public function has no ///
+- **data/0**: public function has no ///
+- **data/0**: public function has no ///
+- **line 10**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 11**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 12**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 13**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 14**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 17**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 18**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 19**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 39**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 40**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 41**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 54**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 54**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **line 55**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 56**: hard wrap: one line per sentence, let the editor soft-wrap
+- **resizeBytes/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+
+### src/core/util/SpscRing.h
+
+- **head_**: code comment 2 lines > 1
+- **line 11**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 12**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 13**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 16**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 17**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 18**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 19**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 20**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 23**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 30**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 55**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 9**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 9**: member comment 16 lines > 1: a deep dive goes after @moreinfo
+- **push/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **size/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+
+### src/core/util/TryLock.h
+
+- **LockGuard/1**: public function has no ///
+- **LockGuard/1**: public function has no ///
+- **TryLock**: class comment 17 lines > 10
+- **bool/0**: public function has no ///
+- **line 12**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 13**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 14**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 15**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 19**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 20**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 33**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 38/0**: public function has no ///
+- **line 7**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 8**: hard wrap: one line per sentence, let the editor soft-wrap
+- **release/0**: public function has no ///
+- **tryAcquire/0**: public function has no ///
+
+### src/core/util/color.h
+
+- **b**: public variable has no ///
+- **hsvToRgb/3**: code comment 2 lines > 1
+- **line 21**: comment line 21 words > 20
+- **scale8/2**: code comment 3 lines > 1
+
+### src/core/util/math16.h
+
+- **advanceTo/2**: member comment 9 lines > 1: a deep dive goes after @moreinfo
+- **atan16/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **ax/1**: code comment 4 lines > 1
+- **ax/1**: code comment 9 lines > 1
+- **ballistic/4**: member comment 10 lines > 1: a deep dive goes after @moreinfo
+- **beat16/3**: code comment 3 lines > 1
+- **dist16/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **easeOutQuad/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **fine/1**: code comment 2 lines > 1
+- **halfLifeKeep/2**: member comment 14 lines > 1: a deep dive goes after @moreinfo
+- **hashInt/4**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **idx/1**: code comment 3 lines > 1
+- **if/1**: code comment 8 lines > 1
+- **isqrt64/1**: member comment 14 lines > 1: a deep dive goes after @moreinfo
+- **kaleido/2**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **line 116**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 117**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 118**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 119**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 122**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 127**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 130**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 131**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 132**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 133**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 142**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 144**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 150**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 151**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 171**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 172**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 175**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 176**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 177**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 180**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 183**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 212/1**: code comment 12 lines > 1
+- **line 225**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 225**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **line 235**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 269**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 283**: code comment 6 lines > 1
+- **line 308**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 318**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 32**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 32**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **line 321**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 338**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 339**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 340**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 341**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 344**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 350**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 351**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 360**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 363**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 364**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 365**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 376**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 377**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 380**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 399**: code comment 5 lines > 1
+- **line 426**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 427**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 428**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 431**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 432**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 433**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 436**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 440**: code comment 5 lines > 1
+- **line 48**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 56**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 57**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 58**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 59**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 60**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 63**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 64**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 92**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 93**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 94**: hard wrap: one line per sentence, let the editor soft-wrap
+- **map32/5**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **numerator/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **peakHold/3**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **phase/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **r**: code comment 4 lines > 1
+- **ratio/1**: code comment 2 lines > 1
+- **reset/0**: public function has no ///
+- **sin16/1**: member comment 20 lines > 1: a deep dive goes after @moreinfo
+- **smoothFollow/3**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **step/1**: code comment 4 lines > 1
+- **triwave16/1**: code comment 3 lines > 1
+- **units/1**: code comment 2 lines > 1
+
+### src/core/util/math8.h
+
+- **below/1**: public function has no ///
+- **below/2**: public function has no ///
+- **line 11**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 11**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **next16/0**: public function has no ///
+- **next8/0**: public function has no ///
+- **seed/1**: public function has no ///
+
+### src/core/util/noise.h
 
 - **corner/3**: member comment 9 lines > 1: a deep dive goes after @moreinfo
 - **curl16**: member comment 13 lines > 1: a deep dive goes after @moreinfo
@@ -1674,7 +1674,7 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **turbulence8/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **warp8/4**: member comment 5 lines > 1: a deep dive goes after @moreinfo
 
-### src/core/oscillators.h
+### src/core/util/oscillators.h
 
 - **advanceTo/1**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **high**: public variable has no ///
@@ -1710,7 +1710,7 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **value/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **wave**: public variable has no ///
 
-### src/core/sha256.h
+### src/core/util/sha256.h
 
 - **line 10**: hard wrap: one line per sentence, let the editor soft-wrap
 - **line 11**: hard wrap: one line per sentence, let the editor soft-wrap
@@ -1727,346 +1727,6 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **line 9**: hard wrap: one line per sentence, let the editor soft-wrap
 - **sha256/3**: member comment 5 lines > 1: a deep dive goes after @moreinfo
 - **sha256Hex/4**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-
-### src/light/FixtureChannels.h
-
-- **forEachMotionSlot/2**: public function has no ///
-- **gobo**: public variable has no ///
-- **kAbsent**: public variable has no ///
-- **kMotionBase**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line 35**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 45**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 49**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 49**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **line 52**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 53**: hard wrap: one line per sentence, let the editor soft-wrap
-- **movable/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **pan**: public variable has no ///
-- **rotate**: public variable has no ///
-- **tilt**: public variable has no ///
-- **zoom**: public variable has no ///
-
-### src/light/MpegTs.h
-
-- **Writer/3**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **avail**: code comment 3 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **kPidPat**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line 10**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 11**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 153/1**: code comment 3 lines > 1
-- **line 2**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 2**: member comment 13 lines > 1: a deep dive goes after @moreinfo
-- **line 210**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 25**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 3**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 34**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 35**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 36**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 42**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 43**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 47**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 48**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 57**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 64**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 67**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 68**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 69**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 7**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 74**: code comment 3 lines > 1
-- **line 87**: code comment 2 lines > 1
-- **pat**: public variable has no ///
-- **writeAccessUnit/4**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **writePcr/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **writeTables/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-
-### src/light/Palette.h
-
-- **Palettes**: code comment 3 lines > 1
-- **active/0**: public function has no ///
-- **active_/1**: code comment 2 lines > 1
-- **blend/3**: code comment 2 lines > 1
-- **clear/1**: member comment 9 lines > 1: a deep dive goes after @moreinfo
-- **colorFromPalette/3**: code comment 4 lines > 1
-- **count/0**: public function has no ///
-- **dh/1**: code comment 2 lines > 1
-- **fadeToBlackBy/2**: code comment 2 lines > 1
-- **for/1**: code comment 3 lines > 1
-- **for/1**: code comment 5 lines > 1
-- **fromBuiltin/1**: code comment 2 lines > 1
-- **fromBuiltin/1**: public function has no ///
-- **fromGradient/2**: code comment 3 lines > 1
-- **fromGradient/2**: public function has no ///
-- **hsvToRgb/1**: code comment 2 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **isLive/1**: member comment 10 lines > 1: a deep dive goes after @moreinfo
-- **kEntries**: public variable has no ///
-- **kMax**: public variable has no ///
-- **lerpRGB/3**: public function has no ///
-- **line 172**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 173**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 174**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 180**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 180/3**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **line 181**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 229**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 253/1**: code comment 8 lines > 1
-- **line 356**: code comment 3 lines > 1
-- **line 359**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 360**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 363**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 368**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 369**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 375**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 376**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 377**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 388**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 389**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 390**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 391**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 392**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 393**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 404**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 405**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 408**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 409**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 410**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 464**: code comment 4 lines > 1
-- **line 492**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 493**: hard wrap: one line per sentence, let the editor soft-wrap
-- **live/0**: code comment 5 lines > 1
-- **nameAt/1**: public function has no ///
-- **nearestForHue/2**: code comment 3 lines > 1
-- **nearestForHue/2**: public function has no ///
-- **nearestForRgb/3**: code comment 5 lines > 1
-- **nearestForRgb/3**: public function has no ///
-- **paletteCount/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **paletteNames/1**: code comment 4 lines > 1
-- **palettes**: code comment 7 lines > 1
-- **representativeHue/1**: public function has no ///
-- **representativeHueSat/3**: code comment 2 lines > 1
-- **representativeHueSat/3**: public function has no ///
-- **representativeRgb/1**: code comment 8 lines > 1
-- **representativeRgb/1**: public function has no ///
-- **rgbToHueSat/5**: code comment 2 lines > 1
-- **set/3**: member comment 8 lines > 1: a deep dive goes after @moreinfo
-- **setActive/1**: public function has no ///
-- **setActiveDirect/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **tagsAt/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-
-### src/light/draw.h
-
-- **Canvas**: class comment 15 lines > 10
-- **addPixel/4**: code comment 2 lines > 1
-- **axis/3**: code comment 7 lines > 1
-- **blendPixel/5**: code comment 3 lines > 1
-- **blit16**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **blobField**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **blur/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **blur/3**: code comment 2 lines > 1
-- **blurAxis**: code comment 17 lines > 1
-- **cell/1**: code comment 5 lines > 1
-- **circle/5**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **combineMax/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **cov/5**: code comment 2 lines > 1
-- **coverage/2**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **cpl**: code comment 2 lines > 1
-- **d/1**: code comment 2 lines > 1
-- **d/1**: code comment 3 lines > 1
-- **decay/3**: member comment 28 lines > 1: a deep dive goes after @moreinfo
-- **decay16/4**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **disc/6**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **dx**: code comment 2 lines > 1
-- **fade/2**: code comment 3 lines > 1
-- **for/1**: code comment 3 lines > 1
-- **for/1**: code comment 3 lines > 1
-- **for/1**: code comment 3 lines > 1
-- **fx/1**: code comment 3 lines > 1
-- **glyph/6**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **glyph/7**: code comment 4 lines > 1
-- **hx**: code comment 2 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **if/1**: code comment 2 lines > 1
-- **lerp/3**: code comment 4 lines > 1
-- **line 1003**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1004**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1031**: member comment 15 lines > 1: a deep dive goes after @moreinfo
-- **line 1033**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1034**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1035**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1036**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1037**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1040**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1041**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1044**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1064**: member comment 9 lines > 1: a deep dive goes after @moreinfo
-- **line 1066**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1067**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1068**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1069**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1109**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1116**: code comment 18 lines > 1
-- **line 1135**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1136**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1152**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1163**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1164**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1165**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1178**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1179**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1200**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1201**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1204**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1224**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1237**: code comment 7 lines > 1
-- **line 1247**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1265**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1268**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1269**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1270**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1295**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1296**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1297**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1333**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1356**: code comment 23 lines > 1
-- **line 1358**: comment line 21 words > 20
-- **line 1385**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1386**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1389**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1390**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1393**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1394**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1395**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1396**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1409**: comment line 21 words > 20
-- **line 1472**: code comment 22 lines > 1
-- **line 1475**: comment line 21 words > 20
-- **line 1512**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1513**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1550**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1551**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1552**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 1571**: code comment 11 lines > 1
-- **line 219**: comment line 22 words > 20
-- **line 32**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 33**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 333**: code comment 10 lines > 1
-- **line 352**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 353**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 354**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 357**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 361**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 37**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 370**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 371**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 372**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 373**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 374**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 375**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 376**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 386**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 389**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 390**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 41**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 42**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 423**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 424**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 43**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 440**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 446**: code comment 13 lines > 1
-- **line 459**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 459**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line 479**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 480**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 483**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 498/3**: code comment 12 lines > 1
-- **line 511**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 58**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 59**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 619**: code comment 22 lines > 1
-- **line 642**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 646**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 646**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line 668**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line 68**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 69**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 697**: code comment 11 lines > 1
-- **line 709**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 732**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 732**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **line 733**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 761/1**: code comment 9 lines > 1
-- **line 808**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 809**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 810**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 819**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 820**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 821**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 823**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 825**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 850**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 864**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 883**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 884**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 89**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 89**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **line 890**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 891**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 902**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 903**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 907**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 908**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 911**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 912**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 913**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 916**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 917**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 92**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 920**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 959**: code comment 10 lines > 1
-- **line/5**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **line/6**: code comment 10 lines > 1
-- **mixed/1**: code comment 5 lines > 1
-- **offsetOf/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **offsetOf/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **offsetOf/3**: code comment 2 lines > 1
-- **palette**: public variable has no ///
-- **paletteCount**: public variable has no ///
-- **phaseY**: public variable has no ///
-- **pixel/3**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **pixel/4**: code comment 2 lines > 1
-- **pixels**: public variable has no ///
-- **pos_t**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **quantize**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **return/1**: code comment 2 lines > 1
-- **reverse/2**: code comment 2 lines > 1
-- **ring**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **sampleClamp/4**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **scroll/4**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **sdBox/6**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **sdCircle/5**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **sdCircleSq/5**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **sdSegment/7**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **shift**: code comment 3 lines > 1
-- **smin/3**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **sphere/6**: member comment 4 lines > 1: a deep dive goes after @moreinfo
-- **splat/5**: member comment 15 lines > 1: a deep dive goes after @moreinfo
-- **sprite**: member comment 8 lines > 1: a deep dive goes after @moreinfo
-- **step**: code comment 5 lines > 1
-- **strokeLine**: member comment 7 lines > 1: a deep dive goes after @moreinfo
-- **swapCells/2**: code comment 5 lines > 1
-- **sx0/1**: code comment 4 lines > 1
-- **text**: code comment 3 lines > 1
-- **text**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **toPixel/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **uint8_t**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **upscale16**: member comment 15 lines > 1: a deep dive goes after @moreinfo
-- **vx/1**: code comment 3 lines > 1
-- **w/1**: code comment 2 lines > 1
-- **x16/1**: code comment 3 lines > 1
 
 ### src/light/drivers/ParallelLedDriver.h
 
@@ -2095,39 +1755,6 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **self**: public variable has no ///
 - **sendFrame/0**: public function has no ///
 - **tiltOff**: public variable has no ///
-
-### src/light/fluid.h
-
-- **advectSelf/5**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **depth/0**: public function has no ///
-- **height/0**: public function has no ///
-- **if/1**: code comment 3 lines > 1
-- **line 105**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 131**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 132**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 150**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 178**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 181**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 205**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 48**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 51**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 52**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 78**: hard wrap: one line per sentence, let the editor soft-wrap
-- **line 86**: hard wrap: one line per sentence, let the editor soft-wrap
-- **lo/1**: code comment 2 lines > 1
-- **project/3**: member comment 5 lines > 1: a deep dive goes after @moreinfo
-- **relax/6**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **release/0**: public function has no ///
-- **reset/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **resize/3**: member comment 6 lines > 1: a deep dive goes after @moreinfo
-- **setBoundary/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
-- **slice/1**: code comment 3 lines > 1
-- **step/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **v/2**: code comment 3 lines > 1
-- **valid/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
-- **velocityX/0**: public function has no ///
-- **velocityY/0**: public function has no ///
-- **width/0**: public function has no ///
 
 ### src/light/layers/BlendMap.h
 
@@ -2722,13 +2349,6 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **placeLights/1**: public function has no ///
 - **spokes**: public variable has no ///
 - **tags/0**: public function has no ///
-
-### src/light/light_types.h
-
-- **line 38/1**: code comment 2 lines > 1
-- **nrOfLightsType**: code comment 4 lines > 1
-- **uint8_t**: code comment 7 lines > 1
-- **x**: public variable has no ///
 
 ### src/light/modifiers/BlockModifier.h
 
@@ -3602,7 +3222,254 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **line 227**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **line 52**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 
-### src/light/particles.h
+### src/light/powerfunctions/draw.h
+
+- **Canvas**: class comment 15 lines > 10
+- **addPixel/4**: code comment 2 lines > 1
+- **axis/3**: code comment 7 lines > 1
+- **blendPixel/5**: code comment 3 lines > 1
+- **blit16**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **blobField**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **blur/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **blur/3**: code comment 2 lines > 1
+- **blurAxis**: code comment 17 lines > 1
+- **cell/1**: code comment 5 lines > 1
+- **circle/5**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **combineMax/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **cov/5**: code comment 2 lines > 1
+- **coverage/2**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **cpl**: code comment 2 lines > 1
+- **d/1**: code comment 2 lines > 1
+- **d/1**: code comment 3 lines > 1
+- **decay/3**: member comment 28 lines > 1: a deep dive goes after @moreinfo
+- **decay16/4**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **disc/6**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **dx**: code comment 2 lines > 1
+- **fade/2**: code comment 3 lines > 1
+- **for/1**: code comment 3 lines > 1
+- **for/1**: code comment 3 lines > 1
+- **for/1**: code comment 3 lines > 1
+- **fx/1**: code comment 3 lines > 1
+- **glyph/6**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **glyph/7**: code comment 4 lines > 1
+- **hx**: code comment 2 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **lerp/3**: code comment 4 lines > 1
+- **line 1003**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1004**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1031**: member comment 15 lines > 1: a deep dive goes after @moreinfo
+- **line 1033**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1034**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1035**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1036**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1037**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1040**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1041**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1044**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1064**: member comment 9 lines > 1: a deep dive goes after @moreinfo
+- **line 1066**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1067**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1068**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1069**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1109**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1116**: code comment 18 lines > 1
+- **line 1135**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1136**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1152**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1163**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1164**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1165**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1178**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1179**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1200**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1201**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1204**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1224**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1237**: code comment 7 lines > 1
+- **line 1247**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1265**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1268**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1269**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1270**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1295**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1296**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1297**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1333**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1356**: code comment 23 lines > 1
+- **line 1358**: comment line 21 words > 20
+- **line 1385**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1386**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1389**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1390**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1393**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1394**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1395**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1396**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1409**: comment line 21 words > 20
+- **line 1472**: code comment 22 lines > 1
+- **line 1475**: comment line 21 words > 20
+- **line 1512**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1513**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1550**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1551**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1552**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 1571**: code comment 11 lines > 1
+- **line 219**: comment line 22 words > 20
+- **line 32**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 33**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 333**: code comment 10 lines > 1
+- **line 352**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 353**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 354**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 357**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 361**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 37**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 370**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 371**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 372**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 373**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 374**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 375**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 376**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 386**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 389**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 390**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 41**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 42**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 423**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 424**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 43**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 440**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 446**: code comment 13 lines > 1
+- **line 459**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 459**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **line 479**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 480**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 483**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 498/3**: code comment 12 lines > 1
+- **line 511**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 58**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 59**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 619**: code comment 22 lines > 1
+- **line 642**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 646**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 646**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **line 668**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **line 68**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 69**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 697**: code comment 11 lines > 1
+- **line 709**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 732**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 732**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **line 733**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 761/1**: code comment 9 lines > 1
+- **line 808**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 809**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 810**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 819**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 820**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 821**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 823**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 825**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 850**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 864**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 883**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 884**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 89**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 89**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **line 890**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 891**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 902**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 903**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 907**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 908**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 911**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 912**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 913**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 916**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 917**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 92**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 920**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 959**: code comment 10 lines > 1
+- **line/5**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **line/6**: code comment 10 lines > 1
+- **mixed/1**: code comment 5 lines > 1
+- **offsetOf/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **offsetOf/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **offsetOf/3**: code comment 2 lines > 1
+- **palette**: public variable has no ///
+- **paletteCount**: public variable has no ///
+- **phaseY**: public variable has no ///
+- **pixel/3**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **pixel/4**: code comment 2 lines > 1
+- **pixels**: public variable has no ///
+- **pos_t**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **quantize**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **return/1**: code comment 2 lines > 1
+- **reverse/2**: code comment 2 lines > 1
+- **ring**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **sampleClamp/4**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **scroll/4**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **sdBox/6**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **sdCircle/5**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **sdCircleSq/5**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **sdSegment/7**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **shift**: code comment 3 lines > 1
+- **smin/3**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **sphere/6**: member comment 4 lines > 1: a deep dive goes after @moreinfo
+- **splat/5**: member comment 15 lines > 1: a deep dive goes after @moreinfo
+- **sprite**: member comment 8 lines > 1: a deep dive goes after @moreinfo
+- **step**: code comment 5 lines > 1
+- **strokeLine**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **swapCells/2**: code comment 5 lines > 1
+- **sx0/1**: code comment 4 lines > 1
+- **text**: code comment 3 lines > 1
+- **text**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **toPixel/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **uint8_t**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **upscale16**: member comment 15 lines > 1: a deep dive goes after @moreinfo
+- **vx/1**: code comment 3 lines > 1
+- **w/1**: code comment 2 lines > 1
+- **x16/1**: code comment 3 lines > 1
+
+### src/light/powerfunctions/fluid.h
+
+- **advectSelf/5**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **depth/0**: public function has no ///
+- **height/0**: public function has no ///
+- **if/1**: code comment 3 lines > 1
+- **line 105**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 131**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 132**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 150**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 178**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 181**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 205**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 48**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 51**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 52**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 78**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 86**: hard wrap: one line per sentence, let the editor soft-wrap
+- **lo/1**: code comment 2 lines > 1
+- **project/3**: member comment 5 lines > 1: a deep dive goes after @moreinfo
+- **relax/6**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **release/0**: public function has no ///
+- **reset/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **resize/3**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **setBoundary/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **slice/1**: code comment 3 lines > 1
+- **step/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **v/2**: code comment 3 lines > 1
+- **valid/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **velocityX/0**: public function has no ///
+- **velocityY/0**: public function has no ///
+- **width/0**: public function has no ///
+
+### src/light/powerfunctions/particles.h
 
 - **FrameTime**: class comment 15 lines > 10
 - **acc**: member comment 2 lines > 1: a deep dive goes after @moreinfo
@@ -3729,7 +3596,7 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **x**: public variable has no ///
 - **y**: public variable has no ///
 
-### src/light/polar.h
+### src/light/powerfunctions/polar.h
 
 - **Controls**: class comment 15 lines > 10
 - **PolarLut/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
@@ -3788,7 +3655,7 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **v/0**: code comment 2 lines > 1
 - **want/1**: code comment 2 lines > 1
 
-### src/light/raymarch.h
+### src/light/powerfunctions/raymarch.h
 
 - **diffuse/3**: member comment 2 lines > 1: a deep dive goes after @moreinfo
 - **hit**: public variable has no ///
@@ -3809,7 +3676,7 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **v/1**: code comment 2 lines > 1
 - **x**: public variable has no ///
 
-### src/light/shader.h
+### src/light/powerfunctions/shader.h
 
 - **cosPalette**: member comment 4 lines > 1: a deep dive goes after @moreinfo
 - **depthFade/2**: member comment 3 lines > 1: a deep dive goes after @moreinfo
@@ -3839,6 +3706,139 @@ Every place the generated documentation breaks the shape [the standards](../../c
 - **sdRoundBox**: member comment 7 lines > 1: a deep dive goes after @moreinfo
 - **smoothstep/3**: member comment 3 lines > 1: a deep dive goes after @moreinfo
 - **uv**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+
+### src/light/util/FixtureChannels.h
+
+- **forEachMotionSlot/2**: public function has no ///
+- **gobo**: public variable has no ///
+- **kAbsent**: public variable has no ///
+- **kMotionBase**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **line 35**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 45**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 49**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 49**: member comment 6 lines > 1: a deep dive goes after @moreinfo
+- **line 52**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 53**: hard wrap: one line per sentence, let the editor soft-wrap
+- **movable/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **pan**: public variable has no ///
+- **rotate**: public variable has no ///
+- **tilt**: public variable has no ///
+- **zoom**: public variable has no ///
+
+### src/light/util/MpegTs.h
+
+- **Writer/3**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **avail**: code comment 3 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **kPidPat**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **line 10**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 11**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 153/1**: code comment 3 lines > 1
+- **line 2**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 2**: member comment 13 lines > 1: a deep dive goes after @moreinfo
+- **line 210**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 25**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 3**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 34**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 35**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 36**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 42**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 43**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 47**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 48**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 57**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 64**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 67**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 68**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 69**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 7**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 74**: code comment 3 lines > 1
+- **line 87**: code comment 2 lines > 1
+- **pat**: public variable has no ///
+- **writeAccessUnit/4**: member comment 7 lines > 1: a deep dive goes after @moreinfo
+- **writePcr/2**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **writeTables/0**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+
+### src/light/util/Palette.h
+
+- **Palettes**: code comment 3 lines > 1
+- **active/0**: public function has no ///
+- **active_/1**: code comment 2 lines > 1
+- **blend/3**: code comment 2 lines > 1
+- **clear/1**: member comment 9 lines > 1: a deep dive goes after @moreinfo
+- **colorFromPalette/3**: code comment 4 lines > 1
+- **count/0**: public function has no ///
+- **dh/1**: code comment 2 lines > 1
+- **fadeToBlackBy/2**: code comment 2 lines > 1
+- **for/1**: code comment 3 lines > 1
+- **for/1**: code comment 5 lines > 1
+- **fromBuiltin/1**: code comment 2 lines > 1
+- **fromBuiltin/1**: public function has no ///
+- **fromGradient/2**: code comment 3 lines > 1
+- **fromGradient/2**: public function has no ///
+- **hsvToRgb/1**: code comment 2 lines > 1
+- **if/1**: code comment 2 lines > 1
+- **isLive/1**: member comment 10 lines > 1: a deep dive goes after @moreinfo
+- **kEntries**: public variable has no ///
+- **kMax**: public variable has no ///
+- **lerpRGB/3**: public function has no ///
+- **line 172**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 173**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 174**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 180**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 180/3**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **line 181**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 229**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 253/1**: code comment 8 lines > 1
+- **line 356**: code comment 3 lines > 1
+- **line 359**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 360**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 363**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 368**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 369**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 375**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 376**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 377**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 388**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 389**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 390**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 391**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 392**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 393**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 404**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 405**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 408**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 409**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 410**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 464**: code comment 4 lines > 1
+- **line 492**: hard wrap: one line per sentence, let the editor soft-wrap
+- **line 493**: hard wrap: one line per sentence, let the editor soft-wrap
+- **live/0**: code comment 5 lines > 1
+- **nameAt/1**: public function has no ///
+- **nearestForHue/2**: code comment 3 lines > 1
+- **nearestForHue/2**: public function has no ///
+- **nearestForRgb/3**: code comment 5 lines > 1
+- **nearestForRgb/3**: public function has no ///
+- **paletteCount/0**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+- **paletteNames/1**: code comment 4 lines > 1
+- **palettes**: code comment 7 lines > 1
+- **representativeHue/1**: public function has no ///
+- **representativeHueSat/3**: code comment 2 lines > 1
+- **representativeHueSat/3**: public function has no ///
+- **representativeRgb/1**: code comment 8 lines > 1
+- **representativeRgb/1**: public function has no ///
+- **rgbToHueSat/5**: code comment 2 lines > 1
+- **set/3**: member comment 8 lines > 1: a deep dive goes after @moreinfo
+- **setActive/1**: public function has no ///
+- **setActiveDirect/1**: member comment 2 lines > 1: a deep dive goes after @moreinfo
+- **tagsAt/1**: member comment 3 lines > 1: a deep dive goes after @moreinfo
+
+### src/light/util/light_types.h
+
+- **line 38/1**: code comment 2 lines > 1
+- **nrOfLightsType**: code comment 4 lines > 1
+- **uint8_t**: code comment 7 lines > 1
+- **x**: public variable has no ///
 
 ### src/platform/desktop/moonlive_asm_host.h
 

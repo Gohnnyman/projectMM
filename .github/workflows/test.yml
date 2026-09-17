@@ -21,8 +21,8 @@ on:
     paths: &test-paths
       - 'moondeck/**'
       - 'mooninstaller/**'
-      - 'src/core/ImprovFrame.h'
-      - 'src/core/ImprovOpReassembler.h'
+      - 'src/core/util/ImprovFrame.h'
+      - 'src/core/util/ImprovOpReassembler.h'
       - 'src/platform/esp32/platform_esp32_improv.cpp'
       - 'test/python/**'
       - 'test/js/**'

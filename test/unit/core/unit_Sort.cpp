@@ -5,7 +5,7 @@
 // is stable (equal elements keep input order), and handles the trivial sizes (0/1).
 
 #include "doctest.h"
-#include "core/Sort.h"
+#include "core/util/Sort.h"
 
 #include <cstring>
 

@@ -44,10 +44,10 @@ Product owner decisions taken for this analysis (2026-08-05):
 
 | Home | Contents |
 |---|---|
-| [draw.h](../../src/light/draw.h) | `pixel` (clipped), `line` (3D Bresenham + `shorten`), `get`, `blendPixel`, `addPixel` (saturating), `fade`, `blur` (separable, every axis, 1D/2D/3D in one call), `fill`, `glyph`/`text` (two built-in fonts), `offsetOf` |
-| [math8.h](../../src/core/math8.h) | `sin8`/`cos8` (256-entry LUT), `triwave8`, `atan2_8`, `dist8` (octagonal, no sqrt), `qadd8`/`qsub8`/`nscale8`, `map8`, `beat8`/`beatsin8`/`beatsin16` (ms passed explicitly), `Random8` (xorshift) |
-| [noise.h](../../src/core/noise.h) | `inoise8` in 1D/2D/3D — value noise, 16.0 fixed coordinates |
-| [color.h](../../src/core/color.h) / [Palette.h](../../src/light/Palette.h) | `RGB`, `hsvToRgb`, `scale8` (with the `/255` rounding), `colorFromPalette` (the hot-path seam), `blend`, `fadeToBlackBy`, 63 built-in gradients |
+| [draw.h](../../src/light/powerfunctions/draw.h) | `pixel` (clipped), `line` (3D Bresenham + `shorten`), `get`, `blendPixel`, `addPixel` (saturating), `fade`, `blur` (separable, every axis, 1D/2D/3D in one call), `fill`, `glyph`/`text` (two built-in fonts), `offsetOf` |
+| [math8.h](../../src/core/util/math8.h) | `sin8`/`cos8` (256-entry LUT), `triwave8`, `atan2_8`, `dist8` (octagonal, no sqrt), `qadd8`/`qsub8`/`nscale8`, `map8`, `beat8`/`beatsin8`/`beatsin16` (ms passed explicitly), `Random8` (xorshift) |
+| [noise.h](../../src/core/util/noise.h) | `inoise8` in 1D/2D/3D — value noise, 16.0 fixed coordinates |
+| [color.h](../../src/core/util/color.h) / [Palette.h](../../src/light/util/Palette.h) | `RGB`, `hsvToRgb`, `scale8` (with the `/255` rounding), `colorFromPalette` (the hot-path seam), `blend`, `fadeToBlackBy`, 63 built-in gradients |
 | [Layer.h](../../src/light/layers/Layer.h) | `width()/height()/depth()`, `elapsed()`, the collected once-per-frame `fadeToBlackBy`, persistent frame buffer (FastLED/WLED convention), `extrude(Dim)` |
 
 Notably absent even for compiled effects: circle, rect/bar, scroll/shift, polar/rotate, gradient fill, easing, any physics, `sin16`, `scale16`.

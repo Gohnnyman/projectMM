@@ -1,14 +1,14 @@
 #pragma once
 
-#include "light/FixtureChannels.h"   // motion-channel offsets an effect writes through
+#include "light/util/FixtureChannels.h"   // motion-channel offsets an effect writes through
 #include "light/layers/Buffer.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/EffectBase.h"
 #include "light/layers/MappingLUT.h"
 #include "light/layers/BlendMap.h"   // BlendOp, for blendOp()
 #include "light/modifiers/ModifierBase.h"
-#include "light/draw.h"              // draw::fade — the once-per-frame collected fade (fadeToBlackBy)
-#include "light/particles.h"       // particles::FrameTime, the shared elapsed-to-scale conversion
+#include "light/powerfunctions/draw.h"              // draw::fade — the once-per-frame collected fade (fadeToBlackBy)
+#include "light/powerfunctions/particles.h"       // particles::FrameTime, the shared elapsed-to-scale conversion
 #include "platform/platform.h"
 
 #include <cstdio>

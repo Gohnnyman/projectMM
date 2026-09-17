@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/math16.h"              // hashInt, easeInOutQuad, BeatPhase
+#include "core/util/math16.h"              // hashInt, easeInOutQuad, BeatPhase
 #include "light/effects/EffectBase.h"
 
 namespace mm {

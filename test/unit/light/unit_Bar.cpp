@@ -6,7 +6,7 @@
 // how color varies along the run, and what a bar longer than the grid does.
 
 #include "doctest.h"
-#include "light/draw.h"
+#include "light/powerfunctions/draw.h"
 
 using namespace mm;
 

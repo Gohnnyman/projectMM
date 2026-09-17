@@ -1,7 +1,7 @@
 // @module math8
 
 #include "doctest.h"
-#include "core/math8.h"
+#include "core/util/math8.h"
 
 using namespace mm;
 

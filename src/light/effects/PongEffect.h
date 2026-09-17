@@ -1,9 +1,9 @@
 #pragma once
 // Author: projectMM original
 
-#include "core/AudioService.h"   // latestFrame: the beat the audio-reactive mode volleys on
-#include "core/math16.h"
-#include "light/draw.h"
+#include "core/services/AudioService.h"   // latestFrame: the beat the audio-reactive mode volleys on
+#include "core/util/math16.h"
+#include "light/powerfunctions/draw.h"
 #include "light/effects/EffectBase.h"
 #include "light/effects/SpriteCast.h"   // the shared cast, when the ball is a sprite
 

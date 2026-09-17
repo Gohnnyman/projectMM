@@ -1,7 +1,7 @@
 // @module light_types
 
 #include "doctest.h"
-#include "light/light_types.h"
+#include "light/util/light_types.h"
 
 // Coord3D is the coordinate/size type the modifier fold interface mutates. The
 // per-axis (Hadamard) operators are what let a modifier read like geometry

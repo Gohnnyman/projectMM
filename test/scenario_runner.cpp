@@ -2,10 +2,10 @@
 // When HTTP API is added, the same JSON files work with a Python runner
 // against a live system.
 
-#include "core/Scheduler.h"
-#include "core/ModuleFactory.h"
-#include "core/Control.h"
-#include "core/JsonSink.h"
+#include "core/module/Scheduler.h"
+#include "core/util/ModuleFactory.h"
+#include "core/module/Control.h"
+#include "core/util/JsonSink.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/GridBlacksLayout.h"
 #include "light/layouts/SphereLayout.h"
@@ -40,8 +40,8 @@
 #include "light/drivers/Drivers.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
-#include "core/SystemModule.h"
-#include "core/AudioService.h"
+#include "core/system/SystemModule.h"
+#include "core/services/AudioService.h"
 #include "light/effects/RadialSpectrumEffect.h"
 #include "light/effects/VuMetersEffect.h"
 #include "light/effects/BeatRipplesEffect.h"

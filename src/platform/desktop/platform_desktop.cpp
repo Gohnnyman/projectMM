@@ -1,5 +1,5 @@
 #include "platform/platform.h"
-#include "core/FirmwareImage.h"  // identify/moonBaseRejection: shared image vetting
+#include "core/util/FirmwareImage.h"  // identify/moonBaseRejection: shared image vetting
 
 #include <algorithm>
 #include <chrono>

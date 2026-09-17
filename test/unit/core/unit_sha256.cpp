@@ -1,7 +1,7 @@
 // @module sha256
 
 #include "doctest.h"
-#include "core/sha256.h"
+#include "core/util/sha256.h"
 
 #include <string>
 

@@ -9,7 +9,7 @@
 // here silently misconfigures a freshly-flashed device.
 
 #include "doctest.h"
-#include "core/ImprovOpReassembler.h"
+#include "core/util/ImprovOpReassembler.h"
 
 #include <cstring>
 #include <string>

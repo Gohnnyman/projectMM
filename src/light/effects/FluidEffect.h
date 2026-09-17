@@ -1,7 +1,7 @@
 #pragma once
 
 #include "light/effects/EffectBase.h"
-#include "light/fluid.h"               // the Stam solver: the medium itself
+#include "light/powerfunctions/fluid.h"               // the Stam solver: the medium itself
 
 namespace mm {
 

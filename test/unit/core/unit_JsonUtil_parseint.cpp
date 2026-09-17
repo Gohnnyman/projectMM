@@ -6,7 +6,7 @@
 // plausible-looking integer.
 
 #include "doctest.h"
-#include "core/JsonUtil.h"
+#include "core/util/JsonUtil.h"
 
 #include <climits>
 

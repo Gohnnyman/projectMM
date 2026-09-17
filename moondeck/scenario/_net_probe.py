@@ -10,9 +10,9 @@ orchestration stay in run_network_live.py.
 
 The packet builders mirror the firmware encoders byte for byte — cross-language
 duplication is unavoidable here; keep each in sync with its `.h`:
-  build_artdmx ↔ src/light/ArtNetPacket.h::buildArtDmxPacket
-  build_e131   ↔ src/light/E131Packet.h::buildE131Packet
-  build_ddp    ↔ src/light/DdpPacket.h::buildDdpPacket
+  build_artdmx ↔ src/light/util/ArtNetPacket.h::buildArtDmxPacket
+  build_e131   ↔ src/light/util/E131Packet.h::buildE131Packet
+  build_ddp    ↔ src/light/util/DdpPacket.h::buildDdpPacket
 """
 
 import json

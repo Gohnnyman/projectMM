@@ -7,7 +7,7 @@
 // rather than as a crash.
 
 #include "doctest.h"
-#include "light/shader.h"
+#include "light/powerfunctions/shader.h"
 
 #include <cmath>
 

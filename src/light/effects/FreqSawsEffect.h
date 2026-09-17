@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/math16.h"            // map32: the shared, fencepost-safe range map
+#include "core/util/math16.h"            // map32: the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
 
 namespace mm {

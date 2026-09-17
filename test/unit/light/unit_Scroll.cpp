@@ -7,7 +7,7 @@
 // and that a wrap conserves every light.
 
 #include "doctest.h"
-#include "light/draw.h"
+#include "light/powerfunctions/draw.h"
 
 using namespace mm;
 

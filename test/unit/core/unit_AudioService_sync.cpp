@@ -15,8 +15,8 @@
 // projectMM desktop app that would hold the real sync port.
 
 #include "doctest.h"
-#include "core/AudioService.h"
-#include "light/WLEDAudioSyncPacket.h"
+#include "core/services/AudioService.h"
+#include "light/util/WLEDAudioSyncPacket.h"
 #include "platform/platform.h"
 
 #include <cstdint>

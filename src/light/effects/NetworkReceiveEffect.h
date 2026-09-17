@@ -2,9 +2,9 @@
 
 #include "light/effects/EffectBase.h"
 
-#include "light/ArtNetPacket.h"   // shared ArtNet wire formats (build + parse)
-#include "light/DdpPacket.h"      // shared DDP wire format
-#include "light/E131Packet.h"     // shared E1.31/sACN wire format
+#include "light/util/ArtNetPacket.h"   // shared ArtNet wire formats (build + parse)
+#include "light/util/DdpPacket.h"      // shared DDP wire format
+#include "light/util/E131Packet.h"     // shared E1.31/sACN wire format
 #include "light/layers/Layer.h"   // Layer::bufferGen: is the held frame still ours?
 #include "platform/platform.h"    // platform::UdpSocket: the three receive sockets
 

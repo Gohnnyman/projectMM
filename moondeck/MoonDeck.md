@@ -1220,7 +1220,7 @@ Exit codes: `0` = all checks passed, `1` = device-side failure (probe or provisi
 
 **Why this exists.** The browser-side Improv flow (ESP Web Tools' modal) is awkward to automate and harder to reproduce on demand: needs Chrome, Web Serial, and a click-through. This script exercises the **device-side** Improv implementation — which is the part we own and the part most likely to break across firmware changes. ESP Web Tools' Improv handling is upstream-maintained and stable. Recommended pre-commit test for any change to:
 
-- [src/core/ImprovFrame.h](../src/core/ImprovFrame.h) — the on-device parser
+- [src/core/util/ImprovFrame.h](../src/core/util/ImprovFrame.h) — the on-device parser
 - [src/platform/esp32/platform_esp32_improv.cpp](../src/platform/esp32/platform_esp32_improv.cpp) — the UART listener task
 - [mooninstaller/index.html](../mooninstaller/index.html) — the web installer page
 - [src/ui/install-picker.js](../src/ui/install-picker.js) — the picker driving the install flow

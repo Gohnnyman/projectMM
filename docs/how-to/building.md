@@ -294,7 +294,7 @@ Where we are on each. The adoption plan and per-item triggers are filed in [back
 |---|---|
 | **EIM** (ESP-IDF Installation Manager) — the new default, cross-platform installer; Espressif says `install.sh` / `idf_tools.py` are "no longer needed" | `setup_esp_idf.py` drives the legacy `install.sh` / `install.bat`. Works, but is the *old* documented path. |
 | **PSA Crypto** — legacy mbedTLS crypto APIs deprecated in favour of the PSA API | No direct exposure: we never call mbedTLS ourselves; OTA uses `esp_https_ota` + `esp_crt_bundle_attach` ([platform_esp32_ota.cpp](../src/platform/esp32/platform_esp32_ota.cpp)), which wrap crypto internally. |
-| **`network_provisioning`** — Espressif's Unified Provisioning subsystem, renamed from `wifi_provisioning` in v6.0. Transports: **BLE (GATT)** + **Wi-Fi SoftAP**. Clients: official iOS/Android apps for both, plus `esp_prov` (a Python CLI on Linux/macOS/Windows). Transport-agnostic but ships no web/serial client. | We provision over [Improv](../src/core/ImprovProvisioningModule.h) — serial (USB) + BLE, driven from the **browser** (ESP Web Tools) or a serial CLI, which covers mooninstaller / no-app onboarding. The IDF-native **phone-app + SoftAP** flow is a coverage gap rather than a duplicate: the two standards meet only on BLE and own different front-ends. |
+| **`network_provisioning`** — Espressif's Unified Provisioning subsystem, renamed from `wifi_provisioning` in v6.0. Transports: **BLE (GATT)** + **Wi-Fi SoftAP**. Clients: official iOS/Android apps for both, plus `esp_prov` (a Python CLI on Linux/macOS/Windows). Transport-agnostic but ships no web/serial client. | We provision over [Improv](../src/core/system/ImprovProvisioningModule.h) — serial (USB) + BLE, driven from the **browser** (ESP Web Tools) or a serial CLI, which covers mooninstaller / no-app onboarding. The IDF-native **phone-app + SoftAP** flow is a coverage gap rather than a duplicate: the two standards meet only on BLE and own different front-ends. |
 | **CMake Build System v2** — the named successor to the current build system; technical preview in v6.0/6.1, has its own migration guide | Standard `idf.py` build (v1). Our component is a thin `idf_component_register()` wrapper, so the migration surface is small. |
 | **Built-in MCP server** (`idf.py mcp-server`) — lets an AI assistant drive build/flash/monitor/debug directly | Not used. Agents and humans both go through the `moondeck/<group>/*.py` layer (the uniform interface in [moondeck/MoonDeck.md](../moondeck/MoonDeck.md)), which wraps pin-drift checks, per-firmware build dirs, and KPI collection. |
 
@@ -382,7 +382,7 @@ CMake runs these automatically before compilation when their source files change
 
 | Step | Source | Generated | Trigger |
 |------|--------|-----------|---------|
-| `build_info_gen` | `library.json` | `src/core/build_info.h` | `library.json` changes |
+| `build_info_gen` | `library.json` | `src/core/util/build_info.h` | `library.json` changes |
 | `ui_embed` | `src/ui/index.html`, `app.js`, `style.css`, `preview3d.js`, `install-picker.js`, logo | `src/ui/ui_embedded.h` | any UI file changes |
 
 Both are defined in the root `CMakeLists.txt` (desktop) and `esp32/main/CMakeLists.txt` (ESP32). Generated files are gitignored — rebuilt on every clean build.

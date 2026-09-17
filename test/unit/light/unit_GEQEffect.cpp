@@ -5,7 +5,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/effects/GEQEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioService.h"
+#include "core/services/AudioService.h"
 
 #include <array>
 

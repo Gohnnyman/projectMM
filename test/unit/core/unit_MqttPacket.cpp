@@ -7,7 +7,7 @@
 // parser reassembling a PUBLISH across arbitrary read() boundaries (fragmentation).
 
 #include "doctest.h"
-#include "core/MqttPacket.h"
+#include "core/system/MqttPacket.h"
 
 #include <cstdint>
 #include <cstring>

@@ -409,7 +409,7 @@ def _class_to_header(xml_dir: Path) -> dict[str, str]:
             brief = cd.find("briefdescription")
             if brief is None or not "".join(brief.itertext()).strip():
                 continue
-        header = loc.get("file")                      # e.g. "src/core/Control.h"
+        header = loc.get("file")                      # e.g. "src/core/module/Control.h"
         if header:
             mapping[name.replace("::", "-")] = header
     return mapping

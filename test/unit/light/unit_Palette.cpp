@@ -5,7 +5,7 @@
 // Palettes::active() seam swaps on setActive. The live Drivers wiring is the bench test.
 
 #include "doctest.h"
-#include "light/Palette.h"
+#include "light/util/Palette.h"
 
 #include <cstring>
 #include <string>

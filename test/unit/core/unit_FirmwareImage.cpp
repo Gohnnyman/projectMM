@@ -9,7 +9,7 @@
 
 #include "doctest.h"
 
-#include "core/FirmwareImage.h"
+#include "core/util/FirmwareImage.h"
 
 #include <cstdint>
 #include <filesystem>
