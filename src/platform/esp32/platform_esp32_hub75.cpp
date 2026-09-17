@@ -63,7 +63,7 @@ constexpr uint32_t kPclkHz = 20'000'000;
 
 // Parlio's hardware ceiling: PER_FRAME is 0x7FFFF bits on every Parlio-capable target, which is
 // 65,535 BYTES whatever the bus width. The same constant platform_esp32_parlio.cpp records, and it
-// is what decides that four 8-bit panels (65,792 bytes) are an LCD_CAM job.
+// is what decides that four 8-bit panels (65,794 bytes) are an LCD_CAM job.
 constexpr size_t kParlioMaxTransferBytes = 0x7FFFF / 8;
 
 const char* g_lastError = nullptr;

@@ -110,8 +110,9 @@ struct Hub75Geometry {
     /// job, and until it does it every bit is worth the same (see backlog-light.md).
     size_t frameSlots() const {
         const uint16_t pairs = rowsPerScan() / 2;   // color passes per address step
+        // Plus ONE per FRAME: the dark tail word that keeps the wrap from lighting row 0 twice.
         return static_cast<size_t>(bitDepth) * scanRows() *
-               (static_cast<size_t>(width) * pairs + 1);
+               (static_cast<size_t>(width) * pairs + 1) + 1;
     }
 
     /// Bytes one encoded frame occupies. TWO per slot: the bus is 16 bits wide, because
@@ -192,6 +193,10 @@ inline size_t hub75Encode(const uint8_t* rgb, uint8_t* out,
             out[w++] = static_cast<uint8_t>((blank >> 8) & 0xFF);
         }
     }
+    // The wrap point: without a dark word here, the re-send lights row 0 for a second window.
+    const uint16_t tail = static_cast<uint16_t>(1u << lay.oe);
+    out[w++] = static_cast<uint8_t>(tail & 0xFF);
+    out[w++] = static_cast<uint8_t>((tail >> 8) & 0xFF);
     return w;
 }
 
