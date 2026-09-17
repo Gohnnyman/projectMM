@@ -81,6 +81,7 @@ MAX_DETAILS_CELL = 300
 # captures for them, so a third copy here is a third thing to forget.
 import mkdocs_hooks as _hooks  # noqa: E402
 ANIMATED_PAGES = _hooks.ANIMATED_PAGES
+PREVIEWLESS_PAGES = _hooks.PREVIEWLESS_PAGES
 
 # ---------------------------------------------------------------------------
 # The OTHER generated surface: the `///` comments that become the technical pages.
@@ -542,6 +543,12 @@ def _header_rules(rel: str, text: str):
     # a nested struct adds another level (Hub75Slots puts its class at 3 where the others
     # are at 2). So remember WHICH depth the class opened at, rather than counting to a
     # number that is right for most files and wrong for the rest.
+    # A STACK, not one depth: a nested type opens its own body and the enclosing class
+    # resumes when it closes. Holding a single depth meant a nested struct overwrote the
+    # class that contained it, and closing the struct then read as closing the class, so
+    # every public member after one escaped this check entirely (a class with a nested
+    # type reported nothing at all).
+    frames = []                                  # (body_depth, public) per open class/struct
     public = False
     depth = 0
     class_depth = None
@@ -555,13 +562,14 @@ def _header_rules(rel: str, text: str):
             # private however it is spelled, and demanding a `///` on its fields asked a file to
             # document what no reader of the generated page can see. Only a top-level struct
             # (nothing open above it) starts public.
-            nested = class_depth is not None or before > 1
+            nested = bool(frames)
+            frames.append((before + 1, public))
             class_depth = before + 1
             public = st.startswith("struct") and not (nested and not public)
             continue
-        if class_depth is not None and depth < class_depth:
-            class_depth = None                   # the class body closed
-            public = False
+        while frames and depth < frames[-1][0]:
+            _, public = frames.pop()             # this body closed; the enclosing one resumes
+            class_depth = frames[-1][0] if frames else None
         if st.startswith("public:"):
             public = True
             continue
@@ -571,7 +579,9 @@ def _header_rules(rel: str, text: str):
         if not public or not st or st.startswith(("//", "/*", "*", "#")):
             continue
         # `before` is the depth the line STARTS at: a member sits exactly in the body.
-        if before != class_depth or st.startswith(("return", "if", "for", "while", "}")):
+        # `friend` grants access to another type; it declares no member and reaches no
+        # generated page, so asking it for a `///` documents a line no reader sees.
+        if before != class_depth or st.startswith(("return", "if", "for", "while", "}", "friend ")):
             continue
         prev = lines[i - 1].lstrip() if i else ""
         if prev.startswith("///") or "///" in ln:
@@ -603,9 +613,11 @@ def _card_rules(rel: str, c: dict):
                          f"{c['widest_text'][:60]}..."))
     # A card leads with its picture. The image is the first thing the eye reaches on a
     # row, and a card without one starts with a name against blank space, which reads as
-    # a gap rather than as a module that happens to be invisible.
+    # a gap rather than as a module that happens to be invisible. The summary pages are
+    # the exception: their rows describe machinery with no card in the UI to capture.
     if not c["img"]:
-        out.append((key, "no image: every card leads with one"))
+        if rel not in PREVIEWLESS_PAGES:
+            out.append((key, "no image: every card leads with one"))
     else:
         want = ".gif" if rel in ANIMATED_PAGES else ".png"
         if not c["img_src"].lower().endswith(want):

@@ -10,8 +10,8 @@ namespace mm {
 /// @{
 ///
 /// WS2812 encode for parallel buses: the contract between a parallel driver and its peripheral.
-/// It is named for the wire unit it builds, and one pixel-clock slot is one byte on the bus.
-/// Both the i80 and the Parlio peripherals use it, since their bus bytes are identical.
+/// It is named for the wire unit it builds, one pixel-clock slot being one bus word.
+/// The peripheral sets that word's width, and both the i80 and Parlio buses use it.
 /// A pure data transform with no platform include, so the host test pins it without an ESP32.
 ///
 /// Prior art: the technique is hpwit's, Adafruit's and FastLED's, studied rather than copied.

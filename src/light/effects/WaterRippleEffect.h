@@ -105,7 +105,7 @@ public:
         const uint32_t stepMs = 1000u / (speed > 0 ? speed : 1);
         if (now - lastStepMs_ >= stepMs) {
             lastStepMs_ = now;
-            // Every pixel steps, clamping the neighbor: that is the reflecting boundary, where
+            // Every pixel steps, clamping the neighbor, which is what reflects the wave at an edge.
             for (lengthType y = 0; y < h; y++) {
                 for (lengthType x = 0; x < w; x++) {
                     const size_t i = static_cast<size_t>(y) * w + x;

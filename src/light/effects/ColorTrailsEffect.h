@@ -211,7 +211,7 @@ private:
             }
         }
         if (m == Mode::All || m == Mode::Lissajous) {
-            // Two sines at 3:2, tracing a figure that never closes, so the line finds new ground.
+            // Two sines at 3:2, a figure that repeats each base turn, the flow carrying the trail.
             const angle16 a = static_cast<angle16>(bank_.phase(1));
             const angle16 b = static_cast<angle16>(bank_.phase(1) * 3u / 2u);
             // `size` scales the reach, the control the orbit reads, so both emitters grow together.

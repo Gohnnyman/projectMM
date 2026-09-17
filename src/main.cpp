@@ -353,8 +353,8 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/system.md#file-manager");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/system.md#firmware-update");
     mm::ModuleFactory::registerType<mm::MoonCloudModule>("MoonCloudModule", "core/system.md#mooncloud");
-    mm::ModuleFactory::registerType<mm::MoonStatsModule>("MoonStatsModule", "core/system.md#mooncloud-stats");
-    mm::ModuleFactory::registerType<mm::MoonTalkModule>("MoonTalkModule", "core/system.md#mooncloud-talk");
+    mm::ModuleFactory::registerType<mm::MoonStatsModule>("MoonStatsModule", "core/system.md#stats");
+    mm::ModuleFactory::registerType<mm::MoonTalkModule>("MoonTalkModule", "core/system.md#talk");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/system.md#improv-provisioning");
     mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/system.md#mqtt");
     mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/system.md#devices");

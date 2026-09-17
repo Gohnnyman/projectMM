@@ -602,6 +602,16 @@ Related: this is the render/output-buffer face of the same non-PSRAM fragmentati
 
 ## Architecture
 
+### Group src/core into folders, the way src/light already is (2026-09-17)
+
+`src/light` keeps nothing at its root: every header sits in `drivers`, `effects`, `layers`, `layouts`, `modifiers` or `moonlive`. `src/core` is the opposite, 61 files flat, with `moonlive` the one folder that exists. The documentation pages already name the grouping, so the folders would only make the tree say what the docs say: `system.md` fronts 13 modules, `services.md` 7, `supporting.md` 4, and `control.md` one.
+
+**The proposed shape.** `system/` takes the 13 modules on system.md plus `HttpServerModule`, which is a real module with its own `.cpp` and no page today. `supporting/` takes `MoonModule`, `Scheduler`, `Control` and `FilesystemModule`. `services/` takes the 7 service modules. That leaves 36 shared utilities, which want a `util/` of their own so the root ends up empty of headers like the light domain's: the packet and frame types, the maths and noise helpers, `JsonSink`, `JsonUtil`, `ModuleFactory`, `ScratchBuffer`, `Sort` and the rest.
+
+**What it costs.** 172 include lines across 96 files, 52 in `src` and 44 in `test`, plus the explicit `.cpp` list in CMakeLists and a handful of scripts and architecture pages that name `src/core/` paths. Mechanical, and a compiler error names every line that was missed, but it touches nearly every file in the tree.
+
+**Why it waits.** A pure rename of this size is unreadable as part of anything else, and it wants its own branch so the diff is one thing. It is also the kind of change that should follow the documentation sweep rather than ride inside it, since the sweep is what settled which page owns which header. The light domain has its own version of this: a `src/light/supporting` for the headers its own supporting page fronts.
+
 ### Filesystem-change notification (live preset refresh) — undesigned
 
 ControlModule rebuilds its preset list by rescanning `/.config/presets`, and that rescan runs at startup and after every save, rename, delete and reorder. So a preset file **uploaded or deleted through the File Manager** appears only once the module next rescans (a reboot, or any preset action on the surface), not the instant the file lands. Documented as the actual behaviour in [control.md](../../moonmodules/core/control.md).

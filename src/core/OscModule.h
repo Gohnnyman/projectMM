@@ -1,27 +1,12 @@
 #pragma once
 
-// OSC control ingest: turns a fader move in Resolume, TouchDesigner, TouchOSC or a DIY
-// Arduino-over-Ethernet rig into a control write on this device.
+// OSC control ingest: a fader move in another application becomes a control write here.
 //
-// It owns no surface of its own. ControlModule already has the pads, encoders and faders, laid out
-// to match a Mackie-style desk, and everything here lands in Scheduler::setControl, the same entry
-// point the HTTP API and the UI use. So OSC gains no privilege: every validator still runs, and
-// there is no second copy of the device's state to keep in step.
+// It owns no surface of its own: the control module already has the pads, encoders and faders,
+// and everything here lands in the same control-set primitive the API and the UI use.
+// So OSC gains no privilege, every validator still runs, and there is no second copy of state.
 //
-// Addresses (the public contract, so they stay small and boring):
-//
-//   /mm/fader/1                     f 0..1 or i 0..255  ->  ControlModule fader1
-//   /mm/encoder/3                       f 0..1 or i 0..255  ->  ControlModule encoder3
-//   /mm/switch/2                    f 0..1 or i 0..255  ->  ControlModule switch2 (nonzero = on)
-//   /mm/hello                       (any or none)       ->  resend every value to the sender
-//   /mm/control/Drivers/brightness  f 0..1 or i 0..255  ->  that module's control directly
-//
-// The /mm/control/ form is what makes projectMM useful to TouchDesigner on day one, without
-// waiting for someone to bind a fader.
-//
-// NOT here: sending OSC (nothing we own consumes it: the X-Touch and QCon are Mackie desks, see
-// reference/control-surfaces.md), bundles, and address wildcards. See the plan.
-// Author: projectMM original
+// Not here: sending OSC, bundles, and address wildcards.
 
 #include "core/ControlModule.h"
 #include "core/ControlSurface.h"
@@ -36,29 +21,42 @@
 
 namespace mm {
 
-/// Service: receives OSC and writes it onto the device's controls.
+/// Receives OSC over the network and writes it onto this device's controls.
+///
+/// A surface addresses the surface: the faders, encoders and switches the control module owns.
+/// One address form reaches any control directly, which is what makes this useful on day one.
 /// @card OscModule.png
+///
+/// @moreinfo
+///
+/// ## Feedback
+///
+/// With it on, a control that changes anywhere is mirrored back to the surface.
+/// That is what keeps a client honest, and what moves a motorised fader.
+/// A client learns the state three ways: on its first write, on an address change, and on asking.
+/// The last exists because a restart on the same address is invisible to the other two.
+/// Most controllers send nothing on load, so every widget would otherwise show its own defaults.
+///
+/// ## What it refuses
+///
+/// The port is unauthenticated and writes controls, so it is off until turned on.
+/// Feedback is off for the same reason, sending unasked-for traffic to whatever last wrote.
 class OscModule : public MoonModule, public ControlSurface {
 public:
+    /// A service, so the container accepts it as a child.
     ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Service; }
 
-    /// Off by default: this opens an unauthenticated UDP port that writes controls, so it is a
-    /// capability a user turns on rather than one every device carries.
+    /// Whether to receive at all, off by default since the port is unauthenticated.
     bool enabledOsc = false;
+    /// The port we listen on.
     uint16_t port = osc::kDefaultPort;
 
-    /// Mirror control changes back to the surface. Off by default like `listen`: it sends unasked-for
-    /// UDP to whatever last talked to us, which is a capability a user turns on.
-    ///
-    /// It is what makes a surface a SURFACE rather than a one-way remote. Open Stage Control shows a
-    /// stale widget without it, and a motorised fader cannot move at all.
+    /// Whether to mirror changes back, which is what makes this a surface rather than a remote.
     bool feedback = false;
-    /// Where the CLIENT listens, which is not where we do. Open Stage Control has its own `osc-port`
-    /// setting for exactly this, and sending to our own `port` would just talk to ourselves. 9001 by
-    /// convention: one above the de-facto receive port.
+    /// Where the client listens, which is not where we do.
     uint16_t feedbackPort = 9001;
 
-
+    /// Declare the receive settings and the feedback settings.
     void defineControls() override {
         MoonModule::defineControls();
         controls_.addControl("listen", enabledOsc);
@@ -68,43 +66,37 @@ public:
         controls_.addControl("feedbackPort", feedbackPort, 1, 65535);
     }
 
+    /// Reopen the socket on a receive change, and re-seed the client on a feedback change.
     void onControlChanged(const char* name) override {
-        // A port or listen change reopens the socket: the setting applies live, no reboot
-        // (architecture.md's live-reconfiguration rule).
+        // The setting applies live, so the socket reopens rather than waiting for a reboot.
         if (std::strcmp(name, "port") == 0 || std::strcmp(name, "listen") == 0) closeSocket();
-        // Turning feedback on, or pointing it somewhere else, means the receiver knows nothing:
-        // change-detection would leave it wrong until something happened to move, which on a quiet
-        // rig is never. Push everything once instead.
+        // A receiver pointed here anew knows nothing, and would stay wrong until something moved.
         if (std::strcmp(name, "feedback") == 0 || std::strcmp(name, "feedbackTo") == 0
             || std::strcmp(name, "feedbackPort") == 0) {
             if (feedback) resendAll_ = true;
         }
     }
 
+    /// Detach from the surface list before closing, since it is walked from the render thread.
     void release() override {
-        // Detach BEFORE the socket closes: ControlModule walks its surface list from the render
-        // thread, and an entry pointing at a destroyed module is a use-after-free on the next tick.
         if (auto* c = ControlModule::active()) c->removeSurface(this);
         attached_ = false;
         closeSocket();
     }
 
-    // --- ControlSurface -----------------------------------------------------------------------
-    //
-    // Only sendValue is implemented: OSC carries numbers. The ring, color and label verbs keep
-    // their no-op defaults, which is the point of them having defaults, and a future MIDI transport
-    // overrides what its hardware can actually drive.
+    // Only the value verb is implemented, the others keeping their no-op defaults.
 
+    /// Mirror one control's value back to the client, as the float an application expects.
     void sendValue(SurfaceControl kind, uint8_t index, uint8_t value) override {
         if (!feedback || !open_) return;
         const char* bank = kind == SurfaceControl::Fader   ? "fader"
                          : kind == SurfaceControl::Encoder ? "encoder"
                          : kind == SurfaceControl::Switch  ? "switch" : nullptr;
-        if (!bank) return;                       // a pad has no OSC address yet (see the plan)
+        if (!bank) return;                       // a pad has no address yet
         char addr[32];
         std::snprintf(addr, sizeof(addr), "/mm/%s/%u", bank, static_cast<unsigned>(index) + 1u);
         uint8_t pkt[64];
-        // 0..1 float, the form an OSC app expects and the inverse of what toByte() reads.
+        // The inverse of what the read path does.
         const size_t len = osc::encodeFloat(pkt, sizeof(pkt), addr, static_cast<float>(value) / 255.0f);
         if (len == 0) return;
         uint8_t dest[4];
@@ -112,51 +104,34 @@ public:
         sock_.sendToAddr(dest, feedbackPort, pkt, len);
     }
 
-    /// The status is time-dependent (a peer goes stale), so it is refreshed on the second, not only
-    /// when something arrives. tick1s rather than tick(): a status line changes at human speed.
+    /// Refresh the status, which is time-dependent because a peer goes stale.
     void tick1s() MM_NONBLOCKING override {
         MoonModule::tick1s();
-        // Only when the answer CHANGES, which is twice per client session rather than once a second:
-        // the string is identical on every tick in between, and a status line nobody is reading does
-        // not need rewriting. snprintf is cheap but this runs on the render thread.
+        // Only when the answer changes, since the string is identical in between.
         if (!enabledOsc) return;
         const bool fresh = peerFresh();
         if (fresh != peerWasFresh_) { peerWasFresh_ = fresh; reportPeer(); }
     }
 
+    /// Drain whatever arrived, learning where to answer, then re-seed a new client once.
     void tick() MM_NONBLOCKING override {
         if constexpr (!platform::hasNetwork) return;
         if (!enabledOsc) { if (open_) closeSocket(); return; }
         if (!ensureSocket()) return;
 
-        // Bounded non-blocking drain, the shape AudioService::syncReceive uses: a desk moves a
-        // handful of controls per frame, so a small cap keeps a flood from owning the tick.
+        // Bounded: a desk moves a handful of controls per frame, so a cap keeps a flood out.
         uint8_t pkt[kMaxPacket];
         for (int i = 0; i < kMaxPerTick; i++) {
             uint8_t src[4] = {};
             const int n = sock_.recvFrom(pkt, sizeof(pkt), src);
             if (n <= 0) break;                       // -1 = nothing pending
-            // Learn where to answer. OSC has no discovery, and a controller that just wrote to us is
-            // by definition reachable, so the peer costs nothing to remember and spares the user a
-            // second address to type. `feedbackTo` overrides it for a fixed receiver.
-            //
-            // A NEW peer is a client that just arrived, and it knows none of the current values: its
-            // widgets sit at whatever its layout file said. So re-seed the whole surface. Without
-            // this a client only learns a value when something happens to change it, which on a
-            // quiet rig is never, and every widget lies until the user touches it.
-            // A CHANGED peer is a client on a new address. This catches a move between machines and
-            // a controller that never sends /mm/hello; hello catches a restart on the same address,
-            // which this cannot see. Both are cheap, and neither alone is enough.
+            // A controller that wrote to us is reachable, and a new one knows no values yet.
             lastRecvMs_ = platform::millis();
             if (std::memcmp(peer_, src, 4) != 0) {
                 std::memcpy(peer_, src, 4);
                 resendAll_ = true;
                 peerWasFresh_ = false;   // a new address: let the next tick1s say so
-                // REMEMBER it. feedbackTo is a persisted control, so writing the learned address
-                // there is what makes a rig survive a reboot: the fallback alone forgets the client
-                // on every restart and stays silent until it happens to send something, which for a
-                // surface that only transmits on touch can be a long time. A user who typed an
-                // address keeps it: this only fills in an empty field.
+                // Persisted, so a rig survives a reboot; only an empty field is filled.
                 if (!feedbackTo_[0]) {
                     std::snprintf(feedbackTo_, sizeof(feedbackTo_), "%u.%u.%u.%u",
                                   src[0], src[1], src[2], src[3]);
@@ -166,8 +141,7 @@ public:
             }
             handle(pkt, static_cast<size_t>(n));
         }
-        // After the drain, not inside it: a burst from one client reseeds once rather than per
-        // packet, and the sends do not interleave with the reads.
+        // After the drain, so a burst re-seeds once rather than per packet.
         if (resendAll_) {
             resendAll_ = false;
             if (auto* c = ControlModule::active()) c->resendTo(this);
@@ -175,13 +149,12 @@ public:
     }
 
 private:
-    static constexpr long   kSurfaceWidth = 8;    // ControlModule's fader/encoder count
-    static constexpr size_t kMaxPacket   = 256;   // an address plus a few args; controllers send far less
-    static constexpr int    kMaxPerTick  = 16;
-    static constexpr uint32_t kOpenRetryMs = 2000;
+    static constexpr long   kSurfaceWidth = 8;    ///< how wide the surface is
+    static constexpr size_t kMaxPacket   = 256;   ///< an address plus a few arguments
+    static constexpr int    kMaxPerTick  = 16;    ///< the drain's own bound
+    static constexpr uint32_t kOpenRetryMs = 2000;   ///< how long a failed open waits
 
-    /// Route one datagram. Unknown addresses are ignored rather than reported: a controller
-    /// blasting its whole layout at us must not fill the log or slow the tick.
+    /// Route one datagram, an unknown address being ignored rather than reported.
     void handle(const uint8_t* pkt, size_t len) {
         osc::Message m;
         if (!osc::parse(pkt, len, m)) return;
@@ -192,17 +165,10 @@ private:
         } else if (std::strncmp(a, "/mm/encoder/", 12) == 0) {
             writeSurface("encoder", a + 12, m);
         } else if (std::strncmp(a, "/mm/switch/", 11) == 0) {
-            // A switch is a BOOL control, so it takes a boolean rather than a byte: `toByte` would
-            // scale a float 1.0 to 255, and parseBool accepts only `true` or `1`, so an "on" from a
-            // float-sending controller (which is most of them) read as false. Any nonzero value is
-            // on, which is what a pad, a toggle and a MIDI note-on all mean.
+            // A boolean rather than a byte, since any nonzero value means on.
             writeSurface("switch", a + 11, m, /*asBool=*/true);
         } else if (std::strcmp(a, "/mm/hello") == 0) {
-            // "I have just started, tell me everything." A client that reconnects from the SAME
-            // address cannot be spotted by the peer-changed check, and Open Stage Control sends
-            // nothing of its own on load, so a restart left every widget showing its layout file's
-            // defaults until the user happened to move something. One explicit address fixes it,
-            // and costs a controller that does not send it nothing.
+            // A client restarting on the same address is invisible to the checks above.
             resendAll_ = true;
         } else if (std::strncmp(a, "/mm/control/", 12) == 0) {
             writeControl(a + 12, m);
@@ -210,27 +176,22 @@ private:
         received_++;
     }
 
-    /// `/mm/fader/N`, `/mm/encoder/N` and `/mm/switch/N`: write ControlModule's own control, so the surface reacts
-    /// exactly as it does to a click in the UI and driveFader routes it onward.
+    /// Write one of the surface's own controls, so it reacts exactly as it does to a click.
     void writeSurface(const char* prefix, const char* indexText, const osc::Message& m,
                       bool asBool = false) {
-        // strtol, not atoi: this is unvalidated network input, and atoi cannot tell "0" from
-        // "not a number at all". `end` also rejects trailing junk, so /mm/fader/1x is not a fader.
+        // Unvalidated input, so a parse that cannot tell zero from junk will not do.
         char* end = nullptr;
         const long idx = std::strtol(indexText, &end, 10);
         if (end == indexText || *end != '\0') return;
-        if (idx < 1 || idx > kSurfaceWidth) return;  // the surface is 8 wide; anything else is not ours
+        if (idx < 1 || idx > kSurfaceWidth) return;  // anything wider is not ours
         char control[16];
         std::snprintf(control, sizeof(control), "%s%ld", prefix, idx);
-        // A switch reads the RAW value, not the scaled byte: toByte rounds a float of 0.001 to 0,
-        // so a controller sending a small positive value would turn the switch off while saying on.
-        // Any nonzero is on, which is what a pad, a toggle and a MIDI note-on all mean.
+        // The raw value, since scaling would round a small positive one down to off.
         if (asBool) setBool("Control", control, osc::isTruthy(m));
         else        setValue("Control", control, osc::toByte(m));
     }
 
-    /// `/mm/control/<Module>/<control>`: reach any control directly. The module and control names
-    /// are taken verbatim, so a typo simply does not resolve, exactly as it would over HTTP.
+    /// Reach any control directly, the names taken verbatim so a typo does not resolve.
     void writeControl(const char* rest, const osc::Message& m) {
         const char* slash = std::strchr(rest, '/');
         if (!slash || slash == rest || !slash[1]) return;
@@ -242,8 +203,7 @@ private:
         setValue(module, slash + 1, osc::toByte(m));
     }
 
-    /// A BOOL control's body is the JSON literal, not a number: parseBool accepts `true` or `1`,
-    /// and a scaled byte (255 for a float 1.0) is neither.
+    /// Write a boolean control, whose body is the literal rather than a number.
     void setBool(const char* module, const char* control, bool on) {
         auto* sched = Scheduler::instance();
         if (!sched) return;
@@ -252,6 +212,7 @@ private:
         sched->setControl(module, control, body);
     }
 
+    /// Write a numeric control through the shared primitive.
     void setValue(const char* module, const char* control, uint8_t value) {
         auto* sched = Scheduler::instance();
         if (!sched) return;
@@ -260,9 +221,7 @@ private:
         sched->setControl(module, control, body);
     }
 
-    /// Open + bind, deferred to the tick path and throttled on failure: the same shape
-    /// AudioService uses, so a boot-present module cannot touch lwip before the stack is up and a
-    /// busy port cannot burn a socket per tick.
+    /// Open and bind, deferred to the tick and throttled, so a busy port costs one socket.
     bool ensureSocket() {
         if (open_) return true;
         if (!platform::networkReady()) return false;
@@ -279,12 +238,12 @@ private:
         }
         sock_.close();
         lastFailMs_ = now == 0 ? 1 : now;
-        // A busy port is a real failure, not a note: nothing will ever arrive, and the severity is
-        // what makes the card say so rather than looking like a normal state.
+        // A real failure rather than a note, since nothing will ever arrive.
         setStatusf(Severity::Error, "port %u busy", static_cast<unsigned>(port));
         return false;
     }
 
+    /// Close the socket and report the resulting state.
     void closeSocket() {
         if (open_) sock_.close();
         open_ = false;
@@ -292,14 +251,11 @@ private:
         setStatus(enabledOsc ? "opening" : "off");
     }
 
-    /// Where feedback goes: the configured address when set, else the last peer that wrote to us.
-    /// False when neither is known, which is the normal state before anything has connected.
+    /// Where feedback goes: the configured address, else the last peer, else nowhere.
     bool feedbackDest(uint8_t out[4]) const {
         unsigned a, b, c, d;
         int used = 0;
-        // %n captures how much was consumed, so trailing junk is rejected: sscanf alone accepts
-        // "1.2.3.4nonsense" as a valid address, and silently sending feedback to a mistyped host
-        // is worse than falling back to the peer that actually wrote to us.
+        // Trailing junk is rejected, since sending to a mistyped host is worse than falling back.
         if (feedbackTo_[0]
             && std::sscanf(feedbackTo_, "%u.%u.%u.%u%n", &a, &b, &c, &d, &used) == 4
             && feedbackTo_[used] == '\0'
@@ -312,17 +268,10 @@ private:
         return false;
     }
 
-    char     feedbackTo_[16] = {};   ///< an override; empty means "answer whoever wrote to us"
-    /// The port, and WHO last reached us on it.
-    ///
-    /// Our own address is not worth reporting: the user got to this card by typing it. Whether a
-    /// client is actually getting through is the thing they cannot see, and the first question worth
-    /// asking when a surface does not respond.
+    char     feedbackTo_[16] = {};   ///< an override, empty meaning answer whoever wrote to us
+
+    /// Report the port and who last reached us, a quiet peer being no peer at all.
     void reportPeer() {
-        // A peer that has gone QUIET is not a peer: the address alone would still claim a client is
-        // there minutes after it stopped, which is worse than saying nothing while someone is
-        // debugging a surface that died. Five seconds is long enough to survive an idle controller
-        // between gestures and short enough that the card stops lying quickly.
         if (peerFresh())
             setStatusf(Severity::Status, "%u from %u.%u.%u.%u", static_cast<unsigned>(port),
                        peer_[0], peer_[1], peer_[2], peer_[3]);
@@ -330,27 +279,26 @@ private:
             setStatusf(Severity::Status, "listening on %u", static_cast<unsigned>(port));
     }
 
-    /// Is a client still talking to us? Five seconds is long enough to survive an idle controller
-    /// between gestures, short enough that the card stops claiming a peer that has gone.
+    /// Whether a client is still talking to us.
     bool peerFresh() const {
         return lastRecvMs_ != 0 && platform::millis() - lastRecvMs_ < kPeerStaleMs;
     }
+    /// Long enough to survive an idle controller, short enough to stop claiming one that left.
     static constexpr uint32_t kPeerStaleMs = 5000;
 
     uint8_t  peer_[4] = {};          ///< the last source address, learned in tick()
     uint32_t lastRecvMs_ = 0;        ///< when we last heard from it, so the status can go stale
     bool     peerWasFresh_ = false;  ///< what the status last said, so it is rewritten only on a change
-    bool     attached_ = false;
-    bool     resendAll_ = false;   ///< a new peer appeared; push every value once
-    platform::UdpSocket sock_;
-    bool     open_ = false;
-    uint32_t lastFailMs_ = 0;
-    uint32_t received_ = 0;
-    /// setStatus takes a BORROWED pointer, so the formatted text lives here rather than in a
-    /// temporary. The base class owns the status itself, including its severity.
+    bool     attached_ = false;    ///< whether we are on the surface list
+    bool     resendAll_ = false;   ///< a new peer appeared, so push every value once
+    platform::UdpSocket sock_;     ///< the receive socket, which also sends feedback
+    bool     open_ = false;        ///< whether it is bound
+    uint32_t lastFailMs_ = 0;      ///< when an open last failed, which throttles the retry
+    uint32_t received_ = 0;        ///< how many datagrams have been routed
+    /// The status text, which the slot borrows rather than copies.
     char     statusStr_[32] = "off";
 
-    /// Format into that buffer and report it, the shape ControlModule uses for the same reason.
+    /// Format into that buffer and report it.
     void setStatusf(Severity sev, const char* fmt, ...) {
         va_list ap;
         va_start(ap, fmt);

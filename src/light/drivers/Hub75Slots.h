@@ -8,7 +8,7 @@ namespace mm {
 /// @defgroup Hub75Slots HUB75 scan encoder: the bit-plane wire format
 /// @{
 ///
-/// HUB75 encode: the contract between Hub75Driver and a HUB75 port, named for the wire unit it builds.
+/// HUB75 encode: the contract between the driver and a HUB75 port, named for the wire unit it builds.
 /// One pixel clock is one SLOT. Sibling of ParallelSlots.h, which does the same job for WS2812.
 /// A pure data transform with no platform include, so unit_Hub75Slots.cpp pins it without an ESP32.
 ///

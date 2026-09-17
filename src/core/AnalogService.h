@@ -11,64 +11,59 @@
 
 namespace mm {
 
-/// A core, domain-neutral ANALOG INPUT peripheral: **a list of ADC pins**, each driving a control
-/// with a value rather than an event. The continuous twin of `ButtonService`, which drives the same
-/// controls from a contact.
+/// A list of ADC pins, each driving a control with a value rather than an event.
 ///
-/// **An expression pedal is the shape this is built around**, and it is why the rows carry more than
-/// a pin. A pedal's usable travel is never the full sweep: it rests at some count and tops out well
-/// below full scale, so a raw reading mapped straight through would give a control that never
-/// reaches 0 or 255 and jumps at one end. `inMin` / `inMax` name the travel that matters and `invert`
-/// covers a pot wired the other way round, which is the difference between a pedal that feels right
-/// and one a user has to fight.
-///
-/// **It writes the surface, not a driver.** A row names a target as `Module.control` and goes
-/// through `Scheduler::setControl`, the same primitive every other transport uses, so a pedal and an
-/// OSC message are indistinguishable to whatever they drive. Pointing a row at `Control.fader1` (the
-/// recommended path) puts the pedal on the control surface where the assignment can then be changed
-/// without touching the pedal's own configuration.
-///
-/// **Smoothed here, not in the platform.** An ADC pin jitters by a few counts even at rest, and a
-/// pot adds its own noise, so an unfiltered read would rewrite its target every tick forever. The
-/// seam reports raw counts (a jitter figure is a property of what is WIRED, which only this module
-/// knows) and the smoothing is an exponential average whose weight a user can see and change. A
-/// deadband on top of it is what stops a resting pedal from writing at all.
-///
-/// **Polled on tick20ms.** A foot moves in tens of milliseconds and 50 Hz follows it comfortably,
-/// where the render tick would sample a pedal thousands of times a second to learn the same thing.
-/// It also means a busy ADC cannot stutter the lights at the frame rate.
-///
-/// **Not auto-wired.** Factory-registered like the other services: a board with a pedal jack or an
-/// on-board sense divider adds it under `Services`, with a row per pin.
+/// The continuous twin of the button service, which drives the same controls from a contact.
 /// @card AnalogService.png
+///
+/// @moreinfo
+///
+/// ## An expression pedal is the shape
+///
+/// A pedal's travel is never the full sweep: it rests high and tops out below full scale.
+/// A raw reading mapped straight through would give a control that never reaches either end.
+/// So a row names the travel that matters, and carries an invert for a pot wired backwards.
+///
+/// ## It writes the surface, not a driver
+///
+/// A row names its target and goes through the same primitive every transport uses.
+/// Pointing one at the surface lets the assignment change without touching the pedal.
+///
+/// ## Smoothed here, not in the platform
+///
+/// An ADC pin jitters by a few counts even at rest, and a pot adds its own noise.
+/// Jitter is a property of what is wired, which only this module knows.
+/// So the seam reports raw counts and the filter lives here, as an average a user can change.
+/// A deadband on top of it is what stops a resting pedal writing at all.
+/// Polled at 50 Hz, which follows a foot comfortably.
 class AnalogService : public MoonModule, public ListSource {
 public:
+    /// A service, so the container accepts it as a child.
     ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Service; }
 
+    /// Declare the shared filter settings and the list of input rows.
     void defineControls() override {
-        // How hard the average pulls toward each new reading, as a percentage: 100 is no smoothing
-        // at all (follow the pin exactly), and a low number is a heavy filter that lags. Expressed
-        // as a weight rather than a time constant because the sample rate is fixed at 50 Hz, so the
-        // two say the same thing and this one needs no arithmetic to understand.
+        // A weight rather than a time constant, the sample rate being fixed.
         controls_.addControl("smoothing", smoothing_, 1, 100);
-        // How far the smoothed value must move before the target is written, in TARGET units (0..255
-        // after mapping). A pedal at rest still jitters, and without this every tick would write a
-        // value one different from the last, forever.
+        // In target units, without which every tick would write a value one different.
         controls_.addControl("deadband", deadband_, 0, 32);
         controls_.addList("inputs", *this);
         MoonModule::defineControls();
     }
 
-    /// Poll every configured pin at 50 Hz. Not on tick(): a foot moves in tens of milliseconds.
+    /// Poll every configured pin, which 50 Hz follows comfortably.
     void tick20ms() MM_NONBLOCKING override {
         for (uint8_t i = 0; i < count_; i++) pollRow(rows_[i]);
     }
 
     // --- ListSource: the analog rows ------------------------------------------------------------
 
+    /// Editable, since the rows are the whole point of this module.
     bool isEditableList() const override { return true; }
+    /// How many rows are configured.
     uint8_t listRowCount() const override { return count_; }
 
+    /// Append one row's summary, ending with the live reading a calibration is set from.
     void writeListRow(JsonSink& sink, uint8_t row) const override {
         if (row >= count_) { sink.append("{}"); return; }
         const Row& r = rows_[row];
@@ -77,13 +72,11 @@ public:
                      static_cast<unsigned>(r.inMin), static_cast<unsigned>(r.inMax),
                      r.invert ? "true" : "false");
         writeInputActionFields(sink, r.action);
-        // The LIVE reading, raw and mapped, so a user calibrating a pedal can see both without
-        // binding it to anything first: the raw count is what inMin/inMax are set from, and the
-        // mapped value is what the target will receive.
         sink.appendf(",\"raw\":%u,\"value\":%u}",
                      static_cast<unsigned>(r.raw), static_cast<unsigned>(r.mapped));
     }
 
+    /// The row's editable fields: its pin, its travel, and its target.
     void writeListRowDetail(JsonSink& sink, uint8_t row) const override {
         if (row >= count_) { sink.append("{}"); return; }
         const Row& r = rows_[row];
@@ -95,27 +88,27 @@ public:
                      static_cast<unsigned>(r.inMin), static_cast<unsigned>(platform::adcMaxCount()),
                      static_cast<unsigned>(r.inMax), static_cast<unsigned>(platform::adcMaxCount()),
                      r.invert ? "true" : "false");
-        // The TARGET only: `kind` and `value` are meaningless for a level, so offering them would
-        // render inputs whose edits setListRowField refuses.
+        // The target alone, a kind and a value being meaningless for a level.
         writeInputTargetDetailField(sink, r.action);
         sink.append("]}");
     }
 
+    /// The target options, shared across every row rather than repeated in each.
     void writeListOptionSets(JsonSink& sink) const override { writeInputTargetOptions(sink); }
 
+    /// Append a row at full scale, so it works end to end before anyone calibrates it.
     bool addListRow(uint32_t& outId) override {
         if (count_ >= kMaxRows) return false;
         Row& r = rows_[count_++];
         r = Row{};
         r.id = nextId_++;
-        // Full scale by default, so a new row works end to end before anyone calibrates it: a pedal
-        // that moves something is what tells a user the wiring is right.
         r.inMax = platform::adcMaxCount();
         outId = r.id;
         markDirty();
         return true;
     }
 
+    /// Remove one row by id.
     bool deleteListRow(uint32_t id) override {
         for (uint8_t i = 0; i < count_; i++) {
             if (rows_[i].id != id) continue;
@@ -127,18 +120,10 @@ public:
         return false;
     }
 
+    /// Set one field of one row, every edit clearing the sent mark so the next poll writes.
     bool setListRowField(uint32_t id, const char* field, const char* valueJson) override {
         Row* r = find(id);
         if (!r) return false;
-        // EVERY edit below changes what the row should be writing, so each clears `sent`. The
-        // deadband compares against the last value SENT, so without this an edit that lands within
-        // the deadband of the old value is swallowed: retargeting a row, or inverting it, left the
-        // new target untouched until the input happened to move far enough. Clearing `sent` makes
-        // the next poll write unconditionally, which is what "the configuration changed" means.
-        // The TARGET is the only action field an analog row has: `runInputLevel` writes the scaled
-        // reading, so `kind` and `value` say nothing and accepting them would store a setting that
-        // is silently ignored. A row pointed at a control still needs the target, so the shared
-        // setter is called for that name alone rather than for the whole action.
         if (std::strcmp(field, "target") == 0) {
             if (!setInputActionField(r->action, field, valueJson)) return false;
             r->sent = false;
@@ -147,14 +132,11 @@ public:
         }
         if (std::strcmp(field, "kind") == 0 || std::strcmp(field, "value") == 0) return false;
         if (std::strcmp(field, "pin") == 0) {
-            // BOUNDED before the narrowing cast: parseInt answers an int, and 300 would become 44
-            // as an int8_t, quietly pointing the row at a pin the user never named. -1 is the
-            // unconfigured state the poll checks for, and 48 is the highest GPIO any supported chip
-            // carries, which is the same bound the seam applies.
+            // Bounded before the narrowing cast, which would otherwise wrap onto another pin.
             const int pin = json::parseInt(valueJson, "value");
             if (pin < -1 || pin > 48) return false;
             r->pin = static_cast<int8_t>(pin);
-            r->primed = false;      // a new pin starts its average fresh rather than drifting from the old one
+            r->primed = false;      // a new pin starts its average fresh
             r->sent = false;
             markDirty();
             return true;
@@ -180,6 +162,7 @@ public:
         return false;
     }
 
+    /// Rebuild the rows from the persisted list.
     bool restoreList(const char* json, const char* key) override {
         count_ = 0;
         const bool ok = mm::json::forEachListElement(json, key,
@@ -190,8 +173,7 @@ public:
                 r.id = nextId_++;
                 r.pin = static_cast<int8_t>(mm::json::readInt(mm::json::member(doc, el, "pin")));
                 r.inMin = clampCount(mm::json::readInt(mm::json::member(doc, el, "inMin")));
-                // An absent inMax reads 0, which would map every reading to the same value and look
-                // like a dead pedal. A row that never named one gets full scale, its default.
+                // An absent value reads zero, which would look like a dead pedal.
                 const auto* mx = mm::json::member(doc, el, "inMax");
                 r.inMax = mx ? clampCount(mm::json::readInt(mx)) : platform::adcMaxCount();
                 r.invert = mm::json::readBool(mm::json::member(doc, el, "invert"));
@@ -199,8 +181,7 @@ public:
                                      r.action.target, sizeof(r.action.target));
                 char kind[16] = {};
                 mm::json::readString(mm::json::member(doc, el, "kind"), kind, sizeof(kind));
-                // SET is the default here, not Toggle: an analog input carries a value, and a pedal
-                // that toggled something on every reading would be nonsense.
+                // A value rather than a toggle, which would fire on every reading.
                 r.action.kind = std::strcmp(kind, "toggle") == 0 ? InputAction::Kind::Toggle
                               : std::strcmp(kind, "delta") == 0  ? InputAction::Kind::Delta
                                                                  : InputAction::Kind::Set;
@@ -211,8 +192,7 @@ public:
     }
 
 private:
-    /// One analog input: where it is wired, the travel that matters, what it drives, and the filter
-    /// state it carries between polls. The state is per row because two pots are independent.
+    /// One analog input: its wiring, its travel, its target, and its own filter state.
     struct Row {
         uint32_t    id = 0;
         int8_t      pin = -1;
@@ -227,12 +207,14 @@ private:
         bool        sent = false;        ///< a value has been written, so `mapped` is a real comparison
     };
 
+    /// Clamp a raw count into the converter's range.
     static uint16_t clampCount(int v) {
         if (v < 0) return 0;
         const int max = static_cast<int>(platform::adcMaxCount());
         return static_cast<uint16_t>(v > max ? max : v);
     }
 
+    /// The row with this id, or null.
     Row* find(uint32_t id) {
         for (uint8_t i = 0; i < count_; i++) if (rows_[i].id == id) return &rows_[i];
         return nullptr;
@@ -245,51 +227,38 @@ private:
         if (!platform::adcRead(static_cast<uint8_t>(r.pin), raw)) return;
         r.raw = raw;
 
-        // The FIRST reading is taken whole: seeding the average with zero would make every pedal
-        // sweep up from the bottom on boot, writing its target the whole way.
+        // The first reading is taken whole, or every pedal would sweep up from zero on boot.
         if (!r.primed) { r.smoothed = raw; r.primed = true; }
         else {
-            // An exponential average in integers: new = old + (raw - old) * weight / 100. Written
-            // with a signed difference so it converges from both directions; the alternative
-            // (weighting the two terms separately) loses the low bits and sticks short of the target.
+            // A signed difference, so the average converges from both directions.
             const int32_t diff = static_cast<int32_t>(raw) - static_cast<int32_t>(r.smoothed);
             const int32_t step = diff * static_cast<int32_t>(smoothing_) / 100;
-            // A step of zero is where an integer exponential average STOPS: within 1/weight of the
-            // reading the fraction truncates away and the value sticks a few counts short forever.
-            // At the top of a pedal's travel that is the difference between 255 and 253, so full
-            // brightness would be unreachable no matter how hard the pedal is pushed. Once the step
-            // rounds to nothing the remaining distance is smaller than the filter can express, so
-            // taking it whole is both correct and the end of the movement.
+            // A step of zero is where an integer average stops, so the last of it is taken whole.
             r.smoothed = static_cast<uint16_t>(step == 0 ? raw
                                                         : static_cast<int32_t>(r.smoothed) + step);
         }
 
         const uint8_t value = mapToTarget(r, r.smoothed);
-        // The DEADBAND, in target units: a resting pedal still jitters a count or two, and without
-        // this the row would write a new value every tick forever, which is 50 setControl calls a
-        // second doing nothing. The first write always goes through, so a row reports where it is.
+        // A resting pedal jitters, so without this a row would write fifty times a second.
         if (r.sent) {
             const int delta = static_cast<int>(value) - static_cast<int>(r.mapped);
             if (delta <= static_cast<int>(deadband_) && -delta <= static_cast<int>(deadband_)) return;
         }
         r.mapped = value;
         r.sent = true;
-        statusBuf_[0] = 0;   // cleared first, so the report below is about THIS move
-        // Through the CONTINUOUS path: an analog row carries a value, where a button carries an
-        // event. Reported when something is wrong (a missing module, a pad target), so a
-        // misconfigured pedal is visible rather than looking like a broken pot.
+        statusBuf_[0] = 0;   // cleared first, so the report below is about this move
+        // The continuous path, since a level carries a value where a button carries an event.
         if (!runInputLevel(r.action, value, statusBuf_, sizeof(statusBuf_)) && statusBuf_[0])
             setStatus(statusBuf_, Severity::Warning);
     }
 
-    /// Map a raw count through the row's travel into 0..255, the range every surface control uses.
+    /// Map a raw count through the row's travel into the range every surface control uses.
     static uint8_t mapToTarget(const Row& r, uint16_t raw) {
         uint16_t lo = r.inMin, hi = r.inMax;
-        // A reversed pair is a legitimate way to say "inverted", and treating it as an error would
-        // reject a calibration a user made by moving the pedal to each end in the order they chose.
+        // A reversed pair says inverted, which is what calibrating in either order produces.
         bool flip = r.invert;
         if (lo > hi) { const uint16_t t = lo; lo = hi; hi = t; flip = !flip; }
-        // A zero-width travel has no answer: report the bottom rather than dividing by zero.
+        // A zero-width travel has no answer, so report the bottom rather than divide by zero.
         if (hi == lo) return 0;
         if (raw <= lo) return flip ? 255 : 0;
         if (raw >= hi) return flip ? 0 : 255;
@@ -299,7 +268,7 @@ private:
         return flip ? static_cast<uint8_t>(255 - v) : v;
     }
 
-    static constexpr uint8_t kMaxRows = 8;
+    static constexpr uint8_t kMaxRows = 8;   ///< inputs one device carries
     Row      rows_[kMaxRows];
     uint8_t  count_ = 0;
     uint32_t nextId_ = 1;

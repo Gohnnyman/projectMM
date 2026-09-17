@@ -311,6 +311,21 @@ def test_a_card_with_no_image_is_reported():
     assert any("no image" in why for _, why in findings)
 
 
+def test_a_summary_page_row_needs_no_image():
+    """The image rule is a CATALOG rule: a reader picks an effect by looking at it, where a
+    summary row names a base class with no card in the UI to capture. The exemption is scoped
+    to that one rule, so an over-long description on the same page is still reported."""
+    import check_docgen
+    page = sorted(check_docgen.PREVIEWLESS_PAGES)[0]
+    assert page not in check_docgen.ANIMATED_PAGES
+    # Silent on the missing image...
+    plain = list(_cards(_card()))[0]
+    assert not any("no image" in why for _, why in check_docgen._card_rules(page, plain))
+    # ...and still loud on everything else the card rules measure.
+    fat = list(_cards(_card(desc="x" * (MAX_DESC + 50))))[0]
+    assert any("description" in why for _, why in check_docgen._card_rules(page, fat))
+
+
 def test_the_image_format_rule_fires_both_ways():
     """A png on an animated page and a gif on a static one are each half the convention,
     and a rule that only caught one left the other unenforced for four pages."""
@@ -609,6 +624,45 @@ def test_a_real_member_beside_an_inline_body_is_still_seen():
            "  bool doThing() { return true; }\n"
            "  uint8_t undocumented = 0;\n};")
     assert [i for i in _hdr(src) if "public variable has no ///" in i[1]]
+
+
+def test_a_public_member_after_a_nested_type_is_still_seen():
+    """A nested type opens its own body, and the enclosing class resumes when it closes.
+    Tracking one depth instead of a stack meant the nested struct overwrote the class that
+    held it, so closing the struct read as closing the class and every public member after
+    one escaped this check: a class with a nested type reported nothing at all."""
+    nested = ("class Foo {\npublic:\n"
+              "  /// documented\n"
+              "  void before() {}\n"
+              "  /// a nested type\n"
+              "  struct Inner { uint8_t a; };\n"
+              "  void after();\n"
+              "  uint8_t alsoAfter = 0;\n};")
+    whys = [why for _, why in _hdr(nested) if "has no ///" in why]
+    assert "public function has no ///" in whys
+    assert "public variable has no ///" in whys
+
+
+def test_a_private_nested_type_stays_exempt():
+    """The stack must not undo what it replaced: a type declared after `private:` is private
+    however it is spelled, and its fields never reach the generated page."""
+    src = ("class Foo {\npublic:\n"
+           "  /// documented\n"
+           "  void ok() {}\n"
+           "private:\n"
+           "  struct Hidden { uint8_t undocumentedField; };\n"
+           "  uint8_t alsoPrivate_ = 0;\n};")
+    assert not [i for i in _hdr(src) if "has no ///" in i[1]]
+
+
+def test_a_friend_declaration_is_not_a_member():
+    """`friend class X;` grants access rather than declaring anything: it reaches no generated
+    page, so asking it for a `///` would document a line no reader ever sees."""
+    src = ("class Foo {\npublic:\n"
+           "  /// documented\n"
+           "  void ok() {}\n"
+           "  friend class ScratchBufferBase;\n};")
+    assert not [i for i in _hdr(src) if "has no ///" in i[1]]
 
 
 def test_the_headers_are_actually_scanned():

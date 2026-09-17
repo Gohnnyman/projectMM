@@ -154,6 +154,15 @@ _CATALOG_PAGES = {
 ANIMATED_TYPES = ("effects", "modifiers", "layouts")
 ANIMATED_PAGES = frozenset(f"moonmodules/light/{t}.md" for t in ANIMATED_TYPES)
 
+# The summary pages, whose rows carry no preview. A catalog card leads with its image
+# because a reader picks an effect by looking at it, where these rows describe a base
+# class, a binding type or an init-order sequencer: there is no card in the UI to capture.
+# The other card rules still apply, since a summary row is read across like any other.
+PREVIEWLESS_PAGES = frozenset({
+    "moonmodules/core/supporting.md",
+    "moonmodules/light/supporting.md",
+})
+
 _H3_RE = re.compile(r'^###\s+(?P<title>.+?)\s*$')
 # A card title is `Name <emoji> · qualifier`: the name runs until the first word that does
 # not start with a letter, digit or "(". Written as a class rather than a list of the emoji

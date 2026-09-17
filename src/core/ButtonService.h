@@ -10,66 +10,65 @@
 
 namespace mm {
 
-/// A core, domain-neutral push-button peripheral: **a list of buttons**, each on its own GPIO, each
-/// driving a control. The physical twin of a UI click, and the same shape as the infrared service,
-/// which drives the same controls from a remote.
+/// A list of push buttons, each on its own GPIO, each driving a control.
 ///
-/// **A list, because boards have more than one.** A QuinLED Dig-Next-2 has three buttons and a stage
-/// rig has a pedalboard; a single pin and a single target was the shape of the first version and it
-/// did not survive the second board. Rows are added, edited and deleted at runtime through the
-/// generic list machinery, so a board's buttons come from its catalog entry rather than from
-/// firmware.
-///
-/// **How it acts.** Through `Scheduler::setControl`, the one generic control-set primitive that
-/// `/api/control`, Improv, MQTT, the WLED bridge and OSC all use. A row names a target as
-/// `Module.control`, so a press and an OSC message are indistinguishable to whatever they drive.
-/// Pointing a row at `Control.switch1` (the recommended path) puts the button on the control surface
-/// where every other transport can also reach it; pointing it at `Drivers.on` drives that control
-/// directly. Both are the same mechanism.
-///
-/// **Momentary vs latching**, because a wall switch and a stage foot pedal want opposite things. A
-/// `toggle` row flips its target on each press and ignores the release (press-to-toggle, a light
-/// switch); a `set` row writes its value while held and 0 on release (hold-to-activate, a pedal for
-/// a burst effect). A foot pedal is electrically a momentary switch on a jack, so it needs no module
-/// of its own: it is a row with `kind = set`.
-///
-/// **Debounced here, not in the platform.** A bouncing contact is a property of the switch, so the
-/// seam reports the pad and the module owns the time constant. Polled on tick20ms: a press lasts
-/// tens of milliseconds and 50 Hz catches it, where the render tick would sample a switch thousands
-/// of times a second to learn the same thing.
-///
-/// **Not auto-wired.** Factory-registered like AudioService and InfraredService: a board with
-/// buttons adds it under `Services` through the device catalog, with a row per button.
+/// The physical twin of a UI click, and the same shape as the infrared service.
+/// A list because boards have more than one, and a single pin did not survive the second board.
 /// @card ButtonService.png
+///
+/// @moreinfo
+///
+/// ## How a press acts
+///
+/// Through the one control-set primitive every transport uses.
+/// So a press and a message are indistinguishable to whatever they drive.
+/// A row names its target as a module and a control.
+/// Pointing one at the surface puts the button where every transport reaches it.
+/// Pointing it at a driver drives that control directly, by the same mechanism.
+///
+/// ## Momentary against latching
+///
+/// A wall switch and a stage pedal want opposite things.
+/// A toggle row flips its target on each press and ignores the release.
+/// A set row writes while held and clears on release, which is what a pedal needs.
+/// So a foot pedal needs no module of its own, being electrically a momentary switch.
+///
+/// ## Debounced here, not in the platform
+///
+/// A bouncing contact is a property of the switch, so this module owns the time constant.
+/// Polled at 50 Hz, since a press lasts tens of milliseconds.
 class ButtonService : public MoonModule, public ListSource {
 public:
+    /// A service, so the container accepts it as a child.
     ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Service; }
 
+    /// Declare the shared debounce and the list of button rows.
     void defineControls() override {
         controls_.addControl("debounceMs", debounceMs_, 1, 200);
         controls_.addList("buttons", *this);
         MoonModule::defineControls();
     }
 
+    /// Open every pin the restored rows name.
     void setup() override {
         MoonModule::setup();
         beginPins();
     }
 
-    /// Poll every configured button at 50 Hz. Not on tick(): a contact closes for tens of
-    /// milliseconds, so the render rate would sample it thousands of times per press.
+    /// Poll every configured button, which 50 Hz catches comfortably.
     void tick20ms() MM_NONBLOCKING override {
         for (uint8_t i = 0; i < count_; i++) pollRow(rows_[i]);
     }
 
     // --- ListSource: the button rows -----------------------------------------------------------
 
-    /// Editable: rows are the whole point of this module, so the UI shows add and delete and the
-    /// list API accepts them. Without this a user could see the rows and change nothing.
+    /// Editable, since the rows are the whole point of this module.
     bool isEditableList() const override { return true; }
 
+    /// How many rows are configured.
     uint8_t listRowCount() const override { return count_; }
 
+    /// Append one row's summary, ending with the live state so a button can be seen working.
     void writeListRow(JsonSink& sink, uint8_t row) const override {
         if (row >= count_) { sink.append("{}"); return; }
         const Row& r = rows_[row];
@@ -77,12 +76,10 @@ public:
                      static_cast<unsigned>(r.id), static_cast<int>(r.pin),
                      r.activeLow ? "true" : "false");
         writeInputActionFields(sink, r.action);
-        // The live state, so a user wiring a button can see it work before binding it to anything.
         sink.appendf(",\"pressed\":%s}", r.pressed ? "true" : "false");
     }
 
-    /// The row's EDITABLE fields: what the UI builds inputs from, so a button is retargeted on the
-    /// card rather than through the API. The summary above is what a collapsed row shows.
+    /// The row's editable fields, so a button is retargeted on the card rather than through the API.
     void writeListRowDetail(JsonSink& sink, uint8_t row) const override {
         if (row >= count_) { sink.append("{}"); return; }
         const Row& r = rows_[row];
@@ -97,6 +94,7 @@ public:
     /// The target-type options, shared across every row rather than repeated in each.
     void writeListOptionSets(JsonSink& sink) const override { writeInputTargetOptions(sink); }
 
+    /// Append a row with default values.
     bool addListRow(uint32_t& outId) override {
         if (count_ >= kMaxRows) return false;
         Row& r = rows_[count_++];
@@ -107,6 +105,7 @@ public:
         return true;
     }
 
+    /// Remove one row by id.
     bool deleteListRow(uint32_t id) override {
         for (uint8_t i = 0; i < count_; i++) {
             if (rows_[i].id != id) continue;
@@ -118,21 +117,19 @@ public:
         return false;
     }
 
+    /// Set one field of one row, the shared action fields first and this module's own after.
     bool setListRowField(uint32_t id, const char* field, const char* valueJson) override {
         Row* r = find(id);
         if (!r) return false;
-        // The action fields first (target / kind / value), shared with every input service; then
-        // this module's own. The shared half owns exactly those three names.
         if (setInputActionField(r->action, field, valueJson)) { markDirty(); return true; }
         if (std::strcmp(field, "pin") == 0) {
             r->pin = static_cast<int8_t>(json::parseInt(valueJson, "value"));
-            beginPin(*r);          // live: entering a GPIO makes the button work now, not at reboot
+            beginPin(*r);          // live, so entering a GPIO works now rather than at reboot
             markDirty();
             return true;
         }
         if (std::strcmp(field, "activeLow") == 0) {
-            // A bool from the API, an option index from the UI select (1 = active low). Both mean
-            // the same thing, so both are accepted rather than adding a second field name.
+            // A bool from the API and an index from the UI mean the same thing, so both are taken.
             r->activeLow = json::parseBool(valueJson, "value") || json::parseInt(valueJson, "value") == 1;
             beginPin(*r);          // the pull follows activeLow, so re-open the input
             markDirty();
@@ -167,8 +164,7 @@ public:
     }
 
 private:
-    /// One button: where it is wired, what it drives, and the debounce state it carries between
-    /// polls. The state is per row because two buttons bounce independently.
+    /// One button: its wiring, its target, and the debounce state it carries between polls.
     struct Row {
         uint32_t    id = 0;
         int8_t      pin = -1;
@@ -180,21 +176,20 @@ private:
         uint16_t    sinceChange = 0;     ///< ms the candidate has held
     };
 
+    /// The row with this id, or null.
     Row* find(uint32_t id) {
         for (uint8_t i = 0; i < count_; i++) if (rows_[i].id == id) return &rows_[i];
         return nullptr;
     }
 
+    /// Open every row's pin.
     void beginPins() { for (uint8_t i = 0; i < count_; i++) beginPin(rows_[i]); }
 
-    /// Open one row's pin as an input. Pull-up for the common wiring (a switch to ground),
-    /// pull-down when the switch feeds 3V3 instead, so `activeLow` picks the arrangement.
+    /// Open one row's pin as an input, the wiring flag picking which pull it takes.
     void beginPin(Row& r) {
         r.open = false;
         if (r.pin < 0) return;
-        // A refused pin is NOT polled: the seam says no for a reason (an invalid GPIO, or one wired
-        // to flash / PSRAM / USB), and reading it anyway returns a level that means nothing. Without
-        // this the row looked configured and reported phantom presses from a floating read.
+        // A refused pin is never polled, since reading it returns phantom presses.
         r.open = platform::gpioInputBegin(
             static_cast<uint8_t>(r.pin),
             r.activeLow ? platform::GpioPull::Up : platform::GpioPull::Down);
@@ -203,36 +198,27 @@ private:
         r.sinceChange = 0;
     }
 
+    /// Read one row, debounce it, and act on a settled edge.
     void pollRow(Row& r) MM_NONBLOCKING {
         if (r.pin < 0 || !r.open) return;
         const bool raw = platform::gpioRead(static_cast<uint8_t>(r.pin)) != r.activeLow;
 
-        // Debounce by TIME, not by a sample count: a count would change meaning if the poll rate
-        // ever did. A level that differs from the settled one starts the clock; it has to hold for
-        // debounceMs before it counts as a real edge.
+        // By time rather than by sample count, which would change meaning with the poll rate.
         if (raw != r.candidate) { r.candidate = raw; r.sinceChange = 0; return; }
         if (raw == r.pressed)   { r.sinceChange = 0; return; }        // already settled here
         if (r.sinceChange < debounceMs_) { r.sinceChange += 20; return; }
 
         r.pressed = raw;
         r.sinceChange = 0;
-        // Only a `set` row acts on the release, and that is its whole point: it writes while held and
-        // clears when let go, which is what a foot pedal needs. A toggle and a delta act on the
-        // PRESS alone, or one push of the button would fire twice, walking a delta row 100 -> 125 on
-        // the press and 150 on the release.
+        // Only a set row acts on the release: the others would fire twice for one push.
         if (r.action.kind != InputAction::Kind::Set && !r.pressed) return;
-        statusBuf_[0] = 0;   // cleared first, so the test below reads THIS press, not the last one
-        // Reported whether it worked or not: a press that reaches a missing module, or a pad with
-        // nothing in it, is a misconfiguration the user has to be able to SEE. Silently doing
-        // nothing looks identical to a broken switch, and sends them to the wiring instead.
-        // Unassigned rows never get here (runInputAction returns false without writing a status),
-        // so an untargeted button stays quiet, which is a valid state rather than a fault.
+        statusBuf_[0] = 0;   // cleared first, so the report below is about this press
+        // Reported either way, since doing nothing looks identical to a broken switch.
         if (runInputAction(r.action, r.pressed, statusBuf_, sizeof(statusBuf_)) || statusBuf_[0])
             setStatus(statusBuf_);
     }
 
-    /// Buttons one device can carry. Three is the most any catalog board wires (Dig-Next-2, Penta);
-    /// eight leaves room for a pedalboard without costing anything meaningful.
+    /// How many buttons one device carries, with room for a pedalboard.
     static constexpr uint8_t kMaxRows = 8;
 
     Row      rows_[kMaxRows];

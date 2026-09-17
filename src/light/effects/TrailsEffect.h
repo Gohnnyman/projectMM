@@ -164,7 +164,7 @@ private:
         const uint8_t n = static_cast<uint8_t>(scaled);
         constexpr uint32_t kReferenceMs = 20;
         emitCarry_ += dt;
-        // One head per frame at most: every head is a full disc, so a stall would flood the plane.
+        // One batch per reference frame at most: each head is a disc, so a stall would flood.
         if (emitCarry_ < kReferenceMs) return;
         emitCarry_ %= kReferenceMs;
         const uint32_t walk = bank_.unitValue(0);

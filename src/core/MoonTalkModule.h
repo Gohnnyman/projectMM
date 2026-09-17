@@ -1,23 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-/// @file MoonTalkModule.h
-/// MoonTalk: a public message board between projectMM devices.
+/// @defgroup MoonTalk A public message board between projectMM devices
+/// @{
 ///
-/// A MoonCloud child with its OWN consent: agreeing to share a chip model says nothing about wanting
-/// to publish messages.
+/// A MoonCloud child with its own consent, sharing a chip model implying nothing more.
+/// Everything sent is public and permanent: no private message, and no delete.
+/// The module never posts on its own, so a message exists because somebody typed it.
 ///
-/// **Everything sent here is public and permanent.** No private message, no recipient, no delete,
-/// and the module never posts on its own: a message exists because somebody typed it.
+/// @moreinfo
 ///
-/// **Two consents.** `consent` allows posting at all; `shareName` is separate and OFF by default, because
-/// "MM-A094" says nothing while "Ewoud's bedroom" says a great deal. Without it a message is
-/// attributed to the first 8 characters of the installation id.
+/// Two consents govern it: one allows posting, the other shares the device name.
+/// The second is off by default, a name saying more than an identifier does.
+/// Without it a message carries the first characters of the installation id.
 ///
-/// Reading sends no identifier, but the board is only read while consent is on: a device whose
-/// owner said no makes no request at all. There is no authentication, so a sender id can be
-/// fabricated by anyone posting by hand: acceptable for a board where nothing is gated on identity,
-/// and stated in the privacy policy rather than left to be discovered.
+/// Reading sends no identifier, and happens only while consent is on.
+/// There is no authentication, so a sender id can be fabricated by hand.
+/// That is acceptable where nothing is gated on identity, and is stated in the policy.
 
 #include <cstdint>
 #include <cstdio>
@@ -33,33 +32,22 @@ namespace mm {
 
 class MoonTalkModule : public MoonModule {
 public:
+    /// Declare the two consents, the message box, and the button that publishes.
     void defineControls() override {
         controls_.clear();
-
-        // A checkbox: publishing is on or off, and a third state said nothing extra.
-        controls_.addControl("consent", consent_);
-
-        // Default OFF: a device name is the one field here that identifies a person.
-        controls_.addControl("shareName", shareName_);
-
+        controls_.addControl("consent", consent_);       // publishing is on or off
+        controls_.addControl("shareName", shareName_);   // off: a name identifies a person
         controls_.addText("message", message_, sizeof(message_));
-        // Below the text it sends, and the ONLY thing that publishes.
-        controls_.addButton("send");
+        controls_.addButton("send");                     // the only thing that publishes
     }
 
-    /// A message is published when the user presses `send`, and never before.
-    ///
-    /// The first shape sent on a `message` write, which a Text control emits on every debounced
-    /// KEYSTROKE: typing "hello" published "hel" and "hell" as messages of their own. A settle
-    /// window then guessed when typing had stopped, and guessing wrong cleared a half-typed
-    /// message. A button removes the guess entirely: a keystroke is just a keystroke.
+    /// Publish the consent explanation, a message being sent only when the button is pressed.
     void setup() override {
         refreshStatus();
         MoonModule::setup();
     }
 
-    /// What this setting exchanges, on the status slot: see MoonStatsModule::refreshStatus for why
-    /// the explanation lives here rather than in a control or only in the policy.
+    /// Say what this setting exchanges, on the status slot rather than only in the policy.
     void refreshStatus() {
         if (consent_) clearStatus();
         else setStatus("Off. Switch on to post to a public board shared by projectMM devices. "
@@ -67,23 +55,21 @@ public:
                        "Each message carries the country it came from and the time it was sent.");
     }
 
+    /// Refresh the explanation on a consent change, and publish on the button.
     void onControlChanged(const char* name) override {
         if (name && std::strcmp(name, "consent") == 0) { refreshStatus(); return; }
         if (!name || std::strcmp(name, "send") != 0) return;
         if (!consent_) return;           // never publish without consent
         if (message_[0] == 0) return;    // nothing typed
 
-        // Only on a successful hand-off. Clearing regardless threw away what somebody typed when the
-        // server was unreachable, which is the moment they would most want to try again.
+        // Only on a successful hand-off, so an unreachable server keeps what somebody typed.
         if (send()) {
             message_[0] = 0;
             markDirty();
         }
     }
 
-    /// Read from SystemModule at SEND time, not cached: a setter was never called, so every message
-    /// went out unnamed while `shareName` said otherwise. Renaming the device now takes effect on
-    /// the next message rather than the next reboot.
+    /// The device's name, read at send time so a rename takes effect on the next message.
     const char* deviceName() const {
         auto* sched = Scheduler::instance();
         const MoonModule* system = sched ? sched->firstByName("System") : nullptr;
@@ -99,12 +85,16 @@ public:
         return "";
     }
 
+    /// Whether posting is allowed at all.
     bool consent() const { return consent_; }
+    /// Whether the device name rides along, which needs both consents.
     bool sharesName() const { return shareName_ && consent_; }
+    /// What is currently typed in the box.
     const char* message() const { return message_; }
 
-    /// Set the two consents directly, so a test can walk the matrix without a UI write.
+    /// Set the posting consent directly, so a test needs no UI write.
     void setConsentForTest(bool yes) { consent_ = yes; refreshStatus(); }
+    /// Set the name consent directly, so a test can walk the matrix.
     void setShareNameForTest(bool share) { shareName_ = share; }
 
     /// Put text in the box the way a control write does, so a test can press send without a UI.
@@ -113,7 +103,7 @@ public:
     }
 
 private:
-    /// Build and post one message. False when nothing was published, so the caller can keep the text.
+    /// Build and post one message, returning false so the caller can keep unsent text.
     bool send() {
         char id[kInstallationIdChars + 1] = {};
         installationId(id);
@@ -122,7 +112,7 @@ private:
         JsonSink body;
         body.append("{\"sender\":");
         body.writeJsonString(id);
-        // Only when both consents allow it, and omitted rather than sent empty.
+        // Omitted rather than sent empty, and only when both consents allow it.
         const char* name = deviceName();
         if (shareName_ && name && name[0]) {
             body.append(",\"name\":");
@@ -133,16 +123,17 @@ private:
         body.append("}");
         body.flush();
 
-        // Sent through the container, which owns the address.
+        // Through the container, which owns the address.
         auto* cloud = static_cast<const MoonCloudModule*>(parent());
         return cloud && cloud->post("/api/talk", body.data());
     }
 
-    bool consent_ = false;
-    bool shareName_ = false;
-    // 281 = the server's MAX_MESSAGE (280) plus the terminator. Sized to the contract rather than
-    // under it: a 192-byte buffer silently capped a device 89 characters below the documented limit.
+    bool consent_ = false;      ///< whether posting is allowed
+    bool shareName_ = false;    ///< whether the device name rides along
+    // Sized to the server's own limit plus a terminator, rather than under it.
     char message_[281] = {};
 };
+
+/// @}
 
 }  // namespace mm

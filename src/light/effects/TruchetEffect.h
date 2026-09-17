@@ -112,7 +112,7 @@ public:
     }
 
 private:
-    /// Distance to a ring of radius `r` at the origin, negative inside its line and positive outside.
+    /// Distance to a ring of radius `r` at the origin: zero on the line, positive either side.
     static int32_t ringDistance(int32_t x, int32_t y, int32_t r) {
         const int32_t d = shader::length(static_cast<draw::pos_t>(x), static_cast<draw::pos_t>(y));
         return d - r < 0 ? r - d : d - r;
