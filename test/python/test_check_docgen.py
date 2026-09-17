@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "moondeck" / "check"))
 sys.path.insert(0, str(ROOT / "moondeck" / "docs"))
 
-from check_docgen import (MAX_CONTROL, MAX_CONTROLS, MAX_DESC,  # noqa: E402
-                           _cards, _structure)
+from check_docgen import (MAX_CONTROL, MAX_CONTROL_VISUAL, MAX_DESC,  # noqa: E402
+                           MAX_DESC_VISUAL, _cards, _header_rules, _structure)
 
 
 def _card(desc: str = "Short.", controls=("- `a` — one.",)) -> str:
@@ -36,17 +36,99 @@ def test_description_over_the_limit_is_measured():
 def test_a_card_within_the_limits_measures_under_them():
     card = list(_cards(_card()))[0]
     assert card["desc"] <= MAX_DESC
-    assert card["controls"] <= MAX_CONTROLS
     assert card["widest"] <= MAX_CONTROL
 
 
-def test_controls_are_summed_not_counted_individually():
-    # Ten short controls are fine one by one and too much together: the column height is
-    # what the reader pays, so the sum is the thing that matters.
-    many = [f"- `p{i}` — {'y' * 80}." for i in range(10)]
+def test_a_wrapped_sentence_in_a_class_comment_is_a_finding():
+    # The one-line budget cannot reach here: a class comment is ALLOWED ten lines, so a
+    # sentence carried onto the next line passes every other rule.
+    header = ("#pragma once\nnamespace mm {\n"
+              "/// A sentence that runs long and wraps onto\n"
+              "/// a second line, which is what this catches.\n"
+              "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    wraps = [w for _, w in _header_rules("probe.h", header) if "hard wrap" in w]
+    assert len(wraps) == 1
+
+
+def test_a_continuation_that_does_not_start_lowercase_is_still_a_wrap():
+    # The test is the PREVIOUS line's unfinished sentence, not the next line's case. A
+    # continuation beginning with a digit or an identifier is most of a technical comment,
+    # and a lowercase-only test missed every one of them.
+    digit = ("#pragma once\nnamespace mm {\n"
+             "/// A sentence that does not end here and gives\n"
+             "/// 8-16 lanes for the wall time of one.\n"
+             "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    ident = ("#pragma once\nnamespace mm {\n"
+             "/// The wire format is\n"
+             "/// ParallelSlots.h in the same directory.\n"
+             "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    for header in (digit, ident):
+        assert len([w for _, w in _header_rules("probe.h", header) if "hard wrap" in w]) == 1
+
+
+def test_an_indented_block_keeps_its_layout():
+    # A wire table, a listing or a diagram is a BLOCK: joining its lines destroys the layout
+    # that carries the meaning. Collapsing one produced a 43-word "sentence" of protocol bytes
+    # in PreviewDriver.h, which is the worst of both readings.
+    table = ("#pragma once\nnamespace mm {\n"
+             "/// Lead.\n///\n/// @moreinfo\n///\n/// ## S\n///\n"
+             "///     POST /api            pair, once pressed\n"
+             "///     GET  /api/lights     the lights by id\n"
+             "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    assert not [w for _, w in _header_rules("probe.h", table) if "hard wrap" in w]
+
+
+def test_a_colon_or_semicolon_does_not_end_a_sentence():
+    # A colon INTRODUCES what follows and a semicolon joins two clauses, so neither ends a
+    # thought. Unicode's sentence-boundary rules, Vale's own detector and the standards line
+    # agree ("joined by a comma or a colon that a full stop should have been"). Treating them
+    # as terminators passed every `Prior art: ...` block that wrapped mid-sentence.
+    colon = ("#pragma once\nnamespace mm {\n"
+             "/// Prior art: one discovery, one lineage, one driver:\n"
+             "/// architecture studied, never copied.\n"
+             "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    semi = ("#pragma once\nnamespace mm {\n"
+            "/// The difference is underneath;\n"
+            "/// it buys two things the other cannot give.\n"
+            "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    for header in (colon, semi):
+        assert len([w for _, w in _header_rules("probe.h", header) if "hard wrap" in w]) == 1
+
+
+def test_structure_is_not_read_as_a_wrapped_sentence():
+    # A list item, a heading and a table row continue across lines as STRUCTURE. Reading
+    # one as wrapped prose would fire on every appendix that carries a table.
+    header = ("#pragma once\nnamespace mm {\n"
+              "/// A finished sentence.\n"
+              "///\n"
+              "/// @moreinfo\n"
+              "///\n"
+              "/// ## A section\n"
+              "///\n"
+              "/// - an item that continues\n"
+              "///   onto the next line\n"
+              "///\n"
+              "/// | a | b |\n"
+              "/// |---|---|\n"
+              "class Probe {\npublic:\n    /// Fine.\n    int a = 0;\n};\n}\n")
+    assert not [w for _, w in _header_rules("probe.h", header) if "hard wrap" in w]
+
+
+def test_many_short_controls_are_not_a_finding():
+    # A module with twelve honest controls is not worse documented than one with three.
+    # Only a control that runs to a paragraph makes a card unreadable, so the cap is per
+    # LINE: ten short ones stay clean however tall the column gets.
+    many = [f"- `p{i}` — short." for i in range(10)]
     card = list(_cards(_card(controls=many)))[0]
-    assert card["controls"] > MAX_CONTROLS
     assert card["widest"] < MAX_CONTROL
+
+
+def test_the_visual_catalogs_are_held_tighter():
+    # An effect's gif says what it looks like, so its prose says only what the eye cannot
+    # see. The same card passes off a still-image page and fails on a gif one.
+    between = "x" * (MAX_DESC_VISUAL + 50)
+    assert MAX_DESC_VISUAL < len(between) <= MAX_DESC
+    assert MAX_CONTROL_VISUAL < MAX_CONTROL
 
 
 def test_the_widest_control_is_reported_with_its_text():
@@ -443,10 +525,18 @@ def test_a_file_level_code_comment_is_exempt():
     assert not [i for i in issues if "code comment" in i[1]]
 
 
-def test_a_long_doc_line_is_flagged():
+def test_a_long_doc_sentence_is_flagged():
     long = "/// " + " ".join(["word"] * 25)
     issues = _hdr(long + "\nvoid doThing();")
-    assert any("doc line 25 words" in why for _, why in issues)
+    assert any("doc sentence 25 words" in why for _, why in issues)
+
+
+def test_several_short_sentences_on_one_line_are_not_flagged():
+    # The no-wrap rule makes a line a paragraph, so the cap counts SENTENCES. Counting the
+    # line would fail correct prose and pass nothing the standards ask for.
+    line = "/// " + " ".join("A short thought here." for _ in range(4))
+    issues = _hdr(line + "\nvoid doThing();")
+    assert not [i for i in issues if "doc sentence" in i[1]]
 
 
 def test_a_moreinfo_appendix_past_twenty_lines_is_flagged():

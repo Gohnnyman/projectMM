@@ -21,6 +21,7 @@ namespace mm {
 /// maxLen 0 → the panel fades to dark, safe on any target and grid size.
 /// Author: Andrew Tuline (WLED-SR), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Audio-reactive effect: a noise field modulated by sound level.
+/// @card NoiseMeterEffect.gif
 class NoiseMeterEffect : public EffectBase {
 public:
     const char* tags() const override { return "🐙🎵🌫️"; }   // WLED origin · audio

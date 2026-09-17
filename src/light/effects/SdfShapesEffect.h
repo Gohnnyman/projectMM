@@ -27,8 +27,8 @@ namespace mm {
 //
 /// Prior art: Iñigo Quilez's 2D distance-function catalogue and his polynomial smooth-minimum
 /// (iquilezles.org). Implemented fresh in fixed point against those descriptions.
-/// @card SdfShapesEffect.png
 /// Effect: two SDF shapes orbiting and melting together, with a soft edge and an outline.
+/// @card SdfShapesEffect.gif
 class SdfShapesEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️"; }   // power-function showcase
@@ -94,7 +94,7 @@ public:
                 if (cov == 0 && !glow) { draw::pixel(cv, {x, y, 0}, RGB{0, 0, 0}); continue; }
 
                 // Palette index rides the distance, so the shape reads as a lit body with the field
-                // falling away around it; time offsets the whole ramp so the colour drifts.
+                // falling away around it; time offsets the whole ramp so the color drifts.
                 const int32_t dPix = d >> draw::kSubShift;
                 const uint8_t idx = static_cast<uint8_t>((t >> 8) + static_cast<uint8_t>(dPix * 4));
                 const uint8_t bri = glow ? (cov > 0 ? cov : glowFalloff(dPix)) : cov;

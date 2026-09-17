@@ -22,8 +22,8 @@ namespace mm {
 //
 /// Prior art: the standard demoscene tunnel (angle + 1/r texture mapping), and Iñigo Quilez's
 /// write-ups of it. Implemented fresh in fixed point.
-/// @card TunnelEffect.png
 /// Effect: a texture-mapped tunnel flying toward a vanishing point.
+/// @card TunnelEffect.gif
 class TunnelEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️🌫️🎡"; }   // power-function showcase

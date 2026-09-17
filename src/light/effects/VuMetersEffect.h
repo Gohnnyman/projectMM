@@ -20,8 +20,8 @@ namespace mm {
 // Each needle sweeps its own arc in its own column, with a peak marker held at the highest
 // reading and falling slowly (a peak-hold, the other half of the standard meter), and a red zone
 // past three quarters.
-// @card VuMetersEffect.png
 /// Effect: sixteen VU needles with real mass, one per band, with peak-hold and a red zone.
+/// @card VuMetersEffect.gif
 class VuMetersEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🎶🖌️"; }

@@ -16,32 +16,24 @@
 
 namespace mm {
 
-/// The reusable light-preset library: a Drivers submodule that owns a set of NAMED channel-role
-/// wirings, each editable in its own row and referenced by many drivers. A driver stores only a
-/// preset's STABLE id and resolves it here at rebuild time into its own Correction, so building a
-/// wiring once makes it reusable, and reordering or deleting other presets disturbs no reference.
+/// The reusable light-preset library, a Drivers submodule owning a set of NAMED channel-role wirings. Each is editable in its own row and referenced by many drivers. A driver stores only a preset's STABLE id and resolves it here into its own Correction. So building a wiring once makes it reusable, and reordering other presets disturbs no reference.
 ///
-/// A curated set of real fixtures is seeded read-only on first boot, and a user adds custom named
-/// wirings alongside them. The render loop never reads this module.
+/// A curated set of real fixtures is seeded read-only on first boot. A user adds custom named wirings alongside them. The render loop never reads this module.
 ///
 /// @moreinfo
 ///
 /// ## What a preset is
 ///
 /// A channel-role layout: role `r` at channel `i` says channel `i` of a light carries role `r`.
-/// The colour roles cover the strip orders, and the fixture roles cover pan, tilt and the rest.
+/// The color roles cover the strip orders, and the fixture roles cover pan, tilt and the rest.
 ///
 /// ## Storage is uncapped
 ///
-/// A preset is exactly as wide as its fixture. Role bytes live in one dynamic pool, each preset a
-/// slice of it, so a moving head can declare as many channels as it has. The pool is touched only
-/// on the cold path, so it is free to reallocate: no control binds an address into it.
+/// A preset is exactly as wide as its fixture. Role bytes live in one dynamic pool, each preset a slice of it. So a moving head declares as many channels as it has. The pool is touched only on the cold path, so it is free to reallocate. No control binds an address into it.
 ///
 /// ## The editable-list primitive
 ///
-/// This is the first consumer of `EditableListSource`, so the whole add, delete, reorder and edit
-/// surface is reused rather than rebuilt. The per-row fields are the name, the channel count, and
-/// one role picker per channel.
+/// The first consumer of `EditableListSource`. The whole add, delete, reorder and edit surface is reused rather than rebuilt. The per-row fields are the name, the channel count, and one role picker per channel.
 ///
 /// @card lightpresets.png
 class LightPresetsModule : public MoonModule, public ListSource {

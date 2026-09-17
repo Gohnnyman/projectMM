@@ -29,8 +29,8 @@ namespace mm {
 // slice and not yet between them: `advect16`'s rule yields vx and vy only, so a trail does not
 // travel through the volume. 3D transport needs a trilinear sampler and a vz, which is its own
 // change.
-// @card TrailsEffect.png
 /// Effect: bright dots thrown into a flowing medium, leaving tails the flow carries and bends.
+/// @card TrailsEffect.gif
 class TrailsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️💨🌫️"; }   // power-function showcase

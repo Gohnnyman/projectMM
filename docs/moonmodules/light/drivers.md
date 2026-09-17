@@ -14,8 +14,8 @@ Added once by [`DriverBase`](moxygen/DriverBase.md) so no driver re-implements i
 
 <img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="Shared driver controls: localBrightness, lightPreset, whiteMode, start, count">
 
-- `localBrightness`: this driver's dim (0–255), multiplied with the global brightness. Both sliders reach the output.
-- `lightPreset`: the [light preset](supporting.md) applied per light: channel order and RGBW synthesis.
+- `localBrightness`: this driver's dim (0–255), multiplied with the global brightness.
+- `lightPreset`: the [light preset](supporting.md) applied per light, for order and white.
 - `whiteMode`: how W is derived on an RGBW strip, when the preset carries a W channel.
 - `start`: first light of the shared buffer this driver reads (default `0`).
 - `count`: how many lights from `start`. **Blank drives all of them.**
@@ -39,8 +39,8 @@ Addressable WS2812B-class LEDs over a wire: **RMT** for a few strands, **Paralle
 Plus the [shared controls](#shared-driver-controls) above:
 
 - `pins`: data GPIO list: `18,17,16`, or ranges like `20-23`, mixed freely. Empty idles until set.
-- `ledsPerPin`: lights per strand. Blank splits evenly, one number applies to all, a list is per strand.
-- `timing` (RMT only): the wire bit rate. Default suits WS2812/WS2812B/SK6812; a 12V WS2811 needs `400kHz`.
+- `ledsPerPin`: lights per strand. Blank splits evenly, one number to all, a list per strand.
+- `timing` (RMT only): the wire bit rate. A 12V WS2811 needs `400kHz`; the default suits the rest.
 - `peripheral`: the DMA peripheral, filtered to what the chip supports. It divides the card.
 - `doubleBuffer`, `pinExpander`, bus pins: shown per peripheral, so the set changes with it.
 - 🔧 `loopbackTest`: a TX to RX self-test, verdict in the status field.
@@ -81,8 +81,8 @@ Detail: [technical](moxygen/Hub75Driver.md) · encoder: [Hub75Slots](moxygen/Hub
 Streams the buffer over UDP as **Art-Net**, **E1.31 / sACN** or **DDP**, one burst per frame, to Falcon/Advatek controllers, xLights and LedFx. Feeds several receivers from one driver, each its own slice. Mixed DMX fixtures and the addressing rules are in [the details below](#network-send-details).
 
 - `protocol`: Art-Net / E1.31 / DDP / E1.31 multicast (default Art-Net); the port follows.
-- `ips`: the receivers. **Blank idles**, so it never sends uninvited traffic. A range or list works: `192.168.1.70-74`.
-- `lightsPerIp`: lights per receiver. Blank splits evenly, one number applies to all, a list is per receiver.
+- `ips`: the receivers, a range or a list: `192.168.1.70-74`. **Blank idles** rather than sending.
+- `lightsPerIp`: lights per receiver. Blank splits evenly, one number to all, a list each.
 - `universe_start`: first universe for Art-Net / E1.31, restarting per receiver. DDP ignores it.
 - `fps`: frame-rate limit (default 50, 1–120).
 
@@ -99,7 +99,7 @@ Detail: [technical](moxygen/NetworkSendDriver.md)
 Streams the buffer to **ColorLight 5A-75 receiving cards** as raw Ethernet, taking the place of the sending card that normally feeds them. The board renders and sends, so it replaces a host PC driving the same wall. The link requirement and the protocol lineage are in [the details below](#panel-card-details).
 
 - `format`: the card's wire format (ColorLight 5A-75).
-- `firmware`: `v12 and older` (default) or `v13 and newer`. Wrong choice, and the wall updates once every few seconds.
+- `firmware`: `v12 and older` (default) or `v13 and newer`. Wrong, and the wall barely updates.
 - **No geometry controls**: the wall comes from the [Layout](layouts.md), cut into card rows.
 - `interface`: which NIC to send from, by adapter name. Desktop only; raw sending needs privileges.
 - `fps`: frame-rate limit (default 40, 1 to 120).
@@ -192,7 +192,7 @@ Detail: [technical](moxygen/HlsDriver.md)
 
 **The 74HCT595 pin expander is experimental and size-limited.** Each data pin feeds one '595, so the driver drives `pins` x 8 strands. It buys pins, not memory: the register is serial-in, so presenting 8 bits costs 8 shift cycles and the DMA frame grows eightfold, about 1.1 KB per light. Above roughly 96 lights per strand that frame exceeds internal DMA RAM. The `i80` peripheral is capped there, because above it the frame falls to PSRAM, which the S3's GDMA cannot sustain at the expander's 26.67 MHz clock. `MoonI80` lifts that with a streaming ring and drives 128 lights per strand reliably; past 128 a residual refill race still stalls it. The ceiling is 64 strands, set by the encoder's 64-bit active-strand mask. Full status and the measurements: [the analysis](../../work/future/shift-register-driver-analysis.md).
 
-**Wiring the loopback jumper through a '595.** In direct mode you jumper a data GPIO straight to `loopbackRxPin`. In shift mode a data GPIO carries the serial stream into the register, not pixel data, so the wire must come from a register OUTPUT. Strand S sits on data pin `S / 8`'s register at shift position `S % 8`, and a '595 shifts MSB-first, so position `p` appears on output `Q(7 - p)`: strand 0 is Q7. Set `loopbackStrand` to the strand whose output you tapped, and walking it 0 to N-1 until the test passes identifies the strand empirically. **The '595 runs at 5 V and an ESP32 GPIO is not 5 V tolerant**: use a divider (1 kOhm from the output to the GPIO, 2 kOhm from the GPIO to ground) or a level shifter, or the pin can be damaged. No continuity pre-check runs in shift mode, so a mis-wired jumper shows as a bit failure rather than "jumper not detected".
+**Wiring the loopback jumper through a '595.** In direct mode you jumper a data GPIO straight to `loopbackRxPin`. In shift mode a data GPIO carries the serial stream into the register, not pixel data, so the wire must come from a register OUTPUT. Strand S sits on data pin `S / 8`'s register at shift position `S % 8`. A '595 shifts MSB-first, so position `p` appears on output `Q(7 - p)`, and strand 0 is Q7. Set `loopbackStrand` to the strand whose output you tapped. Walking it 0 to N-1 until the test passes identifies the strand empirically. **The '595 runs at 5 V and an ESP32 GPIO is not 5 V tolerant.** Use a divider (1 kOhm from the output to the GPIO, 2 kOhm from the GPIO to ground) or a level shifter. Without one the pin can be damaged. No continuity pre-check runs in shift mode, so a mis-wired jumper shows as a bit failure rather than "jumper not detected".
 
 **Whose work this is.** The clockless I2S / RMT / Parlio techniques come from [hpwit (Yves Bazin)](https://github.com/hpwit), whose work is why a single board can drive dozens of parallel strands at all ([analysis](../../work/future/leddriver-analysis-top-down.md)), on WS2812B prior art from FastLED and WLED.
 
@@ -318,7 +318,7 @@ An encoder your ffmpeg lacks starts and exits immediately; the status then reads
 
 **Where the pins come from.** The `board` select fills all fourteen lines on first use. A published map (MoonHub75, MatrixPortal S3, Waveshare RGB Matrix) hides the pin rows, because those lines are soldered and there is nothing to act on; the generic per-chip sets and Custom show them. Hidden rows stay bound, so the values persist, still drive the panel, and still show in the pin map. A line on a pin the chip has wired to flash or PSRAM is refused before init, with the line named. That is why the MatrixPortal S3 runs the `esp32s3-zero` image: three of its lines sit on 35-37, which the octal N8R8/N16R8 images hold for PSRAM. Wiring your own: the per-chip free sets are in [GPIO usage](../../reference/hardware/gpio-usage.md).
 
-**The published board maps.** Each is taken from that board's own source, written in this driver's control order (clk, lat, oe). A panel's ribbon numbers its color lines R1/G1/B1 (upper half) and R2/G2/B2 (lower half); some board docs call the same pairs R0/G0/B0 and R1/G1/B1, which is the one naming trap worth knowing before wiring.
+**The published board maps.** Each is taken from that board's own source, written in this driver's control order (clk, lat, oe). A panel's ribbon numbers its color lines R1/G1/B1 (upper half) and R2/G2/B2 (lower half). Some board docs call the same pairs R0/G0/B0 and R1/G1/B1. That is the one naming trap worth knowing before wiring.
 
 ```text
 MoonHub75             r1  1   g1  5   b1  6    r2  7   g2 13   b2  9
@@ -334,12 +334,12 @@ Waveshare RGB Matrix  r1  4   g1  5   b1  6    r2  7   g2 15   b2 16
                       clk 41  lat 40  oe  2
 ```
 
-The [MoonHub75 PCB](https://moonmodules.org/projects/hardware/#moonhub75-pcb) is a Lilygo T7-S3 on a passive adapter, designed by Sören (lost-hope); its map comes from the hardware repository's own README, and the same board carries an INMP441 microphone socket on IO10/11/12, so an audio-reactive effect and a panel run together on it. The Adafruit MatrixPortal S3 map is from the board's CircuitPython `pins.c`. The Waveshare is SKU 34422, not to be confused with the Waveshare ESP32-S3-Matrix, a different product with an onboard 8x8 WS2812 matrix and no HUB75 connector. A 1/32-scan panel needs `e`; on 1/16 panels that pin is free.
+The [MoonHub75 PCB](https://moonmodules.org/projects/hardware/#moonhub75-pcb) is a Lilygo T7-S3 on a passive adapter, designed by Sören (lost-hope). Its map comes from the hardware repository's own README. The same board carries an INMP441 microphone socket on IO10/11/12, so an audio-reactive effect and a panel run together on it. The Adafruit MatrixPortal S3 map is from the board's CircuitPython `pins.c`. The Waveshare is SKU 34422, not to be confused with the Waveshare ESP32-S3-Matrix, a different product with an onboard 8x8 WS2812 matrix and no HUB75 connector. A 1/32-scan panel needs `e`; on 1/16 panels that pin is free.
 
 **Two controls a panel cannot tell you.** `scanRate` is the panel's own, and two panels of identical dimensions can scan differently, so it is read off the panel rather than calculated from its size. `peripheral` is yours rather than the driver's: a P4 has one LCD_CAM and one Parlio, so a board already driving WS2812 strips from one needs the panel on the other, and only you know which way round.
 
 **How a HUB75 panel works, in two facts.** It is *scanned*, not addressed: two rows light at once, the upper half-panel through R1/G1/B1 and the lower through R2/G2/B2, selected by a row address on A/B/C (and D/E on finer panels). The controller walks every scan row in turn and persistence of vision does the rest, so a 64-row panel has 32 scan rows and row `r` drives panel rows `r` and `r + 32` together.
 
-And brightness is *time*, not amplitude. A HUB75 pixel is a switch, on or off, so intensity comes from binary coded modulation: bit plane `p` is displayed for 2^p time units, and a value lights its planes for a total proportional to itself. That weighting is the peripheral's output-enable window, and it is not built yet, which is why the depth cap below exists. Either way the encoder stores each plane once: emitting plane `p` 2^p times is the obvious reading and it is wrong, since 255 passes at 8-bit is 1,060,800 bytes for a single 64x64 panel where storing once is 33,280.
+And brightness is *time*, not amplitude. A HUB75 pixel is a switch, on or off, so intensity comes from binary coded modulation: bit plane `p` is displayed for 2^p time units, and a value lights its planes for a total proportional to itself. That weighting is the peripheral's output-enable window, and it is not built yet, which is why the depth cap below exists. Either way the encoder stores each plane once. Emitting plane `p` 2^p times is the obvious reading and it is wrong: 255 passes at 8-bit is 1,060,800 bytes for a single 64x64 panel, where storing once is 33,280.
 
 **What depth costs, and why it stops at 4.** Every bit plane is a full scan, so depth costs refresh and memory linearly, and each slot on the wire is 2 bytes because the address, latch and output-enable lines sit above bit 7 of a 16-bit word. One 64x64 panel at 1/32 scan is 16,640 bytes a frame at 4-bit. The planes are emitted once each rather than weighted for 2^p time, so bit 3 lights as long as bit 0 and a fifth plane would buy nothing the eye can find. The weighting is [backlogged](https://github.com/MoonModules/projectMM/blob/main/docs/work/future/backlog-light.md), and the cap lifts with it.

@@ -8,32 +8,19 @@
 
 namespace mm {
 
-/// Output driver: parallel 8-or-16-lane WS2812B over the ESP-IDF esp_lcd i80 bus, the parallel
-/// scale path on all three i80-capable ESP32 families. RMT gives a chip 4-8 channels; this gives
-/// 8-16 lanes for the wall time of one. The shared body (slicing, the whole-frame async DMA, the
-/// fused encode, the loopback self-test) lives in ParallelLedDriver; the wire format is
-/// ParallelSlots.h. Sibling of ParlioPeripheral.
+/// Output driver: parallel 8-or-16-lane WS2812B over the ESP-IDF esp_lcd i80 bus. The parallel scale path on all three i80-capable ESP32 families. RMT gives a chip 4-8 channels; this gives 8-16 lanes for the wall time of one. The shared body lives in ParallelLedDriver: slicing, the async DMA, the fused encode, the loopback self-test. The wire format is ParallelSlots.h. Sibling of ParlioPeripheral.
 ///
-/// Prior art: Adafruit's LCD_CAM discovery, hpwit's I2SClockless lineage, FastLED's S3 driver:
-/// architecture studied, never copied, on IDF's maintained esp_lcd abstraction rather than the
-/// raw registers.
+/// Prior art: Adafruit's LCD_CAM discovery, hpwit's I2SClockless lineage, FastLED's S3 driver. Architecture studied and never copied, on IDF's esp_lcd rather than the raw registers.
 ///
 /// @moreinfo
 ///
 /// **One API, two peripherals.** ESP-IDF exposes one public i80 API and routes it to whatever the
-/// silicon has: LCD_CAM on the S3, P4 and S31, the I2S peripheral in i80 mode on the classic, whose
-/// only route past 8 lanes it is. They are mutually exclusive per chip, so `lanesAvailable()` reads
-/// whichever lane count is non-zero. Named for the bus rather than a peripheral because it is not
-/// one peripheral, the same reason its sibling is named Parlio.
+/// silicon has. LCD_CAM on the S3, P4 and S31; the I2S peripheral on the classic, its only route past 8 lanes. They are mutually exclusive per chip, so `lanesAvailable()` reads whichever lane count is non-zero. Named for the bus rather than a peripheral, because it is not one peripheral. Its sibling is named Parlio for the same reason.
 ///
 /// **The 3-slot-per-bit wire contract.** Each WS2812 bit becomes three bus slots at
-/// 2.67 MHz, a 375 ns slot: every active lane HIGH, the data bits, then all LOW. So a 1
-/// is HIGH 750 ns and a 0 375 ns, approximating RMT's 700/350. NOT the lineage's ~416 ns:
-/// newer WS2812B revisions spec T0H at 380 ns max, and a longer 0 on 3.3 V reads as a 1
-/// and washes the strip white.
+/// 2.67 MHz, a 375 ns slot: every active lane HIGH, the data bits, then all LOW. So a 1 is HIGH 750 ns and a 0 375 ns, approximating RMT's 700/350. NOT the lineage's ~416 ns. Newer WS2812B revisions spec T0H at 380 ns max. A longer 0 on 3.3 V reads as a 1 and washes the strip white.
 ///
-/// Both silicon paths do whole-frame chained DMA, so the classic I2S path is WiFi-underrun-immune
-/// by construction and needs none of the ISR-refilled ring the raw-register lineage requires.
+/// Both silicon paths do whole-frame chained DMA. So the classic I2S path is WiFi-underrun-immune by construction, and needs none of the ISR-refilled ring the lineage requires.
 class I80Peripheral : public LedPeripheral {
 public:
     // Unset until the user sets them; the S3 N16R8 bench is pins "1,2,4,5,6,7,8,9", rx 12.

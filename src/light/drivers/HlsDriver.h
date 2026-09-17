@@ -11,12 +11,9 @@
 
 namespace mm {
 
-/// Output driver: publishes the rendered frame as an H.264 stream over HLS from the device's own
-/// HTTP server, so a TV, VLC or a browser can play it. It complements NdiDriver: NDI is the
-/// pro-tools path, HLS is the consumer-playback path.
+/// Output driver: publishes the rendered frame as an H.264 stream over HLS, from the device's own HTTP server. A TV, VLC or a browser can play it. It complements NdiDriver: NDI is the pro-tools path, HLS is the consumer-playback path.
 ///
-/// The driver states numbers and the platform encodes. This driver packs the corrected frame and
-/// hands it over with the geometry, rate and bitrate; how those become H.264 differs per platform.
+/// The driver states numbers and the platform encodes. This driver packs the corrected frame and hands it over with the geometry, rate and bitrate. How those become H.264 differs per platform.
 ///
 /// Prior art: HLS is Apple's, described in RFC 8216, and ffmpeg does the desktop encoding.
 ///
@@ -24,22 +21,15 @@ namespace mm {
 ///
 /// ## Pixel-exact contract
 ///
-/// The encoded frame is the grid from the layer, letterboxed by the display. Above scale 1 a light
-/// becomes a solid square block rather than one pixel, which is still pixel-exact in the sense
-/// that matters: replication invents no colour the wall does not have, and every light stays
-/// individually visible. Scaling exists because a hardware encoder refuses a frame under its own
-/// floor, and because a small wall streamed one to one is a postage stamp in the player.
+/// The encoded frame is the grid from the layer, letterboxed by the display. Above scale 1 a light becomes a solid square block rather than one pixel. That is still pixel-exact in the sense that matters. Replication invents no color the wall lacks, and every light stays visible. Scaling exists because a hardware encoder refuses a frame under its own floor. A small wall streamed one to one is also a postage stamp in the player.
 ///
 /// ## Frame pacing
 ///
-/// A fixed schedule, not a last-sent timestamp. Dividing into milliseconds truncates, so the
-/// stream would run about one percent fast, and re-basing on each frame's arrival lets one late
-/// tick shift the schedule for good. Either drifts until the player stalls to re-buffer.
+/// A fixed schedule, not a last-sent timestamp. Dividing into milliseconds truncates, so the stream would run about one percent fast. Re-basing on each frame's arrival lets one late tick shift the schedule for good. Either drifts until the player stalls to re-buffer.
 ///
 /// ## Where it runs
 ///
-/// H.264 needs a desktop-class CPU or a hardware encoder, so desktop and the ESP32-P4; every
-/// other board reaches viewers through the preview instead.
+/// H.264 needs a desktop-class CPU or a hardware encoder, so desktop and the ESP32-P4. Every other board reaches viewers through the preview instead.
 /// @card HlsDriver.png
 class HlsDriver : public DriverBase {
 public:
@@ -207,7 +197,7 @@ public:
             }
             const lengthType sx = static_cast<lengthType>(i % srcWidth_);
             const lengthType sy = static_cast<lengthType>(i / srcWidth_);
-            // One colour conversion per light; the replication is a copy, not per-pixel work.
+            // One color conversion per light; the replication is a copy, not per-pixel work.
             uint8_t* row0 = dst + (static_cast<size_t>(sy) * scale_) * rowBytes
                                 + (static_cast<size_t>(sx) * scale_) * 3;
             for (uint8_t px = 0; px < scale_; px++) {

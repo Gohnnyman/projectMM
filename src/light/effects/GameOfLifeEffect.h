@@ -22,6 +22,7 @@ namespace mm {
 // (John Conway, 1970) is the underlying automaton.
 /// Author: Ewoud Wijma (2022), modifications by Brandon Butler / @Brandon502 / wildcats08, https://natureofcode.com/book/chapter-7-cellular-automata/ , https://github.com/DougHaber/nlife-color , https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
 /// Conway's Game of Life cellular-automaton effect.
+/// @card GameOfLifeEffect.gif
 class GameOfLifeEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🌙🧬"; }  // MoonLight origin · MoonModules

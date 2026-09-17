@@ -13,6 +13,14 @@ on:
   pull_request:
     paths:
       - '**.md'
+      # Code carries prose: a `///` becomes a generated page and a `//` is read beside the line
+      # it explains. Without these a header-only PR ran no prose job at all, so the comments in
+      # src/ were the one half of the tree this gate never saw.
+      - '**.h'
+      - '**.hpp'
+      - '**.cpp'
+      - '**.c'
+      - '**.inc'
       - '.vale.ini'
       - '.vale/**'
 

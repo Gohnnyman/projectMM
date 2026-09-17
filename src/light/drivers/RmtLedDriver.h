@@ -9,29 +9,21 @@
 
 namespace mm {
 
-/// Output driver: WS2812B-class addressable LEDs over the ESP32 RMT peripheral, one GPIO and one
-/// RMT TX channel per strand, fed consecutive slices of the source buffer. The default driver for
-/// classic-ESP32 and S3 boards, and the readable example future drivers copy: it fuses the
-/// correction and the wire-byte encode into one pass, then hands per-pin slices to the platform.
+/// Output driver: WS2812B-class addressable LEDs over the ESP32 RMT peripheral. One GPIO and one RMT TX channel per strand, fed consecutive slices of the source buffer. The default driver for classic-ESP32 and S3 boards, and the readable example future drivers copy. It fuses the correction and the wire-byte encode into one pass, then hands per-pin slices to the platform.
 ///
 /// Prior art: WS2812B on FastLED and WLED, and the clockless RMT techniques of hpwit (Yves Bazin).
 ///
-/// Flicker on LEDs that should be off is signal integrity rather than firmware. The playbook is
-/// on the [drivers page](../../moonmodules/light/drivers.md).
+/// Flicker on LEDs that should be off is signal integrity rather than firmware. The playbook is on the drivers page.
 ///
 /// @moreinfo
 ///
 /// ## The wire contract
 ///
-/// One-wire NRZ at 800 kHz, no clock line. Each bit is a 1.25 µs cell that starts high then drops
-/// low, and the high duration encodes the bit, MSB-first per byte. Channel order is applied by
-/// `Correction` before the encode, so the encoder is order-agnostic. Frames latch on 300 µs or
-/// more of idle-low. Timings convert to RMT ticks from the granted resolution, never hard-coded.
+/// One-wire NRZ at 800 kHz, no clock line. Each bit is a 1.25 µs cell that starts high then drops low. The high duration encodes the bit, MSB-first per byte. Channel order is applied by `Correction` before the encode, so the encoder is order-agnostic. Frames latch on 300 µs or more of idle-low. Timings convert to RMT ticks from the granted resolution, never hard-coded.
 ///
 /// ## Which RMT API
 ///
-/// The peripheral half uses the modern RMT driver, not the legacy channel-numbered one. That is
-/// not a preference: the legacy driver was removed entirely in ESP-IDF v6, which is the build IDF.
+/// The peripheral half uses the modern RMT driver, not the legacy channel-numbered one. That is not a preference: the legacy driver was removed entirely in ESP-IDF v6, which is the build IDF.
 /// On chips whose RMT has a DMA backend, the whole-frame loopback capture uses it.
 ///
 /// @card RmtLedDriver.png

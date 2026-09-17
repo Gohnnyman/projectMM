@@ -50,8 +50,8 @@ namespace mm {
 // floors the per-line shift at 0.3 to "prevent pure cardinal motion", because a profile passing
 // through zero collapses the flow to a plain horizontal or vertical slide; a low `flow` here can
 // reach that state.
-// @card ColorTrailsEffect.png
 /// Effect: color emitters carried by a flow made of two noise profiles, one per axis.
+/// @card ColorTrailsEffect.gif
 class ColorTrailsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️💨🌫️"; }

@@ -23,8 +23,8 @@ namespace mm {
 //
 // Volumetric: `Layer::extrude` fills a cube with the plane, the same choice Particles and Wave
 // make. The wave equation itself is 2D, and a 3D one is a different effect rather than a flag.
-// @card BeatRipplesEffect.png
 /// Effect: a wave surface where every detected beat drops a stone, rippling and interfering.
+/// @card BeatRipplesEffect.gif
 class BeatRipplesEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🎶🖌️"; }

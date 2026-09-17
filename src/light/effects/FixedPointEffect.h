@@ -20,42 +20,38 @@
 namespace mm {
 
 /// Effect: sub-pixel shapes, drawn between pixels so small panels move smoothly.
+/// @card FixedPointEffect.gif
 class FixedPointEffect : public EffectBase {
 public:
-    // 💫 for the origin (this came from MoonLight), 🖌️ because every shape is computed from a
-    // position rather than accumulated. The original's 🕐🆕 were MoonLight's own convention and say
-    // nothing in ours: a tag here answers what a module IS, its shape, where it came from, what it
-    // reacts to, or which power function it rides, and the UI has a tooltip for each.
+    // Every shape is computed from a position rather than accumulated.
+    /// The catalog tags shown on this effect's card.
     const char* tags() const override { return "💫🖌️"; }
+    /// This effect draws in two dimensions.
     Dim dimensions() const override { return Dim::D2; }
 
-    /// Which demonstration, or `all` to cycle them. Each shows the same property from a different
-    /// angle: the clock through ROTATION, the orbits through RADIUS, and the two curve demos
-    /// through a PATH, where a trail of joined points is only smooth if its points are.
+    /// Which demonstration, or `all` to cycle them.
     enum : uint8_t { kAll = 0, kClock, kOrbits, kStarWeb, kSpirograph, kLissajous,
                      kCubeThin, kCubeThick, kWalkers, kBoids, kHypotrochoid, kTree, kDemoCount };
     static constexpr const char* kDemoNames[] = {
         "all", "clock", "orbits", "star web", "spirograph", "lissajous",
         "cube thin", "cube thick", "walkers", "boids", "hypotrochoid", "tree"};
-    static constexpr uint8_t kCycled = kDemoCount - 1;   // how many `all` rotates through
+    /// How many demos `all` rotates through.
+    static constexpr uint8_t kCycled = kDemoCount - 1;
 
+    /// Which demonstration is showing.
     uint8_t demo = kAll;
     /// How fast the whole scene runs, in BPM like every other effect here.
     uint8_t bpm = 20;
-    /// How much of the previous frame survives. The trails are what make the motion legible: at 255
-    /// the shapes are crisp, and lower values leave the path they swept.
+    /// How much of the previous frame survives, which is what leaves the trail.
     uint8_t fade = 70;
     /// Seconds each demo holds before `all` moves to the next.
     uint8_t dwell = 12;
-    /// How far the whole scene drifts from the panel's center, in pixels. The original orbits its
-    /// origin rather than pinning it, which keeps a static figure from burning one spot into the
-    /// eye; 0 pins it.
+    /// How far the scene drifts from the panel's center, in pixels; 0 pins it.
     uint8_t drift = 2;
-    /// The CAMERA, and the reason the clock swings across the screen rather than sitting still.
-    /// The original pushes in toward the second hand's tip on a 20 second sine, so the face grows
-    /// and slides off-center at the peak and settles back. 0 holds the camera still.
+    /// The camera, which pushes in and settles back on a cycle; 0 holds it still.
     uint8_t zoom = 150;
 
+    /// Bind the demo selector, the rate, the trail, the dwell, the drift and the camera.
     void defineControls() override {
         controls_.addSelect("demo", demo, kDemoNames, kDemoCount);
         controls_.addControl("bpm", bpm, 1, 120);
@@ -67,6 +63,7 @@ public:
         controls_.setHidden(controls_.count() - 2, demo != kAll);
     }
 
+    /// Clear the shared trail, so a demo change never joins two unrelated figures.
     void prepare() override {
         phase_ = BeatPhase{};
         trailCount_ = 0;
@@ -79,32 +76,21 @@ public:
         const lengthType w = width(), h = height();
         if (w == 0 || h == 0) return;
 
-        // Fade rather than fill: these shapes are thin, and a hard clear would throw away the trail
-        // that makes a sweep readable. It still OWNS its background, since fade 255 clears fully.
-        //
-        // NOT layer()->fadeToBlackBy, though every other fading effect uses it and this one should
-        // too. The two mean different things: draw::fade takes an amount applied EVERY FRAME,
-        // fadeToBlackBy a RATE per reference frame that Layer scales by elapsed time and carries.
-        // Swapping the call without retuning `fade` (default 70, tuned against the per-frame
-        // meaning) made this effect 3.1x brighter at high framerate than at low, against a 1.35x
-        // band: unit_Effects_framerate caught it. The move is right and wants its own change, with
-        // the default re-tuned and the result looked at, not a silent swap. Backlogged.
+        // NOT fadeToBlackBy: that is a RATE per reference frame, this an amount per frame, and
+        // swapping without re-tuning `fade` made the effect 3.1x brighter at high framerate.
         draw::fade(cv, fade);
 
         const uint32_t ms = elapsed();
         phase_.advanceTo(ms, bpm);
         const angle16 a = static_cast<angle16>(phase_.phase(65536));
 
-        // Which demo is on screen. `all` walks them on a wall clock rather than on the phase, so
-        // the dwell is a time a user can set in seconds and does not change with bpm.
+        // On a wall clock rather than the phase, so the dwell is seconds and ignores bpm.
         uint8_t active = demo;
         if (demo == kAll) {
             const uint32_t slot = dwell ? dwell : 1;
             active = static_cast<uint8_t>((ms / (slot * 1000u)) % kCycled + 1);
         }
-        // A changed demo starts from a clean trail: the curve demos share one point buffer, and
-        // carrying a spirograph's points into a lissajous draws a line between two unrelated
-        // figures across the panel.
+        // The curve demos share one buffer, so a carried point draws a line between figures.
         if (active != shown_) {
             trailCount_ = 0;
             trailHead_ = 0;
@@ -113,9 +99,7 @@ public:
             seedSimulations(draw::toSub(w) / 2, draw::toSub(h) / 2);
         }
 
-        // The panel's center, and the drifting origin the scene actually uses. Its own slow circle
-        // (a third of the main rate) so the drift reads as a wander rather than as part of the
-        // figure's own motion.
+        // Its own slow circle, so the drift reads as a wander rather than part of the figure.
         const draw::pos_t px = draw::toSub(w) / 2;
         const draw::pos_t py = draw::toSub(h) / 2;
         const draw::pos_t wander = draw::toSub(drift);
@@ -126,17 +110,13 @@ public:
         const draw::pos_t r = (px < py ? px : py) - wander - draw::toSub(1);
         if (r <= 0) return;
 
-        // THE CAMERA. The original pushes in toward the second hand's tip on a 20 second sine, and
-        // this is what makes the scene sweep across the panel rather than sit in the middle: at the
-        // peak the view is magnified AND off-center, so the figure slides out and grows. A camera
-        // that only scaled would pulse in place, which is a different and much duller thing.
+        // Magnified AND off-center at the peak: a camera that only scaled would pulse in place.
         draw::pos_t vx = cx, vy = cy, vr = r;
         if (zoom > 0) {
             const angle16 zp = static_cast<angle16>((static_cast<uint64_t>(ms % kZoomMs) * 65536u) / kZoomMs);
             const int32_t zs = sin16(zp);
             if (zs > 0) {
-                // Only the positive half of the sine pushes in, so the scene rests at normal size
-                // for half the cycle instead of oscillating continuously.
+                // Only the positive half pushes in, so the scene rests for half the cycle.
                 const int32_t amount = (zs * zoom) / 255;              // 0..32767
                 // Track the second hand's tip, which is the point the original follows.
                 const angle16 secA = static_cast<angle16>((static_cast<uint64_t>(ms % kSecMs) * 65536u) / kSecMs);
@@ -168,25 +148,18 @@ public:
     }
 
 private:
-    /// A clock face: a rim, twelve tick marks and three hands on real gearing.
-    ///
-    /// The hands run on FIXED PERIODS from the millisecond clock rather than from `bpm`, which is
-    /// how the original does it and the reason it reads as a clock: a second hand that sweeps once
-    /// per period is recognizable, where one geared to an arbitrary speed control is just three
-    /// rotating sticks. Accelerated 10x from a real clock so a second completes in 6 seconds, and
-    /// the 1:12:144 ratio between the three is preserved exactly.
+    // Fixed periods rather than `bpm`: a hand geared to a speed control is a rotating stick.
+    /// A clock face: a rim, twelve marks and three hands geared 1:12:144.
     void drawClock(const draw::Canvas& cv, draw::pos_t cx, draw::pos_t cy, draw::pos_t r,
                    uint32_t ms) const {
-        // angle16 wraps at 65536, so a period maps onto it by plain modulo: no trigonometry needed
-        // to advance a hand, which is what keeps this integer-only.
+        // angle16 wraps at 65536, so a period maps on by modulo and the whole path stays integer.
         const angle16 secA  = static_cast<angle16>((static_cast<uint64_t>(ms % kSecMs) * 65536u) / kSecMs);
         const angle16 minA  = static_cast<angle16>((static_cast<uint64_t>(ms % kMinMs) * 65536u) / kMinMs);
         const angle16 hourA = static_cast<angle16>((static_cast<uint64_t>(ms % kHourMs) * 65536u) / kHourMs);
 
         draw::ring(cv, cx, cy, r, draw::kSubOne, RGB{40, 40, 40});
 
-        // Twelve marks, every third one longer and brighter: the hour positions a face needs to be
-        // read at a glance, and without them the ring is just a circle.
+        // Every third mark longer and brighter, or the ring reads as a plain circle.
         for (uint8_t i = 0; i < 12; i++) {
             const angle16 ta = static_cast<angle16>(static_cast<uint32_t>(i) * 65536u / 12u);
             const bool major = (i % 3) == 0;
@@ -198,13 +171,10 @@ private:
                             draw::toPixel(cy - scaleAngle(cos16(ta), r)), 0}, c);
         }
 
-        // Hour hand: thick and short. Minute: medium and nearly full. The lengths are the
-        // original's 0.55 / 0.80 / 1.0 of the radius, which is what makes the three readable at a
-        // glance rather than three sticks of similar size.
+        // Three distinct lengths, or the hands read as three sticks of similar size.
         hand(cv, cx, cy, (r * 55) / 100, hourA, (draw::kSubOne * 5) / 2, RGB{200, 200, 200});
         hand(cv, cx, cy, (r * 80) / 100, minA,  (draw::kSubOne * 3) / 2, RGB{255, 255, 255});
-        // Second hand: a thin red line with a short counterbalance tail past the hub, which is what
-        // a real sweep hand has and what makes its rotation legible at this size.
+        // The counterbalance tail past the hub is what makes the rotation legible.
         const draw::pos_t tail = r / 4;
         draw::line(cv, {draw::toPixel(cx - scaleAngle(sin16(secA), tail)),
                         draw::toPixel(cy + scaleAngle(cos16(secA), tail)), 0},
@@ -213,60 +183,48 @@ private:
         draw::disc(cv, cx, cy, draw::kSubOne, RGB{220, 220, 220});   // the hub, over the pivots
     }
 
-    /// Rings orbiting a common center, each on its own radius and rate: the second view of the same
-    /// property, where what moves smoothly is a SIZE rather than an angle.
+    /// Rings orbiting a common center, where what moves smoothly is a size, not an angle.
     void drawOrbits(const draw::Canvas& cv, draw::pos_t cx, draw::pos_t cy, draw::pos_t r,
                     angle16 a) const {
         static constexpr RGB kColors[kOrbitCount] = {
             {255, 80, 40}, {40, 200, 255}, {180, 255, 60}, {255, 60, 200}};
         for (uint8_t i = 0; i < kOrbitCount; i++) {
-            // Each orbit runs at its own rate and starts a quarter turn further round, so the four
-            // never bunch into one moving blob.
+            // Each starts a quarter turn further round, so the four never bunch together.
             const angle16 own = static_cast<angle16>(a * (i + 1) + i * 16384);
             const draw::pos_t dist = (r * (i + 1)) / (kOrbitCount + 1);
             const draw::pos_t ox = cx + scaleAngle(cos16(own), dist);
             const draw::pos_t oy = cy + scaleAngle(sin16(own), dist);
-            // The ring BREATHES: its radius is a second oscillator, which is the sub-pixel case a
-            // whole-pixel renderer cannot show at all, because a radius under one pixel is either
-            // absent or a full pixel with nothing between.
+            // A radius under one pixel is either absent or whole, with nothing in between.
             const draw::pos_t rad = draw::kSubOne + scaleAngle(sin16(static_cast<angle16>(own * 2)),
                                                                draw::kSubOne);
             draw::ring(cv, ox, oy, rad, draw::kSubOne, kColors[i]);
         }
     }
 
-    /// A spirograph: a pen on a wheel rolling inside a larger circle. The classic hypotrochoid, and
-    /// the figure only closes when the two rates share a small ratio, which is why 3:2 draws a
-    /// stable rosette rather than a smear.
+    /// A spirograph: a pen on a wheel rolling inside a larger circle, closing at 3:2.
     void drawSpirograph(const draw::Canvas& cv, draw::pos_t cx, draw::pos_t cy, draw::pos_t r,
                         angle16 a) {
         const draw::pos_t arm = (r * 2) / 3;                    // how far the wheel's hub sits out
         const draw::pos_t pen = r / 3;                          // the pen's reach from that hub
         const draw::pos_t hx = cx + scaleAngle(cos16(a), arm);
         const draw::pos_t hy = cy + scaleAngle(sin16(a), arm);
-        // 3:2 against the hub's own rotation: the ratio IS the figure, and a whole-number one keeps
-        // it closed instead of precessing away.
+        // The ratio IS the figure, and a whole-number one keeps it closed.
         const angle16 roll = static_cast<angle16>(a * 3 / 2);
         pushTrail(hx + scaleAngle(cos16(roll), pen), hy - scaleAngle(sin16(roll), pen));
         drawTrail(cv, 220);
     }
 
-    /// A Lissajous figure: two perpendicular oscillators at 3:2, with the phase drifting so the
-    /// figure morphs rather than repeating. Two sines are all it is, which is the point: the shape
-    /// comes from the RATIO, not from anything drawn.
+    /// A Lissajous figure: two perpendicular oscillators, the shape coming from the ratio.
     void drawLissajous(const draw::Canvas& cv, draw::pos_t cx, draw::pos_t cy, draw::pos_t r,
                        angle16 a) {
-        // The phase creep is what turns a fixed figure into a morphing one. Slow, because at any
-        // speed the eye can follow it stops reading as one continuous shape.
+        // Slow: at any speed the eye can follow, it stops reading as one continuous shape.
         const angle16 creep = static_cast<angle16>(a / 16);
         pushTrail(cx + scaleAngle(sin16(static_cast<angle16>(a * 3 + creep)), r),
                   cy + scaleAngle(sin16(static_cast<angle16>(a * 2)), r));
         drawTrail(cv, 230);
     }
 
-    /// A pentagram inside two rings: five vertices, each joined to its second neighbor. The star
-    /// is what the 5-and-2 pairing draws, and the inner ring sits at the golden-ratio radius the
-    /// pentagon's own geometry produces.
+    /// A pentagram inside two rings, each vertex joined to its second neighbor.
     void drawStarWeb(const draw::Canvas& cv, draw::pos_t cx, draw::pos_t cy, draw::pos_t r,
                      angle16 a) const {
         const draw::pos_t innerR = (r * 382) / 1000;      // the inner pentagon's radius
@@ -293,9 +251,7 @@ private:
         draw::disc(cv, cx, cy, draw::kSubOne * 2, RGB{255, 165, 0});
     }
 
-    /// A wireframe cube in perspective, spun on two axes. The depth cue is BRIGHTNESS (and, when
-    /// thick, stroke width): a near edge is bright and wide, a far one dim and thin, which is what
-    /// makes eight points and twelve lines read as a solid rather than as a flat tangle.
+    /// A wireframe cube in perspective, its depth read as brightness and stroke width.
     void drawCube(const draw::Canvas& cv, draw::pos_t cx, draw::pos_t cy, draw::pos_t r,
                   angle16 a, bool thin) const {
         static constexpr int8_t kVerts[8][3] = {
@@ -322,8 +278,7 @@ private:
             const int64_t z2 = (x * sinY + z * cosY) / 32767;
             const int64_t y3 = (y * cosX - z2 * sinX) / 32767;
             const int64_t z3 = (y * sinX + z2 * cosX) / 32767;
-            // The perspective divide. Clamped so a vertex swinging toward the eye cannot divide by
-            // zero and fling the projection off the panel.
+            // Clamped, so a vertex swinging toward the eye cannot divide by zero.
             int64_t denom = eye - z3;
             if (denom < draw::kSubOne) denom = draw::kSubOne;
             px[i] = cx + static_cast<draw::pos_t>((x2 * eye) / denom);
@@ -348,14 +303,10 @@ private:
         }
     }
 
-    /// Six walkers on a damped random walk, each pulled back by a weak spring so they wander
-    /// without escaping. The spring is what separates this from noise: without it they leave and
-    /// never return, with it they stay in a loose cloud around the middle.
+    /// Six walkers on a damped random walk, each held near the middle by a weak spring.
     void drawWalkers(const draw::Canvas& cv, draw::pos_t cx, draw::pos_t cy, draw::pos_t r) {
         for (uint8_t i = 0; i < kWalkerCount; i++) {
-            // The kick is HASHED from a step counter, not drawn from a stream RNG: two devices on
-            // one rig must walk the same path, and a per-call RNG diverges the moment their frame
-            // counts differ (math16.h, position-addressable randomness).
+            // HASHED, not a stream RNG: two devices on one rig must walk the same path.
             const int32_t kx = static_cast<int32_t>(hashInt(step_, i, 1)) - 32768;
             const int32_t ky = static_cast<int32_t>(hashInt(step_, i, 2)) - 32768;
             const draw::pos_t ax = static_cast<draw::pos_t>((kx * draw::kSubOne) / 131072)
@@ -379,14 +330,12 @@ private:
         step_++;
     }
 
-    /// Boids: separation, alignment and cohesion, the textbook three rules, plus a soft wall force.
-    /// The flock's shape is emergent, which is the point: nothing here says "make a V".
+    /// Boids on the textbook three rules; the flock's shape is emergent.
     void drawBoids(const draw::Canvas& cv, draw::pos_t cx, draw::pos_t cy, draw::pos_t r) {
         const draw::pos_t margin = draw::kSubOne * 3;
         for (uint8_t i = 0; i < kBoidCount; i++) {
             draw::pos_t ax = 0, ay = 0;
-            // Soft walls: a push that grows as a boid nears the edge, rather than a bounce, so the
-            // flock turns smoothly instead of ricocheting.
+            // A push that grows near the edge, so the flock turns rather than ricochets.
             const draw::pos_t left = bx_[i] - (cx - r), right = (cx + r) - bx_[i];
             const draw::pos_t top = by_[i] - (cy - r), bottom = (cy + r) - by_[i];
             if (left < margin) ax += (margin - left) / 8;
@@ -428,8 +377,7 @@ private:
         }
     }
 
-    /// The general hypotrochoid: the spirograph with the wheel and pen sizes VARYING, so the figure
-    /// is a different rosette each cycle rather than the one fixed 3:2 curve.
+    /// The general hypotrochoid: the spirograph with its sizes varying each cycle.
     void drawHypotrochoid(const draw::Canvas& cv, draw::pos_t cx, draw::pos_t cy, draw::pos_t r,
                           angle16 a) {
         // The original's table of (wheel, pen) pairs, each giving a distinct petal count.
@@ -443,8 +391,7 @@ private:
         const draw::pos_t hy = cy + scaleAngle(sin16(a), arm);
         // The wheel's own rotation is geared to how far it has rolled: (R-r)/r turns per turn.
         const angle16 roll = static_cast<angle16>(static_cast<uint32_t>(a) * (13 - kWheel[v]) / kWheel[v]);
-        // Pre-fill on the first frame, as the original does: without it the figure spends its first
-        // second drawing itself one segment at a time, and on a short dwell it never completes.
+        // Pre-filled, or the figure draws itself a segment at a time and never completes.
         if (trailCount_ == 0)
             for (uint8_t i = 0; i < kTrailMax; i++) {
                 const angle16 back = static_cast<angle16>(a - (kTrailMax - i) * kCurveStep);
@@ -456,13 +403,10 @@ private:
         drawTrail(cv, 200);
     }
 
-    /// A tree drawn by recursion: a trunk that forks into two shorter branches, each of which forks
-    /// again. Six levels, swaying on a wind cycle and growing on a slower one, so it is never the
-    /// same picture twice.
+    /// A tree drawn by recursion, six levels deep, swaying and growing on two cycles.
     void drawTree(const draw::Canvas& cv, draw::pos_t cx, draw::pos_t cy, draw::pos_t r,
                   uint32_t ms) const {
-        // Wind on a 9 second cycle, growth on a 10 second one: two periods that do not divide, so
-        // the tree never repeats a pose exactly.
+        // Two periods that do not divide, so the tree never repeats a pose exactly.
         const angle16 windP = static_cast<angle16>((static_cast<uint64_t>(ms % 9000u) * 65536u) / 9000u);
         const int32_t sway = (sin16(windP) * 3932) / 32767;
         const angle16 growP = static_cast<angle16>((static_cast<uint64_t>(ms % 10000u) * 65536u) / 10000u);
@@ -474,16 +418,13 @@ private:
         const int32_t spread = (5100 * spreadScale) / 32767;      // up to ~28 degrees in angle16
 
         const draw::pos_t trunkY = cy + (r * 99) / 100;
-        // A FLOOR under the growth: the cycle bottoms out at zero, and a tree of zero length is a
-        // blank panel that reads as a broken effect rather than as a seed. A quarter-height trunk
-        // is still visibly a trunk, and the growth above it is what the cycle shows.
+        // A floor, since a tree of zero length reads as a broken effect rather than a seed.
         const int32_t grown = 8192 + (grow * 3) / 4;      // a quarter, plus three quarters of the cycle
         const draw::pos_t trunkLen = static_cast<draw::pos_t>((static_cast<int64_t>(r) * 55 * grown) / (100 * 32767));
         branch(cv, cx, trunkY, 0, trunkLen, 6, sway, spread);
     }
 
-    /// One branch, and its two children. Recursive because a tree IS the recursion: the same shape
-    /// at a smaller scale, which is why six lines of code draw sixty-three branches.
+    /// One branch and its two children, recursive because a tree is the recursion.
     void branch(const draw::Canvas& cv, draw::pos_t x0, draw::pos_t y0, int32_t angle,
                 draw::pos_t len, uint8_t depth, int32_t sway, int32_t spread) const {
         if (depth == 0 || len < draw::kSubOne / 2) return;

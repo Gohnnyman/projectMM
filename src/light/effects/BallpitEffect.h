@@ -25,8 +25,8 @@ namespace mm {
 //
 /// Prior art: the WLED Particle System's ballpit family (Damian Schneider, @DedeHai); the impulse
 /// response and the single-particle overlap push are the kernel's.
-/// @card BallpitEffect.png
 /// Effect: falling balls that pile up and push each other aside.
+/// @card BallpitEffect.gif
 class BallpitEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫✨"; }   // power-function showcase

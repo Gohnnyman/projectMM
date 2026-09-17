@@ -42,7 +42,7 @@ struct Correction {
     uint8_t briLut[256] = {};       // briLut[v] = curve(v * brightness / 255)
     /// Which curve the brightness rebuild fills through; a driver's setting, not a global one.
     Curve curve = Curve::Cie;
-    // The output-byte position of each colour role, recomputed from the role array.
+    // The output-byte position of each color role, recomputed from the role array.
     /// Output byte position of the red role.
     uint8_t offRed = 1;
     /// Output byte position of the green role.
@@ -53,7 +53,7 @@ struct Correction {
     // Warm white has a real achromatic basis; amber and UV are eyeball approximations, honestly so.
     /// Output byte positions of the extra emitters beside cold white.
     uint8_t offWarmWhite = kAbsent;
-    // Held wide open but always WRITTEN: brightness is already in the colours, and 0 is dark.
+    // Held wide open but always WRITTEN: brightness is already in the colors, and 0 is dark.
     /// Output byte position of the fixture's master dimmer.
     uint8_t offDimmer = kAbsent;
     // Never scaled by brightness: dimming the rig would otherwise swing every head toward zero.
@@ -155,7 +155,7 @@ struct Correction {
             if (offWarmWhite != kAbsent) out[offWarmWhite] = briLut[w];
             // yellow ≈ min(R,G) (the shared red+green component).
             if (offYellow != kAbsent)    out[offYellow] = briLut[r < g ? r : g];
-            // Driven from the blue with no red or green to pair with, so it stays dark on warm colours.
+            // Driven from the blue with no red or green to pair with, so it stays dark on warm colors.
             if (offUV != kAbsent) {
                 const uint8_t rg = r > g ? r : g;
                 out[offUV] = briLut[b > rg ? static_cast<uint8_t>(b - rg) : 0];

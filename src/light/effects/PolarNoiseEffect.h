@@ -27,8 +27,8 @@ namespace mm {
 //
 /// Prior art: Stefan Petrick's polar/noise effect vocabulary (a friend of projectMM) and Iñigo
 /// Quilez's domain-warping article. Implemented fresh in fixed point over our own noise.
-/// @card PolarNoiseEffect.png
 /// Effect: a warped, kaleidoscopic noise field in polar coordinates.
+/// @card PolarNoiseEffect.gif
 class PolarNoiseEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️🌫️🎡"; }   // power-function showcase

@@ -9,28 +9,21 @@
 
 namespace mm {
 
-/// Output driver: publishes the rendered frame as an NDI video source, so it reaches OBS,
-/// Resolume, TouchDesigner or any other NDI receiver, on this machine or another.
+/// Output driver: publishes the rendered frame as an NDI video source. It reaches OBS, Resolume, TouchDesigner or any other receiver, on this machine or another.
 ///
-/// NDI rather than Spout or Syphon because one implementation covers every desktop platform,
-/// discovers by name, and crosses machines. At LED-wall pixel counts the latency difference sits
-/// far below one frame, so coverage decides.
+/// NDI rather than Spout or Syphon because one implementation covers every desktop platform, discovers by name, and crosses machines. At LED-wall pixel counts the latency difference sits far below one frame, so coverage decides.
 ///
-/// Prior art: the NDI protocol and SDK are NewTek and Vizrt's; this is our own code against the
-/// documented C API.
+/// Prior art: the NDI protocol and SDK are NewTek and Vizrt's. This is our own code against the documented C API.
 ///
 /// @moreinfo
 ///
 /// ## Desktop only
 ///
-/// The NDI runtime is a closed binary built only for Intel and ARM, so no ESP32 can load one and
-/// there is no source to port. A board reaches the same receivers over the pixel protocols.
+/// The NDI runtime is a closed binary built only for Intel and ARM. No ESP32 can load one, and there is no source to port. A board reaches the same receivers over the pixel protocols.
 ///
 /// ## The runtime is the user's
 ///
-/// projectMM is GPL-3.0 and the runtime is proprietary, so it is never bundled or linked: the
-/// platform layer resolves it on demand. A machine without it runs normally and says so in the
-/// status, and no NDI type appears in this header.
+/// projectMM is GPL-3.0 and the runtime is proprietary, so it is never bundled or linked. The platform layer resolves it on demand. A machine without it runs normally and says so in the status, and no NDI type appears in this header.
 ///
 /// @card NdiDriver.png
 class NdiDriver : public DriverBase {

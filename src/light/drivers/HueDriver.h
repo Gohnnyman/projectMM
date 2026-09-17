@@ -9,13 +9,9 @@
 
 namespace mm {
 
-/// Output driver: sends the buffer to Philips Hue bulbs as pixels, a driver rather than a listed
-/// device. The bulbs are pixels of an effect: make a small grid, run any effect, and this driver
-/// reads its window of the shared buffer and pushes each light's colour to the bridge. The same
-/// shape as NetworkSendDriver, over the Hue v1 HTTP API rather than UDP.
+/// Output driver: sends the buffer to Philips Hue bulbs as pixels, a driver rather than a listed device. The bulbs are pixels of an effect: make a small grid and run any effect. This driver reads its window of the shared buffer and pushes each light's color to the bridge. The same shape as NetworkSendDriver, over the Hue v1 HTTP API rather than UDP.
 ///
-/// It is HTTP rather than a wire protocol, so the rate is bounded by connection churn: each PUT
-/// opens a fresh connection. That gives smooth ambient colour, not real time.
+/// It is HTTP rather than a wire protocol, so the rate is bounded by connection churn. Each PUT opens a fresh connection. That gives smooth ambient color, not real time.
 ///
 /// Prior art: the Hue v1 CLIP API public documentation; the effect-as-output mapping is our own.
 ///
@@ -25,16 +21,16 @@ namespace mm {
 ///
 /// Plain HTTP, no TLS, bench-confirmed on a BSB002 bridge:
 ///
+/// ```text
 ///     POST /api                          pair, once the link button is pressed
 ///     GET  /api/<key>/lights             the lights, keyed by bridge id
 ///     GET  /api/<key>/groups             the rooms, each listing its lights
 ///     PUT  /api/<key>/lights/<id>/state  on, brightness, hue, saturation, transition
+/// ```
 ///
 /// ## Which lights are driven
 ///
-/// Only colour-capable, reachable lights, narrowed further by the room and light selectors. The
-/// shared output Correction applies as it does on the LED drivers, so brightness reaches the Hue
-/// lights too.
+/// Only color-capable, reachable lights, narrowed further by the room and light selectors. The shared output Correction applies as it does on the LED drivers, so brightness reaches the Hue lights too.
 ///
 /// @card HueDriver.png
 class HueDriver : public DriverBase {
@@ -136,7 +132,7 @@ public:
     /// The same count as the read-only control / bridge field; 0 before any fetch.
     int8_t colorCountForTest() const { return colorCount_; }
 
-    // Parse the lights FIRST: room membership resolves against the known colour lights.
+    // Parse the lights FIRST: room membership resolves against the known color lights.
     /// Test seam: parse a real groups body through the room extractor.
     void parseGroupsForTest(const char* json) { parseGroups(json); rebuildDriven(); }
     /// Count of kept Rooms (bridge groups with type=="Room").
@@ -178,7 +174,7 @@ private:
     /// The shared layer buffer this driver reads its window from; null until setSourceBuffer.
     Buffer* sourceBuffer_ = nullptr;
 
-    /// Window index to bridge light id, holding only the colour-capable lights.
+    /// Window index to bridge light id, holding only the color-capable lights.
     uint16_t hueId_[kMaxLights] = {};
     /// The last RGB pushed per light: what the changed-only filter compares against.
     uint8_t  lastRgb_[kMaxLights][3] = {};
@@ -210,7 +206,7 @@ private:
         platform::free(roomNames_);  roomNames_  = nullptr;
     }
 
-    /// Room membership, one bitmask per room over the known colour lights.
+    /// Room membership, one bitmask per room over the known color lights.
     uint32_t roomMask_[kMaxRooms] = {};
     /// Number of Rooms kept.
     uint8_t  roomCount_ = 0;
@@ -336,7 +332,7 @@ private:
         pushCursor_ = 0;
         for (uint8_t i = 0; i < kMaxLights; i++) sent_[i] = false;
         freeNameBuffers();   // drop the old bridge's names; the re-fetch re-allocs for the new one
-        // Rebuilt NOW, or the option arrays dangle into the name buffers just freed.
+        // Rebuilt NOW, or the option arrays dangle into the name buffers freed above.
         buildRoomOptions();
         buildLightOptions();
         rebuildDriven();   // empty caches → empty driven set, until the re-fetch repopulates them
@@ -396,7 +392,7 @@ private:
     }
 
     // A forward scan, not the recursive reader: the response exceeds its node arena.
-    /// Extract the colour-capable, reachable light ids from a lights body.
+    /// Extract the color-capable, reachable light ids from a lights body.
     void parseLights(const char* resp) {
         ensureNameBuffers();
         lightCount_ = 0;
@@ -489,7 +485,7 @@ private:
     }
 
     // Bounded to this room's own array, so a later zone's list cannot bleed in.
-    /// Resolve a room's light array into a membership bitmask over the colour lights.
+    /// Resolve a room's light array into a membership bitmask over the color lights.
     uint32_t roomMaskFor(const char* begin, const char* end) const {
         const char* s = begin;
         const size_t kl = std::strlen("\"lights\":[");
@@ -509,7 +505,7 @@ private:
     }
 
     // One source of truth for both the dropdown and the driven set, so they cannot disagree.
-    /// The colour-light indices the current room selection exposes, and how many.
+    /// The color-light indices the current room selection exposes, and how many.
     uint8_t roomColorLights(uint8_t (&out)[kMaxLights]) const {
         uint8_t n = 0;
         if (room_ == 0 || room_ > roomCount_) {              // "All" (or a stale index) → every color light
@@ -530,7 +526,7 @@ private:
         roomOptionCount_ = n;
     }
 
-    /// Rebuild the light dropdown from the current room's colour lights.
+    /// Rebuild the light dropdown from the current room's color lights.
     void buildLightOptions() {
         lightOptions_[0] = "All";
         uint8_t idx[kMaxLights];
@@ -562,7 +558,7 @@ private:
         const uint8_t cpl = sourceBuffer_->channelsPerLight();
         if (cpl < 3) return;
         const uint8_t* base = sourceBuffer_->data();
-        // Walks the FILTERED set, which is every colour light only while nothing is picked.
+        // Walks the FILTERED set, which is every color light only while nothing is picked.
         const uint8_t n = drivenLightCount_ < winLen ? drivenLightCount_ : static_cast<uint8_t>(winLen);
         if (n == 0) return;
         drivenCount_ = n;   // the round-robin size: drives the Hue fade time (transitionDeciseconds)

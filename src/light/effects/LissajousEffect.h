@@ -23,6 +23,7 @@ namespace mm {
 // written fresh on EffectBase + the shared draw primitives.
 /// Author: Andrew Tuline (WLED-SR), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Parametric effect tracing a Lissajous curve across the layer.
+/// @card LissajousEffect.gif
 class LissajousEffect : public EffectBase {
 public:
     const char* tags() const override { return "🐙"; }  // WLED-lineage

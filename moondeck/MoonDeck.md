@@ -173,7 +173,7 @@ Reads the pages the docs build renders as card tables and reports, per card:
 - a details table past 4 columns, or a cell past 300 characters
 - any link in the second column that is not Tests, API or Details
 
-And per header, over the directories it names in `HEADER_DIRS`:
+And per header, over every `.h` under `HEADER_ROOT` (`src/`) except the vendored paths:
 
 - a class comment past 10 lines, or its `@moreinfo` appendix past 20
 - a member comment past one line: a deep dive goes after `@moreinfo`

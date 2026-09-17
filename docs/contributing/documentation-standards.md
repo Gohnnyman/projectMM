@@ -120,10 +120,11 @@ A control reads `` - `name`: what it does ``. The colon separates the name from 
 
 | | Limit |
 |---|---|
-| Description | 600 characters |
-| Controls, together | 600 |
-| One control | 120 |
+| Description | 600 characters, 400 on effects, modifiers and layouts |
+| One control | 100 characters, 80 on effects, modifiers and layouts |
 | Details table | 4 columns, 300 characters a cell |
+
+There is no limit on the controls together: a module with twelve honest controls is not worse documented than one with three, and capping the sum only punished the richer module. The visual catalogs are tighter because the `.gif` carries the description, so the words are there for what the reader cannot see.
 
 Over a limit the text **moves rather than shrinks**, and its home follows from what it is. Behavior of the module goes in the header's `///`, reaching the reader as the generated page. What a reader needs before choosing between siblings goes in a `## <Name>, details` section below the cards, which the build links from the row. Trimming to fit is the one wrong answer, for the reason [Comments](#comments) gives.
 
@@ -132,6 +133,8 @@ A details section continues the card, so it is written for the same reader. Impl
 The card rules are enforced by [`check_docgen.py`](../moondeck/check/check_docgen.py), pinned by [`test_check_docgen.py`](../../test/python/test_check_docgen.py). Where a card begins and ends is the build's own rule, shared: the renderer, `check_docgen` and `check_specs` all ask `split_blocks` rather than each deciding for itself. A check that silently stopped matching would report a clean run, so each rule is tested firing as well as staying quiet.
 
 **Prose is Vale's**, wherever it sits: a page, a `///` block, a comment. One checker for what text says, so a rule has one home and one vocabulary.
+
+A header reaches Vale through a **View**, `.vale/styles/config/views/CComments.yml`, which runs a tree-sitter query over the file's syntax tree and hands back the comment nodes alone. Vale has no native parser for C, so without the View it skips a header and reports nothing, which reads exactly like a clean file.
 
 ## Comments
 
@@ -152,17 +155,20 @@ A card is read across a row; a member comment is read beside the thing it descri
 | Class `///` | 10 lines |
 | `@moreinfo` appendix | 20 lines |
 | Any other `///` run | 1 line |
-| One comment line, `///` or `//` | 20 words |
+| One sentence in a comment | 20 words |
 | A `//` run beside code | 1 line |
+| A sentence in a comment | 1 line, never wrapped |
 | Every public member | carries one |
 
-The first five cut and the last adds, deliberately: the result is a short line on everything rather than an essay on a few things. The word limit comes from the tree, where a member line is 14 words at the median and 19 at p95, so it bites the outliers and leaves the normal case alone.
+The first five cut and the last adds, deliberately: the result is a short line on everything rather than an essay on a few things. The word limit counts a SENTENCE rather than a line, because the no-wrap rule makes a line a paragraph: three short sentences on one line are correct, and one rambling sentence is not. It comes from the tree, where a member line is 14 words at the median and 19 at p95, so it bites the outliers and leaves the normal case alone.
+
+**No hard wrap in a comment, for the reason markdown gives.** Let the editor soft-wrap, so a one-word edit is a one-word diff rather than a reflowed paragraph. The one-line budget already forbids this on a member or a code comment, so the rule bites where a block is allowed to be multi-line: the class comment, and the `@moreinfo` appendix that becomes a markdown page. A list item, a heading, a table row and a fenced block are structure rather than a wrapped sentence, and each is left alone.
 
 **Use `//` sparingly.** A comment restating what the code does is a naming failure, and the fix is a better name rather than a better sentence. What survives is the WHY a reader cannot recover from the code.
 
 **`//` carries the same one-line budget as `///`, and that is what makes the `///` cap mean anything.** Without it the one-line rule moves text rather than removing it: a fifty-line member comment re-spelled as `//` satisfies every other rule and leaves the file exactly as long. One line is room to say why; past that the reasoning belongs after `@moreinfo`, or on the module's page where a reader will find it. The `//` block above the first class is exempt, being the non-Doxygen sibling of the class comment.
 
-Enforced by [`check_docgen.py`](../moondeck/check/check_docgen.py), which names the areas it covers.
+Enforced by [`check_docgen.py`](../moondeck/check/check_docgen.py) over every header under `src/`, the vendored ones excepted.
 
 
 ### Writing a `///` that generates correctly

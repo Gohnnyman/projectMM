@@ -21,6 +21,7 @@ namespace mm {
 /// crisp Bresenham; the `soft` arg has no projectMM equivalent.)
 /// Author: @TroyHacks (MoonModules, GPLv3), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
 /// Audio-reactive 3D graphic-equaliser effect.
+/// @card GEQ3DEffect.gif
 class GEQ3DEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🌙🎶"; }  // MoonLight origin · MoonModules · audio

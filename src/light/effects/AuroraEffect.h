@@ -33,9 +33,9 @@ namespace mm {
 //
 // Cost: one fbm per layer per pixel, so `layers` is the cost knob and `octaves` multiplies it. The
 // polar address is a table read. Targets in performance.md.
-// @card AuroraEffect.png
 /// Effect: layered noise curtains in polar coordinates, each layer on its own oscillators.
 /// Prior art: the shader vocabulary Stefan Petrick made recognizable in the LED world.
+/// @card AuroraEffect.gif
 class AuroraEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️🌫️🎡"; }   // power-function showcase

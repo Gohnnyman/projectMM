@@ -33,8 +33,8 @@ namespace mm {
 //
 // Prior art: Sébastien Truchet's tiling; the shader formulation follows the standard
 // fract/hash/smoothstep idiom (Iñigo Quilez, Shadertoy convention).
-// @card TruchetEffect.png
 /// Effect: randomly-turned arc tiles that join into endless winding paths.
+/// @card TruchetEffect.gif
 class TruchetEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️"; }   // power-function showcase
@@ -105,7 +105,7 @@ public:
             const frac16 cover = 65535 - shader::smoothstep(-soft, soft, d);
             if (cover == 0) return RGB{0, 0, 0};
 
-            // Colour rides the cell index and time, so neighbouring paths differ and the whole
+            // Color rides the cell index and time, so neighbouring paths differ and the whole
             // pattern cycles through the palette.
             const uint8_t idx = static_cast<uint8_t>(
                 hashInt(static_cast<uint32_t>(cx + 32768), static_cast<uint32_t>(cy + 32768), 1, shuffle)

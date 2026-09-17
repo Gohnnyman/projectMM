@@ -17,7 +17,7 @@ namespace mm {
 // The effect is deliberately THIN, and that is the point of it. Every piece of machinery — the
 // sphere-tracing loop, the distance primitives, the gradient normal, the camera, the lighting —
 // lives in `raymarch.h` where any effect can use it. What remains here is the part that makes this
-// effect this effect: a `scene()` describing two spheres and a floor, and a choice of colours.
+// effect this effect: a `scene()` describing two spheres and a floor, and a choice of colors.
 //
 // Writing a different 3D effect means writing a different `scene()`. That is the whole API.
 //
@@ -26,8 +26,8 @@ namespace mm {
 // far each ray may search, so halving it roughly halves the cost.
 //
 /// Prior art: Iñigo Quilez's distance-function and raymarching articles (iquilezles.org).
-/// @card RaymarchEffect.png
 /// Effect: a raymarched 3D scene of melting spheres, lit by a normal derived from the field.
+/// @card RaymarchEffect.gif
 class RaymarchEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️"; }   // power-function showcase

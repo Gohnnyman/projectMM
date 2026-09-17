@@ -21,6 +21,7 @@ namespace mm {
 // carries a 4th channel (channelsPerLight() >= 4); on RGB layers the white member is ignored.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Effect that fills the whole layer with one palette color.
+/// @card SolidEffect.gif
 class SolidEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }   // MoonLight origin

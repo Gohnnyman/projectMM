@@ -21,6 +21,7 @@ namespace mm {
 // allocated in prepare and freed in release — never a large inline member.
 /// Author: Andrew Tuline (WLED-SR), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Physics effect: gravity-bounced balls trailing along the layer.
+/// @card BouncingBallsEffect.gif
 class BouncingBallsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🐙"; }  // MoonLight origin · WLED

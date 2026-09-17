@@ -22,6 +22,7 @@ namespace mm {
 // safe at any grid size.
 /// Author: Andrew Tuline (WLED-SR), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Tetris-style effect: falling, stacking blocks.
+/// @card TetrixEffect.gif
 class TetrixEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🌙✨"; }  // MoonLight origin · MoonModules

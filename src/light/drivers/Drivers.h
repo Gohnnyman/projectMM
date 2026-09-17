@@ -20,28 +20,21 @@
 
 namespace mm {
 
-/// Top-level container for one or more drivers: the consumer side of the pipeline. Owns the shared
-/// output buffer, composites every enabled layer into it each frame, and holds the global power,
-/// brightness and palette that each driver's own Correction multiplies with.
+/// Top-level container for one or more drivers: the consumer side of the pipeline. Owns the shared output buffer and composites every enabled layer into it each frame. It holds the global power, brightness and palette that each driver's Correction multiplies with.
 ///
-/// Prior art: MoonLight's PhysicalLayer, which owns the display buffer and maps virtual channels
-/// into it.
+/// Prior art: MoonLight's PhysicalLayer, which owns the display buffer and maps virtual channels into it.
 ///
 /// @moreinfo
 ///
 /// ## The shared output buffer
 ///
-/// Blend and map write to arbitrary physical positions through a LUT, so a driver cannot read the
-/// output chunk by chunk until it is whole. One enabled layer with a 1:1 unshuffled mapping is the
-/// exception: drivers then read that layer's buffer directly, at the cost of parallelism.
+/// Blend and map write to arbitrary physical positions through a LUT. So a driver cannot read the output chunk by chunk until it is whole. One enabled layer with a 1:1 unshuffled mapping is the exception. Drivers then read that layer's buffer directly, at the cost of parallelism.
 ///
-/// Two or more enabled layers composite in Effects order, bottom to top. Drivers owns that because
-/// only it sees both the stack order and the output buffer.
+/// Two or more enabled layers composite in Effects order, bottom to top. Drivers owns that because only it sees both the stack order and the output buffer.
 ///
 /// ## Per-driver source window
 ///
-/// A window-aware driver outputs a contiguous slice, so each driver names its own lights and
-/// reordering drivers changes nothing but tick order.
+/// A window-aware driver outputs a contiguous slice, so each driver names its own lights. Reordering drivers changes nothing but tick order.
 ///
 /// ## Naming
 ///
@@ -83,7 +76,7 @@ public:
         stopEncodeTask();
         LivePalettes::clear(livePtrs_);
         MoonLivePalette::clearActiveInstance(&paletteScriptModule_);
-        // Free the script, not just detach: release() may never run, and the engine holds a block.
+        // Free the script rather than detach: release() may never run, and the engine holds a block.
         paletteScriptModule_.release();
     }
 
@@ -147,7 +140,7 @@ public:
     /// Run the drivers' encode on the second core, so a frame costs max(render, encode).
     bool multicore = true;
     // The wire format is per driver; this container owns only the global brightness above.
-    /// The global active colour palette, which every palette-driven effect reads live.
+    /// The global active color palette, which every palette-driven effect reads live.
     uint8_t palette = 0;
 
     // The names live in a member array because the seam holds POINTERS, so a local would dangle.
@@ -475,7 +468,7 @@ public:
     }
 
     // Logical channel order: the per-strip wire reorder is applied later, by the drivers.
-    /// The first driven light's RGB, for a consumer that shows one colour for the device.
+    /// The first driven light's RGB, for a consumer that shows one color for the device.
     bool firstOutputRgb(uint8_t out[3]) const override {
         const Buffer* src = nullptr;
         if (outputBuffer_.data()) src = &outputBuffer_;

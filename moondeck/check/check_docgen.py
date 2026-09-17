@@ -52,9 +52,18 @@ sys.path.insert(0, str(ROOT / "moondeck" / "docs"))
 # The limits. Description and controls share one number deliberately: two cells side by side
 # with different caps makes one column reliably longer than the other, which is the shape
 # this check exists to remove.
-MAX_DESC = 600       # characters of prose under the name
-MAX_CONTROLS = 600   # characters of control lines, all together
-MAX_CONTROL = 120    # characters of any ONE control line
+# A card is read in a narrow column beside its image, so the limits are per LINE rather than
+# per card: a module with twelve honest controls is not worse documented than one with three,
+# and capping their sum only punished the richer module for being rich. What makes a card
+# unreadable is one control that runs to a paragraph, which the per-control cap catches.
+#
+# The visual catalogs are tighter because the GIF carries the description: a moving effect
+# shows what it looks like far better than prose can, so the words are there to say what the
+# reader cannot see. Elsewhere a still PNG shows a card, and the prose does more of the work.
+MAX_DESC = 600            # characters of prose under the name
+MAX_DESC_VISUAL = 400     # ... on effects, modifiers and layouts, where the gif describes it
+MAX_CONTROL = 100         # characters of any ONE control line
+MAX_CONTROL_VISUAL = 80   # ... on the visual catalogs
 
 # A details section continues the CARD, so it is written for the same reader: someone
 # choosing and using the module, not someone reading its implementation. Two limits keep
@@ -81,12 +90,27 @@ ANIMATED_PAGES = _hooks.ANIMATED_PAGES
 # line, and a deep dive goes after `@moreinfo` where a post-process moves it below the
 # member lists. The numbers come from the tree: a member line is 14 words at the median
 # and 19 at p95, so 20 words bites the outliers and leaves the normal case alone.
-HEADER_DIRS = ("src/light/drivers",)
+# EVERY header under src, not a list of directories. A list is a tolerance wearing different
+# clothes: each directory it omits is silently exempt, and nobody notices a new one appearing.
+HEADER_ROOT = "src"
+# Upstream code, vendored rather than written here, spelled exactly as check_prose.py spells it.
+HEADER_EXEMPT = ("src/platform/desktop/vendor/", "src/ui/vendor/")
 MAX_CLASS_DOC = 10      # lines of `///` directly above `class X`
 MAX_MOREINFO = 20       # lines of the `@moreinfo` appendix
 MAX_MEMBER_DOC = 1      # lines of a `///` run that is NOT a class comment
 MAX_DOC_WORDS = 20      # words on one comment line, `///` or `//`
 MAX_CODE_COMMENT = 1    # lines of a `//` run inside a class body
+
+# No hard wrap: a sentence continued on the next `///` line. The one-line budget above already
+# forbids this on a member or code comment, so it bites only where a block is ALLOWED to be
+# multi-line: the class comment and the `@moreinfo` appendix, which becomes a markdown page.
+# Same reason markdown forbids it: let the editor soft-wrap, so a one-word edit is a one-word
+# diff rather than a reflowed paragraph.
+_WRAP_SKIP = ("##", "@", "-", "*", "|", "```", ">")
+# An INDENTED line inside a comment is a block, not prose: a wire table, a listing, a diagram.
+# Joining one destroys the layout that carries its meaning, and a reference table read as a
+# sentence is the worst of both. Four spaces after the marker is the markdown convention.
+_WRAP_INDENT = 4
 
 
 
@@ -119,8 +143,9 @@ def _cards(text: str):
                 src = re.search(r'src="([^"]+)"', ln)
                 cur["img_src"] = src.group(1) if src else ""
             elif (h._ORIGIN_RE.match(ln) or h._TESTS_RE.match(ln)
-                  or h._TESTS_MULTI_RE.match(ln) or h._DETAIL_RE.match(ln)):
-                continue                      # renders in another cell, not the description
+                  or h._TESTS_MULTI_RE.match(ln) or h._DETAIL_RE.match(ln)
+                  or h._ANCHOR_RE.match(ln)):
+                continue                      # renders in another cell, or not at all
             elif h._PARAM_RE.match(ln):
                 control = re.sub(r"^-\s+", "", ln.strip())
                 cur["controls"] += len(control)
@@ -258,7 +283,7 @@ _RULE_NAMES = (
     "details table cell", "details table has", "details section", "details heading",
     "public function has no", "public variable has no", "second column",
     "class comment", "member comment", "no image", "image is", "one control",
-    "description", "controls", "doc line", "appendix",
+    "description", "controls", "doc sentence", "appendix", "hard wrap",
 )
 
 
@@ -272,9 +297,29 @@ def _rule_name(reason: str) -> str:
 
 
 def _headers():
-    """Every header the rules cover, repo-relative."""
-    for d in HEADER_DIRS:
-        yield from sorted(p.relative_to(ROOT) for p in (ROOT / d).glob("*.h"))
+    """Every header the rules cover, repo-relative.
+
+    RECURSIVE: the old per-directory glob was flat, so a header one level down was never
+    read and its findings never counted. Widening the root without this would have reported
+    a clean run over an empty set, which is the failure this check exists to prevent.
+    """
+    for p in sorted((ROOT / HEADER_ROOT).rglob("*.h")):
+        rel = p.relative_to(ROOT)
+        if not str(rel).startswith(HEADER_EXEMPT):
+            yield rel
+
+
+def _sentences(text: str):
+    """The sentences in one comment line, for the word cap.
+
+    A full stop, question mark or exclamation followed by a space ends one. An abbreviation
+    ("e.g.", "i.e.") and a decimal ("0.1 bpp") carry a full stop that ends nothing, so a split
+    there would report two short sentences where there is one long one, which is the opposite
+    of what the cap is for. Both are rare in a comment and neither can lengthen a sentence,
+    so the split is deliberately simple: it can merge, never wrongly divide.
+    """
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z`\"'(\[])", text)
+    return [p for p in (x.strip() for x in parts) if p]
 
 
 def _doc_runs(lines):
@@ -372,6 +417,13 @@ def _header_rules(rel: str, text: str):
             if n > MAX_CLASS_DOC:
                 out.append((f"{rel}::line {start + 1}",
                             f"class comment {n} lines > {MAX_CLASS_DOC}"))
+            # The word cap applies here too: a file-level block is prose a reader sees on the
+            # generated page, and skipping the check exempted every `@defgroup` header from it.
+            for k in range(start, end):
+                for sentence in _sentences(re.sub(r"^\s*///\s*", "", lines[k]).strip()):
+                    if len(sentence.split()) > MAX_DOC_WORDS:
+                        out.append((f"{rel}::line {k + 1}",
+                                    f"doc sentence {len(sentence.split())} words > {MAX_DOC_WORDS}"))
             continue
         if _CLASS_RE.match(nxt):
             # The LEAD only: the run ends at @moreinfo, whose own lines are the appendix and
@@ -387,10 +439,46 @@ def _header_rules(rel: str, text: str):
                         f"member comment {n} lines > {MAX_MEMBER_DOC}: "
                         f"a deep dive goes after @moreinfo"))
         for k in range(start, end):
-            words = len(re.sub(r"^\s*///\s*", "", lines[k]).split())
-            if words > MAX_DOC_WORDS:
+            # PER SENTENCE, not per line. The no-wrap rule makes a line a paragraph, so a line
+            # holding three short sentences is correct and a single rambling one is not: counting
+            # the line would fail the first and pass nothing the standards care about. The rule
+            # reads "a sentence is one thought; past twenty words it is usually two", which is a
+            # statement about sentences.
+            text_ = re.sub(r"^\s*///\s*", "", lines[k]).strip()
+            for sentence in _sentences(text_):
+                words = len(sentence.split())
+                if words > MAX_DOC_WORDS:
+                    out.append((f"{rel}::line {k + 1}",
+                                f"doc sentence {words} words > {MAX_DOC_WORDS}"))
+            # A sentence carried onto the next line: this one ends mid-clause and the next
+            # opens lowercase. A list item, a heading, a table row or a fence is not prose
+            # being wrapped, so each is skipped rather than read as a continuation.
+            if k + 1 >= end:
+                continue
+            body = re.sub(r"^\s*///\s*", "", lines[k]).strip()
+            nbody = re.sub(r"^\s*///\s*", "", lines[k + 1]).strip()
+            if not body or not nbody:
+                continue
+            if body.startswith(_WRAP_SKIP) or nbody.startswith(_WRAP_SKIP):
+                continue
+            # Either side indented means a block: leave its layout alone.
+            raw = re.sub(r"^\s*///", "", lines[k])
+            nraw = re.sub(r"^\s*///", "", lines[k + 1])
+            if (len(raw) - len(raw.lstrip()) >= _WRAP_INDENT
+                    or len(nraw) - len(nraw.lstrip()) >= _WRAP_INDENT):
+                continue
+            # The test is the PREVIOUS line: a sentence that has not ended is carried over,
+            # whatever the continuation happens to start with. Requiring a lowercase opener
+            # missed every continuation beginning with a digit, a backtick or an identifier
+            # ("8-16 lanes...", "`ParallelSlots.h`..."), which is most of a technical comment.
+            # `.`, `!`, `?` only. A colon INTRODUCES what follows and a semicolon joins two
+            # clauses, so neither ends a thought: Unicode's sentence-boundary rules, Vale's own
+            # detector and the standards line all agree ("joined by a comma or a colon that a
+            # full stop should have been"). Treating them as terminators passed every
+            # `Prior art: ...` block that wrapped mid-sentence.
+            if body[-1] not in ".!?":
                 out.append((f"{rel}::line {k + 1}",
-                            f"doc line {words} words > {MAX_DOC_WORDS}"))
+                            "hard wrap: one line per sentence, let the editor soft-wrap"))
 
     for i, ln in enumerate(lines):
         if "@moreinfo" in ln:
@@ -492,12 +580,13 @@ def _card_rules(rel: str, c: dict):
     """
     out = []
     key = f"{rel}::{c['title']}"
-    if c["desc"] > MAX_DESC:
-        out.append((key, f"description {c['desc']} > {MAX_DESC}"))
-    if c["controls"] > MAX_CONTROLS:
-        out.append((key, f"controls {c['controls']} > {MAX_CONTROLS}"))
-    if c["widest"] > MAX_CONTROL:
-        out.append((key, f"one control {c['widest']} > {MAX_CONTROL}: "
+    visual = rel in ANIMATED_PAGES
+    max_desc = MAX_DESC_VISUAL if visual else MAX_DESC
+    max_control = MAX_CONTROL_VISUAL if visual else MAX_CONTROL
+    if c["desc"] > max_desc:
+        out.append((key, f"description {c['desc']} > {max_desc}"))
+    if c["widest"] > max_control:
+        out.append((key, f"one control {c['widest']} > {max_control}: "
                          f"{c['widest_text'][:60]}..."))
     # A card leads with its picture. The image is the first thing the eye reaches on a
     # row, and a card without one starts with a name against blank space, which reads as
@@ -522,20 +611,27 @@ def _orphan_pages():
     is unreachable. The link may come from anywhere: a card's Detail line, a prose page, or
     a sibling header naming the file (the hook retargets a `.h` mention at its page).
     """
-    pages = {p.stem for p in (ROOT / "docs" / "moonmodules").rglob("moxygen/*.md")}
+    # Keyed by (DOMAIN, stem): core/ and light/ each carry their own moxygen tree, so a page
+    # sharing a name across the two would mask the other and one domain's link would silently
+    # mark the other domain's page as reachable.
+    pages = {(p.parts[-3], p.stem)
+             for p in (ROOT / "docs" / "moonmodules").rglob("moxygen/*.md")}
     linked = set()
     for md in (ROOT / "docs").rglob("*.md"):
         if "moxygen" in md.parts:
             continue
-        for m in re.finditer(r"moxygen/(\w+)\.md", md.read_text(errors="ignore")):
-            linked.add(m.group(1))
+        for m in re.finditer(r"(?:(\w+)/)?moxygen/(\w+)\.md", md.read_text(errors="ignore")):
+            # A relative link inside a domain omits it, so fall back to the linking page's own.
+            domain = m.group(1) or (md.parts[-2] if md.parts[-2] in ("core", "light") else None)
+            for d in ((domain,) if domain else ("core", "light")):
+                linked.add((d, m.group(2)))
     for d in ("core", "light"):
         for h in (ROOT / "src" / d).rglob("*.h"):
             for m in re.finditer(r"\b(\w+)\.h\b", h.read_text(errors="ignore")):
                 if m.group(1) != h.stem:
-                    linked.add(m.group(1))
-    return [(f"moonmodules::{name}", "generated page nothing links to: unreachable")
-            for name in sorted(pages - linked)]
+                    linked.add((d, m.group(1)))
+    return [(f"moonmodules/{domain}::{name}", "generated page nothing links to: unreachable")
+            for domain, name in sorted(pages - linked)]
 
 
 def _violations():
@@ -635,8 +731,9 @@ def main() -> int:
         return 0
 
     if not found:
-        print(f"Docgen check: clean. Limits: description {MAX_DESC}, controls "
-              f"{MAX_CONTROLS}, one control {MAX_CONTROL}, one comment line, "
+        print(f"Docgen check: clean. Limits: description {MAX_DESC} "
+              f"({MAX_DESC_VISUAL} visual), one control {MAX_CONTROL} "
+              f"({MAX_CONTROL_VISUAL} visual), one comment line, "
               f"{MAX_DOC_WORDS} words.")
         return 0
 

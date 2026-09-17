@@ -11,36 +11,24 @@
 
 namespace mm {
 
-/// The one registered parallel WS2812B LED-output driver: up to 16 strands clocking out at once, one
-/// GPIO lane each, fed consecutive slices of the source buffer, over whichever bus peripheral the
-/// `peripheral` control selects at runtime. Backends: I80Peripheral.h, MoonI80Peripheral.h,
-/// ParlioPeripheral.h.
+/// The one registered parallel WS2812B LED-output driver: up to 16 strands clocking out at once, one GPIO lane each. Each is fed consecutive slices of the source buffer, over whichever peripheral the control selects. Backends: I80Peripheral.h, MoonI80Peripheral.h, ParlioPeripheral.h.
 ///
-/// The whole frame is encoded up front and shipped as one autonomous transfer, so there is no CPU
-/// deadline while it is on the wire. The encode is a fused correct and transpose, per row
-/// (ParallelSlots.h). Vocabulary: strand, lane, slot, row, under
+/// The whole frame is encoded up front and shipped as one autonomous transfer. So there is no CPU deadline while it is on the wire. The encode is a fused correct and transpose, per row (ParallelSlots.h). Vocabulary: strand, lane, slot, row, under
 /// @xref{terminology|More info → Terminology}.
 ///
 /// @moreinfo
 ///
 /// ## Why single-shot
 ///
-/// A driver that refills buffers as the DMA drains them must beat the clock on every refill, and a
-/// WiFi interrupt at the wrong moment garbles the rest of the frame. Encoding first makes that
-/// impossible. MoonI80Peripheral's ring gives this up: the price of a frame too big to hold.
+/// A driver that refills buffers as the DMA drains them must beat the clock every time. A WiFi interrupt at the wrong moment garbles the rest of the frame. Encoding first makes that impossible. MoonI80Peripheral's ring gives this up: the price of a frame too big to hold.
 ///
 /// ## Terminology
 ///
-/// A **strand** is one chain of LEDs. A **lane** is one bus data line: in the normal case, one GPIO
-/// driving one strand. A **slot** is one WS2812 bit on the wire, and a **row** is one light across every
-/// strand at once (so a frame is `maxLaneLights` rows).
+/// A **strand** is one chain of LEDs. A **lane** is one bus data line: in the normal case, one GPIO driving one strand. A **slot** is one WS2812 bit on the wire. A **row** is one light across every strand at once, so a frame is `maxLaneLights` rows.
 ///
 /// ## The frame transpose (correct + transpose, per row)
 ///
-/// The source has each light's bytes together, but the wire needs each bus WORD to carry one bit
-/// of EVERY strand at the same instant. So the encoder turns 8 lights on their side, an 8x8 bit
-/// matrix transpose, and writes one word per slot, fused with the per-light correction in one
-/// pass (ParallelSlots.h). A Parlio bus word and an i80 bus word have the same meaning.
+/// The source has each light's bytes together. The wire needs each bus WORD to carry one bit of EVERY strand at the same instant. So the encoder turns 8 lights on their side, an 8x8 bit matrix transpose. It writes one word per slot, fused with the per-light correction in one pass. A Parlio bus word and an i80 bus word have the same meaning.
 class ParallelLedDriver : public DriverBase {
 public:
     /// Test-only: borrow a mock backend, dropping any existing one. The caller keeps ownership.

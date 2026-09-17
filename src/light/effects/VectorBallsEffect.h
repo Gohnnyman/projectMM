@@ -31,8 +31,8 @@ namespace mm {
 //
 // Prior art: the demoscene vector-ball effect (Amiga era); the projection and shading are the
 // library's.
-// @card VectorBallsEffect.png
 /// Effect: a rotating 3D object of shaded spheres, drawn with real perspective.
+/// @card VectorBallsEffect.gif
 class VectorBallsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️"; }   // power-function showcase

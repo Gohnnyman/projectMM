@@ -19,8 +19,8 @@ namespace mm {
 // `beat` adds the onset detector's hits as a white shockwave born at the center on every hit,
 // traveling out with the ripples. `smooth` switches the source between the raw bands and the
 // meter ballistic, which is the comparison a person tuning the audio path wants to see.
-// @card RadialSpectrumEffect.png
 /// Effect: the spectrum as ripples, one sector per band, radius as time; a shockwave per beat.
+/// @card RadialSpectrumEffect.gif
 class RadialSpectrumEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🎶🖌️🎡"; }

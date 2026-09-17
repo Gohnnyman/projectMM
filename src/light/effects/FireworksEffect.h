@@ -9,7 +9,7 @@ namespace mm {
 // Fireworks: shells rise, stall, and burst into a shower of sparks that arc over and fall.
 //
 // This is the particle kernel end to end — every stage of a firework is a kernel call, and the
-// effect itself only decides when to launch and what colour:
+// effect itself only decides when to launch and what color:
 //
 //   launch   -> pool.spawn        a shell with upward velocity
 //   rise     -> pool.gravity      the shell decelerates on its own; no timer decides the apex
@@ -29,8 +29,8 @@ namespace mm {
 //
 /// Prior art: the WLED Particle System's firework family (Damian Schneider, @DedeHai) for the effect
 /// vocabulary; the physics is the kernel's.
-/// @card FireworksEffect.png
 /// Effect: shells that rise, stall, and burst into falling sparks.
+/// @card FireworksEffect.gif
 class FireworksEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫✨"; }   // power-function showcase

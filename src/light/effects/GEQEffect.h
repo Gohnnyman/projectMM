@@ -26,6 +26,7 @@ namespace mm {
 /// and freed in release, never a large inline member.
 /// Author: Andrew Tuline (WLED-SR), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Audio-reactive graphic-equaliser effect: 16 bands as vertical bars.
+/// @card GEQEffect.gif
 class GEQEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🐙🎶"; }  // MoonLight origin · WLED · audio

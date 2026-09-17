@@ -6,23 +6,15 @@
 
 namespace mm {
 
-/// Output driver: parallel WS2812B over the ESP32-P4 Parlio (Parallel IO) TX peripheral, the P4's
-/// scale path and sibling of I80Peripheral. The shared body (slicing, encode, single-shot DMA,
-/// loopback) lives in ParallelLedDriver.
+/// Output driver: parallel WS2812B over the ESP32-P4 Parlio (Parallel IO) TX peripheral, the P4's scale path and sibling of I80Peripheral. The shared body (slicing, encode, single-shot DMA, loopback) lives in ParallelLedDriver.
 ///
-/// Prior art: the ESP32-P4 Parlio peripheral, the hpwit/FastLED parallel-WS2812 lineage:
-/// architecture studied, never copied.
+/// Prior art: the ESP32-P4 Parlio peripheral, the hpwit/FastLED parallel-WS2812 lineage: architecture studied, never copied.
 ///
 /// @moreinfo
 ///
-/// Parlio is the simpler peripheral, so this backend adds less than the i80 one: no sacrificial
-/// WR/DC lines, since it generates the pixel clock itself, and no rounding, since its bus width IS
-/// the pin count. Either way the user names only the pins that drive a strand.
+/// Parlio is the simpler peripheral, so this backend adds less than the i80 one. No sacrificial WR/DC lines, since it generates the pixel clock itself. No rounding either, since its bus width IS the pin count. Either way the user names only the pins that drive a strand.
 ///
-/// Every control defaults to unset, because the strand is user-soldered and a hard-coded pin could
-/// drive one committed elsewhere. The P4-NANO bench uses pins 20-27 with loopbackRxPin 33: its
-/// clear GPIOs are 20-27, 32-33 and 39-48, the rest being strapping (34-38), Ethernet RMII
-/// (28-31, 49-52), C6 SDIO (14-19, 54) and I2C (7-8).
+/// Every control defaults to unset, because the strand is user-soldered and a hard-coded pin could drive one committed elsewhere. The P4-NANO bench uses pins 20-27 with loopbackRxPin 33. Its clear GPIOs are 20-27, 32-33 and 39-48; the rest are strapping, Ethernet, SDIO and I2C.
 class ParlioPeripheral : public LedPeripheral {
 public:
     /// Parlio lanes this chip provides; 0 makes the orchestrator's guards hold the driver inert.

@@ -19,12 +19,9 @@
 
 namespace mm {
 
-/// Base class for one driver: a consumer that reads the shared source buffer and emits it to a
-/// destination, whether a physical LED output, a network sink, or the preview.
+/// Base class for one driver: a consumer that reads the shared source buffer and emits it. The destination is a physical LED output, a network sink, or the preview.
 ///
-/// A driver optionally reads dimensions from an active Layer, optionally applies the shared output
-/// correction, and optionally restricts its output to a contiguous window of the source buffer. It
-/// plays the same zero-state role for drivers that EffectBase does for effects.
+/// A driver optionally reads dimensions from an active Layer and applies the shared output correction. It can also restrict its output to a contiguous window of the source buffer. It plays the same zero-state role for drivers that EffectBase does for effects.
 class DriverBase : public MoonModule {
 public:
     // The OWNER must release before destroying: a base destructor cannot prevent the vptr race.

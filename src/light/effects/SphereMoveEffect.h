@@ -22,6 +22,7 @@ namespace mm {
 // quantised integer-time steps — a smooth sweep at every speed.
 // Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Effect moving a lit sphere through a 3D layout.
+/// @card SphereMoveEffect.gif
 class SphereMoveEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin · 3D-native

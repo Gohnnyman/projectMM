@@ -26,8 +26,8 @@ namespace mm {
 //
 // Prior art: the classic dissolve transition; the position-addressed (rather than shuffled) form is
 // the standard shader approach.
-// @card DissolveEffect.png
 /// Effect: two color fields trading places pixel by pixel, with no per-pixel state.
+/// @card DissolveEffect.gif
 class DissolveEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }   // power-function showcase

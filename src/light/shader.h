@@ -6,7 +6,7 @@
 
 // The shader vocabulary: the small set of operations every per-pixel shader is written out of.
 //
-// A **shader** is one idea — a function that runs once per pixel and returns a colour, given that
+// A **shader** is one idea: a function that runs once per pixel and returns a color, given that
 // pixel's position and the time. Everything else is composition. What makes shader code portable
 // between people is that it is written in a shared vocabulary (GLSL's `mix`, `clamp`, `step`,
 // `smoothstep`, `fract`, `length`, plus the signed-distance operators), so an effect reads the same
@@ -17,7 +17,7 @@
 // technique built on top of it, and lives in `raymarch.h`.
 //
 // **Everything is 16-bit fixed point on 0..65535**, matching `frac16` in math16.h. That is the
-// contract: a value is a fraction of one, an SDF distance is in sub-pixel units, and a colour index
+// contract: a value is a fraction of one, an SDF distance is in sub-pixel units, and a color index
 // is a byte because palettes are. The 8-bit forms in math8.h stay for genuinely 8-bit domains.
 //
 // Prior art: the GLSL built-in function set (the names are deliberately the standard ones so a
@@ -220,12 +220,12 @@ constexpr uint8_t depthFade(int32_t z, int32_t far) {
     return static_cast<uint8_t>(((far - z) * 255) / far);
 }
 
-// --- Colour ---------------------------------------------------------------------------------------
+// --- Color ---------------------------------------------------------------------------------------
 
-/// Iñigo Quilez's cosine palette: four coefficients generate a whole smooth colour ramp, so a
+/// Iñigo Quilez's cosine palette: four coefficients generate a whole smooth color ramp, so a
 /// shader carries its palette as numbers rather than a table. `t` is 0..65535 around the ramp.
 ///
-/// colour = a + b * cos(2π(c·t + d)), per channel.
+/// color = a + b * cos(2π(c·t + d)), per channel.
 inline RGB cosPalette(frac16 t, uint8_t aR, uint8_t aG, uint8_t aB,
                       uint8_t bR, uint8_t bG, uint8_t bB,
                       uint8_t cR, uint8_t cG, uint8_t cB,
@@ -240,7 +240,7 @@ inline RGB cosPalette(frac16 t, uint8_t aR, uint8_t aG, uint8_t aB,
     return RGB{ch(aR, bR, cR, dR), ch(aG, bG, cG, dG), ch(aB, bB, cB, dB)};
 }
 
-/// Blend two colours by `t` — the colour form of `mix`.
+/// Blend two colors by `t`, the color form of `mix`.
 inline RGB mixColor(RGB a, RGB b, frac16 t) {
     const uint8_t f = static_cast<uint8_t>(t >> 8);
     return RGB{static_cast<uint8_t>(a.r + (((b.r - a.r) * f) >> 8)),

@@ -12,12 +12,9 @@
 
 namespace mm {
 
-/// Output driver: streams the buffer over UDP, one driver carrying three industry protocols
-/// selected by a control. Byte layouts live beside the receiver, so the two sides cannot drift.
+/// Output driver: streams the buffer over UDP, one driver carrying three industry protocols selected by a control. Byte layouts live beside the receiver, so the two sides cannot drift.
 ///
-/// One driver feeds many receivers, each taking a contiguous run of the window and each addressed
-/// only by itself. So a wall of tubes is one driver, the twin of one LED driver fanning out to
-/// several lanes. Unicast is the default rather than an option among equals.
+/// One driver feeds many receivers, each taking a contiguous run of the window and each addressed only by itself. So a wall of tubes is one driver, the twin of one LED driver fanning out to several lanes. Unicast is the default rather than an option among equals.
 ///
 /// Prior art: MoonLight's D_NetworkOut, and the Art-Net 4, E1.31 and DDP specifications.
 ///
@@ -25,20 +22,13 @@ namespace mm {
 ///
 /// ## Why unicast is the default
 ///
-/// The Art-Net 4 spec leaves no room: broadcast is not allowed, and survives here only as legacy
-/// compatibility. The reason is receive cost, and it is asymmetric. A universe number lives in the
-/// payload rather than a header, so a receiver can discard a universe it does not own only after
-/// its stack has carried the packet up and parsed it. Broadcast therefore makes every host on the
-/// segment pay for every universe. Two independent sources put the practical ceiling near fifteen
-/// universes, and a large grid measured on the bench starved an ESP32's network stack.
+/// The Art-Net 4 spec leaves no room: broadcast is not allowed, and survives here only as legacy compatibility. The reason is receive cost, and it is asymmetric. A universe number lives in the payload rather than a header. So a receiver discards a universe it does not own late. Its stack has already carried the packet up and parsed it. Broadcast therefore makes every host on the segment pay for every universe. Two independent sources put the practical ceiling near fifteen universes. A large grid measured on the bench starved an ESP32's network stack.
 ///
-/// Unicast duplicates nothing when each node owns a different slice, which is the normal case:
-/// the sender emits as many packets as a broadcast stream would, each reaching only its owner.
+/// Unicast duplicates nothing when each node owns a different slice, which is the normal case. The sender emits as many packets as a broadcast stream would, each reaching only its owner.
 ///
 /// ## Liveness
 ///
-/// UDP is fire and forget, so a dead receiver is invisible. The send loop tolerates one rather
-/// than pretending to detect it: a failed send drops that packet, so one dark tube stalls nothing.
+/// UDP is fire and forget, so a dead receiver is invisible. The send loop tolerates one rather than pretending to detect it. A failed send drops that packet, so one dark tube stalls nothing.
 ///
 /// @card NetworkSendDriver.png
 class NetworkSendDriver : public DriverBase {
@@ -194,7 +184,7 @@ public:
             totalBytes = static_cast<size_t>(nLights) * srcCh;
         }
 
-        // Rounded DOWN to whole fixtures: one straddling two universes reads a neighbour's channels.
+        // Rounded DOWN to whole fixtures: one straddling two universes reads a neighbor's channels.
         size_t chunk = (protocol == 2) ? DDP_MAX_PAYLOAD : MAX_CHANNELS_PER_UNIVERSE;
         uint8_t packet[DDP_HEADER_SIZE + DDP_MAX_PAYLOAD];  // 1450 B covers all three
         const uint16_t port = protocolPort(protocol);

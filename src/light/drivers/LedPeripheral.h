@@ -14,9 +14,7 @@ enum class LedHwBlock : uint8_t { None = 0, LcdCam, I2s, Parlio };
 
 /// A parallel-WS2812 output peripheral, behind a runtime strategy interface.
 ///
-/// ParallelLedDriver owns the controls, the lifecycle, the tick and the shared encode machinery,
-/// and drives one peripheral chosen at runtime. The peripheral supplies only the variant
-/// operations: bring the bus up, hand back its DMA buffer, transmit a frame, and tear down.
+/// ParallelLedDriver owns the controls, the lifecycle, the tick and the shared encode machinery, and drives one peripheral chosen at runtime. The peripheral supplies only the variant operations. Bring the bus up, hand back its DMA buffer, transmit a frame, tear down.
 ///
 /// Not a hot-path boundary: every method here is called per frame or per reinit, never per light.
 /// The per-light encode writes into the raw buffer and never calls back into the peripheral.

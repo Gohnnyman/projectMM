@@ -119,6 +119,28 @@ def main():
                 findings.append(f"{path}: {sev} {a.get('Check')}: {a.get('Message')}  "
                                 f"[{a.get('Match', '')[:40]}]  (whole file: this page is finished)")
 
+    # CONTROL: a header reaches Vale through the tree-sitter View in .vale.ini, and a missing or
+    # broken one prints `view 'CComments' not found` and EXITS 0. Every header then reports clean,
+    # which is indistinguishable from a swept tree. So lint a fixture that MUST fail: if Vale finds
+    # nothing in a line carrying an em-dash and a British spelling, the setup is broken rather than
+    # the tree. A zero is only trustworthy once something that should fire, fires.
+    probe = subprocess.run(
+        ["vale", "--output=JSON", "--no-exit", "--ext=.h", "--path=probe.h"],
+        input="// A colour scheme \u2014 an em-dash.\nint x = 1;\n",
+        capture_output=True, text=True)
+    try:
+        hits = sum(len(v) for v in json.loads(probe.stdout or "{}").values())
+    except json.JSONDecodeError:
+        hits = 0
+    if hits < 2:
+        print("Prose check: FAILED ITS OWN CONTROL.\n")
+        print("  A fixture carrying an em-dash and a British spelling produced "
+              f"{hits} alert(s), expected 2.")
+        print("  Vale is not reading comments: check the View at "
+              ".vale/styles/config/views/CComments.yml and the [src/**] section of .vale.ini.")
+        print("  Every header reads as clean until this passes.")
+        return 1
+
     findings = sorted(set(findings))
     if not findings:
         print("Prose check: clean in added lines.")

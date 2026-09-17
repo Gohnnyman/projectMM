@@ -12,33 +12,29 @@ namespace mm {
 
 /// Streams a true-shape 3D preview to the web UI over the binary WebSocket.
 ///
-/// The preview is a POINT LIST, not a dense grid: only the real lights are sent, at their real
-/// (x, y, z) positions, on MoonLight's PhysicalLayer model. Positions go out once at mapping time
-/// and channels per frame. This driver owns both wire formats, and the HTTP server is a
-/// domain-neutral broadcaster that writes the bytes.
+/// The preview is a POINT LIST, not a dense grid. Only the real lights are sent, at their real (x, y, z) positions, on MoonLight's PhysicalLayer model. Positions go out once at mapping time and channels per frame. This driver owns both wire formats, and the HTTP server is a domain-neutral broadcaster that writes the bytes.
 ///
-/// Resolution is client-driven: the browser reads the drops counter each frame carries and posts
-/// the standing request it wants. No standing request means no work at all.
+/// Resolution is client-driven: the browser reads the drops counter each frame carries and posts the standing request it wants. No standing request means no work at all.
 ///
 /// @moreinfo
 ///
 /// ## The wire format
 ///
 /// --8<-- [start:wire-format]
-///     0x03 coordinate table, sent only in answer to a client's request:
-///          [0x03][count:u32][bx][by][bz][stride:u16][epoch:u8][(x,y,z):u8x3 x count]
-///     0x02 per-frame channels:
-///          [0x02][count:u32][stride:u16][epoch:u8][drops:u8][(r,g,b) x count]
-///     0x04 per-frame aim, only for a rig whose fixtures carry pan and tilt:
-///          [0x04][count:u32][stride:u16][epoch:u8][reserved:u8][(pan,tilt):u8x2 x count]
-///     Client requests: [0x51][stride][fps] standing, [0x52][stride] one-shot table.
+/// ```text
+/// 0x03 coordinate table, sent only in answer to a client's request:
+///      [0x03][count:u32][bx][by][bz][stride:u16][epoch:u8][(x,y,z):u8x3 x count]
+/// 0x02 per-frame channels:
+///      [0x02][count:u32][stride:u16][epoch:u8][drops:u8][(r,g,b) x count]
+/// 0x04 per-frame aim, only for a rig whose fixtures carry pan and tilt:
+///      [0x04][count:u32][stride:u16][epoch:u8][reserved:u8][(pan,tilt):u8x2 x count]
+/// Client requests: [0x51][stride][fps] standing, [0x52][stride] one-shot table.
+/// ```
 /// --8<-- [end:wire-format]
 ///
 /// ## Its own channel, and why
 ///
-/// Preview frames are lossy and large; control-plane state is small and latency-sensitive.
-/// Sharing one WebSocket made the small messages queue behind the big ones, which users saw as a
-/// flickering connection indicator. Separate connections is the standard remedy.
+/// Preview frames are lossy and large; control-plane state is small and latency-sensitive. Sharing one WebSocket made the small messages queue behind the big ones, which users saw as a flickering connection indicator. Separate connections is the standard remedy.
 ///
 /// @card PreviewDriver.png
 class PreviewDriver : public DriverBase, public BinaryBroadcaster::ClientMessageSink {
@@ -197,7 +193,7 @@ public:
         nrOfLightsType n = layouts->totalLightCount();
         if (n == 0) return;
 
-        // EXTENT, not size: an 8-wide grid spans 0 to 7, and the browser centres on this.
+        // EXTENT, not size: an 8-wide grid spans 0 to 7, and the browser centers on this.
         auto extent = [](lengthType size) -> lengthType { return size > 0 ? size - 1 : 0; };
         const lengthType ex = extent(layer_->physicalWidth());
         const lengthType ey = extent(layer_->physicalHeight());

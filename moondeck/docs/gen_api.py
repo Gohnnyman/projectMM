@@ -591,9 +591,12 @@ def generate() -> dict[str, str]:
         # cleaned, so a renamed header left its old page behind: reachable by URL, linked by
         # nothing, and reporting as an orphan that no source explains. AFTER the count guard,
         # so a broken toolchain cannot empty the tree.
-        keep = {uri.rsplit("/", 1)[-1] for uri in pages}
+        # Keyed by (DOMAIN, name), not by name alone: core/ and light/ each have their own
+        # moxygen tree, so a page sharing a filename across the two would mask the other and
+        # a delete could take the wrong one.
+        keep = {(uri.split("/")[-3], uri.rsplit("/", 1)[-1]) for uri in pages}
         for domain in ("core", "light"):
             for stale in (DOCS_MOONMODULES / domain / "moxygen").glob("*.md"):
-                if stale.name not in keep:
+                if (domain, stale.name) not in keep:
                     stale.unlink()
         return pages

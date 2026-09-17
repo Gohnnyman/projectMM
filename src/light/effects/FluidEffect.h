@@ -22,9 +22,9 @@ namespace mm {
 // **Cost is the honest problem.** The solver is several passes over the grid per frame and the
 // pressure solve is `iterations` of them, so this is a desktop and P4 effect. An S3 runs it on a
 // small grid; the numbers per target are in performance.md rather than promised here.
-// @card FluidEffect.png
 /// Effect: dye poured into a simulated fluid, carried by the flow the medium itself works out.
 /// Prior art: Stam 1999, "Stable Fluids".
+/// @card FluidEffect.gif
 class FluidEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️🌊💨"; }   // power-function showcase

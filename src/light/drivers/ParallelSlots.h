@@ -20,7 +20,7 @@ namespace mm {
 ///
 /// ## The three slots
 ///
-/// Every WS2812 data bit becomes three bus slots, so a 1 bit is high for two and a 0 bit for one:
+/// Every WS2812 data bit becomes three bus slots. A 1 bit is high for two of them, a 0 bit for one:
 ///
 ///     slot 0: activeMask       every active lane high, the pulse start
 ///     slot 1: data bits & mask lane L's current bit at bus bit L

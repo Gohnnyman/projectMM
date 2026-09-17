@@ -24,6 +24,7 @@ namespace mm {
 /// patterns on a timer" demo; the registry-driven, self-skipping variant is ours.
 /// Author: projectMM original, on Mark Kriegsman's FastLED DemoReel100 pattern, https://github.com/FastLED/FastLED/blob/master/examples/DemoReel100/DemoReel100.ino
 /// Showcase effect: cycles through other effects with a name overlay.
+/// @card DemoReelEffect.gif
 class DemoReelEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }   // demo reel

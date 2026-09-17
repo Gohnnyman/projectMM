@@ -18,6 +18,7 @@ namespace mm {
 // 0×0). On a 1D strip (height 1) the bars collapse to per-column brightness.
 /// Author: projectMM original, on the WLED-SR GEQ / spectrum-analyser concept (Andrew Tuline), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Audio-reactive effect: colors the layer from the 16-band FFT spectrum.
+/// @card AudioSpectrumEffect.gif
 class AudioSpectrumEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🎶"; }

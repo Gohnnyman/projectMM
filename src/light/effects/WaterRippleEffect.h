@@ -27,8 +27,8 @@ namespace mm {
 // drops in the same places (the supersync rule).
 //
 // Prior art: Hugo Elias's water surface algorithm, the standard demoscene/graphics form.
-// @card WaterRippleEffect.png
 /// Effect: a propagating water surface where drops ripple, reflect and interfere.
+/// @card WaterRippleEffect.gif
 class WaterRippleEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🧬"; }   // power-function showcase
@@ -182,9 +182,9 @@ public:
                 // A crest and a trough sit at opposite ends of the palette. The height is scaled
                 // against the SAME running peak the brightness uses, so the index spans the whole
                 // palette: a fixed shift (`v >> 7`) left every pixel within a few steps of 128,
-                // which is one narrow colour band and why the surface read as a single dark hue.
+                // which is one narrow color band and why the surface read as a single dark hue.
                 // Map the height across the WHOLE palette. Centring on 128 pinned every pixel to
-                // one colour (128 is a single palette entry — cyan in the default rainbow), so the
+                // one color (128 is a single palette entry, cyan in the default rainbow), so the
                 // surface could only ever be one hue however the water moved. Spanning the range
                 // means a trough and a crest genuinely differ, and `hueSpread` sets how much of the
                 // palette the water uses.

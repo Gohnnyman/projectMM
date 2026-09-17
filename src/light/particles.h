@@ -243,12 +243,12 @@ struct Pool {
     /// Bring one particle to life. Returns false when the pool is full, so an emitter can simply
     /// stop rather than overwrite a living particle.
     bool spawn(draw::pos_t px, draw::pos_t py, draw::pos_t svx, draw::pos_t svy,
-               uint16_t life, uint8_t colour, uint8_t radius = 0) {
+               uint16_t life, uint8_t color, uint8_t radius = 0) {
         const uint16_t i = findFree();
         if (i >= count) return false;
         x[i] = px; y[i] = py; vx[i] = svx; vy[i] = svy;
         ttl[i] = life == 0 ? 1 : life;      // life 0 would be born dead; clamp so a spawn always shows
-        hue[i] = colour;
+        hue[i] = color;
         if (size) size[i] = radius;
         return true;
     }
@@ -489,7 +489,7 @@ struct Pool {
     /// spark/firework burst. `seed` makes the pattern reproducible: two devices emitting on the same
     /// frame produce the same burst.
     void angleEmit(draw::pos_t px, draw::pos_t py, angle16 angle, draw::pos_t speed,
-                   angle16 cone, uint8_t n, uint16_t life, uint8_t colour, uint32_t seed) {
+                   angle16 cone, uint8_t n, uint16_t life, uint8_t color, uint32_t seed) {
         for (uint8_t k = 0; k < n; k++) {
             const uint16_t r1 = hashInt(k, seed, 1);
             const uint16_t r2 = hashInt(k, seed, 2);
@@ -502,7 +502,7 @@ struct Pool {
             if (!spawn(px, py,
                        static_cast<draw::pos_t>((cx * s) / 32768),
                        static_cast<draw::pos_t>((sy * s) / 32768),
-                       life, colour)) return;                            // pool full: stop emitting
+                       life, color)) return;                            // pool full: stop emitting
         }
     }
 
@@ -510,7 +510,7 @@ struct Pool {
     /// a burst of confetti. `angleEmit` gives a directed cone; this gives an undirected scatter,
     /// which is what a splash or an explosion of debris actually looks like.
     void spray(draw::pos_t px, draw::pos_t py, draw::pos_t speed,
-               uint8_t n, uint16_t life, uint8_t colour, uint32_t seed) {
+               uint8_t n, uint16_t life, uint8_t color, uint32_t seed) {
         for (uint8_t k = 0; k < n; k++) {
             // hashInt rather than a stream RNG: two devices emitting on the same frame produce the
             // same spray without exchanging anything (the supersync rule).
@@ -519,7 +519,7 @@ struct Pool {
             if (!spawn(px, py,
                        static_cast<draw::pos_t>((rx * speed) / 256),
                        static_cast<draw::pos_t>((ry * speed) / 256),
-                       life, colour)) return;                     // pool full: stop emitting
+                       life, color)) return;                     // pool full: stop emitting
         }
     }
 

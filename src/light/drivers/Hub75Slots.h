@@ -19,12 +19,12 @@ namespace mm {
 ///
 ///   for each bit plane p (0 = least significant)
 ///     for each scan row r
-///       for each column x          -> one bus word per column: the six colour
+///       for each column x          -> one bus word per column: the six color
 ///                                     bits for (x, r) and (x, r + rows)
 ///       one blanking word           -> OE high (dark) while the row address
 ///                                     changes and the shift register latches
 ///
-/// The row address and the control lines ride the SAME bus word as the colour bits, because the
+/// The row address and the control lines ride the SAME bus word as the color bits, because the
 /// peripheral clocks one word per slot and a HUB75 panel wants address and data at once.
 /// `Hub75Layout` says which bus bit each line sits on, the one thing that differs between a
 /// board's wiring and ours. How a panel scans, and why brightness is time rather than amplitude,
@@ -34,16 +34,13 @@ namespace mm {
 /// hzeller/rpi-rgb-led-matrix, ESPHome's hub75 component). The scan and bit-plane structure is
 /// the panel's, not any library's; the encoder below is written from the panel behavior.
 
-/// Which bus bit each HUB75 line occupies. The peripheral drives one byte per
-/// slot, so every line is a bit position in that byte rather than a GPIO here:
-/// the platform layer maps bit -> GPIO when it builds the bus.
+/// Which bus bit each HUB75 line occupies. The peripheral drives one byte per slot, so every line is a bit position rather than a GPIO here. The platform layer maps bit to GPIO when it builds the bus.
 ///
-/// Defaults are the conventional order and cost nothing to override: a board that
-/// wires the panel differently changes these, and the encoder is unchanged.
+/// Defaults are the conventional order and cost nothing to override. A board that wires the panel differently changes these, and the encoder is unchanged.
 struct Hub75Layout {
-    /// Colour bits for the upper half-panel.
+    /// Color bits for the upper half-panel.
     uint8_t r1 = 0, g1 = 1, b1 = 2;
-    /// Colour bits for the lower half-panel.
+    /// Color bits for the lower half-panel.
     uint8_t r2 = 3, g2 = 4, b2 = 5;
     /// Row address bits; a 1/8 panel uses only a, b and c.
     uint8_t a = 8, b = 9, c = 10, d = 11, e = 12;
@@ -53,9 +50,7 @@ struct Hub75Layout {
     uint8_t oe = 14;
 };
 
-/// The geometry one encode needs. `scanRate` is the panel's own (8, 16 or 32) and
-/// is NOT derivable from the height: two panels of identical dimensions can scan
-/// differently, which is why it is a user control rather than a calculation.
+/// The geometry one encode needs. `scanRate` is the panel's own and is NOT derivable from the height. Two panels of identical dimensions can scan differently, which is why it is a control rather than a calculation.
 struct Hub75Geometry {
     // Sixteen rather than eight: the control lines live at bits 8-14 (Hub75Layout).
     /// Bytes on the wire per pixel clock: one 16-bit bus word.
@@ -135,7 +130,7 @@ inline size_t hub75Encode(const uint8_t* rgb, uint8_t* out,
                 if ((rgb[lo + 0] >> shift) & 1) word |= static_cast<uint16_t>(1u << lay.r2);
                 if ((rgb[lo + 1] >> shift) & 1) word |= static_cast<uint16_t>(1u << lay.g2);
                 if ((rgb[lo + 2] >> shift) & 1) word |= static_cast<uint16_t>(1u << lay.b2);
-                // The address rides EVERY column byte: changing it mid-row ghosts the last one.
+                // The address rides EVERY column word: changing it mid-row ghosts the last one.
                 for (uint8_t bit = 0; bit < addrBits; bit++) {
                     if ((r >> bit) & 1) word |= static_cast<uint16_t>(1u << addr[bit]);
                 }

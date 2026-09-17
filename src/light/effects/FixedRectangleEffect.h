@@ -20,6 +20,7 @@ namespace mm {
 // written fresh on EffectBase + the shared draw primitives.
 // Author: limpkin (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Test effect: draws a fixed rectangle at set coordinates.
+/// @card FixedRectangleEffect.gif
 class FixedRectangleEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

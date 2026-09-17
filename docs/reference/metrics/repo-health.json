@@ -1,5 +1,5 @@
 {
-  "commit": "9631f75b",
+  "commit": "242cba7c",
   "flash": {
     "esp32s3-n16r8": 2131600,
     "desktop": 1953560,
@@ -31,8 +31,8 @@
   },
   "perf": {
     "desktop": {
-      "tick_us": 127,
-      "fps": 7874,
+      "tick_us": 122,
+      "fps": 8196,
       "scenario_p50": {
         "Layer_base_pipeline": {
           "p50": 70,
@@ -646,7 +646,7 @@
         },
         "desktop-macos": {
           "p50": 252,
-          "p95": 291,
+          "p95": 317,
           "n": 32,
           "last": "2026-09-17"
         },
@@ -699,11 +699,11 @@
   },
   "loc": {
     "core": 27155,
-    "light": 32887,
+    "light": 32712,
     "platform": 19800,
     "ui": 11196,
-    "test": 60192,
-    "moondeck": 25784
+    "test": 60282,
+    "moondeck": 25906
   },
   "comments": {
     "core": {
@@ -711,8 +711,8 @@
       "ratio": 0.433
     },
     "light": {
-      "lines": 10299,
-      "ratio": 0.347
+      "lines": 10124,
+      "ratio": 0.343
     },
     "platform": {
       "lines": 6963,
@@ -723,12 +723,12 @@
       "ratio": 0.314
     },
     "test": {
-      "lines": 11252,
+      "lines": 11271,
       "ratio": 0.215
     },
     "moondeck": {
-      "lines": 4179,
-      "ratio": 0.185
+      "lines": 4230,
+      "ratio": 0.186
     }
   },
   "tests": {
@@ -737,7 +737,7 @@
   },
   "docs": {
     "md_files": 137,
-    "md_lines": 29572,
+    "md_lines": 36729,
     "plans_files": 31,
     "backlog_lines": 2976,
     "lessons_lines": 518,

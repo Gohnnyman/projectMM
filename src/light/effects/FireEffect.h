@@ -10,7 +10,7 @@ namespace mm {
 /// spark count scales with width. The flame color comes from the active palette —
 /// the Lava palette (black->red->orange->yellow->white) gives the classic look; any
 /// palette works (Ocean/Forest turn the flame blue/green).
-/// @card FireEffect.png
+/// @card FireEffect.gif
 class FireEffect : public EffectBase {
 public:
     const char* tags() const override { return "⚡️🦅🧬"; }  // FastLED origin (Fire2012-style) · David Jupijn / Rising Step

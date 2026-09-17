@@ -27,8 +27,8 @@ namespace mm {
 //
 // Prior art: the standard VU/PPM meter ballistics (BBC/EBU peak-programme-meter behaviour) and
 // WLED's GEQ family for the band-to-column mapping.
-// @card SpectrumEffect.png
 /// Audio effect: a spectrum analyser with asymmetric ballistics and falling peak dots.
+/// @card SpectrumEffect.gif
 class SpectrumEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🎶"; }  // showcase + audio-reactive

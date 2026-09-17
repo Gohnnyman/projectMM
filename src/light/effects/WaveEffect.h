@@ -22,6 +22,7 @@ namespace mm {
 // (sawtooth, square) a vertical segment connects to the previous column so the line stays joined.
 // Author: Ewoud Wijma (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Effect of a travelling wave across the layer.
+/// @card WaveEffect.gif
 class WaveEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🌫️"; }

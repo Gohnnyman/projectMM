@@ -21,6 +21,7 @@ namespace mm {
 // (bpm, timebase) with the time source threaded in at the domain edge.
 /// Author: MONSOONO / @Flavourdynamics (MoonLight), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Algorithmic palette-pattern effect driven by two beat oscillators.
+/// @card PraxisEffect.gif
 class PraxisEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

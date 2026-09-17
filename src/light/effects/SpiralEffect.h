@@ -6,7 +6,7 @@ namespace mm {
 
 // Author: projectMM original (rotating spiral)
 /// Effect winding a lit spiral up a conical layout.
-/// @card SpiralEffect.png
+/// @card SpiralEffect.gif
 class SpiralEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🦅🖌️🎡"; }  // MoonLight origin · David Jupijn / Rising Step

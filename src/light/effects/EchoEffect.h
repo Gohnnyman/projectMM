@@ -25,8 +25,8 @@ namespace mm {
 //
 // Prior art: video feedback, a demoscene and video-art staple; the sample-transform-combine
 // formulation follows the standard texture-feedback shader shape.
-// @card EchoEffect.png
 /// Effect: the previous frame fed back through a zoom and rotation, leaving spiralling trails.
+/// @card EchoEffect.gif
 class EchoEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫✨"; }   // power-function showcase

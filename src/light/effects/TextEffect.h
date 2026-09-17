@@ -22,6 +22,7 @@ namespace mm {
 // a separate follow-up — see backlog — kept out so a light effect doesn't reach into system state.)
 // Author: projectMM original, on MoonLight's Scrolling Text — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Effect rendering a scrolling multi-line string in a bitmap font.
+/// @card TextEffect.gif
 class TextEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }   // MoonLight origin
