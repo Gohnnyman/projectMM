@@ -18,8 +18,9 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "moondeck" / "check"))
 sys.path.insert(0, str(ROOT / "moondeck" / "docs"))
 
-from check_docgen import (MAX_CONTROL, MAX_CONTROL_VISUAL, MAX_DESC,  # noqa: E402
-                           MAX_DESC_VISUAL, _cards, _header_rules, _structure)
+from check_docgen import (ANIMATED_PAGES, MAX_CONTROL, MAX_CONTROL_VISUAL,  # noqa: E402
+                           MAX_DESC, MAX_DESC_VISUAL, _card_rules, _cards,
+                           _header_rules, _structure)
 
 
 def _card(desc: str = "Short.", controls=("- `a` — one.",)) -> str:
@@ -125,10 +126,30 @@ def test_many_short_controls_are_not_a_finding():
 
 def test_the_visual_catalogs_are_held_tighter():
     # An effect's gif says what it looks like, so its prose says only what the eye cannot
-    # see. The same card passes off a still-image page and fails on a gif one.
-    between = "x" * (MAX_DESC_VISUAL + 50)
-    assert MAX_DESC_VISUAL < len(between) <= MAX_DESC
-    assert MAX_CONTROL_VISUAL < MAX_CONTROL
+    # see. The SAME card passes off a still-image page and fails on a gif one, which is the
+    # whole rule: asserting the constants alone would pass against a _card_rules that never
+    # read them.
+    VISUAL, PLAIN = "moonmodules/light/effects.md", "moonmodules/light/drivers.md"
+    assert VISUAL in ANIMATED_PAGES and PLAIN not in ANIMATED_PAGES
+
+    def findings(rel, desc_len, control_len):
+        text = _card(desc="x" * desc_len, controls=("- `a` — " + "z" * control_len + ".",))
+        card = list(_cards(text))[0]
+        card["img"], card["img_src"] = True, ("a.gif" if rel in ANIMATED_PAGES else "a.png")
+        return [w for _, w in _card_rules(rel, card)]
+
+    # Just under the tighter caps: clean on both pages.
+    assert findings(VISUAL, MAX_DESC_VISUAL - 50, MAX_CONTROL_VISUAL - 30) == []
+    assert findings(PLAIN, MAX_DESC_VISUAL - 50, MAX_CONTROL_VISUAL - 30) == []
+
+    # Between the two caps: the visual page reports, the plain page stays silent.
+    over = findings(VISUAL, MAX_DESC_VISUAL + 50, MAX_CONTROL_VISUAL + 10)
+    assert any("description" in w for w in over)
+    assert any("one control" in w for w in over)
+    assert findings(PLAIN, MAX_DESC_VISUAL + 50, MAX_CONTROL_VISUAL + 10) == []
+
+    # Past the loose caps: both pages report.
+    assert findings(PLAIN, MAX_DESC + 50, MAX_CONTROL + 10)
 
 
 def test_the_widest_control_is_reported_with_its_text():

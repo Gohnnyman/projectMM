@@ -2,38 +2,38 @@
 
 #include "light/effects/EffectBase.h"
 
-#include "light/fonts.h"             // fonts::kAll — the selectable bitmap fonts
+#include "light/fonts.h"             // fonts::kAll: the selectable bitmap fonts
 
 namespace mm {
 
-// Text: renders a multi-line string on the grid in a selectable bitmap font. By DEFAULT the text is
-// STATIC — laid out from the top-left, each `\n` dropping one font-height, clipped where it runs off
-// the grid. Turn on `scroll` to march the whole block leftwards as a marquee (wrapping), at `speed`.
-// The color comes from the active palette (one index, so it follows the global palette control).
-//
-// Multi-line entry uses the shared TextArea control (the same widget MoonLive's `source` uses — a
-// real <textarea>), so a user types several lines and each renders on its own row. The bitmap glyph
-// blitter (draw::text / draw::glyph, carrying the public raster-fonts data) does the per-pixel work,
-// so this effect stays short.
-//
-// Prior art: MoonLight's Scrolling Text (E_MoonLight) — the font set (4x6 / 6x8) and the scroll idea
-// are carried; extended here to multi-line static-by-default text with a scroll toggle, written fresh
-// on projectMM's EffectBase + the shared draw/font primitives. (MoonLight's IP/FPS/uptime presets are
-// a separate follow-up — see backlog — kept out so a light effect doesn't reach into system state.)
-// Author: projectMM original, on MoonLight's Scrolling Text — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+// Author: projectMM original, on MoonLight's Scrolling Text, https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Effect rendering a scrolling multi-line string in a bitmap font.
 /// @card TextEffect.gif
+///
+/// The text is static by default, laid out from the top left and clipped at the grid's edge.
+/// `scroll` marches the whole block leftward as a marquee instead, wrapping as it goes.
+/// Each newline drops a row, so several lines render at once.
+///
+/// Prior art: MoonLight's Scrolling Text, whose font set and scroll this carries.
 class TextEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫"; }   // MoonLight origin
-    Dim dimensions() const override { return Dim::D2; }   // draws on the z=0 plane; extrude fills z
+    /// Catalog tags: MoonLight origin.
+    const char* tags() const override { return "💫"; }
+    /// Draws on the z=0 plane, which extrude fills through a volume.
+    Dim dimensions() const override { return Dim::D2; }
 
-    char    text_[128] = "projectMM";     // the (multi-line) string to show; TextArea preserves '\n'
-    bool    scroll = false;               // false = static top-left; true = horizontal marquee
-    uint8_t font   = 1;                   // index into fonts::kAll (0 = 4x6, 1 = 6x8)
-    uint8_t speed  = 30;                  // marquee speed (pixels/sec-ish); only used when scrolling
-    uint8_t hue    = 128;                 // palette index for the text color (mid-palette; 0 is black in some palettes)
+    /// The string to show, where the text area preserves its newlines.
+    char    text_[128] = "projectMM";
+    /// March the block leftward as a marquee rather than holding it still.
+    bool    scroll = false;
+    /// Which bitmap font renders it.
+    uint8_t font   = 1;
+    /// How fast the marquee runs, when scrolling.
+    uint8_t speed  = 30;
+    /// The palette index the text takes, mid-palette since some palettes start black.
+    uint8_t hue    = 128;
 
+    /// Publish the string, the scroll, the font and the color.
     void defineControls() override {
         controls_.addTextArea("text", text_, sizeof(text_));
         controls_.addControl("scroll", scroll);
@@ -43,6 +43,7 @@ public:
         controls_.addControl("hue", hue, 0, 255);
     }
 
+    /// Draw the text, either in place or marched along its marquee cycle.
     void tick() MM_NONBLOCKING override {
         const int w = width();
 
@@ -50,29 +51,25 @@ public:
         const fonts::Font& f = fonts::kAll[font < fonts::kCount ? font : 0];
         const RGB color = colorFromPalette(*Palettes::active(), hue);
 
-        draw::fill(cv, {0, 0, 0});   // text is redrawn whole each frame; clear first
+        draw::fill(cv, {0, 0, 0});   // the text is redrawn whole each frame
 
         if (!scroll) {
-            // Static: top-left, newlines wrap down one font-height. draw::text handles '\n'.
+            // From the top left, where each newline drops a row.
             draw::text(cv, f, text_, 0, 0, color);
             return;
         }
 
-        // Marquee: scroll the WHOLE block leftwards. The x offset advances with time and wraps over
-        // the block's pixel width + the grid width, so the text runs off the left and re-enters from
-        // the right seamlessly. Each source line scrolls on its own row (newlines still wrap down).
+        // The offset wraps over the block plus the grid, so the text re-enters seamlessly.
         const int blockW = pixelWidth(text_, f);
-        const int span = blockW + w;                          // one full cycle: block clears then re-enters
+        const int span = blockW + w;                          // one cycle: it clears, then re-enters
         const int off = span > 0 ? static_cast<int>((elapsed() * static_cast<uint32_t>(speed) / 1000u) % span) : 0;
-        // startX runs from +w (just off the right edge) down to -blockW (fully scrolled off the left).
+        // Running from off the right edge to fully off the left.
         const lengthType startX = static_cast<lengthType>(w - off);
         draw::text(cv, f, text_, startX, 0, color);
     }
 
 private:
-
-    // The pixel width of the widest line of `str` in font `f` (glyphs advance f.width each; '\n'
-    // starts a new line). Used to size the marquee's wrap cycle.
+    /// The widest line's pixel width, which sizes the marquee's wrap cycle.
     static int pixelWidth(const char* str, const fonts::Font& f) {
         int widest = 0, cur = 0;
         for (const char* p = str; *p; p++) {

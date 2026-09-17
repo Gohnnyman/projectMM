@@ -4,44 +4,50 @@
 
 namespace mm {
 
-// Tunnel: the demoscene classic — a texture mapped onto the inside of an infinite tube, so the
-// viewer appears to fly down it forever.
-//
-// The trick is that nothing is 3D. For each pixel, its ANGLE around the center becomes one texture
-// coordinate and the RECIPROCAL of its distance becomes the other. Because 1/r grows without bound
-// as you approach the center, the texture compresses toward a vanishing point, and adding time to
-// that coordinate pulls it toward the viewer. Perspective for the price of a divide.
-//
-// It is the polar vocabulary carried to its conclusion: `atan16` and `dist16` give the angle and
-// radius, and the perspective is one reciprocal on top of them. (For the GATHER primitive —
-// reading the grid itself as a texture — see EchoEffect, which feeds a transformed previous frame
-// back through `sampleWrap`.)
-//
-// Cost: one divide, one atan and one noise sample per pixel. The divide is the expensive part on a
-// chip without hardware division; `depth` sets how fine the wall texture is, not how much it costs.
-//
-/// Prior art: the standard demoscene tunnel (angle + 1/r texture mapping), and Iñigo Quilez's
-/// write-ups of it. Implemented fresh in fixed point.
 /// Effect: a texture-mapped tunnel flying toward a vanishing point.
 /// @card TunnelEffect.gif
+///
+/// A texture mapped onto the inside of an infinite tube, so the viewer flies down it forever.
+/// Nothing here is 3D: perspective costs one divide.
+///
+/// Prior art: the standard demoscene tunnel, and Inigo Quilez's write-ups of it.
+///
+/// @moreinfo
+///
+/// ## Angle and reciprocal are the two texture coordinates
+///
+/// Each pixel's angle around the center becomes one coordinate, and 1/r the other.
+/// Since 1/r grows without bound toward the center, the texture compresses to a vanishing point.
+/// Adding time to that coordinate then pulls the wall toward the viewer.
+///
+/// This is the polar vocabulary carried to its conclusion, with one reciprocal on top of it.
+/// EchoEffect holds the gather primitive instead, reading the grid itself as a texture.
+///
+/// Cost: one divide, one atan and one noise sample a pixel, the divide being the expensive part.
 class TunnelEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🖌️🌫️🎡"; }   // power-function showcase
-    Dim dimensions() const override { return Dim::D3; }  // volumetric: the wall recedes through depth
+    /// Catalog tags: this effect is the power-function showcase.
+    const char* tags() const override { return "💫🖌️🌫️🎡"; }
+    /// Volumetric: the wall recedes through depth.
+    Dim dimensions() const override { return Dim::D3; }
 
-    uint8_t bpm      = 20;   // how fast the tunnel flies past
-    uint8_t depth    = 60;   // texture scale along the tunnel: higher = finer rings.
-                             // Shadows EffectBase::depth() (the fixture's), which is why the few
-                             // uses of that one below are qualified.
-    uint8_t twist    = 40;   // rotation per unit depth, so the tunnel corkscrews
-    uint8_t segments = 1;    // kaleidoscope the wall; 1 leaves it plain
-    uint8_t octaves  = 2;    // wall texture detail, and the cost knob
-    bool    vignette = true; // darken toward the vanishing point so it reads as receding
+    /// How fast the tunnel flies past.
+    uint8_t bpm      = 20;
+    /// Texture scale along the tunnel, shadowing `EffectBase::depth()`, which is qualified below.
+    uint8_t depth    = 60;
+    /// Rotation per unit depth, so the tunnel corkscrews.
+    uint8_t twist    = 40;
+    /// Kaleidoscope the wall, where 1 leaves it plain.
+    uint8_t segments = 1;
+    /// Wall texture detail, and the cost knob.
+    uint8_t octaves  = 2;
+    /// Darken toward the vanishing point, so it reads as receding.
+    bool    vignette = true;
 
-    /// The polar address: whether to read it from a table, at what precision, and how a
-    /// volumetric fixture's coordinates become an angle and a radius (light/polar.h).
+    /// The polar address: the table, its precision, and how a volumetric fixture maps to angle and radius.
     PolarLut::Controls polar;
 
+    /// Publish the flight, the wall's texture and the polar address.
     void defineControls() override {
         controls_.addControl("bpm", bpm, 0, 120);
         controls_.addControl("depth", depth, 1, 255);
@@ -51,14 +57,14 @@ public:
         controls_.addControl("vignette", vignette);
         PolarLut::addControls(controls_, polar);
     }
+    /// Build the polar address table for the current geometry.
     void prepare() override {
-        // The polar address is built here, not in tick(): prepare() is where a module builds state
-        // and where allocation is allowed, and it runs again on every resize and control change, so
-        // the table is always current without the render path ever allocating.
+        // Built here rather than in tick(), so the render path never allocates.
         lut_.prepareFor(polar, width(), height(), EffectBase::depth());
     }
 
 
+    /// Map the wall per pixel from its angle and the reciprocal of its distance.
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
         const lengthType w = width(), h = height(), dep = EffectBase::depth();
@@ -68,8 +74,7 @@ public:
 
         const int32_t cx = w / 2, cy = h / 2, cz = dep / 2;
 
-        // The polar address does not change between frames, so it is read from a table; if the
-        // device cannot spare the memory the effect computes it per pixel and looks the same.
+        // Read from a table, or computed per pixel where the memory cannot be spared.
         const bool table = lut_.ready();
 
         std::size_t i = 0;
@@ -78,9 +83,7 @@ public:
             for (lengthType x = 0; x < w; x++, i++) {
                 uint32_t r;
                 angle16 a;
-                // How far along the tube this light sits. A volumetric fixture is a real tube, so
-                // depth is literally distance down it: the wall texture scrolls past each slice at
-                // its own offset rather than every slice showing the same ring.
+                // How far along the tube this light sits, so each slice shows its own ring.
                 int32_t along;
                 if (table) {
                     a = lut_.angle(i);
@@ -100,22 +103,16 @@ public:
                                                               : static_cast<int32_t>(z) - cz;
                 }
 
-                // 1/r is the depth coordinate: distant wall (small r) compresses toward the center,
-                // which is exactly the perspective foreshortening a real tunnel has. The +1 keeps
-                // the pixel at the very center from dividing by zero.
+                // 1/r is the depth coordinate, and the +1 keeps the center pixel off a divide by zero.
                 const uint32_t depthCoord = (static_cast<uint32_t>(depth) * 4096u) / (r + 1);
 
-                // The wall corkscrews: rotating by depth means each ring is turned a little more
-                // than the one behind it.
+                // Rotating by depth turns each ring a little more than the one behind it.
                 a = static_cast<angle16>(a + ((depthCoord * twist) >> 6));
                 a = kaleido(a, segments);
 
-                // Sample the wall texture in (angle, depth) space, with time pulling the depth
-                // coordinate toward the viewer.
+                // Sampled in angle and depth, with time pulling that depth toward the viewer.
                 const uint32_t u = (static_cast<uint32_t>(a) >> 5);
-                // Depth down the tube adds to the texture's own depth coordinate, so a light further
-                // in shows wall that is further away. On a panel `along` is 0 and this is the flat
-                // tunnel exactly.
+                // Depth down the tube adds to the texture's own, and is 0 on a panel.
                 const uint32_t v = depthCoord + (t >> 5) + static_cast<uint32_t>(along * 256);
                 const uint8_t tex = fbm8(u, v, octaves);
 
@@ -133,8 +130,8 @@ public:
     }
 
 private:
-    PolarLut  lut_{*this};
-    BeatPhase phase_;
+    PolarLut  lut_{*this};   ///< the per-pixel angle and radius
+    BeatPhase phase_;        ///< the flight clock
 };
 
 }  // namespace mm

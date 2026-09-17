@@ -359,7 +359,7 @@ private:
     lengthType     srcHeight_ = 0;
     lengthType     width_  = 0;      // the encoded frame: the wall times scale_
     lengthType     height_ = 0;
-    uint8_t        scale_  = 1;      // the factor actually in use (the control, or autoScale)
+    uint8_t        scale_  = 1;      // the factor in use: the control, or autoScale
     // The two ticks run on different tasks, so every field both touch is an atomic.
     std::atomic<bool>     open_{false};
     std::atomic<bool>     encoderDied_{false};

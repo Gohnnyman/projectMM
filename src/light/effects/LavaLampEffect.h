@@ -1,53 +1,55 @@
 #pragma once
 
-#include "core/math16.h"            // BeatPhase — the shared BPM accumulator
+#include "core/math16.h"            // BeatPhase: the shared BPM accumulator
 #include "light/effects/EffectBase.h"
 
 namespace mm {
 
-// Atmospheric lava-lamp: three slow blobs whose summed field is mapped
-// through a black → red → orange → yellow → white palette.
-// Distinct from MetaballsEffect (which is fast, HSV-colored).
 // Author: projectMM original (metaball lava lamp)
-/// Lava-lamp effect: slow rising/merging palette blobs.
+/// Lava-lamp effect: slow rising and merging palette blobs.
 /// @card LavaLampEffect.gif
+///
+/// Three slow blobs whose summed field indexes the palette, so the lamp takes its colors.
+/// MetaballsEffect runs the same field fast and in HSV instead.
 class LavaLampEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step
-    // Iterates y and x only; Layer::extrude fills z on 3D layers.
+    /// Catalog tags: MoonLight origin, David Jupijn and Rising Step.
+    const char* tags() const override { return "💫🦅"; }
+    /// Iterates y and x, which extrude fills through a volume.
     Dim dimensions() const override { return Dim::D2; }
 
+    /// How many blobs share the lamp.
     static constexpr uint8_t NUM_BLOBS = 3;
 
+    /// How fast they drift.
     uint8_t bpm = 8;
+    /// How large each blob's field reaches.
     uint8_t radius = 36;
+    /// How strongly the summed field reads, which is what merges the blobs.
     uint8_t intensity = 200;
 
+    /// Publish the drift, the blob size and the field's strength.
     void defineControls() override {
         controls_.addControl("bpm", bpm, 1, 255);
         controls_.addControl("radius", radius, 8, 255);
         controls_.addControl("intensity", intensity, 1, 255);
     }
 
-    // Class scope, not function-local: -Wfunction-effects flags ANY static local in a
-    // nonblocking function, including a constexpr that needs no guard variable. Same
-    // storage and value here, and these are per-effect constants anyway.
-    // The orbit constants are this effect's own: they are what makes it read as a lava lamp rather
-    // than as the other field effects, so they stay here and the shared kernel takes them.
+    /// The orbits that make this a lava lamp, at class scope since a static local is flagged.
     static constexpr draw::BlobPath BLOB_PATHS[NUM_BLOBS] = {
         {1,   0,  64},
         {2,  80, 200},
         {1, 160, 100},
     };
 
+    /// Place each blob on its orbit, then index the palette by the summed field.
     void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();
         uint8_t cpl = channelsPerLight();
 
-        // Shared accumulator: raw dt·bpm in 64 bits, divided only at the read, so a sub-millisecond
-        // frame does not round to zero and freeze the animation (mm::BeatPhase owns that rule now).
+        // BeatPhase keeps its numerator wide until the read, so a fast frame cannot round to zero.
         phase_.advanceTo(elapsed(), bpm);
         const uint8_t t = static_cast<uint8_t>(phase_.phase(256));
 
@@ -62,9 +64,7 @@ public:
                 const uint32_t field = draw::blobField(x, y, bx, by, NUM_BLOBS, r2);
                 uint32_t scaled = (field * intensity) >> 8;
                 uint8_t idx = scaled > 255 ? 255 : static_cast<uint8_t>(scaled);
-                // The metaball field value (0 = between blobs, 255 = blob core) is the palette index,
-                // so the lamp takes the active palette. Lava gives the classic molten look (its low
-                // end is black, so the space between blobs stays dark); any palette recolors the blobs.
+                // The field value is the palette index, so a palette dark at its low end keeps the gaps dark.
                 const RGB c = colorFromPalette(*Palettes::active(), idx);
                 if (cpl >= 1) row[0] = c.r;
                 if (cpl >= 2) row[1] = c.g;
@@ -75,8 +75,7 @@ public:
     }
 
 private:
-    // Numerator-only accumulator (units of dt*bpm). See tick() for why.
-    BeatPhase phase_;
+    BeatPhase phase_;   ///< the drift clock
 };
 
 } // namespace mm

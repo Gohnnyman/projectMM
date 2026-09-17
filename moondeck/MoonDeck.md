@@ -167,7 +167,7 @@ uv run moondeck/check/check_docgen.py
 
 Reads the pages the docs build renders as card tables and reports, per card:
 
-- the sizes: 600 characters of description, 600 of controls, 120 for one control
+- the sizes: 600 characters of description and 100 for any one control, 400 and 80 on the visual catalogs
 - a missing image, or the wrong format for its page
 - a details section placed above a card, or named for a card that does not exist
 - a details table past 4 columns, or a cell past 300 characters

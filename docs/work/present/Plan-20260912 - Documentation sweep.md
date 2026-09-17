@@ -93,9 +93,13 @@ A file visited twice costs twice, and the second visit re-reads everything the f
 
 1. **Read the findings first, not the file.** `check_docgen` names every rule it breaks and `vale <file>` names every line. Together they say what the edit must contain, so the file is opened knowing the whole job.
 2. **Dump the comment runs once.** One pass prints every multi-line `//` and `///` run with the line it precedes. That output is the working set: do not re-read the file per finding.
-3. **Write one edit.** Every collapse, every added `///`, every em-dash and spelling in a single scripted pass, with each replacement asserted unique. A second edit means the first was incomplete.
-4. **Verify once.** `check_docgen` and `vale` on that file. Both silent, or go back to step 3 with what they now say.
-5. **Build only when the batch ends**, never per file: comments cannot break a build, and the compile is the expensive step.
+3. **Settle the `///` first.** The class comment, its `@moreinfo` appendix, the `@card` line, and a one-line `///` on every public member the check names. This is the reader's view of the file, and it decides what is left to say.
+4. **Then the `//`.** Each one is read against the `///` now above it: a block repeating what the doc comment says is deleted, and only a `//` carrying a constraint the `///` does not is kept and collapsed to its one line. Most are the first kind, which is why this order is cheaper than the reverse.
+5. **Apply the [Writing](../../contributing/documentation-standards.md#writing) rules while writing, not after.** Every sentence in steps 3 and 4 is written under them: present tense, positive form, factual tone, one thought per sentence, the textbook name, no self-reference, no em-dash, American spelling. Writing the sentence twice is the multi-pass this procedure exists to avoid.
+6. **Then read the file once as a reader would.** Three rules need the whole file rather than one comment, so they cannot bind in step 5: **say each fact once** (the class comment and a member `///` six screens apart, both stating it), **the class comment leads with what the reader needs first** after the depth moved to `@moreinfo`, and **a list holds one kind of thing, most important first**. This is a read, not a rewrite: it catches what the per-comment passes structurally cannot see.
+7. **Write it as one edit.** Every phase lands in a single scripted pass, with each replacement asserted unique. A second edit means the first was incomplete.
+8. **Verify once.** `check_docgen` and `vale` on that file. Both silent, or go back to step 7 with what they now say.
+9. **Build only when the batch ends**, never per file: comments cannot break a build, and the compile is the expensive step.
 
 **What the edit must fix, all of it, in that one pass:**
 

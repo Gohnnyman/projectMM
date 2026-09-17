@@ -8,10 +8,9 @@ namespace mm {
 /// @defgroup Hub75Slots HUB75 scan encoder: the bit-plane wire format
 /// @{
 ///
-/// HUB75 encode: the contract between Hub75Driver and a HUB75 port, named for the wire unit it
-/// builds, where one pixel clock is one SLOT. Sibling of ParallelSlots.h, which does the same job
-/// for WS2812. Pure data transform with no platform include, so unit_Hub75Slots.cpp pins it with
-/// no ESP32 and no panel.
+/// HUB75 encode: the contract between Hub75Driver and a HUB75 port, named for the wire unit it builds.
+/// One pixel clock is one SLOT. Sibling of ParallelSlots.h, which does the same job for WS2812.
+/// A pure data transform with no platform include, so unit_Hub75Slots.cpp pins it without an ESP32.
 ///
 /// @moreinfo
 ///
@@ -24,17 +23,16 @@ namespace mm {
 ///       one blanking word           -> OE high (dark) while the row address
 ///                                     changes and the shift register latches
 ///
-/// The row address and the control lines ride the SAME bus word as the color bits, because the
-/// peripheral clocks one word per slot and a HUB75 panel wants address and data at once.
-/// `Hub75Layout` says which bus bit each line sits on, the one thing that differs between a
-/// board's wiring and ours. How a panel scans, and why brightness is time rather than amplitude,
-/// is on the driver's page (docs/moonmodules/light/drivers.md, "HUB75, details").
+/// The row address and the control lines ride the SAME bus word as the color bits.
+/// The peripheral clocks one word per slot, and a HUB75 panel wants address and data at once.
+/// `Hub75Layout` says which bus bit each line sits on, the one thing a board's wiring changes.
+/// How a panel scans, and why brightness is time, is on the driver's page under "HUB75, details".
 ///
-/// Prior art: the HUB75 lineage generally (mrcodetastic/ESP32-HUB75-MatrixPanel-DMA,
-/// hzeller/rpi-rgb-led-matrix, ESPHome's hub75 component). The scan and bit-plane structure is
-/// the panel's, not any library's; the encoder below is written from the panel behavior.
+/// Prior art: mrcodetastic/ESP32-HUB75-MatrixPanel-DMA, hzeller/rpi-rgb-led-matrix and ESPHome's hub75.
+/// The scan and bit-plane structure is the panel's, and the encoder is written from that behavior.
 
-/// Which bus bit each HUB75 line occupies. The peripheral drives one byte per slot, so every line is a bit position rather than a GPIO here. The platform layer maps bit to GPIO when it builds the bus.
+/// Which bus bit each HUB75 line occupies. The peripheral drives one 16-bit bus word per slot.
+/// Every line is a bit position rather than a GPIO here, and the platform layer maps bit to GPIO.
 ///
 /// Defaults are the conventional order and cost nothing to override. A board that wires the panel differently changes these, and the encoder is unchanged.
 struct Hub75Layout {

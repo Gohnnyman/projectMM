@@ -4,29 +4,34 @@
 
 namespace mm {
 
-// Expanding concentric rings from random centre points.
-// Each ring grows continuously and respawns at a fresh random
-// position once it leaves the visible area. Multiple rings overlap.
-// (Renamed from RipplesEffect: the Ripples name now holds the MoonLight
-// sine-wave water-surface port; this concentric-rings effect is Rings.)
 // Author: projectMM original (concentric rings)
-/// Effect of expanding concentric rings from random centres.
+/// Effect of expanding concentric rings from random centers.
 /// @card RingsEffect.gif
+///
+/// Each ring grows continuously and respawns somewhere fresh once it leaves the grid.
+/// Several overlap, and where two rings cross their brightness sums.
+/// RipplesEffect holds the sine-wave water surface, where this one is the concentric form.
 class RingsEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🦅🖌️🎡"; }  // MoonLight origin · David Jupijn / Rising Step
-    // Iterates y and x only; Layer::extrude fills z on 3D layers.
+    /// Catalog tags: MoonLight origin, David Jupijn and Rising Step.
+    const char* tags() const override { return "💫🦅🖌️🎡"; }
+    /// Iterates y and x, which extrude fills through a volume.
     Dim dimensions() const override { return Dim::D2; }
 
+    /// How many rings the effect can hold at once.
     static constexpr uint8_t MAX_RIPPLES = 8;
 
-    // Calm defaults: a couple of slow rings read as clean expanding circles; more/faster reads as
-    // chaos. Raise count/speed in the UI for a busier field.
+    // Calm defaults: a couple of slow rings read as clean circles, where more reads as chaos.
+    /// How many rings expand at a time.
     uint8_t count = 2;
+    /// How fast each one grows.
     uint8_t speed = 30;
+    /// How wide a ring's lit band is.
     uint8_t thickness = 3;
+    /// Walks every ring around the palette.
     uint8_t hue_shift = 0;
 
+    /// Publish the population, the growth rate, the band's width and the palette shift.
     void defineControls() override {
         controls_.addControl("count", count, 1, 255);
         controls_.addControl("speed", speed, 1, 255);
@@ -34,25 +39,21 @@ public:
         controls_.addControl("hue_shift", hue_shift, 0, 255);
     }
 
+    /// Grow every ring, respawning those that left, then light each pixel near one.
     void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         lengthType w = width();
         lengthType h = height();
         uint8_t cpl = channelsPerLight();
 
-        // Visible radius limit: a TRUE distance to the far corner (dist16), where the 8-bit form
-        // approximated an octagon and saturated at 255 — so on a panel wider than ~255 lights the
-        // limit stopped growing and the rings stalled short of the edge. Clamped to a byte because
-        // the per-ripple radius state is 8-bit.
-        // Kept WIDE, not clamped to a byte: on a panel whose far corner is more than 255 lights
-        // away the ceiling stopped growing, so every ripple died before reaching the edge.
+        // The true distance to the far corner, kept wide: clamping it stalled every ring short of the edge.
         const uint32_t maxR32 = dist16(static_cast<int32_t>(w), static_cast<int32_t>(h));
         const uint16_t maxR = static_cast<uint16_t>(maxR32 < 1 ? 1 : (maxR32 > 65535 ? 65535 : maxR32));
 
         if (!initialized_) {
             for (uint8_t i = 0; i < MAX_RIPPLES; i++) {
                 spawn(i, w, h);
-                // Stagger initial radii so ripples are spread across all sizes
+                // Staggered, so the rings start spread across every size.
                 radius_[i] = static_cast<uint16_t>((i * maxR) / MAX_RIPPLES);
             }
             initialized_ = true;
@@ -61,7 +62,7 @@ public:
         uint32_t now = elapsed();
         uint32_t dt = now - lastElapsed_;
         lastElapsed_ = now;
-        // growth in radius units per frame (scaled by speed control + dt)
+        // Growth per frame, scaled by the speed control and the elapsed time.
         uint16_t growth = static_cast<uint16_t>((static_cast<uint32_t>(speed) * dt) >> 7);
         if (growth == 0) growth = 1;
 
@@ -81,21 +82,14 @@ public:
                 for (uint8_t i = 0; i < count && i < MAX_RIPPLES; i++) {
                     const int32_t dx = static_cast<int32_t>(x) - cx_[i];
                     const int32_t dy = static_cast<int32_t>(y) - cy_[i];
-                    // Kept wide for the same reason as maxR: clamping the per-pixel distance to a
-                    // byte made every light past 255 from a ripple's center read as exactly 255, so
-                    // the ring never appeared out there at all.
-                    //
-                    // Computed rather than read from a PolarLut, unlike the other radial effects:
-                    // this distance is from a RIPPLE's center, not the grid's, and each ripple moves
-                    // and respawns. A table per ripple would cost N times the memory and a rebuild
-                    // whenever one respawns, which is more than the dist16 it would save.
+                    // Wide, and computed rather than tabled since this is a moving ring's center.
                     const uint32_t d = dist16(dx, dy);
                     int32_t diff = static_cast<int32_t>(d) - static_cast<int32_t>(radius_[i]);
-                    if (diff < 0) diff = -diff;   // stays int32: narrowing truncated large distances
+                    if (diff < 0) diff = -diff;   // stays wide, since narrowing truncated a large distance
                     if (diff < thickness) {
-                        // Brightness peaks at ring centre, falls off with distance from ring.
+                        // Brightest on the ring itself, falling off across its band.
                         uint8_t falloff = static_cast<uint8_t>(((thickness - diff) * 255) / thickness);
-                        // Older ripples (large radius) fade out.
+                        // An older ring, having grown larger, fades out.
                         uint8_t age_fade = static_cast<uint8_t>(255 - ((radius_[i] * 255u) / maxR));
                         uint8_t intensity = scale8(falloff, age_fade);
                         RGB c = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(hue_[i] + hue_shift), intensity);
@@ -113,15 +107,17 @@ public:
     }
 
 private:
-    lengthType cx_[MAX_RIPPLES] = {};
-    lengthType cy_[MAX_RIPPLES] = {};
-    uint16_t radius_[MAX_RIPPLES] = {};   // wide: a large panel's far corner exceeds 255
-    uint8_t hue_[MAX_RIPPLES] = {};
-    bool initialized_ = false;
-    uint32_t lastElapsed_ = 0;
-    Random8 rng_{0xC0DECAFEu};   // the shared PRNG; rand8() adapts it to the call shape below
+    lengthType cx_[MAX_RIPPLES] = {};     ///< each ring's center on x
+    lengthType cy_[MAX_RIPPLES] = {};     ///< and on y
+    uint16_t radius_[MAX_RIPPLES] = {};   ///< wide, since a large panel's far corner exceeds a byte
+    uint8_t hue_[MAX_RIPPLES] = {};       ///< each ring's palette entry
+    bool initialized_ = false;            ///< false until the first tick seeds the rings
+    uint32_t lastElapsed_ = 0;            ///< the previous frame's timestamp
+    Random8 rng_{0xC0DECAFEu};            ///< the spawn's placement and color
+    /// One random byte, the shape the spawn below wants.
     uint8_t rand8() { return rng_.next8(); }
 
+    /// Put ring `i` somewhere fresh, at zero radius and a new color.
     void spawn(uint8_t i, lengthType w, lengthType h) {
         cx_[i] = static_cast<lengthType>((static_cast<uint16_t>(rand8()) * w) >> 8);
         cy_[i] = static_cast<lengthType>((static_cast<uint16_t>(rand8()) * h) >> 8);

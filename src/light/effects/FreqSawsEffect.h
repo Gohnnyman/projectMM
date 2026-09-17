@@ -1,52 +1,57 @@
 #pragma once
 
-#include "core/math16.h"            // map32 — the shared, fencepost-safe range map
+#include "core/math16.h"            // map32: the shared, fencepost-safe range map
 #include "light/effects/EffectBase.h"
 
 namespace mm {
 
-// Freq Saws: one vertical "saw" per audio band, each rising and falling like a tilt-shifted sawtooth
-// whose run-rate is driven by that band's loudness. Each frame the buffer fades a little (motion
-// trail), then every band sets a target speed from its current loudness; the band's speed RISES
-// instantly to a loud hit (max with the target) and DECAYS slowly back toward zero when the sound
-// stops, so a struck band keeps sawing for a while and a quiet one winds down. The current speed
-// becomes a BPM (0..bpmMax), and that BPM picks the Y position of the lit pixel via one of three
-// methods:
-//   0 "Chaos"      — y straight off beat8(bpm): the BPM jumps with the band, so the saw teleports
-//                    (visually chaotic, the original look).
-//   1 "Chaos fix"  — same beat8(bpm) but a per-band phase offset is carried so a BPM change continues
-//                    from the current sawtooth position instead of snapping (a smoother chaos).
-//   2 "BandPhases" — a per-band phase accumulator integrated from the BPM each frame (deltaMs-scaled),
-//                    so the saw advances continuously and never jumps (the default, smoothest).
-// The band physics run ONCE per tick (a loop over the 16 bands), caching each band's Y; the column
-// loop then just maps x→band and draws that band's cached Y — so a band spanning many columns on a
-// wide panel integrates exactly once per frame, not once per column (WLED's per-band-per-frame
-// physics). `invert` mirrors every other column (x even) top-to-bottom for a woven look; `keepOn`
-// keeps a band drawing even once its speed has fully decayed (so the panel never goes fully dark
-// between hits).
-//
-// Prior art: MoonLight's FreqSaws (E_MoonModules / MoonModules), an audio-reactive matrix effect. The
-// per-band rise/decay physics, the three position methods, the bpmMax / increaser / decreaser knobs,
-// and the per-band phase bookkeeping are reproduced exactly here, written fresh on projectMM's
-// EffectBase + the shared draw / palette / beat8 primitives. Reads AudioService::latestFrame();
-// silence → every band decays → flat → dark, safe on any target and grid size.
-/// Author: @TroyHacks (MoonLight / WLED MoonModules), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Audio-reactive effect: sawtooth bands driven by the frequency spectrum.
 /// @card FreqSawsEffect.gif
+/// Author: @TroyHacks (MoonLight / WLED MoonModules), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+///
+/// One vertical saw per band, each running at a rate its own loudness drives.
+/// A band's speed rises instantly to a loud hit and decays slowly once the sound stops.
+/// So a struck band keeps sawing for a while, and a quiet one winds down.
+///
+/// Prior art: MoonLight's FreqSaws, whose physics and three position methods this reproduces.
+///
+/// @moreinfo
+///
+/// ## Three ways to place the saw
+///
+/// Chaos reads the position straight off the beat, so the saw teleports as the rate changes.
+/// Chaos fix carries a per-band offset, so a rate change continues from where the saw already was.
+/// BandPhases integrates a per-band accumulator each frame, so it advances with no jump at all.
+///
+/// ## The physics run once a tick
+///
+/// The band loop caches each band's position, and the column loop only reads that cache.
+/// So a band spanning many columns integrates once a frame rather than once a column.
+/// `invert` mirrors every other column for a woven look, and `keepOn` keeps a decayed band drawn.
 class FreqSawsEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🎶"; }  // MoonLight origin · audio
-    Dim dimensions() const override { return Dim::D2; }   // writes only the z=0 slice; extrude fills z
+    /// Catalog tags: MoonLight origin, audio-reactive.
+    const char* tags() const override { return "💫🎶"; }
+    /// Writes the z=0 slice, which extrude fills through a volume.
+    Dim dimensions() const override { return Dim::D2; }
 
-    // Defaults match MoonLight's FreqSaws exactly.
-    uint8_t fade      = 4;     // per-frame fade-to-black amount (motion trail)
-    uint8_t increaser = 211;   // gain from band loudness into target speed
-    uint8_t decreaser = 18;    // decay rate when a band falls silent (0 = never decays)
-    uint8_t bpmMax    = 198;   // top BPM a fully-sped band maps to
-    bool    invert    = false; // mirror every even column top↔bottom
-    bool    keepOn    = false; // keep drawing a band whose speed has decayed to zero
-    uint8_t method    = 2;     // 0 Chaos, 1 Chaos fix, 2 BandPhases
+    // Defaults match MoonLight's own FreqSaws.
+    /// The per-frame fade, which is the motion trail.
+    uint8_t fade      = 4;
+    /// How much a band's loudness gains into its target speed.
+    uint8_t increaser = 211;
+    /// How fast a silent band decays, where 0 leaves it running.
+    uint8_t decreaser = 18;
+    /// The top rate a fully sped band reaches.
+    uint8_t bpmMax    = 198;
+    /// Mirror every other column, for a woven look.
+    bool    invert    = false;
+    /// Keep drawing a band whose speed has decayed to nothing.
+    bool    keepOn    = false;
+    /// Which of the three position methods places the saw.
+    uint8_t method    = 2;
 
+    /// Publish the trail, the band physics and the position method.
     void defineControls() override {
         controls_.addControl("fade", fade, 0, 255);
         controls_.addControl("increaser", increaser, 0, 255);
@@ -58,45 +63,42 @@ public:
         controls_.addSelect("method", method, kMethodOptions, 3);
     }
 
-    // Per-band state is a fixed 16-element set (one per GEQ channel, NOT per light), so it stays a
-    // small inline member — the "no large inline members" rule targets per-light buffers sized to
-    // nrOfLights, which this isn't. Cleared on every (re)build so a grid/control change starts the
-    // bands from rest.
+    /// Start every band from rest, since the state is per band rather than per light.
     void prepare() override {
         clearState();
     }
 
+    /// Advance all sixteen bands once, then draw each column from its band's cached position.
     void tick() MM_NONBLOCKING override {
         const int sizeX = width();
         const int sizeY = height();
 
         const AudioFrame* f = AudioService::latestFrame();
-        if (!f) return;   // null-safe (latestFrame returns silence, never null, but guard regardless)
+        if (!f) return;   // latestFrame returns silence rather than null, but guard regardless
 
         const draw::Canvas cv = canvas();
 
         layer()->fadeToBlackBy(fade);
 
-        // deltaMs since the last frame — drives the band decay and the BandPhases integrator.
+        // The elapsed delta, which drives the decay and the phase integrator.
         const unsigned long now = elapsed();
         const unsigned long deltaMs = now - lastTime;
         lastTime = now;
 
-        // Advance the 16-band physics ONCE per tick and cache each band's Y + active flag, so a band
-        // spanning several columns on a wide panel integrates once per frame (not once per column).
+        // Once a tick, cached, so a band spanning several columns still integrates once a frame.
         bool    bandActive[NUM_GEQ_CHANNELS] = {};
         uint8_t bandY[NUM_GEQ_CHANNELS]      = {};
         for (int band = 0; band < NUM_GEQ_CHANNELS; band++) {
             const uint8_t volume = f->bands[band];
-            // targetSpeed = volume * increaser * 257 — scaled into the 16-bit speed space (≈ ×65535).
+            // Scaled into the 16-bit speed space.
             const uint32_t targetSpeed = static_cast<uint32_t>(volume) * increaser * 257u;
 
             if (volume > 0) {
-                // Rise instantly to a loud hit: take the louder of current and target speed.
+                // Rise instantly to a loud hit.
                 if (targetSpeed > bandSpeed[band])
                     bandSpeed[band] = static_cast<uint16_t>(targetSpeed > 65535u ? 65535u : targetSpeed);
             } else if (decreaser > 0 && bandSpeed[band] > 0) {
-                // Decay back toward zero when silent, proportional to elapsed time and 1/decreaser.
+                // Decay toward zero when silent, in proportion to the elapsed time.
                 uint32_t decay = (static_cast<uint32_t>(bandSpeed[band]) * deltaMs) /
                                  (static_cast<uint32_t>(decreaser) * 10u);
                 if (decay < 1) decay = 1;
@@ -106,15 +108,14 @@ public:
 
             if (bandSpeed[band] > 1 || keepOn) {
                 bandActive[band] = true;
-                // Current speed → a BPM in 0..bpmMax.
+                // The current speed as a rate, capped at `bpmMax`.
                 const uint8_t bpm = static_cast<uint8_t>(map32(bandSpeed[band], 0, 65535, 0, bpmMax));
 
                 if (method == 0) {
-                    // Chaos: y straight off the beat — jumps as the BPM changes.
+                    // Straight off the beat, so it jumps as the rate changes.
                     bandY[band] = static_cast<uint8_t>(map32(beat8(bpm, now), 0, 255, 0, sizeY - 1));
                 } else if (method == 1) {
-                    // Chaos fix: carry a per-band phase offset so a BPM change continues from the
-                    // current sawtooth position instead of snapping.
+                    // A carried offset, so a rate change continues from where the saw already was.
                     if (bpm != lastBpm[band]) {
                         const uint8_t currentPos = static_cast<uint8_t>(beat8(lastBpm[band], now) + phaseOffset[band]);
                         const uint8_t newPos = beat8(bpm, now);
@@ -124,9 +125,7 @@ public:
                     bandY[band] = static_cast<uint8_t>(map32(static_cast<uint8_t>(beat8(bpm, now) + phaseOffset[band]),
                                                             0, 255, 0, sizeY - 1));
                 } else {
-                    // BandPhases: integrate a per-band phase accumulator from the BPM each frame
-                    // (deltaMs-scaled), halved, so the saw advances continuously with no jumps.
-                    // phaseInc = (bpm * deltaMs * 65536) / (60 * 1000); phaseInc /= 2.
+                    // An integrated accumulator, so the saw advances continuously with no jump.
                     uint32_t phaseInc = (static_cast<uint32_t>(bpm) * static_cast<uint32_t>(deltaMs) * 65536u) /
                                         (60u * 1000u);
                     phaseInc /= 2u;
@@ -136,10 +135,9 @@ public:
             }
         }
 
-        // Column loop: map each x onto its band and draw that band's cached Y. Per-column concerns
-        // (invert mirroring, palette color) stay here; the band physics already ran above.
+        // Each column reads its band's cache, so only the mirroring and the color are per column.
         for (int x = 0; x < sizeX; x++) {
-            // Map this column onto one of the 16 GEQ bands (band = map(x, 0, sizeX, 0, 16)).
+            // This column mapped onto one of the sixteen bands.
             int band = map32(x, 0, sizeX, 0, NUM_GEQ_CHANNELS);
             if (band < 0) band = 0;
             if (band > NUM_GEQ_CHANNELS - 1) band = NUM_GEQ_CHANNELS - 1;
@@ -147,7 +145,7 @@ public:
             if (!bandActive[band]) continue;
 
             const uint8_t y = bandY[band];
-            // invert mirrors every even column (x % 2 == 0) top-to-bottom.
+            // Every other column mirrors top to bottom.
             const int drawY = (invert && (x % 2 == 0)) ? (sizeY - 1 - y) : y;
             const uint8_t colorIndex = static_cast<uint8_t>(map32(x, 0, sizeX - 1, 0, 255));
             const RGB col = colorFromPalette(*Palettes::active(), colorIndex);
@@ -156,8 +154,10 @@ public:
     }
 
 private:
+    /// The spectrum's width, which the bands and the columns both map onto.
     static constexpr int NUM_GEQ_CHANNELS = 16;
 
+    /// Return every band to rest.
     void clearState() {
         std::memset(bandSpeed, 0, sizeof(bandSpeed));
         std::memset(bandPhase, 0, sizeof(bandPhase));
@@ -166,12 +166,12 @@ private:
         lastTime = 0;
     }
 
-    // Per-band physics state (one entry per GEQ channel, fixed 16). Small enough to stay inline.
-    uint16_t bandSpeed[NUM_GEQ_CHANNELS]   = {};   // current saw run-rate (16-bit speed space)
-    uint16_t bandPhase[NUM_GEQ_CHANNELS]   = {};   // BandPhases (method 2) phase accumulator
-    uint8_t  lastBpm[NUM_GEQ_CHANNELS]     = {};   // Chaos fix (method 1) previous BPM
-    uint8_t  phaseOffset[NUM_GEQ_CHANNELS] = {};   // Chaos fix (method 1) carried phase offset
-    unsigned long lastTime                 = 0;    // elapsed() at the previous frame (for deltaMs)
+    // Per band rather than per light, so these stay inline.
+    uint16_t bandSpeed[NUM_GEQ_CHANNELS]   = {};   ///< each band's current run-rate
+    uint16_t bandPhase[NUM_GEQ_CHANNELS]   = {};   ///< the BandPhases accumulator
+    uint8_t  lastBpm[NUM_GEQ_CHANNELS]     = {};   ///< the Chaos fix method's previous rate
+    uint8_t  phaseOffset[NUM_GEQ_CHANNELS] = {};   ///< and its carried offset
+    unsigned long lastTime                 = 0;    ///< the previous frame's timestamp
 };
 
 } // namespace mm

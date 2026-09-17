@@ -1,66 +1,69 @@
 #pragma once
 
 #include "light/effects/EffectBase.h"
-#include "light/particles.h"   // FrameTime — the shared time scale
+#include "light/particles.h"   // FrameTime: the shared time scale
 
 #include "platform/platform.h"      // platform::millis (the per-drop start-delay clock)
 
 namespace mm {
 
-// Tetrix: each column drops a "brick" of light that falls under a per-column speed, lands on a
-// growing stack at the bottom, and once the stack fills the column the whole column blanks back
-// to black and the cycle restarts — the falling-block "Tetris" look applied per LED column. Each
-// column runs an independent little state machine (idle → start-delay → fall → stack → blank),
-// so the columns desync into a shimmering rain of stacking bricks. With `oneColor` every brick in
-// a column shares one slowly-advancing palette index; otherwise each new brick picks a random one.
-//
-// Prior art: MoonLight's Tetrix (E_MoonModules / MoonModules), descended from the WLED "Tetrix"
-// effect (Aircoookie / blazoncek). The per-column physics (mapped fall speed = grid-height·FRAMETIME
-// / map(speed,1,255,40000,250), the `pos`/`stack`/`brick` integers, the millis()+2000 start/blank
-// delays, and the step-machine values 0/1/2/>2) and the color rules are reproduced from the
-// MoonLight spec, written fresh on EffectBase + the shared draw primitives. One drop per X column;
-// safe at any grid size.
-/// Author: Andrew Tuline (WLED-SR), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// Tetris-style effect: falling, stacking blocks.
+/// Author: Andrew Tuline (WLED-SR), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 /// @card TetrixEffect.gif
+///
+/// Each column drops a brick of light that falls at its own speed onto a growing stack.
+/// Once the stack fills a column, that column blanks to black and the cycle restarts.
+/// Every column runs its own state machine, so they desync into a rain of stacking bricks.
+///
+/// Prior art: MoonLight's Tetrix, descended from the WLED effect by Aircoookie and blazoncek.
+///
+/// @moreinfo
+///
+/// ## The per-column state machine
+///
+/// `step` carries the state: 0 idle, 1 start-roll, 2 falling.
+/// Above 2 it holds a future millis() timestamp instead, for the start delay and the blank delay.
+/// The physics come from the MoonLight spec, written fresh on EffectBase and the draw primitives.
+/// With `oneColor` a column's bricks share one slowly-advancing palette index, else each is random.
 class TetrixEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🌙✨"; }  // MoonLight origin · MoonModules
-    Dim dimensions() const override { return Dim::D2; }   // writes only the z=0 slice; iterates x and y
+    /// Catalog tags: MoonLight origin, MoonModules.
+    const char* tags() const override { return "💫🌙✨"; }
+    /// Writes the z=0 slice only, iterating x and y.
+    Dim dimensions() const override { return Dim::D2; }
 
-    // Controls — MoonLight's exact defaults. `speedControl` is the UI "speed" (0 = random per brick).
-    uint8_t speedControl = 0;     // 0..255; 0 → each brick gets a random fall speed
-    uint8_t widthControl = 0;     // 0..255; 0 → random brick height, else derived from this
-    bool    oneColor     = false; // all bricks in a column share one slowly-advancing color
+    /// Fall speed, MoonLight's default. 0 gives each brick a random speed.
+    uint8_t speedControl = 0;
+    /// Brick height. 0 randomizes it, otherwise it derives from this.
+    uint8_t widthControl = 0;
+    /// Share one slowly-advancing color across a column's bricks.
+    bool    oneColor     = false;
 
+    /// Publish the fall speed, the brick height and the one-color switch.
     void defineControls() override {
         controls_.addControl("speed", speedControl, 0, 255);
         controls_.addControl("width", widthControl, 0, 255);
         controls_.addControl("oneColor", oneColor);
     }
 
-    // Per-column falling-brick state (MoonLight's Tetris struct). `step` doubles as the state
-    // machine value (0 idle, 1 start-roll, 2 falling) AND as a future-millis timestamp once it
-    // holds millis()+2000 (the start delay and the post-fill blank delay) — those are all > 2.
+    /// Per-column falling-brick state, MoonLight's Tetris struct.
     struct Tetris {
-        float    pos   = 0.0f;  // current head position of the falling brick (in LED rows)
-        float    speed = 0.0f;  // fall speed in rows per frame
-        uint8_t  col   = 0;     // palette index for this column's brick(s)
-        uint16_t brick = 0;     // brick height in LEDs
-        uint16_t stack = 0;     // current stacked height at the bottom
-        uint32_t step  = 0;     // state machine / timestamp (see above)
-        float    roll  = 0.0f;  // start-roll carry, paced at the reference frame rate
+        float    pos   = 0.0f;  ///< head position of the falling brick, in LED rows
+        float    speed = 0.0f;  ///< fall speed in rows per frame
+        uint8_t  col   = 0;     ///< palette index for this column's bricks
+        uint16_t brick = 0;     ///< brick height in LEDs
+        uint16_t stack = 0;     ///< stacked height at the bottom
+        uint32_t step  = 0;     ///< state machine value, or a future millis() timestamp above 2
+        float    roll  = 0.0f;  ///< start-roll carry, paced at the reference frame rate
     };
 
+    /// Size one drop per column and give each a 2 s start delay.
     void prepare() override {
-        // One drop per X column. resize() reallocs only when the column count changes (frees on 0);
-        // the disable path frees it through MoonModule::release().
+        // resize() reallocs only when the column count changes, and frees on 0.
         const size_t cols = (width() > 0) ? static_cast<size_t>(width()) : 0;
         drops_.resize(cols);
         if (drops_) {
-            // MoonLight's onSizeChanged init: every column starts idle (stack=0), with a 2 s start
-            // delay (step = millis()+2000), and oneColor columns seeded to palette index 0. resize()
-            // already zeroed the block, so only the non-zero fields need setting.
+            // resize() already zeroed the block, so only the non-zero fields need setting.
             const uint32_t now = platform::millis();
             for (size_t i = 0; i < drops_.count(); i++) {
                 drops_[i].step = now + 2000;
@@ -69,6 +72,7 @@ public:
         }
     }
 
+    /// Advance every column's state machine and paint its brick and stack.
     void tick() MM_NONBLOCKING override {
         frameScale_ = static_cast<float>(fallTime_.advance(elapsed())) /
                       static_cast<float>(particles::FrameTime::kOne);
@@ -81,13 +85,10 @@ public:
 
         const uint32_t now = platform::millis();
         const RGB black{0, 0, 0};
-        // Own the background before painting columns. The Layer does not clear between frames, and
-        // this effect writes only inside its own columns — and nothing at all during the start
-        // delay — so without this it shows the previous effect's frame around and behind the game.
+        // The Layer holds last frame, and this effect writes only its own columns, so own the ground.
         draw::fill(cv, black);
 
-        // Process exactly the live column count (never the allocated max — robust to a shrink
-        // before prepare reruns).
+        // The live column count, never the allocated max, so a shrink before prepare is safe.
         const nrOfLightsType dropCount = static_cast<nrOfLightsType>(drops_.count());
         const nrOfLightsType nrOfDrops = (static_cast<nrOfLightsType>(w) < dropCount)
                                              ? static_cast<nrOfLightsType>(w) : dropCount;
@@ -96,10 +97,9 @@ public:
             Tetris& d = drops_[x];
 
             if (d.step == 0) {
-                // Idle → spawn a new brick. speed input is the control (or random when 0).
+                // Idle, so spawn a brick at the control's speed, or a random one when 0.
                 const uint8_t in = speedControl ? speedControl : rng_.below(1, 255);
-                // FastLED map(in, 1, 255, 40000, 250) — descending; the result (250..40000) needs a
-                // wide type (it does NOT fit in a byte). Fall speed = grid-height·FRAMETIME / mapped.
+                // A descending map, so the 250 to 40000 result needs a wide type rather than a byte.
                 const long mapped = mapRange(in, 1, 255, 40000, 250);
                 d.speed = (mapped > 0) ? (static_cast<float>(h) * FRAMETIME) / static_cast<float>(mapped)
                                        : 1.0f;
@@ -107,16 +107,12 @@ public:
                 if (!oneColor) d.col = static_cast<uint8_t>(rng_.below(0, 15) << 4);
                 d.step  = 1;
                 d.roll  = 0.0f;
-                // Brick height: from the width control (if set) or random 1..4, scaled up on tall grids.
+                // Brick height from the control, or random 1 to 4, scaled up on tall grids.
                 d.brick = static_cast<uint16_t>((widthControl ? ((widthControl >> 5) + 1)
                                                               : rng_.below(1, 5))
                                                 * (1 + (h >> 6)));
             } else if (d.step == 1) {
-                // Start-roll: MoonLight rolls a ~75% chance per frame, which at its fixed 40 fps means a
-                // brick waits a frame or two before dropping. Rolling per FRAME makes that pause a
-                // property of the framerate — at thousands of frames a second every brick starts
-                // instantly and the effect has no rhythm left. Roll once per reference frame instead,
-                // so the wait is the same fraction of a second everywhere.
+                // Roll once per reference frame, not per frame, or the pause scales with the frame rate.
                 d.roll += frameScale_;
                 while (d.roll >= 1.0f && d.step == 1) {
                     d.roll -= 1.0f;
@@ -125,13 +121,10 @@ public:
             } else if (d.step == 2) {
                 // Falling: descend until the brick head reaches the top of the stack.
                 if (d.pos > static_cast<float>(d.stack)) {
-                    // `speed` is calibrated against MoonLight's fixed 25 ms frame, so stepping by it
-                    // once per frame makes the fall rate a property of the framerate — bricks that
-                    // drift at 40 fps slam down at 1200. Scaling by the elapsed fraction of a
-                    // reference frame keeps the descent identical everywhere (architecture.md).
+                    // `speed` is calibrated against a 25 ms frame, so scale it by the elapsed fraction.
                     d.pos -= d.speed * frameScale_;
                     if (d.pos < static_cast<float>(d.stack)) d.pos = static_cast<float>(d.stack);
-                    // Render the brick: rows [pos, pos+brick) lit in the column color, above it black.
+                    // Rows [pos, pos+brick) take the column's color, and everything above is black.
                     for (lengthType i = static_cast<lengthType>(d.pos); i < h; i++) {
                         const RGB c = (i < static_cast<lengthType>(d.pos) + static_cast<lengthType>(d.brick))
                                           ? colorFromPalette(*Palettes::active(), d.col)
@@ -140,18 +133,13 @@ public:
                                                 static_cast<lengthType>(h - 1 - i), 0}, c);
                     }
                 } else {
-                    // Landed: grow the stack by the brick height. If the column is full, start the
-                    // blank delay (step = millis()+2000); otherwise idle for the next brick.
+                    // Landed: grow the stack, then blank-delay a full column or idle for the next brick.
                     d.step = 0;
                     d.stack = static_cast<uint16_t>(d.stack + d.brick);
                     if (d.stack >= static_cast<uint16_t>(h)) d.step = now + 2000;
                 }
             } else {
-                // step > 2: the column is full and waiting to blank. While the delay is in the
-                // future, fade the whole column toward black; once it elapses, reset the column.
-                // The compare is the wrap-safe signed-difference form ((int32_t)(step - now) > 0)
-                // rather than raw `step > now`, so it stays correct across the 32-bit millis()
-                // wrap (~49 days) — the modular difference fits a signed range for the 2 s delay.
+                // Full and waiting to blank, the compare being the wrap-safe signed difference.
                 d.brick = 0;
                 if (static_cast<int32_t>(d.step - now) > 0) {
                     for (lengthType i = 0; i < h; i++)
@@ -166,27 +154,22 @@ public:
     }
 
 private:
-    // FRAMETIME at MoonLight's 40 FPS rate (1000/40 = 25 ms): the per-frame step the fall speed
-    // is calibrated against, so the descent rate is grid-rate-independent.
+    /// MoonLight's 25 ms frame, the step the fall speed is calibrated against.
     static constexpr int FRAMETIME = 1000 / 40;
 
-    // FastLED's integer ::map(x, inMin, inMax, outMin, outMax) — used here with a descending out
-    // range (40000 → 250), so the result falls as the speed control rises. Guards inMax == inMin.
+    /// FastLED's integer map, used with a descending range so the result falls as speed rises.
     static long mapRange(long x, long inMin, long inMax, long outMin, long outMax) {
         const long den = inMax - inMin;
         if (den == 0) return outMin;
         return (x - inMin) * (outMax - outMin) / den + outMin;
     }
 
-    // The width/oneColor control members are named *Control so they don't shadow the inherited
-    // width()/depth() accessors.
-
-    // One drop per X column. Self-sizing, self-freeing, self-reporting.
-    ScratchBuffer<Tetris> drops_{*this};
+    // The *Control suffix keeps these from shadowing the inherited width() and depth() accessors.
+    ScratchBuffer<Tetris> drops_{*this};   ///< one drop per X column
     Random8        rng_;
 
-    particles::FrameTime fallTime_{40};   // MoonLight's reference rate
-    float frameScale_ = 1.0f;             // this frame's share of a reference frame
+    particles::FrameTime fallTime_{40};   ///< MoonLight's reference rate
+    float frameScale_ = 1.0f;             ///< this frame's share of a reference frame
 };
 
 } // namespace mm

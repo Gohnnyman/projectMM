@@ -322,6 +322,44 @@ def _sentences(text: str):
     return [p for p in (x.strip() for x in parts) if p]
 
 
+def _wrap_rule(rel: str, lines: list, k: int, end: int):
+    """A sentence carried onto the next `///` line, which the editor should have soft-wrapped.
+
+    A function rather than a loop body, because two callers need it: a member or class run,
+    and a `@defgroup` file lead. The `@defgroup` branch returns early on its own budget, and
+    when this test lived inline there it simply never ran on a file-level block.
+    """
+    # A list item, a heading, a table row or a fence is structure rather than prose being
+    # wrapped, so each is skipped rather than read as a continuation.
+    if k + 1 >= end:
+        return []
+    body = re.sub(r"^\s*///\s*", "", lines[k]).strip()
+    nbody = re.sub(r"^\s*///\s*", "", lines[k + 1]).strip()
+    if not body or not nbody:
+        return []
+    if body.startswith(_WRAP_SKIP) or nbody.startswith(_WRAP_SKIP):
+        return []
+    # Either side indented means a block: leave its layout alone.
+    raw = re.sub(r"^\s*///", "", lines[k])
+    nraw = re.sub(r"^\s*///", "", lines[k + 1])
+    if (len(raw) - len(raw.lstrip()) >= _WRAP_INDENT
+            or len(nraw) - len(nraw.lstrip()) >= _WRAP_INDENT):
+        return []
+    # The test is the PREVIOUS line: a sentence that has not ended is carried over, whatever
+    # the continuation happens to start with. Requiring a lowercase opener missed every
+    # continuation beginning with a digit, a backtick or an identifier ("8-16 lanes...",
+    # "`ParallelSlots.h`..."), which is most of a technical comment.
+    # `.`, `!`, `?` only. A colon INTRODUCES what follows and a semicolon joins two clauses,
+    # so neither ends a thought: Unicode's sentence-boundary rules, Vale's own detector and
+    # the standards line all agree ("joined by a comma or a colon that a full stop should
+    # have been"). Treating them as terminators passed every `Prior art: ...` block that
+    # wrapped mid-sentence.
+    if body[-1] not in ".!?":
+        return [(f"{rel}::line {k + 1}",
+                 "hard wrap: one line per sentence, let the editor soft-wrap")]
+    return []
+
+
 def _doc_runs(lines):
     """Each run of consecutive `///` lines, as (start, end, next_code_line)."""
     i = 0
@@ -424,6 +462,9 @@ def _header_rules(rel: str, text: str):
                     if len(sentence.split()) > MAX_DOC_WORDS:
                         out.append((f"{rel}::line {k + 1}",
                                     f"doc sentence {len(sentence.split())} words > {MAX_DOC_WORDS}"))
+                # The no-wrap rule binds here too: the file lead is the longest block in the
+                # tree, so exempting it exempted the prose most likely to be wrapped.
+                out += _wrap_rule(rel, lines, k, end)
             continue
         if _CLASS_RE.match(nxt):
             # The LEAD only: the run ends at @moreinfo, whose own lines are the appendix and
@@ -450,35 +491,7 @@ def _header_rules(rel: str, text: str):
                 if words > MAX_DOC_WORDS:
                     out.append((f"{rel}::line {k + 1}",
                                 f"doc sentence {words} words > {MAX_DOC_WORDS}"))
-            # A sentence carried onto the next line: this one ends mid-clause and the next
-            # opens lowercase. A list item, a heading, a table row or a fence is not prose
-            # being wrapped, so each is skipped rather than read as a continuation.
-            if k + 1 >= end:
-                continue
-            body = re.sub(r"^\s*///\s*", "", lines[k]).strip()
-            nbody = re.sub(r"^\s*///\s*", "", lines[k + 1]).strip()
-            if not body or not nbody:
-                continue
-            if body.startswith(_WRAP_SKIP) or nbody.startswith(_WRAP_SKIP):
-                continue
-            # Either side indented means a block: leave its layout alone.
-            raw = re.sub(r"^\s*///", "", lines[k])
-            nraw = re.sub(r"^\s*///", "", lines[k + 1])
-            if (len(raw) - len(raw.lstrip()) >= _WRAP_INDENT
-                    or len(nraw) - len(nraw.lstrip()) >= _WRAP_INDENT):
-                continue
-            # The test is the PREVIOUS line: a sentence that has not ended is carried over,
-            # whatever the continuation happens to start with. Requiring a lowercase opener
-            # missed every continuation beginning with a digit, a backtick or an identifier
-            # ("8-16 lanes...", "`ParallelSlots.h`..."), which is most of a technical comment.
-            # `.`, `!`, `?` only. A colon INTRODUCES what follows and a semicolon joins two
-            # clauses, so neither ends a thought: Unicode's sentence-boundary rules, Vale's own
-            # detector and the standards line all agree ("joined by a comma or a colon that a
-            # full stop should have been"). Treating them as terminators passed every
-            # `Prior art: ...` block that wrapped mid-sentence.
-            if body[-1] not in ".!?":
-                out.append((f"{rel}::line {k + 1}",
-                            "hard wrap: one line per sentence, let the editor soft-wrap"))
+            out += _wrap_rule(rel, lines, k, end)
 
     for i, ln in enumerate(lines):
         if "@moreinfo" in ln:

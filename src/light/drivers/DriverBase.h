@@ -129,7 +129,7 @@ protected:
 
     // The size differs per driver, so the caller passes the byte count; the lifecycle lives here.
     uint8_t* wire_ = nullptr;
-    size_t   wireCap_ = 0;   // bytes actually allocated (0 when the allocation failed)
+    size_t   wireCap_ = 0;   // bytes the allocation returned (0 when it failed)
 
     // Internal RAM first: this is the encoder's hottest data, written and read back per light.
     /// Grow the correction scratch to at least `bytes`, keeping a big-enough existing block.

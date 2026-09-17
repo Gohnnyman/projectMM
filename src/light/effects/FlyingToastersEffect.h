@@ -1,16 +1,4 @@
 #pragma once
-// Flying toasters: the classic screensaver, reborn as a light-wall effect. Chrome toasters with
-// flapping wings and slices of toast drift diagonally across the dark, forever.
-//
-// Inspired by After Dark's Flying Toasters (Berkeley Systems, 1989), brought to projectMM at
-// the suggestion of Frank (softhack007), who proposed sprite support for classic screensavers.
-// Inspiration only: the sprite art below is drawn fresh for this effect (the original art is
-// Berkeley Systems', and famously litigated), and nothing is copied from any derived data.
-//
-// The construction is the sprites-spec's division of labor: movement is the existing
-// particles::Pool (constant diagonal velocity, zero forces, respawn-wrap), appearance is the
-// stateless draw::sprite power function. The wing flap is a BeatPhase with a per-toaster phase
-// offset so the flock never syncs.
 // Author: projectMM original
 
 #include "core/math16.h"      // BeatPhase: the shared wing-flap clock
@@ -100,20 +88,39 @@ inline constexpr draw::sprites::Sprite kToastSprite{kToast, kPalette, TW, TH, 1,
 
 /// Effect: chrome toasters with flapping wings and toast drift diagonally across the dark.
 /// @card FlyingToastersEffect.gif
+///
+/// Inspired by After Dark's Flying Toasters, at Frank's suggestion of sprite support.
+/// The art is drawn fresh here, since the original is Berkeley Systems' and was famously litigated.
+///
+/// @moreinfo
+///
+/// ## The construction
+///
+/// Movement is `particles::Pool` at a constant diagonal velocity, respawning as it wraps.
+/// Appearance is the stateless `draw::sprite`.
+/// The wing flap is one BeatPhase, offset per toaster so the flock never syncs.
 class FlyingToastersEffect : public EffectBase {
 public:
-    static constexpr uint8_t kPool = 20;   // 12 toasters + 8 toast, the control maxima
+    /// The pool size: both count controls at their maxima.
+    static constexpr uint8_t kPool = 20;
 
-    const char* tags() const override { return "💫🎶✨👾"; }  // audio-reactive when audioReactive is set
+    /// Catalog tags: the audio glyph applies when `audioReactive` is set.
+    const char* tags() const override { return "💫🎶✨👾"; }
+    /// A flock needs a width and a height, so it is a 2D effect.
     Dim dimensions() const override { return Dim::D2; }
 
-    /// How many of each fly, and how fast the flock drifts.
+    /// How many toasters fly.
     uint8_t toasters = 5;
+    /// How many slices of toast fly with them.
     uint8_t toast    = 3;
+    /// How fast the flock drifts.
     uint8_t speed    = 96;
-    uint8_t spriteSize = 0;   // 0 = auto: scale with the grid; both toasters and toast use it
-    bool audioReactive = false;  // move to the music: each sprite on its own band, still in silence
+    /// Pixels per art pixel, where 0 scales with the grid.
+    uint8_t spriteSize = 0;
+    /// Move to the music, each sprite on its own band, holding still in silence.
+    bool audioReactive = false;
 
+    /// Publish both counts, the drift, the sprite scale and the audio switch.
     void defineControls() override {
         controls_.addControl("toasters", toasters, 1, 12);
         controls_.addControl("toast", toast, 0, 8);
@@ -122,8 +129,9 @@ public:
         controls_.addControl("audioReactive", audioReactive);
     }
 
+    /// Size the pool's storage, wire the view over it, and fill the sky.
     void prepare() override {
-        // Alloc-all-then-check (the BallpitEffect rule), then wire the SoA pool.
+        // Resize all, then test, so every buffer is sized even if an earlier one fails.
         const bool ok = x_.resize(kPool) && y_.resize(kPool) && vx_.resize(kPool) &&
                         vy_.resize(kPool) && ttl_.resize(kPool) && kind_.resize(kPool);
         if (!ok) { pool_ = particles::Pool{}; return; }
@@ -131,7 +139,7 @@ public:
         pool_.x = &x_[0]; pool_.y = &y_[0];
         pool_.vx = &vx_[0]; pool_.vy = &vy_[0];
         pool_.ttl = &ttl_[0];
-        pool_.hue = &kind_[0];   // reused as the sprite-kind flag: 0 toaster, 1 toast
+        pool_.hue = &kind_[0];   // the sprite kind: 0 is a toaster, 1 a slice of toast
         pool_.count = kPool;
         pool_.clear();
         rng_.seed(kSeed);
@@ -140,8 +148,7 @@ public:
         flap_ = BeatPhase{};
     }
 
-    /// The sprite magnification: the `size` control, or grid-proportional when 0 (auto), so a
-    /// toaster reads as a toaster on a 1024-wide wall and stays 1:1 on a small matrix.
+    /// The sprite magnification, grid-proportional when `spriteSize` is 0.
     uint8_t spriteScale() const {
         if (spriteSize > 0) return spriteSize;
         const lengthType m = width() < height() ? width() : height();
@@ -149,11 +156,11 @@ public:
         return static_cast<uint8_t>(autoScale < 1 ? 1 : (autoScale > 12 ? 12 : autoScale));
     }
 
+    /// Drift the flock, respawn whatever left the frame, and draw each sprite.
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
         const lengthType h = height();
-        // No grid-size guard (the no-grid-guards rule): draw::sprite clips per pixel, so a
-        // grid smaller than a toaster shows a clipped toaster rather than going dark.
+        // No grid-size guard: draw::sprite clips per pixel, so a small grid shows a clipped toaster.
         if (!pool_.valid()) return;
         const uint8_t sc = spriteScale();
 
@@ -162,14 +169,14 @@ public:
         const uint32_t scale = time_.advance(elapsed());
         if (scale > 0) pool_.stepDriven(scale, audioReactive, wanted());
 
-        // The wing flap: one shared BeatPhase, offset per toaster so the flock never syncs.
-        flap_.advanceTo(elapsed(), 180);   // ~3 flaps per second across the 4-frame cycle
+        // One shared clock, offset per toaster, at about three flaps a second.
+        flap_.advanceTo(elapsed(), 180);
 
         for (uint16_t i = 0; i < pool_.count; i++) {
             if (!pool_.ttl[i]) continue;
             const lengthType px = draw::toPixel(pool_.x[i]);
             const lengthType py = draw::toPixel(pool_.y[i]);
-            // Left the lower-left band: respawn into the upper-right spawn band.
+            // Left the lower-left: respawn into the upper-right band.
             if (px < -static_cast<lengthType>(toasterart::W) * sc || py > h) {
                 launch(i, /*anywhere=*/false);
                 continue;
@@ -182,29 +189,25 @@ public:
                 draw::sprite(cv, toasterart::kToastSprite, 0, px, py, sc);
             }
         }
-        // The count controls apply live without a full re-prepare storm: top up or trim.
+        // The count controls apply live, topping up or trimming rather than re-preparing.
         syncPopulation();
     }
 
 private:
-    static constexpr uint32_t kSeed = 0x70A57E25u;   // "TOASTES", fixed: goldens reproduce
+    static constexpr uint32_t kSeed = 0x70A57E25u;   ///< fixed, so the goldens reproduce
 
+    /// How many sprites both controls ask for.
     uint16_t wanted() const { return static_cast<uint16_t>(toasters + toast); }
 
-    /// (Re)spawn slot i: toasters first, then toast. `anywhere` scatters across the whole
-    /// screen (first fill); otherwise the upper-right off-screen band, the classic entry.
+    /// Spawn slot `i`, scattered on the first fill and entering off the upper right after.
     void launch(uint16_t i, bool anywhere) {
         const bool isToast = i >= toasters;
         const lengthType w = width(), h = height();
         const uint8_t sc = spriteScale();
-        // Diagonal toward lower-left, magnitude from `speed` with +-25% per-entry variation.
-        // Scaled with the sprite so the flight READS the same on any grid (same sprite-widths
-        // per second, more pixels per second on a big wall).
+        // Diagonal toward the lower left, scaled with the sprite so flight reads alike on any grid.
         const int32_t base = static_cast<int32_t>(speed) * 2 * sc;
         const int32_t vary = base / 4;
-        // next16, not below(uint8_t): the span is base/2, which passes 255 at any real sprite
-        // scale, and an 8-bit draw would silently clamp it: every large toaster flying at
-        // almost exactly the same speed instead of the documented +-25%.
+        // next16, since the span passes 255 at any real scale and an 8-bit draw clamps it silently.
         const uint32_t span = static_cast<uint32_t>(vary) * 2;
         const int32_t v = base - vary + (span > 0 ? static_cast<int32_t>(rng_.next16() % span) : 0);
         draw::pos_t px, py;
@@ -212,22 +215,20 @@ private:
             px = draw::toSub(static_cast<lengthType>(rng_.next16() % (w > 0 ? w : 1)));
             py = draw::toSub(static_cast<lengthType>(rng_.next16() % (h > 0 ? h : 1)));
         } else if (rng_.next8() & 1) {
-            // Off the top edge, anywhere along x.
+            // Off the top edge, anywhere along the width.
             px = draw::toSub(static_cast<lengthType>(rng_.next16() % (w + toasterart::W * sc)));
             py = draw::toSub(static_cast<lengthType>(-toasterart::H * sc));
         } else {
-            // Off the right edge, upper half of y.
+            // Off the right edge, in the upper half.
             px = draw::toSub(static_cast<lengthType>(w));
             py = draw::toSub(static_cast<lengthType>(rng_.next16() % (h > 1 ? h / 2 + 1 : 1)));
         }
         pool_.ttl[i] = 0;
         pool_.spawn(px, py, -v, v / 2, 65535, isToast ? 1 : 0);
-        // spawn() picked the first free slot, which is i because we just freed it - except when
-        // the pool briefly holds a different shape during a count change; syncPopulation heals.
+        // spawn() takes the first free slot, which is this one, and syncPopulation heals the rest.
     }
 
-    /// Top up newly wanted slots and trim no-longer-wanted ones, so the count controls apply
-    /// live (a full respawn on every slider step would blink the whole flock).
+    /// Top up and trim slots live, since a full respawn would blink the whole flock.
     void syncPopulation() {
         for (uint16_t i = 0; i < pool_.count; i++) {
             const bool want = i < wanted();
@@ -238,12 +239,12 @@ private:
     }
 
     ScratchBuffer<draw::pos_t> x_{*this}, y_{*this}, vx_{*this}, vy_{*this};
-    ScratchBuffer<uint16_t> ttl_{*this};
-    ScratchBuffer<uint8_t> kind_{*this};
-    particles::Pool pool_;
-    particles::FrameTime time_{60};
-    BeatPhase flap_;
-    Random8 rng_{kSeed};
+    ScratchBuffer<uint16_t> ttl_{*this};    ///< which slots are flying
+    ScratchBuffer<uint8_t> kind_{*this};    ///< each slot's sprite kind
+    particles::Pool pool_;                  ///< the view over those arrays
+    particles::FrameTime time_{60};         ///< the drift clock
+    BeatPhase flap_;                        ///< the shared wing-flap clock
+    Random8 rng_{kSeed};                    ///< fixed-seed, so the goldens reproduce
 };
 
 }  // namespace mm

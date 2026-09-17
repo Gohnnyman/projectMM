@@ -4,45 +4,59 @@
 
 namespace mm {
 
-// Fixed Rectangle: paints a solid axis-aligned RGB box at a fixed grid position and extent,
-// over a slow motion-trail fade. The box origin (X/Y/Z position) and size (width/height/depth)
-// are plain controls, so the user dials in exactly which cells light up — a static fixture /
-// alignment / region paint. When `alternateWhite` is on, the box is rendered as a chequerboard
-// of white and the RGB color: a per-cell toggle flips along the box's dominant axis (it flips
-// every cell when the box is wider than tall, and once per row when it is taller than wide), so
-// the white/color pattern follows the box's longer side. On RGBW grids the 4th (white) channel
-// carries `white` on the white tiles and is cleared to 0 on the colored tiles, so a colored
-// cell never picks up the white LED and no stale W lingers from a prior frame.
-//
-// Prior art: MoonLight's FixedRectangle (E_MoonModules / MoonModules). The defaults, the
-// origin+extent clamping, the alternate-toggle rule (flip per-cell when height<width, flip
-// per-row when height>width), and the white-vs-color chequerboard are reproduced exactly,
-// written fresh on EffectBase + the shared draw primitives.
-// Author: limpkin (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Test effect: draws a fixed rectangle at set coordinates.
 /// @card FixedRectangleEffect.gif
+/// Author: limpkin (MoonLight), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+///
+/// A solid box at a dialed-in position and extent, over a slow motion-trail fade.
+/// So it serves as a static fixture, an alignment aid, or a painted region.
+///
+/// Prior art: MoonLight's FixedRectangle, whose clamping and checkerboard this reproduces.
+///
+/// @moreinfo
+///
+/// ## The checkerboard follows the box's longer side
+///
+/// With `alternateWhite` the box renders as white and colored tiles.
+/// The toggle flips every cell when the box is wider than tall, and once a row when taller.
+/// So the pattern runs along whichever side is longer.
+///
+/// On an RGBW grid a white tile carries the white value and a colored tile clears it.
+/// That keeps a colored cell off the white LED, and leaves no stale value from a prior frame.
 class FixedRectangleEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫"; }  // MoonLight origin
+    /// Catalog tags: MoonLight origin.
+    const char* tags() const override { return "💫"; }
+    /// The box has an extent on all three axes.
     Dim dimensions() const override { return Dim::D3; }
 
-    // Color of the box (MoonLight defaults). White is the 4th-channel value, used only on RGBW.
+    /// The box's red channel.
     uint8_t red   = 182;
+    /// Its green channel.
     uint8_t green = 15;
+    /// Its blue channel.
     uint8_t blue  = 98;
+    /// Its white channel, used only on an RGBW grid.
     uint8_t white = 0;
 
-    // Box origin (min 0) and extent (min 1). Named rect* to avoid hiding the inherited
-    // width()/height()/depth() grid accessors; the UI control names carry the source's labels.
-    // Default to a 15×15×15 box at the origin (0,0,0): visible out of the box on a large panel
-    // instead of the source's 1×1×1 single pixel. Origin 0 is the most grid-proof choice — it can
-    // never clip to nothing on a small or flat grid. The draw loop clamps each axis to the grid
-    // (MINi(origin+extent, size)), so on a grid smaller than 15 the box just fills to the edge.
-    int16_t rectX = 0, rectY = 0, rectZ = 0;
-    int16_t rectW = 15, rectH = 15, rectD = 15;
+    // Named rect* so they do not hide the inherited width(), height() and depth() accessors.
+    /// The box's origin on x.
+    int16_t rectX = 0;
+    /// Its origin on y.
+    int16_t rectY = 0;
+    /// Its origin on z.
+    int16_t rectZ = 0;
+    /// Its extent along x, clamped to the grid so a small panel fills to the edge.
+    int16_t rectW = 15;
+    /// Its extent along y.
+    int16_t rectH = 15;
+    /// Its extent along z.
+    int16_t rectD = 15;
 
+    /// Render the box as a checkerboard of white and its color.
     bool alternateWhite = false;
 
+    /// Publish the box's color, its origin and extent, and the checkerboard.
     void defineControls() override {
         controls_.addControl("red",   red);
         controls_.addControl("green", green);
@@ -57,6 +71,7 @@ public:
         controls_.addControl("alternateWhite", alternateWhite);
     }
 
+    /// Paint the box, clamped to the grid, over the trail fade.
     void tick() MM_NONBLOCKING override {
         const int w = width();
         const int h = height();
@@ -65,16 +80,15 @@ public:
         const draw::Canvas cv = canvas();
         const uint8_t cpl = channelsPerLight();
 
-        // Motion trail: dim the whole buffer each frame (source: layer->fadeToBlackBy(10)).
+        // The motion trail: dim the whole buffer each frame.
         layer()->fadeToBlackBy(10);
 
-        // The white/color chequerboard toggle. MoonLight keeps it as a member but resets it to
-        // false at the top of each draw, so it is effectively per-frame state — a plain local here.
+        // Per-frame state, so a local rather than a member reset on every draw.
         bool alternate = false;
 
         const RGB rgb{red, green, blue};
 
-        // Iterate the box clamped to the live grid (origin + extent, capped at each axis size).
+        // The box clamped to the live grid, so an oversized extent fills to the edge.
         const int zEnd = MINi(rectZ + rectD, d > 0 ? d : 1);
         const int yEnd = MINi(rectY + rectH, h);
         const int xEnd = MINi(rectX + rectW, w);
@@ -82,33 +96,28 @@ public:
         for (int z = rectZ; z < zEnd; z++) {
             for (int y = rectY; y < yEnd; y++) {
                 for (int x = rectX; x < xEnd; x++) {
-                    // One chequerboard decision drives both the RGB color and the W channel:
-                    // a white tile paints white RGB + W=white; a colored tile paints rgb + W=0.
+                    // One decision drives both the color and the white channel.
                     const bool isWhiteTile = alternateWhite && alternate;
                     const Coord3D p{static_cast<lengthType>(x), static_cast<lengthType>(y), static_cast<lengthType>(z)};
-                    // Always write RGB: a white tile paints {255,255,255} even when the color is all
-                    // zero, and a colored tile writes rgb (clearing any stale pixel from a prior frame).
+                    // Always written, which also clears any stale pixel from a prior frame.
                     draw::pixel(cv, p, isWhiteTile ? RGB{255, 255, 255} : rgb);
-                    // White channel (4th) only on RGBW grids. Follow the chequerboard branch: the
-                    // white tile carries `white`, a colored tile clears W so it never tints the
-                    // color and no stale W persists in the RGBW buffer. draw::pixel writes RGB only.
+                    // Only on an RGBW grid, and cleared on a colored tile since draw::pixel writes RGB.
                     if (cpl >= 4) {
                         const size_t off = draw::offsetOf(cv, p);
                         if (off + 3 < cv.bytes) cv.data[off + 3] = isWhiteTile ? white : 0;
                     }
-                    // Box wider than tall: flip the white/color toggle every cell along X.
+                    // Wider than tall, so flip the toggle every cell.
                     if (rectH < rectW) alternate = !alternate;
                 }
-                // Box taller than wide: flip once per row instead.
+                // Taller than wide, so flip once a row instead.
                 if (rectH > rectW) alternate = !alternate;
             }
         }
     }
 
 private:
+    /// The smaller of two, which clamps each axis and keeps a degenerate depth one deep.
     static int MINi(int a, int b) { return a < b ? a : b; }
-    // Mirror GEQ3D's helper so the dims build reads the same across effects: a degenerate (0)
-    // grid depth still yields a 1-deep extent. (rectD is a member but does not shadow depth().)
 };
 
 } // namespace mm

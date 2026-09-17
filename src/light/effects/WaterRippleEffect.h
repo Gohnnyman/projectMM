@@ -1,47 +1,55 @@
 #pragma once
 
-#include "core/math16.h"              // hashInt — drop placement without a stream RNG
+#include "core/math16.h"              // hashInt: drop placement without a stream RNG
 #include "light/effects/EffectBase.h"
 
 namespace mm {
 
-// WaterRipple: a real propagating wave simulation. Drops land on the surface and their rings spread
-// outward, reflect off the edges, cross each other and interfere — the crossing is the thing a
-// formula cannot fake, because two rings meeting have to add and cancel.
-//
-// This is the classic two-buffer water algorithm (Hugo Elias): keep the surface height at this step
-// and the previous one, and derive the next from the neighbourhood average minus the previous
-// height. That one line IS the wave equation, discretised — the ripple is emergent, not drawn.
-//
-//   next = (sum of 4 neighbours) / 2 - previous,   then damped toward zero
-//
-// Distinct from RipplesEffect, which draws expanding rings from a closed-form radius: that one is
-// cheaper and always looks like clean concentric circles, this one behaves like water. Both earn
-// their place; the difference is stated here so a reader picks deliberately.
-//
-// Cost: two int16 buffers sized to the grid (2 bytes per light each) and one pass of four
-// neighbour reads per pixel per frame. That is the cheapest interesting simulation in the toolbox,
-// but the MEMORY scales with the fixture, so on a very large wall check the budget.
-//
-// Drop placement uses `hashInt` rather than a stream RNG, so the same frame on two devices puts
-// drops in the same places (the supersync rule).
-//
-// Prior art: Hugo Elias's water surface algorithm, the standard demoscene/graphics form.
 /// Effect: a propagating water surface where drops ripple, reflect and interfere.
 /// @card WaterRippleEffect.gif
+///
+/// Drops land and their rings spread outward, reflect off the edges and cross each other.
+/// The crossing is what a formula cannot fake, since two rings meeting have to add and cancel.
+///
+/// Prior art: Hugo Elias's water surface algorithm, the standard demoscene form.
+///
+/// @moreinfo
+///
+/// ## The wave equation, discretized
+///
+/// Keep the surface height at this step and the previous one.
+/// The next height is the four neighbors averaged, minus the previous height, damped toward zero.
+/// That one line is the wave equation, so the ripple is emergent rather than drawn.
+///
+/// RipplesEffect draws expanding rings from a closed-form radius instead.
+/// That one is cheaper and always looks like clean circles, where this behaves like water.
+///
+/// Cost is two int16 buffers sized to the grid, and four neighbor reads a pixel a frame.
+/// The memory scales with the fixture, so a large wall is worth checking against the budget.
+/// Drop placement uses `hashInt`, so two devices put drops in the same places.
 class WaterRippleEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🧬"; }   // power-function showcase
-    Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
+    /// Catalog tags: this effect is the power-function showcase.
+    const char* tags() const override { return "💫🧬"; }
+    /// Writes the z=0 slice, which extrude fills through a volume.
+    Dim dimensions() const override { return Dim::D2; }
 
-    uint8_t speed    = 60;    // simulation steps per second — how fast the water itself moves
-    uint8_t dropRate = 24;    // how often drops land (0 = none, higher = busier)
-    uint8_t damping  = 16;    // how fast waves lose energy (higher = calmer water)
-    uint8_t strength = 200;   // how hard a drop hits
-    bool    colorByHeight = true;   // color the surface by height instead of by brightness alone
-    uint8_t hueBase   = 140;  // where in the palette the still surface sits
-    uint8_t hueSpread = 110;  // how far a crest and a trough reach from it
+    /// Simulation steps a second, which is how fast the water itself moves.
+    uint8_t speed    = 60;
+    /// How often drops land, where 0 leaves the surface still.
+    uint8_t dropRate = 24;
+    /// How fast waves lose energy, so higher is calmer water.
+    uint8_t damping  = 16;
+    /// How hard a drop hits.
+    uint8_t strength = 200;
+    /// Color the surface by height rather than by brightness alone.
+    bool    colorByHeight = true;
+    /// Where in the palette the still surface sits.
+    uint8_t hueBase   = 140;
+    /// How far a crest and a trough reach from that.
+    uint8_t hueSpread = 110;
 
+    /// Publish the wave's speed and damping, the drops, and how height takes color.
     void defineControls() override {
         controls_.addControl("speed", speed, 1, 120);
         controls_.addControl("dropRate", dropRate, 0, 255);
@@ -52,9 +60,9 @@ public:
         controls_.addControl("hueSpread", hueSpread, 0, 127);
     }
 
+    /// Size both height fields to the grid and reset the drop and step clocks.
     void prepare() override {
-        // Two height fields, sized to the grid. resize() frees on teardown and reallocs only when
-        // the grid changes, so a live layout change is handled by the framework rather than here.
+        // resize() reallocs only when the grid changes, so a live layout change needs nothing here.
         const size_t n = static_cast<size_t>(width() > 0 ? width() : 0) *
                          static_cast<size_t>(height() > 0 ? height() : 0);
         a_.resize(n);
@@ -66,23 +74,19 @@ public:
         agc_ = kAgcFloor;
     }
 
+    /// Land any due drop, advance the surface on its own clock, then render it.
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
         const lengthType w = width(), h = height();
-        // Clamped neighbours make any grid valid, including a strip. The ScratchBuffers may be
-        // absent if allocation failed (degrade, never crash).
+        // Clamped neighbors make any grid valid, and a failed allocation degrades rather than crashes.
         if (w < 1 || h < 1 || !a_ || !b_) return;
 
-        // Drops are timed in MILLISECONDS, not per frame. Testing the rate every frame made the
-        // downpour scale with the framerate: at 100 fps a rate of 24 landed ~9 drops a second, which
-        // reads as rain rather than the slow rippling the effect is for.
+        // Timed in milliseconds, or the downpour scales with the frame rate and reads as rain.
         const uint32_t now = elapsed();
         const uint32_t interval = dropRate > 0
             ? static_cast<uint32_t>(2000u - (static_cast<uint32_t>(dropRate) * 7u))   // 2000ms..215ms
             : 0u;
-        // `started_` makes the FIRST drop land immediately: waiting a full interval before the
-        // first one leaves the surface flat for up to two seconds after the effect is selected,
-        // which reads as broken rather than calm.
+        // The first drop lands at once, since a flat surface for two seconds reads as broken.
         const bool dropNow = dropRate > 0 && (!started_ || (now - lastDropMs_) >= interval);
         started_ = true;
         if (dropNow) {
@@ -90,35 +94,18 @@ public:
             frame_++;                       // advances only on a drop, so each drop lands elsewhere
         }
 
-        // Land a drop. hashInt makes the placement a pure function of the drop counter, so two
-        // devices agree on where drops fall without exchanging anything.
+        // hashInt makes placement a function of the drop counter, so two devices agree.
         if (dropNow) {
             const lengthType dx = static_cast<lengthType>(hashInt(frame_, 1, 0, kDropSeed) % w);
             const lengthType dy = static_cast<lengthType>(hashInt(frame_, 2, 0, kDropSeed) % h);
             field()[static_cast<size_t>(dy) * w + dx] = static_cast<int16_t>(strength * 64);
         }
 
-        // The wave advances on WALL-CLOCK time, not once per rendered frame. A wave step is a fixed
-        // amount of simulated time, so tying it to the framerate made the same water look calm at
-        // 25 fps and frantic at 100 — the speed of the ripples was a property of the hardware
-        // rather than a setting. Stepping on a timer makes `speed` mean the same thing everywhere.
-        // Advance the surface only when a simulation step is due. Rendering still happens EVERY
-        // frame from whatever the surface currently holds, so a slow speed shows calm water rather
-        // than a stuttering panel. At most one step per frame: a long stall must not spend the
-        // whole frame budget replaying the simulation.
+        // The wave advances on wall-clock time, so `speed` means the same on any device.
         const uint32_t stepMs = 1000u / (speed > 0 ? speed : 1);
         if (now - lastStepMs_ >= stepMs) {
             lastStepMs_ = now;
-            // The wave step reads the current field and writes the previous one, which then BECOMES
-            // the current field when the roles flip below. No buffer is copied.
-            //
-            // EVERY pixel steps, including the border. Looping the interior only (1..h-2) is the
-            // usual way to keep the neighbour reads in bounds, but it leaves the outermost ring
-            // frozen at zero — a dead one-pixel frame around the whole fixture, which on a real
-            // panel is a visibly unlit edge. Clamping the neighbour coordinate instead means an
-            // edge pixel reads itself in place of the missing neighbour, which is the standard
-            // reflecting (Neumann) boundary: a wave bounces off the wall rather than vanishing
-            // into it.
+            // Every pixel steps, clamping the neighbor: that is the reflecting boundary, where
             for (lengthType y = 0; y < h; y++) {
                 for (lengthType x = 0; x < w; x++) {
                     const size_t i = static_cast<size_t>(y) * w + x;
@@ -126,13 +113,11 @@ public:
                     const size_t right = static_cast<size_t>(y) * w + (x < w - 1 ? x + 1 : w - 1);
                     const size_t up    = static_cast<size_t>(y > 0 ? y - 1 : 0) * w + x;
                     const size_t down  = static_cast<size_t>(y < h - 1 ? y + 1 : h - 1) * w + x;
-                    const int32_t neighbours = static_cast<int32_t>(field()[left]) + field()[right]
+                    const int32_t neighbors = static_cast<int32_t>(field()[left]) + field()[right]
                                              + field()[up] + field()[down];
-                    int32_t next = (neighbours >> 1) - lastField()[i];
+                    int32_t next = (neighbors >> 1) - lastField()[i];
                     next -= next * damping >> 10;        // damping: the surface settles
-                    // Clamp before narrowing: two drops interfering constructively can exceed
-                    // int16, and a wrap flips the wave's sign — the surface turns inside out at the
-                    // exact moment it should be brightest.
+                    // Clamp before narrowing: a wrap flips the wave's sign and turns the surface inside out.
                     if (next > 32767) next = 32767;
                     if (next < -32768) next = -32768;
                     lastField()[i] = static_cast<int16_t>(next);
@@ -141,11 +126,7 @@ public:
             flip_ = !flip_;   // the fields exchange roles; no data moves
         }
 
-        // Brightness is scaled against the frame's own peak, not a fixed shift. A drop's energy
-        // spreads over the whole surface, so the amplitude PER PIXEL falls as the grid grows: a
-        // fixed `>> 6` peaked at 31/255 on a 16x16 grid and only 11/255 at 64x64, which is why the
-        // surface looked almost unlit and worse the higher the resolution. Tracking the peak makes
-        // the effect look the same at every size.
+        // Scaled against the frame's own peak: a drop's energy spreads, so a fixed shift dims with the grid.
         uint32_t peak = 0;
         for (lengthType y = 0; y < h; y++)
             for (lengthType x = 0; x < w; x++) {
@@ -153,41 +134,23 @@ public:
                 const uint32_t m = static_cast<uint32_t>(v < 0 ? -v : v);
                 if (m > peak) peak = m;
             }
-        // Follow the peak up instantly and down slowly, so brightness does not pump frame to frame;
-        // the floor keeps flat water dark instead of amplifying the last ripple to full scale.
+        // Up instantly and down slowly, with a floor so flat water stays dark.
         if (peak > agc_) agc_ = peak; else agc_ -= (agc_ - peak) >> 5;
         if (agc_ < kAgcFloor) agc_ = kAgcFloor;
-        // Scale against a TYPICAL ripple, not the single tallest pixel. A drop's energy spreads out,
-        // so the mean magnitude measures ~8% of the peak and over half the surface sits at exactly
-        // zero; normalising against the peak therefore mapped the typical pixel to ~8% brightness
-        // and to a palette index a few steps from the centre — a dark, single-hue surface however
-        // the water moved. A fraction of the peak puts the ripples themselves in range, and the
-        // clamp below keeps the few tallest crests from blowing out.
+        // A fraction of the peak, since the mean ripple measures a twelfth of the tallest pixel.
         const uint32_t ref = agc_ > 8u ? (agc_ / 4u) : 2u;
 
-        // Render: height becomes brightness, and optionally palette index, so crests and troughs
-        // read differently rather than both showing as "bright".
+        // Height becomes brightness, and optionally the index, so a crest and a trough differ.
         for (lengthType y = 0; y < h; y++) {
             for (lengthType x = 0; x < w; x++) {
                 const int32_t v = field()[static_cast<size_t>(y) * w + x];
                 const int32_t mag = v < 0 ? -v : v;
-                // Square-root response. The wave's amplitude falls off with distance from the drop,
-                // so a linear map leaves one bright ridge and a dim surface; the sqrt lifts the
-                // mid-range where the ripples actually are (measured: 3% of pixels clearly visible
-                // linear vs 32% sqrt on a 64x64 grid).
+                // A square-root response, which lifts the mid-range where the ripples are.
                 uint32_t lin = (static_cast<uint32_t>(mag) * 255u) / ref;
                 if (lin > 255) lin = 255;
                 uint8_t bri = static_cast<uint8_t>(isqrt(lin * 255u));
                 if (bri == 0) { draw::pixel(cv, {x, y, 0}, RGB{0, 0, 0}); continue; }
-                // A crest and a trough sit at opposite ends of the palette. The height is scaled
-                // against the SAME running peak the brightness uses, so the index spans the whole
-                // palette: a fixed shift (`v >> 7`) left every pixel within a few steps of 128,
-                // which is one narrow color band and why the surface read as a single dark hue.
-                // Map the height across the WHOLE palette. Centring on 128 pinned every pixel to
-                // one color (128 is a single palette entry, cyan in the default rainbow), so the
-                // surface could only ever be one hue however the water moved. Spanning the range
-                // means a trough and a crest genuinely differ, and `hueSpread` sets how much of the
-                // palette the water uses.
+                // The height spans the whole palette, since centering pins every pixel to one hue.
                 uint8_t idx;
                 if (colorByHeight) {
                     const int32_t rel = (v * static_cast<int32_t>(hueSpread)) / static_cast<int32_t>(ref);
@@ -205,22 +168,20 @@ public:
 private:
     static constexpr uint32_t kDropSeed = 0x5EAu;
 
-    // The two fields exchange roles each frame rather than exchanging CONTENTS: copying the whole
-    // grid every frame to achieve a swap would cost a second full pass for nothing. `flip_` says
-    // which buffer currently holds "this step".
+    // The fields exchange roles rather than contents, since copying the grid is a second full pass.
     ScratchBuffer<int16_t>& field()     { return flip_ ? b_ : a_; }
     ScratchBuffer<int16_t>& lastField() { return flip_ ? a_ : b_; }
 
-    static constexpr uint32_t kAgcFloor = 2048;   // below this the surface reads as flat, not lit
+    static constexpr uint32_t kAgcFloor = 2048;   ///< below this the surface reads as flat, not lit
 
-    uint32_t agc_ = kAgcFloor;          // the amplitude brightness is measured against
-    ScratchBuffer<int16_t> a_{*this};   // the two height fields; roles alternate via flip_
-    ScratchBuffer<int16_t> b_{*this};
-    bool flip_ = false;
-    uint32_t frame_ = 0;        // counts DROPS, not frames: it seeds each drop's position
-    uint32_t lastDropMs_ = 0;   // when the last drop landed
-    uint32_t lastStepMs_ = 0;   // when the surface last advanced
-    bool     started_ = false;  // so the first drop does not wait for the interval
+    uint32_t agc_ = kAgcFloor;          ///< the amplitude brightness is measured against
+    ScratchBuffer<int16_t> a_{*this};   ///< a height field, its role alternating with `b_`
+    ScratchBuffer<int16_t> b_{*this};   ///< the other height field
+    bool flip_ = false;                 ///< which field currently holds this step
+    uint32_t frame_ = 0;        ///< counts drops rather than frames, seeding each drop's position
+    uint32_t lastDropMs_ = 0;   ///< when the last drop landed
+    uint32_t lastStepMs_ = 0;   ///< when the surface last advanced
+    bool     started_ = false;  ///< so the first drop does not wait out the interval
 };
 
 }  // namespace mm

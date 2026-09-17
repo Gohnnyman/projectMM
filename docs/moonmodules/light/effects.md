@@ -1176,7 +1176,7 @@ Origin: projectMM original, on the VU ballistics of IEC 60268-17
 
 <img src="../../assets/light/effects/RadialSpectrumEffect.gif" width="300" alt="RadialSpectrum effect preview">
 
-The spectrum as ripples. Each band owns a sector around the center, mirrored left and right with the bass at top and bottom; sound is born at the center and travels outward, so the radius is time and a ring's length is that band's recent history. Every sector is one band, so a band that is stuck shows as a sector that never moves. On a cube the ripples are expanding shells.
+The spectrum as ripples. Each band owns a sector around the center, mirrored left and right with the bass at top and bottom. Sound is born at the center and travels outward, so the radius is time and a ring's length is that band's recent history. Every sector is one band, so a band that is stuck shows as a sector that never moves. On a cube the ripples are expanding shells.
 
 - `speed`: how fast sound travels outward, a ring every 10 to 105 ms.
 - `persistence`: how far out a ripple stays visible.

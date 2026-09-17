@@ -4,36 +4,38 @@
 
 namespace mm {
 
-// SphereMove: a hollow sphere whose surface shell sweeps through the 3D volume. Each frame the
-// buffer is fully cleared, a sphere origin is driven on a Lissajous-like path (sin on x, cos on
-// y and z) and a slowly breathing diameter is computed; every voxel whose Euclidean distance from
-// the origin falls within the one-unit-thick shell (d > diameter && d < diameter+1) is lit from
-// the active palette, the palette index drifting with time plus a small per-pixel random jitter so
-// the shell shimmers. The origin sweep speeds up with `speed` (the divisor 100-speed shrinks).
-//
-// This is float-per-pixel (a sqrtf distance per voxel) — kept deliberately for exact visual
-// fidelity with the original, as the contract allows when the source is float per-pixel.
-//
-// Prior art: MoonLight's SphereMove (E_MoonModules / MoonModules). The origin oscillator math
-// (millis()/(100-speed)/6.4, the sin/cos origin path), the diameter = 2 + sin(ti/3) breathing,
-// the one-unit shell test, and the millis()/50 + random8(64) palette index are reproduced.
-// time_interval is computed in full float (ms and 100-speed as float through the whole
-// expression) so the origin sweep and diameter breathing integrate continuously rather than in
-// quantised integer-time steps — a smooth sweep at every speed.
-// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+// Author: MoonLight, https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Effect moving a lit sphere through a 3D layout.
 /// @card SphereMoveEffect.gif
+///
+/// A hollow sphere whose shell sweeps the volume on a Lissajous path, breathing as it goes.
+/// Every voxel inside the one-unit shell lights from the palette, jittered so it shimmers.
+///
+/// Prior art: MoonLight's SphereMove, whose oscillator and shell test this reproduces.
+///
+/// @moreinfo
+///
+/// ## Float per voxel, deliberately
+///
+/// The distance test is a square root per voxel, kept for exact fidelity with the source.
+/// The time base is float throughout, so the sweep and the breathing integrate continuously.
+/// Dividing in integers first would quantize both into visible steps.
 class SphereMoveEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫"; }  // MoonLight origin · 3D-native
+    /// Catalog tags: MoonLight origin, and 3D-native.
+    const char* tags() const override { return "💫"; }
+    /// A sphere needs the whole volume.
     Dim dimensions() const override { return Dim::D3; }
 
-    uint8_t speed = 50;  // origin sweep rate (0..99); higher = faster (divisor is 100-speed)
+    /// How fast the sphere sweeps, where higher shrinks the divisor.
+    uint8_t speed = 50;
 
+    /// Publish the sweep rate.
     void defineControls() override {
         controls_.addControl("speed", speed, 0, 99);
     }
 
+    /// Place the sphere on its path, then light every voxel inside its shell.
     void tick() MM_NONBLOCKING override {
         const int w = width();
         const int h = height();
@@ -41,17 +43,12 @@ public:
 
         const draw::Canvas cv = canvas();
 
-        // Full clear each frame (source: fadeToBlackBy(255)). A fill rather than a fade: this
-        // effect redraws every pixel, so it wants the buffer blank NOW, and fadeToBlackBy is a rate
-        // the Layer scales by elapsed time. The same idiom BlurzEffect uses for its own clear.
+        // A fill rather than a fade, since this redraws every pixel and wants the buffer blank now.
         draw::fill(cv, RGB{0, 0, 0});
 
         const uint32_t ms = elapsed();
 
-        // Origin oscillator: time_interval = ms / (100-speed) / 6.4, all-float so time advances
-        // continuously (integer-dividing ms/(100-speed) first would truncate the sub-step time and
-        // quantise the sweep). The divisor 100-speed (speed clamped 0..99 → divisor 1..100, never 0)
-        // and the (256-128)/20.0 == 6.4 factor are MoonLight's exact constants.
+        // All float, so time advances continuously: an integer divide first quantizes the sweep.
         const float time_interval = static_cast<float>(ms) / static_cast<float>(100 - speed) / 6.4f;
 
         const float ox = w / 2.0f * (1.0f + sinf(time_interval));
@@ -60,7 +57,7 @@ public:
 
         const float diameter = 2.0f + sinf(time_interval / 3.0f);
 
-        // Palette index base drifts with time; a per-pixel random jitter (0..63) is added per lit voxel.
+        // The index drifts with time, and each lit voxel adds a jitter of its own.
         const uint8_t indexBase = static_cast<uint8_t>(ms / 50);
 
         for (int z = 0; z < d; z++) {
@@ -81,7 +78,7 @@ public:
     }
 
 private:
-    Random8 rng_;  // per-pixel palette jitter (MoonLight's random8(64))
+    Random8 rng_;   ///< the per-voxel palette jitter
 };
 
 } // namespace mm

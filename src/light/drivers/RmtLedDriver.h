@@ -258,7 +258,7 @@ private:
     uint16_t       pinList_[kMaxPins] = {};    // parsed pins, list order
     nrOfLightsType pinCounts_[kMaxPins] = {};  // lights per pin (slice lengths)
     size_t         pinOffsets_[kMaxPins] = {}; // slice start in frame_, bytes
-    nrOfLightsType txLightCount_ = 0;          // Σ pinCounts_: lights actually transmitted/encoded
+    nrOfLightsType txLightCount_ = 0;          // Σ pinCounts_: the lights encoded and transmitted
     nrOfLightsType winStart_ = 0;              // first source-buffer light this driver reads (the window)
     nrOfLightsType winLen_ = 0;                // window length (lights), clamped to the buffer
     uint8_t pinCount_ = 0;                     // 0 = idle (parse error / no pins)

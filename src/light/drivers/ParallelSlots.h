@@ -9,10 +9,10 @@ namespace mm {
 /// @defgroup ParallelSlots WS2812 slot encoder: the transpose and the 3-slot wire format
 /// @{
 ///
-/// WS2812 encode for parallel buses: the contract between a parallel driver and a parallel
-/// peripheral, named for the wire unit it builds. One pixel-clock slot is one byte on the bus.
-/// Both the i80 and the Parlio peripherals use it, since their bus bytes are identical. A pure
-/// data transform with no platform include, so the host test pins it with no ESP32.
+/// WS2812 encode for parallel buses: the contract between a parallel driver and its peripheral.
+/// It is named for the wire unit it builds, and one pixel-clock slot is one byte on the bus.
+/// Both the i80 and the Parlio peripherals use it, since their bus bytes are identical.
+/// A pure data transform with no platform include, so the host test pins it without an ESP32.
 ///
 /// Prior art: the technique is hpwit's, Adafruit's and FastLED's, studied rather than copied.
 ///
@@ -26,14 +26,15 @@ namespace mm {
 ///     slot 1: data bits & mask lane L's current bit at bus bit L
 ///     slot 2: 0x00             every lane low, the pulse tail
 ///
-/// A lane whose strand is shorter than the longest must appear in neither slot 0 nor slot 1 once
-/// its lights are exhausted, so it idles low rather than flashing white.
+/// A short lane leaves both slot 0 and slot 1 once its lights run out.
+/// It then idles low rather than flashing white.
 ///
 /// ## Why the transpose is SWAR
 ///
-/// The data slot is an 8 by 8 bit-matrix transpose, and it is the measured render-loop hot spot,
-/// around 85% of the driver frame at scale. So it uses the branch-free delta-swap from Hacker's
-/// Delight rather than a per-bit gather loop: the same result, no table, far fewer operations.
+/// The data slot is an 8 by 8 bit-matrix transpose, and the measured render-loop hot spot.
+/// It is around 85% of the driver frame at scale.
+/// So it uses the branch-free delta-swap from Hacker's Delight rather than a per-bit gather loop.
+/// Same result, no table, far fewer operations.
 ///
 /// The 8 by 8 bit-transpose on the packed representation, which keeps it in registers.
 inline uint64_t MM_RAMFUNC transposeBits8x8(uint64_t x) {

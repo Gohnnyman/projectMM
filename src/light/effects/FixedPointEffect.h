@@ -76,8 +76,7 @@ public:
         const lengthType w = width(), h = height();
         if (w == 0 || h == 0) return;
 
-        // NOT fadeToBlackBy: that is a RATE per reference frame, this an amount per frame, and
-        // swapping without re-tuning `fade` made the effect 3.1x brighter at high framerate.
+        // Not fadeToBlackBy, which is a rate per reference frame rather than an amount per frame.
         draw::fade(cv, fade);
 
         const uint32_t ms = elapsed();
@@ -424,12 +423,11 @@ private:
         branch(cv, cx, trunkY, 0, trunkLen, 6, sway, spread);
     }
 
-    /// One branch and its two children, recursive because a tree is the recursion.
+    /// One branch and its two children, recursive since a tree is the recursion.
     void branch(const draw::Canvas& cv, draw::pos_t x0, draw::pos_t y0, int32_t angle,
                 draw::pos_t len, uint8_t depth, int32_t sway, int32_t spread) const {
         if (depth == 0 || len < draw::kSubOne / 2) return;
-        // The sway accumulates with depth, so a tip moves further than the trunk, which is what
-        // wind actually does to a tree.
+        // The sway accumulates with depth, so a tip moves further than the trunk.
         const int32_t a = angle + sway * depth;
         const draw::pos_t x1 = x0 + scaleAngle(sin16(static_cast<angle16>(a)), len);
         const draw::pos_t y1 = y0 - scaleAngle(cos16(static_cast<angle16>(a)), len);
@@ -443,8 +441,7 @@ private:
         branch(cv, x1, y1, a + spread, childLen, static_cast<uint8_t>(depth - 1), sway, spread);
     }
 
-    /// Place the walkers and boids for a fresh run. Spread by HASH rather than by a stream RNG,
-    /// for the same reason the walkers' kicks are: two devices showing one rig must agree.
+    /// Place the walkers and boids by hash rather than a stream RNG, so two devices agree.
     void seedSimulations(draw::pos_t cx, draw::pos_t cy) {
         for (uint8_t i = 0; i < kWalkerCount; i++) {
             wx_[i] = cx; wy_[i] = cy;
@@ -460,8 +457,7 @@ private:
         }
     }
 
-    /// Remember one pen position. A ring buffer, because the trail is a fixed-length window over an
-    /// endless path: the oldest point falls off as the newest arrives.
+    /// Remember one pen position in the ring, where the oldest falls off as the newest arrives.
     void pushTrail(draw::pos_t x, draw::pos_t y) {
         trailX_[trailHead_] = x;
         trailY_[trailHead_] = y;
@@ -469,8 +465,7 @@ private:
         if (trailCount_ < kTrailMax) trailCount_++;
     }
 
-    /// Join the remembered points, oldest dark to newest bright. The gradient is what gives the
-    /// curve a direction: a uniformly lit trail reads as a static wire figure.
+    /// Join the remembered points, oldest dark to newest bright, which gives the curve direction.
     void drawTrail(const draw::Canvas& cv, uint8_t saturation) const {
         if (trailCount_ < 2) return;
         for (uint8_t i = 0; i + 1 < trailCount_; i++) {
@@ -479,56 +474,48 @@ private:
             const uint8_t p = static_cast<uint8_t>((start + i) % kTrailMax);
             const uint8_t q = static_cast<uint8_t>((p + 1) % kTrailMax);
             const uint8_t br = static_cast<uint8_t>((static_cast<uint16_t>(i) * 255u) / (trailCount_ - 1));
-            // Hue and brightness both ride the age, so the trail fades out as it goes back in time
-            // and the newest segment is both brightest and furthest round the wheel.
+            // Both ride the age, so the newest segment is brightest and furthest round the wheel.
             draw::strokeLine(cv, trailX_[p], trailY_[p], trailX_[q], trailY_[q], draw::kSubOne,
                              hsvToRgb(br, saturation, br));
         }
     }
 
-    /// One hand: a thick stroke from the hub outward at `a`. Its own function because the three
-    /// differ only in length, angle and weight, and three copies would be three places to fix.
+    /// One hand: a thick stroke from the hub outward, the three differing only in length and weight.
     void hand(const draw::Canvas& cv, draw::pos_t cx, draw::pos_t cy, draw::pos_t len, angle16 a,
               draw::pos_t thickness, RGB c) const {
-        // Twelve o'clock is UP, and up is -y on a light grid: a hand at angle 0 must point at the
-        // top of the panel, not at the right edge, which is where the raw cos/sin pair puts it.
+        // Twelve o'clock is up, which is -y here, where the raw cos and sin pair points right.
         const draw::pos_t tx = cx + scaleAngle(sin16(a), len);
         const draw::pos_t ty = cy - scaleAngle(cos16(a), len);
         draw::strokeLine(cv, cx, cy, tx, ty, thickness, c);
     }
 
-    /// A signed 16-bit wave scaled to a sub-pixel distance. sin16 returns -32767..32767, so this is
-    /// the one place the wave's range meets the draw layer's units.
+    /// A signed 16-bit wave scaled to a sub-pixel distance, where the two unit systems meet.
     static draw::pos_t scaleAngle(int32_t wave, draw::pos_t distance) {
         return static_cast<draw::pos_t>((wave * static_cast<int64_t>(distance)) / 32767);
     }
 
-    /// The clock's periods, accelerated 10x from a real clock so a second hand sweeps in 6
-    /// seconds: the original's kSecPeriod / kMinPeriod / kHrPeriod, in the same 1:12:144 ratio.
     static constexpr uint32_t kZoomMs = 20000u;   ///< the camera push-in cycle
-    static constexpr uint32_t kSecMs  = 6000u;
-    static constexpr uint32_t kMinMs  = 72000u;
-    static constexpr uint32_t kHourMs = 864000u;
+    // The clock runs 10x, so a second hand sweeps in 6, keeping the real 1:12:144 ratio.
+    static constexpr uint32_t kSecMs  = 6000u;    ///< one sweep of the second hand
+    static constexpr uint32_t kMinMs  = 72000u;   ///< one sweep of the minute hand
+    static constexpr uint32_t kHourMs = 864000u;  ///< one sweep of the hour hand
 
-    static constexpr uint8_t kOrbitCount = 4;
+    static constexpr uint8_t kOrbitCount = 4;      ///< bodies in the orbit demo
     static constexpr uint16_t kCurveStep = 512;    ///< how far a pre-filled trail steps back per point
     static constexpr uint8_t kStarPoints = 5;      ///< a pentagram: 5 vertices, joined 2 apart
-    static constexpr uint8_t kWalkerCount = 6;
-    static constexpr uint8_t kBoidCount = 7;
-    /// The trail window. 64 points is enough for a rosette to close visibly while costing 512 bytes
-    /// of members, which a small ESP32 can carry without a heap allocation.
+    static constexpr uint8_t kWalkerCount = 6;     ///< walkers in the random-walk demo
+    static constexpr uint8_t kBoidCount = 7;       ///< boids in the flocking demo
+    /// The trail window: 64 points closes a rosette visibly, at 512 bytes and no heap allocation.
     static constexpr uint8_t kTrailMax = 64;
 
-    BeatPhase phase_;
-    draw::pos_t trailX_[kTrailMax] = {};
-    draw::pos_t trailY_[kTrailMax] = {};
-    uint8_t trailHead_ = 0;
-    uint8_t trailCount_ = 0;
+    BeatPhase phase_;                        ///< the demo clock
+    draw::pos_t trailX_[kTrailMax] = {};     ///< the pen's remembered x positions
+    draw::pos_t trailY_[kTrailMax] = {};     ///< and its y positions
+    uint8_t trailHead_ = 0;                  ///< where the next point is written
+    uint8_t trailCount_ = 0;                 ///< how many of the ring are filled
     uint8_t shown_ = 0xFF;      ///< which demo drew last, so a switch can clear the trail
 
-    /// The simulation demos keep their own state between frames, which is what makes them
-    /// simulations rather than functions of time. Seeded on a demo switch, since a walker starting
-    /// wherever the last one stopped is a visible jump.
+    /// The simulation demos keep state between frames, seeded on a switch to avoid a visible jump.
     draw::pos_t wx_[kWalkerCount] = {}, wy_[kWalkerCount] = {};
     draw::pos_t wvx_[kWalkerCount] = {}, wvy_[kWalkerCount] = {};
     uint8_t whue_[kWalkerCount] = {};

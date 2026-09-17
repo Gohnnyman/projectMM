@@ -11,12 +11,13 @@ namespace mm {
 /// @defgroup PinList Pin + light-count list parsing
 /// @{
 ///
-/// The LIGHT-DOMAIN half of pin/count list parsing for multi-output LED drivers: RmtLedDriver (one RMT
-/// channel per pin) and I80Peripheral (one i80 data lane per pin) drive consecutive slices of the source
-/// buffer from two text controls. The GPIO-CSV parser (`parsePinList`) is a domain-neutral core primitive
-/// (core/PinList.h); the LED-count distribution below (`assignCounts`, which speaks nrOfLightsType) stays
-/// here in the light layer. Both return nullptr on success or a static error literal for setStatus();
-/// host-tested by unit_RmtLedDriver_pins.cpp.
+/// The LIGHT-DOMAIN half of pin and count list parsing for multi-output LED drivers.
+/// RmtLedDriver takes one RMT channel per pin and I80Peripheral one i80 data lane per pin.
+/// Each drives consecutive slices of the source buffer from two text controls.
+/// The GPIO-CSV parser `parsePinList` is a domain-neutral core primitive in core/PinList.h.
+/// The LED-count distribution `assignCounts` speaks nrOfLightsType, so it stays in the light layer.
+/// Both return nullptr on success, or a static error literal for setStatus().
+/// Host-tested by unit_RmtLedDriver_pins.cpp.
 
 // The per-pin light ceiling for a WS2812-class 1-wire protocol (RMT / LCD_CAM / Parlio
 // all shift the same NRZ wire timing): one line clocks a fixed ~30 us/LED (24 bits ×
