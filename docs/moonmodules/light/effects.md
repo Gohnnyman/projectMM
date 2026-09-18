@@ -1,6 +1,6 @@
 # Effects
 
-Every effect, one block each: its preview, what it does, and what each control means: together. An effect writes per-pixel color into its [Layer](moxygen/Layer.md)'s buffer each tick; [modifiers](modifiers.md) reshape the result and a [driver](moxygen/PreviewDriver.md) sends it out. Effects that name an index color read the global palette (the `palette` control on [Drivers](moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio: see the [tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behavior, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../contributing/documentation-standards.md#module-pages).)
+Every effect, one block each: its preview, what it does, and what each control means: together. An effect writes per-pixel color into its [Layer](moxygen/Layer.md)'s buffer each tick; [modifiers](modifiers.md) reshape the result and a [driver](moxygen/PreviewDriver.md) sends it out. Effects that name an index color read the global palette (the `palette` control on [Drivers](moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio: see the [tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behavior, and control descriptions together. How the layout here maps to the source and asset folders is the [folder-structure decision](../../contributing/documentation-standards.md#module-pages).
 
 Effects are built from the shared [power functions](power-functions.md): the drawing, field and motion routines every effect composes; that page lists each one with its callers.
 
@@ -859,7 +859,7 @@ Detail: [technical](moxygen/TextEffect.md)
 
 <img src="../../assets/light/effects/GameOfLifeEffect.gif" width="300" alt="GameOfLife effect preview">
 
-Conway's cellular automaton generalised to 2D/3D: selectable rulesets (+ custom `B#/S#`), cells that inherit a neighbor's palette color on birth, optional green→red age coloring, a dead-cell blur fading toward the background color, toroidal `wrap`, a 1.5 s settle pause, and 3-CRC stasis self-respawn (R-pentomino/glider) when the board goes static.
+Conway's cellular automaton generalized to 2D and 3D, with selectable rulesets and custom `B#/S#`. Cells inherit a neighbor's palette color on birth, dead cells blur toward the background, and the board wraps toroidally. A stasis check respawns a pentomino or glider when the board goes static.
 
 - `backgroundColorR` / `G` / `B`: the color dead cells fade toward.
 - `ruleset`: the birth and survive rule: Conway, HighLife, Maze and others.
@@ -1122,6 +1122,23 @@ Detail: [technical](moxygen/NoiseEffect.md)
 
 ## projectMM-native effects
 
+<a id="moonlive"></a>
+
+### MoonLive 📝 · any
+
+<img src="../../assets/light/effects/MoonLiveEffect.gif" width="300" alt="MoonLive scripted effect preview">
+
+An effect you write as text on the running device, compiled to native code on the next tick. Pick a script from the library or write your own, and it renders at the speed of a compiled effect. The language is [MoonLive](moonlive.md).
+
+- `script`: which `.mle` file runs, picked from the library and edited here.
+- Every control the script declares, editable live without a recompile.
+
+Origin: projectMM original, on the native-codegen approach of [ESPLiveScript](https://github.com/hpwit/ESPLiveScript) by Yves Bazin
+
+Detail: [technical](moxygen/MoonLiveEffect.md) · [what the card reports](#moonlive-details)
+
+[Tests](../../reference/tests/unit-tests.md#moonlive)
+
 <a id="audiospectrum"></a>
 
 ### AudioSpectrum 💫🎶
@@ -1241,3 +1258,25 @@ Origin: MoonLight (Sinus, AI-generated) · via [MoonLight](https://github.com/Mo
 Detail: [technical](moxygen/SineEffect.md)
 
 [Tests](../../reference/tests/unit-tests.md#sineeffect)
+
+## MoonLive, details
+
+#### What the card reports
+
+Three numbers, and they measure different things. `status` is the size of the compiled program in bytes, which is what a script author asks and nothing else answers. The memory figure is what the module costs the device: its own fixed size, plus the executable block holding the compiled code and the control arena. `tickTimeUs` is the per-tick cost of running the compiled function, measured the way every module's is.
+
+A third allocation exists and appears nowhere. Compiling needs a staging buffer, sized from the script's token count, and it is freed the moment the compile returns. Three scripted modules compiling in sequence each borrow and return it, so what persists per module is only the executable block.
+
+#### The five walls
+
+A script can exhaust ten limits, and five are ones an author can act on.
+
+| limit | ceiling | what to do |
+|---|---|---|
+| code size | 16 KB | split or simplify the script |
+| controls | 8 | remove an `addControl` |
+| members | 8 | shares the budget with controls |
+| functions | 8 | merge two helpers |
+| string bytes | 128 | shorter control labels |
+
+The other five follow from code size or loop nesting, so a number for them is noise. The card shows the tightest of the five and only past half full, since the others by definition have more room.

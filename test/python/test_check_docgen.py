@@ -665,11 +665,127 @@ def test_a_friend_declaration_is_not_a_member():
     assert not [i for i in _hdr(src) if "has no ///" in i[1]]
 
 
+def test_a_function_local_type_is_exempt():
+    """A struct declared inside a METHOD body cannot be named outside it and never reaches the
+    generated page, so demanding a `///` on its fields asks the file to document what no reader
+    sees. The same reason `friend` and a private nested type are already exempt."""
+    src = ("class Foo {\npublic:\n"
+           "  /// documented\n"
+           "  bool go() {\n"
+           "    struct Local { uint8_t* out; void emit(int x) {} };\n"
+           "    return true;\n"
+           "  }\n};")
+    assert not [i for i in _hdr(src) if "has no ///" in i[1]]
+
+
+def test_a_class_body_nested_type_still_reports():
+    """The exemption must not swallow the case the stack was built for: a type declared
+    directly in the class body IS on the generated page, one level below it rather than two."""
+    src = ("class Foo {\npublic:\n"
+           "  /// documented\n"
+           "  void ok() {}\n"
+           "  /// a nested type\n"
+           "  struct Inner {\n"
+           "    uint8_t undocumentedField;\n"
+           "  };\n};")
+    whys = [why for _, why in _hdr(src) if "has no ///" in why]
+    assert "public variable has no ///" in whys
+
+
+def test_a_member_after_a_function_local_type_is_still_seen():
+    """The local frame must end with the method that held it: a public member declared after
+    one is an ordinary member, and skipping it would hide the whole rest of the class."""
+    src = ("class Foo {\npublic:\n"
+           "  /// documented\n"
+           "  bool go() {\n"
+           "    struct Local { uint8_t hidden; };\n"
+           "    return true;\n"
+           "  }\n"
+           "  uint8_t afterTheMethod = 0;\n};")
+    whys = [why for _, why in _hdr(src) if "has no ///" in why]
+    assert "public variable has no ///" in whys
+
+
 def test_the_headers_are_actually_scanned():
     """A rule that reads no files reports a clean run, which looks exactly like a clean
     tree. The count is pinned so an empty scan fails here instead of going quiet."""
     import check_docgen
     assert len(list(check_docgen._headers())) > 10
+
+
+def test_the_scan_covers_cpp_as_well_as_headers():
+    """The same `///` and `//` comments live on both sides of a header/source split, so a
+    scan that stopped at `.h` left every `.cpp` silently exempt. Both suffixes are pinned
+    here because the count test above passes just as happily with one of them missing."""
+    import check_docgen
+    scanned = {p.suffix for p in check_docgen._headers()}
+    assert scanned == {".h", ".cpp"}, scanned
+
+
+def test_a_cpp_file_is_held_to_the_comment_rules():
+    """A `.cpp` gets no generated page, so only the comment-shape rules reach it. This pins
+    that they DO reach it: the rule fires on a source file, not just on a header."""
+    import check_docgen
+    src = ("class X {\n"
+           "public:\n"
+           "    /// Does the thing.\n"
+           "    void f() {\n"
+           "        // one\n"
+           "        // two\n"
+           "    }\n"
+           "};")
+    whys = [why for _, why in check_docgen._header_rules("src/core/x.cpp", src)]
+    assert any("code comment 2 lines > 1" in w for w in whys), whys
+
+
+def test_the_scan_reaches_beyond_src():
+    """The entry points and the ISA generator sit outside `src` by build-system convention
+    alone, and were exempt for that reason rather than by decision. Pinned by root so a
+    dropped one fails here instead of quietly shrinking the measured surface."""
+    import check_docgen
+    scanned = {str(p) for p in check_docgen._headers()}
+    for expected in ("esp32/main/main.cpp",
+                     "moonbase/main/moonbase_main.cpp",
+                     "moondeck/moonlive/emit_isa.cpp"):
+        assert expected in scanned, expected
+
+
+def test_a_templated_member_is_not_asked_for_a_second_doc():
+    """Doxygen attaches a comment to the declaration, and a `template <...>` header sits
+    between the two. Reading only the line above asked a documented templated member for a
+    `///` it already had, and the answer was a second one wedged under the template header,
+    which doxygen drops and a reader sees twice."""
+    import check_docgen
+    src = ("class X {\n"
+           "public:\n"
+           "    /// Walks the thing.\n"
+           "    template <typename F>\n"
+           "    void walk(F&& f) const { (void)f; }\n"
+           "};")
+    whys = [why for _, why in check_docgen._header_rules("src/core/x.h", src)]
+    assert not [w for w in whys if "has no ///" in w], whys
+
+
+def test_a_struct_inside_a_free_function_is_exempt():
+    """A type declared in a free function's body reaches no reader: it has no enclosing class,
+    so the frame stack is empty and the old rule read it as a top-level public member. With
+    `.cpp` files in scope that shape is ordinary (a scoped RAII helper), so it is pinned."""
+    import check_docgen
+    src = ("void f() {\n"
+           "    struct Guard { int fd; };\n"
+           "    Guard g{0};\n"
+           "    (void)g;\n"
+           "}")
+    whys = [why for _, why in check_docgen._header_rules("src/core/x.cpp", src)]
+    assert not [w for w in whys if "has no ///" in w], whys
+
+
+def test_the_scan_includes_tests():
+    """A test is C++ we own, and these rules are about how code READS rather than about what
+    gets published, so `test/` is in scope like any other source. Pinned because excluding it
+    is the easy mistake: nothing generates a page from a test, which looks like a reason."""
+    import check_docgen
+    assert [p for p in check_docgen._headers() if str(p).startswith("test/")]
 
 
 def test_the_real_pages_obey_the_structure_rules():

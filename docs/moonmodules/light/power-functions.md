@@ -11,7 +11,7 @@ Three consumers share this vocabulary, and each uses a different slice of it:
 - **[Modifiers](modifiers.md)** fold coordinates through `modifyLogical` and never draw, so they
   reach for almost none of it. That asymmetry is the architecture, not a gap: **an effect decides
   what a pixel looks like, a modifier decides where a pixel comes from.**
-- **[MoonLive](MoonLiveEffect.md)** scripts reach the same routines through the builtin table
+- **[MoonLive](moonlive.md)** scripts reach the same routines through the builtin table
   (`core/moonlive/MoonLiveBuiltins.h`), which carries plain scalar arguments — so a script sees the
   flat form of a function, not the C++ callback form a compiled effect can use.
 
@@ -213,7 +213,7 @@ Frame order matters and is the caller's to get right: forces, then `collide()`, 
 
 Prior art: the [WLED Particle System](https://github.com/wled/WLED) by Damian Schneider ([@DedeHai](https://github.com/DedeHai)), whose vocabulary of emitters, forces and walls over one shared pool is the shape this follows, and Reeves 1983 for the name. The fixed-point implementation and the elapsed-time scaling are ours. His system also settled a design question by having answered it already: he documents trying y-binning in the collision broad phase and measuring it not worth the bookkeeping at these pool sizes, so `collide` keeps the cheaper sweep along X deliberately rather than by omission.
 
-A script reaches the same kernel through [MoonLive](MoonLiveEffect.md#the-vocabulary-what-a-script-can-call)'s `pool` / `emit` / `step` builtins.
+A script reaches the same kernel through [the script vocabulary](moonlive.md#the-vocabulary)'s `pool`, `emit` and `step` builtins.
 
 <div class="mm-pf" markdown="1">
 

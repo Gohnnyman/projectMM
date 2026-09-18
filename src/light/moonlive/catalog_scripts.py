@@ -114,8 +114,7 @@ def main() -> int:
     for role, names in by_role.items():
         lower = role.lower()
         folder = FOLDER_BY_ROLE[role]
-        parts.append(f"/// Every factory {lower}, by file name. They live in `moonlive/{folder}/`\n")
-        parts.append("/// upstream and in the factory script directory on the device.\n")
+        parts.append(f"/// Every factory {lower} by file name, from `moonlive/{folder}/` upstream.\n")
         parts.append(f"constexpr const char* k{role}Catalog[] = {{\n")
         parts.append("".join(f'    "{n}",\n' for n in names))
         parts.append("};\n")
@@ -123,8 +122,8 @@ def main() -> int:
         # Parallel arrays rather than a struct: the name array is what every existing caller walks,
         # and a struct would rewrite each of them to reach a field they do not use.
         decls = decl_by_role[role]
+        parts.append("// A dimension of 0 means the script says nothing, so the device decides.\n")
         parts.append(f"/// What each {lower} above declares about itself, in the same order.\n")
-        parts.append("/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.\n")
         parts.append(f"constexpr unsigned char k{role}CatalogDim[] = {{\n")
         parts.append("".join(f"    {d},\n" for d, _ in decls))
         parts.append("};\n")

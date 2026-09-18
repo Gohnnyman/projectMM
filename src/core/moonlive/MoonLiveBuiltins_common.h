@@ -22,7 +22,7 @@
 
 namespace mm::moonlive {
 
-// This used to fold through a 16-BIT window (`v > 32767 ? v - 65536 : v`), because a script had no
+// This once folded through a 16-bit window, because a script had no
 // way to hold a negative and the convention was that the top half of the 16-bit range meant one.
 // That window was the inverse of uint16_t member truncation, it was written down in neither place,
 // and it is what made `d = 60000` read as -5536: the script author thought in the member's range
@@ -32,20 +32,14 @@ inline int32_t signedArg(uintptr_t a) {
     return static_cast<int32_t>(uint32_t(a));
 }
 
-/// The remaining print budget. A binding resets it when it compiles, so every edit of a script gets
-/// a fresh window: without that, one burst silences the debugging tool for the life of the process,
-/// which is exactly when a second look at a misbehaving script is most needed.
-/// ATOMIC for the same reason random16's seed is: two threads run scripts concurrently. The decrement
-/// below is the one that matters: read-modify-write on a plain uint32_t lets two threads both see 1,
-/// both decrement, and the budget WRAP to ~4 billion, turning the bound that keeps `print` off the
-/// render tick's critical path into no bound at all.
+// Atomic because two threads run scripts concurrently: a plain read-modify-write lets both see 1,
+// both decrement, and the budget wrap to four billion, which is no bound at all.
+/// The remaining print budget, reset by a binding when it compiles.
 inline std::atomic<uint32_t>& printBudget() { static std::atomic<uint32_t> n{0}; return n; }
 
-/// Grant a fresh burst. Call from the binding's prepare(), alongside the compile.
-///
-/// print() writes to serial, which blocks, and an effect script runs on the render tick: so the
-/// burst is what bounds the cost: a handful of writes per compile, after which the call is a compare
-/// and a return. Draining through a queue would take the last of it off the tick; backlogged.
+// print() writes to serial, which blocks, and a script runs on the render tick, so the burst is
+// what bounds the cost: a few writes per compile, then a compare and a return.
+/// Grant a fresh print burst, called from a binding's prepare alongside the compile.
 inline void resetPrintBudget() { printBudget().store(32, std::memory_order_relaxed); }
 
 extern "C" inline uint32_t mm_ml_random16(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -55,7 +49,7 @@ extern "C" inline uint32_t mm_ml_random16(const uintptr_t* args, uint32_t, const
     // the addLight sink is a per-thread table below). A plain `static` here is a data race, and a
     // lost update would additionally let two draws return the SAME value, which for a "random"
     // helper is a correctness bug rather than a tolerable one. compare_exchange keeps the sequence
-    // exactly the LCG's, just serialized.
+    // exactly the LCG's, serialized.
     static std::atomic<uint32_t> seed{0x2545F491u};
     uint32_t prev = seed.load(std::memory_order_relaxed), next;
     do {
@@ -94,7 +88,7 @@ extern "C" inline uint32_t mm_ml_mod(const uintptr_t* args, uint32_t, const uint
 // domain-neutral and a divide is one host call rather than an instruction no ISA here has.
 // b == 0 SATURATES with the numerator's sign: IEEE 754's ±infinity mapped onto an int, and what
 // libfixmath does on divide overflow. The value is also the visually right one: `k / dist` at
-// dist == 0 is the CENTER of a ripple, where max reads as the peak the eye expects and 0 punched
+// dist == 0 is a ripple's center, where max reads as the peak and 0 punched
 // a dark hole exactly there. 0/0 stays 0 (no direction to saturate toward). mod keeps returning
 // 0: there is no "infinite remainder". Either way a script degrades, never faults, and needs no
 // zero-check of its own.
@@ -136,9 +130,9 @@ extern "C" inline uint32_t mm_ml_fdiv(const uintptr_t* args, uint32_t, const uin
 // script and a compiled effect melt shapes identically.
 //
 
-// beat(bpm) / beatsin(bpm, low, high) → the TIME vocabulary an animation is actually written in.
+// beat(bpm) / beatsin(bpm, low, high) → the time vocabulary an animation is written in.
 //
-// An effect does not think in milliseconds, it thinks in beats: `beat` is a rising sawtooth at a
+// An effect thinks in beats rather than milliseconds: `beat` is a rising sawtooth at a
 // given BPM, `beatsin` a sine oscillating between two bounds. Both wrap math8.h's beat8/beatsin16,
 // the same functions the compiled effects use (GEQ3D, FreqSaws, Lines) with the same FastLED
 // semantics, so a script writes what an effect writer writes.
@@ -151,7 +145,7 @@ extern "C" inline uint32_t mm_ml_fdiv(const uintptr_t* args, uint32_t, const uin
 // `ms` is an explicit argument: a script writes `beat(30, t)`. Threading the clock implicitly was
 // tried and is worse: a Call receives exactly the arguments the script names, so an implicit `ms`
 // arrives as zero and the animation silently stands still. Explicit also matches the C++ signature
-// (beat16(bpm, ms)), so a script and an effect read the same. The modulo and divide these need live
+// (beat16(bpm, ms)), so a script and an effect read the same. The modulo and divide they need live
 // in the host function, which is why they are Calls: no ISA here has a cheap integer divide.
 extern "C" inline uint32_t mm_ml_beat(const uintptr_t* args, uint32_t, const uint8_t*) {
     const uint32_t bpm = uint32_t(args[0]), ms = uint32_t(args[1]);
@@ -211,8 +205,8 @@ extern "C" inline uint32_t mm_ml_print(const uintptr_t* args, uint32_t, const ui
     return v;
 }
 
-/// The neutral builtins, registered into whatever table asks. Both vocabularies call this first and
-/// then add their own, so a name means the same thing in an effect and in a service.
+// Both vocabularies call this first and then add their own, so a name means one thing everywhere.
+/// Register the neutral builtins into whatever table asks.
 inline void addCommonBuiltins(BuiltinTable& t) {
     // mod/div: the operators a script cannot spell, since `%` and `/` are not in the grammar.
     t.add({"mod", 2, /*returns*/ true, BuiltinKind::Call, &mm_ml_mod, {}});

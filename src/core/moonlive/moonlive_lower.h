@@ -38,8 +38,8 @@
 
 namespace mm::moonlive {
 
-/// Lower `ir` into `out` using assembler `A`. Returns the byte count, or 0 when the program cannot
-/// be encoded (degrade, never miscompile).
+// Zero means the program cannot be encoded: degrade, never miscompile.
+/// Lower `ir` into `out` using assembler `A`, returning the byte count.
 template <typename A>
 size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squeeze,
                  uint8_t regCount) {
@@ -124,14 +124,14 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
     // exhausts the assembler's fixed label table, and the inline ops (StoreElem's bounds guard,
     // FillElems' loop) then get nothing when they ask for their own, which broke every program that
     // contains no loop at all. Lazy allocation costs one lookup and leaves the table for the labels
-    // a program actually has.
+    // a program has.
     // One label per named function, allocated up front: a CallScript may appear BEFORE the
     // function it targets (and does, for recursion), so the label has to exist before it is bound.
     LabelId fnLabel[kMaxIrEntries];
     for (uint8_t f = 0; f < ir.fnCount; f++) fnLabel[f] = a.newLabel();
 
-    // The depth guard is emitted only for a script whose functions call each other: it is dead
-    // weight in every script that just defines `tick()`, which is all of the shipped ones.
+    // Emitted only for a script whose functions call each other: dead weight in one defining
+    // only `tick()`, which is every shipped script.
     const bool guardDepth = ir.hasScriptCall();
     // Where a function jumps when it is too deep: its own epilogue, so the refusal unwinds through
     // the same decrement and return as a normal exit and there is no second way out of a frame.
@@ -222,9 +222,8 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
             if (f > 0) closeFn(static_cast<uint8_t>(f - 1));   // the previous function returns
             curFn = f;
             // Align BEFORE recording the offset, so the recorded address is the one a caller
-            // actually jumps to. On Xtensa a function entry must be 4-byte aligned or the call
-            // cannot be encoded and the instruction itself is illegal; the other backends are
-            // fixed-width and this costs them nothing.
+            // jumps to. On Xtensa a function entry must be 4-byte aligned or the call cannot be
+            // encoded; the other backends are fixed-width and this costs them nothing.
             a.alignForEntry();
             // Recorded AFTER the epilogue and BEFORE the prologue: the offset is the first byte a
             // caller executes, which is the frame setup, not the first statement.

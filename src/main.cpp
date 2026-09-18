@@ -205,7 +205,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::CubeLayout>("CubeLayout", "light/layouts.md#cube");
     mm::ModuleFactory::registerType<mm::HumanSizedCubeLayout>("HumanSizedCubeLayout", "light/layouts.md#humansizedcube");
     mm::ModuleFactory::registerType<mm::MoonLiveLayout>("MoonLiveLayout",
-                                                        "light/MoonLiveEffect.md#a-layout-written-as-a-script");
+                                                        "light/layouts.md#moonlive");
     mm::ModuleFactory::registerType<mm::PanelsLayout>("PanelsLayout", "light/layouts.md#panels");
     mm::ModuleFactory::registerType<mm::TorontoBarGourdsLayout>("TorontoBarGourdsLayout", "light/layouts.md#torontobargourds");
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout", "light/layouts.md#grid");
@@ -240,7 +240,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::LinesEffect>("LinesEffect", "light/effects.md#lines");
     mm::ModuleFactory::registerType<mm::LissajousEffect>("LissajousEffect", "light/effects.md#lissajous");
     mm::ModuleFactory::registerType<mm::MetaballsEffect>("MetaballsEffect", "light/effects.md#metaballs");
-    mm::ModuleFactory::registerType<mm::MoonLiveEffect>("MoonLiveEffect", "light/MoonLiveEffect.md");
+    mm::ModuleFactory::registerType<mm::MoonLiveEffect>("MoonLiveEffect", "light/effects.md#moonlive");
     mm::ModuleFactory::registerType<mm::NetworkReceiveEffect>("NetworkReceiveEffect", "light/effects.md#networkreceive");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect", "light/effects.md#noise");
     mm::ModuleFactory::registerType<mm::NoiseMeterEffect>("NoiseMeterEffect", "light/effects.md#noisemeter");
@@ -294,7 +294,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::BlockModifier>("BlockModifier", "light/modifiers.md#block");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers.md#checkerboard");
     mm::ModuleFactory::registerType<mm::MoonLiveModifier>("MoonLiveModifier",
-                                                          "light/MoonLiveEffect.md#a-modifier-written-as-a-script");
+                                                          "light/modifiers.md#moonlive");
     mm::ModuleFactory::registerType<mm::CircleModifier>("CircleModifier", "light/modifiers.md#circle");
     mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier", "light/modifiers.md#mirror");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers.md#multiply");

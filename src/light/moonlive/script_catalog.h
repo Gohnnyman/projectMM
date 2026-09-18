@@ -11,8 +11,7 @@
 
 namespace mm::moonlive {
 
-/// Every factory effect, by file name. They live in `moonlive/effects/`
-/// upstream and in the factory script directory on the device.
+/// Every factory effect by file name, from `moonlive/effects/` upstream.
 constexpr const char* kEffectCatalog[] = {
     "aurora.mle",
     "ballpit.mle",
@@ -49,8 +48,8 @@ constexpr const char* kEffectCatalog[] = {
     "trails.mle",
 };
 constexpr size_t kEffectCatalogCount = 33;
+// A dimension of 0 means the script says nothing, so the device decides.
 /// What each effect above declares about itself, in the same order.
-/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
 constexpr unsigned char kEffectCatalogDim[] = {
     3,
     2,
@@ -124,8 +123,7 @@ constexpr const char* kEffectCatalogTags[] = {
 };
 constexpr const char* kEffectFolder = "effects";   ///< its directory upstream
 
-/// Every factory layout, by file name. They live in `moonlive/layouts/`
-/// upstream and in the factory script directory on the device.
+/// Every factory layout by file name, from `moonlive/layouts/` upstream.
 constexpr const char* kLayoutCatalog[] = {
     "diagonal.mll",
     "grid.mll",
@@ -139,8 +137,8 @@ constexpr const char* kLayoutCatalog[] = {
     "two-rows.mll",
 };
 constexpr size_t kLayoutCatalogCount = 10;
+// A dimension of 0 means the script says nothing, so the device decides.
 /// What each layout above declares about itself, in the same order.
-/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
 constexpr unsigned char kLayoutCatalogDim[] = {
     2,
     2,
@@ -168,16 +166,15 @@ constexpr const char* kLayoutCatalogTags[] = {
 };
 constexpr const char* kLayoutFolder = "layouts";   ///< its directory upstream
 
-/// Every factory modifier, by file name. They live in `moonlive/modifiers/`
-/// upstream and in the factory script directory on the device.
+/// Every factory modifier by file name, from `moonlive/modifiers/` upstream.
 constexpr const char* kModifierCatalog[] = {
     "mirror.mlm",
     "shift.mlm",
     "transpose.mlm",
 };
 constexpr size_t kModifierCatalogCount = 3;
+// A dimension of 0 means the script says nothing, so the device decides.
 /// What each modifier above declares about itself, in the same order.
-/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
 constexpr unsigned char kModifierCatalogDim[] = {
     2,
     2,
@@ -191,16 +188,15 @@ constexpr const char* kModifierCatalogTags[] = {
 };
 constexpr const char* kModifierFolder = "modifiers";   ///< its directory upstream
 
-/// Every factory service, by file name. They live in `moonlive/services/`
-/// upstream and in the factory script directory on the device.
+/// Every factory service by file name, from `moonlive/services/` upstream.
 constexpr const char* kServiceCatalog[] = {
     "button.mls",
     "power.mls",
     "sweep.mls",
 };
 constexpr size_t kServiceCatalogCount = 3;
+// A dimension of 0 means the script says nothing, so the device decides.
 /// What each service above declares about itself, in the same order.
-/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
 constexpr unsigned char kServiceCatalogDim[] = {
     0,
     0,
@@ -214,8 +210,7 @@ constexpr const char* kServiceCatalogTags[] = {
 };
 constexpr const char* kServiceFolder = "services";   ///< its directory upstream
 
-/// Every factory palette, by file name. They live in `moonlive/palettes/`
-/// upstream and in the factory script directory on the device.
+/// Every factory palette by file name, from `moonlive/palettes/` upstream.
 constexpr const char* kPaletteCatalog[] = {
     "beat-flash.mlp",
     "drift.mlp",
@@ -224,8 +219,8 @@ constexpr const char* kPaletteCatalog[] = {
     "temperature.mlp",
 };
 constexpr size_t kPaletteCatalogCount = 5;
+// A dimension of 0 means the script says nothing, so the device decides.
 /// What each palette above declares about itself, in the same order.
-/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
 constexpr unsigned char kPaletteCatalogDim[] = {
     0,
     0,

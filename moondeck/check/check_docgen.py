@@ -8,7 +8,7 @@
 """The documentation the build GENERATES, held to the standards that describe it.
 
 Two surfaces, one check, because they are one pipeline: the hand-written catalog pages
-that render as card tables, and the `///` comments in the headers that become the
+that render as card tables, and the `///` comments in the sources that become the
 technical pages beside them. A rule about the first is a rule about a cell width; a rule
 about the second is a rule doxygen enforces by silently dropping what it cannot read.
 Prose is NOT here: em-dashes, spelling and weasel words are Vale's, and a second prose
@@ -91,11 +91,23 @@ PREVIEWLESS_PAGES = _hooks.PREVIEWLESS_PAGES
 # line, and a deep dive goes after `@moreinfo` where a post-process moves it below the
 # member lists. The numbers come from the tree: a member line is 14 words at the median
 # and 19 at p95, so 20 words bites the outliers and leaves the normal case alone.
-# EVERY header under src, not a list of directories. A list is a tolerance wearing different
-# clothes: each directory it omits is silently exempt, and nobody notices a new one appearing.
-HEADER_ROOT = "src"
+# EVERY C++ source in the repository, not a list of directories inside one of them. A list is a
+# tolerance wearing different clothes: each directory it omits is silently exempt, and nobody
+# notices a new one appearing. `src` is the bulk; the rest are the entry points, the ISA generator
+# and the tests, which sat outside it only by build-system convention.
+#
+# `test` is in scope even though nothing generates a page from it: these rules are about how the
+# code READS, which is why a test's comments are held to them like any other source we own. Only
+# the page rules key off a generated page, and they run from `_orphan_pages` over src/{core,light}.
+HEADER_ROOTS = ("src", "test", "esp32/main", "moonbase/main", "moondeck/moonlive")
+# `.cpp` too: a rule that stopped at the header was a tolerance the file extension decided, and
+# the same `///` and `//` comments live on both sides of a split. A `.cpp` gets no generated page,
+# so only the comment-shape rules reach it; the page rules key off the header that names it.
+HEADER_SUFFIXES = ("*.h", "*.cpp")
 # Upstream code, vendored rather than written here, spelled exactly as check_prose.py spells it.
-HEADER_EXEMPT = ("src/platform/desktop/vendor/", "src/ui/vendor/")
+# `test/doctest.h` is the single-header doctest release: vendored the same way, just not under a
+# directory named for it, and holding a hundred findings nobody here will ever fix.
+HEADER_EXEMPT = ("src/platform/desktop/vendor/", "src/ui/vendor/", "test/doctest.h")
 MAX_CLASS_DOC = 10      # lines of `///` directly above `class X`
 MAX_MOREINFO = 20       # lines of the `@moreinfo` appendix
 MAX_MEMBER_DOC = 1      # lines of a `///` run that is NOT a class comment
@@ -298,16 +310,21 @@ def _rule_name(reason: str) -> str:
 
 
 def _headers():
-    """Every header the rules cover, repo-relative.
+    """Every source file the rules cover, repo-relative.
 
     RECURSIVE: the old per-directory glob was flat, so a header one level down was never
     read and its findings never counted. Widening the root without this would have reported
     a clean run over an empty set, which is the failure this check exists to prevent.
     """
-    for p in sorted((ROOT / HEADER_ROOT).rglob("*.h")):
-        rel = p.relative_to(ROOT)
-        if not str(rel).startswith(HEADER_EXEMPT):
-            yield rel
+    seen = set()
+    for root in HEADER_ROOTS:
+        for suffix in HEADER_SUFFIXES:
+            for p in sorted((ROOT / root).rglob(suffix)):
+                rel = p.relative_to(ROOT)
+                if str(rel).startswith(HEADER_EXEMPT) or rel in seen:
+                    continue
+                seen.add(rel)
+                yield rel
 
 
 def _sentences(text: str):
@@ -432,7 +449,8 @@ def _header_rules(rel: str, text: str):
 
     Six rules, all counted rather than judged: a class comment of at most ten lines, an
     `@moreinfo` appendix of at most twenty, ONE line for any other `///`, twenty words on
-    a comment line, ONE line for a `//` run, and a `///` on every public member. The first five cut;
+    a comment line, ONE line for a `//` run, and a `///` on every public member a reader can
+    reach. The first five cut;
     the last adds, and they are meant to pull against each other: the result is a short line
     on everything rather than an essay on a few things.
 
@@ -548,10 +566,16 @@ def _header_rules(rel: str, text: str):
     # class that contained it, and closing the struct then read as closing the class, so
     # every public member after one escaped this check entirely (a class with a nested
     # type reported nothing at all).
-    frames = []                                  # (body_depth, public) per open class/struct
+    # LOCAL types are exempt for the reason the private ones are: a struct declared inside a
+    # METHOD body is unnameable outside it and reaches no generated page, so asking it for a
+    # `///` documents a line no reader sees. The depth says which is which: a type declared in
+    # a class body opens one level below it, one declared in a method opens two or more,
+    # because the method's own `{` sits between them.
+    frames = []                                  # (body_depth, public, local) per open class/struct
     public = False
     depth = 0
     class_depth = None
+    in_local = False
     for i, ln in enumerate(lines):
         st = ln.strip()
         opens, closes = ln.count("{"), ln.count("}")
@@ -563,13 +587,18 @@ def _header_rules(rel: str, text: str):
             # document what no reader of the generated page can see. Only a top-level struct
             # (nothing open above it) starts public.
             nested = bool(frames)
-            frames.append((before + 1, public))
+            # Below the enclosing class body rather than directly in it: a method's body
+            # intervenes, so this type is local to that method and reaches no reader.
+            local = bool(frames) and (before + 1 > frames[-1][0] + 1 or frames[-1][2])
+            frames.append((before + 1, public, local))
             class_depth = before + 1
             public = st.startswith("struct") and not (nested and not public)
+            in_local = local
             continue
         while frames and depth < frames[-1][0]:
-            _, public = frames.pop()             # this body closed; the enclosing one resumes
+            _, public, _ = frames.pop()          # this body closed; the enclosing one resumes
             class_depth = frames[-1][0] if frames else None
+            in_local = frames[-1][2] if frames else False
         if st.startswith("public:"):
             public = True
             continue
@@ -581,9 +610,17 @@ def _header_rules(rel: str, text: str):
         # `before` is the depth the line STARTS at: a member sits exactly in the body.
         # `friend` grants access to another type; it declares no member and reaches no
         # generated page, so asking it for a `///` documents a line no reader sees.
-        if before != class_depth or st.startswith(("return", "if", "for", "while", "}", "friend ")):
+        if (before != class_depth or in_local
+                or st.startswith(("return", "if", "for", "while", "}", "friend "))):
             continue
-        prev = lines[i - 1].lstrip() if i else ""
+        # Past a `template <...>` line: doxygen attaches a comment to the declaration, and the
+        # template header sits between the two. Reading only the line above asked a templated
+        # member for a `///` it already had, and the answer was a second one wedged below the
+        # template header, which doxygen drops and a reader sees twice.
+        j = i - 1
+        while j >= 0 and lines[j].lstrip().startswith("template"):
+            j -= 1
+        prev = lines[j].lstrip() if j >= 0 else ""
         if prev.startswith("///") or "///" in ln:
             continue
         if _FUNC_RE.match(st) or _SPECIAL_FUNC_RE.match(st):
