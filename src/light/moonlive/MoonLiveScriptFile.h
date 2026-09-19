@@ -7,21 +7,30 @@
 #include <cstdio>
 #include <cstring>
 
+/// @defgroup moonlive_script_file MoonLive script files
+/// @{
+/// Where scripts live and how a file name states its role.
+///
+/// One language, five extensions: the engine stays role-blind and the extension alone decides which picker offers a file.
+///
+/// @moreinfo
+///
+/// ## Two directories
+///
+/// A user directory the UI writes and the loader prefers, and a factory directory the picker offers and the UI downloads from on first use.
+/// The split is the revert mechanism: un-editing is a local delete rather than a download.
+
 namespace mm::moonlive {
 
-// A module stores a name rather than a path, so it cannot reach outside this folder.
-// An edit lands here and shadows a factory script of the same name from that moment on.
+// A module stores a name, not a path, so it cannot reach outside this folder.
 /// Where a user's scripts live, which the UI writes and the loader prefers.
 inline constexpr const char* kScriptDir = "/moonlive";
 
-// The split is the whole revert mechanism: editing a factory script writes a second file here
-// instead, so un-editing is a local delete rather than a download on site.
-// Dot-prefixed like `/.config`, so the File Manager hides it while the text stays readable.
+// The split is the revert mechanism: un-editing is a local delete rather than a download.
 /// Where the factory scripts land, which the picker offers and the UI downloads on first use.
 inline constexpr const char* kFactoryScriptDir = "/.moonlive";
 
-// Stated by the author rather than derived, since deriving would couple a UI filter to a language
-// feature. The engine stays role-blind, so the extension decides which picker offers a file.
+// The engine stays role-blind, so the extension alone decides which picker offers a file.
 /// A script's role, carried in its file name: one language, five extensions.
 inline constexpr const char* kEffectExt   = ".mle";
 inline constexpr const char* kLayoutExt   = ".mll";
@@ -159,8 +168,7 @@ inline uint32_t scriptHash(const char* s, size_t len) {
     return h;
 }
 
-// One resolver for both readers: two would let a fork compile from one directory and hash from
-// the other, which looks changed on every sweep. False leaves the user path in `out`.
+// One resolver, or a fork compiles from one directory and hashes from the other.
 /// Where `name` lives: the user's copy when there is one, else the factory copy.
 inline bool resolveScript(const char* name, char* out, size_t outLen) {
     std::snprintf(out, outLen, "%s/%s", kScriptDir, name);
@@ -172,8 +180,7 @@ inline bool resolveScript(const char* name, char* out, size_t outLen) {
     return true;
 }
 
-// A sidecar because the fork is user-facing text, where a provenance line would be edited away.
-// It answers what the shadow marker cannot: whether the shipped copy moved since the fork.
+// A sidecar, since a provenance line inside user-facing text would be edited away.
 /// Where the lineage hash of a forked script is kept.
 inline void scriptLineagePath(const char* name, char* out, size_t outLen) {
     std::snprintf(out, outLen, "%s/.%s.from", kScriptDir, name);
@@ -266,7 +273,6 @@ inline bool scriptShadowsFactory(const char* name) {
 }
 
 // One read, skipping the parse, the codegen and the exec-block allocation after it.
-// False for a missing or unreadable file, which the caller treats as "not what I compiled".
 /// The hash of `name`'s current text, without compiling it.
 inline bool scriptFileHash(const char* name, uint32_t& out) {
     if (!name || !name[0]) return false;
@@ -275,8 +281,7 @@ inline bool scriptFileHash(const char* name, uint32_t& out) {
     const long size = platform::fsSize(path);
     if (size <= 0 || size > kScriptFileMax) return false;
 
-    // One read of the whole file: a chunked walk opens and closes per call, which boot-looped a P4.
-    // Hashing a window is worse, since an edit past it would go undetected.
+    // One read: a chunked walk opens and closes per call, which boot-looped a P4.
     char* text = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
     if (!text) return false;                          // no memory is "cannot answer", not "unchanged"
     const int got = platform::fsRead(path, text, static_cast<size_t>(size) + 1);
@@ -290,8 +295,7 @@ inline bool scriptFileHash(const char* name, uint32_t& out) {
 inline bool compileScriptFile(MoonLive& engine, const char* name,
                               const BuiltinTable& builtins, const SysVarTable& sysvars,
                               const char*& err, uint32_t* hashOut = nullptr) {
-    // First, so a rejected script cannot leave the old program executing under an error status.
-    // freeCode rather than free, since the control arena must survive a failed compile.
+    // freeCode first, since a rejected script must not keep executing and the arena must survive.
     engine.freeCode();
 
     // The write endpoint makes no parent directories, so naming a script is what creates this.
@@ -299,8 +303,7 @@ inline bool compileScriptFile(MoonLive& engine, const char* name,
 
     if (!name || !name[0]) { err = "no script — set the script name"; return false; }
 
-    // A basename only, so a control value cannot reach outside the script directory. Rejected
-    // rather than sanitized, since a name needing a rewrite to be safe is one a user mistyped.
+    // A basename only, rejected rather than sanitized: one needing a rewrite was mistyped.
     for (const char* c = name; *c; c++)
         if (*c == '/' || *c == '\\') { err = "script name is a file in the script folder, not a path"; return false; }
     if (std::strcmp(name, "..") == 0 || std::strncmp(name, "../", 3) == 0) {
@@ -336,5 +339,7 @@ inline bool compileScriptFile(MoonLive& engine, const char* name,
     platform::free(text);
     return ok;
 }
+
+/// @}
 
 }  // namespace mm::moonlive

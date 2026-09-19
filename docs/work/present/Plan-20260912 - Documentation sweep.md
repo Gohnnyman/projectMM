@@ -91,6 +91,8 @@ Red by design. The way to green is solving each file, never widening a tolerance
 
 A file visited twice costs twice, and the second visit re-reads everything the first already loaded. So every gate runs against one file before moving to the next, and the file is read once.
 
+**Top down, never finding by finding.** The unit of work is the declaration and what a reader needs to know about it, not the line a counter flagged. Read the file's structure, decide what each seam says, and write the comment that says it. A sweep driven by the finding list instead patches flagged lines one at a time, re-counts, and patches again: the count falls slowly, the prose stays shaped by whatever the previous author wrote, and promoting a `//` to a `///` *raises* the count, because a documented member is measured where an undocumented one is not. That is the bottom-up trap, and the finding list is a check on the result rather than a worklist to burn down.
+
 1. **Read the findings first, not the file.** `check_docgen` names every rule it breaks and `vale <file>` names every line. Together they say what the edit must contain, so the file is opened knowing the whole job.
 2. **Dump the comment runs once.** One pass prints every multi-line `//` and `///` run with the line it precedes. That output is the working set: do not re-read the file per finding.
 3. **Settle the `///` first.** The class comment, its `@moreinfo` appendix, the `@card` line, and a one-line `///` on every public member the check names. This is the reader's view of the file, and it decides what is left to say.
@@ -101,11 +103,28 @@ A file visited twice costs twice, and the second visit re-reads everything the f
 8. **Verify once.** `check_docgen` and `vale` on that file. Both silent, or go back to step 7 with what they now say.
 9. **Build only when the batch ends**, never per file: comments cannot break a build, and the compile is the expensive step.
 
+**The shape of a swept header**, which the three rules below enforce between them:
+
+| Position | Spelling | Budget |
+|---|---|---|
+| The file's first comment | `///`, a `@defgroup` block or the class comment | 10 lines, plus an `@moreinfo` appendix of 10 per `## ` section |
+| Every class or struct | `///` | 10 lines, plus an `@moreinfo` appendix of 10 per `## ` section |
+| Every public member | `///` | **one line** |
+| A note beside code | `//` | **one line**, and only where a reader of the source needs it |
+
+`@moreinfo` is the one home for depth, and only a lead carries one: the file's, or a class's. On a member it is depth in the wrong place, because the generated page shows a member's single line as its summary. That rule was briefly relaxed during the platform sweep and put a four-line block on every function in the file; the fix was to delete 230 appendix lines and move the handful of load-bearing findings up into the file lead.
+
+A header that opens with `//` generates nothing: Doxygen reads `//` as a note to the next reader of the source. Four of the six platform headers opened that way, so their pages were a bare member list with no statement of what the file is for.
+
+**Backlogged: a declaration-only header's functions never reach its generated page.** moxygen renders a `@defgroup`'s functions when they are `inline` definitions (`ParallelSlots.h`, `Hub75Slots.h`) and not when they are bare declarations. `platform.h` is 202 declarations against 3 definitions, so its page carries the 18 handle structs and none of `millis`, `alloc`, `gpioRead`, `ethSendRaw` or `hub75Init`: 245 functions, each with a `///` line nobody reads. The eight `Detail: technical` links on [the platform page](../../moonmodules/platform/index.md) therefore promise the interface and deliver the types it passes around, and they cannot carry per-section anchors until the sections exist. Doxygen's own XML is correct (one `func` section, 246 entries), so the fix is in the rendering: a moxygen template or upgrade, or rendering that section ourselves from the XML the generator already parses. Worth deciding alongside whether moxygen still earns its place against Doxygen's own HTML or Breathe into Sphinx, since the workarounds around it now number seven.
+
+**Backlogged: require every `@moreinfo` section to be referenced.** `check_docgen` verifies that an `@xref{anchor}` names a heading in the same file, which catches a renamed heading silently dropping a link. The reverse rule, that every section carries at least one `@xref` pointing at it, is not enforced: 101 headers carry `@moreinfo` subsections and one uses `@xref`, so it would land roughly 300 findings on prose that is correct as written. Worth revisiting once the sweep has settled how often a reader is meant to arrive at a subsection through a link rather than by scrolling.
+
 **What the edit must fix, all of it, in that one pass:**
 
 - Every `//` run over one line, and every `///` run over one line that is not the class comment.
 - A `///` on every public member the check names.
-- The class `///` at 10 lines, its `@moreinfo` appendix at 20, every comment line at 20 words.
+- The class `///` at 10 lines, each `@moreinfo` `## ` section at 10, every sentence in a comment at 30 words.
 - No hard wrap: one line per sentence, in the class comment and the appendix alike.
 - One `@card <Name>.gif` on the class `///`, since the catalog rule is a gif for effects, modifiers and layouts.
 - Every em-dash, `e.g.`, British spelling and weasel Vale reports.

@@ -8,8 +8,8 @@ Why it compiles rather than interprets is [the engine's design](../docs/explanat
 
 ## What is here
 
-**A script's ROLE is its file extension**: `.mle` an effect, `.mll` a layout, `.mlm` a modifier. One
-language, three names, the way GLSL uses `.vert`/`.frag` for one shading language. It is what a card
+**A script's ROLE is its file extension**: `.mle` an effect, `.mll` a layout, `.mlm` a modifier, `.mls` a service, `.mlp` a palette. One
+language, five names, the way GLSL uses `.vert`/`.frag` for one shading language. It is what a card
 filters its picker on, so an effect card offers effects.
 
 Stated in the name rather than worked out from the file's contents, and deliberately so.

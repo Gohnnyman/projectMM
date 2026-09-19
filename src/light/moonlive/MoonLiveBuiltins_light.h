@@ -19,28 +19,24 @@
 #include "light/powerfunctions/draw.h"    // draw::line, the shared 3D Bresenham a script draws with
 #include "light/powerfunctions/particles.h" // particles::Pool, the kernel a scripted particle effect drives
 
-// The light-domain builtin registration: the only place the LED vocabulary lives.
-//
-// The function names, their argument counts, and the meaning of each inline opcode are all here.
-// The core compiler sees only the neutral table and tags this file hands it, so a different host
-// writes its own registration and leaves the core unchanged.
+/// @defgroup moonlive_builtins_light MoonLive light builtins
+/// @{
+/// The only place the LED vocabulary lives: the function names, their argument counts, and each inline opcode's meaning.
+///
+/// The core compiler sees only the neutral table and the tags this file hands it, so a different host writes its own registration and leaves core unchanged.
 
 namespace mm::moonlive {
 
 // random16(n) gives a value in [0, n), with the same implementation on every target.
 
-// Saturating rather than truncating, which is what a hardware byte channel does: truncation turns
-// a brightness of `n * 255` into an arbitrary walk while every part of the expression looks right.
-// Covers the Call builtins alone, since an inline store truncates in the emitted code itself.
+// Saturating like a hardware channel, since truncation turns `n * 255` into an arbitrary walk.
 /// Read one argument as a byte, clamped to 0..255.
 inline uint8_t byteArg(uintptr_t a) {
     const int32_t v = signedArg(a);   // one home for the signed reinterpretation of the ABI word
     return v < 0 ? 0 : (v > 255 ? 255 : static_cast<uint8_t>(v));
 }
 
-// The active palette, so a script follows the device's palette control as a compiled effect does.
-// No hsv() alongside it: a hue wheel is how an effect ignores the user's palette, which is the
-// habit the compiled effects were moved off.
+// The active palette, with no hsv() beside it: a hue wheel ignores the user's choice.
 extern "C" inline uint32_t mm_light_paletteR(const uintptr_t* args, uint32_t, const uint8_t*) {
     return colorFromPalette(*Palettes::active(), byteArg(args[0]), byteArg(args[1])).r;
 }
@@ -56,23 +52,12 @@ extern "C" inline uint32_t mm_light_paletteB(const uintptr_t* args, uint32_t, co
 
 
 
-// smoothstep(edge0, edge1, v) gives a soft 0..65535 ramp, the anti-aliasing primitive that turns
-// a distance into a falloff. A builtin rather than script arithmetic, since the cubic folds about
-// five host calls into one on a per-pixel path. All three arguments are signed and re-centered
-// here, or the natural `w - d` arrives huge and the shape renders inverted.
+// Signed and re-centered here, or the natural `w - d` arrives huge and inverts the shape.
 extern "C" inline uint32_t mm_light_smoothstep(const uintptr_t* args, uint32_t, const uint8_t*) {
     return shader::smoothstep(signedArg(args[0]), signedArg(args[1]), signedArg(args[2]));
 }
 
-// uvX and uvY give shader space: the pixel centered on the grid and normalized on the short side,
-// which is the mapping that keeps a circle circular on a wide panel.
-//
-// Two builtins because a call returns one value, and one axis per call because computing the pair
-// would do two divides and discard half of one, on the path this exists to make cheap.
-//
-// The arithmetic is 64-bit and reads its inputs unsigned, since a script can write 65535 * 65535.
-// Read signed, that is a large negative number, and a coordinate off the right of the grid clamped
-// to the left edge.
+// 64-bit and unsigned, since `65535 * 65535` read signed clamps a right-edge pixel to the left.
 extern "C" inline uint32_t mm_light_uvAxis(const uintptr_t* args, bool wantY) {
     const int64_t px = static_cast<int64_t>(uint32_t(args[0]));
     const int64_t w  = static_cast<int64_t>(uint32_t(args[1]));
@@ -85,8 +70,7 @@ extern "C" inline uint32_t mm_light_uvAxis(const uintptr_t* args, bool wantY) {
     const int64_t v = ((px * 2 - extent + 1) * 65536) / s;
     // Four units, past the one the short side normalizes to, which covers any panel built.
     const int64_t c = v < -262144 ? -262144 : (v > 262144 ? 262144 : v);
-    // Signed and fixed with no bias, because a coordinate has an origin where a wave does not:
-    // sin, cos and beat keep their unsigned convention for that reason.
+    // Signed with no bias: a coordinate has an origin where a wave does not.
     return static_cast<uint32_t>(static_cast<int32_t>(c));
 }
 extern "C" inline uint32_t mm_light_uvX(const uintptr_t* args, uint32_t, const uint8_t*) {
@@ -96,22 +80,7 @@ extern "C" inline uint32_t mm_light_uvY(const uintptr_t* args, uint32_t, const u
     return mm_light_uvAxis(args, true);
 }
 
-// escape(cx, cy, jx, jy, iters) → how many steps z = z*z + c survives before it runs away,
-// scaled to 0..255. The Mandelbrot set when the seed is zero, a Julia set when it is not.
-//
-// A BUILTIN rather than script arithmetic, and this is the one case where that is not a
-// judgement call. The iteration squares a SIGNED fixed-point value, and a script's arithmetic is
-// unsigned 32-bit: `x * x` where x holds the wrapped form of -1 computes 65535 * 65535, not 1.
-// There is no spelling of this loop in the language, at any cost, until signed values land
-// (moonlive-language-roadmap #7). Everything else here stays expressible in script on purpose.
-//
-// Q16.16 like uvX and uvY, so a script hands over uv coordinates with no rescaling.
-//
-// The products are int64 and have to be: at the escape radius an int32 overflows, and the point
-// then reads as escaped when it has not, which draws holes in the middle of the set.
-//
-// `iters` is the detail dial and the cost, capped at 64 where the returned byte stops gaining
-// visible bands.
+// The one loop a script cannot spell: it squares signed values, and int64 stops holes in the set.
 extern "C" inline uint32_t mm_light_escape(const uintptr_t* args, uint32_t, const uint8_t*) {
     // Clamped to |8.0|, without which a full int32 makes the escape test's sum overflow.
     const auto qfx = [](uintptr_t a) {
@@ -124,9 +93,7 @@ extern "C" inline uint32_t mm_light_escape(const uintptr_t* args, uint32_t, cons
     if (iters > 64) iters = 64;
     if (iters == 0) return 0;
 
-    // Julia iterates z from the pixel with a FIXED c; Mandelbrot iterates z from zero with c
-    // taken from the pixel. One loop serves both: a zero seed selects Mandelbrot, which is why
-    // the seed is not a separate builtin.
+    // One loop serves both, since a zero seed selects Mandelbrot.
     const bool julia = (jx != 0 || jy != 0);
     int64_t zx = julia ? cx : 0, zy = julia ? cy : 0;
     const int64_t ax = julia ? jx : cx, ay = julia ? jy : cy;
@@ -149,19 +116,7 @@ extern "C" inline uint32_t mm_light_escape(const uintptr_t* args, uint32_t, cons
 
 
 
-// scale(value, n) maps a 0..65535 value onto 0..n-1, which lands a full-scale beat on an axis.
-// It reaches n-1, where the naive form truncates one short and the last column never lights.
-//
-// sin and cos give the full-turn wave, biased into 0..65535 with the zero line at 32768, so a
-// script scaling the result sweeps a whole axis.
-// polarA(dx, dy) / polarR(dx, dy): the POLAR pair (Angle, Radius), for an effect written around distance and
-// bearing from a center rather than around x/y. Both take offsets that a script computes as
-// `x - cx`, which is unsigned and therefore wraps for a point left of center: the builtins
-// re-center it themselves (see below), so a script does not have to reason about the wrap.
-//
-// polarA() returns an angle16 (65536 = one turn), so it feeds straight into sin()/cos(). polarR()
-// returns the true distance, not the octagonal approximation, because a visibly non-circular
-// "circle" is exactly what an effect using this would be trying to draw.
+// The polar builtins re-center their offsets, so a script need not reason about the wrap.
 extern "C" inline uint32_t mm_light_polarA(const uintptr_t* args, uint32_t, const uint8_t*) {
     return static_cast<uint32_t>(atan16(signedArg(args[1]), signedArg(args[0])));
 }
@@ -171,20 +126,17 @@ extern "C" inline uint32_t mm_light_polarR(const uintptr_t* args, uint32_t, cons
 
 
 
-// fbm(x, y, octaves) sums octaves of noise into the cloud, smoke and terrain field, 0..255.
 // `octaves` is the cost knob, since each one is another noise sample per pixel.
 extern "C" inline uint32_t mm_light_fbm(const uintptr_t* args, uint32_t, const uint8_t*) {
     return fbm8(uint32_t(args[0]), uint32_t(args[1]), static_cast<uint8_t>(uint32_t(args[2])));
 }
 
-// warp(x, y, strength) samples the field where the field displaced it, which is the marbled look.
-// Three noise samples per call.
+// Samples the field where the field displaced it, at three noise samples per call.
 extern "C" inline uint32_t mm_light_warp(const uintptr_t* args, uint32_t, const uint8_t*) {
     return warp8(uint32_t(args[0]), uint32_t(args[1]), static_cast<uint16_t>(uint32_t(args[2])), 1);
 }
 
-// fbm3 and warp3 are the volumetric forms, each its 2D form when z is 0, so a script passes a
-// light's depth unconditionally.
+// The volumetric forms, each its 2D form when z is 0, so depth passes unconditionally.
 extern "C" inline uint32_t mm_light_fbm3(const uintptr_t* args, uint32_t, const uint8_t*) {
     return fbm8(uint32_t(args[0]), uint32_t(args[1]), uint32_t(args[2]),
                 static_cast<uint8_t>(uint32_t(args[3])));
@@ -194,9 +146,7 @@ extern "C" inline uint32_t mm_light_warp3(const uintptr_t* args, uint32_t, const
                  static_cast<uint16_t>(uint32_t(args[3])), 1);
 }
 
-// osc(rate, ms, shape) is an oscillator at `rate` cycles per minute, in sine, triangle, sawtooth
-// and square. A pure function of time rather than a stateful bank, because a script holds no state
-// between frames, so two calls at one rate stay locked for as long as the device runs.
+// A pure function of time, so two calls at one rate stay locked for as long as the device runs.
 extern "C" inline uint32_t mm_light_osc(const uintptr_t* args, uint32_t, const uint8_t*) {
     const uint32_t rate = uint32_t(args[0]), ms = uint32_t(args[1]), shape = uint32_t(args[2]);
     // No special case for rate 0, since each shape's own value at phase 0 is the right answer.
@@ -211,38 +161,13 @@ extern "C" inline uint32_t mm_light_osc(const uintptr_t* args, uint32_t, const u
 }
 
 
-// print(v) → write one value to the serial log, and return it so `print` can be dropped into an
-// expression without changing what it computes (`setXYZ(0, print(x), y, z)` still stores x).
-//
-// This is the only way to see INSIDE a running script. A script that compiles cleanly and produces
-// a black fixture gives no other clue: every part reports success and the result is simply wrong.
-// That case cost a long debugging session before this existed.
-//
-// **Rate-limited, because the call sites are per-light.** A modifier's script runs once per light
-// per mapping rebuild: 16,384 times on a 128x128 wall. Printing all of them would flood the serial
-// line, stall the render (a UART write blocks) and bury the first values, which are the useful
-// ones. So a burst is capped and the rest are counted, not printed: the tail of a flood tells you
-// nothing the head did not.
+// Rate-limited because the call sites are per-light: 16,384 prints would stall the render.
 
 
-// addLight(x, y, z) places one light, the call a scripted layout is built on.
-//
-// A layout does not know how many lights it will place until it has placed them, and staging a
-// 16k-light fixture would need 48 KB a classic ESP32 does not have. So the script calls out once
-// per light and the host counts or emits each one, storing nothing.
-//
-// Outside a run the sink is null and the call is ignored, so a script reaching addLight from an
-// effect places nothing rather than corrupting something.
+// One call per light, storing nothing: staging a 16k fixture needs 48 KB the classic lacks.
 using AddLightFn = void (*)(void* ctx, uint16_t x, uint16_t y, uint16_t z);
 
-// Per-thread rather than one global, since the render task and the HTTP task both run scripts: as
-// one global, one thread cleared the sink while the other was mid-run and the builtin called
-// through a live function pointer with a null context.
-//
-// Keyed on the task handle rather than `thread_local`, which is unusable on the ESP32: a task
-// created without TLS has THREADPTR at 0, so the access dies inside the exception handler.
-//
-// The function and the context are one struct, so they cannot be observed half-updated.
+// Per-thread and keyed on the task handle, since `thread_local` dies on an ESP32 task without TLS.
 /// The addLight sink for one thread, installed by the binding around each run.
 struct AddLightSink { AddLightFn fn = nullptr; void* ctx = nullptr; };
 
@@ -1084,5 +1009,7 @@ inline void runDefineControls(MoonLive& engine, PoolSizeFn sizePool = nullptr, v
     if (sizeTrail) setTrailSizeSink(nullptr, nullptr);
     setAddControlSink(nullptr, nullptr);
 }
+
+/// @}
 
 }  // namespace mm::moonlive

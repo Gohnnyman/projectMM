@@ -5,39 +5,39 @@
 #include "core/module/Scheduler.h"
 #include "platform/platform.h"   // gpioInputBegin / gpioRead / gpioWrite
 #include "core/moonlive/MoonLiveBuiltins_common.h"   // the neutral half: math, waveforms, print
-// addControl still comes from the light header, whose sink machinery is a bigger job to move.
-#include "light/moonlive/MoonLiveBuiltins_light.h"
+#include "light/moonlive/MoonLiveBuiltins_light.h"   // addControl, whose sinks stay there
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 
-// The service vocabulary: reading hardware and driving controls, rather than painting lights.
-//
-// Its own table rather than an extension of the light one. A service has no canvas, so a table
-// offering `setRGB` or `xPos` would promise what it cannot keep. It gets the two things that make
-// it a service instead: it reads a pin and it writes a control.
-//
-// It lives in core because an input is domain-neutral, and a service must run on a device with no
-// lights configured at all.
+/// @defgroup moonlive_builtins_service MoonLive service builtins
+/// @{
+/// The service vocabulary: reading hardware and driving controls, rather than painting lights.
+///
+/// It lives in core because an input is domain-neutral, and a service must run on a device with no lights configured at all.
+///
+/// @moreinfo
+///
+/// ## Its own table
+///
+/// A service has no canvas, so a table offering pixel writes or coordinates would promise what it cannot keep.
+/// It gets the two things that make it a service instead: it reads a pin and it writes a control.
 
 namespace mm::moonlive {
 
-// A contact closes for tens of milliseconds, so the render tick would sample thousands of times a
-// second to learn the same thing. A slow script costs its own tick rather than the lights.
+// A contact closes for tens of milliseconds, so a slow script costs its own tick, not the lights.
 /// The moment a service runs: the 50 Hz poll, rather than the render frame.
 inline constexpr const char* kEntryTick20ms = "tick20ms";
 
 // --- The host functions -------------------------------------------------------------------------
 
-// Opens the pin on first use with a pull-up, the wiring a switch to ground needs. Debouncing is the
-// script's, because a time constant belongs to whoever knows what is wired.
+// Pulled up on first use, and debouncing is the script's: it knows what is wired.
 /// Read a pin, as 0 or 1.
 extern "C" inline uint32_t mm_service_gpioRead(const uintptr_t* args, uint32_t, const uint8_t*) {
     const uint32_t pin = static_cast<uint32_t>(args[0]);
     if (pin > 48) return 0;                      // out of range on every supported chip
-    // Opened once per pin: gpioInputBegin sets the resting level, so calling it per read would hold
-    // the pin at idle and a script could never see a press.
+    // Once per pin: gpioInputBegin sets the resting level, so a per-read call hides every press.
     static bool opened[49] = {};
     if (!opened[pin]) {
         // Cached only on success: marking a refused pin open reported a floating read as a button.
@@ -55,8 +55,7 @@ extern "C" inline uint32_t mm_service_gpioWrite(const uintptr_t* args, uint32_t,
     return platform::gpioWrite(static_cast<uint8_t>(pin), args[1] != 0) ? 1u : 0u;
 }
 
-// Raw counts, the same numbers AnalogService maps: a scaled value would hide which end of the
-// travel a reading came from. `adcMax()` reports full scale, so a script normalizes without the chip.
+// Raw counts, with `adcMax()` for full scale, so a script normalizes without knowing the chip.
 /// Read a pin's ADC count, or 0 where it has none.
 extern "C" inline uint32_t mm_service_adcRead(const uintptr_t* args, uint32_t, const uint8_t*) {
     const uint32_t pin = static_cast<uint32_t>(args[0]);
@@ -82,8 +81,7 @@ extern "C" inline uint32_t mm_service_adcMax(const uintptr_t*, uint32_t, const u
     return platform::adcMaxCount();
 }
 
-// Writes the control module alone: a script drives the surface, and the surface drives the rest.
-// So a script cannot rewrite a driver's pin list or a network setting by naming it.
+// The control module alone, so a script cannot rewrite a pin list by naming it.
 /// Write a control, reporting whether the write took.
 extern "C" inline uint32_t mm_service_setControl(const uintptr_t* args, uint32_t, const uint8_t*) {
     const char* name = reinterpret_cast<const char*>(args[0]);
@@ -135,5 +133,7 @@ inline const BuiltinTable& serviceBuiltins() {
     }();
     return table;
 }
+
+/// @}
 
 }  // namespace mm::moonlive

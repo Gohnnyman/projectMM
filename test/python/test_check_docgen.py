@@ -530,6 +530,108 @@ def test_a_one_line_member_comment_is_accepted():
     assert not [i for i in _hdr("/// one\nvoid doThing();") if "member comment" in i[1]]
 
 
+def test_a_header_leads_with_a_defgroup_block():
+    """A header of free functions opens with `@defgroup`, so its page says what the file is for."""
+    src = "#pragma once\n\n/// @defgroup g Thing\n/// What it is.\nvoid doThing();"
+    assert not [i for i in _hdr(src) if "file" in i[1]]
+
+
+def test_a_single_class_header_leads_with_its_class_comment():
+    """The class comment IS the file's documentation where the header holds one class."""
+    src = "#pragma once\nnamespace mm {\n/// What it is.\nclass Foo {};\n}"
+    assert not [i for i in _hdr(src) if "file" in i[1]]
+
+
+def test_a_header_opening_with_a_slash_slash_block_is_flagged():
+    """Doxygen reads `//` as a note to the next reader of the source, so it generates nothing.
+
+    Four platform headers opened this way and their pages were a bare member list."""
+    src = "#pragma once\n\n// What it is.\nvoid doThing();"
+    issues = [i for i in _hdr(src) if "file opens with //" in i[1]]
+    assert issues
+
+
+def test_a_header_with_no_lead_comment_is_flagged():
+    src = "#pragma once\n#include <cstdint>\nvoid doThing();"
+    assert [i for i in _hdr(src) if "file lead missing" in i[1]]
+
+
+def test_an_xref_to_a_real_heading_resolves():
+    """`@xref{anchor}` names a heading on the same generated page, by its MkDocs slug."""
+    src = ("#pragma once\n/// Lead.\n/// See @xref{terminology|Terminology}.\n///\n"
+           "/// @moreinfo\n///\n/// ## Terminology\n///\n/// Words.\nclass Foo {};")
+    assert not [i for i in _hdr(src) if "@xref" in i[1]]
+
+
+def test_an_xref_naming_no_heading_is_flagged():
+    """A renamed heading leaves the link dead, and the generator strips it without a word.
+
+    That is the whole reason to check it here: the cross-reference vanishes from the page and
+    nothing else reports the loss."""
+    src = ("#pragma once\n/// Lead.\n/// See @xref{glossary|Glossary}.\n///\n"
+           "/// @moreinfo\n///\n/// ## Terminology\n///\n/// Words.\nclass Foo {};")
+    assert [i for i in _hdr(src) if "names no heading" in i[1]]
+
+
+def test_a_moreinfo_section_past_ten_lines_is_flagged():
+    """The cap is PER SECTION, not per appendix.
+
+    A whole-appendix budget punishes a file for having several distinct topics, and the cheapest
+    way to satisfy it is to delete a section rather than tighten the prose. Each `## ` section is
+    asked to be disciplined instead, so a file may carry as many as it genuinely has."""
+    body = "".join(f"/// line {i}\n" for i in range(11))
+    src = ("#pragma once\n/// @defgroup g G\n/// Lead.\n///\n/// @moreinfo\n///\n"
+           "/// ## Topic\n///\n" + body + "class Foo {};")
+    assert [i for i in _hdr(src) if "appendix section 11 lines" in i[1]]
+
+
+def test_a_fenced_block_does_not_count_toward_the_section_cap():
+    """A fenced block is structure rather than prose, the exemption the no-wrap rule already makes.
+
+    A protocol listing is as long as the thing it describes, so counting its lines would ask the
+    author to delete wire format to fit a prose budget."""
+    fence = "///\n".join(f"/// [0x{i:02x}][count][stride]\n" for i in range(12))
+    src = ("#pragma once\n/// @defgroup g G\n/// Lead.\n///\n/// @moreinfo\n///\n"
+           "/// ## Wire format\n///\n/// ```text\n" + fence + "/// ```\nclass Foo {};")
+    assert not [i for i in _hdr(src) if "appendix section" in i[1]]
+
+
+def test_two_short_moreinfo_sections_are_accepted():
+    """Sixteen lines across two sections is fine; one section of eleven is not."""
+    a = "".join(f"/// a{i}\n" for i in range(8))
+    b = "".join(f"/// b{i}\n" for i in range(8))
+    src = ("#pragma once\n/// @defgroup g G\n/// Lead.\n///\n/// @moreinfo\n///\n"
+           "/// ## A\n///\n" + a + "///\n/// ## B\n///\n" + b + "class Foo {};")
+    assert not [i for i in _hdr(src) if "appendix section" in i[1]]
+
+
+def test_a_moreinfo_on_a_member_is_flagged():
+    """`@moreinfo` is an appendix, and only a file or class lead carries one.
+
+    Relaxing this put a four-line block on every function in a swept header, which cost 230 lines
+    to undo. A member gets one line, because the page shows that line as its summary."""
+    src = ("#pragma once\n/// @defgroup g G\n/// Lead.\n\n"
+           "/// Doc.\n///\n/// @moreinfo detail\nvoid doThing();")
+    assert [i for i in _hdr(src) if "@moreinfo on a member" in i[1]]
+
+
+def test_a_moreinfo_on_a_struct_is_accepted():
+    """A struct comment is a lead, so it carries an appendix like a class does."""
+    src = "#pragma once\n/// Doc.\n///\n/// @moreinfo detail\nstruct S { int a; };"
+    assert not [i for i in _hdr(src) if "@moreinfo on a member" in i[1]]
+
+
+def test_a_moreinfo_does_not_exempt_a_member_comment():
+    """`@moreinfo` is the CLASS comment's appendix. A member gets one line, whatever it holds.
+
+    Relaxing this let a four-line block stand on every function in a swept header. The budget is
+    one line because the generated page shows that line as the summary; depth belongs on the
+    class comment or the module's page."""
+    src = "/// one\n///\n/// @moreinfo a detail\n/// and another\nvoid doThing();"
+    issues = [i for i in _hdr(src) if "member comment" in i[1]]
+    assert issues and "member comment 4 lines" in issues[0][1]
+
+
 def test_a_code_comment_run_past_one_line_is_flagged():
     """`//` carries the same one-line budget as `///`. Without that the `///` cap moves text
     rather than removing it: a fifty-line member comment re-spelled as `//` passes every other
@@ -542,9 +644,9 @@ def test_a_code_comment_run_past_one_line_is_flagged():
 def test_a_long_code_comment_line_is_flagged():
     """A `//` line carries the same word budget as a `///` one: without it the line cap is
     satisfied by one very long line, which is a paragraph that happens to lack line breaks."""
-    long = "// " + " ".join(["word"] * 25)
+    long = "// " + " ".join(["word"] * 35)
     issues = _hdr("class Foo {\npublic:\n" + long + "\n/// does a thing\nvoid doThing();\n};")
-    assert any("comment line 25 words" in why for _, why in issues)
+    assert any("comment line 35 words" in why for _, why in issues)
 
 
 def test_a_one_line_code_comment_is_accepted():
@@ -562,9 +664,9 @@ def test_a_file_level_code_comment_is_exempt():
 
 
 def test_a_long_doc_sentence_is_flagged():
-    long = "/// " + " ".join(["word"] * 25)
+    long = "/// " + " ".join(["word"] * 35)
     issues = _hdr(long + "\nvoid doThing();")
-    assert any("doc sentence 25 words" in why for _, why in issues)
+    assert any("doc sentence 35 words" in why for _, why in issues)
 
 
 def test_several_short_sentences_on_one_line_are_not_flagged():
@@ -575,10 +677,14 @@ def test_several_short_sentences_on_one_line_are_not_flagged():
     assert not [i for i in issues if "doc sentence" in i[1]]
 
 
-def test_a_moreinfo_appendix_past_twenty_lines_is_flagged():
+def test_an_undivided_moreinfo_appendix_is_flagged():
+    """An appendix with no `## ` heading is one section, so the per-section cap catches it whole.
+
+    This was a 20-line whole-appendix cap. Counting per section instead lets a file carry as many
+    topics as it genuinely has, while still refusing a single undivided wall of prose."""
     body = "\n".join(f"/// deep {i}" for i in range(25))
     issues = _hdr("/// @moreinfo\n" + body + "\nclass Foo {")
-    assert any("appendix 25 lines" in why for _, why in issues)
+    assert any("appendix section 25 lines" in why for _, why in issues)
 
 
 def test_an_undocumented_public_member_is_flagged():
@@ -730,12 +836,105 @@ def test_a_cpp_file_is_held_to_the_comment_rules():
            "public:\n"
            "    /// Does the thing.\n"
            "    void f() {\n"
-           "        // one\n"
-           "        // two\n"
+           + "".join(f"        // line {i}\n" for i in range(5)) +
            "    }\n"
            "};")
     whys = [why for _, why in check_docgen._header_rules("src/core/x.cpp", src)]
-    assert any("code comment 2 lines > 1" in w for w in whys), whys
+    assert any("code comment 5 lines > 4" in w for w in whys), whys
+
+
+def test_a_cpp_is_asked_for_no_member_docs():
+    """`public` is read from a declaration's SHAPE, which cannot see `namespace {` or a function
+    body. A header's declarations mostly ARE the public API and each becomes a page row, so the
+    approximation holds there. In a `.cpp` it matched fields of file-local structs and plain
+    locals, asking a variable named `got` for a doc comment, so the rule stops at the header."""
+    import check_docgen
+    src = ("struct State {\n"
+           "    bool busy = false;   // a frame is on the wire\n"
+           "};")
+    cpp = [w for _, w in check_docgen._header_rules("src/core/x.cpp", src) if "public variable" in w]
+    assert not cpp, cpp
+    hdr = [w for _, w in check_docgen._header_rules("src/core/x.h", src) if "public variable" in w]
+    assert hdr, hdr
+
+
+def test_a_cpp_is_asked_for_no_member_docs_of_either_kind():
+    """Functions go the same way as variables, for the same reason: what the rule matched in a
+    `.cpp` was the constructor or destructor of a file-local RAII struct — `~WinsockInit`,
+    `Lock`, `ParkGuard` — none of them public API, each already explained by the struct's own
+    comment. A header keeps both halves, where a declaration really is the public surface."""
+    import check_docgen
+    src = ("struct State {\n"
+           "    void start();\n"
+           "    bool busy = false;\n"
+           "};")
+    cpp = [w for _, w in check_docgen._header_rules("src/core/x.cpp", src)
+           if "has no ///" in w]
+    assert not cpp, cpp
+    hdr = [w for _, w in check_docgen._header_rules("src/core/x.h", src)
+           if "has no ///" in w]
+    assert any("public function has no ///" in w for w in hdr), hdr
+    assert any("public variable has no ///" in w for w in hdr), hdr
+
+
+def test_a_fenced_block_is_not_read_as_wrapped_prose():
+    """Skipping the ``` delimiters alone was not enough. A fence's whole point is that what sits
+    BETWEEN them is verbatim, so a wire table was flagged on every row: each line ends without a
+    full stop, which is exactly what the no-wrap rule looks for. The same exemption the appendix
+    section cap already makes, and the one the standards state."""
+    import check_docgen
+    src = ("/// @defgroup g A group\n"
+           "/// A lead line.\n"
+           "///\n"
+           "/// ```\n"
+           "/// div 3  26.67 MHz  zero 300 ns   strict spec, but strands scramble\n"
+           "/// div 4  20.00 MHz  zero 400 ns   the reliability point\n"
+           "/// ```\n"
+           "/// @{\n"
+           "void f();\n"
+           "/// @}\n")
+    whys = [w for _, w in check_docgen._header_rules("src/core/x.h", src) if "hard wrap" in w]
+    assert not whys, whys
+
+
+def test_prose_after_a_closed_fence_is_still_checked():
+    """The exemption tracks the fence STATE rather than switching off at the first one, so a
+    wrapped sentence below a closed block is caught as it always was."""
+    import check_docgen
+    src = ("/// @defgroup g A group\n"
+           "/// A lead line.\n"
+           "///\n"
+           "/// ```\n"
+           "/// a table row\n"
+           "/// ```\n"
+           "///\n"
+           "/// This sentence is carried\n"
+           "/// onto the next line.\n"
+           "/// @{\n"
+           "void f();\n"
+           "/// @}\n")
+    whys = [w for _, w in check_docgen._header_rules("src/core/x.h", src) if "hard wrap" in w]
+    assert whys, whys
+
+
+def test_a_cpp_code_comment_gets_four_lines_where_a_header_gets_one():
+    """The one-line budget protects a GENERATED PAGE, and a `.cpp` has none, so there it
+    enforced a documentation constraint on text that never reaches the documentation. The word
+    budget is what catches a rambling comment and is unchanged on both; what a line count
+    catches in an implementation file is an essay, so the limit sits where an essay starts.
+    Measured over the platform backends, one line fired on 182 well-commented blocks."""
+    import check_docgen
+    body = ("class X {\n"
+            "public:\n"
+            "    /// Does the thing.\n"
+            "    void f() {\n"
+            + "".join(f"        // line {i}\n" for i in range(4)) +
+            "    }\n"
+            "};")
+    cpp = [w for _, w in check_docgen._header_rules("src/core/x.cpp", body) if "code comment" in w]
+    assert not cpp, cpp
+    hdr = [w for _, w in check_docgen._header_rules("src/core/x.h", body) if "code comment" in w]
+    assert any("code comment 4 lines > 1" in w for w in hdr), hdr
 
 
 def test_the_scan_reaches_beyond_src():
@@ -748,6 +947,42 @@ def test_the_scan_reaches_beyond_src():
                      "moonbase/main/moonbase_main.cpp",
                      "moondeck/moonlive/emit_isa.cpp"):
         assert expected in scanned, expected
+
+
+def test_the_file_comment_is_exempt_but_nothing_below_it_is():
+    """The file comment is the one `//` block at the top, before anything is declared. The rule
+    used to exempt everything above the first `class`, which in a header of free functions is
+    most of the file: 1002 multi-line runs across 149 files sat unmeasured on the declarations
+    they documented. Both halves are pinned, since exempting nothing is the opposite mistake."""
+    import check_docgen
+    src = ("// The file comment.\n"
+           "// Its second line, which is allowed.\n"
+           "\n"
+           "#include <cstdint>\n"
+           "\n"
+           "// A comment on a declaration,\n"
+           "// spanning two lines, which is not.\n"
+           "using Fn = void (*)(int);\n")
+    whys = [why for _, why in check_docgen._header_rules("src/core/x.h", src)]
+    assert [w for w in whys if "code comment 2 lines" in w], whys
+    assert len([w for w in whys if "code comment" in w]) == 1, whys
+
+
+def test_a_file_with_no_leading_comment_exempts_nothing():
+    """`_file_comment_end` answers 0 once a declaration has been seen, so a file that opens with
+    code buys no exemption for a comment further down. Otherwise a file could dodge the rule by
+    omitting its own header comment, which is the wrong incentive.
+
+    The file comment may sit BELOW the includes, which is where this repo puts it, so the
+    fixture has to declare something first to prove the other half."""
+    import check_docgen
+    src = ("#include <cstdint>\n"
+           "using Fn = void (*)(int);\n"
+           "// Two lines,\n"
+           "// on a later declaration.\n"
+           "using G = int;\n")
+    whys = [why for _, why in check_docgen._header_rules("src/core/x.h", src)]
+    assert [w for w in whys if "code comment 2 lines" in w], whys
 
 
 def test_a_templated_member_is_not_asked_for_a_second_doc():
@@ -766,6 +1001,42 @@ def test_a_templated_member_is_not_asked_for_a_second_doc():
     assert not [w for w in whys if "has no ///" in w], whys
 
 
+def test_a_multiline_struct_inside_a_free_function_is_exempt():
+    """The one-line form was already exempt, but a struct whose fields sit on their own lines
+    reached the member scan and reported `public variable has no ///`. A free function has no
+    enclosing class, so the frame stack is empty and the depth test had nothing to compare
+    against: locality there is the function body's own depth."""
+    import check_docgen
+    src = ("namespace mm {\n"
+           "\n"
+           "void f() {\n"
+           "    struct Guard {\n"
+           "        int fd;\n"
+           "    };\n"
+           "    Guard g{0};\n"
+           "    (void)g;\n"
+           "}\n"
+           "\n"
+           "}\n")
+    whys = [why for _, why in check_docgen._header_rules("src/core/x.h", src)]
+    assert not [w for w in whys if "has no ///" in w], whys
+
+
+def test_a_namespace_level_struct_is_still_public():
+    """The free-function exemption must not swallow an ordinary type: one declared at namespace
+    scope reaches the generated page and still owes a `///`."""
+    import check_docgen
+    src = ("namespace mm {\n"
+           "\n"
+           "struct Public {\n"
+           "    int field;\n"
+           "};\n"
+           "\n"
+           "}\n")
+    whys = [why for _, why in check_docgen._header_rules("src/core/x.h", src)]
+    assert [w for w in whys if "has no ///" in w], whys
+
+
 def test_a_struct_inside_a_free_function_is_exempt():
     """A type declared in a free function's body reaches no reader: it has no enclosing class,
     so the frame stack is empty and the old rule read it as a top-level public member. With
@@ -778,6 +1049,32 @@ def test_a_struct_inside_a_free_function_is_exempt():
            "}")
     whys = [why for _, why in check_docgen._header_rules("src/core/x.cpp", src)]
     assert not [w for w in whys if "has no ///" in w], whys
+
+
+def test_every_source_folder_maps_to_a_summary_page():
+    """The report groups findings by the page a sweep runs against, so a folder that maps to
+    nothing would silently vanish from that view. Pinned per domain folder: the mapping is the
+    machine-readable half of the hierarchy zoom in documentation-standards.md."""
+    import check_docgen, pathlib
+    root = pathlib.Path(check_docgen.ROOT)
+    for domain in ("core", "light"):
+        for folder in sorted((root / "src" / domain).iterdir()):
+            if not folder.is_dir():
+                continue
+            rel = f"src/{domain}/{folder.name}/X.h"
+            area = check_docgen._doc_area(rel)
+            assert area.endswith(".md"), f"{rel} -> {area}"
+
+
+def test_a_path_outside_the_card_surface_is_bucketed_not_lost():
+    """The tests carry no card by design, so they get a named bucket rather than a summary
+    page. Anything else is `(unassigned)`, which is the finding: a header no page owns
+    reaches no reader. The platform layer USED to sit in a bucket here and now has its own
+    page, which is what a bucket is for: naming the gap until it is filled."""
+    import check_docgen
+    assert check_docgen._doc_area("src/platform/platform.h") == "platform/index.md"
+    assert check_docgen._doc_area("test/unit/core/x.cpp") == "(tests, no card)"
+    assert check_docgen._doc_area("moonbase/main/x.cpp") == "(unassigned)"
 
 
 def test_the_scan_includes_tests():

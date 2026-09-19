@@ -994,15 +994,26 @@ def main() -> int:
                 # `props` body, so a module needing a control set (a scripted one needs its
                 # script, or it captures an empty card reading "no script") gets it here. The
                 # settle is the compile, which a scripted module does on the control change.
+                pushed = True
                 if extra_props:
                     for ctrl, value in extra_props.items():
-                        # A script control names a file that has to BE there: push it first,
-                        # or the control is set to a name the device cannot resolve.
-                        if ctrl == "script" and isinstance(value, str):
-                            if not push_script(args.host, value):
-                                print(f"push-{value}-failed ", end="", flush=True)
+                        # A script control names a file that has to BE there: push it first, or
+                        # the control is set to a name the device cannot resolve and the capture
+                        # records an empty card. A failed push abandons this module rather than
+                        # photographing that, so the asset on disk is never a lie.
+                        if ctrl == "script" and isinstance(value, str) \
+                                and not push_script(args.host, value):
+                            print(f"push-{value}-failed")
+                            failed.append((type_name, f"script upload failed: {value}"))
+                            delete_module(args.host, actual_name)
+                            added_ids.remove(actual_name)
+                            pushed = False
+                            break
                         if not set_control(args.host, actual_name, ctrl, value):
                             print(f"control-{ctrl}-failed ", end="", flush=True)
+                    if not pushed:
+                        time.sleep(0.15)
+                        continue
                     time.sleep(1.0)
 
                 if need_png:

@@ -21,9 +21,7 @@ void MoonLive::freeCode() {
     hasErrorPos_ = false;
     // The entry table describes code that is gone, so entry() would hand out a freed address.
     entryCount_ = 0;
-    // The controls go too, since the records would otherwise outlive the pool their names point
-    // into. The string pool itself is reclaimed when the next compile interns from offset zero,
-    // because freeCode runs mid-compile and clearing would wipe the published program's labels.
+    // The pool is reclaimed when the next compile interns from zero, not cleared mid-compile.
     controlCount_ = 0;
     stringLen_ = 0;
 }
@@ -46,10 +44,7 @@ void* MoonLive::place(const uint8_t* staged, size_t len) {
     return block;
 }
 
-// On the heap, since 2 KB of stack in a call chain holding the assembler's own buffer overflowed
-// the compile task on a classic ESP32, surfacing as a double exception inside _xt_context_save.
-//
-// Sized per compile rather than to kCodeCap, which is now the sanity bound at 16 KB.
+// On the heap and sized per compile: 2 KB of stack here overflowed the classic ESP32's task.
 /// The emitted-code staging buffer, freed when it leaves scope.
 namespace {
 struct Staging {

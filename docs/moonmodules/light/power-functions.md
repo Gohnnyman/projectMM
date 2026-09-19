@@ -68,6 +68,30 @@ These act on the grid as a surface rather than on a shape. Between them they cov
 
 </div>
 
+### The Canvas, and why it is passed by value
+
+Every draw call once took a `Buffer&` and a `Coord3D dims` as two independent arguments that nothing checked for agreement. Passing dims from one layer with a buffer from another, or a dims computed with the depth guard beside one without, misaddressed silently. Binding them into one `Canvas` makes that mismatch unrepresentable rather than merely detectable.
+
+The Canvas also owns the depth guard: `depth()` is 0 on a 2D layer, which would zero the z stride, so sixteen effects each carried a private `depthDim()` helper. Constructing a Canvas applies it once.
+
+It is passed **by value**, which is a measured choice rather than a stylistic one. It is a small POD, a pointer plus three int16 and two small ints, and in a per-pixel fill loop it measured 62 instructions against 67 for the separate arguments and 69 for a `const Canvas&`. A reference member forces the extents to be re-read from memory, because the compiler must assume they alias the buffer being written, while a by-value POD stays in registers. The abstraction is a small win, not a cost.
+
+### Fading a trail, and why 8 bits is not enough
+
+`draw::fade` takes *how much to lose this frame*, so the same setting is a long tail at 60 fps and an instant clear at 1200. `draw::decay` takes a half-life instead, so the picture is identical on any device and the elapsed time does the work. Reach for `decay` on state that persists across frames: a trail plane, an advected field.
+
+An 8-bit buffer cannot hold that decay at a high framerate, and no rounding rule fixes it. Decaying 200 over a 500 ms half-life, across 500 ms of frames, where the exact answer is 100:
+
+| frame | truncating | rounding | a 16-bit accumulator |
+|---|---|---|---|
+| 50 ms | 96 | 100 | 100 |
+| 5 ms | 73 | 100 | 101 |
+| 1 ms | **0** | **200** | 102 |
+
+Truncating loses a fraction every frame until a fast device erases the trail outright. Rounding puts it back every frame until the trail never decays and the effect turns solid, which is the symptom `fade` already has. Both failures are the quantization rather than the weight: the value is re-rounded to a byte hundreds of times a second.
+
+So an effect whose trail must survive at any framerate keeps its plane wider than the layer, at 16 bits per channel in its own ScratchBuffer, and narrows once on the way out. `decay` on a byte plane is honest for a slow cadence, which is what the Layer's collected `fadeToBlackBy` already does. Measured 2026-09-04; `decay16` in [draw.h](../../../src/light/powerfunctions/draw.h) is the 16-bit form.
+
 ## Geometry
 
 **Drawing a shape by walking the pixels it covers.**
@@ -133,6 +157,25 @@ One sample is a soft blur; the character comes from composing them. Summing octa
 | `Fluid` | A stable-fluid solver (Stam 1999) in Q16.16: the medium works out its own motion rather than reading it from a function, one independent medium per depth slice | Fluid | — |
 
 </div>
+
+### The fluid solver
+
+Every other flow here is a *function* of position and time: noise, curl, a wind. A fluid is the other kind. Its velocity is state that evolves from its own past, so pushing the medium in one place changes where everything downstream goes, and a vortex forms because the maths says it must rather than because a rule drew one. A curl field is beautiful and unchanging in character; a fluid reacts.
+
+The algorithm is Stam's ("Stable Fluids", SIGGRAPH 1999), chosen for one reason: it cannot blow up. An explicit solver has a timestep small enough to stay stable, and a frame that runs long breaks it. Stam's is unconditionally stable, so a device that stalls for a second resumes with a plausible field instead of a screenful of infinities. On a fixture that must never look broken, that is worth more than accuracy.
+
+Four steps a frame, and the order is the algorithm:
+
+1. `diffuse` — viscosity: each cell relaxes toward its neighbours' average.
+2. `project` — make it divergence-free, the step that turns a set of arrows into a flow.
+3. `advect` — the velocity carries itself, which is what makes a vortex persist and travel.
+4. `project` again, because advection reintroduces divergence.
+
+The caller then advects its own dye along the finished field with `draw::advect16`.
+
+**Q16.16 throughout, not float.** The render path is integer by contract, and a fluid is the hardest case for it: `project` solves a linear system by relaxation, so an error a float would absorb accumulates over iterations. Sixteen fraction bits is what makes the pressure solve converge at all, where eight would quantize the gradient to nothing on a slow flow.
+
+The cost is per cell per iteration across several passes, so this is a desktop and P4 effect; an S3 runs it on a small grid or not at all. [fluid.h](../../../src/light/powerfunctions/fluid.h) is the implementation.
 
 ## Transport
 
@@ -210,6 +253,10 @@ Anything that behaves like matter is the same handful of forces over the same st
 Storage is structure-of-arrays over the caller's own buffers, so a pass that touches only velocity walks only velocity, and the pool never allocates after `prepare()`. Positions are the same sub-pixel type `splat` takes, so a particle at x=3.5 lands half on each pixel instead of snapping.
 
 Frame order matters and is the caller's to get right: forces, then `collide()`, then `step()`, then walls, then `age()`, then `render()`. Collisions run *before* the move because resolving an overlap afterwards can shove a particle through a wall the bounce pass already checked.
+
+**Time is scaled, not quantised.** A pool advanced by a fixed amount each frame has physics that belong to the hardware: the desktop renders tens of thousands of frames a second and an ESP32 a few hundred, so one gravity setting is an explosion on one and a drift on the other. Running a fixed 60 Hz simulation and skipping the frames between is the obvious fix and the wrong one for a light effect, because it throws away exactly the smoothness those extra frames were rendered for.
+
+So every force and velocity is expressed per reference frame (1/60 s), and `FrameTime::scale()` reports how much of a reference frame this one covered, in 8.8 fixed point: 256 at exactly 60 fps, 26 at 600 fps, 2560 after a sixteen-frame stall. A faster device takes many small steps where a slow one takes a few large ones — the same trajectory, at more resolution along it.
 
 Prior art: the [WLED Particle System](https://github.com/wled/WLED) by Damian Schneider ([@DedeHai](https://github.com/DedeHai)), whose vocabulary of emitters, forces and walls over one shared pool is the shape this follows, and Reeves 1983 for the name. The fixed-point implementation and the elapsed-time scaling are ours. His system also settled a design question by having answered it already: he documents trying y-binning in the collision broad phase and measuring it not worth the bookkeeping at these pool sizes, so `collide` keeps the cheaper sweep along X deliberately rather than by omission.
 

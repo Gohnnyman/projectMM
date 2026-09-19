@@ -148,7 +148,7 @@ Detail: [technical](moxygen/ParallelSlots.md)
 
 Parses the `pins` and `ledsPerPin` controls: GPIO lists, and the broadcasting rule that spreads a window over strands (empty = even split, one number = that many each, a list = one per strand).
 
-Detail: [technical](moxygen/PinList.md)
+Detail: [technical](moxygen/drivers_PinList.md)
 
 ### Parallel LED driver base
 

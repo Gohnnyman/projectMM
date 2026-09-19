@@ -197,6 +197,10 @@ nav:
       - Overview: explanation/architecture/index.md
       - MoonModule: explanation/architecture/moonmodule.md
       - MoonCore: explanation/architecture/mooncore.md
+      # The reference half of MoonCore's platform abstraction, so it sits beside it rather than
+      # carrying a tab of its own. The file stays under moonmodules/ because the generated
+      # moxygen/ tree is written beside it (gen_api.py writes moonmodules/<domain>/moxygen/).
+      - Platform: moonmodules/platform/index.md
       - MoonLight: explanation/architecture/moonlight.md
       - MoonLive: explanation/architecture/moonlive.md
       - MoonBase: explanation/architecture/moonbase.md

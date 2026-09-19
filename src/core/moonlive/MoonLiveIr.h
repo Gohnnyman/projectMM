@@ -5,16 +5,23 @@
 #include "core/moonlive/MoonLiveBuiltins.h"   // InlineOp (a neutral opcode tag)
 #include "platform/platform.h"                // alloc/free, since the op array is script-sized
 
-// The typed intermediate representation between the front-end and the per-ISA assembler.
-//
-// The front-end lowers an AST to a flat list of three-address ops over virtual registers, and each
-// backend lowers that same list to machine bytes. The IR knows operations, never an ISA and never a
-// domain: a buffer write is an `Inline` op carrying a tag the host registered.
-//
-// Compile-time only, consumed during lowering and never present at run time.
-//
-// Virtual registers are plain indices a backend maps to machine registers. The host arguments
-// arrive in fixed ones, named neutrally, so the front-end refers to them without knowing the ABI.
+/// @defgroup moonlive_ir MoonLive intermediate representation
+/// @{
+/// The typed form between the front-end and the per-ISA assembler.
+///
+/// The front-end lowers an AST to a flat list of three-address ops over virtual registers, and each backend lowers that same list to machine bytes.
+/// Compile-time only, consumed during lowering and never present at run time.
+///
+/// @moreinfo
+///
+/// ## It knows operations, not targets
+///
+/// The IR names no instruction set and no domain: a buffer write is an inline op carrying a tag the host registered.
+///
+/// ## Virtual registers
+///
+/// Plain indices a backend maps to machine registers.
+/// The host arguments arrive in fixed ones, named neutrally, so the front-end refers to them without knowing the calling convention.
 
 namespace mm::moonlive {
 
@@ -23,8 +30,7 @@ using VReg = uint8_t;
 // kArg4 is a per-instance data pointer the host passes at run time, which LoadCtrl reads from.
 enum : VReg { kArg0 = 0, kArg1 = 1, kArg2 = 2, kArg3 = 3, kArg4 = 4, kFirstTemp = 5 };
 
-// Larger than any register file, since the allocator parks the overflow: this bounds the
-// compiler's own tables rather than the script.
+// Larger than any register file, since this bounds the compiler's tables, not the script.
 static constexpr uint8_t kMaxVRegs = 32;
 // A sanity bound rather than the working limit, so a runaway source fails with a diagnostic.
 static constexpr uint16_t kMaxIrOps = 4096;
@@ -248,5 +254,7 @@ struct IrProgram {
         return false;
     }
 };
+
+/// @}
 
 }  // namespace mm::moonlive
