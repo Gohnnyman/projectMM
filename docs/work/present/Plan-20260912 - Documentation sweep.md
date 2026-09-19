@@ -70,18 +70,25 @@ Headers carry more than twice the prose findings of every `.md` page together.
 | 1 | sentence length | | 364 | `src/light/effects` |
 | | | | 3 | `src/light/drivers` |
 
-**`check_docgen`**: **7199 findings across 227 headers**, every `.h` under `src/` except the vendored ones. A root rather than a list of directories, because a list is a tolerance wearing different clothes: each directory it omits is silently exempt, and nobody notices a new one appearing. `src/light/drivers` is at **0** and the rest is the work.
+**`check_docgen`**: **2040 findings**, over every `.h` and `.cpp` under `src/` except the vendored ones. A root rather than a list of directories, because a list is a tolerance wearing different clothes: each directory it omits is silently exempt, and nobody notices a new one appearing.
 
-The largest single rule is the hard wrap at **2948**, which the one-line budget could never reach: it bites only in the class comment and the `@moreinfo` appendix, the two blocks allowed to run long.
+Findings split by whether the file publishes a page, which is what decides severity: **1196 errors** in headers and catalog pages, **844 warnings** in implementation files. Only the errors fail the gate, so the remaining `.cpp` work cannot hold a header's commit hostage. The split is a staging device and names its own removal: when the warning column reaches zero it goes and everything blocks, the way Vale's config promotes a page to error as the sweep finishes it.
 
-| Findings | Area |
-|---|---|
-| 1066 | `src/light/effects` |
-| 252 | `src/light/moonlive` |
-| 239 | `src/platform/platform.h` |
-| 239 | `src/light/layouts` |
-| 185 | `src/core/moonlive` |
-| 153 | `src/light/modifiers` |
+| Errors | Warnings | Area |
+|---:|---:|---|
+| 288 | 140 | `core/system.md` |
+| 248 | 0 | `light/layouts.md` |
+| 240 | 0 | `light/power-functions.md` |
+| 163 | 0 | `light/modifiers.md` |
+| 132 | 0 | `core/services.md` |
+| 71 | 664 | tests, which no card covers |
+| 2 | 40 | unassigned: files no summary page owns |
+
+`ScratchBuffer.h` still renders no `@moreinfo` appendix on its generated page, and the cause is not yet identified. Its group is closed correctly and it is not the empty-group shape the checker now reports, so the two known causes are both ruled out. Worth one session with the Doxygen XML rather than another guess: three wrong theories died to the same mistake of reasoning from one example.
+
+Two `@defgroup` ids are still duplicated, `moonlive_asm_riscv` and `moonlive_asm_xtensa`, each declared in a per-ISA header. Doxygen merges same-named groups, so one absorbs the other's page, which is the fault that took `drivers_PinList.md` off the site until the core parser's group was renamed. Nothing reports it yet.
+
+Seven areas are at **0**: `light/drivers.md`, `light/effects.md`, `light/moonlive.md`, `light/supporting.md`, `core/supporting.md`, `core/ui.md` and `platform/index.md`. The live ranking is [docgen.md](../../reference/metrics/docgen.md), which the check writes.
 
 Red by design. The way to green is solving each file, never widening a tolerance, and once green it stays green because nothing new is exempt by construction.
 
@@ -135,7 +142,7 @@ A header that opens with `//` generates nothing: Doxygen reads `//` as a note to
 - **Present tense, positive form.** A comment narrating what the code no longer does is history, and git holds that. A real constraint stays; a bare absence goes.
 - **A rule states a test**, and how it came to be broken belongs in the commit that fixed it. This is what most over-budget comments turn out to be: a bench story where one sentence would do.
 - **Say it, then stop: about 40 words.** Past that a reader skims, and a skimmed comment is not followed.
-- **A sentence is one thought.** Past twenty words it is usually two, joined by a comma that a full stop should have been. The 20-word cap enforces the count; this says what to do about it.
+- **A sentence is one thought.** Past twenty words it is usually two, joined by a comma that a full stop should have been. The 30-word cap enforces the count; this says what to do about it.
 - **The text never refers to itself.** "As described above" and "see the section below" are the author stepping in front of the content.
 - **One parenthetical per sentence**, and the textbook name for a thing rather than ours.
 

@@ -55,7 +55,6 @@ flowchart LR
 
     csys["<b>system.md</b>"]
     csvc["<b>services.md</b>"]
-    cctl["<b>control.md</b>"]
     cui["<b>ui.md</b>"]
     csup["<b>supporting.md</b>"]
 
@@ -69,9 +68,9 @@ flowchart LR
 
     pidx["<b>index.md</b>"]
 
-    hsys["<b>core/system/</b><br/><i>22 headers</i>"]
+    hsys["<b>core/system/</b> · <b>core/module/</b><br/><i>the modules, and what a module is</i>"]
     hsvc["<b>core/services/</b><br/><i>10 headers</i>"]
-    hctl["<b>core/module/</b> · <b>core/util/</b><br/><i>the control surface</i>"]
+    hctl["<b>core/util/</b><br/><i>the shared building blocks</i>"]
     hui["<b>core/system/</b> · <b>src/ui/</b><br/><i>the served app</i>"]
 
     heff["<b>light/effects/</b><br/><i>67 headers</i>"]
@@ -83,13 +82,12 @@ flowchart LR
     hlyr["<b>light/layers/</b> · <b>light/util/</b><br/><i>the pieces they share</i>"]
     hplat["<b>platform/</b> · <b>platform/esp32/</b> · <b>platform/desktop/</b><br/><i>one interface, two implementations</i>"]
 
-    core --> csys & csvc & cctl & cui & csup
+    core --> csys & csvc & cui & csup
     light --> leff & llay & lmod & ldrv & lpf & lml & lsup
     plat --> pidx
 
     csys --> hsys
     csvc --> hsvc
-    cctl --> hctl
     cui --> hui
     csup --> hctl
 
@@ -106,7 +104,7 @@ flowchart LR
     classDef page fill:#1f4d3d,stroke:#5fb89a,color:#fff
     classDef headers fill:#3d2d61,stroke:#a07bc9,color:#fff
     class core,light,plat domain
-    class csys,csvc,cctl,cui,csup,leff,llay,lmod,ldrv,lpf,lml,lsup,pidx page
+    class csys,csvc,cui,csup,leff,llay,lmod,ldrv,lpf,lml,lsup,pidx page
     class hsys,hsvc,hctl,hui,heff,hlay,hmod,hdrv,hpf,hml,hlyr,hplat headers
 ```
 
@@ -222,7 +220,7 @@ A header reaches Vale through a **View**, `.vale/styles/config/views/CComments.y
 
 A card is read across a row; a member comment is read beside the thing it describes, and the generated page shows its first sentence as the summary. So the budget is one line, and a deep dive goes after `@moreinfo`.
 
-**A header opens with `///`**, so its page says what the file is for rather than starting with a bare member list. A header of free functions or constants leads with a `@defgroup` block; a single-class header leads with the class comment, which is the file's documentation already. A `//` block at the top generates nothing, because Doxygen reads `//` as a note to the next reader of the source.
+**A header opens with `///`**, so its page says what the file is for rather than starting with a bare member list. A header of free functions, constants or several peer types leads with a `@defgroup` block. A header declaring one type leads with that type's comment, which is the file's documentation already, and takes no group around it. The two are exclusive. A group wrapping a lone class is a second lead saying the same thing twice, leaving an editor two homes to keep in step. Nested types are implementation detail and do not make a header a multi-type one. A provenance marker above the lead, an SPDX tag or an `// Author:` line, is machine-read or a credit rather than documentation, and passes through. A `//` block at the top generates nothing, because Doxygen reads `//` as a note to the next reader of the source.
 
 **`@moreinfo` is an appendix, and only a lead carries one**: the file's, or a class's. A member gets one line, so an `@moreinfo` there is depth in the wrong place, and it belongs in the file lead's appendix or on the module's page. Relaxing that once put a four-line block on every function in a swept header and cost 230 lines to undo.
 
@@ -251,6 +249,8 @@ The first five cut and the last adds, deliberately: the result is a short line o
 **An implementation file is asked for no member docs at all, for the same reason.** "Public" is read from the shape of a declaration, which cannot see an anonymous namespace or a function body. In a header that approximation holds, because a header's declarations mostly are the public API and each becomes a row on a generated page. In a `.cpp` it matched the fields of file-local structs and plain locals, asking a variable named `got` for a doc comment, so the rule stops at the header. A field that needs explaining carries a trailing `//`, which is what those already did.
 
 **An implementation file gets four lines instead of one, because it has no page to protect.** A `.cpp` generates nothing, so the one-line cap there enforced a documentation constraint on text that never reaches the documentation. It read as verbosity control and was not: the word budget is what catches a rambling comment, and that applies to both kinds of file unchanged. What a line count catches in an implementation file is an essay, so the limit sits where an essay starts. Past four lines the reasoning belongs in the file lead's appendix, with an `@xref` back from the line that raised the question. That is the same move a header makes, and the same one the `@xref` rule above describes. Measured over the platform backends, the one-line cap fired on 182 blocks that a reader would call well commented. The genuinely oversized ones ran to twelve, twenty-two and thirty-four lines.
+
+**A finding in a header is an error; one in an implementation file is a warning.** This follows the same line. A header's comments are the published page, so a defect there ships, while a `.cpp` publishes nothing and its comments are a note to the next reader. Both are counted and both are reported, because a warning nobody sees is a warning nobody fixes. The split stages the sweep rather than ranking the two kinds of comment, so it goes and everything blocks once the warning column reaches zero. That is how Vale's own config promotes a page to error as the sweep finishes it.
 
 Enforced by [`check_docgen.py`](../moondeck/check/check_docgen.py) over every header under `src/`, the vendored ones excepted.
 

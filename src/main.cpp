@@ -339,7 +339,7 @@ static void registerModuleTypes() {
 #endif
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/system.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/system.md#system");
-    mm::ModuleFactory::registerType<mm::ControlModule>("ControlModule", "core/control.md#control");
+    mm::ModuleFactory::registerType<mm::ControlModule>("ControlModule", "core/system.md#control");
     mm::ModuleFactory::registerType<mm::Services>("Services", "core/services.md#services");
     mm::ModuleFactory::registerType<mm::AudioService>("AudioService", "core/services.md#audio");
     mm::ModuleFactory::registerType<mm::OscModule>("OscModule", "core/services.md#osc");
@@ -359,7 +359,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/system.md#mqtt");
     mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/system.md#devices");
     mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/system.md#network");
-    mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/supporting.md#filesystem");
+    mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/system.md#filesystem");
 }
 
 static void printModuleMetrics(mm::MoonModule* mod, int depth) {

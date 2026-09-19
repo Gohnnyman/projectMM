@@ -27,7 +27,7 @@ using lengthType = int16_t;
 /// A 3D grid position or size, with per-component operators so a fold reads like the geometry.
 ///
 /// @moreinfo Each modifier is a coordinate transform, and the operators let it read as one line rather than three.
-/// Plain data on the cold build path: the render path stays on flat indices and never sees these.
+/// Plain data, and the per-pixel inner loop stays on flat indices rather than carrying a struct through it.
 struct Coord3D {
     lengthType x = 0, y = 0, z = 0;   ///< the three axes
 

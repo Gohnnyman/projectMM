@@ -5,26 +5,28 @@
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 #include "light/util/Palette.h"
 
-// A palette authored as a script rather than stored as data.
-//
-// The fifth binding, and the one shape the other four do not have: it writes sixteen entries once
-// per frame, and every effect in that frame samples them.
-//
-// A stop list is frozen the moment it is saved, where a palette that is code can follow the music,
-// drift, or be computed. The audio builtins are already in the shared table, so `audioBand()` in a
-// palette costs nothing to expose and is the case that justifies the design.
-//
-// Cost is independent of rig size: a sixteen-iteration loop whatever the wall is, which is what
-// makes running it in the render path reasonable.
-//
-// It fills a scratch palette and assigns the 48 bytes once, so an effect sees either the previous
-// palette or the new one, never a mixture.
-//
-// A broken script keeps the last good palette. The other bindings degrade to dark, which is honest
-// when the script is the picture; here the effects still run, so a black palette would blame them.
-
 namespace mm {
 
+/// A palette authored as code rather than stored as data.
+///
+/// @moreinfo
+///
+/// This is the fifth binding, and the one shape the other four do not have: it writes sixteen entries once per frame, and every effect in that frame samples them.
+///
+/// ## Why a palette is worth computing
+///
+/// A stop list is frozen the moment it is saved, where a palette that is code can follow the music, drift, or be computed.
+/// The audio builtins are already in the shared table, so `audioBand` in a palette costs nothing to expose, and it is the case that justifies the design.
+///
+/// ## Why it is cheap enough to run per frame
+///
+/// Cost is independent of rig size: a sixteen-iteration loop whatever the wall is.
+/// It fills a scratch palette and assigns the 48 bytes once, so an effect sees either the previous palette or the new one and never a mixture.
+///
+/// ## Why a broken script keeps the last good palette
+///
+/// The other bindings degrade to dark, which is honest when the script is the picture.
+/// Here the effects still run, so a black palette would blame them for a fault that is not theirs.
 class MoonLivePalette {
 public:
     /// Point the palette at a script. The next prepare() compiles it.
@@ -90,3 +92,4 @@ private:
 };
 
 }  // namespace mm
+

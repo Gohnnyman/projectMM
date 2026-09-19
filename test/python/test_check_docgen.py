@@ -858,6 +858,196 @@ def test_a_cpp_is_asked_for_no_member_docs():
     assert hdr, hdr
 
 
+def test_a_local_struct_in_an_allman_function_is_not_a_member():
+    """A free function's body is tracked by the brace that opens it, wherever that brace sits.
+    With the brace on its own line the signature and the body open on different lines, so a
+    local struct declared inside could be mistaken for a documented type's member and its
+    fields asked for a `///` they do not owe. Both brace styles are pinned, and a genuine
+    member after the function still reports, so the exclusion cannot swallow a real finding."""
+    import check_docgen
+    body = ("/// @defgroup g G\n/// @{\n/// doc\nint f()%s\n"
+            "    struct Local { int x; };\n    return sizeof(Local);\n}\n"
+            "struct S {\n    int shouldBeFlagged;\n};\n/// @}\n")
+    for brace in ("\n{", " {"):
+        whys = [w for k, w in check_docgen._header_rules("src/core/x.h", body % brace)]
+        assert whys == ["public variable has no ///"], (brace, whys)
+
+
+def test_a_header_finding_blocks_and_an_implementation_one_warns():
+    """Severity follows the same split `_generates_a_page` draws. A header's comments ARE the
+    published page, so a finding there is a defect in what ships and fails the gate. An
+    implementation file publishes nothing, so an over-long note to the next reader is worth
+    fixing without holding a commit. A catalog page publishes too, so it blocks like a header.
+    What the split must NOT do is hide the warnings: they stay in the report and in the count,
+    because the split stages the sweep rather than ranking the two kinds of comment, and it goes
+    once the warning side reaches zero."""
+    import check_docgen
+    assert check_docgen._blocks("src/core/x.h::Thing")
+    assert check_docgen._blocks("docs/moonmodules/light/effects.md::SomeCard")
+    assert not check_docgen._blocks("src/core/x.cpp::line 12")
+
+
+def test_a_provenance_marker_above_the_lead_is_not_the_lead():
+    """A file's lead is the first thing that DOCUMENTS it. An SPDX tag is machine-read and an
+    `Author:` line is a credit, so both sit above the real lead and neither is one: counted as the
+    lead they reported every licensed or credited header as opening with `//` while a proper `///`
+    lead stood two lines below. A forward declaration names a type defined elsewhere and documents
+    nothing either. What none of them may do is stand in for a lead that is missing."""
+    import check_docgen
+    def whys(src):
+        return [w for _, w in check_docgen._header_rules("src/core/x.h", src) if "lead" in w]
+
+    for marker in ("// SPDX-License-Identifier: GPL-3.0-or-later",
+                   "// Author: projectMM original"):
+        src = f"{marker}\n#pragma once\n/// One thing.\nclass Thing {{\npublic:\n    /// Go.\n    void go();\n}};\n"
+        assert not whys(src), marker
+
+    fwd = "#pragma once\nclass Other;\n/// One thing.\nclass Thing {\npublic:\n    /// Go.\n    void go();\n};\n"
+    assert not whys(fwd), "a forward declaration is not a lead"
+
+    bare = "// Author: projectMM original\n#pragma once\nclass Thing {\npublic:\n    void go();\n};\n"
+    assert whys(bare), "a marker must not stand in for a missing lead"
+
+
+def test_a_defgroup_is_asked_for_only_where_a_lone_class_already_leads():
+    """Two lead shapes generate a page, and which is right follows from what the header holds. A
+    lone class IS its page, so a group around it is a second lead saying the same thing twice.
+
+    Counting what is TOP-LEVEL is the whole rule, and four shapes each defeated a naive count, so
+    each is pinned: a `template` line above a class belongs to that class rather than being a free
+    declaration (read otherwise, every single-class template header was permanently exempt, which
+    is the rule's own headline case); an Allman brace belongs to the declaration above it; a brace
+    inside a string literal is text and must not raise the depth; and one line may open two
+    namespaces. A header of free declarations keeps its group, and a nested type never makes a
+    header a multi-type one."""
+    import check_docgen
+    def whys(src):
+        return [w for _, w in check_docgen._header_rules("src/core/x.h", src) if "@defgroup on" in w]
+    G = "/// @defgroup g G\n/// @{\n/// A lead.\n"
+    MEM = "public:\n    /// Go.\n    void go();\n};\n/// @}\n"
+
+    assert whys(G + "class Thing {\n" + MEM), "a lone class needs no group"
+    assert whys(G + "template <class T>\nclass Thing {\n" + MEM), \
+        "a template introducing the class is not a free declaration"
+    assert whys("namespace mm\n{\n" + G + "class Thing\n{\n" + MEM + "}\n"), \
+        "an Allman brace belongs to the declaration above it"
+    assert whys("namespace mm { namespace detail {\n" + G + "class Thing {\n" + MEM + "}}\n"), \
+        "one line may open two namespaces"
+    assert whys(G + 'class Thing {\npublic:\n    /// Go.\n'
+                '    void go() { const char* s = "{"; }\n};\n/// @}\n'), \
+        "a brace in a string literal is text, not scope"
+    assert whys(G + "class Thing {\npublic:\n    /// Go.\n    void go();\n"
+                "private:\n    struct H { int n; };\n};\n/// @}\n"), \
+        "a nested struct is not a second page-level type"
+
+    quiet = ("/// The class.\nclass Thing {\n" + MEM)
+    for free in ("inline void f();", "template <class T>\ninline void f(T t);",
+                 "int f()\n{\n    return 0;\n}", "int f() {\n    return 0;\n}"):
+        assert not whys(G + free + "\n" + quiet), (free, "a free declaration justifies the group")
+
+    lone = G + "class Thing {\n" + MEM
+    assert not [w for _, w in check_docgen._header_rules("src/core/x.cpp", lone) if "@defgroup on" in w], \
+        "a .cpp generates no page, so it has no lead to shape"
+
+
+def test_two_headers_claiming_one_group_id_are_reported(tmp_path, monkeypatch):
+    """Doxygen MERGES two groups sharing an id, so one header's page absorbs the other's and the
+    loser vanishes from the site. It fails silently both ways: the surviving page looks complete
+    and the missing one is simply absent. A core parser and a light-domain one both named their
+    group `PinList` that way, and only a dangling link in the strict build caught it. An
+    implementation file counts too — Doxygen reads it all the same — and is reported against
+    rather than the header, since the header owns the page."""
+    import check_docgen
+    from pathlib import Path
+    (tmp_path / "a.h").write_text("/// @defgroup Shared A\n/// @{\n/// A.\n/// @}\n")
+    (tmp_path / "b.h").write_text("/// @defgroup Shared B\n/// @{\n/// B.\n/// @}\n")
+    (tmp_path / "c.h").write_text("/// @defgroup Own C\n/// @{\n/// C.\n/// @}\n")
+    (tmp_path / "c.cpp").write_text("/// @defgroup Own C\n/// @{\n/// C.\n/// @}\n")
+    monkeypatch.setattr(check_docgen, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docgen, "_headers",
+                        lambda: [Path(n) for n in ("a.h", "b.h", "c.h", "c.cpp")])
+    found = {key: why for key, why in check_docgen._duplicate_group_ids()}
+    assert any(k.startswith("b.h") for k in found), "the second header to claim an id is reported"
+    assert not any(k.startswith("a.h") for k in found), "the first keeps the id"
+    assert any(k.startswith("c.cpp") for k in found), "a .cpp re-declaring its header's id merges"
+    assert not any(k.startswith("c.h") for k in found), "the header owns the page"
+
+
+def test_a_group_that_documents_nothing_is_reported():
+    """A group is a label, not an entity, so `gen_api` infers its page from where its MEMBERS
+    sit. A `@}` that closes before the first declaration wraps only the comment: the group holds
+    nothing, resolves to no header, and the whole page is skipped — lead, appendix and members —
+    with nothing reported, because the header still looks documented and the unreachable-page
+    check only fires on a page that exists. Two headers shipped that way, their appendices
+    unreachable. A group closing after what it documents is the working shape."""
+    import check_docgen
+    def whys(src, rel="src/core/x.h"):
+        return [w for _, w in check_docgen._header_rules(rel, src) if "documents anything" in w]
+
+    LEAD = "/// @defgroup g G\n/// @{\n/// A lead.\n"
+    assert whys(LEAD + "/// @}\n\nnamespace mm {\n/// A thing.\ninline void f();\n}\n"), \
+        "a group closing before the namespace holds nothing"
+    assert not whys("namespace mm {\n" + LEAD + "/// A thing.\ninline void f();\n/// @}\n}\n"), \
+        "a group closing after its declarations is the working shape"
+    assert not whys(LEAD + "/// @}\n"), "a header with no declaration at all is not this fault"
+    assert not whys(LEAD + "/// @}\n\nnamespace mm {\ninline void f();\n}\n",
+                    rel="src/core/x.cpp"), "a .cpp generates no page to lose"
+
+
+def test_an_xref_that_cannot_render_is_reported():
+    """`@xref{anchor|label}` renders to a same-page link, and the generator resolves `[a-z0-9-]+`
+    only. An underscore therefore never becomes a link: the marker survives Doxygen untouched and
+    the reader sees raw `@xref{...}` mid-sentence. Matching that same narrow class HERE made the
+    rule silent on exactly the names that cannot work, so it reported a clean run over 21 of them
+    — a check that read nothing is indistinguishable from a check that found nothing. So anything
+    `@xref{...}`-shaped is matched loosely and then judged: a name that is not a slug is
+    unrenderable, and a slug naming no heading in the file is dead."""
+    import check_docgen
+    def whys(src):
+        return [w for _, w in check_docgen._header_rules("src/core/x.h", src) if "xref" in w]
+
+    HEAD = ("/// @defgroup g G\n/// @{\n/// A lead.\n///\n/// @moreinfo\n///\n"
+            "/// ## A real heading\n///\n")
+    TAIL = "inline void f();\n/// @}\n"
+    assert any("renders as raw text" in w
+               for w in whys(HEAD + "/// See @xref{some_anchor|this}.\n" + TAIL)), \
+        "an underscore cannot render, so it must be reported"
+    assert any("names no heading" in w
+               for w in whys(HEAD + "/// See @xref{no-such-heading|this}.\n" + TAIL)), \
+        "a slug naming no heading is dead"
+    assert not whys(HEAD + "/// See @xref{a-real-heading|this}.\n" + TAIL)
+
+
+def test_an_unclosed_group_scope_is_reported():
+    """`@defgroup` opens a scope with `@{` and Doxygen runs it to `@}`. Left open, every
+    declaration after the lead is absorbed into the group and the generated page is silently
+    reshaped: three headers shipped that way in one sweep because nothing counted the pair. An
+    orphan `@}` is the same bug from the other side, which is what a conversion away from a group
+    leaves behind."""
+    import check_docgen
+    def whys(src, rel="src/core/x.h"):
+        return [w for _, w in check_docgen._header_rules(rel, src) if "group scope" in w]
+
+    assert whys("/// @defgroup g G\n/// @{\n/// A lead.\ninline void f();\n")
+    assert whys("/// A lead.\ninline void f();\n/// @}\n")
+    assert not whys("/// @defgroup g G\n/// @{\n/// A lead.\ninline void f();\n/// @}\n")
+    assert not whys("/// @defgroup g G\n/// @{\n/// A lead.\ninline void f();\n",
+                    rel="src/core/x.cpp"), "a .cpp has no page to reshape"
+
+
+def test_a_cpp_may_open_with_a_plain_comment_but_must_open_with_one():
+    """The SPELLING of a file lead is a header's business, because a header's lead is its
+    generated page's opening paragraph and `//` generates nothing. An implementation file has no
+    page, so there `//` is a note to the next reader and reads correctly. What both owe is a lead
+    at all: a file that opens on code says nothing about itself to anybody."""
+    import check_docgen
+    plain, none_ = "// what this file is for\nint f() { return 1; }\n", "#include <x>\nint f() { return 1; }\n"
+    assert not [w for _, w in check_docgen._header_rules("src/core/x.cpp", plain) if "file" in w]
+    assert [w for _, w in check_docgen._header_rules("src/core/x.h", plain) if "opens with //" in w]
+    for rel in ("src/core/x.cpp", "src/core/x.h"):
+        assert [w for _, w in check_docgen._header_rules(rel, none_) if "file lead missing" in w], rel
+
+
 def test_a_cpp_is_asked_for_no_member_docs_of_either_kind():
     """Functions go the same way as variables, for the same reason: what the rule matched in a
     `.cpp` was the constructor or destructor of a file-local RAII struct — `~WinsockInit`,

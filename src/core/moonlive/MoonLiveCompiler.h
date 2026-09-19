@@ -6,13 +6,16 @@
 #include "core/moonlive/MoonLiveIr.h"      // DeclaredControl, kMaxCtrls (surfaced on CompileResult)
 #include "core/moonlive/moonlive_emit.h"   // RegBudget, the test-only budget override
 
-// The MoonLive front-end: source text to tokens to AST to IR, then to native code via the per-ISA
-// assembler. The grammar is a statement that calls a host-registered function, with expression
-// arguments, so any argument may be a literal or a nested call.
-//
-// Neutral by construction: the compiler knows the language and resolves call names against the
-// injected table. It owns no function names and no domain semantics, so the backend lowers a
-// generic call or a generic inline op.
+/// @defgroup MoonLiveCompiler The MoonLive front-end
+/// @{
+/// Source text to tokens to AST to IR, and then to native code through the per-ISA assembler.
+///
+/// @moreinfo
+///
+/// The grammar is a statement calling a host-registered function with expression arguments, so any argument may be a literal or a nested call.
+///
+/// The compiler is neutral by construction: it knows the language and resolves call names against the injected table.
+/// Owning no function names and no domain semantics, it leaves the backend lowering a generic call or a generic inline op.
 
 namespace mm::moonlive {
 
@@ -85,4 +88,5 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
 /// Tokens in `source`, which is what both right-sized buffers derive from.
 uint32_t countTokens(const char* source);
 
+/// @}
 }  // namespace mm::moonlive

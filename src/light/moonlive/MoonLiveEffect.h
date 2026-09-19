@@ -8,14 +8,14 @@
 #include <cstring>
 #include <cstdio>
 
-// A scripted effect: the thin binding between the MoonLive engine and a first-class EffectBase.
-//
-// The effect names a script file, prepare compiles it, and tick runs the emitted native code over
-// this effect's own buffer. A source edit recompiles live, and a parse error shows in the module
-// status while the layer renders dark.
-
 namespace mm {
 
+/// The thin binding between the MoonLive engine and a first-class `EffectBase`.
+///
+/// @moreinfo
+///
+/// The effect names a script file, `prepare` compiles it, and `tick` runs the emitted native code over this effect's own buffer.
+/// A source edit recompiles live, and a parse error shows in the module status while the layer renders dark.
 class MoonLiveEffect : public EffectBase {
 public:
     // 📝 marks a script declaring none of its own, which is all a module can say about one.
@@ -204,3 +204,4 @@ private:
 };
 
 }  // namespace mm
+

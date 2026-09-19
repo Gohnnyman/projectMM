@@ -295,9 +295,15 @@ _ASSETS = ROOT / "docs" / "assets"
 # Doxygen has no "trailing section" slot, so we relocate it here on the rendered markdown, the same
 # post-process layer `@card` uses. Like `@card`, the plain-text marker survives Doxygen → moxygen as-is.
 _MOREINFO_RE = re.compile(r'^[ \t]*@moreinfo[ \t]*$', re.MULTILINE)
-# The first member-section heading moxygen emits (### Public Attributes / Public Methods / …). The
-# detailed-description ends where the first such heading begins.
-_FIRST_SECTION_RE = re.compile(r'^### (?:Public|Protected|Private|Static) ', re.MULTILINE)
+# The first member-section heading moxygen emits. A CLASS page lists `### Public Attributes`,
+# `### Public Methods` and friends; a GROUP page lists `### Functions`, `### Variables`,
+# `### Enumerations` or `### Classes`. Both shapes are matched, because the detailed description
+# ends where the first such heading begins and a group page must not have its members swallowed
+# into a relocated tail.
+_FIRST_SECTION_RE = re.compile(
+    r'^### (?:(?:Public|Protected|Private|Static) |'
+    r'(?:Functions|Variables|Enumerations|Classes|Structs|Typedefs|Defines)\s*$)',
+    re.MULTILINE)
 
 
 # An in-`///` cross-reference: `@xref{<anchor>|<label>}` (or `@xref{<anchor>}` — the anchor doubles as the

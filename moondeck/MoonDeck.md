@@ -175,7 +175,7 @@ Reads the pages the docs build renders as card tables and reports, per card:
 
 And per header, over every `.h` under `HEADER_ROOT` (`src/`) except the vendored paths:
 
-- a class comment past 10 lines, or its `@moreinfo` appendix past 20
+- a class comment past 10 lines, or any `## ` section of its `@moreinfo` appendix past 10
 - a member comment past one line: a deep dive goes after `@moreinfo`
 - one sentence in a comment past 30 words
 - a public function or variable with no `///` at all

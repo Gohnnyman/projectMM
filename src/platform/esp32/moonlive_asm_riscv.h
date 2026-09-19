@@ -88,7 +88,7 @@ public:
 
     /// A full-width address into a register (ConstPtr).
     void movPtr(Reg d, const void* p);
-    /// Li rd, imm  (addi rd, x0, imm).
+    /// An immediate of any width into a register, through the small-immediate add where it fits.
     void movImm(Reg d, int32_t imm);
     /// Mv rd, ra   (addi rd, ra, 0).
     void movReg(Reg d, Reg a);

@@ -686,7 +686,7 @@ static bool ethInitEmac() {
     // The gigabit path's fixed pads, the only pins the controller accepts for each signal.
     // Validated against the IO_MUX table in the vendor's own esp32s31/emac_periph.c, and matching the board schematic.
     // Listed explicitly for clarity though the defaults would pick the same.
-    // And resolved at compile time so a name not in the list fails the build rather than silently wiring the first pad.
+    // A name not in the list returns the not-found sentinel, which the driver rejects at init rather than silently wiring the first pad.
     constexpr auto rgmiiPad = [](const char* want) -> int {
         for (uint8_t i = 0; i < ethFixedPadCount; i++) {
             const char* n = ethFixedPads[i].name;
@@ -699,7 +699,7 @@ static bool ethInitEmac() {
     // Looked up BY NAME out of platform::ethFixedPads, the ONE list of these pads: NetworkModule
     // reports the same entries through fixedPins() so the pin map can show what the MAC holds. By
     // name rather than by index so reordering that list cannot silently rewire the MAC, and a typo
-    // is a compile error rather than a scrambled bus.
+    // is a refused init rather than a scrambled bus.
     emac_config.clock_config.rgmii.clock_tx_gpio = rgmiiPad("ethTxClk");
     emac_config.clock_config.rgmii.clock_rx_gpio = rgmiiPad("ethRxClk");
     emac_config.emac_dataif_gpio.rgmii = eth_mac_rgmii_gpio_config_t{

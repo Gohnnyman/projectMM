@@ -8,16 +8,17 @@
 #include "core/moonlive/MoonLiveCompiler.h"   // CompileResult (carries the declared controls)
 #include <cstring>   // std::strcmp: entry lookup by name
 
-// The live-script engine core, domain-neutral.
-//
-// compile() turns a program into native code, places it in executable memory, and run() calls it
-// over a host-supplied buffer. The path is emit, allocate, call, write, on Xtensa, RISC-V and host.
-//
-// Neutral by construction: this includes only the compiler and platform seams, never a light type.
-// The binding wraps it as a MoonModule.
-
 namespace mm::moonlive {
 
+/// Compiling a script to native code and running it over a host-supplied buffer.
+///
+/// @moreinfo
+///
+/// A compile turns a program into native code and places it in executable memory, and a run calls it.
+/// The path is emit, allocate, call, write, and it is the same on Xtensa, RISC-V and the host.
+///
+/// The engine is domain-neutral by construction: it includes the compiler and platform seams and never a light type.
+/// The binding is what wraps it as a MoonModule.
 class MoonLive {
 public:
     /// An engine with nothing compiled, until a compile call fills it.
@@ -260,3 +261,4 @@ private:
 };
 
 }  // namespace mm::moonlive
+

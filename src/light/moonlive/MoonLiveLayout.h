@@ -7,23 +7,26 @@
 #include <cstdio>
 #include <cstring>
 
-// A scripted layout: where the lights physically are, written as text on a running device.
-//
-// A layout is the one part of the pipeline that differs for every physical build, so each one has
-// meant a new class, a rebuild and a reflash. A script means the person who hung the lights
-// describes where they went and sees it immediately.
-//
-// This is the binding that needed the language to grow. A modifier transforms one coordinate
-// because the Layer calls it per light, where a layout places N lights itself, which takes a loop.
-//
-// It allocates nothing, like every other layout: the script calls `addLight` per light, and the
-// binding points that call at a counter on the sizing pass and at the sink on the walk. Staging the
-// coordinates would cost 48 KB on a 16k-light fixture.
-//
-// The count and the coordinates come from the same code, so the two answers cannot drift apart.
-
 namespace mm {
 
+/// Where the lights physically are, written as text on a running device.
+///
+/// @moreinfo
+///
+/// ## Why a layout is worth scripting
+///
+/// A layout is the one part of the pipeline that differs for every physical build, so each one has meant a new class, a rebuild and a reflash.
+/// A script means the person who hung the lights describes where they went and sees it immediately.
+///
+/// ## The binding that needed the language to grow
+///
+/// A modifier transforms one coordinate because the Layer calls it per light, where a layout places every light itself, which takes a loop.
+///
+/// ## Why it still allocates nothing
+///
+/// The script calls `addLight` per light, and the binding points that call at a counter on the sizing pass and at the sink on the walk.
+/// Staging the coordinates instead would cost 48 KB on a 16k-light fixture.
+/// The count and the coordinates come from the same code, so the two answers cannot drift apart.
 class MoonLiveLayout : public LayoutBase {
 public:
     // 📝 marks a script declaring nothing of its own, which is all a module can say about one.
@@ -125,3 +128,4 @@ private:
 };
 
 }  // namespace mm
+

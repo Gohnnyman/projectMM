@@ -306,4 +306,4 @@ free. No script in this folder ships with one.
 
 ## Source
 
-[MoonLive](../core/moxygen/MoonLive.md) is the engine, [MoonLiveCompiler](../core/moxygen/MoonLiveCompiler.md) the front-end, and [MoonLiveBuiltins_light](moxygen/MoonLiveBuiltins_light.md) the table registering every call above.
+[MoonLive](../core/moxygen/MoonLive.md) is the engine, [MoonLiveCompiler](../core/moxygen/MoonLiveCompiler.md) the front-end, and [MoonLiveBuiltins_light](moxygen/MoonLiveBuiltins_light.md) the table registering every call above. [The lowering](../core/moxygen/moonlive_lower.md) turns the intermediate form into machine bytes, written once for every backend.

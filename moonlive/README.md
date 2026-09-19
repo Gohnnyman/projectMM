@@ -39,7 +39,7 @@ The browser does the downloading, not the device: it reads the script from GitHu
 
 **Sending one back.** A script you wrote or changed carries a **`↗`** button beside the editor. It opens GitHub with the script already filled in: a new script as a new file under `moonlive/`, a changed library script as an edit of the one that is there. GitHub forks the repository on your behalf when you propose it, so contributing needs a GitHub account and nothing else. The button appears only for a file in your own directory, since an untouched library copy is byte-identical to what is already upstream.
 
-**`GET /api/scripts`** is what the picker reads: the library's names per role (`effects`, `layouts`, `modifiers`), the tag they are fetched from, and the directory a download lands in. The catalog is compiled into the firmware, generated from `moonlive/` at build time by `catalog_scripts.cmake`, so a script added to the repository reaches devices with no other change.
+**`GET /api/scripts`** is what the picker reads: the library's names per role (`effects`, `layouts`, `modifiers`, `services`, `palettes`), the tag they are fetched from, and the directory a download lands in. The catalog is compiled into the firmware, generated from `moonlive/` at build time by `catalog_scripts.cmake`, so a script added to the repository reaches devices with no other change.
 
 ## Editing a shipped script forks it
 

@@ -7,20 +7,21 @@
 #include <cstdio>
 #include <cstring>
 
-// A scripted modifier: a coordinate transform authored live rather than compiled in.
-//
-// The second binding of the engine, and what shows it is domain-neutral: it needed no engine, IR,
-// grammar or backend change. An effect script writes a color per light, a modifier a position, and
-// both are three values stored at an index.
-//
-// The script does not loop, because the Layer already does: `modifyLogical` is called once per
-// physical light while the mapping builds, so a script transforms one coordinate.
-//
-// A coordinate arriving outside the representable range passes through untransformed rather than
-// wrapping to a wrong position. An out-of-range result is the script's own.
-
 namespace mm {
 
+/// A coordinate transform authored live rather than compiled in.
+///
+/// @moreinfo
+///
+/// This is the second binding of the engine, and what shows the engine is domain-neutral: it needed no engine, IR, grammar or backend change.
+/// An effect script writes a color per light and a modifier a position, and both are three values stored at an index.
+///
+/// ## Why the script does not loop
+///
+/// The Layer already does: `modifyLogical` is called once per physical light while the mapping builds, so a script transforms one coordinate.
+///
+/// A coordinate arriving outside the representable range passes through untransformed rather than wrapping to a wrong position.
+/// An out-of-range result is the script's own.
 class MoonLiveModifier : public ModifierBase {
 public:
     // 📝 marks a script declaring nothing of its own, which is all a module can say about one.
@@ -126,3 +127,4 @@ private:
 };
 
 }  // namespace mm
+

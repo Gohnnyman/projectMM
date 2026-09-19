@@ -74,7 +74,7 @@ Every draw call once took a `Buffer&` and a `Coord3D dims` as two independent ar
 
 The Canvas also owns the depth guard: `depth()` is 0 on a 2D layer, which would zero the z stride, so sixteen effects each carried a private `depthDim()` helper. Constructing a Canvas applies it once.
 
-It is passed **by value**, which is a measured choice rather than a stylistic one. It is a small POD, a pointer plus three int16 and two small ints, and in a per-pixel fill loop it measured 62 instructions against 67 for the separate arguments and 69 for a `const Canvas&`. A reference member forces the extents to be re-read from memory, because the compiler must assume they alias the buffer being written, while a by-value POD stays in registers. The abstraction is a small win, not a cost.
+It is passed **by value** in the per-pixel fill, which is a measured choice rather than a stylistic one. It is a small POD, a pointer plus three int16 and two small ints, and in that loop it measured 62 instructions against 67 for the separate arguments and 69 for a `const Canvas&`. APIs that do more per call, `draw::text` among them, take a `const Canvas&`. A reference member forces the extents to be re-read from memory, because the compiler must assume they alias the buffer being written, while a by-value POD stays in registers. The abstraction is a small win, not a cost.
 
 ### Fading a trail, and why 8 bits is not enough
 
@@ -166,9 +166,9 @@ The algorithm is Stam's ("Stable Fluids", SIGGRAPH 1999), chosen for one reason:
 
 Four steps a frame, and the order is the algorithm:
 
-1. `diffuse` — viscosity: each cell relaxes toward its neighbours' average.
-2. `project` — make it divergence-free, the step that turns a set of arrows into a flow.
-3. `advect` — the velocity carries itself, which is what makes a vortex persist and travel.
+1. `diffuse`: viscosity, each cell relaxing toward its neighbours' average.
+2. `project`: make it divergence-free, the step that turns a set of arrows into a flow.
+3. `advect`: the velocity carries itself, which is what makes a vortex persist and travel.
 4. `project` again, because advection reintroduces divergence.
 
 The caller then advects its own dye along the finished field with `draw::advect16`.
@@ -227,7 +227,7 @@ The 16-bit forms matter here: the 8-bit versions step visibly on a large fixture
 
 Two related problems. First, motion: raw linear movement reads as mechanical, so easings shape it, followers smooth it, and peak-hold gives a meter its characteristic instant-rise slow-fall. Second, randomness that is *reproducible* — addressed by position rather than drawn from a stream, so the same pixel gets the same value on every device and every frame.
 
-The framerate rule lives here too: everything in this group is driven by elapsed time, never by frame count ([architecture](../../explanation/architecture/moonlight.md#effects)).
+The framerate rule lives here too: everything in this group is driven by elapsed time, never by frame count ([architecture](../../explanation/architecture/moonlight.md#effects)). The shapes themselves live in [oscillators](../core/moxygen/oscillators.md), which traces one over a cycle.
 
 <div class="mm-pf" markdown="1">
 
@@ -256,7 +256,7 @@ Frame order matters and is the caller's to get right: forces, then `collide()`, 
 
 **Time is scaled, not quantised.** A pool advanced by a fixed amount each frame has physics that belong to the hardware: the desktop renders tens of thousands of frames a second and an ESP32 a few hundred, so one gravity setting is an explosion on one and a drift on the other. Running a fixed 60 Hz simulation and skipping the frames between is the obvious fix and the wrong one for a light effect, because it throws away exactly the smoothness those extra frames were rendered for.
 
-So every force and velocity is expressed per reference frame (1/60 s), and `FrameTime::scale()` reports how much of a reference frame this one covered, in 8.8 fixed point: 256 at exactly 60 fps, 26 at 600 fps, 2560 after a sixteen-frame stall. A faster device takes many small steps where a slow one takes a few large ones — the same trajectory, at more resolution along it.
+So every force and velocity is expressed per reference frame (1/60 s), and `FrameTime::scale()` reports how much of a reference frame this one covered, in 8.8 fixed point: 256 at exactly 60 fps, 26 at 600 fps, and 2048 after a sixteen-frame stall, which is the eight-reference-frame ceiling `advance()` caps a long stall to. A faster device takes many small steps where a slow one takes a few large ones: the same trajectory, at more resolution along it.
 
 Prior art: the [WLED Particle System](https://github.com/wled/WLED) by Damian Schneider ([@DedeHai](https://github.com/DedeHai)), whose vocabulary of emitters, forces and walls over one shared pool is the shape this follows, and Reeves 1983 for the name. The fixed-point implementation and the elapsed-time scaling are ours. His system also settled a design question by having answered it already: he documents trying y-binning in the collision broad phase and measuring it not worth the bookkeeping at these pool sizes, so `collide` keeps the cheaper sweep along X deliberately rather than by omission.
 

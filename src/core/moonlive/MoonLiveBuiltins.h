@@ -4,14 +4,19 @@
 #include <cstddef>
 #include <cstdio>   // the builtin-table overflow diagnostic
 
-// The neutral seam by which a host registers the functions a script may call.
-//
-// The core compiler knows only that a name maps to a descriptor: it owns no function names and no
-// domain semantics. A host populates the table with its own vocabulary.
-//
-// A descriptor says how a call lowers. A Call is a pure host helper, lowered to a generic call. An
-// Inline is a routine the backend emits without per-call overhead, carrying a neutral opcode tag
-// the per-ISA lowering knows. The core threads the tag through without interpreting it.
+/// @defgroup MoonLiveBuiltins Registering the functions a script may call
+/// @{
+/// The neutral seam a host fills with its own vocabulary.
+///
+/// @moreinfo
+///
+/// The core compiler knows only that a name maps to a descriptor, owning no function names and no domain semantics.
+///
+/// ## What a descriptor decides
+///
+/// A descriptor says how a call lowers.
+/// A `Call` is a pure host helper, lowered to a generic call.
+/// An `Inline` is a routine the backend emits without per-call overhead, carrying a neutral opcode tag the per-ISA lowering knows, which the core threads through without interpreting.
 
 namespace mm::moonlive {
 
@@ -211,4 +216,5 @@ struct SysVarTable {
     }
 };
 
+/// @}
 }  // namespace mm::moonlive

@@ -163,7 +163,7 @@ private:
     static constexpr uint8_t kMaxLabels = kAsmLabels;
     static constexpr uint8_t kMaxFixups = kAsmFixups;
 
-    /// Append one 32-bit instruction (arm64 only; x64 encoders.
+    /// Append one 32-bit instruction, arm64 only: an x64 instruction is variable-length, so those encoders call emitBytes.
     void emit32(uint32_t w);
                                          // are variable-length and call emitBytes directly)
 #if (defined(__x86_64__) || defined(_M_X64)) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)

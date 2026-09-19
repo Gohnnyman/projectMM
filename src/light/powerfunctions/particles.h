@@ -307,7 +307,7 @@ struct Pool {
         }
     }
 
-    /// Kill any particle that has left the grid: the alternative to bouncing, for sparks that
+    /// Kill any particle that has left the grid, the alternative to bouncing for sparks meant to fly away and vanish.
     void killOutside(draw::pos_t w, draw::pos_t h, draw::pos_t margin = 0) {
         for (uint16_t i = 0; i < count; i++) {
             if (!ttl[i]) continue;

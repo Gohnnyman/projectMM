@@ -678,6 +678,9 @@ def capture_preview_gif(page: Page, host: str, module_id: str,
 
     _load_page(page, host)
     _click_nav(page, nav_root)
+    # The CHILD tab too, as the screenshot path does: the nav root alone leaves whichever child
+    # was last open selected, so the wait below can find a card the preview is not rendering.
+    _click_child_tab(page, module_id)
 
     # Wait for the card to be visible (confirms module is rendering).
     card_sel = f'.card[data-module="{module_id}"]'

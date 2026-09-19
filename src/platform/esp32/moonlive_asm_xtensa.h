@@ -93,7 +93,7 @@ public:
 
     /// A full-width address into a register (ConstPtr).
     void movPtr(Reg d, const void* p);
-    /// Movi aD, #imm (0..255).
+    /// An immediate of any width into a register, through the narrow move where it fits.
     void movImm(Reg d, int32_t imm);
     /// Mov.n aD, aA.
     void movReg(Reg d, Reg a);

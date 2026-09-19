@@ -406,8 +406,11 @@ inline void paletteNames(JsonSink& sink) {
     for (uint8_t i = 0; i < palettes::kCount; i++)
         sink.appendf("%s\"%s\"", i > 0 ? "," : "", palettes::kBuiltins[i].name);
     // The scripted tail too, in the SAME order the picker and `seg[0].pal` use.
-    for (uint8_t i = 0; i < LivePalettes::count(); i++)
-        sink.appendf(",\"%s\"", LivePalettes::nameAt(i));
+    for (uint8_t i = 0; i < LivePalettes::count(); i++) {
+        // The escaping writer: a user-supplied name with a quote would end the string early.
+        sink.append(",");
+        sink.writeJsonString(LivePalettes::nameAt(i));
+    }
 }
 
 /// How many entries paletteNames() writes.

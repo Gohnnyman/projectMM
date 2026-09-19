@@ -8,8 +8,8 @@
 
 #include <cstdint>
 
-/// @defgroup polar Polar address tables
-/// @{
+namespace mm {
+
 /// The angle and radius of every pixel, computed once and read from a table.
 ///
 /// A radial effect addresses the grid by angle and radius, which turns its motion around the center.
@@ -35,9 +35,7 @@
 ///
 /// A 32-edge grid asks 2 KB and a 128-edge wall 32 KB, a real fraction of a device without PSRAM.
 /// So prepare declines rather than taking it, and the caller computes the address per pixel instead.
-
-namespace mm {
-
+///
 /// The polar address of every pixel on a grid, as tables.
 ///
 /// Precision is chosen at prepare() time rather than by type, so an effect can offer it as a control and switch live, which is what the live-reconfiguration rule requires.
@@ -267,6 +265,5 @@ private:
     bool     ready_ = false;
 };
 
-/// @}
-
 }  // namespace mm
+
