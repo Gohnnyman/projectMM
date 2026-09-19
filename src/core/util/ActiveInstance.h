@@ -2,8 +2,8 @@
 
 namespace mm {
 
-/// The seat itself, declared as a member of the instance that competes for it.
-template <class T>
+/// @defgroup ActiveInstance The one-active-instance election
+/// @{
 /// The one-active-instance election, as a member a module declares and claims.
 ///
 /// Several instances of a type may exist, two microphones say, but exactly one is the one a consumer reaches.
@@ -27,6 +27,7 @@ template <class T>
 /// It is therefore safe in any order of construction, claim, vacate and destruction.
 ///
 /// Copying and moving are deleted, the seat being tied to one instance by reference: relocating it would dangle, exactly as for the sibling scratch buffer.
+template <class T>
 class ActiveInstance {
 public:
     /// Declared as a member of the instance it seats.
@@ -56,4 +57,5 @@ private:
     static inline T* seat_ = nullptr;   // one seat per T
 };
 
+/// @}
 } // namespace mm

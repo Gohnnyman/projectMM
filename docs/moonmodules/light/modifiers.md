@@ -10,6 +10,8 @@ A modifier folds coordinates rather than drawing, so it reaches for very little 
 
 ### Block 💫 · static
 
+<img src="../../assets/light/modifiers/BlockModifier.gif" width="300" alt="Block modifier preview">
+
 Expands a 1D effect into concentric **square rings** (Chebyshev distance from the center): the effect's linear position becomes the ring index, so a gradient effect draws nested squares.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
@@ -39,6 +41,8 @@ Detail: [technical](moxygen/CheckerboardModifier.md)
 
 ### Circle 💫 · static
 
+<img src="../../assets/light/modifiers/CircleModifier.gif" width="300" alt="Circle modifier preview">
+
 Expands a 1D effect into concentric **circular rings** (Euclidean distance from the center): the effect's linear position becomes the radius, so a gradient effect draws nested circles. The circular counterpart to [Block](#block).
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
@@ -51,9 +55,11 @@ Detail: [technical](moxygen/CircleModifier.md)
 
 ### Mirror 💫 · static
 
+<img src="../../assets/light/modifiers/MirrorModifier.gif" width="300" alt="Mirror modifier preview">
+
 Folds the far half of the box back onto the near half per axis, mirroring the image across the box center (top-left quadrant reflected into the others in 2D, near octant into all eight in 3D).
 
-- `mirrorX` / `mirrorY` / `mirrorZ` — mirror across the center on that axis (each default on; enabling an axis the layout doesn't use is a no-op).
+- `mirrorX` / `mirrorY` / `mirrorZ` — mirror across the center on that axis.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
@@ -69,8 +75,8 @@ Detail: [technical](moxygen/MirrorModifier.md)
 
 Tiles the logical image across the box `multiply` times per axis, optionally mirroring alternate tiles (a pure mirror is `multiply = 2, mirror = true`).
 
-- `multiplyX` / `multiplyY` / `multiplyZ` — tile count per axis (1–64; 1 = no tiling).
-- `mirrorX` / `mirrorY` / `mirrorZ` — reflect alternate tiles on that axis (with a count of 2, folds the axis in half — the kaleidoscope mirror).
+- `multiplyX` / `multiplyY` / `multiplyZ` — tiles per axis, `1` meaning none.
+- `mirrorX` / `mirrorY` / `mirrorZ` — reflect alternate tiles on that axis.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
@@ -81,6 +87,8 @@ Detail: [technical](moxygen/MultiplyModifier.md)
 <a id="pinwheel"></a>
 
 ### Pinwheel 💫 · static
+
+<img src="../../assets/light/modifiers/PinwheelModifier.gif" width="300" alt="Pinwheel modifier preview">
 
 Remaps the grid into radial **petals** around the center — the angle to each pixel picks its petal, with an optional swirl (angle sheared by radius), symmetry, and z-twist. Turns a linear or 2D effect into a rotating flower/spokes pattern.
 
@@ -100,6 +108,8 @@ Detail: [technical](moxygen/PinwheelModifier.md)
 
 ### RippleXZ 💫 · static
 
+<img src="../../assets/light/modifiers/RippleXZModifier.gif" width="300" alt="RippleXZ modifier preview">
+
 Collapses an axis to a single plane so a higher-dimensional effect ripples along the remaining axes — used to drive a 1D→2D/3D ripple.
 
 - `shrink` — collapse the selected axis (on = collapse).
@@ -114,6 +124,8 @@ Detail: [technical](moxygen/RippleXZModifier.md)
 <a id="transpose"></a>
 
 ### Transpose 💫 · static
+
+<img src="../../assets/light/modifiers/TransposeModifier.gif" width="300" alt="Transpose modifier preview">
 
 Swaps a pair of box axes (and every coordinate through them), then optionally inverts each axis — rotate/flip the image without redrawing the effect.
 
@@ -149,9 +161,11 @@ Detail: [technical](moxygen/MoonLiveModifier.md) · [what a script transforms](#
 
 ### RandomMap · dynamic
 
+<img src="../../assets/light/modifiers/RandomMapModifier.gif" width="300" alt="RandomMap modifier preview">
+
 Remaps every light to another via a true 1:1 permutation, reshuffling to a fresh permutation on a `bpm` timer — the arrangement scrambles each beat, the content is untouched.
 
-- `bpm` — reshuffles per minute (0–60; 6 ≈ a fresh permutation every 10 s; 0 = frozen).
+- `bpm` — reshuffles per minute, `0` freezing the permutation.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
@@ -163,9 +177,11 @@ Detail: [technical](moxygen/RandomMapModifier.md)
 
 ### Region · static
 
+<img src="../../assets/light/modifiers/RegionModifier.gif" width="300" alt="Region modifier preview">
+
 Carves the layer to a sub-rectangle given as percentages of the physical extent (so it survives a resize); outside the region is dark.
 
-- `startX` / `startY` / `startZ` and `endX` / `endY` / `endZ` — the sub-rectangle bounds as **percentages** of each axis's physical extent (0 = start of axis, 100 = end), so the region survives a resize; values may go negative or past 100 to push the window off-screen.
+- `startX` … `endZ` — the bounds as **percentages** of each axis.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
 
@@ -176,6 +192,8 @@ Detail: [technical](moxygen/RegionModifier.md)
 <a id="rotate"></a>
 
 ### Rotate · dynamic
+
+<img src="../../assets/light/modifiers/RotateModifier.gif" width="300" alt="Rotate modifier preview">
 
 Rotates the 2D image around its center, turning continuously over time (the codebase's transform-matrix reference).
 

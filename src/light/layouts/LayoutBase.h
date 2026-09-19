@@ -1,7 +1,6 @@
 #pragma once
 
-// The single include a layout needs: LayoutBase plus the maths a coordinate placement reaches for.
-// A layout overrides lightCount() and placeLights(), reporting each light's position.
+/// One include writes a layout: the base plus the maths a coordinate placement reaches for.
 
 #include "core/module/MoonModule.h"
 #include "light/util/light_types.h" // lengthType, nrOfLightsType, Coord3D

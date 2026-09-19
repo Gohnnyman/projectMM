@@ -1,6 +1,5 @@
 #pragma once
 
-// Header-only: a small read-only diagnostic whose only platform reach is one seam.
 
 #include "core/module/MoonModule.h"
 #include "core/module/Scheduler.h"   // instance()->moduleCount()/module(i) — the modules to profile
@@ -18,6 +17,7 @@ namespace mm {
 ///
 /// It is the observability foundation for core-affinity work.
 /// You cannot optimise which module runs on which core until you can see it.
+/// Header-only: its only platform reach is one seam.
 /// A fixed System module, wired by code, and read-only.
 ///
 /// @moreinfo

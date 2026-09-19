@@ -83,16 +83,13 @@ namespace mm {
 /// Pixel bytes are copied verbatim, because channel order is the caller's business and the driver's `Correction` has already applied it.
 /// Nothing here reorders them, and nothing here should start to.
 ///
-/// ## Why the largest frame exceeds the MTU
+/// ## Why a row packet carries 497 pixels
 ///
-/// The largest frame is 1512 bytes, above the 1500-byte Ethernet MTU on purpose.
-/// These are raw layer-2 frames on a dedicated link to dumb receivers, never IP packets a router would fragment.
+/// The largest frame is 1512 bytes measured from the destination MAC, so it includes the 14-byte Ethernet header.
+/// Its payload is 1498 bytes, which sits just inside the standard 1500-byte MTU: 497 pixels is the most that fits, and one more would not.
 ///
-/// FPP packs rows the same way, while Harald Kubota's write-up sends 128 pixels a packet, 391 bytes, which stays inside the MTU.
+/// FPP packs rows the same way, while Harald Kubota's write-up sends 128 pixels a packet instead.
 /// Both work against the cards, and the larger packet is fewer frames for the same wall.
-///
-/// This is worth knowing if a wall ever goes dark behind a switch that will not pass a 1512-byte frame.
-/// Nothing in the path reports that: the card simply never sees a row and its activity LED stays still, which looks exactly like a transmit path that is not running.
 
 // Fixed MACs. The cards filter on the destination, so these are not arbitrary.
 constexpr uint8_t kColorLightDestMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
@@ -113,7 +110,7 @@ constexpr size_t COLORLIGHT_ROW_PREFIX = COLORLIGHT_DATA_OFFSET + COLORLIGHT_ROW
 constexpr uint16_t COLORLIGHT_MAX_PIXELS_PER_PACKET = 497;
 constexpr uint8_t COLORLIGHT_BYTES_PER_PIXEL = 3;
 
-/// The largest frame built, 1512 bytes, deliberately above the 1500-byte MTU.
+/// The largest frame built: 1512 bytes from the destination MAC, a 1498-byte payload inside the MTU.
 constexpr size_t COLORLIGHT_MAX_FRAME =
     COLORLIGHT_ROW_PREFIX + COLORLIGHT_MAX_PIXELS_PER_PACKET * COLORLIGHT_BYTES_PER_PIXEL;  // 1512
 

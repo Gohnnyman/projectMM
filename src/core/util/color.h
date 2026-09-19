@@ -4,12 +4,14 @@
 
 namespace mm {
 
+/// One light's color, the three channels every effect writes.
 struct RGB {
-    uint8_t r, g, b;
+    uint8_t r;   ///< red
+    uint8_t g;   ///< green
+    uint8_t b;   ///< blue
 };
 
-// Integer HSV to RGB conversion. Maps h 0-255 to 6 sectors of 256 steps.
-// h: 0-255 (full hue circle), s: 0-255, v: 0-255
+/// Integer HSV to RGB, the hue circle mapped onto six sectors.
 constexpr RGB hsvToRgb(uint8_t h, uint8_t s, uint8_t v) {
     if (s == 0) return {v, v, v};
 
@@ -18,7 +20,7 @@ constexpr RGB hsvToRgb(uint8_t h, uint8_t s, uint8_t v) {
     uint8_t sector = static_cast<uint8_t>(hue >> 8);    // 0-5
     uint8_t frac = static_cast<uint8_t>(hue & 0xFF);    // 0-255 within sector
 
-    // p = v * (1 - s), q = v * (1 - s*frac), t = v * (1 - s*(1-frac))
+    // The three partial values a sector interpolates between.
     uint8_t p = static_cast<uint8_t>((static_cast<uint16_t>(v) * (255 - s)) >> 8);
     uint8_t q = static_cast<uint8_t>((static_cast<uint16_t>(v) * (255 - ((static_cast<uint16_t>(s) * frac) >> 8))) >> 8);
     uint8_t t = static_cast<uint8_t>((static_cast<uint16_t>(v) * (255 - ((static_cast<uint16_t>(s) * (255 - frac)) >> 8))) >> 8);
@@ -33,9 +35,7 @@ constexpr RGB hsvToRgb(uint8_t h, uint8_t s, uint8_t v) {
     }
 }
 
-// scale8: (val * scale) / 256, with +1 correction so scale8(x, 255) == x. The fundamental
-// channel-scale op (brightness, blend), kept here with the color type it scales. Integer
-// trig (sin8/cos8/atan2_8/dist8) and the rest of the 8-bit math library live in math8.h.
+/// Scale a channel by a fraction, corrected so a full scale returns the value unchanged.
 constexpr uint8_t scale8(uint8_t val, uint8_t scale) {
     return static_cast<uint8_t>(((static_cast<uint16_t>(val) * static_cast<uint16_t>(scale)) + 1 + ((static_cast<uint16_t>(val) * static_cast<uint16_t>(scale)) >> 8)) >> 8);
 }

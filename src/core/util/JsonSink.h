@@ -2,6 +2,7 @@
 
 #include "platform/platform.h"
 
+#include <cmath>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -132,8 +133,10 @@ public:
 
     /// Write one syntactically correct value: @xref{the-number-writer-takes-a-double-and-firmware-must-not-call-it|why firmware uses the typed serializers instead}.
     void writeNumber(double v) {
-        // A whole value renders as an integer, and a genuine fraction compactly.
-        if (v == static_cast<double>(static_cast<long long>(v))) {
+        // JSON has no NaN or infinity, and the cast below is undefined for them.
+        if (!std::isfinite(v)) { append("null"); return; }
+        // A whole value renders as an integer; the range test guards the cast the test itself uses.
+        if (v >= -9.2e18 && v <= 9.2e18 && v == static_cast<double>(static_cast<long long>(v))) {
             appendf("%lld", static_cast<long long>(v));
         } else {
             appendf("%g", v);

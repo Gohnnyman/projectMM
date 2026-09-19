@@ -6,78 +6,74 @@
 #include <cstdio>
 #include <cstring>
 
-// Device-interop plugin seam — how a foreign lighting/IoT system "hooks in" to
-// projectMM's device discovery. DevicesModule owns the device model + the UDP discovery
-// listener and stays domain-neutral; each *plugin* teaches it to recognise one ecosystem
-// (our own projectMM, WLED, later ESPHome / Tasmota / Hue) from a UDP presence broadcast.
-// This is the adapter pattern (cf. the ListSource data-source seam, ModuleFactory's
-// register-by-name): the core is generic, the per-system knowledge lives with its plugin,
-// so a new system is *one new plugin file*, never a core edit.
-//
-// Discovery is PASSIVE UDP: a plugin declares the broadcast port it listens on and
-// classifies a received datagram into a device. This replaces the former mDNS *query*
-// path, which destabilized our own mDNS advertise (a PTR query for a service we also host
-// exhausts the IDF mDNS pool). mDNS is
-// now advertise-only (so the WLED app + Home Assistant find us); discovery never queries.
-//
-// The seam covers the discovery half, with two concrete plugins (projectMM and WLED) that
-// prove it isn't shaped to one system. It is sized to also carry a control half (a per-plugin
-// `command()` that translates "set brightness" into a system's protocol) without reshaping —
-// that's why `DiscoveredDevice` stays plain and the iteration is generic.
+/// @defgroup DevicePlugin The device-interop plugin seam
+/// @{
+/// How a foreign lighting or IoT system hooks into projectMM's device discovery.
+///
+/// @moreinfo
+///
+/// `DevicesModule` owns the device model and the UDP discovery listener and stays domain-neutral, while each plugin teaches it to recognise one ecosystem from a presence broadcast.
+/// That is the adapter pattern, the same shape the list-source seam and the factory's register-by-name use.
+/// The core is generic and the per-system knowledge lives with its plugin, so a new system is one new file rather than a core edit.
+///
+/// ## Discovery is passive
+///
+/// A plugin declares the broadcast port it listens on and classifies a received datagram into a device.
+///
+/// This replaced an mDNS query path, which destabilized our own mDNS advertising: a query for a service we also host exhausts the IDF mDNS pool.
+/// mDNS is now advertise-only, so the WLED app and Home Assistant still find us, and discovery never queries.
+///
+/// ## Sized for a control half it does not yet have
+///
+/// The seam covers the discovery half, with two concrete plugins that prove it is not shaped to one system.
+/// It is sized to also carry a control half, a per-plugin command that translates something like setting brightness into a system's own protocol, without reshaping.
+/// That is why the discovered device stays plain data and the iteration is generic.
+///
+/// ## Why the projectMM plugin is listed first
+///
+/// A projectMM device broadcasts a WLED-valid packet, so the WLED apps list it, stamped with a sentinel in the version field.
+/// Its plugin claims a packet only when that marker is present, and the WLED plugin declines a packet that carries it.
+/// Order gives the more specific plugin its chance first.
 
 namespace mm {
 
-// A device a plugin recognised from a presence packet. Plain data; the IP comes from the
-// datagram source, the plugin fills the kind + name. (A future hub plugin adds a resource
-// list here; the command half adds capability/auth.)
+/// A device a plugin recognized, the address coming from the datagram and the rest from the plugin.
 struct DiscoveredDevice {
-    DevType type = DevType::Generic;
-    char    name[24] = {};
+    DevType type = DevType::Generic;   ///< which ecosystem it belongs to
+    char    name[24] = {};             ///< its display name, truncated to fit
 };
 
-// Copy a discovered name into a DiscoveredDevice, truncating to the display-name field.
-// `%.*s` bounds the read so truncation is explicit and the format-truncation check passes.
+/// Copy a name in, truncating explicitly so the read is bounded.
 inline void setDeviceName(DiscoveredDevice& d, const char* src) {
     std::snprintf(d.name, sizeof(d.name), "%.*s",
                   static_cast<int>(sizeof(d.name) - 1), src ? src : "");
 }
 
-// One interop plugin. Stateless const singleton — no per-device state (that lives in the
-// module's list). A plugin declares the UDP port it listens on and turns a received
-// presence datagram into a device.
+/// One interop plugin: a stateless singleton turning a presence datagram into a device.
 class DevicePlugin {
 public:
+    /// Destroyed through this interface, since the module holds plugins by base pointer.
     virtual ~DevicePlugin() = default;
 
-    // A short label for logs / the UI ("projectMM", "WLED"). Flash-literal lifetime.
+    /// A short label for logs and the UI, with flash-literal lifetime.
     virtual const char* label() const = 0;
 
-    // The UDP port this plugin's ecosystem broadcasts presence on. The bundled plugins
-    // share one port (projectMM + WLED both use 65506), and DevicesModule enforces that
-    // invariant: it binds a single listener to the plugins' common discoveryPort() and
-    // offers every datagram to all of them.
+    /// The UDP port this ecosystem broadcasts presence on, which every bundled plugin shares.
     virtual uint16_t discoveryPort() const = 0;
 
-    // Classify a received datagram (`data`/`len`) from `srcIp`. Returns true and fills
-    // `out` when this plugin owns the packet; false to decline (let another plugin handle
-    // it). Defensive per the robustness contract: a short/garbage datagram → decline,
-    // never read out of bounds, never crash.
+    /// Claim and classify a datagram, or decline it so another plugin may try.
     virtual bool classifyPacket(const uint8_t* data, size_t len, const uint8_t srcIp[4],
                                 DiscoveredDevice& out) const = 0;
 
-    // (reserved) Translate a generic command (set brightness, …) into this system's
-    // protocol and send it. Added when a control consumer exists; not built now.
-    //   virtual bool command(const DiscoveredDevice& dev, const DeviceCommand& cmd) const;
+    // Reserved for the control half: a command translated into this system's own protocol.
 };
 
-// --- projectMM plugin: a peer's WLED-valid presence packet carrying our `MM` marker. ---
-// projectMM broadcasts a WLED-VALID 65506 packet (so WLED apps list us too) stamped with a
-// sentinel in the version field. This plugin claims a packet ONLY if that marker is present
-// — so a peer projectMM device is typed projectMM, and the WledPlugin (below) doesn't also
-// claim it as a generic WLED. Listed first for that priority.
+/// Claims a presence packet that carries the projectMM marker, so a peer is typed as one.
 class MmPlugin : public DevicePlugin {
 public:
+    /// Names this plugin in logs and the UI.
     const char* label() const override { return "projectMM"; }
+    /// The shared presence port.
     uint16_t discoveryPort() const override { return WledPacket::kPort; }
 
     bool classifyPacket(const uint8_t* data, size_t len, const uint8_t /*srcIp*/[4],
@@ -91,10 +87,12 @@ public:
     }
 };
 
-// --- WLED plugin: any valid WLED presence packet WITHOUT our marker. ---------------
+/// Claims any valid WLED presence packet that carries no projectMM marker.
 class WledPlugin : public DevicePlugin {
 public:
+    /// Names this plugin in logs and the UI.
     const char* label() const override { return "WLED"; }
+    /// The shared presence port.
     uint16_t discoveryPort() const override { return WledPacket::kPort; }
 
     bool classifyPacket(const uint8_t* data, size_t len, const uint8_t /*srcIp*/[4],
@@ -109,4 +107,5 @@ public:
     }
 };
 
+/// @}
 }  // namespace mm

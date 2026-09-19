@@ -6,9 +6,12 @@
 
 namespace mm {
 
-/// The ring itself, sized at compile time by its element type and capacity.
-template <typename T, uint32_t N>
-/// The textbook single-producer single-consumer ring, where one thread pushes and one pops, never the same thread for both roles.
+/// @defgroup SpscRing A lock-free ring between two threads
+/// @{
+/// The textbook single-producer single-consumer ring, sized at compile time by its element type and capacity.
+///
+/// At most one producer and at most one consumer may act at a time, which is what the lock-freedom rests on.
+/// One execution context calling push and pop in sequence is fine; two producers, or two consumers, are not.
 ///
 /// The capacity must be a power of two, indices wrapping by masking.
 /// One slot is sacrificed, so a full ring is distinguishable from an empty one without a count.
@@ -23,10 +26,11 @@ template <typename T, uint32_t N>
 /// ## Overflow drops the newest
 ///
 /// A push accepts what fits and reports how much.
-/// Dropping the oldest instead would need the producer to advance the consumer's index, a second writer on it, which breaks the single-writer invariant the lock-freedom rests on.
+/// Dropping the oldest instead would need the producer to advance the consumer's index, a second writer on it, which breaks the single-writer invariant.
 ///
 /// For the audio capture the trade is right anyway.
 /// Overflow happens when the consumer stalls or renders below one block per fill, latency then pinning at the ring depth, and the backlog drains once it catches up.
+template <typename T, uint32_t N>
 class SpscRing {
     static_assert((N & (N - 1)) == 0 && N > 1, "capacity must be a power of two");
 
@@ -67,4 +71,5 @@ private:
     std::atomic<uint32_t> tail_{0};   ///< written only by the consumer
 };
 
+/// @}
 }  // namespace mm

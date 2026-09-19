@@ -97,7 +97,7 @@ def asset_dir_for(type_name: str) -> Path:
 # ---------------------------------------------------------------------------
 MODULES = [
     # Layouts
-    ("GridLayout",          "Layouts",  {}, False),
+    ("GridLayout",          "Layouts",  {}, True),
     # The scripted layout, whose preview is the shape a script places rather than a control
     # panel: it runs `rose.mll`, a rhodonea curve whose petals no compiled layout defines,
     # so the capture shows what a script buys that a C++ class does not.
@@ -139,6 +139,14 @@ MODULES = [
     ("NdiDriver",           "Drivers",  {}, False),
     ("HlsDriver",           "Drivers",  {}, False),
 ]
+
+# A modifier reshapes what an effect draws, so it has nothing to show on an empty Layer: it
+# photographs as a dark panel. Every modifier capture therefore lays this effect down first and
+# removes it again afterwards. Rainbow is the bed because a modifier is only visible as a BREAK in
+# something regular: its smooth gradient fills every light, so a fold, a rotation or a transpose
+# shows as an obvious seam. A noise field fills the panel too but is already irregular, which hides
+# the very transform the card is meant to show.
+BED_EFFECT = "RainbowEffect"
 
 # Container types that exist in the pipeline but are not added via REST
 CONTAINERS = ["Layouts", "Effects", "Drivers"]
@@ -420,6 +428,58 @@ def prepare_pipeline(host: str, drop_modifiers: bool, grid: int | None) -> None:
             ok_h = set_control(host, name, "height", grid)
             if ok_w and ok_h:
                 print(f"  pipeline: grid {name!r} -> {grid}x{grid}")
+
+
+def displace_default_layout(host: str) -> dict | None:
+    """Take the existing layout out of the pipeline and return what it takes to put it back.
+
+    Two layouts in the pipeline share one set of lights, so the boot GridLayout would overlap
+    whichever layout is being photographed. It is removed for the shot and rebuilt afterwards
+    from this snapshot, controls and all, so a capture run leaves the pipeline as it found it.
+    Returns None when there is nothing to displace, which is also what a failure returns: the
+    capture is still worth taking, and the restore then has nothing to undo.
+    """
+    try:
+        sr = _get(f"http://{host}/api/state", timeout=5)
+        if not sr.ok:
+            return None
+
+        def find(ms):
+            for m in ms:
+                if m.get("role") == "layout":
+                    return m
+                hit = find(m.get("children", []))
+                if hit:
+                    return hit
+            return None
+
+        cur = find(sr.json().get("modules", []))
+        if not cur:
+            return None
+        # The NAME as well as the type: the boot pipeline calls its grid "Grid", and coming back
+        # as "GridLayout" would leave the pipeline subtly different from the one found.
+        snap = {"type": cur.get("type", ""), "name": cur.get("name", ""),
+                "controls": {c.get("name"): c.get("value") for c in cur.get("controls", [])}}
+        if not delete_module(host, cur.get("name", "")):
+            return None
+        return snap
+    except Exception as e:
+        print(f"  displace-layout failed: {e} ", end="", flush=True)
+        return None
+
+
+def restore_default_layout(host: str, snap: dict) -> None:
+    """Put back what displace_default_layout took, controls and all."""
+    try:
+        name = add_module(host, (snap.get("name") or snap["type"])[:16], snap["type"],
+                          "Layouts", {})
+        if not name:
+            print(f"  restore-layout: re-adding {snap['type']} failed ", end="", flush=True)
+            return
+        for ctrl, value in snap.get("controls", {}).items():
+            set_control(host, name, ctrl, value)
+    except Exception as e:
+        print(f"  restore-layout failed: {e} ", end="", flush=True)
 
 
 def get_types(host: str) -> set[str]:
@@ -793,17 +853,21 @@ def main() -> int:
         offered = set(server_types) if server_types else None
         uncaptured = sorted(
             t for t in source_registered_types()
-            if ("Effect" in t or "Modifier" in t) and t not in listed
+            if ("Effect" in t or "Modifier" in t or "Layout" in t) and t not in listed
+            # A container is not a capture subject: "Layouts" and "Effects" hold the modules
+            # rather than being one, and each has its own card shot by the CONTAINERS loop.
+            and t not in CONTAINERS
             and (offered is None or t in offered))
         if uncaptured and args.all_registered:
-            # Capture them anyway: an effect goes on a Layer, a modifier on a Layer, both want a
-            # GIF. The hand-kept list stays for the ones that need special props or a parent that
-            # is not a Layer; everything else needs no entry at all.
-            MODULES.extend((t, "Layer", {}, True) for t in uncaptured)
-            print(f"  + {len(uncaptured)} registered effect/modifier(s) added from the types "
-                  f"registered in src/main.cpp (--all-registered)")
+            # Capture them anyway: an effect and a modifier go on the Layer, a layout goes under
+            # Layouts, and all three want a GIF. The hand-kept list stays for the ones that need
+            # special props; everything else needs no entry at all.
+            MODULES.extend((t, "Layouts" if "Layout" in t else "Layer", {}, True)
+                           for t in uncaptured)
+            print(f"  + {len(uncaptured)} registered effect/modifier/layout(s) added from the "
+                  f"types registered in src/main.cpp (--all-registered)")
         elif uncaptured:
-            print(f"  ⚠️  {len(uncaptured)} registered effect/modifier(s) are NOT in this "
+            print(f"  ⚠️  {len(uncaptured)} registered effect/modifier/layout(s) are NOT in this "
                   f"script's MODULES list, so they get no screenshot: {', '.join(uncaptured)}")
             print("      Run with --all-registered to capture them, or add an entry to MODULES "
                   "if one needs special props.")
@@ -866,6 +930,10 @@ def main() -> int:
         page = browser.new_page(viewport={"width": 1280, "height": 900})
 
         added_ids: list[str] = []
+        # The layout the capture pushed aside, restored once the orphan sweep below has run:
+        # the sweep deletes by TYPE PREFIX, and a restored GridLayout matches one, so putting
+        # it back any earlier only has it removed again as if it were an orphan.
+        displaced_layout: dict | None = None
 
         try:
             # --- Full-page UI overview screenshot --- (needs projectMM)
@@ -984,11 +1052,33 @@ def main() -> int:
                 req_id = type_name[:16]
                 print(f"  {type_name} …", end=" ", flush=True)
 
+                # The bed effect, removed again below, so the pipeline holds exactly one effect
+                # and one subject while the camera is open. A modifier reshapes what an effect
+                # draws and a layout says where its lights sit, so neither has anything to show
+                # on its own: both photograph as a dark panel without a lit effect under them.
+                bed_name = None
+                if need_gif and (type_name.endswith("Modifier") or type_name.endswith("Layout")):
+                    bed_name = add_module(args.host, BED_EFFECT[:16], BED_EFFECT,
+                                          parents.get("Layer"), {})
+                    if bed_name:
+                        added_ids.append(bed_name)
+                        time.sleep(0.5)
+                    else:
+                        print("bed-failed ", end="", flush=True)
+
+                # A second layout would fight the boot GridLayout for the same lights, so the
+                # default steps aside for the duration and is restored once the shot is taken.
+                if type_name.endswith("Layout") and displaced_layout is None:
+                    displaced_layout = displace_default_layout(args.host)
+
                 actual_name = add_module(args.host, req_id, type_name,
                                          parent_id, extra_props)
                 if not actual_name:
                     print("add failed")
                     failed.append((type_name, "add_module failed"))
+                    if bed_name:
+                        delete_module(args.host, bed_name)
+                        added_ids.remove(bed_name)
                     continue
 
                 added_ids.append(actual_name)
@@ -1010,6 +1100,9 @@ def main() -> int:
                             failed.append((type_name, f"script upload failed: {value}"))
                             delete_module(args.host, actual_name)
                             added_ids.remove(actual_name)
+                            if bed_name:
+                                delete_module(args.host, bed_name)
+                                added_ids.remove(bed_name)
                             pushed = False
                             break
                         if not set_control(args.host, actual_name, ctrl, value):
@@ -1042,6 +1135,9 @@ def main() -> int:
                 print(f"→ {asset_dir_for(type_name).relative_to(ROOT)}/")
                 delete_module(args.host, actual_name)
                 added_ids.remove(actual_name)
+                if bed_name:
+                    delete_module(args.host, bed_name)
+                    added_ids.remove(bed_name)
                 time.sleep(0.5)
 
         except _ExtrasOnlyDone:
@@ -1076,6 +1172,10 @@ def main() -> int:
                         _sweep(sr.json().get("modules", []))
                 except Exception as e:
                     print(f"  final-sweep on {args.host} failed: {e}")
+                # Last, so the sweep above cannot take it straight back out.
+                if displaced_layout:
+                    restore_default_layout(args.host, displaced_layout)
+                    print(f"  pipeline: restored {displaced_layout['type']}")
             browser.close()
 
     print(f"\n{'─'*50}")

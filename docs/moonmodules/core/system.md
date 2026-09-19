@@ -14,7 +14,7 @@ The device's identity and vitals — name (behind mDNS `<name>.local`, the SoftA
 
 - `deviceName` — the identity behind mDNS, the SoftAP SSID and the DHCP hostname.
 - `deviceModel` — the board model (drives the installer catalog entry).
-- `expertMode` — reveals advanced tuning/diagnostic controls (marked 🔧) across the UI; off by default.
+- `expertMode` — reveals advanced controls (marked 🔧) across the UI; off by default.
 - `logLevel` — serial verbosity, defaulting to Warn. The first 60 s always logs at Info.
 - read-only vitals — `uptime`, `fps`, `heap`, `psram`, `flash`, `chip`, and per-module footprint.
 
@@ -61,7 +61,7 @@ Discovers other projectMM devices on the LAN and lists them, persisting the last
 
 <img src="../../assets/core/DevicesModule.png" width="300" alt="Devices module — discovered LAN devices">
 
-- `devices` — a List control of discovered devices; each row expands to a detail panel. Persistable.
+- `devices` — a List of discovered devices; each row expands to a detail panel. Persistable.
 - `wledCompatible` — also announce on WLED's broadcast address, off by default.
 
 WLED apps browse on broadcast, so a device appears in them only with this on. Off is the better neighbour, since a broadcast wakes every device on the LAN to parse a packet none of them want. Presence always goes to the projectMM group regardless, so peers find each other either way. See [multicast and IGMP snooping](../../explanation/architecture/moonlight.md#multicast-and-igmp-snooping).
@@ -132,7 +132,7 @@ One opt-in report about this install, sent once per install or upgrade, so devel
 
 - `consent` — a checkbox, off by default. Nothing is sent and no identifier computed while off.
 - read-only: `version` and `reportedVersion`, which differ exactly when a report is due.
-- `send update` — a button that reports again now, for a setup that changed without a version change.
+- `send update` — reports again now, for a setup that changed without a version change.
 
 The two versions differing is what makes an upgrade send one report and a reboot send nothing. The button replaces this install's row rather than adding one.
 
@@ -241,10 +241,10 @@ A grid of preset pads, a row of rotary encoders above them, a row of on/off swit
 
 <img src="../../assets/core/ControlModule.png" width="300" alt="Control module surface: encoders, preset pads, faders">
 
-- `presets` — the pad grid (8×8). One pad per preset file; click to apply, right-click (or long-press) to name it, pick which single subtree it captures, save or delete. Drag a pad to rearrange the surface.
-- `switch1` … `switch8` — the top row of on/off switches, for a target a fader cannot express (a fader says `on` only as 0 or 255, which is a switch pretending to be a slider). `switch1` drives `Drivers.on`, the master the whole rig honours; the rest are unassigned until bound.
-- `encoder1` … `encoder8` — rotary encoders. Drag or scroll to turn; right-click shows what each drives.
-- `fader1` … `fader8` — faders. `fader1` drives `Drivers.brightness`; the rest are unassigned until bound.
+- `presets` — one pad per preset file. Click applies, right-click names, drag rearranges.
+- `switch1` … `switch8` — the switch row. `switch1` drives `Drivers.on`, the rest unbound.
+- `encoder1` … `encoder8` — rotary encoders. Drag or scroll to turn, right-click to see the binding.
+- `fader1` … `fader8` — faders. `fader1` drives `Drivers.brightness`, the rest unbound.
 
 Detail: [technical](moxygen/ControlModule.md)
 
@@ -254,7 +254,9 @@ Detail: [technical](moxygen/ControlModule.md)
 
 ### Filesystem
 
-The persistence **engine**: writes control values to `/.config/*.json` and restores them on boot, overlaying loaded values through each control's pointer during `defineControls()`. A non-UI module, so it renders no card of its own; its "last saved" status is surfaced by the File Manager.
+<img src="../../assets/core/FilesystemModule.png" width="300" alt="Filesystem module controls">
+
+The persistence **engine**: writes control values to `/.config/*.json` and restores them on boot, overlaying loaded values through each control's pointer during `defineControls()`. The File Manager browses the stored files.
 
 Calling `defineControls()` again at runtime, when a Select changes mode, clears and rebuilds the set, so only the controls relevant to the current mode show. That is how a conditional `hidden` flag re-evaluates, and how a config change applies live with no reboot.
 
@@ -306,7 +308,7 @@ A preset captures **exactly one** top-level subtree, recorded in the file:
 
 Each captured subtree is exactly the bytes the persistence engine already writes for that module, namespaced under a `<TypeName>.` key prefix. Save and restore therefore reuse the engine that reconciles a tree against JSON ([`saveSubtreeTo` / `applySubtree`](moxygen/FilesystemModule.md)) rather than a second serializer that could drift from it.
 
-One subtree per preset is the whole model: a preset is *a look*, or *a geometry*, or *a hardware setup*, or *a service configuration. Never a combination. A `Effects` preset is a look, and applies to a board with completely different hardware; a `Drivers` preset carries pin maps and is device-specific. Choosing the role is a single radio button when saving, and the pad's color says which role it holds.
+One subtree per preset is the whole model: a preset is *a look*, or *a geometry*, or *a hardware setup*, or *a service configuration*. Never a combination. An `Effects` preset is a look, and applies to a board with completely different hardware; a `Drivers` preset carries pin maps and is device-specific. Choosing the role is a single radio button when saving, and the pad's color says which role it holds.
 
 A preset naming a subtree this build does not have is refused with a reason rather than partially applied, and a file written by an older build that names several subtrees is listed but not applied, so it can be seen and deleted rather than silently vanishing. A malformed file leaves the live tree untouched.
 

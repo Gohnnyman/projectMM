@@ -17,6 +17,7 @@ namespace mm {
 ///
 /// `clearFirst` clears the destination before writing, which the first and bottom layer of a composite does.
 /// That is what keeps physical cells with no source, such as a sparse layout's lattice gaps, black.
+/// It applies on the mapped path only: the identity path writes every byte it covers, so it has no unwritten cell to clear.
 /// Later layers pass false and blend onto the frame accumulated below.
 /// A single layer passes `Overwrite` at full opacity with a clear, which takes the exact fast path this had before composition existed.
 ///

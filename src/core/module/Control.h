@@ -5,9 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 
-// The highest valid GPIO, which the build overrides per chip. The fallback is the widest
-// current ceiling, so it never under-clamps a real board and needs no platform include.
-#ifndef MM_MAX_GPIO
+#ifndef MM_MAX_GPIO   // the highest valid GPIO, overridden per chip; the fallback is the widest
 #define MM_MAX_GPIO 63
 #endif
 

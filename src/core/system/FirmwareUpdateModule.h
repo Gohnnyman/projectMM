@@ -8,11 +8,19 @@
 #include <cstdio>
 #include <cstring>
 
+/// @defgroup FirmwareUpdateModule Installing a firmware image
+/// @{
+/// The install's live progress, shared by every path that can start one.
+///
+/// @moreinfo
+///
+/// The status and the byte counters are inline globals rather than module state.
+/// The flash route and the platform's own task both write them, and both must see one instance.
+/// A module reading them reports the same install a socket handler started.
+
 namespace mm {
 
-// Shared with the flash route and the platform task, and inline so every translation
-// unit sees one instance rather than its own copy.
-inline char     g_otaStatus[64]     = "idle";   ///< the phase the install is in
+inline char     g_otaStatus[64]     = "idle";   ///< the phase the install is in, shared by every unit
 inline uint32_t g_otaBytesRead      = 0;        ///< how much has been written
 inline uint32_t g_otaBytesTotal     = 0;        ///< the image size, zero until it is known
 
@@ -193,4 +201,5 @@ private:
     bool     wasInstallingMoonBase_ = false;   ///< edge-detects the end of a MoonBase install
 };
 
+/// @}
 } // namespace mm

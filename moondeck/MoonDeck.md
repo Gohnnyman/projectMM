@@ -173,14 +173,16 @@ Reads the pages the docs build renders as card tables and reports, per card:
 - a details table past 4 columns, or a cell past 300 characters
 - any link in the second column that is not Tests, API or Details
 
-And per header, over every `.h` under `HEADER_ROOT` (`src/`) except the vendored paths:
+And per file, over every `.h` and `.cpp` under `src/`, `test/`, `esp32/main`, `moonbase/main` and `moondeck/moonlive`, excluding the two vendored trees and the bundled test framework:
 
 - a class comment past 10 lines, or any `## ` section of its `@moreinfo` appendix past 10
 - a member comment past one line: a deep dive goes after `@moreinfo`
 - one sentence in a comment past 30 words
 - a public function or variable with no `///` at all
 
-`--report` writes [docs/reference/metrics/docgen.md](../docs/reference/metrics/docgen.md), the tracked state of the sweep: totals per rule and per page, then every finding. Current state only, so its git history is the trend, the same shape repo-health.md uses.
+**A finding in a file that generates a page is an error; one in an implementation file is a warning.** A header and a catalog page are published, so a defect there ships and fails the gate. A `.cpp` publishes nothing: its comments are a note to the next reader, worth fixing without stopping a commit. Both are counted and both are reported. The split stages the sweep rather than ranking the two kinds of comment, so it goes and everything blocks once the warning column reaches zero.
+
+Every run writes [docs/reference/metrics/docgen.md](../docs/reference/metrics/docgen.md), the tracked state of the sweep: errors and warnings per rule and per page, then the files ranked within each area. Current state only, so its git history is the trend, the same shape repo-health.md uses. The file is the artifact to read, because stdout scrolls away and truncates; `--noreport` suppresses the write for a caller that only wants the exit code.
 
 **There is no tolerated list.** The limits are the limits, and the check is red until the tree meets them. A grandfather list was tried and removed: while one exists, the cheapest way to make the check green is to add to it, which is how the comment budget eroded in the first place.
 

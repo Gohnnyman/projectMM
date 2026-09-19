@@ -5,30 +5,56 @@
 #include <cmath>     // std::lround: correct float-to-byte rounding
 #include <cstring>
 
-// OSC 1.0 wire format: the one place the layout lives (the ArtNetPacket.h /
-// WLEDAudioSyncPacket.h convention: constants plus an inline parse, pinned by a golden byte
-// vector so we cannot drift from the spec). OscModule receives with it; nothing sends yet.
-//
-// A message is three parts, each padded to a 4-byte boundary, everything BIG-endian:
-//
-//   address pattern   OSC-string starting '/', NUL-terminated, then 0-3 NULs to reach a multiple of 4
-//   type tag string   OSC-string starting ',', one character per argument
-//   arguments         in tag order, each 32-bit aligned
-//
-// Type tags we read: 'i' int32, 'f' float32. The spec also has 's' string and 'b' blob, plus the
-// no-payload 'T'/'F'/'N'/'I'; a control value is a number, so the rest are skipped rather than
-// rejected (a controller that appends a label must not make the whole message unusable).
-//
-// PARSING IS THE SECURITY SURFACE: this reads an unauthenticated datagram off the LAN, so every
-// read is length-checked against the buffer end and nothing is allocated. A malformed packet
-// returns false; it never reads past `len`.
-//
-// Bundles ("#bundle" instead of an address) are recognized and rejected: controllers send plain
-// messages, and a bundle is a timed batch we have no use for yet (see the plan's Not doing).
+/// @defgroup OscPacket The OSC 1.0 wire format
+/// @{
+/// The one place the layout lives, with the constants and an inline parse.
+///
+/// @moreinfo
+///
+/// This follows the same convention the Art-Net and audio-sync packets do, pinned by a golden byte vector so it cannot drift from the spec.
+/// The OSC module receives with it, and nothing sends yet.
+///
+/// ## The message layout
+///
+/// A message is three parts, each padded to a four-byte boundary, everything big-endian.
+///
+/// | Part | What it holds |
+/// |------|---------------|
+/// | address pattern | a string starting with a slash, NUL-terminated, then padded to a multiple of four |
+/// | type tag string | a string starting with a comma, one character per argument |
+/// | arguments | in tag order, each aligned to four bytes |
+///
+/// Two type tags are read, a 32-bit integer and a 32-bit float.
+/// The spec also has strings, blobs and four tags carrying no payload at all; a control value is a number, so the rest are skipped rather than rejected.
+/// A controller that appends a label must not make the whole message unusable.
+///
+/// ## What each value form means
+///
+/// Applications overwhelmingly send a float between zero and one, while hardware bridges usually send an integer in the target's own range.
+/// Both are accepted and clamped rather than rejected.
+/// A controller sending a narrower range must not appear dead, and a float slightly past one is a rounding artifact rather than an error.
+///
+/// The boolean reading is separate from the byte one, because scaling to a byte rounds a small float to zero.
+/// A tiny value is not off; it is a controller sending a range where a switch wanted a flag.
+///
+/// The encoder is deliberately the only one, and emits a float: every value we send is a number, and that is what applications expect.
+/// The parser accepts an integer too, because bridges send those, but nothing forces us to emit one.
+///
+/// ## Parsing is the security surface
+///
+/// This reads an unauthenticated datagram off the LAN, so every read is length-checked against the buffer end and nothing is allocated.
+/// A malformed packet returns false and never reads past the length it was given.
+///
+/// Bundles are recognised and rejected: controllers send plain messages, and a bundle is a timed batch we have no use for yet.
+///
+/// One guard needs naming. A padded string length overshoots whenever the terminator sits in the last few bytes of the buffer, so it must be tested against what remains as well as against zero.
+/// Subtracting an overshoot from an unsigned remaining count wraps it to a huge number.
+/// Every later size guard then passes, and the next argument is read off the end of the datagram.
 
 namespace mm::osc {
 
-inline constexpr uint16_t kDefaultPort = 9000;   // the de-facto OSC receive port (TouchOSC's default)
+/// The de-facto OSC receive port.
+inline constexpr uint16_t kDefaultPort = 9000;
 
 /// One parsed message: the address, and the first numeric argument as both forms.
 struct Message {
@@ -56,20 +82,14 @@ inline float beFloat32(const uint8_t* p) {
     return f;
 }
 
-/// Length of the NUL-terminated string at `p`, including its padding, or 0 if it is not
-/// terminated within the buffer. 0 is the failure signal: a valid OSC-string is never empty,
-/// since it carries at least the leading '/' or ','.
+/// The padded length of the string at `p`, or 0 when it is not terminated inside the buffer.
 inline size_t stringLen(const uint8_t* p, size_t avail) {
     for (size_t k = 0; k < avail; k++)
         if (p[k] == '\0') return pad4(k + 1);
     return 0;   // ran off the end without a terminator
 }
 
-/// Parse one OSC message. Returns false for anything we cannot use, having read nothing past
-/// `len`: a bundle, a truncated packet, a missing or malformed type tag, or an address that is
-/// not NUL-terminated inside the buffer.
-///
-/// `out.address` points into `pkt`, so it is valid only while that buffer is.
+/// Parse one message, false for anything unusable, having read nothing past `len`.
 inline bool parse(const uint8_t* pkt, size_t len, Message& out) {
     if (!pkt || len < 8) return false;                    // shorter than the smallest valid message
     if (pkt[0] == '#') return false;                      // "#bundle": not handled, see the header
@@ -88,8 +108,7 @@ inline bool parse(const uint8_t* pkt, size_t len, Message& out) {
     const uint8_t* arg = tags + tagsLen;
     size_t argAvail = (tagsLen < tagsAvail) ? tagsAvail - tagsLen : 0;
 
-    // Walk the tags to the first numeric one, stepping over the sizes of those we skip. A message
-    // with no numeric argument is still valid (a bare /mm/pad/3 press), so hasValue stays false.
+    // A message with no numeric argument is still valid, so the value flag simply stays false.
     for (size_t t = 1; tags[t] != '\0' && t < tagsLen; t++) {
         switch (tags[t]) {
             case 'i':
@@ -107,11 +126,7 @@ inline bool parse(const uint8_t* pkt, size_t len, Message& out) {
             // Skipped types: step over their payload and keep looking for a number.
             case 's': {
                 const size_t n = stringLen(arg, argAvail);
-                // `> argAvail` as well as `== 0`: stringLen returns the PADDED length, which
-                // overshoots whenever the NUL sits in the last 1-3 bytes of the buffer (avail 3,
-                // NUL at 2, pad4(3) = 4). Subtracting that from a size_t wraps argAvail to a huge
-                // number, every later `argAvail < 4` guard then passes, and the next numeric
-                // argument is read off the end of the datagram. One malformed packet on the LAN.
+                // Both tests matter: a padded length can exceed what is left. See the appendix.
                 if (n == 0 || n > argAvail) return false;
                 arg += n; argAvail -= n;
                 break;
@@ -138,12 +153,7 @@ inline bool parse(const uint8_t* pkt, size_t len, Message& out) {
     return true;   // a valid message that simply carries no number
 }
 
-/// Write one OSC message with a single float argument into `out`, returning its length, or 0 when
-/// it would not fit. The mirror image of parse(), and deliberately the only encoder: every value
-/// projectMM sends is a number, and a float in 0..1 is what OSC apps expect (parse() accepts an int
-/// too, because hardware bridges send those, but nothing forces us to emit one).
-///
-/// Same three padded parts as parse() reads: address, type tags, argument.
+/// Write one message carrying a single float, returning its length or 0 when it will not fit.
 inline size_t encodeFloat(uint8_t* out, size_t cap, const char* address, float value) {
     if (!out || !address) return 0;
     const size_t addrLen = std::strlen(address);
@@ -169,20 +179,13 @@ inline size_t encodeFloat(uint8_t* out, size_t cap, const char* address, float v
     return total;
 }
 
-/// The 0..255 control value a message means.
-///
-/// OSC apps overwhelmingly send a float in 0..1 (TouchOSC, Resolume); hardware bridges usually
-/// send an int in the target's own range. Both are accepted, and CLAMPED rather than rejected: a
-/// controller sending 0..127 must not appear dead, and a float slightly past 1.0 is a rounding
-/// artifact, not an error.
-/// Is this message ON? For a BOOLEAN destination, where any nonzero means on. Separate from
-/// toByte because scaling to a byte rounds a small float to zero: 0.001 is not off, it is a
-/// controller that sends a range where a switch wanted a flag.
+/// Whether this message means on, for a boolean destination where any nonzero value does.
 inline bool isTruthy(const Message& m) {
     if (!m.hasValue) return false;
     return m.wasFloat ? (m.f != 0.0f) : (m.i != 0);
 }
 
+/// The control value a message means, on the byte range.
 inline uint8_t toByte(const Message& m) {
     if (!m.hasValue) return 0;
     if (m.wasFloat) {
@@ -192,4 +195,5 @@ inline uint8_t toByte(const Message& m) {
     return static_cast<uint8_t>(m.i <= 0 ? 0 : (m.i >= 255 ? 255 : m.i));
 }
 
+/// @}
 } // namespace mm::osc

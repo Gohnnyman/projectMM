@@ -2,7 +2,7 @@
 
 The shared building blocks under `src/core/util/`: small, domain-neutral pieces every module leans on. Nothing here renders a card or owns a control. Each row links to its generated technical page, built from the header's own `///` comments.
 
-The rule that puts a header here rather than in the light domain is the dependency direction. A light driver's `pins` control and the core pin-ownership map read the same comma-separated list, so the parser lives in core and the dependency runs domain to core, never the reverse.
+The rule that puts a header here rather than in the light domain is the dependency direction. A light driver's `pins` control and the core pin-ownership map read the same comma-separated list, so the parser lives in core. The dependency then runs domain to core, never the reverse.
 
 A row without a link carries free functions and constants rather than a class, which the generator renders no page for. The header itself is the reference until that is fixed.
 
@@ -42,6 +42,7 @@ A flat parser returns zero for a missing key, which is indistinguishable from a 
 | [`FirmwareImage`](moxygen/FirmwareImage.md) | Reads an image's header without the vendor framework. The layout is a fixed on-disk format, so the same bytes parse on a device and in a test. |
 | [`PinList`](moxygen/util_PinList.md) · [`IpList`](moxygen/IpList.md) | The two list parsers a board configuration needs: a pin list and a destination list, both typed by a human into one text control. |
 | [`sha256`](moxygen/sha256.md) · [`crc`](moxygen/crc.md) | A cryptographic digest for update verification and identity, and a cheap checksum used as a fingerprint of a block of state. |
+| [`Sha1`](moxygen/Sha1.md) · [`Base64`](moxygen/Base64.md) | The two codecs the WebSocket handshake needs, the digest that standard mandates and the encoding that carries it. |
 
 ## Crossing the domain boundary
 

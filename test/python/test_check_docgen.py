@@ -913,12 +913,14 @@ def test_a_defgroup_is_asked_for_only_where_a_lone_class_already_leads():
     """Two lead shapes generate a page, and which is right follows from what the header holds. A
     lone class IS its page, so a group around it is a second lead saying the same thing twice.
 
-    Counting what is TOP-LEVEL is the whole rule, and four shapes each defeated a naive count, so
-    each is pinned: a `template` line above a class belongs to that class rather than being a free
-    declaration (read otherwise, every single-class template header was permanently exempt, which
-    is the rule's own headline case); an Allman brace belongs to the declaration above it; a brace
-    inside a string literal is text and must not raise the depth; and one line may open two
-    namespaces. A header of free declarations keeps its group, and a nested type never makes a
+    Counting what is TOP-LEVEL is the whole rule, and several shapes defeated a naive count, so
+    each is pinned: an Allman brace belongs to the declaration above it; a brace inside a string
+    literal is text and must not raise the depth; and one line may open two namespaces.
+
+    A TEMPLATE class is exempt outright. Its `template <...>` line sits between the comment and
+    the class, so the comment cannot attach to the class at all and a group is the only lead
+    shape that reaches the page. Reported, the rule would push such a header back into the shape
+    that loses its documentation. A header of free declarations keeps its group, and a nested type never makes a
     header a multi-type one."""
     import check_docgen
     def whys(src):
@@ -927,8 +929,8 @@ def test_a_defgroup_is_asked_for_only_where_a_lone_class_already_leads():
     MEM = "public:\n    /// Go.\n    void go();\n};\n/// @}\n"
 
     assert whys(G + "class Thing {\n" + MEM), "a lone class needs no group"
-    assert whys(G + "template <class T>\nclass Thing {\n" + MEM), \
-        "a template introducing the class is not a free declaration"
+    assert not whys(G + "template <class T>\nclass Thing {\n" + MEM), \
+        "a template class keeps its group: the template line stops a class comment attaching"
     assert whys("namespace mm\n{\n" + G + "class Thing\n{\n" + MEM + "}\n"), \
         "an Allman brace belongs to the declaration above it"
     assert whys("namespace mm { namespace detail {\n" + G + "class Thing {\n" + MEM + "}}\n"), \
@@ -1016,6 +1018,10 @@ def test_an_xref_that_cannot_render_is_reported():
                for w in whys(HEAD + "/// See @xref{no-such-heading|this}.\n" + TAIL)), \
         "a slug naming no heading is dead"
     assert not whys(HEAD + "/// See @xref{a-real-heading|this}.\n" + TAIL)
+    # The label separator may be written escaped, which the generator accepts, so the backslash
+    # lands in the captured anchor and must not be read as part of the slug.
+    assert not whys(HEAD + "/// See @xref{a-real-heading\\|this}.\n" + TAIL), \
+        "an escaped pipe is a valid reference"
 
 
 def test_an_unclosed_group_scope_is_reported():
@@ -1264,7 +1270,10 @@ def test_a_path_outside_the_card_surface_is_bucketed_not_lost():
     import check_docgen
     assert check_docgen._doc_area("src/platform/platform.h") == "platform/index.md"
     assert check_docgen._doc_area("test/unit/core/x.cpp") == "(tests, no card)"
-    assert check_docgen._doc_area("moonbase/main/x.cpp") == "(unassigned)"
+    # A path under no DOC_AREAS prefix at all. `moonbase/main` stood here until it was
+    # assigned to core/system.md, which is the bucket working as intended rather than a
+    # regression: an example that gets a page is replaced, not restored.
+    assert check_docgen._doc_area("tools/nowhere/x.cpp") == "(unassigned)"
 
 
 def test_the_scan_includes_tests():

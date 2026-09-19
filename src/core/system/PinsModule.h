@@ -1,6 +1,5 @@
 #pragma once
 
-// Header-only: a small read-only diagnostic over the live tree and one platform seam.
 
 #include "core/module/MoonModule.h"
 #include "core/module/Scheduler.h"   // instance()->moduleCount()/module(i) — the roots of the tree to walk
@@ -19,6 +18,7 @@ namespace mm {
 ///
 /// It is keyed by physical GPIO, the way an OS device manager or a board template is.
 /// A fixed System module, wired by code, and read-only.
+/// Header-only: a small read-only diagnostic over the live tree and one platform seam.
 ///
 /// @moreinfo
 ///

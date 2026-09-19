@@ -1,7 +1,6 @@
 #pragma once
 
-// The single include a modifier needs: ModifierBase plus the maths a coordinate fold reaches for.
-// A modifier overrides one or more of modifyLogicalSize, modifyLogical and modifyLive.
+/// One include writes a modifier: the base plus the maths a coordinate fold reaches for.
 
 #include "core/module/MoonModule.h"
 #include "light/util/light_types.h" // lengthType, nrOfLightsType, Dim
