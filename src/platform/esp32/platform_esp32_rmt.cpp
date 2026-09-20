@@ -632,7 +632,7 @@ RmtLoopbackResult ws2812LoopbackRide(uint16_t rxGpio, const uint8_t* sent, uint8
 
 RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio) {
     RmtLoopbackResult r;
-    r.sent[0] = 0xA5; r.sent[1] = 0x00; r.sent[2] = 0xFF;  // recognisable pattern
+    r.sent[0] = 0xA5; r.sent[1] = 0x00; r.sent[2] = 0xFF;  // recognizable pattern
 
     r.jumperDetected = detail::loopbackJumperOk(txGpio, rxGpio);
     if (!r.jumperDetected) return r;   // no point running RMT through a dead wire

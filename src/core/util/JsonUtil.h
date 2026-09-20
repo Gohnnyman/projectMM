@@ -37,7 +37,7 @@
 ///
 /// Trailing text is deliberately allowed, these values being read out of a document where digits are followed by a comma or a brace, so only the leading characters decide.
 ///
-/// ## The conversion is out of line, unlike its neighbours
+/// ## The conversion is out of line, unlike its neighbors
 ///
 /// As an inline its three checks were duplicated into every caller and cost 1712 bytes of flash on one chip, measured per symbol.
 /// One call instead is free in practice, every user being off the hot path.
@@ -122,7 +122,7 @@ inline bool hasKey(const char* json, const char* key) {
     return std::strstr(json, search) != nullptr;
 }
 
-/// The integer a string starts with, or the fallback: @xref{overflow-needs-both-checks|both range checks} and @xref{the-conversion-is-out-of-line-unlike-its-neighbours|why not inline}.
+/// The integer a string starts with, or the fallback: @xref{overflow-needs-both-checks|both range checks} and @xref{the-conversion-is-out-of-line-unlike-its-neighbors|why not inline}.
 int parseIntStr(const char* s, int fallback = 0);
 
 inline int parseInt(const char* json, const char* key) {

@@ -29,7 +29,7 @@ TEST_CASE("math8: qadd8 / qsub8 saturate, never wrap") {
     CHECK(qsub8(100, 20) == 80);
 }
 
-// nscale8 is the recognisable spelling of scale8 (n/256 channel scale), so nscale8(x,255)==x.
+// nscale8 is the recognizable spelling of scale8 (n/256 channel scale), so nscale8(x,255)==x.
 TEST_CASE("math8: nscale8 scales a byte by n/256") {
     CHECK(nscale8(255, 255) == 255);
     CHECK(nscale8(255, 128) == 128);       // half

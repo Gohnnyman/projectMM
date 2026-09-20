@@ -16,7 +16,7 @@ namespace mm {
 /// A domain-neutral diagnostic showing what runs where: the tasks, and the modules inside each.
 ///
 /// It is the observability foundation for core-affinity work.
-/// You cannot optimise which module runs on which core until you can see it.
+/// You cannot optimize which module runs on which core until you can see it.
 /// Header-only: its only platform reach is one seam.
 /// A fixed System module, wired by code, and read-only.
 ///

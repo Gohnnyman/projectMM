@@ -441,7 +441,7 @@ TEST_CASE("PreviewDriver cancels an in-flight buffered send on rebuild (resize s
     rig.layer.applyState();          // reallocs the producer buffer (the body the send pointed at)
     rig.preview->applyState();       // must cancel the in-flight send
 
-    CHECK(rig.cap.bufferedCanceled == cancelsBefore + 1);   // the stale send was cancelled
+    CHECK(rig.cap.bufferedCanceled == cancelsBefore + 1);   // the stale send was canceled
 }
 
 TEST_CASE("a wedged link never blocks a tick, never closes a client, and resumes when it drains") {

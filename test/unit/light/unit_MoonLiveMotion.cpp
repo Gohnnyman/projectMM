@@ -184,7 +184,7 @@ TEST_CASE("mh-sweep.mle moves the rig and its formations differ") {
 
     // Unison is the reference: one aim for the whole rig.
     for (size_t i = 1; i < unison.size(); i++) CHECK(unison[i] == unison[0]);
-    // Chase delays each head along the sweep, so neighbours differ.
+    // Chase delays each head along the sweep, so neighbors differ.
     CHECK(chase != unison);
     // Cross opposes alternate heads, so it differs from both.
     CHECK(cross != unison);

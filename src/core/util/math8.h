@@ -10,7 +10,7 @@
 ///
 /// @moreinfo
 ///
-/// This is the recognisable surface an embedded or LED developer already knows, under the same names, written fresh against our own architecture.
+/// This is the recognizable surface an embedded or LED developer already knows, under the same names, written fresh against our own architecture.
 /// Prior art is FastLED's lib8tion by Mark Kriegsman: we carry the ideas, the names and the textbook algorithms, and the code is ours.
 ///
 /// It is all integer and table-backed where that pays, with no float and no heap, so it is safe in the render loop.

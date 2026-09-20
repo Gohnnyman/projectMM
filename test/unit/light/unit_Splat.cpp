@@ -48,7 +48,7 @@ TEST_CASE("splat between two pixels splits the light by coverage") {
     CHECK(left == right);        // a halfway point is symmetric
 }
 
-TEST_CASE("splat weights follow the distance to each neighbour") {
+TEST_CASE("splat weights follow the distance to each neighbor") {
     Surface s(8, 8);
     // A quarter of the way from x=2 toward x=3: the nearer pixel gets ~3x the light.
     draw::splat(s.cv, draw::toSub(2) + 64, draw::toSub(4), RGB{240, 0, 0});
@@ -111,7 +111,7 @@ TEST_CASE("splat works on a 1D strand") {
     CHECK(s.at(5, 0) == s.at(6, 0));
 }
 
-TEST_CASE("splat spreads over eight neighbours in a volume") {
+TEST_CASE("splat spreads over eight neighbors in a volume") {
     Surface s(4, 4, 4);
     // Dead center of a 2x2x2 cell block: all eight corners get an equal share.
     draw::splat(s.cv, draw::toSub(1) + 128, draw::toSub(1) + 128, draw::toSub(1) + 128,

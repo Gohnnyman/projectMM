@@ -304,7 +304,7 @@ TEST_CASE("shift encoder: strand N rides the correct shift cycle ('595 MSB-first
 }
 
 // The whole point of the fan-out: strands on DIFFERENT physical pins ride the same shift cycle in parallel (different bus bits), while strands on the SAME pin are serialized across cycles. This is why extra strands are free but the x8 is not.
-TEST_CASE("shift encoder: strands on different pins share a cycle, same pin serialise") {
+TEST_CASE("shift encoder: strands on different pins share a cycle, same pin serialize") {
     uint8_t wire[128 * 3] = {};
     // channels=1. Strand 0 = pin 0 / pos 0; strand 8 = pin 1 / pos 0 → same shift cycle.
     wire[0] = 0xFF;   // strand 0  → pin 0

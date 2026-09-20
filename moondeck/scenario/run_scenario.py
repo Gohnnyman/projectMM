@@ -307,7 +307,7 @@ def main():
 
     if args.update_contract and not args.reason:
         parser.error("--update-contract requires --reason "
-                     "(e.g. --reason 'tightened after Layer optimisation')")
+                     "(e.g. --reason 'tightened after Layer optimization')")
 
     # Missing OR stale: both mean the results would not describe the code on disk.
     _require_fresh_runner()

@@ -45,7 +45,7 @@ TEST_CASE("LightPresets seeds the curated built-ins as locked rows") {
 }
 
 // Option-array hoist (the 1 Hz-push efficiency fix): the 14 channel-role option strings are emitted ONCE per list in optionSets["channelRole"], and each ch<N> select references it via optionsRef, NOT re-inlined per channel per row. A 32-channel fixture × 13 rows would otherwise repeat that array 400+ times in every state push. Pins that the row detail carries optionsRef, never inline options.
-TEST_CASE("LightPresets serialises the channel-role options ONCE, rows reference by optionsRef") {
+TEST_CASE("LightPresets serializes the channel-role options ONCE, rows reference by optionsRef") {
     LightPresetsModule m;
     m.setup();
     m.defineControls();
@@ -65,7 +65,7 @@ TEST_CASE("LightPresets serialises the channel-role options ONCE, rows reference
     // Rows reference the set; they do NOT inline a per-channel options array.
     CHECK(json.find("\"optionsRef\":\"channelRole\"") != std::string::npos);
     CHECK(json.find("\"type\":\"select\",\"value\":") != std::string::npos);   // channel selects present
-    // The role-name array must appear ONCE (the shared set), not once per channel: count "Rotate" (a distinctive role), it should be exactly one occurrence across the whole serialisation.
+    // The role-name array must appear ONCE (the shared set), not once per channel: count "Rotate" (a distinctive role), it should be exactly one occurrence across the whole serialization.
     size_t count = 0, pos = 0;
     while ((pos = json.find("\"Rotate\"", pos)) != std::string::npos) { count++; pos += 8; }
     CHECK(count == 1);   // one shared set, not 13 rows × N channels of inlined options

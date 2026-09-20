@@ -716,7 +716,7 @@ private:
     void syncTxPower() {
         if constexpr (!platform::hasWiFi) return;
         if (txPowerSetting_ == appliedTxPowerSetting_) return;
-        // A genuine no-op, not an optimisation: pushing one here boot-loops a device.
+        // A genuine no-op, not an optimization: pushing one here boot-loops a device.
         if (txPowerSetting_ == 0 && appliedTxPowerSetting_ <= 0) {
             appliedTxPowerSetting_ = 0;   // mark synced so we don't re-check every tick
             return;

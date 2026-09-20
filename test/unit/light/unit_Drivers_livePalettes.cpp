@@ -10,6 +10,7 @@
 #include "doctest.h"
 #include "light/drivers/Drivers.h"
 #include "light/util/Palette.h"
+#include "core/util/JsonSink.h"
 #include "light/moonlive/MoonLiveScriptFile.h"
 #include "platform/platform.h"
 #include "../core/conditional_controls.h"   // mm::test::controlIndex
@@ -17,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <vector>
 
 using namespace mm;
 
@@ -87,6 +89,29 @@ TEST_CASE("editing a factory palette leaves one entry, not two") {
     drv.rebuildControls();      // CLEARS then re-defines, which is what a schema change does
 
     CHECK(paletteMax(drv) == before + 1);   // ONE entry, from two files
+}
+
+TEST_CASE("a quote in a live palette's name is escaped, so the options stay parseable") {
+    // A palette is named by its FILE, and a user names the file. An unescaped name ends the JSON
+    // string early and the control frame it sits in stops parsing, so the UI loses the whole
+    // picker rather than one entry. paletteNames() escaped and paletteOptions() did not, for the
+    // same name from the same source.
+    static const char* const kNames[] = {"unit-a\"b"};
+    static const char* const kTags[] = {"\U0001F3A8"};
+    mm::LivePalettes::set(kNames, kTags, 1);
+
+    // Every built-in with its whole color table, so the dump is tens of kilobytes: a heap buffer
+    // sized past the real thing, so an overflow here means a defect rather than a cap.
+    std::vector<char> buf(1 << 17, 0);
+    JsonSink sink(buf.data(), buf.size());
+    mm::paletteOptions(sink);
+    mm::LivePalettes::clear();
+    REQUIRE(!sink.overflowed());
+
+    // The quote survives ESCAPED, never as a bare one that would close the string.
+    const char* q = std::strstr(buf.data(), "unit-a");
+    REQUIRE(q != nullptr);
+    CHECK(std::strncmp(q + 6, "\\\"", 2) == 0);
 }
 
 TEST_CASE("a palette added while running becomes selectable without a reboot") {

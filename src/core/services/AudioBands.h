@@ -101,7 +101,7 @@ namespace mm {
 /// It also strips the DC offset while converting the samples to floats.
 ///
 /// The band grouping folds the transform's magnitude bins into sixteen log-spaced bands, because pitch is logarithmic and bass needs few bins where treble needs many.
-/// The split is a plain geometric one of equal ratio, the result normalises onto the byte range, and the single loudest bin becomes the dominant peak.
+/// The split is a plain geometric one of equal ratio, the result normalizes onto the byte range, and the single loudest bin becomes the dominant peak.
 
 /// The Hann window's coefficient at sample `i` of `n`.
 inline float hannWindow(size_t i, size_t n) {

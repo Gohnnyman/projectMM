@@ -56,7 +56,7 @@ TEST_CASE("DcBlocker: an audio tone passes through (DC removed, AC kept)") {
         if (biased[i] > hi) hi = biased[i];
     }
     const int32_t swing = hi - lo;
-    // Centred near zero (DC removed): the midpoint is tiny vs the swing.
+    // Centerd near zero (DC removed): the midpoint is tiny vs the swing.
     CHECK(std::abs(lo + hi) < swing / 4);
     // The tone survived: the swing is on the order of the AC amplitude (<<8 slot).
     CHECK(swing > amp);

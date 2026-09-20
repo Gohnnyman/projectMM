@@ -17,7 +17,7 @@
 /// As a plain array it was eight kilobytes of internal memory reserved from boot on every board.
 /// That is a few percent of the pool the network stack and every task stack share.
 /// That included the many boards with no microphone fitted, where nothing ever reads it, and a module that is not used should cost nothing.
-/// Now a board without audio pays only for the pointer, and one with audio allocates on its first analysed frame and keeps it for the process.
+/// Now a board without audio pays only for the pointer, and one with audio allocates on its first analyzed frame and keeps it for the process.
 /// So nothing allocates per frame on the audio path.
 ///
 /// ## The gain from the alternate microphone is a conversion, not a boost

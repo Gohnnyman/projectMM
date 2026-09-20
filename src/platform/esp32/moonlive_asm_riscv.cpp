@@ -167,7 +167,7 @@ void RiscvAssembler::slotAddr(Reg d, uint8_t slot) {
 }
 
 void RiscvAssembler::movImm(Reg d, int32_t imm) {
-    // addi sign-extends a 12-bit immediate, so it alone covers only -2048..2047. For wider constants (a uint16 like 65535) materialise the full value with lui (high 20 bits) + addi (low 12), the hi/lo split, without this, larger Const values truncate. Single addi when the value fits, to keep the common small-constant case one instruction.
+    // addi sign-extends a 12-bit immediate, so it alone covers only -2048..2047. For wider constants (a uint16 like 65535) materialize the full value with lui (high 20 bits) + addi (low 12), the hi/lo split, without this, larger Const values truncate. Single addi when the value fits, to keep the common small-constant case one instruction.
     if (imm >= -2048 && imm <= 2047) {
         emit32(encAddi(xr(d), 0, imm));                    // li = addi rd, x0, imm
         return;

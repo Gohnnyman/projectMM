@@ -22,7 +22,7 @@ namespace mm {
 ///
 /// ## Prior art
 ///
-/// FastLED's gradient palettes, the convention WLED and MoonLight share, so the recognisable names and model are carried.
+/// FastLED's gradient palettes, the convention WLED and MoonLight share, so the recognizable names and model are carried.
 /// The implementation is our own; the gradient data is a public palette set, reformatted.
 struct Palette {
     /// Entries a palette holds, evenly spaced across the wheel.
@@ -99,7 +99,7 @@ inline void fadeToBlackBy(RGB& c, uint8_t amt) {
 /// Gradient-stop definitions in flash ({pos,R,G,B,…}).
 namespace palettes {
 
-/// Gradient definitions, verbatim from MoonLight's palettes.h, with names kept recognisable.
+/// Gradient definitions, verbatim from MoonLight's palettes.h, with names kept recognizable.
 inline constexpr uint8_t kParty[]       = {0,85,0,171, 42,150,0,107, 85,201,0,42, 128,212,32,0, 170,191,98,0, 213,128,160,0, 255,85,212,0};   // FastLED party-colors stops
 inline constexpr uint8_t kForest[]      = {0,0,100,0, 64,34,139,34, 128,0,128,0, 192,107,142,35, 255,0,100,0};
 inline constexpr uint8_t kLava[]        = {0,0,0,0, 46,18,0,0, 96,113,0,0, 108,142,3,1, 119,175,17,1, 146,213,44,2, 174,255,82,4, 188,255,115,4, 202,255,156,4, 218,255,203,4, 234,255,255,4, 244,255,255,71, 255,255,255,255};
@@ -376,6 +376,7 @@ inline void paletteOptions(JsonSink& sink) {
     if (sink.nameIndex() >= 0) {
         const uint8_t i = static_cast<uint8_t>(sink.nameIndex());
         const uint8_t src = LivePalettes::sourceIndex(i);
+        // A RAW name here, not a JSON string: this path fills a char buffer for the display strip (ControlModule::paletteNameAt), so quoting it would put the quotes on the strip.
         if (LivePalettes::isLive(i)) { sink.append(LivePalettes::nameAt(src)); return; }
         if (src < palettes::kCount) sink.append(palettes::kBuiltins[src].name);
         return;
@@ -392,9 +393,10 @@ inline void paletteOptions(JsonSink& sink) {
     // Then the scripted tail, each marked with 🎨 so the list says at a glance which entries are code rather than a fixed gradient.
     for (uint8_t i = 0; i < live; i++) {
         const Palette& p = *Palettes::active();
-        // The name alone.
-        sink.appendf(",{\"name\":\"%s\",\"live\":true,\"tags\":\"%s\",\"colors\":\"",
-                     LivePalettes::nameAt(i), LivePalettes::tagsAt(i));
+        // The escaping writer for the NAME: a script names its palette, and a quote in that name would end the string early and cost the UI the whole control frame.
+        sink.append(",{\"name\":");
+        sink.writeJsonString(LivePalettes::nameAt(i));
+        sink.appendf(",\"live\":true,\"tags\":\"%s\",\"colors\":\"", LivePalettes::tagsAt(i));
         for (uint8_t e = 0; e < Palette::kEntries; e++)
             sink.appendf("%s%02x%02x%02x", e > 0 ? " " : "", p.entry[e].r, p.entry[e].g, p.entry[e].b);
         sink.append("\"}");

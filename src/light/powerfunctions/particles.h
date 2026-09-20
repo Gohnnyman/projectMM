@@ -219,7 +219,7 @@ struct Pool {
             int32_t d2 = px * px + py * py;
             if (d2 < 1) d2 = 1;                       // the near-field clamp
             const int32_t a = strength / d2;
-            // Direction times magnitude, normalised by the distance so diagonal pull is not stronger.
+            // Direction times magnitude, normalized by the distance so diagonal pull is not stronger.
             const int32_t d = static_cast<int32_t>(isqrt(static_cast<uint32_t>(d2)));
             if (d == 0) continue;
             vx[i] += static_cast<draw::pos_t>((px * a) / d);

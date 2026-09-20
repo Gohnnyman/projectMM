@@ -470,7 +470,7 @@ TEST_CASE("particles too far apart do not interact") {
 // Already-separating pairs must be left alone, or a particle that has just bounced gets kicked again and the pair sticks together vibrating.
 TEST_CASE("particles already moving apart are not kicked again") {
     TestPool<4> t;
-    t.pool.spawn(toSub(4), toSub(4), -toSub(1), 0, 200, 0);   // moving away from its neighbour
+    t.pool.spawn(toSub(4), toSub(4), -toSub(1), 0, 200, 0);   // moving away from its neighbor
     t.pool.spawn(toSub(5), toSub(4),  toSub(1), 0, 200, 0);
     const draw::pos_t v0 = t.vx[0], v1 = t.vx[1];
     t.pool.collide(toSub(2), 256);

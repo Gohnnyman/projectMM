@@ -5,7 +5,7 @@
 
 using namespace mm;
 
-// The B#/S# parser turns a rule string into birth/survive neighbour sets. Conway = B3/S23.
+// The B#/S# parser turns a rule string into birth/survive neighbor sets. Conway = B3/S23.
 TEST_CASE("GameOfLife: ruleset parser reads B/S sets") {
     GameOfLifeEffect gol;
     gol.ruleset = 1;                       // "Conway B3/S23"
@@ -45,8 +45,8 @@ TEST_CASE("GameOfLife: a 2x2 block is a stable still life") {
     CHECK_FALSE(gol.isAliveForTest(4, 4, 0));
 }
 
-// Regression: a 3D grid gives a cell up to 26 neighbors (3×3×3 minus self), but the B/S rule tables are sized 9 (single-digit Conway notation, 0..8). A dense 3D neighborhood must not read those tables out of bounds, a count ≥9 is in no single-digit ruleset, so the cell dies / stays dead. This fills a 3×3×3 cube (the center has all 26 neighbors alive) and just steps: the test passing under ASan/bounds-checking is the OOB-read pin; behaviourally the over-crowded center dies (26 ∉ S) and the dense interior doesn't survive.
-TEST_CASE("GameOfLife: a dense 3D neighbourhood never indexes the B/S tables out of bounds") {
+// Regression: a 3D grid gives a cell up to 26 neighbors (3×3×3 minus self), but the B/S rule tables are sized 9 (single-digit Conway notation, 0..8). A dense 3D neighborhood must not read those tables out of bounds, a count ≥9 is in no single-digit ruleset, so the cell dies / stays dead. This fills a 3×3×3 cube (the center has all 26 neighbors alive) and just steps: the test passing under ASan/bounds-checking is the OOB-read pin; behaviorally the over-crowded center dies (26 ∉ S) and the dense interior doesn't survive.
+TEST_CASE("GameOfLife: a dense 3D neighborhood never indexes the B/S tables out of bounds") {
     GameOfLifeEffect gol;
     gol.ruleset = 1;                                  // Conway B3/S23
     REQUIRE(gol.allocateForTest(5, 5, 5));            // a real 3D grid (depth>1 enables the z axis)

@@ -273,7 +273,7 @@ TEST_CASE("print reports a value without changing what the script computes") {
     CHECK(transform(mmScriptAs("modifyLogical", "setXYZ(print(width - 1 - xPos), yPos, zPos);"), 0, 0, 0, 16, 16, 1).x == 15);
 }
 
-// Subtraction is emitted as `a + (b * -1)`, and -1 has to survive into the register. The assemblers materialise a constant with a 16-bit immediate, so a naive -1 becomes 65535 and every subtraction is right only MODULO 256, invisible in a stored byte, and wrong everywhere the full value is used: a bounds-guarded index silently drops the light, and a value handed to a host call is nonsense. Byte-comparison tests cannot see this, so it is checked through print(), which returns the full 32-bit value.
+// Subtraction is emitted as `a + (b * -1)`, and -1 has to survive into the register. The assemblers materialize a constant with a 16-bit immediate, so a naive -1 becomes 65535 and every subtraction is right only MODULO 256, invisible in a stored byte, and wrong everywhere the full value is used: a bounds-guarded index silently drops the light, and a value handed to a host call is nonsense. Byte-comparison tests cannot see this, so it is checked through print(), which returns the full 32-bit value.
 TEST_CASE("a subtraction produces the whole value, not just its low byte") {
     // `a - b` compiles to `a + (b * -1)`, so -1 has to reach the register intact. The assemblers build a constant from a 16-bit immediate, and a naive -1 lands as 65535, which leaves every subtraction correct only MODULO 256. A stored color byte cannot show that (the low byte is right either way), so this checks the value THROUGH print(), which returns the full 32 bits and is therefore the only observer that can fail.
     //

@@ -36,7 +36,7 @@
 /// It lands somewhere unwritable, so every save fails, or it makes the settings belong to that folder rather than to the user, so moving the executable loses them.
 /// Both were seen on a Windows bench. Three sources are tried in order: an explicit override, a repo checkout, then the operating system's per-user application data.
 ///
-/// A checkout is recognised by two markers together, because one of them is true in the root of every CMake project there is.
+/// A checkout is recognized by two markers together, because one of them is true in the root of every CMake project there is.
 /// A developer whose shell sits in an unrelated one would otherwise get this project's settings written into that project's build directory.
 /// It keys on the working directory rather than the executable's location, since that is the development loop this preserves and an installed copy is never launched that way.
 ///

@@ -61,7 +61,7 @@ TEST_CASE("setPalEntryHSV reaches the same table, in the space a palette is reas
 }
 
 TEST_CASE("an out-of-range entry index writes nothing at all") {
-    // Bounded rather than wrapped: a wrapped index would write a NEIGHBOURING entry and produce a palette nobody wrote, which reads as an engine fault rather than a script bug.
+    // Bounded rather than wrapped: a wrapped index would write a NEIGHBORING entry and produce a palette nobody wrote, which reads as an engine fault rather than a script bug.
     const Palette before = *Palettes::active();
     Palette seed;
     for (int i = 0; i < 16; i++) seed.entry[i] = RGB{7, 7, 7};

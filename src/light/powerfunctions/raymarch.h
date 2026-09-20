@@ -149,7 +149,7 @@ struct Camera {
     Vec3 ray(int32_t sx, int32_t sy) const {
         const Vec3 fwd = normalise(target - position);
         const Vec3 worldUp{0, 1, 0};
-        // right = normalise(cross(fwd, worldUp)): the standard look-at basis.
+        // right = normalize(cross(fwd, worldUp)): the standard look-at basis.
         Vec3 right = normalise({fwd.y * worldUp.z - fwd.z * worldUp.y,
                                 fwd.z * worldUp.x - fwd.x * worldUp.z,
                                 fwd.x * worldUp.y - fwd.y * worldUp.x});

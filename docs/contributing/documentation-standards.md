@@ -234,7 +234,7 @@ A card is read across a row; a member comment is read beside the thing it descri
 | A `//` run beside code | 1 line |
 | One comment line | 250 characters, on the way down |
 | One line of a file or class lead | 400 characters |
-| A whole `///` run | 2500 characters |
+| A whole `///` run, lead or class comment | 2500 characters |
 | A sentence in a comment | 1 line, never wrapped |
 | Every public member | carries one |
 

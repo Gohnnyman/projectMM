@@ -166,7 +166,7 @@ TEST_CASE("every effect owns its background rather than inheriting the last fram
         layouts.applyState();
         layer.applyState();
 
-        // A recognisable value no palette produces, standing in for the previous effect's frame.
+        // A recognizable value no palette produces, standing in for the previous effect's frame.
         constexpr uint8_t kStale = 0xA7;
         uint8_t* buf = const_cast<uint8_t*>(layer.buffer().data());
         const mm::nrOfLightsType lights = layer.buffer().count();

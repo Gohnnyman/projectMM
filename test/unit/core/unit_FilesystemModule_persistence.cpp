@@ -887,7 +887,7 @@ struct LiveAndSaved : public mm::MoonModule {
 };
 }  // namespace
 
-TEST_CASE("A live control is left out of the saved file, and its neighbours still save") {
+TEST_CASE("A live control is left out of the saved file, and its neighbors still save") {
     // A surface control's position MIRRORS its target, and that target persists in its own module. Writing the position too would store the same fact twice and let the two disagree on load.
     char root[256];
     std::snprintf(root, sizeof(root), "/tmp/mm_live_save_%u",

@@ -162,7 +162,7 @@ TEST_CASE("scrolling a 1-channel fixture moves whole lights") {
 TEST_CASE("a wrapping column scroll moves every channel of a wide fixture") {
     constexpr uint8_t kWide = 32;                // a moving head's worth of channels
     Surface s(1, 4, 1, kWide);
-    // Give each light a recognisable pattern across ALL its channels.
+    // Give each light a recognizable pattern across ALL its channels.
     for (lengthType y = 0; y < 4; y++)
         for (uint8_t c = 0; c < kWide; c++)
             s.buf.data()[y * kWide + c] = static_cast<uint8_t>(y * 40 + c);

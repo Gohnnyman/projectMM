@@ -66,7 +66,7 @@ class Scheduler;
 ///
 /// ## State push: a diff on the wire
 ///
-/// This is the recognisable snapshot-then-patch model, the shape Redux and Firestore sync use and RFC 6902 formalises.
+/// This is the recognizable snapshot-then-patch model, the shape Redux and Firestore sync use and RFC 6902 formalises.
 ///
 /// The state a client needs is the full module tree, around 30 KB and mostly unchanging option and detail metadata.
 /// Re-serializing all of it every second, inline on the render thread, stole render budget and stuttered the LEDs at 1 Hz.

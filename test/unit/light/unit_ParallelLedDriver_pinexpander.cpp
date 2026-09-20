@@ -397,7 +397,7 @@ TEST_CASE("a given-up driver recovers when the bus is fixed") {
     CHECK(d.severity() != mm::MoonModule::Severity::Error);     // and the error is cleared
 }
 
-// **THE INVARIANT THE STREAMING RING RESTS ON.** The ring never materialises the big encoded frame:
+// **THE INVARIANT THE STREAMING RING RESTS ON.** The ring never materializes the big encoded frame:
 // the DMA loops a few small INTERNAL buffers, and the CPU encodes each slice straight into the buffer the DMA is about to read. That is only sound if encoding in slices produces EXACTLY the bytes the whole-frame encode would have produced, otherwise the wire sees a different frame depending on how it happened to be chunked, which is the class of bug that is invisible on a sparse effect and catastrophic on a dense one.
 //
 // Note the latch pad: only the LAST slice closes the frame (closeFrame), because the pad is what makes every strand idle LOW into the WS2812 reset. A pad emitted mid-frame would reset the strand halfway.

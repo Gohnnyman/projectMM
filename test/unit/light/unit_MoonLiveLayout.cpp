@@ -196,7 +196,7 @@ TEST_CASE("a layout answers count and coordinates every time it is asked") {
 
 
 // Subtraction has to produce the WHOLE value, not just a byte that happens to look right.
-// `a - b` compiles to `a + (b * -1)`, and if -1 is materialised as 65535 (which it was, on two of three targets) the result is correct only modulo 256. A coordinate comparison cannot see that, both the right answer and the widened one truncate to the same byte.
+// `a - b` compiles to `a + (b * -1)`, and if -1 is materialized as 65535 (which it was, on two of three targets) the result is correct only modulo 256. A coordinate comparison cannot see that, both the right answer and the widened one truncate to the same byte.
 //
 // A layout's light INDEX can see it: the count comes from how many times addLight ran, so a loop bound computed by subtraction that came out ~65k places a wildly different number of lights.
 TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
@@ -239,7 +239,7 @@ TEST_CASE("a scripted control keeps its live value when the script is edited") {
     l.prepare();
     CHECK(l.lightCount() == 4);
 
-    // A script whose first control is a NEW slot gets its own initialiser: nothing to inherit.
+    // A script whose first control is a NEW slot gets its own initializer: nothing to inherit.
     l.setScript(mmWriteScript(mmScriptAs("placeLights", "byte cols = 16;\n"
                 "byte rows = 3;\n"
                 "for (int yy = 0; yy < rows; yy = yy + 1) {"
@@ -584,7 +584,7 @@ TEST_CASE("editing a script's text recompiles it, without renaming the file") {
     CHECK(l.lightCount() == 7);
 }
 
-// The other half of the same rule, and the one a modifier depends on: an unchanged file must be RECOGNISED as unchanged. A modifier turns "a new program was installed" into "ask the Layer to rebuild", and the Layer's rebuild calls prepare() again, so answering "changed" every time makes the two call each other forever and the fixture renders nothing at all.
+// The other half of the same rule, and the one a modifier depends on: an unchanged file must be RECOGNIZED as unchanged. A modifier turns "a new program was installed" into "ask the Layer to rebuild", and the Layer's rebuild calls prepare() again, so answering "changed" every time makes the two call each other forever and the fixture renders nothing at all.
 TEST_CASE("preparing an unchanged script installs no new program") {
     MoonLiveModifier m;
     m.defineControls();
@@ -866,7 +866,7 @@ TEST_CASE("editing a script's text recompiles it, without renaming the file") {
     CHECK(l.lightCount() == 7);
 }
 
-// The other half of the same rule, and the one a modifier depends on: an unchanged file must be RECOGNISED as unchanged. A modifier turns "a new program was installed" into "ask the Layer to rebuild", and the Layer's rebuild calls prepare() again, so answering "changed" every time makes the two call each other forever and the fixture renders nothing at all.
+// The other half of the same rule, and the one a modifier depends on: an unchanged file must be RECOGNIZED as unchanged. A modifier turns "a new program was installed" into "ask the Layer to rebuild", and the Layer's rebuild calls prepare() again, so answering "changed" every time makes the two call each other forever and the fixture renders nothing at all.
 TEST_CASE("preparing an unchanged script installs no new program") {
     MoonLiveModifier m;
     m.defineControls();

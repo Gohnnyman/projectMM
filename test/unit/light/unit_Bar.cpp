@@ -160,5 +160,5 @@ TEST_CASE("a bar never spills into the next light on a 1-channel fixture") {
     for (size_t i = 0; i < s.buf.bytes(); i++) s.buf.data()[i] = 0x5A;
     draw::bar(s.cv, 1, 0, 1, draw::Grow::Right, RGB{10, 20, 30});
     CHECK(s.buf.data()[1] == 10);                // the light took what it could hold
-    CHECK(s.buf.data()[2] == 0x5A);              // its neighbour is untouched
+    CHECK(s.buf.data()[2] == 0x5A);              // its neighbor is untouched
 }

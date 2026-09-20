@@ -669,7 +669,7 @@ def mutate_state(mutator):
 
     Slow work (subnet scans, device probes) should happen BEFORE calling
     mutate_state — pass already-gathered data in by closure. Holding the
-    lock across network I/O would serialise everything behind the slowest
+    lock across network I/O would serialize everything behind the slowest
     scan."""
     with _state_write_lock:
         state = load_state()
@@ -784,7 +784,7 @@ def _device_model_for_port(port: str) -> str:
 
 
 def _subnet_from_host_subnet(host_subnet: str) -> str:
-    """Normalise `_get_local_subnet()` output (e.g. "192.168.1") to the
+    """Normalize `_get_local_subnet()` output (e.g. "192.168.1") to the
     network record's `subnet` field shape ("192.168.1.0/24")."""
     if not host_subnet:
         return ""
@@ -1576,7 +1576,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             params = json.loads(body) if body else {}
             subnet = params.get("subnet", "")
             # Slow part — subnet scan — happens OUTSIDE the state lock so
-            # parallel discovers on different subnets don't serialise behind
+            # parallel discovers on different subnets don't serialize behind
             # each other. The merge into the active network record happens
             # under the lock via mutate_state.
             devices, scanned_subnet = discover_devices(subnet)
@@ -1661,7 +1661,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             network_name = params.get("network", "")
             # Read the device list snapshot under the lock, release, do the
             # slow probes outside, then re-enter mutate_state for the merge.
-            # Holding the lock across the probes would serialise every refresh.
+            # Holding the lock across the probes would serialize every refresh.
             with _state_write_lock:
                 state = load_state()
                 net = next((n for n in (state.get("networks") or [])

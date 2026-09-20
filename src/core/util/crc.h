@@ -14,7 +14,7 @@
 ///
 /// ## Which variant, and what it is not for
 ///
-/// This is the textbook polynomial 0x1021 with an init of 0xFFFF and no reflection, the recognisable CCITT-FALSE variant.
+/// This is the textbook polynomial 0x1021 with an init of 0xFFFF and no reflection, the recognizable CCITT-FALSE variant.
 ///
 /// It is no security hash, a CRC being trivially collidable; it is a fast change detector, which is all the stasis check needs.
 /// The implementation is integer-only with no table, the bit-serial form being tiny and the call sites running off the hot path, once per generation rather than per pixel.

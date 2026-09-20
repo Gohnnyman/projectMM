@@ -25,7 +25,7 @@
 /// The system-in-package parts wire their in-package memory differently while the same firmware runs on all of them, so the package comes from the chip's own fuses.
 /// On one of them four pads are not bonded at all, which in practice means the in-package parts use them.
 /// Muxing a peripheral onto one wedges the flash cache, and the board resets with no panic and no dump.
-/// Two neighbouring pins ARE free on that package, which one bench board's microphone uses.
+/// Two neighboring pins ARE free on that package, which one bench board's microphone uses.
 ///
 /// ## Pins are configured for input and output together
 ///

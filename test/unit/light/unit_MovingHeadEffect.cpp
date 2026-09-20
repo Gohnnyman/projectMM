@@ -53,7 +53,7 @@ TEST_CASE("every fixture in a 2D rig gets its own aim, not a copy of its row's f
     layer.setFixtureChannels(motionRig());
 
     mm::MovingHeadEffect heads;
-    heads.formation = mm::MovingHeadEffect::kChase;   // a travelling wave: every head differs
+    heads.formation = mm::MovingHeadEffect::kChase;   // a traveling wave: every head differs
     layer.addChild(&heads);
     layer.applyState();
 

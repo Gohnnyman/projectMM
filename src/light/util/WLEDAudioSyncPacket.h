@@ -20,7 +20,7 @@ namespace mm {
 /// Forty-four bytes on a fixed port, broadcast: a header string, two levels as floats and a peak flag.
 /// Then the sixteen bands as bytes, and the dominant bin's magnitude and frequency.
 /// Two padding runs are real wire bytes and go out as zero, and one reserved byte stays zero because the upstream may claim it later.
-/// The offsets are hand-serialised rather than trusted to struct packing, and the floats are little-endian, which every target here and upstream shares.
+/// The offsets are hand-serialized rather than trusted to struct packing, and the floats are little-endian, which every target here and upstream shares.
 ///
 /// ## Units convert at this boundary
 ///

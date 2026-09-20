@@ -432,7 +432,7 @@ TEST_CASE("Each moving-head formation aims the rig differently") {
     REQUIRE(unison.size() == 4);
     for (size_t i = 1; i < unison.size(); i++) CHECK(unison[i] == unison[0]);
 
-    // Chase delays each head along the sweep, so neighbours differ.
+    // Chase delays each head along the sweep, so neighbors differ.
     const auto chase = aimOf(mm::MovingHeadEffect::kChase);
     bool chaseVaries = false;
     for (size_t i = 1; i < chase.size(); i++) if (chase[i] != chase[0]) chaseVaries = true;

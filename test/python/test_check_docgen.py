@@ -229,7 +229,7 @@ def test_a_section_heading_that_is_not_details_is_left_alone():
     assert _structure(page, "p.md") == []
 
 
-# ---- the rendered row: two columns, labelled links ----
+# ---- the rendered row: two columns, labeled links ----
 
 def _row(md: str) -> str:
     """One rendered table row, through the build's own renderer."""
@@ -630,7 +630,9 @@ def test_a_moreinfo_does_not_exempt_a_member_comment():
     src = ("#include <x.h>\n\nvoid g();\n\n"
                "/// one\n///\n/// @moreinfo a detail\n/// and another\nvoid doThing();")
     issues = [i for i in _hdr(src) if "member comment" in i[1]]
-    assert issues and "member comment 4 lines" in issues[0][1]
+    # TWO, not four: the blank `///` and the `@moreinfo` marker are structure, and the cap counts
+    # the prose. What the test pins is that `@moreinfo` buys a member no exemption at all.
+    assert issues and "member comment 2 lines" in issues[0][1]
 
 
 def test_a_code_comment_run_past_one_line_is_flagged():

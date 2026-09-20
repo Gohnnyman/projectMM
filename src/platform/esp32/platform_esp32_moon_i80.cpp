@@ -18,7 +18,7 @@
 /// The peripheral has no data-length register, and the SDK's own comment says the data phase is controlled by the buffer length.
 /// So it clocks out exactly what the DMA feeds it and stops when the chain ends.
 /// One start over an arbitrarily long descriptor chain is a single gapless stream across as many buffers as we like.
-/// This backend takes that, built on the SDK's own hardware and link-list interfaces rather than raw registers, which keeps it a recognisable construct.
+/// This backend takes that, built on the SDK's own hardware and link-list interfaces rather than raw registers, which keeps it a recognizable construct.
 ///
 /// ## Both implementations ship
 ///
@@ -51,7 +51,7 @@
 ///
 /// ```
 /// memory          lights x depth x row bytes; flat only at one light per buffer
-/// per-call cost   the encode seam's fixed overhead, amortised over the buffer
+/// per-call cost   the encode seam's fixed overhead, amortized over the buffer
 /// interrupt rate  one per buffer: 25.6k/s at one light, 1.6k/s at sixteen
 /// lap-time runway how long a preemption may last before the DMA laps a refilling buffer
 /// ```

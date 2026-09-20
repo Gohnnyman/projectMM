@@ -293,13 +293,13 @@ TEST_CASE("noise is smooth across neighboring points, and varies across the fiel
     uint8_t buf[32 * 3] = {};
     fn(buf, 32, 3, 0, arena);
 
-    // Smooth: 64 units per step is a quarter cell, so neighbours move but cannot leap the range.
+    // Smooth: 64 units per step is a quarter cell, so neighbors move but cannot leap the range.
     int biggestJump = 0;
     for (int i = 1; i < 32; i++) {
         const int d = std::abs(int(buf[i * 3]) - int(buf[(i - 1) * 3]));
         if (d > biggestJump) biggestJump = d;
     }
-    INFO("biggest neighbour-to-neighbour jump: " << biggestJump);
+    INFO("biggest neighbor-to-neighbor jump: " << biggestJump);
     CHECK(biggestJump < 64);
 
     // Varies: a field that returned one value everywhere would pass the smoothness check.

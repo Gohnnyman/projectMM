@@ -340,7 +340,7 @@ def _relocate_moreinfo(md: str) -> str:
     sect = _FIRST_SECTION_RE.search(md, marker.end())
     tail_end = sect.start() if sect else len(md)
     tail = md[marker.end():tail_end].strip()
-    # Excise the marker + its tail from the description, then append it (relabelled) after everything else.
+    # Excise the marker + its tail from the description, then append it (relabeled) after everything else.
     body = (md[:marker.start()] + md[tail_end:]).rstrip()
     return f"{body}\n\n## More info\n\n{tail}\n"
 

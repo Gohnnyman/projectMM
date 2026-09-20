@@ -164,8 +164,8 @@ TEST_CASE("cross-protocol datagrams are rejected") {
 
 // --- ArtPoll recognition -----------------------------------------------------------
 
-// An ArtPoll datagram is recognised (the discovery hook Resolume/Madrix use); OpDmx and non-ArtNet packets are not polls.
-TEST_CASE("isArtPoll recognises polls and nothing else") {
+// An ArtPoll datagram is recognized (the discovery hook Resolume/Madrix use); OpDmx and non-ArtNet packets are not polls.
+TEST_CASE("isArtPoll recognizes polls and nothing else") {
     uint8_t poll[14] = {'A', 'r', 't', '-', 'N', 'e', 't', 0, 0x00, 0x20, 0, 14, 0, 0};
     CHECK(mm::isArtPoll(poll, sizeof(poll)));
     CHECK_FALSE(mm::isArtPoll(poll, 10));   // truncated

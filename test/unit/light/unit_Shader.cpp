@@ -175,13 +175,13 @@ TEST_CASE("a polygon with too few sides falls back to a circle") {
 }
 
 // The cosine palette carries a whole color ramp as twelve numbers rather than a table.
-TEST_CASE("a cosine palette produces varied colours around its ramp") {
+TEST_CASE("a cosine palette produces varied colors around its ramp") {
     const RGB a = cosPalette(0, 128, 128, 128, 127, 127, 127, 1, 1, 1, 0, 85, 170);
     const RGB b = cosPalette(32768, 128, 128, 128, 127, 127, 127, 1, 1, 1, 0, 85, 170);
     CHECK((a.r != b.r || a.g != b.g || a.b != b.b));
 }
 
-TEST_CASE("mixing colours interpolates each channel") {
+TEST_CASE("mixing colors interpolates each channel") {
     const RGB a{0, 0, 0}, b{200, 100, 50};
     CHECK(mixColor(a, b, 0).r == 0);
     const RGB mid = mixColor(a, b, 32768);

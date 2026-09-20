@@ -64,7 +64,7 @@
 /// ## The narrow slot access reaches only part of the arena
 ///
 /// Its offset field is four bits counting whole words, so it reaches a fixed distance and no further.
-/// Past that the field overflows into the neighbouring nibbles and the instruction silently addresses somewhere else entirely.
+/// Past that the field overflows into the neighboring nibbles and the instruction silently addresses somewhere else entirely.
 ///
 /// That is not a theoretical bound.
 /// The control arena puts a script's own members low and the HOST SYSTEM VARIABLES above them.

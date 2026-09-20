@@ -23,7 +23,7 @@
 ///
 /// ## DMA cannot read PSRAM at the expander's clock
 ///
-/// Measured fine at 2.67 MHz and never completing at 26.67 MHz, which is why a frame above the expander's cap is never materialised.
+/// Measured fine at 2.67 MHz and never completing at 26.67 MHz, which is why a frame above the expander's cap is never materialized.
 /// The streaming ring loops a small pool of internal buffers instead, and the CPU encodes the next slice into each as it drains.
 ///
 /// ## Internal RAM for what an interrupt reads

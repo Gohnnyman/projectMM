@@ -94,7 +94,7 @@ inline void checkHostBusDoubleBuffer() {
     REQUIRE(peripheral.busBuffer(1) != nullptr);
     CHECK(peripheral.busBuffer(0) != peripheral.busBuffer(1));
 
-    // Re-initialising releases the second, rather than leaving a stale span to read from.
+    // Re-initializing releases the second, rather than leaving a stale span to read from.
     REQUIRE(peripheral.busInit(256, /*wantSecondBuffer=*/false));
     CHECK(peripheral.busBuffer(1) == nullptr);
 }

@@ -40,7 +40,7 @@ TEST_CASE("NetworkSendDriver sizes corrected_ in prepare, not in tick") {
         CHECK(driver.correctedBuffer().count() == 64);
         CHECK(driver.correctedBuffer().channelsPerLight() == 3);
     }
-    mm::platform::setTestNowMs(0);   // restore real-clock behaviour for later cases
+    mm::platform::setTestNowMs(0);   // restore real-clock behavior for later cases
 }
 
 // A preset toggle from RGB to RGBW grows outChannels from 3 to 4. The grow runs in onCorrectionChanged, off the hot path.

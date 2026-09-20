@@ -63,7 +63,7 @@ TEST_CASE("fbm with no octaves is a flat field") {
 }
 
 // A field must be a FIELD: neighboring points are similar, distant points are not. This is what separates noise from a raw hash, and it must survive the octave sum.
-TEST_CASE("fbm is smooth: neighbours resemble each other more than distant points") {
+TEST_CASE("fbm is smooth: neighbors resemble each other more than distant points") {
     const int here = fbm8(5000, 5000, 3);
     const int near = fbm8(5000 + 8, 5000, 3);       // a fraction of a cell away
     const int far  = fbm8(5000 + 4096, 5000, 3);    // many cells away

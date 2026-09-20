@@ -120,11 +120,9 @@ MAX_DOC_WORDS = 30      # words in one sentence of a comment, `///` or `//`
 # line up to here, which is what keeps a dense comment compact instead of fanning out one line per
 # sentence.
 #
-# An IMPLEMENTATION file's `//` only, because the limit is about reading SOURCE. A header's
-# comment becomes a paragraph on a generated page, where the browser wraps it and its length
-# reaches no reader: a 200-character line renders exactly like a 100-character one. Applied to
-# headers it reported 475 lines whose rendering it could not improve, and asked for a rewording
-# the 30-word budget already governs from the sentence side.
+# Every file, because the limit is about reading SOURCE and a header is read as source far more
+# often than as a rendered page. It was briefly implementation-only, on the argument that the
+# browser wraps a generated paragraph anyway, which ignores the audience doing the work.
 # 250 for now, on the way down. One number, so tightening it is this line and nothing else.
 # 120 was tried first and punished the compactness the other rules ask for: several short
 # sentences sharing a line is good writing and runs past 120 easily, so the cap fired on 4727
@@ -143,10 +141,11 @@ MAX_RUN_CHARS = MAX_CLASS_DOC * MAX_COMMENT_LINE_CHARS
 # lost about a third of that, and what went was content rather than padding. The run budget above
 # still bounds the lead as a whole, so the wider line buys density rather than sprawl.
 MAX_LEAD_LINE_CHARS = 400
-# The phrase a line-length finding carries, so `_blocks` can recognise the one rule that warns
+# The prefixes a LINE-length finding carries, so `_blocks` can recognize the one rule that warns
 # even in a header. Matching on the reason keeps the exception in ONE place rather than making
-# every rule pass its own severity.
-_LINE_LENGTH_RULE = "chars >"
+# every rule pass its own severity. Prefixes rather than the substring "chars >", which also
+# matched `lead N chars > M` and silently demoted the run rule, a differently motivated one.
+_LINE_LENGTH_RULES = ("doc line ", "comment line ")
 # One line, in every file. Depth is not forbidden, it is HOMED: a header carries it in an
 # `@moreinfo` appendix (212 do) and an implementation file carries it in the same appendix on its
 # own file lead. A cap of 8 in a `.cpp` was an attempt to give depth a home inline, which leaves
@@ -188,7 +187,7 @@ def _blocks(key: str, why: str = "") -> bool:
     erroring on 820 of them would stop commits over a target rather than a defect. It joins the
     others as an error once the tree meets it, which is the same staging this function is.
     """
-    if _LINE_LENGTH_RULE in why:
+    if why.startswith(_LINE_LENGTH_RULES):
         return False
     return _generates_a_page(key.partition("::")[0])
 
@@ -332,7 +331,7 @@ _LINK_LABEL_RE = re.compile(r"\*\*([A-Z][A-Za-z ]{1,12}):\*\*")
 
 
 def _rendered_links(rel: str, text: str):
-    """Which labelled links the build puts in the second column, per card."""
+    """Which labeled links the build puts in the second column, per card."""
     import mkdocs_hooks as h
     out = []
     for row in h._render_catalog_table(text).split("\n"):
@@ -568,6 +567,15 @@ def _declared_key(decl: str, start: int) -> str:
     return f"{name}/{n}"
 
 
+# A keyword reads as an identifier before `(`, so `if (ok) {` keys as `if` and a literal
+# initializer keys as `true`. Neither locates the comment a finding is about, and `if/1`
+# alone accounted for 56 of them; the line number is what a reader can act on.
+_NOT_A_NAME = frozenset((
+    "if", "for", "while", "switch", "catch", "return", "else", "do",
+    "true", "false", "nullptr", "break", "continue", "sizeof", "case", "default",
+))
+
+
 def _declared_name(decl: str, start: int) -> str:
     """The NAME a declaration introduces, for a stable baseline key.
 
@@ -587,7 +595,7 @@ def _declared_name(decl: str, start: int) -> str:
     # A greedy prefix swallows it and captures the initializer instead, so anchor on the
     # last identifier that precedes one of `( = ; {`.
     m = re.match(r"^[\w:<>,\s\*&\[\]]*?\b(\w+)\s*(?:\(|=|;|\{)", decl)
-    if m:
+    if m and m.group(1) not in _NOT_A_NAME:
         return m.group(1)
     return f"line {start + 1}"
 
@@ -945,9 +953,10 @@ def _header_rules(rel: str, text: str):
                     if len(sentence.split()) > MAX_DOC_WORDS:
                         out.append((f"{rel}::line {k + 1}",
                                     f"doc sentence {len(sentence.split())} words > {MAX_DOC_WORDS}"))
-                if len(lines[k]) > MAX_LEAD_LINE_CHARS:
+                width = len(re.sub(r"^\s*///\s?", "", lines[k]))
+                if width > MAX_LEAD_LINE_CHARS:
                     out.append((f"{rel}::line {k + 1}",
-                                f"doc line {len(lines[k])} chars > {MAX_LEAD_LINE_CHARS}"))
+                                f"doc line {width} chars > {MAX_LEAD_LINE_CHARS}"))
                 # The no-wrap rule binds here too: the file lead is the longest block in the
                 # tree, so exempting it exempted the prose most likely to be wrapped.
                 out += _wrap_rule(rel, lines, k, end, start)
@@ -961,13 +970,27 @@ def _header_rules(rel: str, text: str):
             if n > MAX_CLASS_DOC:
                 out.append((f"{rel}::{nxt.split()[1].rstrip('{:')}",
                             f"class comment {n} lines > {MAX_CLASS_DOC}"))
-        elif n > MAX_MEMBER_DOC:
+            # The run cap reaches HERE too. Applied only to the `@defgroup` branch it missed the
+            # block it was written for: nine lines of 359 characters is 3231, over the cap, with
+            # every line inside the lead cap and every sentence inside the word budget.
+            chars = sum(len(re.sub(r"^\s*///\s?", "", lines[k])) for k in range(start, head))
+            if chars > MAX_RUN_CHARS:
+                out.append((f"{rel}::line {start + 1}",
+                            f"lead {chars} chars > {MAX_RUN_CHARS}"))
+        else:
             # Both kinds of file. A `.cpp` carries a file lead with its own `@moreinfo` appendix
             # exactly as a header does, so "move the deep dive after @moreinfo" names a place
             # that exists there too: the rule was scoped away on a reason that does not hold.
-            out.append((f"{rel}::{_declared_key(nxt, start)}",
-                        f"member comment {n} lines > {MAX_MEMBER_DOC}: "
-                        f"a deep dive goes after @moreinfo"))
+            #
+            # Structure discounts here exactly as it does on the `//` cap. Without that, one
+            # marker exempted a bulleted list and the other did not, so the same six lines were
+            # clean as `//` and a finding as `///`, which is two rule sets wearing one name.
+            prose = n - sum(1 for k in range(start, start + n)
+                            if _is_structural(re.sub(r"^\s*///\s?", "", lines[k])))
+            if prose > MAX_MEMBER_DOC:
+                out.append((f"{rel}::{_declared_key(nxt, start)}",
+                            f"member comment {prose} lines > {MAX_MEMBER_DOC}: "
+                            f"a deep dive goes after @moreinfo"))
         for k in range(start, end):
             # PER SENTENCE, not per line. The no-wrap rule makes a line a paragraph, so a line
             # holding three short sentences is correct and a single rambling one is not: counting
@@ -983,9 +1006,13 @@ def _header_rules(rel: str, text: str):
             # A LEAD's line is wider than a member's: it carries what the whole type is for,
             # and held to the member cap the driver headers each lost about a third of that.
             cap = MAX_LEAD_LINE_CHARS if _CLASS_RE.match(nxt) else MAX_COMMENT_LINE_CHARS
-            if len(lines[k]) > cap:
+            # The PROSE, not the marker and the indent. Measuring the raw line held a member
+            # nested in a class to a stricter budget than the same words at file scope, which
+            # is a rule nobody wrote, and it disagreed with the run cap below that strips both.
+            width = len(re.sub(r"^\s*///\s?", "", lines[k]))
+            if width > cap:
                 out.append((f"{rel}::line {k + 1}",
-                            f"doc line {len(lines[k])} chars > {cap}"))
+                            f"doc line {width} chars > {cap}"))
             out += _wrap_rule(rel, lines, k, end, start)
 
     # A file OPENS with `///`, so the generated page says what the file is for. The lead is a
@@ -1093,9 +1120,10 @@ def _header_rules(rel: str, text: str):
                     if words > MAX_DOC_WORDS:
                         out.append((f"{rel}::line {k + 1}",
                                     f"comment line {words} words > {MAX_DOC_WORDS}"))
-                if len(lines[k]) > MAX_COMMENT_LINE_CHARS:
+                width = len(re.sub(r"^\s*//+\s?", "", lines[k]))
+                if width > MAX_COMMENT_LINE_CHARS:
                     out.append((f"{rel}::line {k + 1}",
-                                f"comment line {len(lines[k])} chars > {MAX_COMMENT_LINE_CHARS}"))
+                                f"comment line {width} chars > {MAX_COMMENT_LINE_CHARS}"))
                 # And the same no-wrap rule. It used to run on `///` only, which left every `//`
                 # block in the tree unmeasured: the budget above says a line is a sentence, and
                 # a sentence carried onto the next line breaks that whichever marker spells it.
@@ -1446,7 +1474,7 @@ def _write_report(found) -> None:
         area = _doc_area(page)
         areas[area] += len(items)
         # Per FINDING, through _blocks: a file is not wholly one severity, because a header's
-        # line-length finding warns while its neighbours block.
+        # line-length finding warns while its neighbors block.
         for _, why in items:
             (areas_e if _blocks(page, why) else areas_w)[area] += 1
     if areas:
@@ -1485,7 +1513,7 @@ def _write_report(found) -> None:
         # file is worth seeing even though it does not block.
         # Counted through _blocks, which reads the REASON as well as the file: a header's
         # line-length finding warns, so a file holding only those is a warning file. Grouping
-        # on the file alone labelled 74 such files "error" under a report saying 0 errors.
+        # on the file alone labeled 74 such files "error" under a report saying 0 errors.
         def _blocking(page, items):
             return [f for f in items if _blocks(page, f[1])]
         errs_a = sum(len(_blocking(k, v)) for k, v in files.items())

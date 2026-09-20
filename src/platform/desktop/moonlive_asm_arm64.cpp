@@ -237,7 +237,7 @@ void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
     emit32(0xaa0f03e0u);                                   // mov x0, x15
     emit32(0xaa1003e1u);                                   // mov x1, x16
     emit32(0xaa1103e2u);                                   // mov x2, x17
-    // materialise the 64-bit absolute fn address into x15 (movz + 3×movk)
+    // materialize the 64-bit absolute fn address into x15 (movz + 3×movk)
     uint64_t addr = reinterpret_cast<uint64_t>(fn);
     emit32(0xd2800000u | ((uint32_t(addr) & 0xffff) << 5) | 15);                 // movz x15, #b0
     emit32(0xf2800000u | (1u << 21) | (((uint32_t(addr >> 16)) & 0xffff) << 5) | 15);  // movk x15,#b1,lsl16

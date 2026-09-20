@@ -8,7 +8,7 @@
 ///
 /// @moreinfo
 ///
-/// The value varies smoothly across space, so neighbouring coordinates give similar results, unlike a raw hash.
+/// The value varies smoothly across space, so neighboring coordinates give similar results, unlike a raw hash.
 /// Sample it across a grid for clouds, plasma or fire-like fields, and scroll a coordinate to animate.
 /// One gradient set and one interpolation serve all three dimensions.
 ///
@@ -45,7 +45,7 @@
 ///
 /// ## The three standard compositions
 ///
-/// One sample is a smooth blur; the looks people recognise come from composing samples, and each composition is a few lines over the base rather than a new field generator.
+/// One sample is a smooth blur; the looks people recognize come from composing samples, and each composition is a few lines over the base rather than a new field generator.
 ///
 /// Summing octaves at doubling frequency and halving amplitude turns the blur into cloud, terrain or smoke structure: large shapes with fine detail on them.
 /// The same sum over the absolute deviation creases the field, and those creases read as billows and flame.

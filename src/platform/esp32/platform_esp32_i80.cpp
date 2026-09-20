@@ -41,7 +41,7 @@
 /// The transmit call returns success because the enqueue succeeded and the mount fails later in the interrupt.
 /// So the driver waits out a timeout per frame while the strands hold stale data.
 /// Depth one was tried because the available count reflects only what the previous transfer released.
-/// So serialising the mounts should have freed the pool. It did not, and neither did doubling it.
+/// So serializing the mounts should have freed the pool. It did not, and neither did doubling it.
 /// Six hypotheses are ruled out by measurement; the open one is the vendor's own note that without descriptor write-back a descriptor stays owned by the engine after use.
 /// The full account and what not to retry again are in the driver analysis under the shift-register work.
 ///

@@ -12,7 +12,7 @@
 ///
 /// @moreinfo
 ///
-/// `DevicesModule` owns the device model and the UDP discovery listener and stays domain-neutral, while each plugin teaches it to recognise one ecosystem from a presence broadcast.
+/// `DevicesModule` owns the device model and the UDP discovery listener and stays domain-neutral, while each plugin teaches it to recognize one ecosystem from a presence broadcast.
 /// That is the adapter pattern, the same shape the list-source seam and the factory's register-by-name use.
 /// The core is generic and the per-system knowledge lives with its plugin, so a new system is one new file rather than a core edit.
 ///

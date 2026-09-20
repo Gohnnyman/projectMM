@@ -395,7 +395,7 @@ TEST_CASE("RmtLedDriver window: a start past the buffer end yields an empty slic
 
 // --- tick() robustness -------------------------------------------------------
 //
-// tick()'s transmit-all/wait-all concurrency body is gated out on the desktop (platform::rmtTxChannels == 0 → it returns at the top), exactly as I80Peripheral::tick() is. So the host can pin only the reachable contract: tick() must never crash or overrun for any pin configuration, grid size, or uninitialised state. The concurrency path itself (parallel transmit, longest-strand cost) is proven on hardware by the real-frame loopback self-test, the platform boundary keeps it out of CI, which is by design.
+// tick()'s transmit-all/wait-all concurrency body is gated out on the desktop (platform::rmtTxChannels == 0 → it returns at the top), exactly as I80Peripheral::tick() is. So the host can pin only the reachable contract: tick() must never crash or overrun for any pin configuration, grid size, or uninitialized state. The concurrency path itself (parallel transmit, longest-strand cost) is proven on hardware by the real-frame loopback self-test, the platform boundary keeps it out of CI, which is by design.
 
 // tick() is a safe no-op across single-pin, multi-pin and zero-grid configs.
 TEST_CASE("RmtLedDriver tick is crash-safe for every pin configuration") {
@@ -429,7 +429,7 @@ TEST_CASE("RmtLedDriver tick is crash-safe for every pin configuration") {
     SUBCASE("tick before any buffer is wired") {
         mm::RmtLedDriver d;
         d.defineControls();
-        d.tick();                       // uninitialised: the guards must hold
+        d.tick();                       // uninitialized: the guards must hold
     }
     CHECK(true);                        // reached here ⇒ no crash in any subcase
 }

@@ -89,7 +89,7 @@ def test_newest_python_minor_wins_within_a_version(tmp_path, monkeypatch):
 
 
 def test_falls_back_to_newest_when_no_version_match(tmp_path, monkeypatch):
-    """Unknown/absent version match → keep the old newest-mtime behaviour so a
+    """Unknown/absent version match → keep the old newest-mtime behavior so a
     single-IDF setup (the common case) is unaffected."""
     home = tmp_path / "home"
     _make_venvs(home, ["idf6.1_py3.12_env", "idf6.1_py3.13_env"])

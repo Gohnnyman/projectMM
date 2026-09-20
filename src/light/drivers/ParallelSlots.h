@@ -50,7 +50,7 @@ namespace mm {
 /// The fan-out grows on pins rather than cascade depth, because depth doubles the required pixel clock and there is no exact divide in the band that would need.
 /// The board details are on the drivers page.
 ///
-/// ## Two shift-mode optimisations worth knowing
+/// ## Two shift-mode optimizations worth knowing
 ///
 /// The prefill writes the frame's constant words once, because only one of a slot's three words carries pixel data.
 /// Rewriting the other two per light would burn two thirds of the encoder's stores.

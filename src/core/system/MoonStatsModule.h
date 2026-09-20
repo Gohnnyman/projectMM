@@ -41,7 +41,7 @@ namespace mm {
 /// What the report says happened, the first two automatic and the third a button press.
 enum class MoonStatsEvent : uint8_t { Install, Upgrade, Refresh };
 
-/// Read one control by name, so a rename drops the field rather than emitting its neighbour.
+/// Read one control by name, so a rename drops the field rather than emitting its neighbor.
 inline bool readControl(const MoonModule* mod, const char* name, JsonSink& out) {
     if (!mod) return false;
     auto& ctrls = mod->controls();

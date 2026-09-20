@@ -45,7 +45,7 @@
 /// This reads an unauthenticated datagram off the LAN, so every read is length-checked against the buffer end and nothing is allocated.
 /// A malformed packet returns false and never reads past the length it was given.
 ///
-/// Bundles are recognised and rejected: controllers send plain messages, and a bundle is a timed batch we have no use for yet.
+/// Bundles are recognized and rejected: controllers send plain messages, and a bundle is a timed batch we have no use for yet.
 ///
 /// One guard needs naming. A padded string length overshoots whenever the terminator sits in the last few bytes of the buffer, so it must be tested against what remains as well as against zero.
 /// Subtracting an overshoot from an unsigned remaining count wraps it to a huge number.
