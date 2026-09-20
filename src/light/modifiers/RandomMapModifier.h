@@ -12,7 +12,7 @@ namespace mm {
 ///
 /// Randomly remaps every light to another light, a true 1:1 permutation (every light goes somewhere, no gaps or duplicates), and reshuffles on a `bpm` timer.
 /// A static fold whose mapping changes on a beat: modifyLogical applies the permutation (the box is unchanged, each light maps to exactly one other).
-/// The bpm tick (tick()) bumps the generation and rebuilds the Layer's mapping on a beat boundary, the same rebuild path a control change takes, scoped to one Layer. (Not a per-frame modifyLive: a permutation is a discrete reshuffle, not smooth motion, so a beat-gated rebuild is the right cost, not a per-frame remap.)
+/// The bpm tick bumps the generation and rebuilds the Layer's mapping on a beat boundary, the path a control change takes, scoped to one Layer. A permutation is a discrete reshuffle rather than smooth motion, so a beat-gated rebuild is the right cost, not a per-frame remap.
 ///
 /// ## How often it reshuffles
 ///

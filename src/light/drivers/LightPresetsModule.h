@@ -16,7 +16,7 @@
 
 namespace mm {
 
-/// The reusable light-preset library, a Drivers submodule owning a set of NAMED channel-role wirings. Each is editable in its own row and referenced by many drivers. A driver stores only a preset's STABLE id and resolves it here into its own Correction. So building a wiring once makes it reusable, and reordering other presets disturbs no reference.
+/// The reusable light-preset library, a Drivers submodule owning NAMED channel-role wirings, each editable in its own row and referenced by many drivers. A driver stores a preset's STABLE id and resolves it here into its own Correction, so a wiring is built once and reordering other presets disturbs no reference.
 ///
 /// A curated set of real fixtures is seeded read-only on first boot. A user adds custom named wirings alongside them. The render loop never reads this module.
 ///
@@ -29,7 +29,7 @@ namespace mm {
 ///
 /// ## Storage is uncapped
 ///
-/// A preset is exactly as wide as its fixture. Role bytes live in one dynamic pool, each preset a slice of it. So a moving head declares as many channels as it has. The pool is touched only on the cold path, so it is free to reallocate. No control binds an address into it.
+/// A preset is exactly as wide as its fixture. Role bytes live in one dynamic pool, each preset a slice, so a moving head declares as many channels as it has. The pool is touched on the cold path only, leaving it free to reallocate.
 ///
 /// ## The editable-list primitive
 ///

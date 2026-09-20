@@ -9,9 +9,7 @@
 /// The engine copies the bytes into instruction RAM and calls them through a function pointer, which is the path a bench run validates.
 /// One instruction set per file, self-guarding: the file is always compiled and its body disappears elsewhere.
 //
-// Every byte array below is the VERBATIM assembler output (objcopy'd from .text), never
-// hand-transcribed from a disassembly: a hand-grouped Xtensa byte once caused a StoreProhibited
-// crash, and the rule since is copy the raw blob.
+// Every byte array below is the VERBATIM assembler output (objcopy'd from .text), never hand-transcribed from a disassembly: a hand-grouped Xtensa byte once caused a StoreProhibited crash, and the rule since is copy the raw blob.
 
 namespace mm::moonlive {
 
@@ -21,10 +19,7 @@ namespace mm::moonlive {
 // The standard calling convention, and the color loads sit at fixed word indices whose immediate occupies the top bits, so a patch is the base combined with the shifted value.
 // Taken verbatim from the assembler's own output.
 
-// Disassembly (word index : instruction):
-//   0: beqz a1,.done   1: li t0,0(off)  2: li t1,0(i)  3: li t2,R  4: li t3,G  5: li t4,B
-//   6: add t5,a0,t0  7: sb t2,0(t5)  8: sb t3,1(t5)  9: sb t4,2(t5)
-//   10: addi t1,t1,1  11: add t0,t0,a2  12: bne t1,a1,.loop   13: ret
+// Disassembly (word index : instruction): 0: beqz a1,.done   1: li t0,0(off)  2: li t1,0(i)  3: li t2,R  4: li t3,G  5: li t4,B 6: add t5,a0,t0  7: sb t2,0(t5)  8: sb t3,1(t5)  9: sb t4,2(t5) 10: addi t1,t1,1  11: add t0,t0,a2  12: bne t1,a1,.loop   13: ret
 static const uint8_t kRiscvFill[] = {
     0x63, 0x8a, 0x05, 0x02,  0x93, 0x02, 0x00, 0x00,  0x13, 0x03, 0x00, 0x00,
     0x93, 0x03, 0x10, 0x01,  0x13, 0x0e, 0x20, 0x02,  0x93, 0x0e, 0x30, 0x03,
@@ -50,8 +45,7 @@ size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
     return sizeof(kRiscvFill);
 }
 
-// Animated: red=(t>>3)&0xFF computed at runtime (srli + zext.b on a3), green=0, blue=64.
-// Nothing to patch. Verbatim from riscv32-esp-elf-as.
+// Animated: red=(t>>3)&0xFF computed at runtime (srli + zext.b on a3), green=0, blue=64. Nothing to patch. Verbatim from riscv32-esp-elf-as.
 static const uint8_t kRiscvAnim[] = {
     0x63, 0x8c, 0x05, 0x02,  0x93, 0xd3, 0x36, 0x00,  0x93, 0xf3, 0xf3, 0x0f,
     0x13, 0x0e, 0x00, 0x00,  0x93, 0x0e, 0x00, 0x04,  0x93, 0x02, 0x00, 0x00,

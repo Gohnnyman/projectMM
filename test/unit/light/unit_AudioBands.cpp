@@ -1,5 +1,5 @@
-// @module AudioService
-// @also AudioSpectrumEffect
+/// @module AudioService
+/// @also AudioSpectrumEffect
 
 #include "doctest.h"
 #include "core/services/AudioBands.h"
@@ -10,12 +10,7 @@
 #include <numbers>
 #include <vector>
 
-// The success spec for the frequency path, written RED before AudioService's FFT
-// call exists. The whole pipeline runs host-side: synthesize a sine ->
-// applyWindow -> platform::audioFft (the desktop reference DFT) ->
-// magnitudesToBands, then assert the energy lands in the right band and the
-// reported peak frequency tracks the tone. This is the coverage that lets the
-// band-map tuning happen in CI instead of on the bench over months.
+// The success spec for the frequency path, written RED before AudioService's FFT call exists. The whole pipeline runs host-side: synthesize a sine -> applyWindow -> platform::audioFft (the desktop reference DFT) -> magnitudesToBands, then assert the energy lands in the right band and the reported peak frequency tracks the tone. This is the coverage that lets the band-map tuning happen in CI instead of on the bench over months.
 
 namespace {
 
@@ -35,10 +30,7 @@ std::vector<int32_t> tone(double freqHz, double amp24 = (1 << 21)) {
     return v;
 }
 
-// Run the full window -> FFT -> bands pipeline; return the frame fields of
-// interest. noiseFloor=80 / gain=80 set a dB window (~100 dB floor, ~40 dB span)
-// that brackets the test tones' ~125 dB level, so a dominant band stands clearly
-// above the others instead of every band saturating at the top of the window.
+// Run the full window -> FFT -> bands pipeline; return the frame fields of interest. noiseFloor=80 / gain=80 set a dB window (~100 dB floor, ~40 dB span) that brackets the test tones' ~125 dB level, so a dominant band stands clearly above the others instead of every band saturating at the top of the window.
 void analyse(const std::vector<int32_t>& samples, uint8_t (&bands)[16],
              uint16_t& peakHz, uint16_t& peakMag) {
     std::vector<float> windowed(kN), mag(kN / 2);
@@ -139,16 +131,10 @@ TEST_CASE("AudioBands: zero / degenerate input never crashes") {
     CHECK(true);
 }
 
-// The band SPLIT itself, rather than what lands in a band. A 16-band display is only 16 bands if
-// every band owns bins of its own: a band whose edges collapse onto the same bin index can never
-// light, whatever the signal, and a band with one bin reads a sixteenth of what a band with 75 does
-// under the same energy. Both were true of the geometric split (edge[e] = nMag^(e/16)) at the
-// shipped shape, which is what these pin.
+// The band SPLIT itself, rather than what lands in a band. A 16-band display is only 16 bands if every band owns bins of its own: a band whose edges collapse onto the same bin index can never light, whatever the signal, and a band with one bin reads a sixteenth of what a band with 75 does under the same energy. Both were true of the geometric split (edge[e] = nMag^(e/16)) at the shipped shape, which is what these pin.
 
 TEST_CASE("every band owns at least one FFT bin, so no band is dark whatever the music") {
-    // The shipped shape: 512-sample FFT at 22050 Hz, so 256 bins of 43.1 Hz. The geometric split
-    // gave bands 0 and 2 no bins at all (edges 1-1 and 2-2) and bands 1 and 4 a single bin, which
-    // is a quarter of the display that cannot respond.
+    // The shipped shape: 512-sample FFT at 22050 Hz, so 256 bins of 43.1 Hz. The geometric split gave bands 0 and 2 no bins at all (edges 1-1 and 2-2) and bands 1 and 4 a single bin, which is a quarter of the display that cannot respond.
     const size_t nMag = 256;
     const uint32_t sampleRate = 22050;
     size_t edges[17];
@@ -169,8 +155,7 @@ TEST_CASE("band edges rise with frequency, so a band is a range rather than a re
 }
 
 TEST_CASE("a small FFT still yields sixteen usable bands, because a fixture may run one") {
-    // 128 bins is the smallest shape worth supporting; a geometric split there is degenerate over
-    // half its range. Sixteen bands must still each own a bin.
+    // 128 bins is the smallest shape worth supporting; a geometric split there is degenerate over half its range. Sixteen bands must still each own a bin.
     const size_t nMag = 128;
     size_t edges[17];
     mm::audioBandEdges(nMag, 22050, edges);
@@ -181,9 +166,7 @@ TEST_CASE("a small FFT still yields sixteen usable bands, because a fixture may 
 }
 
 TEST_CASE("the low bands keep the resolution the FFT can actually deliver") {
-    // Above the bin width the split is free to place edges anywhere; below it there is nothing to
-    // place. The lowest band starts at the first non-DC bin and the early bands stay narrow, so the
-    // bass keeps what resolution exists rather than being folded into one wide band.
+    // Above the bin width the split is free to place edges anywhere; below it there is nothing to place. The lowest band starts at the first non-DC bin and the early bands stay narrow, so the bass keeps what resolution exists rather than being folded into one wide band.
     const size_t nMag = 256;
     const uint32_t sampleRate = 22050;
     size_t edges[17];
@@ -194,10 +177,7 @@ TEST_CASE("the low bands keep the resolution the FFT can actually deliver") {
     CHECK(edges[8] * binHz < 2000.0f);                     // half the display below 2 kHz
 }
 
-// The BALLISTIC of a band. A meter that rises and falls at the same speed is the wrong instrument:
-// it makes the attack as sluggish as the decay and rounds off exactly the drum hit an audio effect
-// exists to show. Broadcast meters (PPM, IEC 60268-10) rise fast and fall slowly, and WLED, FastLED
-// and LedFx each arrived at the same asymmetric form independently.
+// The BALLISTIC of a band. A meter that rises and falls at the same speed is the wrong instrument: it makes the attack as sluggish as the decay and rounds off exactly the drum hit an audio effect exists to show. Broadcast meters (PPM, IEC 60268-10) rise fast and fall slowly, and WLED, FastLED and LedFx each arrived at the same asymmetric form independently.
 
 TEST_CASE("a band rises to a transient at once and falls back slowly, the PPM ballistic") {
     uint8_t v = 0;
@@ -244,10 +224,7 @@ TEST_CASE("every band gets its own ballistic, so a hit in the bass does not smoo
     CHECK(sm[0] < 200);
 }
 
-// Onset detection. The standard onset detection function is SPECTRAL FLUX (Bello 2005, Dixon
-// 2006): the sum over bands of the positive change since the last block. A rise across the
-// spectrum is a hit; a fall is not, and a steady tone is not. It is 16 subtractions on bands we
-// already have, so it costs nothing and lands with the block's own latency.
+// Onset detection. The standard onset detection function is SPECTRAL FLUX (Bello 2005, Dixon 2006): the sum over bands of the positive change since the last block. A rise across the spectrum is a hit; a fall is not, and a steady tone is not. It is 16 subtractions on bands we already have, so it costs nothing and lands with the block's own latency.
 
 TEST_CASE("spectral flux reads a rise, ignores a fall, and is zero on a steady spectrum") {
     uint8_t prev[16] = {}, cur[16] = {};
@@ -262,8 +239,7 @@ TEST_CASE("spectral flux reads a rise, ignores a fall, and is zero on a steady s
 }
 
 TEST_CASE("an onset fires once per hit, not once per block the hit lasts, and not on a swell") {
-    // A hit is flux well above its own recent average; a refractory window makes one hit one
-    // onset. A slow swell raises the average with it and never exceeds it enough to fire.
+    // A hit is flux well above its own recent average; a refractory window makes one hit one onset. A slow swell raises the average with it and never exceeds it enough to fire.
     mm::OnsetDetector d;
     int onsets = 0;
     for (int block = 0; block < 200; block++) {
@@ -279,15 +255,12 @@ TEST_CASE("an onset fires once per hit, not once per block the hit lasts, and no
     CHECK(swell <= 1);                                      // the first block may fire; nothing after
 }
 
-// Per-band conditioning: the learner. Each band learns its own floor and peak in dB; `ratio`
-// decides how much of the rig's coloration is removed. Fed directly with dB so the tests say
-// what they mean.
+// Per-band conditioning: the learner. Each band learns its own floor and peak in dB; `ratio` decides how much of the rig's coloration is removed. Fed directly with dB so the tests say what they mean.
 
 namespace {
 void feedBlocks(mm::BandConditioner& c, const float db[16], float out[16], int blocks, uint8_t ratio,
                 float maxGain = 24.0f, bool learning = true) {
-    // gate 0: these cases test the conditioner's mapping, so nothing is gated as silence. The
-    // gate has its own case below.
+    // gate 0: these cases test the conditioner's mapping, so nothing is gated as silence. The gate has its own case below.
     for (int i = 0; i < blocks; i++) c.process(db, out, 23, 60.0f, 40.0f, ratio, maxGain, learning, 0.0f);
 }
 }
@@ -300,9 +273,7 @@ TEST_CASE("at ratio 1:1 the conditioner changes nothing, so the music's own bala
 }
 
 TEST_CASE("a spectrally tilted rig reads flat at a high ratio, once the learner has settled") {
-    // Pink noise through a peak-per-band reading tilts 1/sqrt(f): the treble far below the bass.
-    // Each band has the same DYNAMICS (a 20 dB swing), only its level differs. After settling,
-    // the conditioned tops line up within a couple of dB, so a balanced signal shows as balanced.
+    // Pink noise through a peak-per-band reading tilts 1/sqrt(f): the treble far below the bass. Each band has the same DYNAMICS (a 20 dB swing), only its level differs. After settling, the conditioned tops line up within a couple of dB, so a balanced signal shows as balanced.
     mm::BandConditioner c; float lo[16], hi[16], out[16];
     for (uint8_t b = 0; b < 16; b++) { hi[b] = 90.0f - b * 1.5f; lo[b] = hi[b] - 20.0f; }
     // The cap is not under test here (it has its own case below), so it sits above the tilt.
@@ -349,16 +320,11 @@ TEST_CASE("the peak releases over seconds, not blocks, so one loud bar does not 
     feedBlocks(c, quiet, out, 10, 20);                          // a quarter of a second later
     CHECK(c.peakDb[0] > 85.0f);                                // still remembers the loud bar
     feedBlocks(c, quiet, out, 400, 20);                         // ten seconds later
-    // It has let go: the peak sits at the band's floor plus the minimum range, rather than
-    // anywhere near the loud bar it was holding.
-    // Converging on the minimum range: the peak falls while the floor drifts up to meet it.
+    // It has let go: the peak sits at the band's floor plus the minimum range, rather than anywhere near the loud bar it was holding. Converging on the minimum range: the peak falls while the floor drifts up to meet it.
     CHECK(c.peakDb[0] - c.floorDb[0] < mm::BandConditioner::kMinRangeDb + 2.0f);
 }
 
-// A quiet passage is not silence, and must keep its dynamics. The range clamp used to be the
-// anti-noise mechanism and was set high enough (12 dB) to squash real music: a band swinging 6 dB
-// filled only half the display, which reads as vivid bands with no dynamic range. The silence gate
-// took that job over, so a band with real swing now uses the whole window.
+// A quiet passage is not silence, and must keep its dynamics. The range clamp used to be the anti-noise mechanism and was set high enough (12 dB) to squash real music: a band swinging 6 dB filled only half the display, which reads as vivid bands with no dynamic range. The silence gate took that job over, so a band with real swing now uses the whole window.
 TEST_CASE("a quietly played band still fills the display, so soft passages keep their dynamics") {
     mm::BandConditioner c; float soft[16], loud[16], out[16];
     for (uint8_t b = 0; b < 16; b++) { soft[b] = 70.0f; loud[b] = 76.0f; }   // a 6 dB swing
@@ -376,23 +342,18 @@ TEST_CASE("a quietly played band still fills the display, so soft passages keep 
     CHECK(atLoud - atSoft > 20.0f);
 }
 
-// The level path levels itself in automatic mode, the other half of the one `levels` decision:
-// the learner measures the VU's window the way it measures each band's, so the manual floor/gain
-// sliders are genuinely manual-only rather than still shaping the picture from behind a hidden row.
+// The level path levels itself in automatic mode, the other half of the one `levels` decision: the learner measures the VU's window the way it measures each band's, so the manual floor/gain sliders are genuinely manual-only rather than still shaping the picture from behind a hidden row.
 TEST_CASE("in automatic mode a quiet room and a loud one both fill the level meter") {
     const size_t n = 512;
     int32_t quiet[n], loud[n];
     for (size_t i = 0; i < n; i++) {
         const float ph = static_cast<float>(i) * 0.1f;
-        // Both above the silence gate (60 dB at floor 0), a hundred times apart: the test is
-        // that each fills its OWN window, not that one of them is silent.
+        // Both above the silence gate (60 dB at floor 0), a hundred times apart: the test is that each fills its OWN window, not that one of them is silent.
         quiet[i] = static_cast<int32_t>(std::sin(ph) * 20000000.0f);     // a quiet room
         loud[i]  = static_cast<int32_t>(std::sin(ph) * 2000000000.0f);   // a hundred times louder
     }
 
-    // Music, not a test tone: the level has to VARY for a learned window to mean anything, so
-    // each room alternates a soft passage with a loud one. A steady tone correctly reads zero
-    // once the floor follower catches up to it, which is what "nothing is changing" looks like.
+    // Music, not a test tone: the level has to VARY for a learned window to mean anything, so each room alternates a soft passage with a loud one. A steady tone correctly reads zero once the floor follower catches up to it, which is what "nothing is changing" looks like.
     int32_t quietSoft[n], loudSoft[n];
     for (size_t i = 0; i < n; i++) { quietSoft[i] = quiet[i] / 2; loudSoft[i] = loud[i] / 2; }
 
@@ -409,9 +370,7 @@ TEST_CASE("in automatic mode a quiet room and a loud one both fill the level met
     }
     const uint16_t loudLevel = f.level;
 
-    // The two rooms read the SAME, though one is a hundred times louder: each is mapped onto its
-    // own learned window, which is the whole point of levelling the VU automatically. Both sit
-    // above the silence gate (floor 0 here), so this measures the levelling, not the gate.
+    // The two rooms read the SAME, though one is a hundred times louder: each is mapped onto its own learned window, which is the whole point of levelling the VU automatically. Both sit above the silence gate (floor 0 here), so this measures the levelling, not the gate.
     CHECK(quietLevel > 0);
     CHECK(quietLevel == loudLevel);
 
@@ -422,10 +381,7 @@ TEST_CASE("in automatic mode a quiet room and a loud one both fill the level met
     CHECK(f.level > quietManual);
 }
 
-// The silence gate, the fix for a learner that levelled an empty room up to full scale. Measured on
-// a Dig-Next-2: the raw path read flux 0-3 in a quiet room while the conditioner made 33-68 of it,
-// because the lift is dominated by relocating a quiet band up into the display window and silence
-// was relocated as eagerly as music.
+// The silence gate, the fix for a learner that levelled an empty room up to full scale. Measured on a Dig-Next-2: the raw path read flux 0-3 in a quiet room while the conditioner made 33-68 of it, because the lift is dominated by relocating a quiet band up into the display window and silence was relocated as eagerly as music.
 TEST_CASE("a room below the floor reads silent, however hard the learner is asked to level") {
     mm::BandConditioner c; float quiet[16], out[16];
     for (uint8_t b = 0; b < 16; b++) quiet[b] = 55.0f;          // below a gate of 60
@@ -441,19 +397,14 @@ TEST_CASE("a room below the floor reads silent, however hard the learner is aske
     for (uint8_t b = 0; b < 16; b++) CHECK(out[b] > 0.0f);
 }
 
-// Flux is a difference against the PREVIOUS block and the onset detector carries a running mean,
-// so a source that stops and starts must not measure its first new block against the last block of
-// the old one: that reports a hit nobody played. AudioService::deinit clears both with the frame.
+// Flux is a difference against the PREVIOUS block and the onset detector carries a running mean, so a source that stops and starts must not measure its first new block against the last block of the old one: that reports a hit nobody played. AudioService::deinit clears both with the frame.
 TEST_CASE("a restarted source reports no onset from the block that preceded it") {
     // The history the old source left behind: a loud spectrum.
     uint8_t prev[16], now[16];
     for (uint8_t b = 0; b < 16; b++) { prev[b] = 200; now[b] = 200; }
     CHECK(mm::spectralFlux(prev, now) == 0);            // steady: no flux, by definition
 
-    // Cleared history (what deinit leaves) reads the same block as a full-scale RISE, which is why
-    // deinit also publishes a silent frame: the first block after a restart is what that silences.
-    // What clearing buys is a DEFINED reference for the block after it, rather than a spectrum the
-    // old source left behind.
+    // Cleared history (what deinit leaves) reads the same block as a full-scale RISE, which is why deinit also publishes a silent frame: the first block after a restart is what that silences. What clearing buys is a DEFINED reference for the block after it, rather than a spectrum the old source left behind.
     uint8_t cleared[16] = {};
     const uint16_t againstStale = mm::spectralFlux(prev, now);
     const uint16_t againstCleared = mm::spectralFlux(cleared, now);
@@ -461,12 +412,7 @@ TEST_CASE("a restarted source reports no onset from the block that preceded it")
     CHECK(againstCleared > againstStale);   // which is why the frame is published silent too
 }
 
-// The gate that ships, exercised through magnitudesToBands rather than process() directly: every
-// conditioner test above hands `process` a hand-picked gateDb, so none covers the value the caller
-// actually passes. It sits AT the display window's floor, deliberately: a band reports its bins'
-// PEAK while the level path reports an RMS, so the level's 20 dB silence margin is a far larger
-// concession here. Measured on a Dig-Next-2, a 20 dB margin took a quiet room from flux 1-2 to
-// 49-102 with onsets firing.
+// The gate that ships, exercised through magnitudesToBands rather than process() directly: every conditioner test above hands `process` a hand-picked gateDb, so none covers the value the caller actually passes. It sits AT the display window's floor, deliberately: a band reports its bins' PEAK while the level path reports an RMS, so the level's 20 dB silence margin is a far larger concession here. Measured on a Dig-Next-2, a 20 dB margin took a quiet room from flux 1-2 to 49-102 with onsets firing.
 TEST_CASE("a room below the display window shows nothing on the spectrum") {
     const size_t nMag = 256;
     const uint32_t rate = 22050;

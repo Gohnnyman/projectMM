@@ -1,12 +1,11 @@
-// @module ColorTrailsEffect
+/// @module ColorTrailsEffect
 
-// The two flows this effect can carry color with, and the property that separates them.
-//
-// `Noise` is the separable one it is named for: a shift per row and per column, so the picture
-// shears and folds. `Radial` is a current along the line through the center, computed per pixel
-// from geometry with no field and no state. What distinguishes radial from every other flow here
-// is DIRECTION: color must end up further from the center than it started (or nearer, running in),
-// which a shear can never do on average.
+/// The two flows this effect can carry color with, and the property that separates them.
+///
+/// `Noise` is the separable one it is named for: a shift per row and per column, so the picture shears and folds.
+/// `Radial` is a current along the line through the center, computed per pixel from geometry with no field and no state.
+/// What distinguishes radial from every other flow here is DIRECTION.
+/// Color must end up further from the center than it started (or nearer, running in), which a shear can never do on average.
 
 #include "doctest.h"
 #include "golden_frame.h"                 // the effect harness: Layouts, Grid, Layer
@@ -18,8 +17,8 @@ using namespace mm;
 
 namespace {
 
-/// Mean distance from the center of every lit sample, weighted by brightness. The one number that
-/// tells an outward flow from an inward one: a shear moves color around, radial moves it out.
+/// Mean distance from the center of every lit sample, weighted by brightness.
+/// The one number that tells an outward flow from an inward one: a shear moves color around, radial moves it out.
 double litRadius(const Layer& layer, uint16_t w, uint16_t h) {
     const auto& buf = layer.buffer();
     const double cx = w / 2.0, cy = h / 2.0;
@@ -60,8 +59,7 @@ double runFlow(uint8_t flowType, uint16_t frames) {
 TEST_CASE("an outward radial flow carries color further from the center than an inward one") {
     const double out = runFlow(static_cast<uint8_t>(ColorTrailsEffect::Flow::Radial), 60);
     const double in  = runFlow(static_cast<uint8_t>(ColorTrailsEffect::Flow::RadialIn), 60);
-    // Both draw the same emitter in the same place; only the direction of the wind differs, so the
-    // difference in where the color ends up IS the flow.
+    // Both draw the same emitter in the same place; only the direction of the wind differs, so the difference in where the color ends up IS the flow.
     CHECK(out > in);
 }
 
@@ -72,8 +70,7 @@ TEST_CASE("every flow renders something rather than draining the picture to blac
 }
 
 TEST_CASE("the center cell has no direction to move in, and does not divide by zero") {
-    // The one place a radial field is undefined. Reaching it must leave the effect running rather
-    // than trapping: the guard is a floored radius, and this is what pins it.
+    // The one place a radial field is undefined. Reaching it must leave the effect running rather than trapping: the guard is a floored radius, and this is what pins it.
     golden::ScopedTestClock clock(1000);
     Layouts layouts; GridLayout grid; Layer layer; ColorTrailsEffect effect;
     grid.width = 1; grid.height = 1; grid.depth = 1;   // the center IS the whole grid

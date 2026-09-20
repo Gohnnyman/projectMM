@@ -1,15 +1,12 @@
-// @module Control
+/// @module Control
 
-// Pins the ControlType::List serialization contract (the generic list control that
-// backs DevicesModule's discovered-devices view). A List holds no row data itself —
-// a ListSource the owning module implements produces rows on demand from the
-// module's own storage. These tests verify:
-//   - the value serializes as a JSON array of summary objects (one per row),
-//   - the metadata carries a parallel `detail` array,
-//   - an empty source emits "[]" (robustness: a list with nothing found),
-//   - a List is read-only from the browser but PERSISTABLE: the saved array is
-//     parsed back on boot via ListSource::restoreList (the recursive mm::json
-//     reader's forEachListElement), seeding the cached list before the first scan.
+/// Pins the ControlType::List serialization contract (the generic list control that backs DevicesModule's discovered-devices view). A List holds no row data itself, a ListSource the owning module implements produces rows on demand from the module's own storage. These tests verify:
+///   - the value serializes as a JSON array of summary objects (one per row),
+///   - the metadata carries a parallel `detail` array,
+///   - an empty source emits "[]" (robustness: a list with nothing found),
+///   - a List is read-only from the browser but PERSISTABLE: the saved array is
+///     parsed back on boot via ListSource::restoreList (the recursive mm::json
+///     reader's forEachListElement), seeding the cached list before the first scan.
 
 #include "doctest.h"
 #include "core/module/Control.h"
@@ -21,9 +18,7 @@
 
 namespace {
 
-// A tiny fixed-data ListSource standing in for a real module (e.g. DevicesModule).
-// Two rows; row 0 is the "self" device. Summary is a compact object; detail adds
-// a field, exercising the separate summary/detail paths.
+// A tiny fixed-data ListSource standing in for a real module (e.g. DevicesModule). Two rows; row 0 is the "self" device. Summary is a compact object; detail adds a field, exercising the separate summary/detail paths.
 struct StubDevices : mm::ListSource {
     uint8_t n = 2;
     uint8_t listRowCount() const override { return n; }
@@ -35,8 +30,7 @@ struct StubDevices : mm::ListSource {
         if (row == 0) s.append("{\"name\":\"self\",\"ip\":\"192.168.1.10\",\"type\":\"projectMM\",\"self\":true}");
         else          s.append("{\"name\":\"WLED-1\",\"ip\":\"192.168.1.50\",\"type\":\"WLED\"}");
     }
-    // Restore: parse the persisted array with the recursive reader; record the count
-    // and the first row's name so a test can prove the round-trip took.
+    // Restore: parse the persisted array with the recursive reader; record the count and the first row's name so a test can prove the round-trip took.
     int restoredCount = -1;
     char firstName[24] = {};
     bool restoreList(const char* json, const char* key) override {
@@ -53,10 +47,7 @@ struct StubDevices : mm::ListSource {
 
 }  // namespace
 
-// A minimal EDITABLE list source — the CRUD half of the primitive. Rows are {id, name},
-// with a monotonic id counter so an id is never reused. Pins the contract the /api/list/*
-// endpoints call: add returns a fresh stable id, delete/move/setField address by id, and an
-// id stays put across add/delete/reorder (so a consumer referencing a row by id survives).
+// A minimal EDITABLE list source, the CRUD half of the primitive. Rows are {id, name}, with a monotonic id counter so an id is never reused. Pins the contract the /api/list/* endpoints call: add returns a fresh stable id, delete/move/setField address by id, and an id stays put across add/delete/reorder (so a consumer referencing a row by id survives).
 struct StubLibrary : mm::ListSource {
     struct Row { uint32_t id; char name[16]; bool locked; };
     Row rows[8];
@@ -137,8 +128,7 @@ TEST_CASE("EditableList: delete by id; a locked row is protected") {
     CHECK_FALSE(lib.deleteListRow(9999));        // bad id
 }
 
-// The load-bearing invariant for reference-by-id: an id assigned to a row NEVER changes across
-// add / delete / reorder of OTHER rows. A driver that stored "preset id 2" still resolves it.
+// The load-bearing invariant for reference-by-id: an id assigned to a row NEVER changes across add / delete / reorder of OTHER rows. A driver that stored "preset id 2" still resolves it.
 TEST_CASE("EditableList: a row id is stable across add / delete / reorder") {
     StubLibrary lib;
     uint32_t a = 0, b = 0, c = 0;
@@ -176,9 +166,7 @@ TEST_CASE("ControlType::List metadata carries a parallel detail array") {
 
     mm::JsonSink sink;
     mm::writeControlMetadata(sink, controls[0]);
-    // optionSets is emitted once per list (empty {} here — the devices list has no repeated selects),
-    // then the parallel detail array. A list with a repeated select (preset channel roles) fills
-    // optionSets with the shared option arrays so rows reference them by name instead of re-inlining.
+    // optionSets is emitted once per list (empty {} here, the devices list has no repeated selects), then the parallel detail array. A list with a repeated select (preset channel roles) fills optionSets with the shared option arrays so rows reference them by name instead of re-inlining.
     CHECK(std::strcmp(sink.data(),
         ",\"optionSets\":{}"
         ",\"detail\":["
@@ -199,11 +187,9 @@ TEST_CASE("ControlType::List with an empty source emits []") {
 
 TEST_CASE("ControlType::List type identity + persistable + restore round-trip") {
     CHECK(std::strcmp(mm::controlTypeName(mm::ControlType::List), "list") == 0);
-    // Persistable: the List value is a JSON array the recursive reader round-trips,
-    // restored via ListSource::restoreList (the model owns its (de)serialization).
+    // Persistable: the List value is a JSON array the recursive reader round-trips, restored via ListSource::restoreList (the model owns its (de)serialization).
     CHECK(mm::isPersistable(mm::ControlType::List));
-    // applyControlValue on a List drives restoreList (the persistence-overlay load
-    // path) and returns Ok — handing the source the saved array to rebuild itself.
+    // applyControlValue on a List drives restoreList (the persistence-overlay load path) and returns Ok, handing the source the saved array to rebuild itself.
     StubDevices src;
     mm::ControlList controls;
     controls.addList("devices", src);

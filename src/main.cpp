@@ -102,16 +102,13 @@
 #include "light/drivers/NdiDriver.h"
 #include "light/drivers/HlsDriver.h"
 #include "light/drivers/PreviewDriver.h"
-// LED drivers are compiled in per chip, gated on the peripheral each one needs, so a board
-// carries only the drivers its silicon can run. The preprocessor rather than `if constexpr`,
-// because the goal is excluding the code and a constexpr branch still compiles every arm. These
-// are capability macros, not the platform ones the boundary rule forbids.
+/// LED drivers are compiled in per chip, gated on the peripheral each one needs, so a board carries only the drivers its silicon can run.
+/// The preprocessor rather than `if constexpr`, because the goal is excluding the code and a constexpr branch still compiles every arm.
+/// These are capability macros, not the platform ones the boundary rule forbids.
 #if defined(CONFIG_SOC_RMT_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
 #include "light/drivers/RmtLedDriver.h"
 #endif
-// The parallel-WS2812 driver + its peripheral backends. Each backend header self-registers its factory
-// into ParallelLedDriver's peripheral registry (gated by the chip's CONFIG_SOC_*), so including the ones
-// this silicon supports is what populates the `peripheral` control's options.
+// The parallel-WS2812 driver + its peripheral backends. Each backend header self-registers its factory into ParallelLedDriver's peripheral registry (gated by the chip's CONFIG_SOC_*), so including the ones this silicon supports is what populates the `peripheral` control's options.
 #if defined(CONFIG_SOC_LCD_I80_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
 #include "light/drivers/I80Peripheral.h"      // esp_lcd i80 backend (I80Peripheral)
 #endif
@@ -121,15 +118,13 @@
 #if defined(CONFIG_SOC_PARLIO_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
 #include "light/drivers/ParlioPeripheral.h"        // Parlio backend (ParlioPeripheral)
 #endif
-// Panel receiver cards are opt-in per firmware rather than per chip: the panels need a gigabit
-// link, and no capability macro separates the boards that have one. So the firmware catalogue
-// names the variants that get it, and everything else saves the flash.
+// Panel receiver cards are opt-in per firmware rather than per chip: the panels need a gigabit link, and no capability macro separates the boards that have one. So the firmware catalogue names the variants that get it, and everything else saves the flash.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
 #include "light/drivers/PanelCardDriver.h"
 #endif
-// HUB75 is a GPIO panel, not a receiver card: it needs LCD_CAM or Parlio silicon and nothing else,
-// so it gates on the chip the way every other LED driver above does. Tying it to MM_PANEL_CARDS
-// hid it from every S3 that is not a panel-card firmware, which is most of them.
+// HUB75 is a GPIO panel, not a receiver card.
+// It needs LCD_CAM or Parlio silicon and nothing else, so it gates on the chip the way every other LED driver above does.
+// Tying it to MM_PANEL_CARDS hid it from every S3 that is not a panel-card firmware, which is most of them.
 #if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED) || defined(CONFIG_SOC_PARLIO_SUPPORTED) || \
     MM_LINKS_ALL_LED_DRIVERS
 #include "light/drivers/Hub75Driver.h"
@@ -173,15 +168,11 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::Drivers>("Drivers", "light/supporting.md#drivers");
     mm::ModuleFactory::registerType<mm::LightPresetsModule>("LightPresetsModule", "light/supporting.md#lightpresets");
 
-    // Wire the core quiesce-render hook to the light domain's encode worker: before core mutates the tree
-    // (add/remove/replace a child), stop core 1 so it can't dereference a node being freed. Core can't
-    // name Drivers (a light module), so it calls through this function-pointer seam (see MoonModule
-    // quiesceForMutation). Wired once here, where main.cpp legitimately depends on both sides.
+    // Wire the core quiesce-render hook to the light domain's encode worker: before core mutates the tree (add/remove/replace a child), stop core 1 so it can't dereference a node being freed.
+    // Core can't name Drivers (a light module), so it calls through this function-pointer seam (see MoonModule quiesceForMutation).
+    // Wired once here, where main.cpp legitimately depends on both sides.
     mm::MoonModule::setQuiesceRenderHook([] { if (auto* d = mm::Drivers::active()) d->quiesceRenderSplit(); });
-    // Concrete modules. registerType<T> captures the type's dimensions() via
-    // if-constexpr when present — EffectBase and ModifierBase both expose one,
-    // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.
-    // Layouts — alphabetical by display name.
+    // Concrete modules. registerType<T> captures the type's dimensions() via if-constexpr when present, EffectBase and ModifierBase both expose one, so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper. Layouts, alphabetical by display name.
     mm::ModuleFactory::registerType<mm::CarLightsLayout>("CarLightsLayout", "light/layouts.md#carlights");
     mm::ModuleFactory::registerType<mm::CubeLayout>("CubeLayout", "light/layouts.md#cube");
     mm::ModuleFactory::registerType<mm::HumanSizedCubeLayout>("HumanSizedCubeLayout", "light/layouts.md#humansizedcube");
@@ -200,8 +191,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::SpiralLayout>("SpiralLayout", "light/layouts.md#spiral");
     mm::ModuleFactory::registerType<mm::TubesLayout>("TubesLayout", "light/layouts.md#tubes");
     mm::ModuleFactory::registerType<mm::WheelLayout>("WheelLayout", "light/layouts.md#wheel");
-    // Effects — registered alphabetically by display name (the picker + docs also sort
-    // alphabetically; keeping this list sorted makes the three orders agree at a glance).
+    // Effects, registered alphabetically by display name (the picker + docs also sort alphabetically; keeping this list sorted makes the three orders agree at a glance).
     mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect", "light/effects.md#audiospectrum");
     mm::ModuleFactory::registerType<mm::RadialSpectrumEffect>("RadialSpectrumEffect", "light/effects.md#radialspectrum");
     mm::ModuleFactory::registerType<mm::VuMetersEffect>("VuMetersEffect", "light/effects.md#vumeters");
@@ -271,7 +261,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::TetrixEffect>("TetrixEffect", "light/effects.md#tetrix");
     mm::ModuleFactory::registerType<mm::TextEffect>("TextEffect", "light/effects.md#text");
     mm::ModuleFactory::registerType<mm::WaveEffect>("WaveEffect", "light/effects.md#wave");
-    // Modifiers — alphabetical by display name.
+    // Modifiers, alphabetical by display name.
     mm::ModuleFactory::registerType<mm::BlockModifier>("BlockModifier", "light/modifiers.md#block");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers.md#checkerboard");
     mm::ModuleFactory::registerType<mm::MoonLiveModifier>("MoonLiveModifier",
@@ -288,9 +278,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::HueDriver>("HueDriver", "light/drivers.md#hue");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers.md#networksend");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers.md#preview");
-    // NDI is gated by CAPABILITY, not by firmware: the header compiles everywhere (its platform
-    // calls are declared on every target), and `hasNdi` decides whether the picker offers it. An
-    // `if constexpr` discarded branch must still PARSE, so the include above cannot be gated.
+    // NDI is gated by CAPABILITY, not by firmware: the header compiles everywhere (its platform calls are declared on every target), and `hasNdi` decides whether the picker offers it. An `if constexpr` discarded branch must still PARSE, so the include above cannot be gated.
     if constexpr (mm::platform::hasNdi)
         mm::ModuleFactory::registerType<mm::NdiDriver>("NdiDriver", "light/drivers.md#ndi");
     if constexpr (mm::platform::hasHls)
@@ -304,14 +292,11 @@ static void registerModuleTypes() {
     MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::Hub75Driver>("Hub75Driver", "light/drivers.md#hub75");
 #endif
-    // Register only the LED drivers this chip's silicon can run (see the gated
-    // includes above) — keeps the type picker honest (no I80Peripheral offered on a
-    // chip without an i80 bus) and the binary lean.
+    // Register only the LED drivers this chip's silicon can run (see the gated includes above), keeps the type picker honest (no I80Peripheral offered on a chip without an i80 bus) and the binary lean.
 #if defined(CONFIG_SOC_RMT_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers.md#rmtled");
 #endif
-    // One driver for the parallel output whatever the DMA peripheral: each backend self-registers
-    // when its header is included, so the control offers exactly the ones this chip links.
+    // One driver for the parallel output whatever the DMA peripheral: each backend self-registers when its header is included, so the control offers exactly the ones this chip links.
 #if defined(CONFIG_SOC_LCD_I80_SUPPORTED) || defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED) || defined(CONFIG_SOC_PARLIO_SUPPORTED) || MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::ParallelLedDriver>("ParallelLedDriver", "light/drivers.md#parallelled");
 #endif
@@ -361,22 +346,15 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     // All modules created via factory (heap-allocated, PSRAM when available, classSize set)
 
-    // Names come from the factory, which strips the role suffix, keeping the direction on a
-    // network module so send and receive stay distinguishable. An explicit name is needed only
-    // for a genuine rename.
+    // Names come from the factory, which strips the role suffix, keeping the direction on a network module so send and receive stay distinguishable. An explicit name is needed only for a genuine rename.
 
-    // Creation can return null in principle, and these results are deliberately not checked:
-    // at startup the right behavior is a crash with a usable backtrace, which both targets
-    // already give, rather than boilerplate that reports the same failure less clearly.
+    // Creation can return null in principle, and these results are deliberately not checked. At startup the right behavior is a crash with a usable backtrace, which both targets already give, rather than boilerplate that reports the same failure less clearly.
 
-    // Filesystem (first — wires the load hook into the scheduler so persisted values
-    // overlay into other modules' bound variables before their setup() runs)
+    // Filesystem (first, wires the load hook into the scheduler so persisted values overlay into other modules' bound variables before their setup() runs)
     auto* filesystemModule = static_cast<mm::FilesystemModule*>(mm::ModuleFactory::create("FilesystemModule"));
     filesystemModule->setScheduler(&scheduler);
 
-    // File Manager — browse/manage the filesystem (a device-wide tool, boot-wired like the other
-    // system modules, not per-board). Distinct from FilesystemModule (the persistence engine).
-    // setName gives the card a clean "File Manager" label (the type stays FileManagerModule).
+    // File Manager, browse/manage the filesystem (a device-wide tool, boot-wired like the other system modules, not per-board). Distinct from FilesystemModule (the persistence engine). setName gives the card a clean "File Manager" label (the type stays FileManagerModule).
     auto* fileManagerModule = static_cast<mm::FileManagerModule*>(mm::ModuleFactory::create("FileManagerModule"));
     fileManagerModule->setName("File Manager");
 
@@ -384,9 +362,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* systemModule = static_cast<mm::SystemModule*>(mm::ModuleFactory::create("SystemModule"));
     systemModule->setScheduler(&scheduler);
 
-    // The device's inspection toolkit, wired by code as System children rather than user-added:
-    // always present, exempt from the persistence trim, and accepted by no container as an
-    // editable child, so no card offers a delete.
+    // The device's inspection toolkit, wired by code as System children rather than user-added. Always present, exempt from the persistence trim, and accepted by no container as an editable child, so no card offers a delete.
     auto* tasksModule = static_cast<mm::TasksModule*>(mm::ModuleFactory::create("TasksModule"));
     tasksModule->markWiredByCode();
     systemModule->addChild(tasksModule);
@@ -397,36 +373,26 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     pinsModule->markWiredByCode();
     systemModule->addChild(pinsModule);
 
-    // Services — top-level container for user-added capability modules (Audio, IR).
-    // The core-domain twin of the light domain's Effects/Drivers: a grouping node
-    // whose children the user adds/removes at runtime. Added as a root below.
+    // Services, top-level container for user-added capability modules (Audio, IR).
+    // The core-domain twin of the light domain's Effects/Drivers: a grouping node whose children the user adds/removes at runtime.
+    // Added as a root below.
     auto* servicesModule = static_cast<mm::Services*>(mm::ModuleFactory::create("Services"));
 
-    // ControlModule — puts the device into a named state. Top-level rather than a Services child
-    // because a preset reaches ACROSS Layouts/Effects/Drivers/Services, so it cannot live inside one
-    // of them. Boot-wired: presets are a device capability, not something a user adds.
+    // ControlModule, puts the device into a named state.
+    // Top-level rather than a Services child because a preset reaches ACROSS Layouts/Effects/Drivers/Services, so it cannot live inside one of them.
+    // Boot-wired: presets are a device capability, not something a user adds.
     auto* controlModule = static_cast<mm::ControlModule*>(mm::ModuleFactory::create("ControlModule"));
 
-    // The device identity is SystemModule's own pair of controls rather than a separate module.
-    // Tooling injects the model like any catalog default, over HTTP or serial, both routed
-    // through the apply core and the control's validator.
+    // The device identity is SystemModule's own pair of controls rather than a separate module. Tooling injects the model like any catalog default, over HTTP or serial, both routed through the apply core and the control's validator.
 
-    // The audio service is user-added rather than boot-wired: auto-wiring forced an I2S init on
-    // boards with no microphone, which hung setup and boot-looped a classic ESP32. Added, its
-    // pins default to empty so it idles until real ones are entered, and the effects read a
-    // silent frame when no microphone exists.
+    // The audio service is user-added rather than boot-wired: auto-wiring forced an I2S init on boards with no microphone, which hung setup and boot-looped a classic ESP32. Added, its pins default to empty so it idles until real ones are entered, and the effects read a silent frame when no microphone exists.
 
-    // Surfaces the install's status as read-only controls, the flash itself being driven over
-    // HTTP; this only polls the shared globals so the push picks up progress. Renamed because
-    // the card hosts the install picker, so the shorter word is the user-facing concept.
+    // Surfaces the install's status as read-only controls, the flash itself being driven over HTTP; this only polls the shared globals so the push picks up progress. Renamed because the card hosts the install picker, so the shorter word is the user-facing concept.
     auto* firmwareUpdateModule = static_cast<mm::FirmwareUpdateModule*>(
         mm::ModuleFactory::create("FirmwareUpdateModule"));
     firmwareUpdateModule->setName("Firmware");
 
-    // The container for everything talking to a server we run, each child carrying its own
-    // consent, because wanting a joint lightshow is not agreeing to usage reporting. Not a child
-    // of Firmware, which was tried: that module does not chain to its children, so anything
-    // parented there showed an empty card.
+    // The container for everything talking to a server we run, each child carrying its own consent, because wanting a joint lightshow is not agreeing to usage reporting. Not a child of Firmware, which was tried: that module does not chain to its children, so anything parented there showed an empty card.
     auto* moonCloudModule = static_cast<mm::MoonCloudModule*>(
         mm::ModuleFactory::create("MoonCloudModule"));
     moonCloudModule->setName("MoonCloud");
@@ -435,37 +401,30 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
         mm::ModuleFactory::create("MoonStatsModule"));
     moonStatsModule->setName("Stats");
 
-    // MoonTalk: the public message board. A SECOND MoonCloud child with its own consent,
-    // because publishing a message and sharing a chip model are different decisions.
+    // MoonTalk: the public message board. A SECOND MoonCloud child with its own consent, because publishing a message and sharing a chip model are different decisions.
     auto* moonTalkModule = static_cast<mm::MoonTalkModule*>(
         mm::ModuleFactory::create("MoonTalkModule"));
     moonTalkModule->setName("Talk");
 
-    // Network (platform stubs return false on desktop — module is a no-op)
+    // Network (platform stubs return false on desktop, module is a no-op)
     auto* networkModule = static_cast<mm::NetworkModule*>(mm::ModuleFactory::create("NetworkModule"));
     networkModule->setScheduler(&scheduler);
     networkModule->setSystemModule(systemModule);
 
-    // Listens on the serial port for pushed WiFi credentials, created after the network module
-    // so its setter has a valid pointer. Compile-time gated, the one exception to registering
-    // everything and letting modules guard themselves: its only purpose is pushing credentials,
-    // so on a build without WiFi there is no surface to push to.
+    // Listens on the serial port for pushed WiFi credentials, created after the network module so its setter has a valid pointer.
+    // Compile-time gated, the one exception to registering everything and letting modules guard themselves.
+    // Its only purpose is pushing credentials, so on a build without WiFi there is no surface to push to.
     mm::ImprovProvisioningModule* improvModule = nullptr;
     if constexpr (mm::platform::hasImprov) {
         improvModule = static_cast<mm::ImprovProvisioningModule*>(
             mm::ModuleFactory::create("ImprovProvisioningModule"));
         improvModule->setSystemModule(systemModule);
         improvModule->setNetworkModule(networkModule);
-        // One module answers the device-info request and the other takes the credentials.
-        // Marked wired-by-code so the trim loop preserves it on a device whose saved tree
-        // predates this child.
+        // One module answers the device-info request and the other takes the credentials. Marked wired-by-code so the trim loop preserves it on a device whose saved tree predates this child.
         improvModule->markWiredByCode();
     }
 
-    // MQTT service: a code-wired child of Network (like Improv), bridging the light controls to a
-    // broker for Homebridge/Home-Assistant. Built on every networked target (it uses TCP, so it
-    // works over WiFi or Ethernet); disabled until the user sets a broker. systemModule is injected
-    // for the default topic prefix (the device name).
+    // MQTT service: a code-wired child of Network (like Improv), bridging the light controls to a broker for Homebridge/Home-Assistant. Built on every networked target (it uses TCP, so it works over WiFi or Ethernet); disabled until the user sets a broker. systemModule is injected for the default topic prefix (the device name).
     mm::MqttModule* mqttModule = nullptr;
     if constexpr (mm::platform::hasNetwork) {
         mqttModule = static_cast<mm::MqttModule*>(mm::ModuleFactory::create("MqttModule"));
@@ -474,15 +433,14 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
         mqttModule->markWiredByCode();
     }
 
-    // Layouts: top-level container; one or more layouts. Today one GridLayout,
-    // which self-initialises to defaultGridSize (persistence overlays any saved
-    // size before setup()). No boot-time dimensions threaded in here.
+    // Layouts: top-level container; one or more layouts.
+    // Today one GridLayout, which self-initializes to defaultGridSize (persistence overlays any saved size before setup()).
+    // No boot-time dimensions threaded in here.
     auto* layouts = static_cast<mm::Layouts*>(mm::ModuleFactory::create("Layouts"));
     auto* grid = static_cast<mm::GridLayout*>(mm::ModuleFactory::create("GridLayout"));
     layouts->addChild(grid);
 
-    // Effects: top-level container; one or more layers, each rendering
-    // into its own buffer. Today one Layer with one effect + one modifier.
+    // Effects: top-level container; one or more layers, each rendering into its own buffer. Today one Layer with one effect + one modifier.
     auto* effectsContainer = static_cast<mm::Effects*>(mm::ModuleFactory::create("Effects"));
     auto* layer = static_cast<mm::Layer*>(mm::ModuleFactory::create("Layer"));
     layer->setChannelsPerLight(3);
@@ -490,29 +448,23 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // setLayouts wires the shared Layouts to the container AND propagates to every child Layer.
     effectsContainer->setLayouts(layouts);
 
-    // One default effect so a bare device (no catalog inject) still shows lights out
-    // of the box — but NO default modifier: the boot Layer is just an effect on a
-    // 16x16 grid. A device-model catalog entry can REPLACE this (replaceChildren) with
-    // its own effects/modifiers — e.g. the testbench swaps in AudioSpectrum + RandomMap.
+    // One default effect so a bare device (no catalog inject) still shows lights out of the box, but NO default modifier.
+    // The boot Layer is just an effect on a 16x16 grid.
+    // A device-model catalog entry can REPLACE this (replaceChildren) with its own effects/modifiers, e.g. the testbench swaps in AudioSpectrum + RandomMap.
     auto* noise = mm::ModuleFactory::create("NoiseEffect");
     layer->addChild(noise);
 
-    // Bound to the effects container rather than to a single layer, so a layer rebuilt through
-    // the API self-heals without re-running this wiring, and one driver can read across several
-    // layer buffers from one place.
+    // Bound to the effects container rather than to a single layer. A layer rebuilt through the API self-heals without re-running this wiring, and one driver can read across several layer buffers from one place.
     auto* drivers = static_cast<mm::Drivers*>(mm::ModuleFactory::create("Drivers"));
     drivers->setEffects(effectsContainer);
 
-    // Output drivers are added per board through the catalog rather than boot-wired, so a device
-    // carries only what its board has. The container wires any child generically, so one added at
-    // runtime is wired exactly like one added at boot and persists across a reboot. A bare flash
-    // therefore has no output until a board is selected, which is the deliberate model.
+    // Output drivers are added per board through the catalog rather than boot-wired, so a device carries only what its board has.
+    // The container wires any child generically, so one added at runtime is wired exactly like one added at boot and persists across a reboot.
+    // A bare flash therefore has no output until a board is selected, which is the deliberate model.
 
-    // The preview is the one boot-wired driver: it needs the broadcaster only this file holds,
-    // which the catalog cannot supply.
+    // The preview is the one boot-wired driver: it needs the broadcaster only this file holds, which the catalog cannot supply.
 
-    // The preset library, a boot-wired singleton owning the named channel-role wirings every
-    // driver references by id, resolved through its own seat since exactly one exists.
+    // The preset library, a boot-wired singleton owning the named channel-role wirings every driver references by id, resolved through its own seat since exactly one exists.
     auto* lightPresets =
         static_cast<mm::LightPresetsModule*>(mm::ModuleFactory::create("LightPresetsModule"));
     drivers->addChild(lightPresets);
@@ -520,51 +472,38 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
     drivers->addChild(preview);
-    // Marked wired-by-code so a persistence load can't replace the wired instance
-    // with a fresh factory one that lost its broadcaster — same protection
-    // ImprovProvisioning uses.
+    // Marked wired-by-code so a persistence load can't replace the wired instance with a fresh factory one that lost its broadcaster, same protection ImprovProvisioning uses.
     preview->markWiredByCode();
 
     auto* httpServer = static_cast<mm::HttpServerModule*>(mm::ModuleFactory::create("HttpServerModule"));
     httpServer->port = httpPort;
     httpServer->setScheduler(&scheduler);
-    // PreviewDriver pushes the coordinate table + per-frame RGB to the HTTP
-    // server's WS broadcaster (HttpServerModule is-a BinaryBroadcaster). Light
-    // owns the preview wire format end to end; core just writes the bytes.
+    // PreviewDriver pushes the coordinate table + per-frame RGB to the HTTP server's WS broadcaster (HttpServerModule is-a BinaryBroadcaster). Light owns the preview wire format end to end; core just writes the bytes.
     preview->setBroadcaster(httpServer);
 
-    // APPLY_OP vendor RPC (0xFC): the installer pushes the device-model's catalog
-    // ops over serial during provisioning, and ImprovProvisioningModule routes each
-    // to the HttpServerModule apply-core (the same code /api/modules + /api/control
-    // use) — "Improv = REST over serial". Wired here once httpServer exists.
+    // APPLY_OP vendor RPC (0xFC): the installer pushes the device-model's catalog ops over serial during provisioning.
+    // ImprovProvisioningModule routes each to the HttpServerModule apply-core (the same code /api/modules + /api/control use), "Improv = REST over serial".
+    // Wired here once httpServer exists.
     if (improvModule) improvModule->setHttpServerModule(httpServer);
 
-    // Registration order matters, and the scheduler walks the roots in it each tick: the
-    // filesystem first so its load hook runs before any setup, then the identity and status
-    // surfaces, then network with its credential and bridge children, then the services a later
-    // stage may consume, then the light pipeline, and the server last.
+    // Registration order matters, and the scheduler walks the roots in it each tick: the filesystem first so its load hook runs before any setup, then the identity and status surfaces, then network with its credential and bridge children, then the services a later stage may consume, then the light pipeline, and the server last.
     scheduler.addModule(filesystemModule);
     scheduler.addModule(systemModule);
     scheduler.addModule(fileManagerModule);
     scheduler.addModule(firmwareUpdateModule);
-    // markWiredByCode: both are boot wiring, not user-added, so the persisted tree must not decide
-    // whether they exist. Without it a config written before a child was added drops that child on
-    // load, which is exactly what happened when Talk was introduced beside Stats: the file listed
-    // one child, so the tree came back with one.
+    // markWiredByCode: both are boot wiring, not user-added, so the persisted tree must not decide whether they exist.
+    // Without it a config written before a child was added drops that child on load, which is exactly what happened when Talk was introduced beside Stats.
+    // The file listed one child, so the tree came back with one.
     moonStatsModule->markWiredByCode(); moonCloudModule->addChild(moonStatsModule);
     moonTalkModule->markWiredByCode();  moonCloudModule->addChild(moonTalkModule);
     scheduler.addModule(moonCloudModule);
     if (improvModule) networkModule->addChild(improvModule);
     if (mqttModule) networkModule->addChild(mqttModule);
-    // Devices: discovers other devices on the LAN. Child of Network (discovery
-    // depends on the network being up); wired-by-code so persistence preserves it
-    // on devices whose saved Network.json predates the child (see DevicesModule.md).
+    // Devices: discovers other devices on the LAN. Child of Network (discovery depends on the network being up); wired-by-code so persistence preserves it on devices whose saved Network.json predates the child (see DevicesModule.md).
     auto* devicesModule = static_cast<mm::DevicesModule*>(
         mm::ModuleFactory::create("DevicesModule"));
     devicesModule->markWiredByCode();
-    // Wire our own name so the self row in the device list matches the rest of the
-    // device's identity (status page / router / mDNS). deviceName has static lifetime
-    // (SystemModule's member); the module borrows the pointer.
+    // Wire our own name so the self row in the device list matches the rest of the device's identity (status page / router / mDNS). deviceName has static lifetime (SystemModule's member); the module borrows the pointer.
     devicesModule->setSelfName(systemModule->deviceName());
     networkModule->addChild(devicesModule);
     scheduler.addModule(networkModule);
@@ -573,9 +512,9 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     scheduler.addModule(layouts);
     scheduler.addModule(effectsContainer);
     scheduler.addModule(drivers);
-    // Only where an IP stack exists: setup binds a socket, and with no interface compiled in
-    // nothing initialises the stack, so its thread never exists and the board goes down before
-    // the light pipeline runs. The gate is what makes a network-less build supported.
+    // Only where an IP stack exists.
+    // Setup binds a socket, and with no interface compiled in nothing initializes the stack, so its thread never exists and the board goes down before the light pipeline runs.
+    // The gate is what makes a network-less build supported.
     if constexpr (mm::platform::hasNetwork) scheduler.addModule(httpServer);
 
     scheduler.setup();
@@ -589,17 +528,14 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     std::printf("sizeof: MoonModule=%zu Layer=%zu Drivers=%zu Grid=%zu HttpServer=%zu\n",
                 sizeof(mm::MoonModule), sizeof(mm::Layer), sizeof(mm::Drivers),
                 sizeof(mm::GridLayout), sizeof(mm::HttpServerModule));
-    // The server binds every interface, so it is reachable across the LAN. A loopback name only
-    // means anything where the browser runs on the host, so a device prints its interface address
-    // instead and the network module logs the real one as each interface comes up.
+    // The server binds every interface, so it is reachable across the LAN.
+    // A loopback name only means anything where the browser runs on the host.
+    // A device prints its interface address instead and the network module logs the real one as each interface comes up.
     const char* hostIp = mm::platform::hostIp();
     if (hostIp && hostIp[0]) {
         std::printf("HTTP server → http://%s:%u\n", hostIp, httpServer->port);
     } else {
-        // No address yet, for two different reasons: on a device that is normal this early (an
-        // interface is not up, and NetworkModule logs the address when it comes up), while on a
-        // desktop it means hostIp() found no route at all. Stating what is true — no address yet —
-        // covers both without promising a follow-up message that an offline desktop never prints.
+        // No address yet, for two different reasons: on a device that is normal this early (an interface is not up, and NetworkModule logs the address when it comes up), while on a desktop it means hostIp() found no route at all. Stating what is true, no address yet, covers both without promising a follow-up message that an offline desktop never prints.
         std::printf("HTTP server on port %u — no network address yet\n", httpServer->port);
     }
 
@@ -613,10 +549,9 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     const uint32_t bootMillis = lastLog;   // window start for the MM_IP serial token
     bool mmIpWindowClosed = false;         // latches true once the 60 s window elapses
 
-    // Subscribe THIS (render-loop) task to the task watchdog: a genuine wedge here now panics-and-reboots
-    // (the self-heal, with a backtrace) instead of hanging silently. The sdkconfig runs the TWDT with
-    // idle-task checking OFF (a saturated core is healthy, not a bug), so this explicit subscription is
-    // what the watchdog actually watches. Reset it each tick below; a heavy-but-live frame keeps feeding it.
+    // Subscribe THIS (render-loop) task to the task watchdog: a genuine wedge here now panics-and-reboots (the self-heal, with a backtrace) instead of hanging silently.
+    // The sdkconfig runs the TWDT with idle-task checking OFF (a saturated core is healthy, not a bug), so this explicit subscription is what the watchdog actually watches.
+    // Reset it each tick below; a heavy-but-live frame keeps feeding it.
     mm::platform::taskWdtSubscribe();
 
     while (keepRunning) {
@@ -627,15 +562,12 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
         uint32_t now = mm::platform::millis();
         if (now - lastLog >= 1000) {
             lastLog = now;
-            // `goto`, not `continue`: the loop's pacing lives at its TAIL, so a continue here
-            // skips the yield and spins the core for this pass. Jumping to the pacing point keeps
-            // "skip the logging" from meaning "skip the sleep".
+            // `goto`, not `continue`: the loop's pacing lives at its TAIL, so a continue here skips the yield and spins the core for this pass. Jumping to the pacing point keeps "skip the logging" from meaning "skip the sleep".
             if (scheduler.tickTimeUs() == 0) goto paced; // no measurement yet
 
-            // A plain write rather than a log call, so the platform level cannot suppress it and
-            // this gates on the same level by hand: silenced above a warning, so a resting device
-            // makes no periodic serial write and a transmit-blinking LED stops flickering. The
-            // first minute always prints, because the installer reads the address off this line.
+            // A plain write rather than a log call, so the platform level cannot suppress it and this gates on the same level by hand.
+            // Silenced above a warning, so a resting device makes no periodic serial write and a transmit-blinking LED stops flickering.
+            // The first minute always prints, because the installer reads the address off this line.
             const bool inBootWindow = !mmIpWindowClosed && (now - bootMillis < 60000);
             if (systemModule->logLevel() < mm::platform::LogLevel::Info && !inBootWindow) goto paced;
 
@@ -643,22 +575,17 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
             std::printf("tick: %uus (FPS: %u)", static_cast<unsigned>(scheduler.tickTimeUs()),
                         static_cast<unsigned>(scheduler.fps()));
             if (heap > 0) {
-                // maxInternalAllocBlock — internal RAM only. The all-memory
-                // variant reports ~8 MB on S3/S2 PSRAM boards and is useless
-                // as a memory-pressure KPI. See platform.h for the split.
+                // maxInternalAllocBlock, internal RAM only.
+                // The all-memory variant reports ~8 MB on S3/S2 PSRAM boards and is useless as a memory-pressure KPI.
+                // See platform.h for the split.
                 std::printf("  free: %u  maxBlock: %u",
                             static_cast<unsigned>(heap),
                             static_cast<unsigned>(mm::platform::maxInternalAllocBlock()));
             }
-            // The worst wait at a frame boundary in the last second, not a single frame's, which
-            // would land wherever this once-a-second line falls and read as nothing. It is what
-            // says whether a second buffer would recover idle time or gain nothing.
+            // The worst wait at a frame boundary in the last second, not a single frame's, which would land wherever this once-a-second line falls and read as nothing. It is what says whether a second buffer would recover idle time or gain nothing.
             if (drivers->renderSplitActive())
                 std::printf("  renderWait: %uus", static_cast<unsigned>(drivers->renderWaitPeakUs()));
-            // A stable address token for the installer's post-flash serial read, riding this
-            // already-periodic line so it costs no extra write and repeats until the port is
-            // reopened. Gated to the first minute, after which the address comes from the API,
-            // and the window latches off for good so a counter wrap cannot reopen it.
+            // A stable address token for the installer's post-flash serial read, riding this already-periodic line so it costs no extra write and repeats until the port is reopened. Gated to the first minute, after which the address comes from the API, and the window latches off for good so a counter wrap cannot reopen it.
             if (!mmIpWindowClosed) {
                 if (now - bootMillis >= 60000) {
                     mmIpWindowClosed = true;   // first 60 s elapsed; stop for the rest of uptime
@@ -669,9 +596,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
                         char ipStr[16];
                         mm::formatDottedQuad(ipStr, ip);
                         std::printf("  MM_IP=%s", ipStr);
-                        // The discovery name alongside the address, so the installer's link
-                        // survives a lease change. It is the one network identity, and it rides
-                        // serial because the installer's fallback is blocked by mixed content.
+                        // The discovery name alongside the address, so the installer's link survives a lease change. It is the one network identity, and it rides serial because the installer's fallback is blocked by mixed content.
                         std::printf("  MM_DEVICE=%s.local", systemModule->deviceName());
                     }
                 }
@@ -685,10 +610,10 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
         }
 
     paced:
-        // Pace the loop rather than spin: yielding only offers the CPU to another runnable
-        // thread, so with nothing else to run it returns at once and this burns a whole core,
-        // as a bench reported. A sub-millisecond sleep parks the thread at no cost to the frame
-        // rate. The yield stays for the split's frame boundary, which must not sleep.
+        // Pace the loop rather than spin.
+        // Yielding only offers the CPU to another runnable thread, so with nothing else to run it returns at once and this burns a whole core, as a bench reported.
+        // A sub-millisecond sleep parks the thread at no cost to the frame rate.
+        // The yield stays for the split's frame boundary, which must not sleep.
         mm::platform::yield();
         mm::platform::pauseLoop();
     }

@@ -79,7 +79,7 @@ public:
     /// The polar address of one light, computed rather than read.
     /// What an effect uses when the table was declined (a device too tight for it) or switched off.
     ///
-    /// Takes the mapping, so the fallback renders the SAME composition the table would have. An earlier version computed cylindrical unconditionally, so a fixture set to spherical or radial silently reverted to cylindrical the moment memory ran short.
+    /// Takes the mapping, so the fallback renders the SAME composition the table would have, whatever projection the fixture is set to.
     /// The effect kept working and quietly showed a different thing, which is worse than not working.
     struct Address {
         angle16  angle;   ///< around the axis

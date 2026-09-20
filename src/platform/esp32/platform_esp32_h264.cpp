@@ -37,10 +37,7 @@
 
 #if defined(CONFIG_MM_HLS)
 
-// The Kconfig symbol cannot enforce this itself: `depends on IDF_TARGET_ESP32P4` would hide
-// MM_HLS from the component solver, which reads it to gate the esp_h264 dependency, and every
-// non-P4 build then fails at cmake. Catch it here instead, where the message names the cause
-// rather than surfacing as a link error against a missing hardware encoder.
+// The Kconfig symbol cannot enforce this itself: `depends on IDF_TARGET_ESP32P4` would hide MM_HLS from the component solver, which reads it to gate the esp_h264 dependency, and every non-P4 build then fails at cmake. Catch it here instead, where the message names the cause rather than surfacing as a link error against a missing hardware encoder.
 #include "soc/soc_caps.h"
 #if !defined(SOC_H264_ENCODER_SUPPORTED) || !SOC_H264_ENCODER_SUPPORTED
 #error "CONFIG_MM_HLS is set on a chip with no hardware H.264 encoder (P4 only)."
@@ -60,18 +57,12 @@
 namespace mm::platform {
 namespace {
 
-// Frame slots between the render tick and the encode task. Three is the desktop's number and the
-// same reasoning: enough to absorb a burst, few enough that a backlog is dropped rather than
-// queued into latency.
+// Frame slots between the render tick and the encode task. Three is the desktop's number and the same reasoning: enough to absorb a burst, few enough that a backlog is dropped rather than queued into latency.
 constexpr size_t kSlots = 3;
 
-// Segments kept in the ring, and so also the playlist's depth: a segment survives this many
-// seconds after it closes, which is the whole budget a player has to parse the playlist, fetch
-// and buffer before what it asked for is recycled. Browsers want several seconds of that, so the
-// ring is the lifetime, not a cache.
+// Segments kept in the ring, and so also the playlist's depth: a segment survives this many seconds after it closes, which is the whole budget a player has to parse the playlist, fetch and buffer before what it asked for is recycled. Browsers want several seconds of that, so the ring is the lifetime, not a cache.
 constexpr size_t kSegments = 12;
-// Segments held back from the playlist: the slots rotation is about to reuse. Without this margin
-// a player is handed a segment that is overwritten while it fetches it.
+// Segments held back from the playlist: the slots rotation is about to reuse. Without this margin a player is handed a segment that is overwritten while it fetches it.
 constexpr uint32_t kReserved = 3;
 
 // One second at a generous bitrate, with headroom for the keyframe that opens every segment.
@@ -89,34 +80,26 @@ struct Segment {
     uint16_t frames = 0;    // frames muxed into it, so the playlist can state its REAL duration
 };
 
-// Everything the worker and the producers share. Guarded by the FreeRTOS mutex below, except the
-// atomics, which are read without it.
+// Everything the worker and the producers share. Guarded by the FreeRTOS mutex below, except the atomics, which are read without it.
 Slot     slots_[kSlots];
 size_t   head_ = 0, count_ = 0;
 Segment  segments_[kSegments];
 size_t   segWrite_ = 0;          // segment currently being filled
 uint32_t nextSeq_  = 1;
-// The segment a socket is currently reading, if any. hlsSegment hands out a pointer that the
-// caller reads AFTER the lock drops, so the encoder must not recycle that slot underneath it;
-// serving is far shorter than the eight seconds the ring takes to lap, but "usually in time" is
-// not a lifetime guarantee. kNoSeg = nothing being served.
+// The segment a socket is currently reading, if any. hlsSegment hands out a pointer that the caller reads AFTER the lock drops, so the encoder must not recycle that slot underneath it; serving is far shorter than the eight seconds the ring takes to lap, but "usually in time" is not a lifetime guarantee. kNoSeg = nothing being served.
 constexpr uint32_t kNoSeg = 0;
 std::atomic<uint32_t> serving_{kNoSeg};
 
 WorkerTask       task_;
 std::atomic<bool> running_{false};
 std::atomic<bool> dead_{false};   // the encoder failed: writes are refused until a restart
-// Set by the worker as its LAST act. stopPinnedTask detaches rather than joins if the worker
-// overruns its deadline (platform_esp32_worker.cpp), so its return does not prove the worker is
-// gone; freeing the buffers on that path would pull them out from under a live encode.
+// Set by the worker as its LAST act. stopPinnedTask detaches rather than joins if the worker overruns its deadline (platform_esp32_worker.cpp), so its return does not prove the worker is gone; freeing the buffers on that path would pull them out from under a live encode.
 std::atomic<bool> workerExited_{false};
 
 // Which worker generation is the live one: @xref{an-orphaned-worker-must-not-become-a-second-producer|why a running flag alone cannot gate it}.
 std::atomic<uint32_t> generation_{0};
 
-// Set when a segment was closed early (a frame that did not fit), so the fresh one is still
-// waiting for its first keyframe. Without it the next P-frame would open the segment and a
-// player seeking there would have no reference frame to decode against.
+// Set when a segment was closed early (a frame that did not fit), so the fresh one is still waiting for its first keyframe. Without it the next P-frame would open the segment and a player seeking there would have no reference frame to decode against.
 bool needKeyframe_ = false;
 
 esp_h264_enc_handle_t enc_ = nullptr;
@@ -150,8 +133,7 @@ void rgbToEncoderFormat(const uint8_t* rgb, uint8_t* out, uint16_t w, uint16_t h
 
             const int y0 = (77 * r0 + 150 * g0 + 29 * b0) >> 8;
             const int y1 = (77 * r1 + 150 * g1 + 29 * b1) >> 8;
-            // Chroma is subsampled 2x2; averaging the pair costs nothing and avoids the crawl a
-            // nearest-sample pick gives on hard edges.
+            // Chroma is subsampled 2x2; averaging the pair costs nothing and avoids the crawl a nearest-sample pick gives on hard edges.
             const int rA = (r0 + r1) >> 1, gA = (g0 + g1) >> 1, bA = (b0 + b1) >> 1;
             const int c = evenRow ? (((-43 * rA - 84 * gA + 128 * bA) >> 8) + 128)    // U
                                   : (((128 * rA - 107 * gA - 21 * bA) >> 8) + 128);   // V
@@ -169,9 +151,7 @@ void rotateSegment() {
     const uint32_t busy = serving_.load();
     for (size_t tried = 0; tried < kSegments; tried++) {
         segWrite_ = (segWrite_ + 1) % kSegments;
-        // Only a slot actually being served is off limits. An empty slot carries seq 0, which is
-        // also kNoSeg, so comparing without the busy check skips every free slot and the ring
-        // never advances (bench: 12 rotations, all eight slots still seq 0).
+        // Only a slot actually being served is off limits. An empty slot carries seq 0, which is also kNoSeg, so comparing without the busy check skips every free slot and the ring never advances (bench: 12 rotations, all eight slots still seq 0).
         if (busy == kNoSeg || segments_[segWrite_].seq != busy) break;
     }
     segments_[segWrite_].len    = 0;
@@ -209,29 +189,24 @@ void encodeOne(const uint8_t* rgb, size_t rgbLen) {
 
     Lock lk;
     Segment& seg = segments_[segWrite_];
-    // A segment must START on a keyframe (a player seeking to it has nothing to reference
-    // otherwise), so a keyframe closes the previous one. GOP == fps, so this lands once a second.
+    // A segment must START on a keyframe (a player seeking to it has nothing to reference otherwise), so a keyframe closes the previous one. GOP == fps, so this lands once a second.
     if (keyframe && seg.len > 0) {
         rotateSegment();
     }
-    // A segment opened by an overflow rotate holds nothing until a keyframe arrives: dropping
-    // these few P-frames costs a fraction of a second, where admitting them costs the segment.
+    // A segment opened by an overflow rotate holds nothing until a keyframe arrives: dropping these few P-frames costs a fraction of a second, where admitting them costs the segment.
     if (needKeyframe_ && !keyframe) return;
     needKeyframe_ = false;
     Segment& dst = segments_[segWrite_];
     if (!dst.data) return;
 
-    // The counters advance per packet as the writer emits. A discarded frame must not keep that
-    // advance: the packets were never sent, so a player would read the gap as lost packets, the
-    // exact corruption Continuity exists to prevent.
+    // The counters advance per packet as the writer emits. A discarded frame must not keep that advance: the packets were never sent, so a player would read the gap as lost packets, the exact corruption Continuity exists to prevent.
     const mm::ts::Continuity ccBefore = cc_;
     mm::ts::Writer w(dst.data + dst.len, kSegmentBytes - dst.len, cc_);
     if (dst.len == 0) w.writeTables();
     w.writeAccessUnit(nal_, out.length, pts90, keyframe);
     if (w.overflowed()) {
         cc_ = ccBefore;
-        // The frame did not fit: close the segment here rather than emit a torn one, and hold
-        // the fresh one empty until a keyframe can open it (needKeyframe_).
+        // The frame did not fit: close the segment here rather than emit a torn one, and hold the fresh one empty until a keyframe can open it (needKeyframe_).
         if (dst.len > 0) rotateSegment();
         needKeyframe_ = true;
         return;
@@ -278,15 +253,12 @@ void* psram(size_t bytes) {
 }  // namespace
 
 bool encoderStart(const EncoderConfig& cfg) {
-    // If the previous stop had to detach a wedged worker, encoderStop left its buffers alive on
-    // purpose (see there) and the pointers below are overwritten rather than freed: a bounded
-    // one-time leak, deliberately preferred to freeing memory a live task is still writing.
+    // If the previous stop had to detach a wedged worker, encoderStop left its buffers alive on purpose (see there) and the pointers below are overwritten rather than freed: a bounded one-time leak, deliberately preferred to freeing memory a live task is still writing.
     encoderStop();
     if (!mutex_) mutex_ = xSemaphoreCreateMutex();
     if (!mutex_) return false;
 
-    // The hardware encoder's own limits (esp_h264_types.h): below 80 or above 1920x2032 it will
-    // refuse, so decline here with a status rather than fail obscurely mid-stream.
+    // The hardware encoder's own limits (esp_h264_types.h): below 80 or above 1920x2032 it will refuse, so decline here with a status rather than fail obscurely mid-stream.
     if (cfg.width < 80 || cfg.height < 80 || cfg.width > 1920 || cfg.height > 2032) return false;
     // 4:2:0 chroma needs even dimensions.
     if ((cfg.width & 1) || (cfg.height & 1)) return false;
@@ -303,10 +275,7 @@ bool encoderStart(const EncoderConfig& cfg) {
     hw.res.width  = width_;
     hw.res.height = height_;
     hw.rc.bitrate = static_cast<uint32_t>(cfg.bitrateKbit) * 1000u;
-    // The QP window the rate controller may use. A near-fixed window (the 25/26 this started
-    // with) overrides the bitrate entirely: quality is pinned, so the encoder spends whatever
-    // that costs and ignores rc.bitrate. Opening the window lets the configured bitrate actually
-    // govern, which is what the driver's control promises.
+    // The QP window the rate controller may use. A near-fixed window (the 25/26 this started with) overrides the bitrate entirely: quality is pinned, so the encoder spends whatever that costs and ignores rc.bitrate. Opening the window lets the configured bitrate actually govern, which is what the driver's control promises.
     hw.rc.qp_min  = 10;
     hw.rc.qp_max  = 40;
 
@@ -335,9 +304,7 @@ bool encoderStart(const EncoderConfig& cfg) {
     running_  = true;
     // A new generation retires any orphan the previous stop had to detach.
     const uint32_t myGen = generation_.fetch_add(1) + 1;
-    // Clear HERE, not in the worker: the worker's first instruction runs only once the scheduler
-    // reaches it, and a stop landing in that window would read the previous stop's `true` and
-    // free the buffers the worker is about to encode from.
+    // Clear HERE, not in the worker: the worker's first instruction runs only once the scheduler reaches it, and a stop landing in that window would read the previous stop's `true` and free the buffers the worker is about to encode from.
     workerExited_ = false;
     // The second core, since the first runs the network stack and starving it stalls the very server that serves these segments.
     // The stack is twice what this started with: the encoder call chain plus our muxer overflowed the smaller one.
@@ -389,8 +356,7 @@ bool hlsSegment(const char* name, const uint8_t** data, size_t* len) {
     if (!name || !data || !len) return false;
     Lock lk;
 
-    // The playlist is generated on demand from the ring: whatever segments are currently complete,
-    // newest last. Static buffer because the caller writes it straight to the socket.
+    // The playlist is generated on demand from the ring: whatever segments are currently complete, newest last. Static buffer because the caller writes it straight to the socket.
     if (std::strcmp(name, "stream.m3u8") == 0) {
         static char playlist[640];   // header + two lines per segment, kSegments of them
         uint32_t oldest = 0;
@@ -408,21 +374,16 @@ bool hlsSegment(const char* name, const uint8_t** data, size_t* len) {
             const Segment* seg = nullptr;
             for (const auto& s : segments_) if (s.seq == q) seg = &s;
             if (!seg) continue;
-            // The segment's REAL duration, from the frames actually in it. Claiming a flat 1.0 s
-            // while delivering fewer makes the player run ahead of the stream until it stalls to
-            // re-buffer -- the periodic hiccup, visible as segments arriving every ~0.7 s.
+            // The segment's REAL duration, from the frames actually in it. Claiming a flat 1.0 s while delivering fewer makes the player run ahead of the stream until it stalls to re-buffer -- the periodic hiccup, visible as segments arriving every ~0.7 s.
             const uint32_t milli = fps_ ? (static_cast<uint32_t>(seg->frames) * 1000u) / fps_ : 1000u;
-            // snprintf returns the length it WOULD have written, so an unchecked accumulate can
-            // push n past the buffer and report more bytes than exist. Not reachable at this
-            // sizing, but the clamp costs nothing and the failure would be served garbage.
+            // snprintf returns the length it WOULD have written, so an unchecked accumulate can push n past the buffer and report more bytes than exist. Not reachable at this sizing, but the clamp costs nothing and the failure would be served garbage.
             if (n < 0 || n >= static_cast<int>(sizeof(playlist))) break;
             n += std::snprintf(playlist + n, sizeof(playlist) - n,
                                "#EXTINF:%u.%03u,\nseg%u.ts\n",
                                static_cast<unsigned>(milli / 1000u),
                                static_cast<unsigned>(milli % 1000u), static_cast<unsigned>(q));
         }
-        // Clamp: snprintf reports the length it WOULD have written, so an accumulated n can
-        // exceed the buffer and hand the caller bytes past its end.
+        // Clamp: snprintf reports the length it WOULD have written, so an accumulated n can exceed the buffer and hand the caller bytes past its end.
         if (n < 0) return false;
         if (n > static_cast<int>(sizeof(playlist)) - 1) n = static_cast<int>(sizeof(playlist)) - 1;
         *data = reinterpret_cast<const uint8_t*>(playlist);
@@ -434,8 +395,7 @@ bool hlsSegment(const char* name, const uint8_t** data, size_t* len) {
     if (std::sscanf(name, "seg%u.ts", &q) != 1) return false;
     for (const auto& s : segments_) {
         if (s.seq == q && s.len > 0) {
-            // Reserved until hlsSegmentRelease: the caller reads this pointer after the lock
-            // drops, and the encoder must not recycle the slot underneath it.
+            // Reserved until hlsSegmentRelease: the caller reads this pointer after the lock drops, and the encoder must not recycle the slot underneath it.
             serving_ = q;
             *data = s.data;
             *len = s.len;
@@ -451,15 +411,11 @@ void hlsSegmentRelease() { serving_ = kNoSeg; }
 
 #else   // !CONFIG_MM_HLS
 
-// The HTTP server calls the RAM-segment seam on every /hls/ request whatever the platform, so a
-// build without the encoder still has to answer it: no segments in RAM, fall through to the
-// filesystem path (where there is nothing either, and the request 404s as it should).
+// The HTTP server calls the RAM-segment seam on every /hls/ request whatever the platform, so a build without the encoder still has to answer it: no segments in RAM, fall through to the filesystem path (where there is nothing either, and the request 404s as it should).
 namespace mm::platform {
 bool hlsSegment(const char*, const uint8_t**, size_t*) { return false; }
 void hlsSegmentRelease() {}
-// The whole encoder seam, not just the segment half: platform.h declares these for every target,
-// so a build that reaches them without CONFIG_MM_HLS must link rather than fail. Starting fails,
-// which is what the driver reports; the rest are inert.
+// The whole encoder seam, not just the segment half: platform.h declares these for every target, so a build that reaches them without CONFIG_MM_HLS must link rather than fail. Starting fails, which is what the driver reports; the rest are inert.
 bool encoderStart(const EncoderConfig&) { return false; }
 int  encoderWrite(const uint8_t*, size_t) { return -1; }
 bool encoderRunning() { return false; }

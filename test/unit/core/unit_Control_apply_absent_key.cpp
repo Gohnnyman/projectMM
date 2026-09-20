@@ -1,20 +1,11 @@
-// @module Control
-// @also FilesystemModule
+/// @module Control
+/// @also FilesystemModule
 
-// Regression test for the persistence-overlay bug that silently zeroed a control's
-// non-zero default when a saved JSON file omitted that control's key.
-//
-// The bug: applyControlValue() called mm::json::parseInt(json, key), which returns
-// 0 for an ABSENT key — indistinguishable from a real 0 — and then wrote that 0
-// into the control (Clamp policy). So loading an older/partial NetworkModule.json
-// (one written before a control existed, or that simply didn't include it) clobbered
-// the control's chip default. On the ESP32-P4 this zeroed eth `ethType` (default 2 =
-// IP101) to 0 (= none), so ethInit() dispatched to "no Ethernet" and the board got a
-// link but never a DHCP lease. The fix: applyControlValue() skips absent keys
-// (mm::json::hasKey guard), leaving the control at its current value.
-//
-// These tests pin the contract at the unit level so the regression can't recur:
-// an absent key must NEVER mutate a control; a present key still applies.
+/// Regression test for the persistence-overlay bug that silently zeroed a control's non-zero default when a saved JSON file omitted that control's key.
+///
+/// The bug: applyControlValue() called mm::json::parseInt(json, key), which returns 0 for an ABSENT key, indistinguishable from a real 0, and then wrote that 0 into the control (Clamp policy). So loading an older/partial NetworkModule.json (one written before a control existed, or that simply didn't include it) clobbered the control's chip default. On the ESP32-P4 this zeroed eth `ethType` (default 2 = IP101) to 0 (= none), so ethInit() dispatched to "no Ethernet" and the board got a link but never a DHCP lease. The fix: applyControlValue() skips absent keys (mm::json::hasKey guard), leaving the control at its current value.
+///
+/// These tests pin the contract at the unit level so the regression can't recur: an absent key must NEVER mutate a control; a present key still applies.
 
 #include "doctest.h"
 #include "core/module/Control.h"
@@ -25,8 +16,7 @@
 #include <cstring>
 #include <string>   // std::string — the overlong-label regression builds its JSON
 
-// hasKey distinguishes an absent key from one whose value is 0 — the capability the
-// fix relies on. parseInt alone can't (returns 0 for both).
+// hasKey distinguishes an absent key from one whose value is 0, the capability the fix relies on. parseInt alone can't (returns 0 for both).
 TEST_CASE("json::hasKey detects presence independent of value") {
     const char* json = "{\"a\":0,\"b\":5}";
     CHECK(mm::json::hasKey(json, "a"));        // present, value 0
@@ -36,13 +26,11 @@ TEST_CASE("json::hasKey detects presence independent of value") {
     CHECK_FALSE(mm::json::hasKey(nullptr, "a"));
 }
 
-// The core regression: a control bound with a non-zero value, overlaid with a JSON
-// that does NOT contain its key, must keep its value — not snap to 0.
+// The core regression: a control bound with a non-zero value, overlaid with a JSON that does NOT contain its key, must keep its value, not snap to 0.
 TEST_CASE("applyControlValue leaves a control untouched when its key is absent") {
     mm::ControlList controls;
 
-    // Mirror the eth controls that triggered the bug: a Select (ethType, default 2)
-    // and an Int16 (a pin, default 31), plus a Uint8 and a Bool for coverage.
+    // Mirror the eth controls that triggered the bug: a Select (ethType, default 2) and an Int16 (a pin, default 31), plus a Uint8 and a Bool for coverage.
     uint8_t  ethType = 2;                 // IP101 — the value that got zeroed on P4
     int16_t  mdcGpio = 31;
     uint8_t  small   = 7;
@@ -53,11 +41,10 @@ TEST_CASE("applyControlValue leaves a control untouched when its key is absent")
     controls.addControl("small", small, 0, 100);
     controls.addControl("flag", flag);
 
-    // A persisted file that contains an UNRELATED key only — none of our controls.
+    // A persisted file that contains an UNRELATED key only, none of our controls.
     const char* partialJson = "{\"ssid\":\"home\"}";
 
-    // Clamp policy is what the persistence overlay uses. Every absent key must be a
-    // no-op (Ok, value preserved) — this is exactly what failed before the fix.
+    // Clamp policy is what the persistence overlay uses. Every absent key must be a no-op (Ok, value preserved), this is exactly what failed before the fix.
     for (uint8_t i = 0; i < controls.count(); i++) {
         auto r = mm::applyControlValue(controls[i], partialJson, controls[i].name,
                                        mm::ApplyPolicy::Clamp);
@@ -88,8 +75,7 @@ TEST_CASE("applyControlValue still applies a present key") {
     CHECK(mdcGpio == 23);   // applied
 }
 
-// A present key whose value IS 0 must apply the 0 (don't confuse "present 0" with
-// "absent"). Guards against an over-eager fix that skipped on value rather than key.
+// A present key whose value IS 0 must apply the 0 (don't confuse "present 0" with "absent"). Guards against an over-eager fix that skipped on value rather than key.
 TEST_CASE("applyControlValue applies an explicit zero when the key is present") {
     mm::ControlList controls;
     uint8_t ethType = 2;
@@ -102,11 +88,7 @@ TEST_CASE("applyControlValue applies an explicit zero when the key is present") 
     CHECK(ethType == 0);    // explicit 0 IS applied
 }
 
-// A per-control validator (ControlDescriptor::validate) runs on EVERY write path —
-// the backend home for input rules that used to live in a bespoke per-transport RPC
-// (e.g. deviceModel's printable-ASCII check, formerly the SET_DEVICE_MODEL Improv RPC).
-// A reject returns Malformed and leaves the stored value untouched (no partial write);
-// any transport (HTTP, APPLY_OP over serial, persistence) gets the check for free.
+// A per-control validator (ControlDescriptor::validate) runs on EVERY write path, the backend home for input rules that used to live in a bespoke per-transport RPC (e.g. deviceModel's printable-ASCII check, formerly the SET_DEVICE_MODEL Improv RPC). A reject returns Malformed and leaves the stored value untouched (no partial write); any transport (HTTP, APPLY_OP over serial, persistence) gets the check for free.
 static bool acceptPrintableAscii(const char* v) {
     if (!v) return false;
     size_t n = std::strlen(v);
@@ -128,9 +110,7 @@ TEST_CASE("a per-control validator accepts a valid value and rejects bad input")
                                 "deviceModel", mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
     CHECK(std::strcmp(deviceModel, "LOLIN D32") == 0);
 
-    // A raw non-printable byte embedded in the value (0x01) — parseString copies bytes
-    // verbatim (it only un-escapes \" and \\), so a wire-untrusted control byte reaches
-    // the validator, which rejects it → Malformed, prior value preserved (no partial write).
+    // A raw non-printable byte embedded in the value (0x01), parseString copies bytes verbatim (it only un-escapes \" and \\), so a wire-untrusted control byte reaches the validator, which rejects it → Malformed, prior value preserved (no partial write).
     const char bad[] = {'{','"','d','e','v','i','c','e','M','o','d','e','l','"',':','"',
                         'b','a','d', 0x01, 'x','"','}', 0};
     CHECK(mm::applyControlValue(controls[0], bad,
@@ -143,11 +123,7 @@ TEST_CASE("a per-control validator accepts a valid value and rejects bad input")
     CHECK(std::strcmp(deviceModel, "LOLIN D32") == 0);
 }
 
-// Length boundary of the deviceModel validator (accepts 1..31). Uses a buffer wider than
-// the validator's limit so the 32-char value reaches the validator intact (parseString
-// truncates to bufSize-1, so the buffer must exceed 32 for the validator's own length
-// check — not parse truncation — to be what rejects it). The scratch buffer in
-// applyControlValue is sized to bufSize, so a long value isn't truncated before validation.
+// Length boundary of the deviceModel validator (accepts 1..31). Uses a buffer wider than the validator's limit so the 32-char value reaches the validator intact (parseString truncates to bufSize-1, so the buffer must exceed 32 for the validator's own length check, not parse truncation, to be what rejects it). The scratch buffer in applyControlValue is sized to bufSize, so a long value isn't truncated before validation.
 TEST_CASE("the validator enforces its length limit on the long end") {
     mm::ControlList controls;
     char label[64] = "init";   // wider than the validator's 31-char limit
@@ -172,11 +148,7 @@ TEST_CASE("a Text control with no validator accepts anything that fits") {
     CHECK(std::strcmp(label, "hi") == 0);
 }
 
-// A Palette control's aux holds a PaletteOptionsFn (a FUNCTION POINTER), not an options array. The
-// Select label-match path must therefore NOT run for Palette: reinterpreting a function pointer as a
-// char* const* and walking it dereferences code bytes — undefined behavior, a near-certain crash on
-// ESP32. The regression: a string value on a palette must fall to numeric-index apply (parseInt → 0),
-// exactly the harmless behavior before the label-match feature existed. (Robust to any input.)
+// A Palette control's aux holds a PaletteOptionsFn (a FUNCTION POINTER), not an options array. The Select label-match path must therefore NOT run for Palette: reinterpreting a function pointer as a char* const* and walking it dereferences code bytes, undefined behavior, a near-certain crash on ESP32. The regression: a string value on a palette must fall to numeric-index apply (parseInt → 0), exactly the harmless behavior before the label-match feature existed. (Robust to any input.)
 static void paletteOptions(mm::JsonSink& sink) {
     sink.append("[\"Rainbow\",\"Ocean\",\"Forest\"]");   // a real fn body; never read via the aux cast
 }
@@ -185,8 +157,7 @@ TEST_CASE("applyControlValue: a string palette value does not crash and applies 
     uint8_t palette = 1;
     controls.addPalette("palette", palette, paletteOptions, 3);
 
-    // A STRING value (as a hand-edited config or a mistaken client could send). Before the fix this
-    // walked the function pointer as an options array. After: string → parseInt → 0, clamped in range.
+    // A STRING value (as a hand-edited config or a mistaken client could send). Before the fix this walked the function pointer as an options array. After: string → parseInt → 0, clamped in range.
     CHECK(mm::applyControlValue(controls[0], "{\"palette\":\"Rainbow\"}", "palette",
                                 mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
     CHECK(palette == 0);   // numeric fallback, no function-pointer deref
@@ -197,9 +168,7 @@ TEST_CASE("applyControlValue: a string palette value does not crash and applies 
     CHECK(palette == 2);
 }
 
-// The complement: a Select's aux IS the options array, so a string LABEL value matches an option by
-// name (the board-portable catalog path — a peripheral label is stable while its filtered index is
-// not). This keeps the label-match feature working where it is safe.
+// The complement: a Select's aux IS the options array, so a string LABEL value matches an option by name (the board-portable catalog path, a peripheral label is stable while its filtered index is not). This keeps the label-match feature working where it is safe.
 TEST_CASE("applyControlValue: a Select accepts an option label as a string value") {
     mm::ControlList controls;
     uint8_t sel = 0;
@@ -216,9 +185,7 @@ TEST_CASE("applyControlValue: a Select accepts an option label as a string value
     CHECK(sel == 1);
 }
 
-// An empty option list (max == 0) has no valid index — applying a value must not manufacture index 0.
-// Strict rejects; Lenient (Clamp) leaves the bound value untouched. Guards a board-filtered Select that
-// filtered down to zero options (e.g. a peripheral list on a chip that supports none).
+// An empty option list (max == 0) has no valid index, applying a value must not manufacture index 0. Strict rejects; Lenient (Clamp) leaves the bound value untouched. Guards a board-filtered Select that filtered down to zero options (e.g. a peripheral list on a chip that supports none).
 TEST_CASE("applyControlValue: an empty Select rejects/no-ops instead of accepting index 0") {
     mm::ControlList controls;
     uint8_t sel = 7;                       // a sentinel that a spurious index-0 write would clobber
@@ -235,9 +202,7 @@ TEST_CASE("applyControlValue: an empty Select rejects/no-ops instead of acceptin
                                 mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
 }
 
-// The Palette twin of the empty-Select guard: an empty palette (addPalette(..., 0)) has no valid index,
-// so a value must not write index 0 — and critically must not let `hi = c.max - 1` underflow to -1 and
-// clamp the stored value up to 255. Lenient leaves the sentinel untouched; Strict returns OutOfRange.
+// The Palette twin of the empty-Select guard: an empty palette (addPalette(..., 0)) has no valid index, so a value must not write index 0, and critically must not let `hi = c.max - 1` underflow to -1 and clamp the stored value up to 255. Lenient leaves the sentinel untouched; Strict returns OutOfRange.
 TEST_CASE("applyControlValue: an empty Palette rejects/no-ops and never underflows to 255") {
     mm::ControlList controls;
     uint8_t pal = 7;                       // sentinel: a spurious index-0 OR a 255 underflow would clobber it
@@ -254,16 +219,14 @@ TEST_CASE("applyControlValue: an empty Palette rejects/no-ops and never underflo
                                 mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
 }
 
-// A label longer than any real option (here, longer than the parse buffer) must NOT match a real option
-// by prefix — it is "no such option", so Lenient keeps the default and Strict rejects. Guards against a
-// truncated value spuriously equalling a shorter option that shares its leading characters.
+// A label longer than any real option (here, longer than the parse buffer) must NOT match a real option by prefix, it is "no such option", so Lenient keeps the default and Strict rejects. Guards against a truncated value spuriously equalling a shorter option that shares its leading characters.
 TEST_CASE("applyControlValue: an overlong Select label does not prefix-match a real option") {
     mm::ControlList controls;
     uint8_t sel = 0;
     static const char* const opts[] = {"i80", "MoonI80", "Parlio"};
     controls.addSelect("peripheral", sel, opts, 3);
 
-    // 80 'M' chars — far past any option and past the parse buffer; must not match "MoonI80" by prefix.
+    // 80 'M' chars, far past any option and past the parse buffer; must not match "MoonI80" by prefix.
     std::string longVal(80, 'M');
     std::string json = "{\"peripheral\":\"" + longVal + "\"}";
     CHECK(mm::applyControlValue(controls[0], json.c_str(), "peripheral",
@@ -273,13 +236,7 @@ TEST_CASE("applyControlValue: an overlong Select label does not prefix-match a r
                                 mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
 }
 
-// The exact boundary of the overlong guard. The Select label parses into a 64-byte buffer and a value
-// that FILLS it (length >= 63, i.e. buffer_size - 1) is treated as overlong — it may have been truncated
-// to the cap, so it cannot legitimately equal any option and the match is skipped. A value one shorter
-// (62) is NOT overlong and matches normally. This pins the threshold so a future buffer-size change
-// can't silently shift where a legitimate long label starts being rejected. Real option labels sit far
-// below this (the longest peripheral/mode label is ~35 chars), so the boundary only ever fences off
-// junk — but the test makes that contract explicit rather than incidental.
+// The exact boundary of the overlong guard. The Select label parses into a 64-byte buffer and a value that FILLS it (length >= 63, i.e. buffer_size - 1) is treated as overlong, it may have been truncated to the cap, so it cannot legitimately equal any option and the match is skipped. A value one shorter (62) is NOT overlong and matches normally. This pins the threshold so a future buffer-size change can't silently shift where a legitimate long label starts being rejected. Real option labels sit far below this (the longest peripheral/mode label is ~35 chars), so the boundary only ever fences off junk, but the test makes that contract explicit rather than incidental.
 TEST_CASE("applyControlValue: the Select overlong-label boundary is exactly the parse buffer") {
     mm::ControlList controls;
     uint8_t sel = 0;
@@ -295,8 +252,7 @@ TEST_CASE("applyControlValue: the Select overlong-label boundary is exactly the 
                                 mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
     CHECK(sel == 1);
 
-    // 63 chars: fills the buffer → treated as overlong, the match is skipped even though an option of
-    // that exact text EXISTS. Lenient keeps the current value; Strict rejects.
+    // 63 chars: fills the buffer → treated as overlong, the match is skipped even though an option of that exact text EXISTS. Lenient keeps the current value; Strict rejects.
     sel = 0;
     const std::string j63 = "{\"peripheral\":\"" + at63 + "\"}";
     CHECK(mm::applyControlValue(controls[0], j63.c_str(), "peripheral",
@@ -306,10 +262,7 @@ TEST_CASE("applyControlValue: the Select overlong-label boundary is exactly the 
                                 mm::ApplyPolicy::Strict) == mm::ApplyResult::OutOfRange);
 }
 
-// A Select over ENUMERATED options (a NIC list, an audio device list) persists by LABEL when
-// flagged: the index shifts when the machine's device list reorders, but the name is what the
-// user chose. Both directions of robustness: a label round-trips, and an old index-persisted
-// value still applies (the apply path always accepted both).
+// A Select over ENUMERATED options (a NIC list, an audio device list) persists by LABEL when flagged: the index shifts when the machine's device list reorders, but the name is what the user chose. Both directions of robustness: a label round-trips, and an old index-persisted value still applies (the apply path always accepted both).
 TEST_CASE("a persist-label Select saves the option string and loads by it") {
     static constexpr const char* kNics[] = {"none (capture only)", "Ethernet 5GbE", "WiFi"};
     uint8_t sel = 1;

@@ -1,4 +1,4 @@
-// @module sha256
+/// @module sha256
 
 #include "doctest.h"
 #include "core/util/sha256.h"
@@ -13,12 +13,9 @@ std::string hex(const std::string& in) {
 }
 }  // namespace
 
-/// The digest matches the published FIPS 180-4 values, so this is SHA-256 rather than a function
-/// that merely agrees with itself.
+/// The digest matches the published FIPS 180-4 values, so this is SHA-256 rather than a function that merely agrees with itself.
 ///
-/// These three are the standard vectors: the empty string, the one-block "abc" example from the
-/// specification's own appendix, and the two-block example that exercises the padding path where
-/// the length does not fit beside the terminator.
+/// These three are the standard vectors: the empty string, the one-block "abc" example from the specification's own appendix, and the two-block example that exercises the padding path where the length does not fit beside the terminator.
 TEST_CASE("the digest matches the published SHA-256 test vectors") {
     CHECK(hex("") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     CHECK(hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
@@ -28,8 +25,7 @@ TEST_CASE("the digest matches the published SHA-256 test vectors") {
 
 /// A message that lands exactly on a block boundary, and one just over it, both hash correctly.
 ///
-/// This is where a padding bug hides: 55 bytes leaves room for the length, 56 does not and forces a
-/// second block, and 64 is a whole block with the padding entirely in the next one.
+/// This is where a padding bug hides: 55 bytes leaves room for the length, 56 does not and forces a second block, and 64 is a whole block with the padding entirely in the next one.
 TEST_CASE("messages around the block boundary hash correctly") {
     CHECK(hex(std::string(55, 'a'))
           == "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318");
@@ -45,8 +41,7 @@ TEST_CASE("a multi-block message hashes correctly") {
           == "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3");
 }
 
-/// The hex helper truncates to the requested length and always terminates, which is what the
-/// installation id relies on for its 32 characters.
+/// The hex helper truncates to the requested length and always terminates, which is what the installation id relies on for its 32 characters.
 TEST_CASE("the hex helper truncates the digest to the requested length") {
     char buf[64] = {};
     mm::sha256Hex("abc", 3, buf, 16);

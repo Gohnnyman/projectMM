@@ -1,5 +1,5 @@
-// @module SpiralEffect
-// @also RingsEffect, RipplesEffect, LavaLampEffect
+/// @module SpiralEffect
+/// @also RingsEffect, RipplesEffect, LavaLampEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -40,8 +40,7 @@ struct Ctx {
         return data[0] != data[last] || data[1] != data[last + 1] || data[2] != data[last + 2];
     }
 
-    // For effects with localised features (e.g. ripples): scan all pixels for
-    // at least two distinct RGB triplets.
+    // For effects with localised features (e.g. ripples): scan all pixels for at least two distinct RGB triplets.
     bool hasTwoDistinctColors() {
         auto* data = layer.buffer().data();
         size_t pixels = static_cast<size_t>(grid.width) * grid.height;
@@ -79,11 +78,7 @@ struct Ctx {
 // SpiralEffect renders non-zero pixels and shows spatial variation (corners differ).
 STATELESS_EFFECT_TEST(SpiralEffect)
 
-// LavaLampEffect has localised blob features that can land on identical corner
-// palette indices at some t values (corner-pair check is too strict). Scan the
-// whole buffer for any two distinct pixels instead — same approach as
-// RingsEffect below.
-// LavaLamp paints at least one non-zero byte (effect actually renders).
+// LavaLampEffect has localised blob features that can land on identical corner palette indices at some t values (corner-pair check is too strict). Scan the whole buffer for any two distinct pixels instead, same approach as RingsEffect below. LavaLamp paints at least one non-zero byte (effect actually renders).
 TEST_CASE("LavaLampEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::LavaLampEffect effect;
@@ -95,13 +90,7 @@ TEST_CASE("LavaLampEffect writes non-zero RGB") {
 
 // Across 10 frames at bpm=60, at least one frame shows two distinct colors somewhere in the buffer (blobs move and the field varies).
 TEST_CASE("LavaLampEffect spatial variation") {
-    // LavaLamp's blobs cluster at some t values and produce a near-uniform
-    // saturated frame at the default slow bpm (=8). Sample several frames
-    // across a wider t range — at bpm=60 the blob positions sweep through the
-    // grid quickly enough that at least one frame in the window must have
-    // spatial variety. (If none do, the effect is genuinely broken.) Time
-    // advances through the platform test-clock seam so the loop is instant
-    // and deterministic — no real sleeps, no CI flakiness.
+    // LavaLamp's blobs cluster at some t values and produce a near-uniform saturated frame at the default slow bpm (=8). Sample several frames across a wider t range, at bpm=60 the blob positions sweep through the grid quickly enough that at least one frame in the window must have spatial variety. (If none do, the effect is genuinely broken.) Time advances through the platform test-clock seam so the loop is instant and deterministic, no real sleeps, no CI flakiness.
     Ctx ctx(32, 32);
     mm::LavaLampEffect effect;
     effect.bpm = 60;
@@ -119,9 +108,7 @@ TEST_CASE("LavaLampEffect spatial variation") {
     CHECK(varied);
 }
 
-// RingsEffect has localised features (thin rings); corner-pair check is
-// too strict, so we scan for any two distinct pixels instead.
-// Rings paints at least one non-zero byte (effect actually renders).
+// RingsEffect has localised features (thin rings); corner-pair check is too strict, so we scan for any two distinct pixels instead. Rings paints at least one non-zero byte (effect actually renders).
 TEST_CASE("RingsEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::RingsEffect effect;
@@ -141,9 +128,7 @@ TEST_CASE("RingsEffect spatial variation") {
     CHECK(ctx.hasTwoDistinctColors());
 }
 
-// RipplesEffect (MoonLight sine-wave water surface) lights one pixel per column
-// at a sine-driven height. On a flat 2D layer it still paints a visible wavefront
-// — assert it renders something and varies across the surface.
+// RipplesEffect (MoonLight sine-wave water surface) lights one pixel per column at a sine-driven height. On a flat 2D layer it still paints a visible wavefront, assert it renders something and varies across the surface.
 TEST_CASE("RipplesEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::RipplesEffect effect;
@@ -153,7 +138,7 @@ TEST_CASE("RipplesEffect writes non-zero RGB") {
     CHECK(ctx.hasNonZero());
 }
 
-// Ripples lights one pixel per column at a sine-driven height, so the surface holds at least two distinct colors (wavefront vs background) — scan the whole buffer, corner-pair would be too strict.
+// Ripples lights one pixel per column at a sine-driven height, so the surface holds at least two distinct colors (wavefront vs background), scan the whole buffer, corner-pair would be too strict.
 TEST_CASE("RipplesEffect spatial variation") {
     Ctx ctx(32, 32);
     mm::RipplesEffect effect;

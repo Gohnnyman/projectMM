@@ -1,4 +1,4 @@
-// The ESP32 entry point: bring up NVS, then hand control to the shared application main.
+/// The ESP32 entry point: bring up NVS, then hand control to the shared application main.
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"

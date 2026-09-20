@@ -83,8 +83,7 @@
 #include "esp_log.h"
 #include "esp_cpu.h"
 #if CONFIG_IDF_TARGET_ESP32
-// The level-5 refill path (rmt_hi_vector.S): the classic ESP32 has no RMT DMA, so the refill
-// interrupt is the whole timing story. These are the pieces that path drives directly.
+// The level-5 refill path (rmt_hi_vector.S): the classic ESP32 has no RMT DMA, so the refill interrupt is the whole timing story. These are the pieces that path drives directly.
 #include "esp_rom_sys.h"          // esp_rom_route_intr_matrix
 #include "esp_memory_utils.h"     // esp_ptr_internal: the ISR may only read internal RAM
 #include "freertos/FreeRTOS.h"
@@ -115,16 +114,12 @@ struct RmtHiChannel {
 };
 static RmtHiChannel s_hi[RMT_LL_CHANS_PER_INST];
 
-// RMTMEM is a linker-provided address; the IDF types it in a private header, so the same layout
-// is declared here: 8 channels of 64 words, contiguous, which is what lets a channel that owns
-// several blocks be addressed as one run past its own 64.
+// RMTMEM is a linker-provided address; the IDF types it in a private header, so the same layout is declared here: 8 channels of 64 words, contiguous, which is what lets a channel that owns several blocks be addressed as one run past its own 64.
 struct RmtHiMem { struct { volatile uint32_t data32[SOC_RMT_MEM_WORDS_PER_CHANNEL]; } chan[RMT_LL_CHANS_PER_INST]; };
 extern "C" RmtHiMem RMTMEM;
 extern "C" void ld_include_rmt_hi_vector();   // forces the .S object to link (the vector symbol is weak elsewhere)
 
-// Copy the next half-block for `ch`. Runs at level 5: no RTOS, no logging, no cache-dependent
-// memory. A frame shorter than the remaining half ends with a zero symbol, which the peripheral
-// treats as end-of-transmission and raises TX_DONE on.
+// Copy the next half-block for `ch`. Runs at level 5: no RTOS, no logging, no cache-dependent memory. A frame shorter than the remaining half ends with a zero symbol, which the peripheral treats as end-of-transmission and raises TX_DONE on.
 static void IRAM_ATTR rmtHiFill(uint8_t ch) {
     RmtHiChannel& c = s_hi[ch];
     volatile uint32_t* dst = &RMTMEM.chan[ch].data32[c.offset];
@@ -143,9 +138,7 @@ static void IRAM_ATTR rmtHiFill(uint8_t ch) {
     c.offset = static_cast<uint16_t>(c.offset ? 0 : c.half);
 }
 
-// The C half of the level-5 handler. Called from rmt_hi_vector.S with the register file saved
-// and a private stack; must return promptly and must clear what it handles, the interrupt is
-// level-triggered.
+// The C half of the level-5 handler. Called from rmt_hi_vector.S with the register file saved and a private stack; must return promptly and must clear what it handles, the interrupt is level-triggered.
 extern "C" void IRAM_ATTR rmtHiIsr(void*) {
     const uint32_t st = RMT.int_st.val;
     for (uint8_t ch = 0; ch < RMT_LL_CHANS_PER_INST; ch++) {
@@ -162,8 +155,7 @@ extern "C" void IRAM_ATTR rmtHiIsr(void*) {
     }
 }
 
-// Which peripheral channel the IDF handed this GPIO: the matrix records the output signal, and
-// the RMT signals are consecutive from RMT_SIG_OUT0_IDX. The driver keeps the id private.
+// Which peripheral channel the IDF handed this GPIO: the matrix records the output signal, and the RMT signals are consecutive from RMT_SIG_OUT0_IDX. The driver keeps the id private.
 static uint8_t rmtHiChannelOf(uint8_t gpio) {
     const uint32_t sig = GPIO.func_out_sel_cfg[gpio].func_sel;
     return (sig >= RMT_SIG_OUT0_IDX && sig < RMT_SIG_OUT0_IDX + RMT_LL_CHANS_PER_INST)
@@ -181,9 +173,7 @@ static void rmtHiRouteOnThisCore() {
     constexpr uint32_t kVector = 26;   // level 5, "special" in the descriptor table, free here
     esp_rom_route_intr_matrix(esp_cpu_get_core_id(), ETS_RMT_INTR_SOURCE, kVector);
     esp_cpu_intr_enable(1u << kVector);
-    // Read the routing back: the matrix map for this core's RMT source, and this core's
-    // INTENABLE. The IDF's esp_intr_enable re-programs the map (intr_alloc.c), so a later call on
-    // the driver's own handle would silently undo this; the readback is what proves it held.
+    // Read the routing back: the matrix map for this core's RMT source, and this core's INTENABLE. The IDF's esp_intr_enable re-programs the map (intr_alloc.c), so a later call on the driver's own handle would silently undo this; the readback is what proves it held.
     const uint32_t mapReg = esp_cpu_get_core_id() == 0
         ? DPORT_PRO_RMT_INTR_MAP_REG : DPORT_APP_RMT_INTR_MAP_REG;
     ESP_LOGI("rmt", "level-5 refill: RMT source routed to vector %lu on core %d; map reads %lu, INTENABLE 0x%08lx",
@@ -197,9 +187,7 @@ namespace mm::platform {
 
 namespace {
 
-// Per-channel peripheral state, hidden behind RmtWs2812Handle::impl so the
-// domain header never sees an ESP type. One TX channel + the copy encoder it
-// streams symbols through, both allocated once at init.
+// Per-channel peripheral state, hidden behind RmtWs2812Handle::impl so the domain header never sees an ESP type. One TX channel + the copy encoder it streams symbols through, both allocated once at init.
 struct RmtTxState {
     rmt_channel_handle_t channel = nullptr;
     rmt_encoder_handle_t encoder = nullptr;
@@ -235,8 +223,7 @@ void rmtInitOnThisCore(void* arg) {
     txCfg.resolution_hz = job->resolutionHz;
     txCfg.trans_queue_depth = 4;
     txCfg.flags.invert_out = job->invert ? 1 : 0;
-    // One memory block per channel at the chip's own size, since a hardcoded one is rejected elsewhere, so every channel stays available to a fully populated board.
-    // The block is the refill deadline, and extra blocks only softened a deadline the high-priority refill removes entirely, so they bought nothing and lost pins.
+    // One memory block per channel at the chip's own size, since a hardcoded one is rejected elsewhere, so every channel stays available to a fully populated board. The block is the refill deadline, and extra blocks only softened a deadline the high-priority refill removes entirely, so they bought nothing and lost pins.
     txCfg.mem_block_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL;
     if (rmt_new_tx_channel(&txCfg, &st->channel) != ESP_OK) { job->ok = false; return; }
 
@@ -280,9 +267,7 @@ bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool
 
     RmtInitJob job{st, gpio, resolutionHz, invert, false};
     WorkerTask hop;
-    // Priority above the render loop so the one-shot runs at once; 8 KB matches the encode
-    // task. If the spawn fails (single core, no memory) the init runs inline on this core, which
-    // is the pre-fix behavior rather than no channel at all.
+    // Priority above the render loop so the one-shot runs at once; 8 KB matches the encode task. If the spawn fails (single core, no memory) the init runs inline on this core, which is the pre-fix behavior rather than no channel at all.
     if (spawnPinnedTask(hop, "mmRmtInit", &rmtInitOnThisCore, &job, 8192, 6, 1)) {
         stopPinnedTask(hop);          // joins: the fn already returned, this only reaps the task
     } else {
@@ -303,15 +288,13 @@ uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h) MM_NONBLOCKING {
 bool rmtWs2812SetBitTiming(RmtWs2812Handle& h, uint32_t sym0, uint32_t sym1) {
     auto* st = static_cast<RmtTxState*>(h.impl);
     if (!st || !st->encoder) return false;
-    // The `timing` control is live (400 kHz WS2811, 800 kHz, custom ns), so the encoder's bit
-    // shapes are rewritten rather than fixed at init.
+    // The `timing` control is live (400 kHz WS2811, 800 kHz, custom ns), so the encoder's bit shapes are rewritten rather than fixed at init.
     rmt_bytes_encoder_config_t cfg = {};
     static_assert(sizeof(rmt_symbol_word_t) == sizeof(uint32_t), "symbol word is one 32-bit word");
     std::memcpy(&cfg.bit0, &sym0, sizeof(uint32_t));
     std::memcpy(&cfg.bit1, &sym1, sizeof(uint32_t));
     cfg.flags.msb_first = 1;
-    // Commit the shapes only once the encoder took them, so a transmit can never run on stale or
-    // zero symbols: `timed` is what rmtWs2812Transmit checks.
+    // Commit the shapes only once the encoder took them, so a transmit can never run on stale or zero symbols: `timed` is what rmtWs2812Transmit checks.
     if (rmt_bytes_encoder_update_config(st->encoder, &cfg) != ESP_OK) return false;
     st->sym0 = sym0; st->sym1 = sym1; st->timed = true;
     return true;
@@ -323,19 +306,14 @@ bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint8_t* wire, size_t byteCount
 
 #if CONFIG_IDF_TARGET_ESP32
     if (st->channelId != 0xFF) {
-        // The level-5 path expands the bytes itself (rmtHiFill). Those bytes must be internal RAM:
-        // the refill runs with the flash cache possibly off, where a PSRAM read is a fault rather
-        // than a stall. At 3-4 bytes per light that is a few KB even for a long strand, so unlike
-        // the pre-expanded symbol form this does not outgrow internal RAM: issue #94.
+        // The level-5 path expands the bytes itself (rmtHiFill). Those bytes must be internal RAM: the refill runs with the flash cache possibly off, where a PSRAM read is a fault rather than a stall. At 3-4 bytes per light that is a few KB even for a long strand, so unlike the pre-expanded symbol form this does not outgrow internal RAM: issue #94.
         if (!esp_ptr_internal(wire)) return false;
         RmtHiChannel& c = s_hi[st->channelId];
         if (c.busy) return false;
         const uint8_t ch = st->channelId;
         c.cur = wire; c.end = wire + byteCount;
         c.sym0 = st->sym0; c.sym1 = st->sym1;
-        // The expander consumes whole BYTES (8 symbols each), so a half-block that is not a
-        // multiple of 8 would leave 1..7 symbols unfilled and end the frame early with no
-        // diagnostic. True for every chip today; asserted so a mem_block_symbols change says so.
+        // The expander consumes whole BYTES (8 symbols each), so a half-block that is not a multiple of 8 would leave 1..7 symbols unfilled and end the frame early with no diagnostic. True for every chip today; asserted so a mem_block_symbols change says so.
         static_assert(SOC_RMT_MEM_WORDS_PER_CHANNEL % 16 == 0,
                       "half-block must be a multiple of 8 symbols: rmtHiFill expands whole bytes");
         c.half = st->blockSymbols / 2; c.offset = 0;
@@ -352,22 +330,17 @@ bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint8_t* wire, size_t byteCount
     rmt_transmit_config_t txCfg = {};
     txCfg.loop_count = 0;   // single shot, no hardware loop
 
-    // The bytes encoder expands each byte to eight symbols as it feeds the peripheral, so the wire
-    // bytes go straight out. This only *starts* the transfer: channels started back-to-back clock
-    // out concurrently, which is what makes a multi-pin frame cost the longest strand instead of
-    // the sum. The caller pairs this with rmtWs2812Wait and owns the inter-frame latch.
+    // The bytes encoder expands each byte to eight symbols as it feeds the peripheral, so the wire bytes go straight out. This only *starts* the transfer: channels started back-to-back clock out concurrently, which is what makes a multi-pin frame cost the longest strand instead of the sum. The caller pairs this with rmtWs2812Wait and owns the inter-frame latch.
     return rmt_transmit(st->channel, st->encoder, wire, byteCount, &txCfg) == ESP_OK;
 }
 
 bool rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs) {
     auto* st = static_cast<RmtTxState*>(h.impl);
     if (!st) return true;
-    // A finite timeout, so a wedged transfer cannot hang the render tick forever; even the longest realistic frame clocks out well inside it.
-    // A timed-out transfer is deliberately left alone rather than canceled: @xref{a-timed-out-transfer-is-left-alone|why, and what the result costs}.
+    // A finite timeout, so a wedged transfer cannot hang the render tick forever; even the longest realistic frame clocks out well inside it. A timed-out transfer is deliberately left alone rather than canceled: @xref{a-timed-out-transfer-is-left-alone|why, and what the result costs}.
 #if CONFIG_IDF_TARGET_ESP32
     if (st->channelId != 0xFF) {
-        // TX_DONE clears `busy` from the level-5 handler. Polled with a yield, not a semaphore:
-        // the handler runs where no RTOS call is allowed, so it cannot signal one.
+        // TX_DONE clears `busy` from the level-5 handler. Polled with a yield, not a semaphore: the handler runs where no RTOS call is allowed, so it cannot signal one.
         const int64_t deadline = esp_timer_get_time() + static_cast<int64_t>(timeoutMs) * 1000;
         // Spin first and yield only if the frame is genuinely long, since the shortest sleep is a whole scheduler tick.
         // A frame clocking out in a fraction of a millisecond still cost the full tick, measured flat on the bench whatever the light or lane count.
@@ -407,8 +380,7 @@ void rmtWs2812Deinit(RmtWs2812Handle& h) {
 
 namespace {
 
-// done-callback hands the received symbol count to the waiting capture call via
-// a 1-deep queue. IRAM so it survives a cache-disabled window.
+// done-callback hands the received symbol count to the waiting capture call via a 1-deep queue. IRAM so it survives a cache-disabled window.
 struct RxDone { size_t numSymbols; };
 
 bool IRAM_ATTR rmtRxDoneCb(rmt_channel_handle_t, const rmt_rx_done_event_data_t* edata,
@@ -437,14 +409,10 @@ size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
     if (memBlock < SOC_RMT_MEM_WORDS_PER_CHANNEL) memBlock = SOC_RMT_MEM_WORDS_PER_CHANNEL;
     if (memBlock & 1) memBlock++;
 #if SOC_RMT_SUPPORT_DMA
-    // A capture larger than one hardware block (whole-frame captures, e.g. the
-    // LCD loopback's full-frame check) uses the DMA backend, which can stream
-    // an arbitrarily large mem_block. Caller's buffer must then be DMA-capable
-    // internal RAM.
+    // A capture larger than one hardware block (whole-frame captures, e.g. the LCD loopback's full-frame check) uses the DMA backend, which can stream an arbitrarily large mem_block. Caller's buffer must then be DMA-capable internal RAM.
     rxCfg.flags.with_dma = maxSymbols > SOC_RMT_MEM_WORDS_PER_CHANNEL;
 #else
-    // Without transfer hardware, asking for more than one channel's memory silently claims a neighbour's and then fails to allocate, so this caps at a single channel.
-    // A whole-frame check on such a chip must therefore use a frame that fits one, which the frame loopback sizes itself to.
+    // Without transfer hardware, asking for more than one channel's memory silently claims a neighbor's and then fails to allocate, so this caps at a single channel. A whole-frame check on such a chip must therefore use a frame that fits one, which the frame loopback sizes itself to.
     if (memBlock > SOC_RMT_MEM_WORDS_PER_CHANNEL)
         memBlock = SOC_RMT_MEM_WORDS_PER_CHANNEL;
 #endif
@@ -460,16 +428,14 @@ size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
     cbs.on_recv_done = rmtRxDoneCb;
     rmt_rx_register_event_callbacks(rxChan, &cbs, q);
 
-    // Accept WS2812 pulse widths: anything from a fraction of T0H up to well past
-    // a bit cell, so glitches are filtered but real 0/1 pulses pass.
+    // Accept WS2812 pulse widths: anything from a fraction of T0H up to well past a bit cell, so glitches are filtered but real 0/1 pulses pass.
     rmt_receive_config_t rcfg = {};
     rcfg.signal_range_min_ns = 100;       // shorter than any real WS2812 edge
     rcfg.signal_range_max_ns = 100000;    // longer than a bit cell; ends the frame
 
     size_t got = 0;
     if (rmt_enable(rxChan) == ESP_OK) {
-        // Once enabled, the channel must be disabled before delete — even if
-        // rmt_receive or the wait fails — or rmt_del_channel rejects it.
+        // Once enabled, the channel must be disabled before delete, even if rmt_receive or the wait fails, or rmt_del_channel rejects it.
         if (rmt_receive(rxChan, outSymbols, maxSymbols * sizeof(uint32_t), &rcfg) == ESP_OK) {
             RxDone d = {};
             if (xQueueReceive(q, &d, pdMS_TO_TICKS(timeoutMs)) == pdTRUE) {
@@ -485,8 +451,7 @@ size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
 }
 
 
-// The loopback self-test, runnable from the live firmware: send a known pattern, capture it back on the jumpered pin, decode and compare.
-// The symbol build is inlined here, being two shapes, so this layer stays self-contained and the domain keeps no dependency on it.
+// The loopback self-test, runnable from the live firmware: send a known pattern, capture it back on the jumpered pin, decode and compare. The symbol build is inlined here, being two shapes, so this layer stays self-contained and the domain keeps no dependency on it.
 
 namespace {
 
@@ -497,9 +462,7 @@ constexpr uint16_t kT0H = 14, kT1H = 28, kPeriod = 50;  // 350/700/1250 ns in ti
 
 namespace detail {
 
-// Plain-GPIO continuity check: drive tx, read rx. Separates "wire wrong" from
-// "RMT/LCD wrong" so a failed jumper is reported clearly. Shared with the LCD
-// loopback in platform_esp32_i80.cpp (declared there), hence not anonymous.
+// Plain-GPIO continuity check: drive tx, read rx. Separates "wire wrong" from "RMT/LCD wrong" so a failed jumper is reported clearly. Shared with the LCD loopback in platform_esp32_i80.cpp (declared there), hence not anonymous.
 bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio) {
     gpio_set_direction(static_cast<gpio_num_t>(txGpio), GPIO_MODE_OUTPUT);
     gpio_set_direction(static_cast<gpio_num_t>(rxGpio), GPIO_MODE_INPUT);
@@ -512,10 +475,7 @@ bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio) {
     int lo = gpio_get_level(static_cast<gpio_num_t>(rxGpio));
     gpio_reset_pin(static_cast<gpio_num_t>(txGpio));
     gpio_reset_pin(static_cast<gpio_num_t>(rxGpio));
-    // Log the raw levels — this one line is a genuine bench HAL diagnostic (it pinned the
-    // MHC-WLED P4 shield loopback: hi=0 lo=0 = no signal path, hi=1 lo=1 = the Rx pin is
-    // externally pulled up, hi=1 lo=0 = clean). Only runs when the loopback self-test is
-    // invoked (off the hot path), so it costs nothing in normal operation.
+    // Log the raw levels, this one line is a genuine bench HAL diagnostic (it pinned the MHC-WLED P4 shield loopback: hi=0 lo=0 = no signal path, hi=1 lo=1 = the Rx pin is externally pulled up, hi=1 lo=0 = clean). Only runs when the loopback self-test is invoked (off the hot path), so it costs nothing in normal operation.
     ESP_LOGI("mm_loopback", "continuity tx=%u->rx=%u: hi=%d lo=%d (want hi=1 lo=0)",
              txGpio, rxGpio, hi, lo);
     return hi == 1 && lo == 0;
@@ -554,16 +514,13 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
         uint8_t rxGpio; uint32_t* buf; size_t max; size_t need;
         bool ride; volatile size_t got = 0; volatile bool done = false;
     };
-    // HEAP, not stack: the rx task holds this pointer, and the wedged-task exit below returns while the
-    // task may still be running — a stack Cap would then be a use-after-return. Heap lets that path leak
-    // the context alongside rxSymbols (the deliberate failure mode) instead of dangling it.
+    // HEAP, not stack: the rx task holds this pointer, and the wedged-task exit below returns while the task may still be running, a stack Cap would then be a use-after-return. Heap lets that path leak the context alongside rxSymbols (the deliberate failure mode) instead of dangling it.
     auto* cap = new (std::nothrow) Cap{static_cast<uint8_t>(rxGpio), rxSymbols, capMax, kBits, rideMode};
     if (!cap) { heap_caps_free(rxSymbols); return; }
     // Re-arm until a whole frame lands: @xref{riding-a-live-pipeline-means-re-arming-until-a-whole-frame-lands|why one arm is not enough here}.
     auto rxTask = [](void* arg) {
         auto* c = static_cast<Cap*>(arg);
-        // The retry budget fits inside the outer ceiling below, or the caller frees the buffer while this task is still writing into it.
-        // A live pipeline delivers a frame within milliseconds, so the per-arm wait is already generous slack and a dead wire exhausts the budget in bounded time.
+        // The retry budget fits inside the outer ceiling below, or the caller frees the buffer while this task is still writing into it. A live pipeline delivers a frame within milliseconds, so the per-arm wait is already generous slack and a dead wire exhausts the budget in bounded time.
         const int attempts = c->ride ? 40 : 1;
         const uint32_t perArmTimeoutMs = c->ride ? 100 : 1000;
         for (int a = 0; a < attempts; a++) {
@@ -577,18 +534,13 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
     const bool taskStarted = xTaskCreate(rxTask, "lblb", 4096, cap, 5, nullptr) == pdPASS;
     if (taskStarted) {
         vTaskDelay(pdMS_TO_TICKS(50));
-        // First transmit timed — the wall time of a known byte count confirms the
-        // granted pixel clock matches the configured slot rate (the bus driver
-        // doesn't expose the granted clock directly).
+        // First transmit timed, the wall time of a known byte count confirms the granted pixel clock matches the configured slot rate (the bus driver doesn't expose the granted clock directly).
         {
             const int64_t t0 = esp_timer_get_time();
             transmitOnce();
             const int64_t dt = esp_timer_get_time() - t0;
             r.txWallUs = static_cast<uint32_t>(dt);
-            // Expected wire time from the STRAND's view (unit-safe at any bus width / fan-out):
-            // kBits WS2812 bits × 3 slots each ÷ the slot rate. frameBytes ÷ pclkHz would mix
-            // units — frameBytes counts BUS bytes while pclkHz here is the slot rate, which
-            // overstates the expectation 8× in shift mode.
+            // Expected wire time from the STRAND's view (unit-safe at any bus width / fan-out): kBits WS2812 bits × 3 slots each ÷ the slot rate. frameBytes ÷ pclkHz would mix units, frameBytes counts BUS bytes while pclkHz here is the slot rate, which overstates the expectation 8× in shift mode.
             r.txExpectUs = static_cast<uint32_t>(kBits * 3ull * 1000000ull / pclkHz);
             ESP_LOGI(tag, "loopback: %u bytes in %lld us (expect ~%u us at %u Hz slot rate)",
                      (unsigned)frameBytes, (long long)dt,
@@ -596,9 +548,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
         }
         // Back-to-back frames, exactly the render loop's transmit/wait cadence.
         for (int i = 0; i < 100 && !cap->done; i++) transmitOnce();
-        // Wait for the capture task. Ride mode re-arms internally (each arm returns in ~1 frame when the
-        // pipeline is live), so give it a longer ceiling than the controlled-transmit path — a live frame is
-        // caught in well under this, and a dead wire still ends when the task exhausts its bounded retries.
+        // Wait for the capture task. Ride mode re-arms internally (each arm returns in ~1 frame when the pipeline is live), so give it a longer ceiling than the controlled-transmit path, a live frame is caught in well under this, and a dead wire still ends when the task exhausts its bounded retries.
         const int waitTicks = rideMode ? 600 : 200;   // ×10 ms = 6 s (ride) / 2 s (controlled)
         for (int i = 0; i < waitTicks && !cap->done; i++) vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -608,8 +558,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
              (unsigned)cap->got, (unsigned)kBits, (int)r.rxIdleLevel);
 
     if (cap->done && cap->got >= kBits) {
-        // Verify EVERY bit of the frame against the per-row pattern (r.sent[],
-        // zero-padded for RGBW rows), not just the first light.
+        // Verify EVERY bit of the frame against the per-row pattern (r.sent[], zero-padded for RGBW rows), not just the first light.
         size_t mismatch = SIZE_MAX;
         uint16_t minH[2] = {0x7FFF, 0x7FFF}, maxH[2] = {0, 0};
         size_t mismatchCount = 0;
@@ -647,10 +596,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                      r.got[0], r.got[1], r.got[2], r.sent[0], r.sent[1], r.sent[2]);
         }
     }
-    // NEVER free what the rx task may still touch — the capture buffer it writes AND the Cap context it
-    // reads. The retry budget is sized under the wait ceiling above, so cap->done is normally long set by
-    // here; this drains the residue if the scheduler starved the task. If it STILL hasn't finished (an
-    // RMT-driver wedge), leaking both is the correct failure — a use-after-free under a running task is not.
+    // NEVER free what the rx task may still touch, the capture buffer it writes AND the Cap context it reads. The retry budget is sized under the wait ceiling above, so cap->done is normally long set by here; this drains the residue if the scheduler starved the task. If it STILL hasn't finished (an RMT-driver wedge), leaking both is the correct failure, a use-after-free under a running task is not.
     for (int i = 0; taskStarted && !cap->done && i < 500; i++) vTaskDelay(pdMS_TO_TICKS(10));
     if (taskStarted && !cap->done) {
         ESP_LOGE(tag, "loopback: rx task never finished — leaking the capture buffer instead of freeing under it");
@@ -673,10 +619,7 @@ RmtLoopbackResult ws2812LoopbackRide(uint16_t rxGpio, const uint8_t* sent, uint8
         return r;
     for (uint8_t i = 0; i < sentLen; i++) r.sent[i] = sent[i];   // the per-light pattern to verify
     r.jumperDetected = true;   // proven by the bit-verify itself, not a plain-GPIO continuity pre-check
-    // The STRAND's slot rate (what the RX sees), from the WS2812 physical timing every family shares: direct
-    // slots at kSlotHz; an expander fits `clockMultiplier` bus words per slot, so the slot rate is the fast
-    // bus clock ÷ multiplier. Same values the per-family loopbacks derive from their own kPclkHz/kShiftPclkHz
-    // — canonical WS2812 timing, so the driver-agnostic ride carries them here rather than taking a family's.
+    // The STRAND's slot rate (what the RX sees), from the WS2812 physical timing every family shares: direct slots at kSlotHz; an expander fits `clockMultiplier` bus words per slot, so the slot rate is the fast bus clock ÷ multiplier. Same values the per-family loopbacks derive from their own kPclkHz/kShiftPclkHz, canonical WS2812 timing, so the driver-agnostic ride carries them here rather than taking a family's.
     constexpr uint32_t kSlotHz = 2'666'666;         // direct-mode WS2812 slot (375 ns)
     constexpr uint32_t kShiftBusHz = 26'666'666;    // expander bus clock (300 ns slot at ÷8)
     const bool pinExpanderMode = clockMultiplier > 1;
@@ -706,11 +649,10 @@ RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio) {
     if (!rmtWs2812Init(tx, txGpio, kLoopbackResHz, /*invert=*/false)) return r;
     rmtWs2812SetBitTiming(tx, sym0, sym1);
 
-    // RX must be listening while we transmit; run the (blocking) capture in a task
-    // and resend the short frame until the receiver latches one or we give up.
+    // RX must be listening while we transmit; run the (blocking) capture in a task and resend the short frame until the receiver latches one or we give up.
     constexpr size_t kCapMax = kBits + 8;
     static uint32_t rxSymbols[kCapMax];
-    // Pass rxGpio through the arg struct (the task fn is a plain C pointer — no captures).
+    // Pass rxGpio through the arg struct (the task fn is a plain C pointer, no captures).
     struct Cap { uint8_t rxGpio; volatile size_t got = 0; volatile bool done = false; } cap{rxGpio};
     auto rxTask = [](void* arg) {
         auto* c = static_cast<Cap*>(arg);
@@ -762,16 +704,14 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
                         | (static_cast<uint32_t>(kPeriod - kT1H) << 16);
     const uint8_t bitsPerLight = static_cast<uint8_t>(channels * 8);
 #if !SOC_RMT_SUPPORT_DMA
-    // Without transfer hardware the capture holds at most one channel's symbols, so the verified frame is capped to whole lights within that block.
-    // The frame is still transmitted back to back, which is the stress that exposes interference; only the verified part is a prefix.
+    // Without transfer hardware the capture holds at most one channel's symbols, so the verified frame is capped to whole lights within that block. The frame is still transmitted back to back, which is the stress that exposes interference; only the verified part is a prefix.
     const uint16_t maxLights =
         static_cast<uint16_t>(SOC_RMT_MEM_WORDS_PER_CHANNEL / bitsPerLight);
     if (lights > maxLights) lights = maxLights ? maxLights : 1;
 #endif
     const size_t kBits = static_cast<size_t>(lights) * bitsPerLight;
 
-    // One real frame's worth of WIRE BYTES, DMA-capable internal RAM (the same place the driver's
-    // own frame buffer lives). Off the hot path: a control-driven self-test.
+    // One real frame's worth of WIRE BYTES, DMA-capable internal RAM (the same place the driver's own frame buffer lives). Off the hot path: a control-driven self-test.
     const size_t txBytes = static_cast<size_t>(lights) * channels;
     auto* txWire = static_cast<uint8_t*>(heap_caps_malloc(
         txBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
@@ -808,8 +748,7 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
     };
     if (xTaskCreate(rxTask, "rmtlbf", 4096, &cap, 5, nullptr) == pdPASS) {
         vTaskDelay(pdMS_TO_TICKS(50));
-        // Back-to-back frames, the render loop's cadence. The capture latches
-        // one whole frame; we keep resending so it can't miss the window.
+        // Back-to-back frames, the render loop's cadence. The capture latches one whole frame; we keep resending so it can't miss the window.
         for (int i = 0; i < 100 && !cap.done; i++) {
             rmtWs2812Transmit(tx, txWire, txBytes);
             rmtWs2812Wait(tx, 1000);

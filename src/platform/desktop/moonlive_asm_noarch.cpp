@@ -21,9 +21,7 @@
 
 namespace mm::moonlive {
 
-// Refusing rather than emitting something that cannot run: MoonLive::compile then reports a
-// failure and a scripted module renders dark, the same path a too-large or unparseable script
-// takes.
+// Refusing rather than emitting something that cannot run: MoonLive::compile then reports a failure and a scripted module renders dark, the same path a too-large or unparseable script takes.
 size_t lowerToBytes(IrProgram&, uint8_t*, size_t, const RegBudget*) { return 0; }
 
 }  // namespace mm::moonlive

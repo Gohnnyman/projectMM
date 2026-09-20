@@ -1,9 +1,7 @@
-// @module draw
-// @also Canvas, GEQEffect, AudioSpectrumEffect
+/// @module draw
+/// @also Canvas, GEQEffect, AudioSpectrumEffect
 
-// `bar`, `fillRect` and `rect` — the audio-meter staple. Four effects hand-rolled a bar loop before
-// this existed, and what they disagreed on is exactly what these tests pin: which end is the floor,
-// how color varies along the run, and what a bar longer than the grid does.
+/// `bar`, `fillRect` and `rect`, the audio-meter staple. Four effects hand-rolled a bar loop before this existed, and what they disagreed on is exactly what these tests pin: which end is the floor, how color varies along the run, and what a bar longer than the grid does.
 
 #include "doctest.h"
 #include "light/powerfunctions/draw.h"
@@ -22,7 +20,7 @@ struct Surface {
     uint8_t at(lengthType x, lengthType y, uint8_t ch = 0) const {
         return buf.data()[(static_cast<size_t>(y) * cv.dims.x + x) * cv.cpl + ch];
     }
-    /// How many lights carry any light at all — the "did it draw the right amount" check.
+    /// How many lights carry any light at all, the "did it draw the right amount" check.
     int litCount() const {
         int n = 0;
         for (nrOfLightsType i = 0; i < buf.count(); i++) {
@@ -47,8 +45,7 @@ TEST_CASE("a bar growing right lights exactly its length from the origin") {
     CHECK(s.litCount() == 3);
 }
 
-// The GEQ direction, and the one most likely to be got backwards: row 0 is the TOP of the grid, so a
-// bar rising from the floor walks toward DECREASING y.
+// The GEQ direction, and the one most likely to be got backwards: row 0 is the TOP of the grid, so a bar rising from the floor walks toward DECREASING y.
 TEST_CASE("a bar growing up rises toward row zero") {
     Surface s(4, 8);
     draw::bar(s.cv, 1, 7, 3, draw::Grow::Up, kRed);      // from the bottom row
@@ -74,8 +71,7 @@ TEST_CASE("bars grow down and left from their origin") {
     CHECK(left.litCount() == 3);
 }
 
-// The reason the color is a callback: every real call site varies color ALONG the bar. The index is
-// the distance from the origin, which is the number those formulas already computed.
+// The reason the color is a callback: every real call site varies color ALONG the bar. The index is the distance from the origin, which is the number those formulas already computed.
 TEST_CASE("a bar colors each cell by its distance from the origin") {
     Surface s(8, 2);
     draw::bar(s.cv, 0, 0, 4, draw::Grow::Right,
@@ -86,8 +82,7 @@ TEST_CASE("a bar colors each cell by its distance from the origin") {
     CHECK(s.at(3, 0) == 40);
 }
 
-// Robustness: a magnitude that maps past the grid must not write outside it. This is the case a
-// hand-rolled loop gets wrong when the band value is at full scale.
+// Robustness: a magnitude that maps past the grid must not write outside it. This is the case a hand-rolled loop gets wrong when the band value is at full scale.
 TEST_CASE("a bar longer than the grid stops at the edge") {
     Surface s(4, 4);
     draw::bar(s.cv, 0, 0, 99, draw::Grow::Right, kRed);

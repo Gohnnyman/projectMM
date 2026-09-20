@@ -68,22 +68,19 @@ struct MicState {
     int16_t stage[256] = {};
 };
 
-// The library's transform works in place on an interleaved complex array, so one scratch is sized to the largest block, and its tables initialize lazily on first use.
-// Allocated on the first transform rather than reserved from boot: @xref{the-transform-scratch-is-allocated-not-reserved|what it cost as a static array}.
+// The library's transform works in place on an interleaved complex array, so one scratch is sized to the largest block, and its tables initialize lazily on first use. Allocated on the first transform rather than reserved from boot: @xref{the-transform-scratch-is-allocated-not-reserved|what it cost as a static array}.
 constexpr size_t kMaxFftN = 1024;
 float* g_fftBuf = nullptr;
 bool   g_fftReady = false;
 
 bool ensureFftInit() {
     if (g_fftReady) return true;
-    // dsps_fft2r_init_fc32(NULL, …) uses the library's built-in max-size twiddle
-    // table — no caller allocation, initialised once for the process.
+    // dsps_fft2r_init_fc32(NULL, …) uses the library's built-in max-size twiddle table, no caller allocation, initialized once for the process.
     if (dsps_fft2r_init_fc32(nullptr, CONFIG_DSP_MAX_FFT_SIZE) != ESP_OK) {
         ESP_LOGE(I2S_TAG, "esp-dsp FFT init failed");
         return false;
     }
-    // Internal RAM, not PSRAM: esp-dsp's assembly kernels run per audio block and
-    // a PSRAM scratch would put a cache miss in the middle of every butterfly.
+    // Internal RAM, not PSRAM: esp-dsp's assembly kernels run per audio block and a PSRAM scratch would put a cache miss in the middle of every butterfly.
     g_fftBuf = static_cast<float*>(
         heap_caps_malloc(kMaxFftN * 2 * sizeof(float), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     if (!g_fftBuf) {
@@ -98,9 +95,7 @@ bool ensureFftInit() {
 }  // namespace
 
 namespace {
-// Set when audioMicInit failed because another module held the I2S instance, cleared on every
-// attempt. Only contention can clear on its own, so only it earns the once-a-second retry: keyed
-// on "the mic is down" instead, a board with no microphone wired would re-init forever.
+// Set when audioMicInit failed because another module held the I2S instance, cleared on every attempt. Only contention can clear on its own, so only it earns the once-a-second retry: keyed on "the mic is down" instead, a board with no microphone wired would re-init forever.
 bool s_micRefusedForContention = false;
 }
 
@@ -120,10 +115,7 @@ bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
 
     if (mode == MicMode::Pdm) {
 #if SOC_I2S_SUPPORTS_PDM_RX
-        // A PDM part sends one bit per clock and the peripheral decimates it to PCM, so there are
-        // only two wires: the clock the ESP32 drives, and the data line. `wsPin` carries the clock
-        // (it is the pin the board wires to the mic's CLK) and `sdPin` the data; `sckPin` and
-        // `mclkPin` have no meaning here.
+        // A PDM part sends one bit per clock and the peripheral decimates it to PCM, so there are only two wires: the clock the ESP32 drives, and the data line. `wsPin` carries the clock (it is the pin the board wires to the mic's CLK) and `sdPin` the data; `sckPin` and `mclkPin` have no meaning here.
         i2s_pdm_rx_config_t pdmCfg = {
             .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG(sampleRate),
             .slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
@@ -140,14 +132,12 @@ bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
             delete st;
             return false;
         }
-        // 16-bit samples, where the std path reads 32. audioMicRead widens them on the way out so
-        // the domain code sees one sample format whatever the part is.
+        // 16-bit samples, where the std path reads 32. audioMicRead widens them on the way out so the domain code sees one sample format whatever the part is.
         st->pdm = true;
         h.impl = st;
         return true;
 #else
-        // The chip has no PDM receiver. Fail rather than quietly configure a standard-mode
-        // channel on two pins, which would read noise and look like a wiring fault.
+        // The chip has no PDM receiver. Fail rather than quietly configure a standard-mode channel on two pins, which would read noise and look like a wiring fault.
         ESP_LOGE(I2S_TAG, "PDM microphone requested, but this chip has no PDM receiver");
         i2s_del_channel(st->rx);
         delete st;
@@ -155,8 +145,7 @@ bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
 #endif
     }
 
-    // The standard framing, mono, the part putting its data in ONE slot chosen by its own select pin and leaving the other empty.
-    // The bench part is wired for the left slot; a microphone reading silence with sound present is filling the other one, so flip this.
+    // The standard framing, mono, the part putting its data in ONE slot chosen by its own select pin and leaving the other empty. The bench part is wired for the left slot; a microphone reading silence with sound present is filling the other one, so flip this.
     i2s_std_slot_config_t slotCfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
         I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO);
     slotCfg.slot_mask = I2S_STD_SLOT_LEFT;
@@ -164,8 +153,7 @@ bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(sampleRate),
         .slot_cfg = slotCfg,
         .gpio_cfg = {
-            // MCLK: unused for a self-clocked MEMS mic (INMP441); driven on the
-            // given pin for a codec that needs a master clock (the ES8311). −1 = none.
+            // MCLK: unused for a self-clocked MEMS mic (INMP441); driven on the given pin for a codec that needs a master clock (the ES8311). −1 = none.
             .mclk = mclkPin < 0 ? I2S_GPIO_UNUSED : static_cast<gpio_num_t>(mclkPin),
             .bclk = static_cast<gpio_num_t>(sckPin),
             .ws   = static_cast<gpio_num_t>(wsPin),
@@ -213,14 +201,9 @@ size_t audioMicRead(AudioMicHandle& h, int32_t* out, size_t maxSamples) {
 
 bool audioMicSharedBusFree(MicMode mode) {
 #if CONFIG_IDF_TARGET_ESP32
-    // Only after a CONTENTION refusal. Without this the probe answers "free" on any board whose
-    // instance 0 is simply idle, so a mic that is down for its OWN reasons (no part wired, wrong
-    // pins) would re-init once a second forever, allocating and logging on the render thread.
+    // Only after a CONTENTION refusal. Without this the probe answers "free" on any board whose instance 0 is simply idle, so a mic that is down for its OWN reasons (no part wired, wrong pins) would re-init once a second forever, allocating and logging on the render thread.
     if (!s_micRefusedForContention) return false;
-    // Only the classic ESP32 shares: its parallel LED bus IS an I2S peripheral. That bus always
-    // takes instance 1 (see platform_esp32_i80.cpp), so audio always has instance 0, which is also
-    // the only instance a PDM microphone can use. This is the mirror of the bus's own probe: it
-    // matters when something else holds 0, and the mic recovers once that clears.
+    // Only the classic ESP32 shares: its parallel LED bus IS an I2S peripheral. That bus always takes instance 1 (see platform_esp32_i80.cpp), so audio always has instance 0, which is also the only instance a PDM microphone can use. This is the mirror of the bus's own probe: it matters when something else holds 0, and the mic recovers once that clears.
     (void)mode;
     if (i2s_platform_acquire_occupation(I2S_CTLR_HP, 0, "mm_mic_probe") != ESP_OK) return false;
     i2s_platform_release_occupation(I2S_CTLR_HP, 0);
@@ -281,10 +264,7 @@ void audioFft(const float*, size_t, float*) {}
 
 #endif  // SOC_I2S_SUPPORTED
 
-// OS capture devices are a desktop concept (hasAudioCapture == false on every ESP32 target).
-// Deliberately OUTSIDE the SOC_I2S_SUPPORTED split: shared code references these from
-// discarded `if constexpr (hasAudioCapture)` branches, which still require a definition to
-// link (ODR) on I2S and I2S-less chips alike.
+// OS capture devices are a desktop concept (hasAudioCapture == false on every ESP32 target). Deliberately OUTSIDE the SOC_I2S_SUPPORTED split: shared code references these from discarded `if constexpr (hasAudioCapture)` branches, which still require a definition to link (ODR) on I2S and I2S-less chips alike.
 namespace mm::platform {
 size_t audioCaptureDevices(const char* const** optionsOut) {
     if (optionsOut) *optionsOut = nullptr;

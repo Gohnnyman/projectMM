@@ -11,8 +11,7 @@ namespace mm::moonlive {
 
 #if defined(__aarch64__) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
 
-// arm64 template (assembled from fill_arm64.s, verified with clang/objdump). 18 words.
-// buf=x0, nLights=w1, cpl=w2. R/G/B live in `mov w4/w5/w6, #imm` at word indices 4,5,6.
+// arm64 template (assembled from fill_arm64.s, verified with clang/objdump). 18 words. buf=x0, nLights=w1, cpl=w2. R/G/B live in `mov w4/w5/w6, #imm` at word indices 4,5,6.
 static const uint32_t kArm64[] = {
     0x34000221,  // cbz   w1, .done
     0xd2800003,  // mov   x3, #0          (byte offset)
@@ -38,8 +37,7 @@ size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
     if (!out || cap < sizeof(kArm64)) return 0;
     uint32_t code[sizeof(kArm64) / 4];
     std::memcpy(code, kArm64, sizeof(kArm64));
-    // Patch the color immediates: mov wN,#imm encodes imm at bits [20:5]; the base word
-    // has imm=0 so OR-ing (imm<<5) sets it cleanly.
+    // Patch the color immediates: mov wN,#imm encodes imm at bits [20:5]; the base word has imm=0 so OR-ing (imm<<5) sets it cleanly.
     code[4] = 0x52800004u | (static_cast<uint32_t>(r) << 5);
     code[5] = 0x52800005u | (static_cast<uint32_t>(g) << 5);
     code[6] = 0x52800006u | (static_cast<uint32_t>(b) << 5);
@@ -47,8 +45,7 @@ size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
     return sizeof(code);
 }
 
-// arm64 animated fill (assembled from anim_arm64.s): red = (t>>3)&0xFF, green=0, blue=64.
-// t arrives in w3; nothing to patch — the color is computed from the runtime arg.
+// arm64 animated fill (assembled from anim_arm64.s): red = (t>>3)&0xFF, green=0, blue=64. t arrives in w3; nothing to patch, the color is computed from the runtime arg.
 static const uint32_t kArm64Anim[] = {
     0x34000241,  // cbz   w1, .done
     0x53037c64,  // lsr   w4, w3, #3      red = t>>3

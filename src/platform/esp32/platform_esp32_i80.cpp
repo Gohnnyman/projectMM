@@ -70,9 +70,7 @@
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
 
-// SOC_LCD_I80_SUPPORTED: the generic esp_lcd i80 API, backed by LCD_CAM on the S3/P4 and by
-// the I2S peripheral on the classic ESP32 — both selected by IDF's own CMake. The body below
-// is backend-agnostic. (esp_lcd i80 headers exist wherever SOC_LCD_I80_SUPPORTED is set.)
+// SOC_LCD_I80_SUPPORTED: the generic esp_lcd i80 API, backed by LCD_CAM on the S3/P4 and by the I2S peripheral on the classic ESP32, both selected by IDF's own CMake. The body below is backend-agnostic. (esp_lcd i80 headers exist wherever SOC_LCD_I80_SUPPORTED is set.)
 #if SOC_LCD_I80_SUPPORTED
 
 #include "esp_lcd_panel_io.h"
@@ -94,18 +92,14 @@
 
 namespace mm::platform {
 
-// Defined in platform_esp32_rmt.cpp — the plain-GPIO continuity pre-check the
-// RMT loopback uses; the wire question is identical here.
+// Defined in platform_esp32_rmt.cpp, the plain-GPIO continuity pre-check the RMT loopback uses; the wire question is identical here.
 namespace detail { bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio); }
 
 namespace {
 
 static const char* I80_TAG = "mm_i80";
 
-// The lcd_cmd passed to esp_lcd_panel_io_tx_color. LCD_CAM (S3/P4) takes -1 = "no command phase"
-// (pure data). The classic I2S backend has an UNCONDITIONAL command phase (see the lcd_cmd_bits note
-// in createState), so it needs a real 8-bit command: 0 is a benign no-op byte that completes the
-// backend's command poll before the WS2812 data frame.
+// The lcd_cmd passed to esp_lcd_panel_io_tx_color. LCD_CAM (S3/P4) takes -1 = "no command phase" (pure data). The classic I2S backend has an UNCONDITIONAL command phase (see the lcd_cmd_bits note in createState), so it needs a real 8-bit command: 0 is a benign no-op byte that completes the backend's command poll before the WS2812 data frame.
 #if SOC_LCDCAM_I80_LCD_SUPPORTED
 constexpr int kI80Cmd = -1;
 #else
@@ -115,8 +109,7 @@ constexpr int kI80Cmd = 0;
 // Three slots per bit, one slot HIGH for a zero: @xref{the-clock-is-set-by-the-slot-duration|why this rate and not the lineage's usual one}.
 constexpr uint32_t kPclkHz = 2'666'666;
 
-// The pixel clock with an expander fitted, an exact divide so the silent round-down cannot bite: @xref{the-clock-is-set-by-the-slot-duration|the whole window, and the direction to adjust it}.
-// The fitted buffer has real but adequate margin at this shift rate.
+// The pixel clock with an expander fitted, an exact divide so the silent round-down cannot bite: @xref{the-clock-is-set-by-the-slot-duration|the whole window, and the direction to adjust it}. The fitted buffer has real but adequate margin at this shift rate.
 constexpr uint32_t kShiftPclkHz = 26'666'666;   // prescale 3 of 80 MHz -> 300 ns WS2812 slots
 
 
@@ -130,13 +123,11 @@ struct I80State {
     SemaphoreHandle_t done[2] = {nullptr, nullptr};
     uint8_t* buf[2] = {nullptr, nullptr};
     size_t cap = 0;   // shared per-buffer capacity (both buffers equal)
-    // In-order completion FIFO of enqueued buffer indices (0/1). enqueue at head under a critical
-    // section around tx_color; the ISR pops at tail. Only ever 0..2 entries (one per buffer).
+    // In-order completion FIFO of enqueued buffer indices (0/1). enqueue at head under a critical section around tx_color; the ISR pops at tail. Only ever 0..2 entries (one per buffer).
     volatile uint8_t fifo[2] = {0, 0};
     volatile uint8_t fifoHead = 0;   // next write slot (mod 2)
     volatile uint8_t fifoTail = 0;   // next read slot (mod 2)
-    // Wire-time KPI: the start timestamp of the oldest in-flight transfer (paired with the FIFO,
-    // so it tracks the transfer the next done-callback completes), and the last measured duration.
+    // Wire-time KPI: the start timestamp of the oldest in-flight transfer (paired with the FIFO, so it tracks the transfer the next done-callback completes), and the last measured duration.
     volatile int64_t txStartUs[2] = {0, 0};
     volatile uint32_t lastTransmitUs = 0;
 };
@@ -151,9 +142,7 @@ bool IRAM_ATTR i80DoneCb(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_
     const int64_t now = esp_timer_get_time();
     st->lastTransmitUs = static_cast<uint32_t>(now - st->txStartUs[slot]);
     st->fifoTail = (st->fifoTail + 1u) & 1u;
-    // In-order queue: a buffer already queued behind this one starts the instant this transfer ends —
-    // stamp its true start here, since the transmit call deliberately skipped stamping it (the wire was
-    // busy). Without this the second buffer's frameTime would include this one's remaining wire time.
+    // In-order queue: a buffer already queued behind this one starts the instant this transfer ends, stamp its true start here, since the transmit call deliberately skipped stamping it (the wire was busy). Without this the second buffer's frameTime would include this one's remaining wire time.
     if (st->fifoTail != st->fifoHead) st->txStartUs[st->fifoTail] = now;
     BaseType_t high = pdFALSE;
     xSemaphoreGiveFromISR(st->done[b], &high);
@@ -169,9 +158,7 @@ void destroyState(I80State* st) {
     delete st;
 }
 
-// One bus + IO device + DMA buffer(s). `wantSecond` allocates the async double-buffer's second
-// frame buffer (best-effort — null if it won't fit); false allocates buffer 0 only. Shared by the
-// runtime init and the loopback's private bus (which passes false — one transfer).
+// One bus + IO device + DMA buffer(s). `wantSecond` allocates the async double-buffer's second frame buffer (best-effort, null if it won't fit); false allocates buffer 0 only. Shared by the runtime init and the loopback's private bus (which passes false, one transfer).
 I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
                       uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes, bool wantSecond,
                       uint8_t clockMultiplier = 1) {
@@ -182,14 +169,10 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     busCfg.dc_gpio_num = static_cast<gpio_num_t>(dcGpio);
     busCfg.wr_gpio_num = static_cast<gpio_num_t>(wrGpio);
     busCfg.clk_src = LCD_CLK_SRC_DEFAULT;
-    // Bus width is power-of-two only (8 or 16), derived from the lane count: ≤8 → 8,
-    // 9..16 → 16. The domain driver already guarantees exactly 8 or 16 real data pins.
+    // Bus width is power-of-two only (8 or 16), derived from the lane count: ≤8 → 8, 9..16 → 16. The domain driver already guarantees exactly 8 or 16 real data pins.
     const size_t busWidth = laneCount <= 8 ? 8 : 16;
     busCfg.bus_width = busWidth;
-    // The i80 layer REJECTS an NC data pin (unlike Parlio), so every data line up to
-    // bus_width must be a real GPIO. A board that drives fewer than bus_width lanes
-    // parks the unused ones on the WR "ghost pin" (hpwit's trick) — WR toggles on it
-    // harmlessly, and the domain driver clears those lanes' activeMask so they idle.
+    // The i80 layer REJECTS an NC data pin (unlike Parlio), so every data line up to bus_width must be a real GPIO. A board that drives fewer than bus_width lanes parks the unused ones on the WR "ghost pin" (hpwit's trick), WR toggles on it harmlessly, and the domain driver clears those lanes' activeMask so they idle.
     for (size_t i = 0; i < ESP_LCD_I80_BUS_WIDTH_MAX; i++) {
         busCfg.data_gpio_nums[i] = (i < busWidth) ? static_cast<gpio_num_t>(wrGpio)
                                                   : GPIO_NUM_NC;
@@ -213,10 +196,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
 
     esp_lcd_panel_io_i80_config_t ioCfg = {};
     ioCfg.cs_gpio_num = GPIO_NUM_NC;    // no chip select — we own the bus
-    // A '595 expander shifts each WS2812 slot out over 8 bus words, so the bus must clock 8× faster
-    // to keep the slot inside the WS2812 bit window. kShiftPclkHz is that rate — and it is one of the
-    // EXACT divides of the 80 MHz bus resolution, because esp_lcd silently rounds an inexact pclk DOWN
-    // into a wrong waveform rather than reporting it (see kShiftPclkHz).
+    // A '595 expander shifts each WS2812 slot out over 8 bus words, so the bus must clock 8× faster to keep the slot inside the WS2812 bit window. kShiftPclkHz is that rate, and it is one of the EXACT divides of the 80 MHz bus resolution, because esp_lcd silently rounds an inexact pclk DOWN into a wrong waveform rather than reporting it (see kShiftPclkHz).
     ioCfg.pclk_hz = (clockMultiplier > 1) ? kShiftPclkHz : kPclkHz;
     // Depth two, so the deferred-wait tick can hand over the next frame while the current one drains.
     // The driver still waits before reusing a buffer, so at most one transfer per buffer is outstanding.
@@ -244,9 +224,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     // The classic backend rejecting it outright, and the component handles cache alignment for whichever region it lands in.
     // Zeroed, so the trailing latch pad holds the lines LOW.
 #if SOC_LCDCAM_I80_LCD_SUPPORTED
-    // Only the LCD_CAM backend can reach PSRAM at all, so the preference only exists here. (The
-    // classic ESP32's i80 is the I2S peripheral, whose DMA cannot address PSRAM — it takes the
-    // internal-only path below unconditionally, and never asks the question.)
+    // Only the LCD_CAM backend can reach PSRAM at all, so the preference only exists here. (The classic ESP32's i80 is the I2S peripheral, whose DMA cannot address PSRAM, it takes the internal-only path below unconditionally, and never asks the question.)
     const bool pinExpanderMode = clockMultiplier > 1;
     if (!pinExpanderMode)
         st->buf[0] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
@@ -256,8 +234,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
         st->buf[0] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
             st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
 #if SOC_LCDCAM_I80_LCD_SUPPORTED
-    // Shift mode wanted internal RAM and could not have it (a frame too big): take PSRAM rather than
-    // refuse to drive. Expect the flicker until the frame fits or the real fix lands.
+    // Shift mode wanted internal RAM and could not have it (a frame too big): take PSRAM rather than refuse to drive. Expect the flicker until the frame fits or the real fix lands.
     if (!st->buf[0] && pinExpanderMode) {
         ESP_LOGW(I80_TAG, "shift frame (%u B) does not fit internal DMA RAM — using PSRAM; "
                           "expect stalled transfers. Reduce lights per strand.", (unsigned)bufferBytes);
@@ -272,20 +249,17 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     std::memset(st->buf[0], 0, bufferBytes);
     st->cap = bufferBytes;
 
-    // The second buffer, only when asked, so the common path allocates one frame and pays no extra memory.
-    // Allocate and degrade: if it fits, double buffering arms; if not, the driver runs single-buffered, which is never a requirement.
+    // The second buffer, only when asked, so the common path allocates one frame and pays no extra memory. Allocate and degrade: if it fits, double buffering arms; if not, the driver runs single-buffered, which is never a requirement.
     if (wantSecond) {
         st->done[1] = xSemaphoreCreateBinary();
         if (st->done[1]) {
-            // The second buffer follows the first's policy exactly, so the back buffer never lands where the front one refused to.
-            // External memory does not touch the scarce internal heap, so that branch needs no reserve check.
+            // The second buffer follows the first's policy exactly, so the back buffer never lands where the front one refused to. External memory does not touch the scarce internal heap, so that branch needs no reserve check.
 #if SOC_LCDCAM_I80_LCD_SUPPORTED
             if (!pinExpanderMode)
                 st->buf[1] = static_cast<uint8_t*>(esp_lcd_i80_alloc_draw_buffer(
                     st->io, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM));
 #endif
-            // The internal fallback only if it leaves the reserve intact, the second buffer being a nice-to-have that must never eat what the network stack needs.
-            // Without the guard a board whose frame lands internal would drop below the reserve and fail its allocations; degrading to one buffer instead is the honest answer.
+            // The internal fallback only if it leaves the reserve intact, the second buffer being a nice-to-have that must never eat what the network stack needs. Without the guard a board whose frame lands internal would drop below the reserve and fail its allocations; degrading to one buffer instead is the honest answer.
             if (!st->buf[1]
                 && heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
                        >= bufferBytes + HEAP_RESERVE) {
@@ -295,7 +269,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
             if (st->buf[1]) {
                 std::memset(st->buf[1], 0, bufferBytes);
             } else {
-                // No room for the second buffer — drop its unused semaphore, stay single-buffer.
+                // No room for the second buffer, drop its unused semaphore, stay single-buffer.
                 vSemaphoreDelete(st->done[1]);
                 st->done[1] = nullptr;
             }
@@ -308,9 +282,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
 
 namespace {
 const char* s_lastError = nullptr;   // set by i80Ws2812Init on a refusal it can name; cold path
-// Whether that refusal was CONTENTION (another module holds the instance) rather than a config
-// fault. Only contention can clear on its own, so only it earns a retry: keying the retry on
-// `s_lastError` alone made a bad pin set rebuild the bus once a second forever.
+// Whether that refusal was CONTENTION (another module holds the instance) rather than a config fault. Only contention can clear on its own, so only it earns a retry: keying the retry on `s_lastError` alone made a bad pin set rebuild the bus once a second forever.
 bool s_refusedForContention = false;
 }
 
@@ -318,9 +290,7 @@ const char* i80Ws2812LastError() { return s_lastError; }
 
 bool i80Ws2812SharedBusFree() {
 #if !SOC_LCDCAM_I80_LCD_SUPPORTED
-    // Only meaningful after THIS backend was refused for contention: otherwise a driver that failed
-    // for its own reasons (bad pins, no memory) would rebuild once a second forever. Probing is the
-    // acquire/release pair esp_lcd itself uses, which is why it is safe to call repeatedly.
+    // Only meaningful after THIS backend was refused for contention: otherwise a driver that failed for its own reasons (bad pins, no memory) would rebuild once a second forever. Probing is the acquire/release pair esp_lcd itself uses, which is why it is safe to call repeatedly.
     if (!s_refusedForContention) return false;
     if (i2s_platform_acquire_occupation(I2S_CTLR_HP, 1, "mm_i80_probe") != ESP_OK) return false;
     i2s_platform_release_occupation(I2S_CTLR_HP, 1);
@@ -364,15 +334,13 @@ bool i80Ws2812Init(I80Ws2812Handle& h, const uint16_t* dataPinsIn, uint8_t laneC
         return false;
     }
 #else
-    // LCD_CAM (S3 / P4 / S31): both control lines need a real pad. The driver refuses an unset one
-    // before calling here; this is the backstop that keeps an invalid number away from the ROM.
+    // LCD_CAM (S3 / P4 / S31): both control lines need a real pad. The driver refuses an unset one before calling here; this is the backstop that keeps an invalid number away from the ROM.
     if (wrGpio == kBusPinUnset || dcGpio == kBusPinUnset) {
         s_lastError = "clockPin (WR) and dcPin (DC) need a real GPIO on this chip";
         return false;
     }
 #endif
-    // The expander needs the other backend, its eightfold frame fitting only in external memory, which the classic one cannot reach at all.
-    // Refused here so the driver reports a clean failure rather than a mystery, and so the size pre-check below is not what accidentally enforces a hardware rule.
+    // The expander needs the other backend, its eightfold frame fitting only in external memory, which the classic one cannot reach at all. Refused here so the driver reports a clean failure rather than a mystery, and so the size pre-check below is not what accidentally enforces a hardware rule.
 #if !SOC_LCDCAM_I80_LCD_SUPPORTED
     if (clockMultiplier > 1) return false;
 #endif
@@ -417,18 +385,13 @@ bool i80Ws2812Transmit(I80Ws2812Handle& h, uint8_t buffer, size_t bytes) {
     const uint8_t slot = st->fifoHead;
     const bool wireIdle = (st->fifoHead == st->fifoTail);   // nothing in flight → this one starts NOW
     st->fifo[slot] = buffer;
-    // Stamp the wire-time start only when the wire is IDLE (enqueue == hardware-start). If a transfer is
-    // already clocking out, this one does not begin until that one ends, so stamping here would fold the
-    // predecessor's remaining wire time into this buffer's measured duration. The done-callback stamps it
-    // instead, at the moment the hardware actually starts it.
+    // Stamp the wire-time start only when the wire is IDLE (enqueue == hardware-start). If a transfer is already clocking out, this one does not begin until that one ends, so stamping here would fold the predecessor's remaining wire time into this buffer's measured duration. The done-callback stamps it instead, at the moment the hardware actually starts it.
     if (wireIdle) st->txStartUs[slot] = esp_timer_get_time();
     st->fifoHead = (st->fifoHead + 1u) & 1u;
-    // lcd_cmd = -1: no command phase — the transfer is one continuous GDMA data stream, gapless
-    // at the pclk rate.
+    // lcd_cmd = -1: no command phase, the transfer is one continuous GDMA data stream, gapless at the pclk rate.
     const esp_err_t err = esp_lcd_panel_io_tx_color(st->io, kI80Cmd, st->buf[buffer], bytes);
     if (err != ESP_OK) {
-        // Enqueue failed — unwind the FIFO push so the ISR count stays balanced. Safe: a failed
-        // enqueue produced no transfer, so no done-callback will pop this slot.
+        // Enqueue failed, unwind the FIFO push so the ISR count stays balanced. Safe: a failed enqueue produced no transfer, so no done-callback will pop this slot.
         st->fifoHead = (st->fifoHead + 1u) & 1u;
     }
     return err == ESP_OK;
@@ -437,9 +400,7 @@ bool i80Ws2812Transmit(I80Ws2812Handle& h, uint8_t buffer, size_t bytes) {
 bool i80Ws2812Wait(I80Ws2812Handle& h, uint8_t buffer, uint32_t timeoutMs) {
     auto* st = static_cast<I80State*>(h.impl);
     if (!st || buffer >= 2 || !st->done[buffer]) return true;   // nothing to wait on = not in flight
-    // Report whether the transfer actually completed. On a timeout the DMA may still be reading this
-    // buffer, so the caller must keep it marked in-flight rather than re-encoding into it — handing a
-    // live DMA a half-rewritten buffer is exactly the frame corruption the timeout is meant to avoid.
+    // Report whether the transfer actually completed. On a timeout the DMA may still be reading this buffer, so the caller must keep it marked in-flight rather than re-encoding into it, handing a live DMA a half-rewritten buffer is exactly the frame corruption the timeout is meant to avoid.
     return xSemaphoreTake(st->done[buffer], pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
 }
 
@@ -459,17 +420,14 @@ void i80Ws2812Deinit(I80Ws2812Handle& h) {
 // A receive channel captures the whole frame off the jumpered pin and verifies every bit.
 // A short synthetic burst would miss exactly the failures a real frame hits, so the test sends the genuine article.
 
-// The capture + bit-verify half is shared with the Parlio loopback in
-// detail::captureAndVerifyFrame (platform_esp32_rmt.cpp); only the i80 transmit
-// differs. Declared here so this TU can call it (same pattern as loopbackJumperOk).
+// The capture + bit-verify half is shared with the Parlio loopback in detail::captureAndVerifyFrame (platform_esp32_rmt.cpp); only the i80 transmit differs. Declared here so this TU can call it (same pattern as loopbackJumperOk).
 namespace detail {
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                            uint8_t rowBits, uint32_t pclkHz, bool pinExpanderMode, const char* tag,
                            const std::function<void()>& transmitOnce,
                            RmtLoopbackResult& r, bool rideMode = false,
                            uint32_t* rxSymbols = nullptr);
-// Pre-allocate the capture buffer, one contiguous internal block, so a caller can take it before its own allocations fragment the heap.
-// Ownership transfers regardless of outcome, and passing nothing on failure is fine: the helper retries and reports it.
+// Pre-allocate the capture buffer, one contiguous internal block, so a caller can take it before its own allocations fragment the heap. Ownership transfers regardless of outcome, and passing nothing on failure is fine: the helper retries and reports it.
 uint32_t* allocLoopbackCapture(size_t dataBytes);
 }
 
@@ -497,8 +455,7 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
         if (!r.jumperDetected) return r;
     }
 
-    // The continuity check above reset txGpio's GPIO matrix route; bus
-    // creation re-claims it.
+    // The continuity check above reset txGpio's GPIO matrix route; bus creation re-claims it.
     I80State* st = createState(dataPins, laneCount, wrGpio, dcGpio, frameBytes,
                                /*wantSecond=*/false,    // one transfer — single buffer
                                clockMultiplier);        // shift mode → the kShiftPclkHz bus clock
@@ -508,13 +465,9 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
     }
     std::memcpy(st->buf[0], frame, frameBytes);   // loopback uses buffer 0 only (single transfer)
 
-    // The i80-specific transmit: ship one frame from buffer 0 and wait for its done-callback.
-    // Everything else (capture, cadence, bit-verify) is the shared helper. The FIFO/semaphore
-    // bookkeeping matches the runtime path: push buffer 0, enqueue, the ISR pops and gives done[0].
+    // The i80-specific transmit: ship one frame from buffer 0 and wait for its done-callback. Everything else (capture, cadence, bit-verify) is the shared helper. The FIFO/semaphore bookkeeping matches the runtime path: push buffer 0, enqueue, the ISR pops and gives done[0].
     auto transmitOnce = [st, frameBytes]() {
-        // Loopback self-test path (not the render hot path): surface a failed
-        // enqueue or a done-callback timeout instead of letting it show up only as
-        // a later capture mismatch (same handling as the Parlio sibling).
+        // Loopback self-test path (not the render hot path): surface a failed enqueue or a done-callback timeout instead of letting it show up only as a later capture mismatch (same handling as the Parlio sibling).
         st->fifo[st->fifoHead] = 0;
         st->fifoHead = (st->fifoHead + 1u) & 1u;
         const esp_err_t err = esp_lcd_panel_io_tx_color(st->io, kI80Cmd, st->buf[0], frameBytes);

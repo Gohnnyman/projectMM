@@ -1,26 +1,16 @@
-// Pins the MoonModule base-default propagation for loop / tick20ms / tick1s.
-// The three tick callbacks default to iterating children, gating by
-// `!respectsEnabled() || enabled()`, dispatching the same callback on each
-// child, and accumulating per-child timing. Containers that need extra work
-// override and chain to the base; leaf modules pay one predicted-not-taken
-// branch on the empty children_ array.
-//
-// Regression target: before this propagation existed, every container
-// (Effects, Drivers, NetworkModule-with-children) had to write the same
-// 5-line per-child block by hand; one missing block meant a child's loop
-// callback silently never ran. The lifecycle-propagation tests below pin
-// the gating + dispatch rules so a future change to MoonModule::tickChildren
-// fails loudly here instead of silently breaking a container subtree.
+/// Pins the MoonModule base-default propagation for loop / tick20ms / tick1s.
+/// The three tick callbacks default to iterating children, gating by `!respectsEnabled() || enabled()`, dispatching the same callback on each child, and accumulating per-child timing. Containers that need extra work override and chain to the base; leaf modules pay one predicted-not-taken branch on the empty children_ array.
+///
+/// Regression target: before this propagation existed, every container (Effects, Drivers, NetworkModule-with-children) had to write the same 5-line per-child block by hand; one missing block meant a child's loop callback silently never ran. The lifecycle-propagation tests below pin the gating + dispatch rules so a future change to MoonModule::tickChildren fails loudly here instead of silently breaking a container subtree.
 
-// @module MoonModule
+/// @module MoonModule
 
 #include "doctest.h"
 #include "core/module/MoonModule.h"
 
 namespace {
 
-// Test module that counts each tick callback. Default ctor; no extra
-// behaviour beyond accounting. Used for both parents and children below.
+// Test module that counts each tick callback. Default ctor; no extra behavior beyond accounting. Used for both parents and children below.
 class Counting : public mm::MoonModule {
 public:
     uint32_t loopCalls = 0;
@@ -41,8 +31,7 @@ public:
     }
 };
 
-// Variant that opts out of the enabled gate — same behaviour as
-// NetworkModule / SystemModule / FirmwareUpdateModule today.
+// Variant that opts out of the enabled gate, same behavior as NetworkModule / SystemModule / FirmwareUpdateModule today.
 class AlwaysOn : public Counting {
 public:
     bool respectsEnabled() const MM_NONBLOCKING override { return false; }
@@ -50,7 +39,7 @@ public:
 
 } // namespace
 
-// A parent's default tick() fans out to every enabled child — no per-container boilerplate needed.
+// A parent's default tick() fans out to every enabled child, no per-container boilerplate needed.
 TEST_CASE("tick default propagates to enabled children") {
     Counting parent;
     Counting a, b;
@@ -109,8 +98,7 @@ TEST_CASE("tick20ms and tick1s follow the same gating + dispatch rules") {
 
 // A leaf module (no children) ticks safely as a no-op with no accumulated timing.
 TEST_CASE("leaf module tick default is a safe no-op (childCount_ == 0)") {
-    // Direct MoonModule (no override): default loop / tick20ms / tick1s
-    // should iterate over zero children and return without side effects.
+    // Direct MoonModule (no override): default loop / tick20ms / tick1s should iterate over zero children and return without side effects.
     mm::MoonModule leaf;
     leaf.tick();
     leaf.tick20ms();
@@ -122,29 +110,18 @@ TEST_CASE("leaf module tick default is a safe no-op (childCount_ == 0)") {
 
 // Each child's tickTimeUs() reflects its own accumulated cost (Scheduler reads per-child timing, not the parent's sum).
 TEST_CASE("per-child timing accumulates on the child, not the parent") {
-    // The base default times each child individually (matches what Scheduler
-    // does for top-level modules). Rather than depend on what platform::micros()
-    // happens to read between two adjacent calls on a fast desktop (which can
-    // round to 0 µs and make the assertion tautological), inject a known
-    // non-zero accumulation directly via addAccumUs() and verify that
-    // publishTiming surfaces it on the child as tickTimeUs().
+    // The base default times each child individually (matches what Scheduler does for top-level modules). Rather than depend on what platform::micros() happens to read between two adjacent calls on a fast desktop (which can round to 0 µs and make the assertion tautological), inject a known non-zero accumulation directly via addAccumUs() and verify that publishTiming surfaces it on the child as tickTimeUs().
     Counting parent;
     Counting a;
     parent.addChild(&a);
 
-    // Tick once via the parent so we exercise the propagation path itself
-    // (tickChildren runs addAccumUs on the child as a side-effect; we don't
-    // rely on the magnitude that produces). Then add a deterministic
-    // contribution so the per-frame average lands at a known non-zero value.
+    // Tick once via the parent so we exercise the propagation path itself (tickChildren runs addAccumUs on the child as a side-effect; we don't rely on the magnitude that produces). Then add a deterministic contribution so the per-frame average lands at a known non-zero value.
     parent.tick();
     a.addAccumUs(40);   // 40us across 2 frames = average 20us/frame
 
     parent.publishTiming(2);
 
     CHECK(a.loopCalls == 1);
-    // Deterministic lower bound: we injected 40us across 2 frames, so the
-    // averaged tickTimeUs() must be at least 20. A regression that bypasses
-    // addAccumUs in tickChildren would still see the manual 40us we injected;
-    // a regression that breaks publishTiming itself would drop to 0.
+    // Deterministic lower bound: we injected 40us across 2 frames, so the averaged tickTimeUs() must be at least 20. A regression that bypasses addAccumUs in tickChildren would still see the manual 40us we injected; a regression that breaks publishTiming itself would drop to 0.
     CHECK(a.tickTimeUs() >= 20u);
 }

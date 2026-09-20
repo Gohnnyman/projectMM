@@ -110,8 +110,7 @@ size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
     return sizeof(kWin64);
 }
 
-// Win64 animated fill: red = (t>>3) & 0xFF (t arrives in r9d), green=0, blue=64.
-// Same `mov edx, edx` zero-extension of the loop bound as kWin64 above.
+// Win64 animated fill: red = (t>>3) & 0xFF (t arrives in r9d), green=0, blue=64. Same `mov edx, edx` zero-extension of the loop bound as kWin64 above.
 static const uint8_t kWin64Anim[] = {
     0x89, 0xd2,                         // mov   edx, edx        (zero-extend nLights)
     0x85, 0xd2,                         // test  edx, edx

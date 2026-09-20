@@ -1,10 +1,7 @@
-// @module draw
-// @also math16
+/// @module draw
+/// @also math16
 
-// Signed distance fields: negative inside a shape, zero on its edge, positive outside. The sign and
-// the ordering are the contract every consumer relies on — a fill tests `d <= 0`, an outline tests
-// `|d| - w`, anti-aliasing ramps across `d`, and `smin` blends two of them. These tests pin that
-// contract rather than specific pixel values, because the value is only meaningful relative to zero.
+/// Signed distance fields: negative inside a shape, zero on its edge, positive outside. The sign and the ordering are the contract every consumer relies on, a fill tests `d <= 0`, an outline tests `|d| - w`, anti-aliasing ramps across `d`, and `smin` blends two of them. These tests pin that contract rather than specific pixel values, because the value is only meaningful relative to zero.
 
 #include "doctest.h"
 #include "light/powerfunctions/draw.h"
@@ -12,8 +9,7 @@
 using namespace mm;
 using draw::toSub;
 
-// The squared form is the one effects reach for by default (measured: ~14 cycles/pixel against ~108
-// for the sqrt on an ESP32-S3), so its sign contract matters most.
+// The squared form is the one effects reach for by default (measured: ~14 cycles/pixel against ~108 for the sqrt on an ESP32-S3), so its sign contract matters most.
 TEST_CASE("sdCircleSq is negative inside, zero on the rim, positive outside") {
     const draw::pos_t cx = toSub(10), cy = toSub(10), r = toSub(4);
     CHECK(draw::sdCircleSq(cx, cy, cx, cy, r) < 0);                    // dead centre
@@ -32,8 +28,7 @@ TEST_CASE("sdCircle returns a true distance in sub-pixel units") {
     CHECK(d < toSub(3) + 8);
 }
 
-// The dimension-generic claim in concrete form: the same expression is a circle here and a sphere in
-// a volume, because only the length term changes. A grid of samples must agree with the radius.
+// The dimension-generic claim in concrete form: the same expression is a circle here and a sphere in a volume, because only the length term changes. A grid of samples must agree with the radius.
 TEST_CASE("a circle SDF describes the same shape a radius test would") {
     const draw::pos_t cx = toSub(8), cy = toSub(8), r = toSub(3);
     for (lengthType y = 0; y < 16; y++)
@@ -56,8 +51,7 @@ TEST_CASE("sdBox is negative inside and grows with distance outside") {
     CHECK(far > near);                                                 // monotone with distance
 }
 
-// A box's half-extents are independent per axis, which is what makes it a rectangle rather than a
-// square — the bar/rect primitives build on this.
+// A box's half-extents are independent per axis, which is what makes it a rectangle rather than a square, the bar/rect primitives build on this.
 TEST_CASE("sdBox respects different half-extents per axis") {
     const draw::pos_t cx = toSub(10), cy = toSub(10), bx = toSub(6), by = toSub(1);
     CHECK(draw::sdBox(toSub(15), cy, cx, cy, bx, by) < 0);             // 5 px along the wide axis: inside
@@ -82,8 +76,7 @@ TEST_CASE("sdSegment treats a zero-length segment as a point") {
     CHECK(draw::sdSegment(toSub(9), a, a, a, a, a, toSub(1)) > 0);
 }
 
-// smin is what makes SDFs worth having over a rasteriser: two shapes merge into one form instead of
-// simply overlapping.
+// smin is what makes SDFs worth having over a rasteriser: two shapes merge into one form instead of simply overlapping.
 TEST_CASE("smin with zero blend is a plain minimum") {
     CHECK(draw::smin(10, 20, 0) == 10);
     CHECK(draw::smin(-5, 3, 0) == -5);
@@ -96,15 +89,7 @@ TEST_CASE("smin pulls two nearby shapes together below either alone") {
     CHECK(blended > a - k);                    // ...but only within the blend radius
 }
 
-// A large blend radius is reachable from a control on a big fixture, and the intermediate
-// `k * h * (256 - h)` overflows int32 past ~131000 sub-units. An overflow makes smin return MORE
-// than both inputs, inverting the blend — so the invariant to pin is that it never exceeds the
-// smaller input. Found by review.
-// Two equal distances put the blend at its deepest, where `k * h * (256 - h)` is largest — the term
-// that overflows int32 once k passes ~131000 sub-units (512 pixels), a radius a control reaches on a
-// large fixture. At h = 128 the dip is exactly k/4, so the exact value is what catches a wrap: the
-// 32-bit form returned a dip of 9464 at k=300000 where k/4 is 75000, and wandered rather than grew
-// (34464, 59464, then back to 18928). Found by review.
+// A large blend radius is reachable from a control on a big fixture, and the intermediate `k * h * (256 - h)` overflows int32 past ~131000 sub-units. An overflow makes smin return MORE than both inputs, inverting the blend, so the invariant to pin is that it never exceeds the smaller input. Found by review. Two equal distances put the blend at its deepest, where `k * h * (256 - h)` is largest, the term that overflows int32 once k passes ~131000 sub-units (512 pixels), a radius a control reaches on a large fixture. At h = 128 the dip is exactly k/4, so the exact value is what catches a wrap: the 32-bit form returned a dip of 9464 at k=300000 where k/4 is 75000, and wandered rather than grew (34464, 59464, then back to 18928). Found by review.
 TEST_CASE("smin digs exactly a quarter of the blend radius, at any radius") {
     for (int32_t k = 100000; k <= 2000000; k += 100000) {
         CAPTURE(k);
@@ -118,8 +103,7 @@ TEST_CASE("smin leaves distant shapes alone") {
     CHECK(draw::smin(a, b, k) == a);           // far apart: no blending, just the nearer one
 }
 
-// Coverage is the anti-aliasing an SDF gives for free: the edge pixel is lit in proportion to how
-// much of it the shape covers, which is what stops a curve reading as a staircase.
+// Coverage is the anti-aliasing an SDF gives for free: the edge pixel is lit in proportion to how much of it the shape covers, which is what stops a curve reading as a staircase.
 TEST_CASE("coverage ramps across the edge rather than switching") {
     CHECK(draw::coverage(-draw::kSubOne * 2) == 255);       // well inside: fully lit
     CHECK(draw::coverage(draw::kSubOne * 2) == 0);          // well outside: dark
@@ -136,8 +120,7 @@ TEST_CASE("coverage with a zero-width edge is a hard threshold") {
     CHECK(draw::coverage(1, 0) == 0);
 }
 
-// The composition the SDF family exists for: a shape, an outline of it, and a glow, all read off the
-// same distance without a second algorithm.
+// The composition the SDF family exists for: a shape, an outline of it, and a glow, all read off the same distance without a second algorithm.
 TEST_CASE("one distance yields a fill, an outline and a falloff") {
     const draw::pos_t cx = toSub(8), cy = toSub(8), r = toSub(4);
     const int32_t dIn = draw::sdCircle(toSub(8), toSub(8), cx, cy, r);   // centre

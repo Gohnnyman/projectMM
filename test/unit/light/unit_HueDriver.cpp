@@ -1,8 +1,6 @@
-// @module HueDriver
+/// @module HueDriver
 
-// Pins HueDriver's host-testable core: the changed-only diff, the RGB→HSV color body it PUTs,
-// and the parse that keeps only color-capable, reachable lights. Live bridge I/O (httpRequest,
-// pairing) needs a real bridge — that's the bench; here the seams run with no socket.
+/// Pins HueDriver's host-testable core: the changed-only diff, the RGB→HSV color body it PUTs, and the parse that keeps only color-capable, reachable lights. Live bridge I/O (httpRequest, pairing) needs a real bridge, that's the bench; here the seams run with no socket.
 
 #include "doctest.h"
 #include "light/drivers/HueDriver.h"
@@ -52,8 +50,7 @@ TEST_CASE("HueDriver: unchanged color is not resent, a changed one is") {
 
 TEST_CASE("HueDriver: parseLights keeps only color-capable, reachable lights") {
     mm::HueDriver hue;
-    // id 5 color + reachable (keep); id 7 dimmable-only white (drop); id 10 on/off plug (drop);
-    // id 8 color but UNREACHABLE (drop). The shapes the real bridge returns.
+    // id 5 color + reachable (keep); id 7 dimmable-only white (drop); id 10 on/off plug (drop); id 8 color but UNREACHABLE (drop). The shapes the real bridge returns.
     const char* json =
         "{\"5\":{\"state\":{\"on\":false,\"bri\":77,\"hue\":8595,\"sat\":121,\"reachable\":true},\"name\":\"Bureau lamp\"},"
         "\"7\":{\"state\":{\"on\":true,\"bri\":40,\"reachable\":true},\"name\":\"Gang lamp\"},"
@@ -65,9 +62,7 @@ TEST_CASE("HueDriver: parseLights keeps only color-capable, reachable lights") {
     CHECK(hue.colorCountForTest() == 1);
 }
 
-// Room + light selection filters which color lights the driver actually drives. Both dropdowns
-// default to "All" (index 0): then every color light is driven (unchanged behaviour). Selecting a
-// room narrows the driven set to that room's color lights; selecting a light drives just that one.
+// Room + light selection filters which color lights the driver actually drives. Both dropdowns default to "All" (index 0): then every color light is driven (unchanged behavior). Selecting a room narrows the driven set to that room's color lights; selecting a light drives just that one.
 TEST_CASE("HueDriver: room/light selection filters the driven set") {
     mm::HueDriver hue;
     // Four color+reachable lights, ids 1..4.
@@ -107,8 +102,7 @@ TEST_CASE("HueDriver: room/light selection filters the driven set") {
     CHECK(hue.drivenCountForTest() == 4);
 }
 
-// The single status line (folding what were the separate hueStatus / colorLights controls) shows
-// the light count as driven-of-total: "N-M lights" while filtered, the plain "M lights" when not.
+// The single status line (folding what were the separate hueStatus / colorLights controls) shows the light count as driven-of-total: "N-M lights" while filtered, the plain "M lights" when not.
 TEST_CASE("HueDriver: status reports the driven-of-total light count") {
     mm::HueDriver hue;
     hue.appKey[0] = 'k'; hue.appKey[1] = '\0';   // any non-empty key → "paired" not "unpaired"; size-independent
@@ -132,10 +126,7 @@ TEST_CASE("HueDriver: status reports the driven-of-total light count") {
     CHECK(std::string(hue.status()) == "paired, 2-4 lights");
 }
 
-// fetchLights sizes its read buffer by growing while the body looks truncated. The signal is
-// "does the body end in '}'": a too-small buffer cuts the JSON mid-content. (Regression: an
-// earlier check tested strlen==cap-1, which never fires because httpRequest strips headers first,
-// so a >2 KB bridge response was parsed truncated and lights silently disappeared.)
+// fetchLights sizes its read buffer by growing while the body looks truncated. The signal is "does the body end in '}'": a too-small buffer cuts the JSON mid-content. (Regression: an earlier check tested strlen==cap-1, which never fires because httpRequest strips headers first, so a >2 KB bridge response was parsed truncated and lights silently disappeared.)
 TEST_CASE("HueDriver: bodyLooksComplete is the truncation signal for the grow-and-retry fetch") {
     // Complete: a whole /lights object, with and without trailing whitespace.
     CHECK(mm::HueDriver::bodyLooksCompleteForTest("{\"5\":{\"state\":{\"hue\":1}}}"));

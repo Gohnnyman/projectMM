@@ -1,14 +1,9 @@
-// @module NetworkSendDriver
-// @also Drivers, Correction
+/// @module NetworkSendDriver
+/// @also Drivers, Correction
 
-// Pins the no-allocation-in-loop contract for NetworkSendDriver. The framework
-// fires prepare (topology) and onCorrectionChanged (preset toggle) off
-// the hot path; tick() must read the pre-sized buffer and never allocate.
-//
-// We can't observe a malloc from inside the test without an interceptor, so
-// the contract is pinned indirectly: capture the corrected_ buffer's data
-// pointer and size after a build-state, then assert they're already correct
-// (the resize fired before any tick()) and that the buffer matches the source.
+/// Pins the no-allocation-in-loop contract for NetworkSendDriver. The framework fires prepare (topology) and onCorrectionChanged (preset toggle) off the hot path; tick() must read the pre-sized buffer and never allocate.
+///
+/// We can't observe a malloc from inside the test without an interceptor, so the contract is pinned indirectly: capture the corrected_ buffer's data pointer and size after a build-state, then assert they're already correct (the resize fired before any tick()) and that the buffer matches the source.
 
 #include "doctest.h"
 #include "light/drivers/NetworkSendDriver.h"
@@ -17,9 +12,7 @@
 #include "light/drivers/Drivers.h"
 #include "light/layers/Buffer.h"
 
-// prepare sizes the correction-applied buffer to source-count × out-channels.
-// The size matches what tick() needs on its first send. Calling tick()
-// after prepare must not reallocate — pin the data pointer + shape.
+// prepare sizes the correction-applied buffer to source-count × out-channels. The size matches what tick() needs on its first send. Calling tick() after prepare must not reallocate, pin the data pointer + shape.
 TEST_CASE("NetworkSendDriver sizes corrected_ in prepare, not in tick") {
     mm::Buffer source;
     REQUIRE(source.allocate(64, 3));
@@ -37,10 +30,7 @@ TEST_CASE("NetworkSendDriver sizes corrected_ in prepare, not in tick") {
     CHECK(driver.correctedBuffer().count() == 64);
     CHECK(driver.correctedBuffer().channelsPerLight() == 3);
 
-    // tick() must not reallocate — same backing pointer, same shape — on every
-    // protocol path (ArtNet, E1.31, DDP all share the pre-sized buffer and a
-    // stack packet). Virtual time advances past the fps limiter between
-    // protocols so each send path actually executes.
+    // tick() must not reallocate, same backing pointer, same shape, on every protocol path (ArtNet, E1.31, DDP all share the pre-sized buffer and a stack packet). Virtual time advances past the fps limiter between protocols so each send path actually executes.
     const uint8_t* dataBefore = driver.correctedBuffer().data();
     for (uint8_t p = 0; p < mm::NetworkSendDriver::kProtocolCount; p++) {
         mm::platform::setTestNowMs(1000u + 100u * p);
@@ -53,8 +43,7 @@ TEST_CASE("NetworkSendDriver sizes corrected_ in prepare, not in tick") {
     mm::platform::setTestNowMs(0);   // restore real-clock behaviour for later cases
 }
 
-// A preset toggle from RGB to RGBW grows outChannels from 3 to 4. The grow
-// runs in onCorrectionChanged, off the hot path.
+// A preset toggle from RGB to RGBW grows outChannels from 3 to 4. The grow runs in onCorrectionChanged, off the hot path.
 TEST_CASE("NetworkSendDriver grows corrected_ in onCorrectionChanged on RGB → RGBW") {
     mm::Buffer source;
     REQUIRE(source.allocate(32, 3));
@@ -69,8 +58,7 @@ TEST_CASE("NetworkSendDriver grows corrected_ in onCorrectionChanged on RGB → 
 
     REQUIRE(driver.correctedBuffer().channelsPerLight() == 3);
 
-    // Simulate a preset change. Drivers normally drives this; we call directly.
-    // The driver owns its Correction, so mutate that copy (not the external one).
+    // Simulate a preset change. Drivers normally drives this; we call directly. The driver owns its Correction, so mutate that copy (not the external one).
     mm::test::rebuildFromPreset(driver.correctionForTest(), 255, mm::test::PresetOrder::RGBW);
     driver.onCorrectionChanged();
 
@@ -78,8 +66,7 @@ TEST_CASE("NetworkSendDriver grows corrected_ in onCorrectionChanged on RGB → 
     CHECK(driver.correctedBuffer().channelsPerLight() == 4);
 }
 
-// A brightness-only change keeps outChannels at 3 — onCorrectionChanged is
-// still called, but the resize short-circuits (existing buffer already fits).
+// A brightness-only change keeps outChannels at 3, onCorrectionChanged is still called, but the resize short-circuits (existing buffer already fits).
 TEST_CASE("NetworkSendDriver onCorrectionChanged is a no-op when outChannels unchanged") {
     mm::Buffer source;
     REQUIRE(source.allocate(48, 3));
@@ -95,12 +82,11 @@ TEST_CASE("NetworkSendDriver onCorrectionChanged is a no-op when outChannels unc
     const uint8_t* dataBefore = driver.correctedBuffer().data();
     REQUIRE(dataBefore != nullptr);
 
-    // Brightness change: outChannels stays 3, so the existing allocation fits.
-    // The driver owns its Correction, so mutate that copy (not the external one).
+    // Brightness change: outChannels stays 3, so the existing allocation fits. The driver owns its Correction, so mutate that copy (not the external one).
     mm::test::rebuildFromPreset(driver.correctionForTest(), 128, mm::test::PresetOrder::RGB);
     driver.onCorrectionChanged();
 
-    // Same backing allocation — the resize short-circuited.
+    // Same backing allocation, the resize short-circuited.
     CHECK(driver.correctedBuffer().data() == dataBefore);
     CHECK(driver.correctedBuffer().count() == 48);
     CHECK(driver.correctedBuffer().channelsPerLight() == 3);

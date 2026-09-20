@@ -1,14 +1,9 @@
-// @module MoonLiveLayout
-// @also MoonLive, LayoutBase, Layouts
+/// @module MoonLiveLayout
+/// @also MoonLive, LayoutBase, Layouts
 
-// A scripted layout: where the lights physically are, written as text on a running device instead of
-// compiled in as a C++ class. This is the binding that needed `for` — a modifier transforms one
-// coordinate because the Layer calls it per light, but a layout has to place N lights itself.
-//
-// The tests are about the contract a layout owes its container: that lightCount() answers before any
-// coordinate is asked for (the Layer sizes its buffer from it), that the count and the coordinates
-// agree because they come from the same script, that nothing is allocated to achieve it, and that a
-// broken script leaves an empty fixture rather than taking the pipeline down.
+/// A scripted layout: where the lights physically are, written as text on a running device instead of compiled in as a C++ class. This is the binding that needed `for`, a modifier transforms one coordinate because the Layer calls it per light, but a layout has to place N lights itself.
+///
+/// The tests are about the contract a layout owes its container: that lightCount() answers before any coordinate is asked for (the Layer sizes its buffer from it), that the count and the coordinates agree because they come from the same script, that nothing is allocated to achieve it, and that a broken script leaves an empty fixture rather than taking the pipeline down.
 
 #include "doctest.h"
 #include "MoonLiveScriptFixture.h"
@@ -30,10 +25,7 @@
 using namespace mm;
 
 
-// Every case here compiles a script and runs the emitted native code, so all of them need a JIT
-// backend for the host ISA. arm64 and x86-64 both have one; a --no-jit build does not, and there a
-// layout reports zero lights for a reason that has nothing to do with the layout. Gated as a block,
-// the same way unit_moonlive_fill / unit_moonlive_ir do it.
+// Every case here compiles a script and runs the emitted native code, so all of them need a JIT backend for the host ISA. arm64 and x86-64 both have one; a --no-jit build does not, and there a layout reports zero lights for a reason that has nothing to do with the layout. Gated as a block, the same way unit_moonlive_fill / unit_moonlive_ir do it.
 #if MM_MOONLIVE_HAS_HOST_JIT
 
 namespace {
@@ -70,8 +62,7 @@ TEST_CASE("the default script lays out a grid, one light per cell") {
 }
 
 TEST_CASE("the light count is known before any coordinate is asked for") {
-    // The layout contract: the Layer sizes its buffer from lightCount() and only then walks
-    // placeLights. A count that came from the walk would arrive too late to be useful.
+    // The layout contract: the Layer sizes its buffer from lightCount() and only then walks placeLights. A count that came from the walk would arrive too late to be useful.
     MoonLiveLayout l;
     l.defineControls();
     l.setScript(mmWriteScript(mmScriptAs("placeLights", "byte cols = 5;\n"
@@ -98,14 +89,13 @@ TEST_CASE("the count and the coordinates always agree, because one script produc
 }
 
 TEST_CASE("a scripted layout allocates nothing, like every other layout") {
-    // A 16k-light fixture staged as coordinates would be 48 KB — memory a classic ESP32 does not
-    // have. The script calls out per light instead, so the only heap here is the compiled program.
+    // A 16k-light fixture staged as coordinates would be 48 KB, memory a classic ESP32 does not have. The script calls out per light instead, so the only heap here is the compiled program.
     MoonLiveLayout l;
     l.defineControls();
     l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 4096; i = i + 1) { addLight(i, 0, 0); }")));
     l.prepare();
     CHECK(l.lightCount() == 4096);
-    // dynamicBytes is the JIT'd program only — no coordinate storage grows with the light count.
+    // dynamicBytes is the JIT'd program only, no coordinate storage grows with the light count.
     CHECK(l.dynamicBytes() < 1024);
 }
 
@@ -120,7 +110,7 @@ TEST_CASE("a script places lights wherever it likes, which is the point of scrip
 }
 
 TEST_CASE("a script can place a shape no rectangular layout can express") {
-    // A diagonal — light i at (i, i).
+    // A diagonal, light i at (i, i).
     const std::vector<Coord3D> p = place(mmScriptAs("placeLights", "for (int i = 0; i < 4; i = i + 1) { addLight(i, i, 0); }"));
     REQUIRE(p.size() == 4);
     CHECK(p[0] == Coord3D{0, 0, 0});
@@ -128,8 +118,7 @@ TEST_CASE("a script can place a shape no rectangular layout can express") {
 }
 
 TEST_CASE("a broken script leaves an empty fixture rather than taking the pipeline down") {
-    // Robustness, the hard rule: someone editing a layout mid-show types something wrong. The
-    // fixture reports no lights, the module carries the diagnostic, and the device keeps running.
+    // Robustness, the hard rule: someone editing a layout mid-show types something wrong. The fixture reports no lights, the module carries the diagnostic, and the device keeps running.
     MoonLiveLayout l;
     l.defineControls();
     l.setScript(mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 4; i = i + 1) { addLight(i, i")));   // unclosed
@@ -151,9 +140,7 @@ TEST_CASE("editing the script changes the fixture") {
     CHECK(l.lightCount() == 2);
 }
 
-// Every layout example in MoonLiveEffect.md must actually compile. A doc that shows a call the language
-// does not have sends the reader to a parse error on their first attempt — and it happened here:
-// an early draft advertised cos8/sin8, which are not registered built-ins.
+// Every layout example in MoonLiveEffect.md must actually compile. A doc that shows a call the language does not have sends the reader to a parse error on their first attempt, and it happened here: an early draft advertised cos8/sin8, which are not registered built-ins.
 TEST_CASE("the scripts the documentation shows all compile") {
     const char* fromDocs[] = {
         // the default
@@ -184,10 +171,7 @@ TEST_CASE("the scripts the documentation shows all compile") {
     }
 }
 
-// The container asks a layout for its count and its coordinates SEPARATELY, and both must work at
-// any time: not only immediately after prepare(). Layouts::prepare walks placeLights for the
-// bounding box, and the Layer asks lightCount() when it sizes its buffer; a layout that answers
-// only once reports an empty fixture to whichever asks second.
+// The container asks a layout for its count and its coordinates SEPARATELY, and both must work at any time: not only immediately after prepare(). Layouts::prepare walks placeLights for the bounding box, and the Layer asks lightCount() when it sizes its buffer; a layout that answers only once reports an empty fixture to whichever asks second.
 TEST_CASE("a layout answers count and coordinates every time it is asked") {
     MoonLiveLayout l;
     l.defineControls();
@@ -212,12 +196,9 @@ TEST_CASE("a layout answers count and coordinates every time it is asked") {
 
 
 // Subtraction has to produce the WHOLE value, not just a byte that happens to look right.
-// `a - b` compiles to `a + (b * -1)`, and if -1 is materialised as 65535 (which it was, on two of
-// three targets) the result is correct only modulo 256. A coordinate comparison cannot see that —
-// both the right answer and the widened one truncate to the same byte.
+// `a - b` compiles to `a + (b * -1)`, and if -1 is materialised as 65535 (which it was, on two of three targets) the result is correct only modulo 256. A coordinate comparison cannot see that, both the right answer and the widened one truncate to the same byte.
 //
-// A layout's light INDEX can see it: the count comes from how many times addLight ran, so a loop
-// bound computed by subtraction that came out ~65k places a wildly different number of lights.
+// A layout's light INDEX can see it: the count comes from how many times addLight ran, so a loop bound computed by subtraction that came out ~65k places a wildly different number of lights.
 TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
     MoonLiveLayout l;
     l.defineControls();
@@ -234,15 +215,9 @@ TEST_CASE("a subtraction feeding a loop bound produces the whole value") {
     CHECK(p[3] == Coord3D{0, 0, 0});      // 4 - 1 - 3
 }
 
-// A slider you moved has to survive editing the script — that is the live-authoring loop, and the
-// control arena delivers it by keeping a slot's value when the control persists across a recompile
-// (MoonLive.h, ensureArena). The consequence, which is easy to be surprised by: the arena matches
-// controls by OFFSET, so a DIFFERENT script whose first control happens to sit at the same offset
-// inherits the value rather than its own initialiser. Two scripts that both open with a `cols` are
-// the same slot as far as the engine is concerned.
+// A slider you moved has to survive editing the script, that is the live-authoring loop, and the control arena delivers it by keeping a slot's value when the control persists across a recompile (MoonLive.h, ensureArena). The consequence, which is easy to be surprised by: the arena matches controls by OFFSET, so a DIFFERENT script whose first control happens to sit at the same offset inherits the value rather than its own initializer. Two scripts that both open with a `cols` are the same slot as far as the engine is concerned.
 //
-// This pins the behaviour so a change to it is a decision rather than an accident. Setting the
-// control after the edit is what makes a script's own extent authoritative.
+// This pins the behavior so a change to it is a decision rather than an accident. Setting the control after the edit is what makes a script's own extent authoritative.
 TEST_CASE("a scripted control keeps its live value when the script is edited") {
     MoonLiveLayout l;
     l.defineControls();
@@ -257,9 +232,7 @@ TEST_CASE("a scripted control keeps its live value when the script is edited") {
     l.prepare();
     CHECK(l.lightCount() == 16);
 
-    // A member INSERTED ABOVE cols shifts cols to the next arena byte, so the byte cols used to
-    // own now belongs to `pad`. Identity is the name at an offset, not the declaration position:
-    // pad must take its own 4 rather than inherit the 16 the user had dialed into cols.
+    // A member INSERTED ABOVE cols shifts cols to the next arena byte, so the byte cols used to own now belongs to `pad`. Identity is the name at an offset, not the declaration position: pad must take its own 4 rather than inherit the 16 the user had dialed into cols.
     l.setScript(mmWriteScript(mmScriptAs("placeLights", "byte pad = 4;\n"
                 "byte cols = 7;\n"
                 "for (int i = 0; i < pad; i = i + 1) { addLight(i, 2, 0); }")));
@@ -275,13 +248,9 @@ TEST_CASE("a scripted control keeps its live value when the script is edited") {
     CHECK(l.lightCount() == 48);          // 16 inherited, rows 3 its own
 }
 
-// A layout script never fills, so it should not pay for the scratch registers a fill needs. The
-// backends reserved them unconditionally, and on the smallest register file (Xtensa, 12) that one
-// register was the difference between a nested loop compiling and being refused outright — the
-// shipped default script is a nested loop, so the module's own default did not compile there.
+// A layout script never fills, so it should not pay for the scratch registers a fill needs. The backends reserved them unconditionally, and on the smallest register file (Xtensa, 12) that one register was the difference between a nested loop compiling and being refused outright, the shipped default script is a nested loop, so the module's own default did not compile there.
 //
-// This is a register-budget property, and the budget differs per target, so what it pins portably is
-// the behaviour: a nested loop places every light of the grid it describes.
+// This is a register-budget property, and the budget differs per target, so what it pins portably is the behavior: a nested loop places every light of the grid it describes.
 TEST_CASE("a nested loop lays out a full grid, on every target's register budget") {
     const std::vector<Coord3D> p = place(
         mmScriptAs("placeLights", "for (int yy = 0; yy < 3; yy = yy + 1) {"
@@ -293,14 +262,9 @@ TEST_CASE("a nested loop lays out a full grid, on every target's register budget
     CHECK(p[14] == Coord3D{4, 2, 0});
 }
 
-// A `for` counter must survive whatever the body does to it. The device backends built a light's
-// byte address by multiplying the index register IN PLACE — fine when the index is a throwaway temp,
-// wrong when it is the loop counter, which the step and the loop test read again afterwards. A
-// gradient (`for (i…) { setRGB(i, …) }`) therefore ran the wrong number of times on Xtensa and
-// RISC-V while being correct on the desktop host, which used a scratch register instead.
+// A `for` counter must survive whatever the body does to it. The device backends built a light's byte address by multiplying the index register IN PLACE, fine when the index is a throwaway temp, wrong when it is the loop counter, which the step and the loop test read again afterwards. A gradient (`for (i…) { setRGB(i, …) }`) therefore ran the wrong number of times on Xtensa and RISC-V while being correct on the desktop host, which used a scratch register instead.
 //
-// Pinned through a LAYOUT because the count is the observable: the host executes this test, and the
-// arithmetic the backends share is the same. addLight's index is likewise the counter.
+// Pinned through a LAYOUT because the count is the observable: the host executes this test, and the arithmetic the backends share is the same. addLight's index is likewise the counter.
 TEST_CASE("a loop counter survives the body that uses it") {
     SUBCASE("through a call — addLight") {
         MoonLiveLayout l;
@@ -310,10 +274,7 @@ TEST_CASE("a loop counter survives the body that uses it") {
         CHECK(l.lightCount() == 6);      // a clobbered counter gives some other number
     }
     SUBCASE("through an inline store — setRGB") {
-        // The case the bug was actually in: StoreElem folded the byte address into the index
-        // register, which for `setRGB(i, …)` is the counter itself. The count above cannot see that
-        // — addLight is a Call and takes a different path — so this drives the emitted code and
-        // checks every light was written, which is what a wrong counter changes.
+        // The case the bug was actually in: StoreElem folded the byte address into the index register, which for `setRGB(i, …)` is the counter itself. The count above cannot see that, addLight is a Call and takes a different path, so this drives the emitted code and checks every light was written, which is what a wrong counter changes.
         uint8_t code[4096];
         auto r = moonlive::compileSource(mmScriptAs("placeLights", "for (int i = 0; i < 6; i = i + 1) { setRGB(i, 200, 0, 0); }"),
                                          moonlive::lightBuiltins(), moonlive::modifierSysVars(), code, sizeof(code));
@@ -332,10 +293,7 @@ TEST_CASE("a loop counter survives the body that uses it") {
     }
 }
 
-// A malformed script must produce a diagnostic, never a hang. The `for` header's step expression is
-// scanned by a small loop that skips to the closing paren; a lexer ERROR is not the END token, and
-// the lexer does not move past the offending character, so the scan spun forever on a stray symbol.
-// A device compiling that script would wedge with no message at all.
+// A malformed script must produce a diagnostic, never a hang. The `for` header's step expression is scanned by a small loop that skips to the closing paren; a lexer ERROR is not the END token, and the lexer does not move past the offending character, so the scan spun forever on a stray symbol. A device compiling that script would wedge with no message at all.
 TEST_CASE("a stray character in a for header is rejected, not spun on") {
     MoonLiveLayout l;
     l.defineControls();
@@ -345,11 +303,7 @@ TEST_CASE("a stray character in a for header is rejected, not spun on") {
     CHECK(l.lightCount() == 0);
 }
 
-// A scripted layout is asked for its lights from more than one thread: the HTTP task runs the script
-// when a control is edited, while the render task walks the same layout for the frame. The sink the
-// script calls out through used to be one process-wide pair, so one thread cleared it while the other
-// was mid-run — the built-in then called a live function pointer with a null context and the render
-// core took a null dereference. It presented as an intermittent crash while resizing on an S3.
+// A scripted layout is asked for its lights from more than one thread: the HTTP task runs the script when a control is edited, while the render task walks the same layout for the frame. The sink the script calls out through used to be one process-wide pair, so one thread cleared it while the other was mid-run, the built-in then called a live function pointer with a null context and the render core took a null dereference. It presented as an intermittent crash while resizing on an S3.
 //
 // Two threads walking their own layouts concurrently must each see their own sink.
 TEST_CASE("two threads can run scripts at once without stealing each other's sink") {
@@ -374,13 +328,7 @@ TEST_CASE("two threads can run scripts at once without stealing each other's sin
     CHECK(bOk);
 }
 
-// The card's memory figure has to be the memory the module actually holds, or it is not worth
-// reading. A scripted module owns two heap blocks — the emitted code and the control-values arena —
-// and dynamicBytes counted only the first, so every scripted card under-reported. It also read 0
-// whenever the script failed to compile, while the arena was still allocated.
-// ...and hands it all back when disabled. MoonLive::free() drops the exec block but does not touch
-// the owner's counter, so a binding that forgets to report the release leaves a disabled module's
-// card claiming memory nobody holds. All three scripted bindings share one helper for this.
+// The card's memory figure has to be the memory the module actually holds, or it is not worth reading. A scripted module owns two heap blocks, the emitted code and the control-values arena, and dynamicBytes counted only the first, so every scripted card under-reported. It also read 0 whenever the script failed to compile, while the arena was still allocated. ...and hands it all back when disabled. MoonLive::free() drops the exec block but does not touch the owner's counter, so a binding that forgets to report the release leaves a disabled module's card claiming memory nobody holds. All three scripted bindings share one helper for this.
 TEST_CASE("a disabled scripted layout stops reporting the memory it freed") {
     MoonLiveLayout l;
     l.defineControls();
@@ -409,19 +357,13 @@ TEST_CASE("a scripted layout reports every heap byte it holds, compiled or not")
     CHECK(l.dynamicBytes() > 0);             // the arena is not
 }
 
-// The layer builds its mapping in two passes over the layouts: pass A counts destinations, pass B
-// scatters driver indices into an array sized by that count. Both passes call placeLights: and a
-// scripted layout COMPILES lazily inside placeLights, so a control edited between the two passes
-// makes pass B emit more lights than pass A counted. The scatter then ran past its array and
-// corrupted the heap; the crash surfaced later inside an unrelated allocation, which is why resizing
-// a scripted layout failed at random rather than pointing anywhere near the layer.
+// The layer builds its mapping in two passes over the layouts: pass A counts destinations, pass B scatters driver indices into an array sized by that count. Both passes call placeLights: and a scripted layout COMPILES lazily inside placeLights, so a control edited between the two passes makes pass B emit more lights than pass A counted. The scatter then ran past its array and corrupted the heap; the crash surfaced later inside an unrelated allocation, which is why resizing a scripted layout failed at random rather than pointing anywhere near the layer.
 //
 // A layout that grows mid-build must cost a dropped destination, never memory.
 TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
     MoonLiveLayout layout;
     layout.defineControls();
-    // `cols` is a CONTROL here, because the test drives it: the loop below sets it and expects the
-    // layout to resize. A member alone would not appear on the module, so this one is surfaced.
+    // `cols` is a CONTROL here, because the test drives it: the loop below sets it and expects the layout to resize. A member alone would not appear on the module, so this one is surfaced.
     layout.setScript(mmWriteScript(
         "class GrowLayout {\n"
         "  byte cols = 4;\n"
@@ -429,8 +371,7 @@ TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
         "  void placeLights() { for (int i = 0; i < cols; i = i + 1) { addLight(i, 0, 0); } }\n"
         "}\n"));
     layout.prepare();
-    // The script's own controls (`cols`) exist only once it has COMPILED, and a module starts with
-    // no script now — so the control list has to be rebuilt after prepare() for setWidth to find it.
+    // The script's own controls (`cols`) exist only once it has COMPILED, and a module starts with no script now, so the control list has to be rebuilt after prepare() for setWidth to find it.
     layout.rebuildControls();
 
     mm::Layouts group;
@@ -449,7 +390,7 @@ TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
                 *static_cast<uint8_t*>(cs[i].ptr) = v;
     };
 
-    // Grow and shrink repeatedly, rebuilding each time — the resize loop a slider drives.
+    // Grow and shrink repeatedly, rebuilding each time, the resize loop a slider drives.
     for (uint8_t w : {4, 32, 8, 48, 16, 64, 2, 24}) {
         setWidth(w);
         group.applyState();
@@ -463,10 +404,7 @@ TEST_CASE("a layout that changes size mid-build cannot overrun the mapping") {
 
 #endif  // MM_MOONLIVE_HAS_HOST_JIT
 
-// A control write lands directly in the module's buffer — addText binds it — so setScript() is NOT
-// called. Nothing then cleared the compiled-hash, and compile()'s early-return kept the OLD program
-// running under the new name. Found by review; the same class of bug hardware found in the effect.
-// Needs a backend: without one BOTH counts are zero and the test passes without proving the swap.
+// A control write lands directly in the module's buffer, addText binds it, so setScript() is NOT called. Nothing then cleared the compiled-hash, and compile()'s early-return kept the OLD program running under the new name. Found by review; the same class of bug hardware found in the effect. Needs a backend: without one BOTH counts are zero and the test passes without proving the swap.
 #if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("naming a different script through the control actually swaps the program") {
     MoonLiveLayout l;
@@ -490,12 +428,7 @@ TEST_CASE("naming a different script through the control actually swaps the prog
 
 // A layout that cannot compile must stay quiet, not keep trying.
 //
-// The pipeline asks a layout for its size and then walks it, and BOTH ask it to compile first — so a
-// failure that leaves "nothing is compiled" looks exactly like "not compiled yet" and every ask
-// re-reads the file. On an ESP32 one attempt is two LittleFS operations (~5 ms), and the repeated
-// asks during a single rebuild starved the task until the 12-second watchdog reset the board: a
-// missing script took the whole device down rather than showing an error. The behaviour to pin is
-// that a failed layout still places no lights however many times it is asked, and says so.
+// The pipeline asks a layout for its size and then walks it, and BOTH ask it to compile first, so a failure that leaves "nothing is compiled" looks exactly like "not compiled yet" and every ask re-reads the file. On an ESP32 one attempt is two LittleFS operations (~5 ms), and the repeated asks during a single rebuild starved the task until the 12-second watchdog reset the board: a missing script took the whole device down rather than showing an error. The behavior to pin is that a failed layout still places no lights however many times it is asked, and says so.
 TEST_CASE("a layout whose script is missing reports it without retrying forever") {
     MoonLiveLayout l;
     l.defineControls();
@@ -514,13 +447,11 @@ TEST_CASE("a layout whose script is missing reports it without retrying forever"
     CHECK(placed == 0);
     CHECK(l.severity() == MoonModule::Severity::Error);   // and it still says what is wrong
 
-    // A working script after a failed one must still compile — the give-up is per script name, not
-    // permanent, or fixing a typo would need a reboot.
+    // A working script after a failed one must still compile, the give-up is per script name, not permanent, or fixing a typo would need a reboot.
     const char* good = mmScriptAs("placeLights", "for (int i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }");
     l.setScript(mmWriteScript(good));
     l.prepare();
-    // The COUNT needs an emitting backend; the give-up-is-per-name behaviour above does not, so
-    // only this line is gated and the rest of the case still runs on x86_64 (where CI runs).
+    // The COUNT needs an emitting backend; the give-up-is-per-name behavior above does not, so only this line is gated and the rest of the case still runs on x86_64 (where CI runs).
 #if MM_MOONLIVE_HAS_HOST_JIT
     CHECK(l.lightCount() == 5);
 #endif
@@ -528,12 +459,7 @@ TEST_CASE("a layout whose script is missing reports it without retrying forever"
 
 // A layout that starts with NO script must still compile the first real one it is given.
 //
-// Every device boots a fresh layout card with an empty script control, so the very first compile
-// always fails with "no script — set the script name". When the give-up flag was a bare bool that
-// failure latched, and the card then reported "no script" forever however many valid names were set
-// afterwards: the render loop asks for the light count long before a control write can clear a flag,
-// so the guard re-armed itself on every tick. Bench-caught on an S3 — the host never saw it because
-// a test constructs a fresh layout per case and never boots one empty.
+// Every device boots a fresh layout card with an empty script control, so the very first compile always fails with "no script, set the script name". When the give-up flag was a bare bool that failure latched, and the card then reported "no script" forever however many valid names were set afterwards: the render loop asks for the light count long before a control write can clear a flag, so the guard re-armed itself on every tick. Bench-caught on an S3, the host never saw it because a test constructs a fresh layout per case and never boots one empty.
 TEST_CASE("a layout that starts empty still compiles the first script it is given") {
     MoonLiveLayout l;
     l.defineControls();
@@ -541,13 +467,10 @@ TEST_CASE("a layout that starts empty still compiles the first script it is give
     CHECK(l.severity() == MoonModule::Severity::Error);
     CHECK(l.lightCount() == 0);
 
-    // The RENDER LOOP keeps asking while no script is set — this is the step that re-armed the
-    // flag on device and that a straight prepare/setScript sequence never reproduces.
+    // The RENDER LOOP keeps asking while no script is set, this is the step that re-armed the flag on device and that a straight prepare/setScript sequence never reproduces.
     for (int i = 0; i < 5; i++) CHECK(l.lightCount() == 0);
 
-    // Write the control the way the UI does — straight into the bound buffer, then
-    // onControlChanged — because addText binds `script_` directly and setScript() is NOT called on
-    // that path. That is exactly how a device sets a script, and where the latch survived.
+    // Write the control the way the UI does, straight into the bound buffer, then onControlChanged, because addText binds `script_` directly and setScript() is NOT called on that path. That is exactly how a device sets a script, and where the latch survived.
     const char* name = mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }"));
     auto& cs = l.controls();
     for (uint8_t i = 0; i < cs.count(); i++)
@@ -560,9 +483,7 @@ TEST_CASE("a layout that starts empty still compiles the first script it is give
 #endif
 }
 
-// The fixed script directory is a boundary: a module names a file inside it, and cannot address the
-// filesystem. Without this, a control value of "../.config/NetworkModule.json" reads the device's
-// saved WiFi credentials as if they were a script.
+// The fixed script directory is a boundary: a module names a file inside it, and cannot address the filesystem. Without this, a control value of "../.config/NetworkModule.json" reads the device's saved WiFi credentials as if they were a script.
 TEST_CASE("a script name cannot escape the script folder") {
     MoonLiveLayout l;
     l.defineControls();
@@ -575,11 +496,7 @@ TEST_CASE("a script name cannot escape the script folder") {
     }
 }
 
-// A script that STOPS being valid must take its lights with it. Every check in the loader returns
-// before the compile, and the compile is what releases the previous program, so a rename, a delete
-// or an emptied file used to leave the old code executing while the card reported the error: the
-// fixture kept rendering a script the user had removed. The one state a user can never debug is a
-// device that disagrees with its own status line.
+// A script that STOPS being valid must take its lights with it. Every check in the loader returns before the compile, and the compile is what releases the previous program, so a rename, a delete or an emptied file used to leave the old code executing while the card reported the error: the fixture kept rendering a script the user had removed. The one state a user can never debug is a device that disagrees with its own status line.
 TEST_CASE("a script that disappears takes its lights with it") {
     MoonLiveLayout l;
     l.defineControls();
@@ -596,19 +513,14 @@ TEST_CASE("a script that disappears takes its lights with it") {
     CHECK(l.lightCount() == 0);                        // the old program is gone, not just unreported
 }
 
-// The name the LOADER accepts and the name the CONTROL can hold must be the same length. They were
-// not: the control held 31 characters while the loader accepted 40, so a longer valid name was
-// silently truncated on its way in, and truncation can cut the extension off, turning a real
-// script into a name the loader then rejects. The user sees an extension complaint for a file that
-// has one.
+// The name the LOADER accepts and the name the CONTROL can hold must be the same length. They were not: the control held 31 characters while the loader accepted 40, so a longer valid name was silently truncated on its way in, and truncation can cut the extension off, turning a real script into a name the loader then rejects. The user sees an extension complaint for a file that has one.
 TEST_CASE("a script name at the accepted length survives the control it is stored in") {
     // A name exactly at the limit: filler + a role extension, written so the file really exists.
     std::string longName(mm::moonlive::kMaxScriptName - 4, 'a');
     longName += mm::moonlive::kLayoutExt;
     REQUIRE(longName.size() == mm::moonlive::kMaxScriptName);
 
-    // Write a real script under that name, then name it. If the control clipped it, the loader
-    // would see a truncated name (possibly without its extension) and report an error instead.
+    // Write a real script under that name, then name it. If the control clipped it, the loader would see a truncated name (possibly without its extension) and report an error instead.
     char path[128];
     std::snprintf(path, sizeof(path), "%s/%s", mm::moonlive::kScriptDir, longName.c_str());
     mm::platform::fsMkdir(mm::moonlive::kScriptDir);
@@ -620,10 +532,7 @@ TEST_CASE("a script name at the accepted length survives the control it is store
     l.defineControls();
     l.setScript(longName.c_str());
     l.prepare();
-    // The name reached the loader intact: a clipped one is rejected for its missing extension, so
-    // the status would name the NAME rather than anything about the script's contents. Asserted
-    // this way because a host without a MoonLive backend (x86-64) fails every compile by design,
-    // and this test is about the control buffer, not about codegen.
+    // The name reached the loader intact: a clipped one is rejected for its missing extension, so the status would name the NAME rather than anything about the script's contents. Asserted this way because a host without a MoonLive backend (x86-64) fails every compile by design, and this test is about the control buffer, not about codegen.
     if (l.severity() == MoonModule::Severity::Error)
         CHECK(std::string(l.status()).find(".mll") == std::string::npos);
 #if MM_MOONLIVE_HAS_HOST_JIT
@@ -633,10 +542,7 @@ TEST_CASE("a script name at the accepted length survives the control it is store
 }
 
 #if MM_MOONLIVE_HAS_HOST_JIT
-// A SERPENTINE over an arbitrary number of rows: every other row reversed. This was the standing
-// example of what the language could not express, because it needs a per-row decision and there
-// was no `if`. It is also the most common real panel wiring, so it is worth pinning as a layout
-// rather than only as a compiler test.
+// A SERPENTINE over an arbitrary number of rows: every other row reversed. This was the standing example of what the language could not express, because it needs a per-row decision and there was no `if`. It is also the most common real panel wiring, so it is worth pinning as a layout rather than only as a compiler test.
 TEST_CASE("a serpentine layout places every light exactly once") {
     MoonLiveLayout l;
     l.defineControls();
@@ -657,10 +563,7 @@ TEST_CASE("a serpentine layout places every light exactly once") {
 
 // --- editing a script's CONTENTS recompiles it -------------------------------------------------
 //
-// The gap this closes: a binding keyed its recompile on the script's NAME, so saving new text into
-// the same file changed nothing. The module kept running the program built from the PREVIOUS text,
-// and the only way to make it notice was to rename the file. That is why editing a script on its
-// own card could not work, and it is what a file write now triggers tree-wide.
+// The gap this closes: a binding keyed its recompile on the script's NAME, so saving new text into the same file changed nothing. The module kept running the program built from the PREVIOUS text, and the only way to make it notice was to rename the file. That is why editing a script on its own card could not work, and it is what a file write now triggers tree-wide.
 TEST_CASE("editing a script's text recompiles it, without renaming the file") {
     MoonLiveLayout l;
     l.defineControls();
@@ -681,10 +584,7 @@ TEST_CASE("editing a script's text recompiles it, without renaming the file") {
     CHECK(l.lightCount() == 7);
 }
 
-// The other half of the same rule, and the one a modifier depends on: an unchanged file must be
-// RECOGNISED as unchanged. A modifier turns "a new program was installed" into "ask the Layer to
-// rebuild", and the Layer's rebuild calls prepare() again, so answering "changed" every time makes
-// the two call each other forever and the fixture renders nothing at all.
+// The other half of the same rule, and the one a modifier depends on: an unchanged file must be RECOGNISED as unchanged. A modifier turns "a new program was installed" into "ask the Layer to rebuild", and the Layer's rebuild calls prepare() again, so answering "changed" every time makes the two call each other forever and the fixture renders nothing at all.
 TEST_CASE("preparing an unchanged script installs no new program") {
     MoonLiveModifier m;
     m.defineControls();
@@ -699,16 +599,9 @@ TEST_CASE("preparing an unchanged script installs no new program") {
     CHECK_FALSE(m.consumeNeedsRebuild());
 }
 
-// A broken script that is FIXED IN PLACE compiles, without being renamed. This is the failure the
-// editor makes routine: type a typo, see the parse error, correct it, save. Keyed on the name alone
-// (which is what the bindings did before) the corrected script stays refused until it is renamed.
+// A broken script that is FIXED IN PLACE compiles, without being renamed. This is the failure the editor makes routine: type a typo, see the parse error, correct it, save. Keyed on the name alone (which is what the bindings did before) the corrected script stays refused until it is renamed.
 //
-// NOT pinned here: that a broken script is tried ONCE rather than on every ask. The latch exists
-// because each retry is two LittleFS reads (~5 ms on an S3) and the pipeline asks repeatedly while
-// sizing a fixture, so the retries starve the render task until the watchdog resets the device. On
-// the host a re-read costs microseconds and nothing observable differs, which four attempts at a
-// test confirmed: removing the latch entirely leaves every assertion passing. Backlogged rather
-// than papered over with a test that cannot fail.
+// NOT pinned here: that a broken script is tried ONCE rather than on every ask. The latch exists because each retry is two LittleFS reads (~5 ms on an S3) and the pipeline asks repeatedly while sizing a fixture, so the retries starve the render task until the watchdog resets the device. On the host a re-read costs microseconds and nothing observable differs, which four attempts at a test confirmed: removing the latch entirely leaves every assertion passing. Backlogged rather than papered over with a test that cannot fail.
 TEST_CASE("a broken script fixed in place compiles, without being renamed") {
     MoonLiveLayout l;
     l.defineControls();
@@ -731,13 +624,9 @@ TEST_CASE("a broken script fixed in place compiles, without being renamed") {
 
 
 
-// A script's ROLE is its file extension: `.mle` an effect, `.mll` a layout, `.mlm` a modifier. It is
-// stated by the author rather than derived from what the class defines, so that adding (say) a
-// per-frame tick() to modifiers later cannot silently start listing them in effect pickers.
+// A script's ROLE is its file extension: `.mle` an effect, `.mll` a layout, `.mlm` a modifier. It is stated by the author rather than derived from what the class defines, so that adding (say) a per-frame tick() to modifiers later cannot silently start listing them in effect pickers.
 //
-// The LOADER is role-blind and accepts all three, exactly as the engine is: which picker offered a
-// file is the binding's business, and a class may serve several moments. What the extension decides
-// is which card offers the file, not what the engine will do with it.
+// The LOADER is role-blind and accepts all three, exactly as the engine is: which picker offered a file is the binding's business, and a class may serve several moments. What the extension decides is which card offers the file, not what the engine will do with it.
 TEST_CASE("the loader accepts any role extension, and nothing else") {
     MoonLiveLayout l;
     l.defineControls();
@@ -762,8 +651,7 @@ TEST_CASE("the loader accepts any role extension, and nothing else") {
 }
 
 // A disabled scripted module must not publish controls bound into a freed control arena.
-// release() frees the engine's arena; the control descriptors registered by defineControls() hold
-// raw pointers into it, so re-publishing them would read (and a UI write would WRITE) freed heap.
+// release() frees the engine's arena; the control descriptors registered by defineControls() hold raw pointers into it, so re-publishing them would read (and a UI write would WRITE) freed heap.
 // Symptom on hardware: reading a disabled MoonLive card returned a different value every read.
 TEST_CASE("a disabled scripted module publishes no controls bound to freed memory") {
     MoonLiveLayout l;
@@ -798,10 +686,7 @@ TEST_CASE("a disabled scripted module publishes no controls bound to freed memor
 
 #endif  // MM_MOONLIVE_HAS_HOST_JIT
 
-// A control write lands directly in the module's buffer — addText binds it — so setScript() is NOT
-// called. Nothing then cleared the compiled-hash, and compile()'s early-return kept the OLD program
-// running under the new name. Found by review; the same class of bug hardware found in the effect.
-// Needs a backend: without one BOTH counts are zero and the test passes without proving the swap.
+// A control write lands directly in the module's buffer, addText binds it, so setScript() is NOT called. Nothing then cleared the compiled-hash, and compile()'s early-return kept the OLD program running under the new name. Found by review; the same class of bug hardware found in the effect. Needs a backend: without one BOTH counts are zero and the test passes without proving the swap.
 #if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("naming a different script through the control actually swaps the program") {
     MoonLiveLayout l;
@@ -825,12 +710,7 @@ TEST_CASE("naming a different script through the control actually swaps the prog
 
 // A layout that cannot compile must stay quiet, not keep trying.
 //
-// The pipeline asks a layout for its size and then walks it, and BOTH ask it to compile first — so a
-// failure that leaves "nothing is compiled" looks exactly like "not compiled yet" and every ask
-// re-reads the file. On an ESP32 one attempt is two LittleFS operations (~5 ms), and the repeated
-// asks during a single rebuild starved the task until the 12-second watchdog reset the board: a
-// missing script took the whole device down rather than showing an error. The behaviour to pin is
-// that a failed layout still places no lights however many times it is asked, and says so.
+// The pipeline asks a layout for its size and then walks it, and BOTH ask it to compile first, so a failure that leaves "nothing is compiled" looks exactly like "not compiled yet" and every ask re-reads the file. On an ESP32 one attempt is two LittleFS operations (~5 ms), and the repeated asks during a single rebuild starved the task until the 12-second watchdog reset the board: a missing script took the whole device down rather than showing an error. The behavior to pin is that a failed layout still places no lights however many times it is asked, and says so.
 TEST_CASE("a layout whose script is missing reports it without retrying forever") {
     MoonLiveLayout l;
     l.defineControls();
@@ -849,13 +729,11 @@ TEST_CASE("a layout whose script is missing reports it without retrying forever"
     CHECK(placed == 0);
     CHECK(l.severity() == MoonModule::Severity::Error);   // and it still says what is wrong
 
-    // A working script after a failed one must still compile — the give-up is per script name, not
-    // permanent, or fixing a typo would need a reboot.
+    // A working script after a failed one must still compile, the give-up is per script name, not permanent, or fixing a typo would need a reboot.
     const char* good = mmScriptAs("placeLights", "for (int i = 0; i < 5; i = i + 1) { addLight(i, 0, 0); }");
     l.setScript(mmWriteScript(good));
     l.prepare();
-    // The COUNT needs an emitting backend; the give-up-is-per-name behaviour above does not, so
-    // only this line is gated and the rest of the case still runs on x86_64 (where CI runs).
+    // The COUNT needs an emitting backend; the give-up-is-per-name behavior above does not, so only this line is gated and the rest of the case still runs on x86_64 (where CI runs).
 #if MM_MOONLIVE_HAS_HOST_JIT
     CHECK(l.lightCount() == 5);
 #endif
@@ -863,12 +741,7 @@ TEST_CASE("a layout whose script is missing reports it without retrying forever"
 
 // A layout that starts with NO script must still compile the first real one it is given.
 //
-// Every device boots a fresh layout card with an empty script control, so the very first compile
-// always fails with "no script — set the script name". When the give-up flag was a bare bool that
-// failure latched, and the card then reported "no script" forever however many valid names were set
-// afterwards: the render loop asks for the light count long before a control write can clear a flag,
-// so the guard re-armed itself on every tick. Bench-caught on an S3 — the host never saw it because
-// a test constructs a fresh layout per case and never boots one empty.
+// Every device boots a fresh layout card with an empty script control, so the very first compile always fails with "no script, set the script name". When the give-up flag was a bare bool that failure latched, and the card then reported "no script" forever however many valid names were set afterwards: the render loop asks for the light count long before a control write can clear a flag, so the guard re-armed itself on every tick. Bench-caught on an S3, the host never saw it because a test constructs a fresh layout per case and never boots one empty.
 TEST_CASE("a layout that starts empty still compiles the first script it is given") {
     MoonLiveLayout l;
     l.defineControls();
@@ -876,13 +749,10 @@ TEST_CASE("a layout that starts empty still compiles the first script it is give
     CHECK(l.severity() == MoonModule::Severity::Error);
     CHECK(l.lightCount() == 0);
 
-    // The RENDER LOOP keeps asking while no script is set — this is the step that re-armed the
-    // flag on device and that a straight prepare/setScript sequence never reproduces.
+    // The RENDER LOOP keeps asking while no script is set, this is the step that re-armed the flag on device and that a straight prepare/setScript sequence never reproduces.
     for (int i = 0; i < 5; i++) CHECK(l.lightCount() == 0);
 
-    // Write the control the way the UI does — straight into the bound buffer, then
-    // onControlChanged — because addText binds `script_` directly and setScript() is NOT called on
-    // that path. That is exactly how a device sets a script, and where the latch survived.
+    // Write the control the way the UI does, straight into the bound buffer, then onControlChanged, because addText binds `script_` directly and setScript() is NOT called on that path. That is exactly how a device sets a script, and where the latch survived.
     const char* name = mmWriteScript(mmScriptAs("placeLights", "for (int i = 0; i < 6; i = i + 1) { addLight(i, 0, 0); }"));
     auto& cs = l.controls();
     for (uint8_t i = 0; i < cs.count(); i++)
@@ -895,9 +765,7 @@ TEST_CASE("a layout that starts empty still compiles the first script it is give
 #endif
 }
 
-// The fixed script directory is a boundary: a module names a file inside it, and cannot address the
-// filesystem. Without this, a control value of "../.config/NetworkModule.json" reads the device's
-// saved WiFi credentials as if they were a script.
+// The fixed script directory is a boundary: a module names a file inside it, and cannot address the filesystem. Without this, a control value of "../.config/NetworkModule.json" reads the device's saved WiFi credentials as if they were a script.
 TEST_CASE("a script name cannot escape the script folder") {
     MoonLiveLayout l;
     l.defineControls();
@@ -910,11 +778,7 @@ TEST_CASE("a script name cannot escape the script folder") {
     }
 }
 
-// A script that STOPS being valid must take its lights with it. Every check in the loader returns
-// before the compile, and the compile is what releases the previous program, so a rename, a delete
-// or an emptied file used to leave the old code executing while the card reported the error: the
-// fixture kept rendering a script the user had removed. The one state a user can never debug is a
-// device that disagrees with its own status line.
+// A script that STOPS being valid must take its lights with it. Every check in the loader returns before the compile, and the compile is what releases the previous program, so a rename, a delete or an emptied file used to leave the old code executing while the card reported the error: the fixture kept rendering a script the user had removed. The one state a user can never debug is a device that disagrees with its own status line.
 TEST_CASE("a script that disappears takes its lights with it") {
     MoonLiveLayout l;
     l.defineControls();
@@ -931,19 +795,14 @@ TEST_CASE("a script that disappears takes its lights with it") {
     CHECK(l.lightCount() == 0);                        // the old program is gone, not just unreported
 }
 
-// The name the LOADER accepts and the name the CONTROL can hold must be the same length. They were
-// not: the control held 31 characters while the loader accepted 40, so a longer valid name was
-// silently truncated on its way in, and truncation can cut the extension off, turning a real
-// script into a name the loader then rejects. The user sees an extension complaint for a file that
-// has one.
+// The name the LOADER accepts and the name the CONTROL can hold must be the same length. They were not: the control held 31 characters while the loader accepted 40, so a longer valid name was silently truncated on its way in, and truncation can cut the extension off, turning a real script into a name the loader then rejects. The user sees an extension complaint for a file that has one.
 TEST_CASE("a script name at the accepted length survives the control it is stored in") {
     // A name exactly at the limit: filler + a role extension, written so the file really exists.
     std::string longName(mm::moonlive::kMaxScriptName - 4, 'a');
     longName += mm::moonlive::kLayoutExt;
     REQUIRE(longName.size() == mm::moonlive::kMaxScriptName);
 
-    // Write a real script under that name, then name it. If the control clipped it, the loader
-    // would see a truncated name (possibly without its extension) and report an error instead.
+    // Write a real script under that name, then name it. If the control clipped it, the loader would see a truncated name (possibly without its extension) and report an error instead.
     char path[128];
     std::snprintf(path, sizeof(path), "%s/%s", mm::moonlive::kScriptDir, longName.c_str());
     mm::platform::fsMkdir(mm::moonlive::kScriptDir);
@@ -955,10 +814,7 @@ TEST_CASE("a script name at the accepted length survives the control it is store
     l.defineControls();
     l.setScript(longName.c_str());
     l.prepare();
-    // The name reached the loader intact: a clipped one is rejected for its missing extension, so
-    // the status would name the NAME rather than anything about the script's contents. Asserted
-    // this way because a host without a MoonLive backend (x86-64) fails every compile by design,
-    // and this test is about the control buffer, not about codegen.
+    // The name reached the loader intact: a clipped one is rejected for its missing extension, so the status would name the NAME rather than anything about the script's contents. Asserted this way because a host without a MoonLive backend (x86-64) fails every compile by design, and this test is about the control buffer, not about codegen.
     if (l.severity() == MoonModule::Severity::Error)
         CHECK(std::string(l.status()).find(".mll") == std::string::npos);
 #if MM_MOONLIVE_HAS_HOST_JIT
@@ -968,10 +824,7 @@ TEST_CASE("a script name at the accepted length survives the control it is store
 }
 
 #if MM_MOONLIVE_HAS_HOST_JIT
-// A SERPENTINE over an arbitrary number of rows: every other row reversed. This was the standing
-// example of what the language could not express, because it needs a per-row decision and there
-// was no `if`. It is also the most common real panel wiring, so it is worth pinning as a layout
-// rather than only as a compiler test.
+// A SERPENTINE over an arbitrary number of rows: every other row reversed. This was the standing example of what the language could not express, because it needs a per-row decision and there was no `if`. It is also the most common real panel wiring, so it is worth pinning as a layout rather than only as a compiler test.
 TEST_CASE("a serpentine layout places every light exactly once") {
     MoonLiveLayout l;
     l.defineControls();
@@ -992,10 +845,7 @@ TEST_CASE("a serpentine layout places every light exactly once") {
 
 // --- editing a script's CONTENTS recompiles it -------------------------------------------------
 //
-// The gap this closes: a binding keyed its recompile on the script's NAME, so saving new text into
-// the same file changed nothing. The module kept running the program built from the PREVIOUS text,
-// and the only way to make it notice was to rename the file. That is why editing a script on its
-// own card could not work, and it is what a file write now triggers tree-wide.
+// The gap this closes: a binding keyed its recompile on the script's NAME, so saving new text into the same file changed nothing. The module kept running the program built from the PREVIOUS text, and the only way to make it notice was to rename the file. That is why editing a script on its own card could not work, and it is what a file write now triggers tree-wide.
 TEST_CASE("editing a script's text recompiles it, without renaming the file") {
     MoonLiveLayout l;
     l.defineControls();
@@ -1016,10 +866,7 @@ TEST_CASE("editing a script's text recompiles it, without renaming the file") {
     CHECK(l.lightCount() == 7);
 }
 
-// The other half of the same rule, and the one a modifier depends on: an unchanged file must be
-// RECOGNISED as unchanged. A modifier turns "a new program was installed" into "ask the Layer to
-// rebuild", and the Layer's rebuild calls prepare() again, so answering "changed" every time makes
-// the two call each other forever and the fixture renders nothing at all.
+// The other half of the same rule, and the one a modifier depends on: an unchanged file must be RECOGNISED as unchanged. A modifier turns "a new program was installed" into "ask the Layer to rebuild", and the Layer's rebuild calls prepare() again, so answering "changed" every time makes the two call each other forever and the fixture renders nothing at all.
 TEST_CASE("preparing an unchanged script installs no new program") {
     MoonLiveModifier m;
     m.defineControls();
@@ -1034,16 +881,9 @@ TEST_CASE("preparing an unchanged script installs no new program") {
     CHECK_FALSE(m.consumeNeedsRebuild());
 }
 
-// A broken script that is FIXED IN PLACE compiles, without being renamed. This is the failure the
-// editor makes routine: type a typo, see the parse error, correct it, save. Keyed on the name alone
-// (which is what the bindings did before) the corrected script stays refused until it is renamed.
+// A broken script that is FIXED IN PLACE compiles, without being renamed. This is the failure the editor makes routine: type a typo, see the parse error, correct it, save. Keyed on the name alone (which is what the bindings did before) the corrected script stays refused until it is renamed.
 //
-// NOT pinned here: that a broken script is tried ONCE rather than on every ask. The latch exists
-// because each retry is two LittleFS reads (~5 ms on an S3) and the pipeline asks repeatedly while
-// sizing a fixture, so the retries starve the render task until the watchdog resets the device. On
-// the host a re-read costs microseconds and nothing observable differs, which four attempts at a
-// test confirmed: removing the latch entirely leaves every assertion passing. Backlogged rather
-// than papered over with a test that cannot fail.
+// NOT pinned here: that a broken script is tried ONCE rather than on every ask. The latch exists because each retry is two LittleFS reads (~5 ms on an S3) and the pipeline asks repeatedly while sizing a fixture, so the retries starve the render task until the watchdog resets the device. On the host a re-read costs microseconds and nothing observable differs, which four attempts at a test confirmed: removing the latch entirely leaves every assertion passing. Backlogged rather than papered over with a test that cannot fail.
 TEST_CASE("a broken script fixed in place compiles, without being renamed") {
     MoonLiveLayout l;
     l.defineControls();
@@ -1066,13 +906,9 @@ TEST_CASE("a broken script fixed in place compiles, without being renamed") {
 
 
 
-// A script's ROLE is its file extension: `.mle` an effect, `.mll` a layout, `.mlm` a modifier. It is
-// stated by the author rather than derived from what the class defines, so that adding (say) a
-// per-frame tick() to modifiers later cannot silently start listing them in effect pickers.
+// A script's ROLE is its file extension: `.mle` an effect, `.mll` a layout, `.mlm` a modifier. It is stated by the author rather than derived from what the class defines, so that adding (say) a per-frame tick() to modifiers later cannot silently start listing them in effect pickers.
 //
-// The LOADER is role-blind and accepts all three, exactly as the engine is: which picker offered a
-// file is the binding's business, and a class may serve several moments. What the extension decides
-// is which card offers the file, not what the engine will do with it.
+// The LOADER is role-blind and accepts all three, exactly as the engine is: which picker offered a file is the binding's business, and a class may serve several moments. What the extension decides is which card offers the file, not what the engine will do with it.
 TEST_CASE("the loader accepts any role extension, and nothing else") {
     MoonLiveLayout l;
     l.defineControls();

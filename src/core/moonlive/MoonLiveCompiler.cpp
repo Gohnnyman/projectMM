@@ -1,3 +1,6 @@
+/// The MoonLive compiler: source text to IR, in a lexer, a parser and a code generator.
+/// Each stage is a section below, and the emitters it feeds are per-architecture.
+
 #include "core/moonlive/MoonLiveCompiler.h"
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLiveIr.h"

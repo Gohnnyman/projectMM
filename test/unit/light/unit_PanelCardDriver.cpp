@@ -1,10 +1,7 @@
-// @module PanelCardDriver
-// @also Drivers, Correction
+/// @module PanelCardDriver
+/// @also Drivers, Correction
 
-// End-to-end tests for the raw-Ethernet panel driver. The desktop platform records every frame
-// ethSendRaw() emits instead of putting it on a wire, so these pin what the driver would actually
-// send — the geometry, the chunking, and the sync-last ordering — with no hardware and no
-// privileges. The bench then only has to confirm the wire itself.
+/// End-to-end tests for the raw-Ethernet panel driver. The desktop platform records every frame ethSendRaw() emits instead of putting it on a wire, so these pin what the driver would actually send, the geometry, the chunking, and the sync-last ordering, with no hardware and no privileges. The bench then only has to confirm the wire itself.
 
 #include "doctest.h"
 #include "light/drivers/PanelCardDriver.h"
@@ -20,11 +17,8 @@
 namespace {
 
 // Build a driver over a `count`-light source with a plain RGB correction, ready to tick.
-// Build a driver over a `count`-light source. With no Layer wired the driver falls back to the
-// panel arrangement for the wall size, which is exactly what a bare unit test wants: geometry it
-// states rather than geometry it has to construct a Layout for.
-// A wall of `width` x `height`, wired the way production wires it: a Layout gives the Layer its
-// physical size, and the driver reads that. The driver has no geometry of its own to set.
+// Build a driver over a `count`-light source. With no Layer wired the driver falls back to the panel arrangement for the wall size, which is exactly what a bare unit test wants: geometry it states rather than geometry it has to construct a Layout for.
+// A wall of `width` x `height`, wired the way production wires it: a Layout gives the Layer its physical size, and the driver reads that. The driver has no geometry of its own to set.
 struct Wall {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -54,13 +48,10 @@ void setUp(mm::PanelCardDriver& driver, mm::Buffer& source, Wall& wall,
     mm::platform::ethTestClearFrames();
 }
 
-// Drop any raw-L2 claim left by an earlier test's driver. Test drivers are stack objects that are
-// destroyed without release() being called, so the claim count would otherwise carry across cases.
+// Drop any raw-L2 claim left by an earlier test's driver. Test drivers are stack objects that are destroyed without release() being called, so the claim count would otherwise carry across cases.
 void clearClaims() {
     while (mm::platform::ethRawL2Claimed()) mm::platform::ethClaimRawL2(false);
-    // The platform's simulated-failure switches are process-global: a test that leaves one set
-    // poisons whichever test runs next, which is how a passing-alone/failing-in-sequence result
-    // appears. Reset them here so every case starts from a known platform state.
+    // The platform's simulated-failure switches are process-global: a test that leaves one set poisons whichever test runs next, which is how a passing-alone/failing-in-sequence result appears. Reset them here so every case starts from a known platform state.
     mm::platform::setTestEthSendFails(false);
     mm::platform::setTestEthRestartFails(false);
     mm::platform::ethTestClearFrames();
@@ -73,8 +64,7 @@ uint8_t frameType(size_t i) {
 
 }  // namespace
 
-// A panel is sent as one frame per row followed by a single sync — the sync is what latches the
-// image, so it must arrive after every row it applies to.
+// A panel is sent as one frame per row followed by a single sync, the sync is what latches the image, so it must arrive after every row it applies to.
 TEST_CASE("PanelCardDriver sends one frame per row then one sync") {
     mm::Buffer source;
     mm::PanelCardDriver driver;
@@ -93,16 +83,13 @@ TEST_CASE("PanelCardDriver sends one frame per row then one sync") {
     CHECK(frameType(7) == mm::COLORLIGHT_TYPE_SYNC);
 }
 
-// A card on v12-or-older firmware acts on the FIRST copy and reads a second sync as another latch,
-// aborting the refresh already running: the wall then updates once every few seconds. That
-// generation gets exactly one brightness and one sync, which is also what FPP sends such a card.
+// A card on v12-or-older firmware acts on the FIRST copy and reads a second sync as another latch, aborting the refresh already running: the wall then updates once every few seconds. That generation gets exactly one brightness and one sync, which is also what FPP sends such a card.
 TEST_CASE("PanelCardDriver sends a pre-v13 card one brightness and one sync") {
     mm::Buffer source;
     mm::PanelCardDriver driver;
     Wall wall(64, 4);
     setUp(driver, source, wall, 256);
-    // No assignment: "v12 and older" is index 0 and the DEFAULT, because the documented path
-    // downgrades the card to clear the v13 flicker. This test also pins that default.
+    // No assignment: "v12 and older" is index 0 and the DEFAULT, because the documented path downgrades the card to clear the v13 flicker. This test also pins that default.
 
     mm::platform::setTestNowMs(1000);
     driver.tick();
@@ -113,8 +100,7 @@ TEST_CASE("PanelCardDriver sends a pre-v13 card one brightness and one sync") {
     CHECK(frameType(5) == mm::COLORLIGHT_TYPE_SYNC);
 }
 
-// A buffer smaller than the wall sends only the rows it covers, then latches — rather than reading
-// past the buffer for the rows it does not have.
+// A buffer smaller than the wall sends only the rows it covers, then latches, rather than reading past the buffer for the rows it does not have.
 TEST_CASE("PanelCardDriver stops at the last row its buffer covers") {
     mm::Buffer source;
     mm::PanelCardDriver driver;
@@ -128,8 +114,7 @@ TEST_CASE("PanelCardDriver stops at the last row its buffer covers") {
     CHECK(frameType(3) == mm::COLORLIGHT_TYPE_SYNC);
 }
 
-// A row wider than one packet splits into several, each carrying its own pixel offset — the wide-
-// panel case, where 497 pixels is the per-packet ceiling.
+// A row wider than one packet splits into several, each carrying its own pixel offset, the wide-panel case, where 497 pixels is the per-packet ceiling.
 TEST_CASE("PanelCardDriver splits a row wider than one packet") {
     mm::Buffer source;
     mm::PanelCardDriver driver;
@@ -171,8 +156,7 @@ TEST_CASE("PanelCardDriver puts rendered pixels on the wire") {
     CHECK(row[mm::COLORLIGHT_ROW_PREFIX + 3] == 40);
 }
 
-// The fps control caps the send rate, so a render loop faster than the panel needs doesn't
-// saturate the link.
+// The fps control caps the send rate, so a render loop faster than the panel needs doesn't saturate the link.
 TEST_CASE("PanelCardDriver rate-limits to its fps setting") {
     mm::Buffer source;
     mm::PanelCardDriver driver;
@@ -194,8 +178,7 @@ TEST_CASE("PanelCardDriver rate-limits to its fps setting") {
     CHECK(mm::platform::ethTestFrameCount() > after1);
 }
 
-// Nothing is latched when the window is empty: an all-zero geometry must not emit a bare sync,
-// which would blank a panel that another driver is feeding.
+// Nothing is latched when the window is empty: an all-zero geometry must not emit a bare sync, which would blank a panel that another driver is feeding.
 TEST_CASE("PanelCardDriver sends nothing when the window is empty") {
     mm::Buffer source;
     mm::PanelCardDriver driver;
@@ -209,8 +192,7 @@ TEST_CASE("PanelCardDriver sends nothing when the window is empty") {
     CHECK(mm::platform::ethTestFrameCount() == 0);
 }
 
-// A dropped frame doesn't stall the driver: the cards give no acknowledgement, so a failed send is
-// tolerated exactly as a dropped UDP packet is, and the next tick proceeds.
+// A dropped frame doesn't stall the driver: the cards give no acknowledgement, so a failed send is tolerated exactly as a dropped UDP packet is, and the next tick proceeds.
 TEST_CASE("PanelCardDriver survives a failing link") {
     mm::Buffer source;
     mm::PanelCardDriver driver;
@@ -228,8 +210,7 @@ TEST_CASE("PanelCardDriver survives a failing link") {
     CHECK(mm::platform::ethTestFrameCount() == 3);   // recovers on the next tick
 }
 
-// The correction-applied buffer is sized off the hot path, so tick() never allocates — the same
-// contract the other sinks hold.
+// The correction-applied buffer is sized off the hot path, so tick() never allocates, the same contract the other sinks hold.
 TEST_CASE("PanelCardDriver sizes its buffer in prepare, not in tick") {
     mm::Buffer source;
     mm::PanelCardDriver driver;
@@ -246,10 +227,7 @@ TEST_CASE("PanelCardDriver sizes its buffer in prepare, not in tick") {
     CHECK(driver.correctedBuffer().count() == 64);
 }
 
-// The driver CLAIMS the ethernet interface while it is enabled, which is how NetworkModule tells
-// "the cable is broken" apart from "a driver is using the wire below IP". Stated at prepare rather
-// than inferred from traffic, so the claim is in place before the first frame and cannot race the
-// network cascade's DHCP timeout.
+// The driver CLAIMS the ethernet interface while it is enabled, which is how NetworkModule tells "the cable is broken" apart from "a driver is using the wire below IP". Stated at prepare rather than inferred from traffic, so the claim is in place before the first frame and cannot race the network cascade's DHCP timeout.
 TEST_CASE("PanelCardDriver claims the ethernet link while enabled") {
     clearClaims();
     mm::Buffer source;
@@ -264,8 +242,7 @@ TEST_CASE("PanelCardDriver claims the ethernet link while enabled") {
     CHECK_FALSE(mm::platform::ethRawL2Claimed());     // released with the driver
 }
 
-// Re-preparing (a geometry or window edit) must not stack claims, or the link would stay claimed
-// after the driver is gone.
+// Re-preparing (a geometry or window edit) must not stack claims, or the link would stay claimed after the driver is gone.
 TEST_CASE("PanelCardDriver claim survives a re-prepare without stacking") {
     clearClaims();
     mm::Buffer source;
@@ -281,9 +258,7 @@ TEST_CASE("PanelCardDriver claim survives a re-prepare without stacking") {
     CHECK_FALSE(mm::platform::ethRawL2Claimed());   // one release is enough
 }
 
-// The wall a PanelsLayout describes is what reaches the card: two 128x64 panels stacked give 128
-// rows of 128 pixels, and the driver reads that from the Layout rather than from controls of its
-// own. This is the setup a ColorLight card is normally configured for.
+// The wall a PanelsLayout describes is what reaches the card: two 128x64 panels stacked give 128 rows of 128 pixels, and the driver reads that from the Layout rather than from controls of its own. This is the setup a ColorLight card is normally configured for.
 TEST_CASE("PanelCardDriver sends the wall a PanelsLayout describes") {
     clearClaims();
     mm::Layouts layouts;
@@ -327,8 +302,7 @@ TEST_CASE("PanelCardDriver sends the wall a PanelsLayout describes") {
     CHECK(((lastRow[13] << 8) | lastRow[14]) == 127);
 }
 
-// Panels chained side by side widen each card row instead of adding rows — the same Layout control
-// the user already sets, with no second place to state it.
+// Panels chained side by side widen each card row instead of adding rows, the same Layout control the user already sets, with no second place to state it.
 TEST_CASE("PanelCardDriver widens the row when a PanelsLayout chains panels across") {
     clearClaims();
     mm::Layouts layouts;
@@ -367,9 +341,7 @@ TEST_CASE("PanelCardDriver widens the row when a PanelsLayout chains panels acro
     CHECK(((row[17] << 8) | row[18]) == 256);   // pixels in this packet
 }
 
-// A transmit path that refuses every frame must SAY so. It reads as a healthy link otherwise — the
-// IDF driver keeps reporting the negotiated speed while rejecting every frame — so "0 packets/s at
-// 1 Gbit" would look identical to an idle effect.
+// A transmit path that refuses every frame must SAY so. It reads as a healthy link otherwise, the IDF driver keeps reporting the negotiated speed while rejecting every frame, so "0 packets/s at 1 Gbit" would look identical to an idle effect.
 TEST_CASE("PanelCardDriver reports a failing transmit path instead of a healthy link") {
     clearClaims();
     mm::Buffer source;
@@ -389,9 +361,7 @@ TEST_CASE("PanelCardDriver reports a failing transmit path instead of a healthy 
     CHECK(mm::platform::ethSendFailStreak() == 0);   // a success clears it: back-pressure is not a fault
 }
 
-// A link that fails every send must not latch: the sync frame tells the cards to show what they
-// have, so emitting one after a frame where nothing arrived would blank a wall that was previously
-// showing a good image.
+// A link that fails every send must not latch: the sync frame tells the cards to show what they have, so emitting one after a frame where nothing arrived would blank a wall that was previously showing a good image.
 TEST_CASE("PanelCardDriver does not latch a frame that never reached the wire") {
     clearClaims();
     mm::Buffer source;
@@ -404,12 +374,11 @@ TEST_CASE("PanelCardDriver does not latch a frame that never reached the wire") 
     driver.tick();
     mm::platform::setTestEthSendFails(false);
 
-    // Nothing was recorded at all — in particular no sync frame slipped through after the failures.
+    // Nothing was recorded at all, in particular no sync frame slipped through after the failures.
     CHECK(mm::platform::ethTestFrameCount() == 0);
 }
 
-// A window covering no whole row sends nothing, rather than putting the brightness pair on the wire
-// every tick for a wall it cannot fill.
+// A window covering no whole row sends nothing, rather than putting the brightness pair on the wire every tick for a wall it cannot fill.
 TEST_CASE("PanelCardDriver sends nothing when the buffer covers no row") {
     clearClaims();
     mm::Buffer source;
@@ -423,18 +392,10 @@ TEST_CASE("PanelCardDriver sends nothing when the buffer covers no row") {
     CHECK(mm::platform::ethTestFrameCount() == 0);
 }
 
-// A transmit path that refuses everything gets ONE recovery attempt, not one per second: a restart
-// cannot fix an unplugged cable, and retrying would tear the interface down repeatedly under a user
-// who is watching the card to find out what is wrong.
-// Drive the failure streak past the wedge threshold. Split out because a test that does not REBUILD
-// the streak between ticks proves nothing: the restart clears it, so the wedge branch is simply not
-// re-entered and the guard under test never runs.
+// A transmit path that refuses everything gets ONE recovery attempt, not one per second: a restart cannot fix an unplugged cable, and retrying would tear the interface down repeatedly under a user who is watching the card to find out what is wrong. Drive the failure streak past the wedge threshold. Split out because a test that does not REBUILD the streak between ticks proves nothing: the restart clears it, so the wedge branch is simply not re-entered and the guard under test never runs.
 static void wedge(mm::PanelCardDriver& driver, uint32_t fromMs) {
     mm::platform::setTestEthSendFails(true);
-    // Enough TICKS to clear the driver's 500-consecutive-failure wedge threshold. Each tick sends
-    // one brightness + rows + one sync, so the frame count per tick depends on the wall: 250 ticks
-    // is comfortably past 500 for the small walls these tests build, with headroom rather than an
-    // exact figure, because the point is that a long run of failures accumulates.
+    // Enough TICKS to clear the driver's 500-consecutive-failure wedge threshold. Each tick sends one brightness + rows + one sync, so the frame count per tick depends on the wall: 250 ticks is comfortably past 500 for the small walls these tests build, with headroom rather than an exact figure, because the point is that a long run of failures accumulates.
     for (int i = 0; i < 250; i++) {
         mm::platform::setTestNowMs(fromMs + i * 30);
         driver.tick();
@@ -442,9 +403,7 @@ static void wedge(mm::PanelCardDriver& driver, uint32_t fromMs) {
     REQUIRE(mm::platform::ethSendFailStreak() >= 500);
 }
 
-// A wedge earns ONE recovery attempt. The second and third wedges in the same episode must NOT fire
-// again: a restart cannot fix an unplugged cable, and retrying would tear the interface down every
-// tick under a user reading the card to find out what is wrong.
+// A wedge earns ONE recovery attempt. The second and third wedges in the same episode must NOT fire again: a restart cannot fix an unplugged cable, and retrying would tear the interface down every tick under a user reading the card to find out what is wrong.
 TEST_CASE("PanelCardDriver attempts recovery once per wedge") {
     clearClaims();
     mm::Buffer source;
@@ -457,8 +416,7 @@ TEST_CASE("PanelCardDriver attempts recovery once per wedge") {
     driver.tick1s();
     CHECK(mm::platform::ethRestartCountForTest() == before + 1);   // fired
 
-    // Rebuild the streak so the wedge branch is genuinely re-entered; without this the guard is
-    // never reached and the assertion below would pass even with the guard deleted.
+    // Rebuild the streak so the wedge branch is genuinely re-entered; without this the guard is never reached and the assertion below would pass even with the guard deleted.
     wedge(driver, 20000);
     driver.tick1s();
     wedge(driver, 40000);
@@ -485,8 +443,7 @@ TEST_CASE("PanelCardDriver reports a wedge that survives its restart") {
     mm::platform::setTestEthSendFails(false);
 }
 
-// A recovery that FAILS leaves the interface stopped, which no user action short of a power cycle
-// resolves. That must not be reported as "no ethernet link", the message for an unplugged cable.
+// A recovery that FAILS leaves the interface stopped, which no user action short of a power cycle resolves. That must not be reported as "no ethernet link", the message for an unplugged cable.
 TEST_CASE("PanelCardDriver keeps a failed restart visible") {
     clearClaims();
     mm::Buffer source;
@@ -507,8 +464,7 @@ TEST_CASE("PanelCardDriver keeps a failed restart visible") {
     mm::platform::setTestEthSendFails(false);
 }
 
-// Failures are counted by CAUSE, because a down link and a full TX ring are different faults with
-// different fixes; one total cannot tell them apart, which is what made a real bug unreadable.
+// Failures are counted by CAUSE, because a down link and a full TX ring are different faults with different fixes; one total cannot tell them apart, which is what made a real bug unreadable.
 TEST_CASE("PanelCardDriver counts send failures by cause") {
     clearClaims();
     mm::platform::ethTestClearFrames();
@@ -535,9 +491,7 @@ TEST_CASE("PanelCardDriver counts send failures by cause") {
     CHECK(after == ringFull);  // a success does not erase the history
 }
 
-// The `interface` Select lists the DETECTED host NICs (none-first) and persists by label, the
-// fix for the Windows index-mismatch trap: whatever the OS or Npcap renumbers, the name the
-// user picked keeps meaning that adapter. Enumeration is faked through the test seam.
+// The `interface` Select lists the DETECTED host NICs (none-first) and persists by label, the fix for the Windows index-mismatch trap: whatever the OS or Npcap renumbers, the name the user picked keeps meaning that adapter. Enumeration is faked through the test seam.
 TEST_CASE("the interface Select lists detected NICs, none first, bind names behind the rows") {
     static const char* kFake[] = {"en-test0", "en-test1"};
     mm::platform::setTestRawInterfaces(kFake, 2);
@@ -568,9 +522,7 @@ TEST_CASE("the interface Select lists detected NICs, none first, bind names behi
     mm::platform::setTestRawInterfaces(nullptr, 0);   // restore real enumeration
 }
 
-// A persisted adapter NAME whose NIC is gone must degrade to capture-only without crashing:
-// the label no longer matches any option, the Select stays at row 0 (none), and prepare()'s
-// nullptr bind is today's blank-interface capture path.
+// A persisted adapter NAME whose NIC is gone must degrade to capture-only without crashing: the label no longer matches any option, the Select stays at row 0 (none), and prepare()'s nullptr bind is today's blank-interface capture path.
 TEST_CASE("a vanished persisted NIC degrades to capture-only, never a crash") {
     static const char* kFake[] = {"en-test0"};
     mm::platform::setTestRawInterfaces(kFake, 1);
@@ -591,9 +543,7 @@ TEST_CASE("a vanished persisted NIC degrades to capture-only, never a crash") {
     mm::platform::setTestRawInterfaces(nullptr, 0);
 }
 
-// The NIC list is re-enumerated on every rebuild and the OS does not promise a stable order.
-// The selection must follow the ADAPTER, not the row it happened to occupy: a NIC appearing
-// ahead of the chosen one would otherwise silently move panel output to a different adapter.
+// The NIC list is re-enumerated on every rebuild and the OS does not promise a stable order. The selection must follow the ADAPTER, not the row it happened to occupy: a NIC appearing ahead of the chosen one would otherwise silently move panel output to a different adapter.
 TEST_CASE("a reordered NIC list keeps the selected adapter, not its old row") {
     static const char* kFirst[]  = {"en-alpha", "en-beta"};
     mm::platform::setTestRawInterfaces(kFirst, 2);
@@ -621,8 +571,7 @@ TEST_CASE("a reordered NIC list keeps the selected adapter, not its old row") {
         if (std::strcmp(cs[i].name, "interface") != 0) continue;
         const uint8_t sel = *static_cast<uint8_t*>(cs[i].ptr);
         const char* bound = mm::platform::rawInterfaceName(sel);
-        // Row 0 is "none (capture only)" and binds nothing, so landing there is the failure
-        // this guards against, not a reason to crash the run.
+        // Row 0 is "none (capture only)" and binds nothing, so landing there is the failure this guards against, not a reason to crash the run.
         REQUIRE(bound != nullptr);
         CHECK(std::strcmp(bound, "en-beta") == 0);
     }
@@ -630,8 +579,7 @@ TEST_CASE("a reordered NIC list keeps the selected adapter, not its old row") {
     mm::platform::setTestRawInterfaces(nullptr, 0);
 }
 
-// Interface labels come from the OS, and on Windows they are free-form descriptions. One
-// containing a quote or a backslash must not be able to break the JSON the whole UI loads from.
+// Interface labels come from the OS, and on Windows they are free-form descriptions. One containing a quote or a backslash must not be able to break the JSON the whole UI loads from.
 TEST_CASE("an interface label with JSON metacharacters keeps the schema parseable") {
     static const char* kOdd[] = {"Realtek \"Gaming\" 2.5GbE", "Intel\\Wi-Fi 6"};
     mm::platform::setTestRawInterfaces(kOdd, 2);
@@ -653,8 +601,7 @@ TEST_CASE("an interface label with JSON metacharacters keeps the schema parseabl
     mm::platform::setTestRawInterfaces(nullptr, 0);
 }
 
-// The documented reset for the test seam is (nullptr, 0); it must clear the override rather
-// than form a range from a null pointer.
+// The documented reset for the test seam is (nullptr, 0); it must clear the override rather than form a range from a null pointer.
 TEST_CASE("resetting the interface test seam with nullptr restores real enumeration") {
     static const char* kFake[] = {"en-test0"};
     mm::platform::setTestRawInterfaces(kFake, 1);
@@ -665,10 +612,7 @@ TEST_CASE("resetting the interface test seam with nullptr restores real enumerat
     CHECK(mm::platform::rawInterfaces(&opts) >= 1);   // back to the host's own list
 }
 
-// An interface label carries the adapter's live link speed ("Realtek PCIe GbE, 1 Gb") so a user
-// can tell a 1 Gb NIC from a Wi-Fi radio or a virtual switch. That detail CHANGES: a renegotiated
-// link, or the same cable at 100 Mb, rewrites the label. The selection must survive it, or the
-// driver silently falls back to capture-only the first time a link renegotiates.
+// An interface label carries the adapter's live link speed ("Realtek PCIe GbE, 1 Gb") so a user can tell a 1 Gb NIC from a Wi-Fi radio or a virtual switch. That detail CHANGES: a renegotiated link, or the same cable at 100 Mb, rewrites the label. The selection must survive it, or the driver silently falls back to capture-only the first time a link renegotiates.
 TEST_CASE("a NIC whose link speed changed is still the same NIC") {
     static const char* kFast[] = {"en-alpha, 1 Gb", "en-beta, 2.5 Gb"};
     mm::platform::setTestRawInterfaces(kFast, 2);
@@ -703,8 +647,7 @@ TEST_CASE("a NIC whose link speed changed is still the same NIC") {
     mm::platform::setTestRawInterfaces(nullptr, 0);
 }
 
-// The same rule on the APPLY path: a persisted label whose speed has since changed still selects
-// its adapter, so a config restored onto a machine whose link renegotiated keeps working.
+// The same rule on the APPLY path: a persisted label whose speed has since changed still selects its adapter, so a config restored onto a machine whose link renegotiated keeps working.
 TEST_CASE("a persisted interface label matches its adapter despite a changed speed") {
     static const char* kNow[] = {"en-alpha, 100 Mb"};
     mm::platform::setTestRawInterfaces(kNow, 1);
@@ -724,9 +667,7 @@ TEST_CASE("a persisted interface label matches its adapter despite a changed spe
     mm::platform::setTestRawInterfaces(nullptr, 0);
 }
 
-// An adapter that DISAPPEARS between rebuilds (unplugged USB NIC, a driver uninstall) must not
-// leave the selection pointing at whatever now occupies that row: the driver would send panel
-// data out of a NIC the user never chose. No match means capture-only, explicitly.
+// An adapter that DISAPPEARS between rebuilds (unplugged USB NIC, a driver uninstall) must not leave the selection pointing at whatever now occupies that row: the driver would send panel data out of a NIC the user never chose. No match means capture-only, explicitly.
 TEST_CASE("a NIC that disappeared falls back to capture-only, not to whoever took its row") {
     static const char* kBefore[] = {"en-alpha", "en-beta"};
     mm::platform::setTestRawInterfaces(kBefore, 2);

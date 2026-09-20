@@ -1,9 +1,7 @@
-// @module MpegTs
-// @also HlsDriver
+/// @module MpegTs
+/// @also HlsDriver
 
-// The MPEG-TS packaging the ESP32-P4 does for itself, where desktop hands the whole job to
-// ffmpeg. These tests are why the muxer is pure logic in a header: the packet structure a player
-// has to accept is pinned here, on the host, rather than only by watching a TV.
+/// The MPEG-TS packaging the ESP32-P4 does for itself, where desktop hands the whole job to ffmpeg. These tests are why the muxer is pure logic in a header: the packet structure a player has to accept is pinned here, on the host, rather than only by watching a TV.
 
 #include "doctest.h"
 #include "light/util/MpegTs.h"
@@ -13,8 +11,7 @@
 
 namespace {
 
-// A frame's worth of Annex-B bytes. Content is irrelevant to muxing (the muxer never parses the
-// NALs), so a recognizable filler proves payload placement.
+// A frame's worth of Annex-B bytes. Content is irrelevant to muxing (the muxer never parses the NALs), so a recognizable filler proves payload placement.
 std::vector<uint8_t> fakeAccessUnit(size_t len) {
     std::vector<uint8_t> au(len);
     for (size_t i = 0; i < len; i++) au[i] = static_cast<uint8_t>(i & 0xFF);
@@ -28,8 +25,7 @@ uint16_t pidOf(const uint8_t* pkt) {
 
 }  // namespace
 
-// The invariant a demuxer relies on above all others: the stream is a whole number of 188-byte
-// packets, each starting with the sync byte. Everything else is read relative to that.
+// The invariant a demuxer relies on above all others: the stream is a whole number of 188-byte packets, each starting with the sync byte. Everything else is read relative to that.
 TEST_CASE("Every muxed packet is 188 bytes and starts with the sync byte") {
     std::vector<uint8_t> out(64 * 1024);
     mm::ts::Continuity wcc;
@@ -45,8 +41,7 @@ TEST_CASE("Every muxed packet is 188 bytes and starts with the sync byte") {
         CHECK(out[off] == 0x47);
 }
 
-// A player joining mid-stream can only decode a segment that tells it what the segment contains,
-// so each one opens with the program tables before any video.
+// A player joining mid-stream can only decode a segment that tells it what the segment contains, so each one opens with the program tables before any video.
 TEST_CASE("A segment opens with the program tables, then video") {
     std::vector<uint8_t> out(64 * 1024);
     mm::ts::Continuity wcc;
@@ -60,10 +55,7 @@ TEST_CASE("A segment opens with the program tables, then video") {
     CHECK(pidOf(&out[2 * mm::ts::kPacketSize]) == mm::ts::kPidVideo);
 }
 
-// A player finds the video by following the PAT to the PMT and the PMT to the elementary stream.
-// Testing only that those packets EXIST is not enough: the PAT once pointed at PID 0 instead of
-// the PMT, so a player that trusts it (VLC) saw no video track at all, while ffmpeg still played
-// the file because it probes for streams regardless. This walks the chain the way a player does.
+// A player finds the video by following the PAT to the PMT and the PMT to the elementary stream. Testing only that those packets EXIST is not enough: the PAT once pointed at PID 0 instead of the PMT, so a player that trusts it (VLC) saw no video track at all, while ffmpeg still played the file because it probes for streams regardless. This walks the chain the way a player does.
 TEST_CASE("The PAT points at the PMT, and the PMT at the video stream") {
     std::vector<uint8_t> out(64 * 1024);
     mm::ts::Continuity wcc;
@@ -101,8 +93,7 @@ TEST_CASE("The PAT points at the PMT, and the PMT at the video stream") {
     CHECK(static_cast<uint16_t>(((es[1] & 0x1F) << 8) | es[2]) == mm::ts::kPidVideo);
 }
 
-// The continuity counter is how a player detects a dropped packet: it must advance by one per
-// packet on each PID independently, wrapping at 4 bits.
+// The continuity counter is how a player detects a dropped packet: it must advance by one per packet on each PID independently, wrapping at 4 bits.
 TEST_CASE("Continuity counters advance per PID") {
     std::vector<uint8_t> out(256 * 1024);
     mm::ts::Continuity wcc;
@@ -123,8 +114,7 @@ TEST_CASE("Continuity counters advance per PID") {
     CHECK(expected > 0);   // the loop actually saw video packets
 }
 
-// Only the first packet of a frame may claim a payload start; a decoder uses the flag to find
-// frame boundaries, so a spurious one mid-frame corrupts the split.
+// Only the first packet of a frame may claim a payload start; a decoder uses the flag to find frame boundaries, so a spurious one mid-frame corrupts the split.
 TEST_CASE("Only a frame's first packet flags the payload start") {
     std::vector<uint8_t> out(64 * 1024);
     mm::ts::Continuity wcc;
@@ -142,8 +132,7 @@ TEST_CASE("Only a frame's first packet flags the payload start") {
     CHECK(starts == 1);
 }
 
-// A player needs a clock reference where it can start decoding, and that is the keyframe. A
-// non-key frame carries none.
+// A player needs a clock reference where it can start decoding, and that is the keyframe. A non-key frame carries none.
 TEST_CASE("A keyframe carries the clock reference, a delta frame does not") {
     auto hasPcr = [](const std::vector<uint8_t>& buf, size_t len) {
         for (size_t off = 0; off < len; off += mm::ts::kPacketSize) {
@@ -169,10 +158,7 @@ TEST_CASE("A keyframe carries the clock reference, a delta frame does not") {
     CHECK_FALSE(hasPcr(delta, dw.size()));
 }
 
-// Muxing a long run of frames must not disturb anything around it. The muxer assembles each PES
-// header in a fixed local buffer, and it once overran that buffer by a byte -- invisible in the
-// output, caught only by a sanitizer. This drives the same path with a guard around the output so
-// the CI sanitizer build has a case that would fail loudly.
+// Muxing a long run of frames must not disturb anything around it. The muxer assembles each PES header in a fixed local buffer, and it once overran that buffer by a byte -- invisible in the output, caught only by a sanitizer. This drives the same path with a guard around the output so the CI sanitizer build has a case that would fail loudly.
 TEST_CASE("Muxing many frames stays inside its buffers") {
     const uint8_t guard = 0x5A;
     std::vector<uint8_t> arena(512 * 1024, guard);
@@ -190,8 +176,7 @@ TEST_CASE("Muxing many frames stays inside its buffers") {
     CHECK(clobbered == 0);
 }
 
-// A frame larger than the buffer must be reported, never written past the end: on the P4 the
-// destination is a fixed PSRAM slot, so a silent overrun would corrupt whatever follows it.
+// A frame larger than the buffer must be reported, never written past the end: on the P4 the destination is a fixed PSRAM slot, so a silent overrun would corrupt whatever follows it.
 TEST_CASE("A frame too large for the buffer reports overflow instead of overrunning") {
     std::vector<uint8_t> out(3 * mm::ts::kPacketSize);
     const uint8_t guard = 0xAB;
@@ -209,8 +194,7 @@ TEST_CASE("A frame too large for the buffer reports overflow instead of overrunn
     CHECK(past == 0);
 }
 
-// The whole frame reaches the stream: what a decoder reassembles from the payloads must be the
-// bytes we handed in, in order, with nothing dropped at a packet seam.
+// The whole frame reaches the stream: what a decoder reassembles from the payloads must be the bytes we handed in, in order, with nothing dropped at a packet seam.
 TEST_CASE("The frame's bytes survive the split across packets") {
     std::vector<uint8_t> out(64 * 1024);
     mm::ts::Continuity wcc;
@@ -236,10 +220,7 @@ TEST_CASE("The frame's bytes survive the split across packets") {
     CHECK(found);
 }
 
-// A Writer is constructed per FRAME in production, so the continuity counters cannot live inside
-// it: MPEG-TS requires one unbroken sequence per PID across every frame and every segment. When
-// they did live in the Writer, each frame restarted at zero and ffmpeg reported "Packet corrupt"
-// on every one, which players show as a stream that stalls and re-buffers.
+// A Writer is constructed per FRAME in production, so the continuity counters cannot live inside it: MPEG-TS requires one unbroken sequence per PID across every frame and every segment. When they did live in the Writer, each frame restarted at zero and ffmpeg reported "Packet corrupt" on every one, which players show as a stream that stalls and re-buffers.
 TEST_CASE("Continuity survives across the separate writers a stream is muxed with") {
     std::vector<uint8_t> out(256 * 1024);
     mm::ts::Continuity cc;
@@ -266,10 +247,7 @@ TEST_CASE("Continuity survives across the separate writers a stream is muxed wit
     CHECK(checked > 40);   // enough packets that a per-writer reset could not hide
 }
 
-// A frame the segment cannot hold is DISCARDED, and the counters must be discarded with it: the
-// writer advances them per packet as it emits, so keeping the advance for packets that were
-// never sent leaves a gap a player reads as lost packets. The caller restores them; this pins
-// that the counters are a plain value the caller can snapshot for exactly that purpose.
+// A frame the segment cannot hold is DISCARDED, and the counters must be discarded with it: the writer advances them per packet as it emits, so keeping the advance for packets that were never sent leaves a gap a player reads as lost packets. The caller restores them; this pins that the counters are a plain value the caller can snapshot for exactly that purpose.
 TEST_CASE("Discarding an overflowed frame can restore the continuity counters") {
     std::vector<uint8_t> out(64 * 1024);
     mm::ts::Continuity cc;

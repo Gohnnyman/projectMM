@@ -1,4 +1,4 @@
-// @module ScratchBuffer
+/// @module ScratchBuffer
 
 #include "doctest.h"
 #include "core/module/MoonModule.h"
@@ -10,9 +10,7 @@ using namespace mm;
 
 namespace {
 
-// A minimal concrete MoonModule to own scratch buffers in these tests. MoonModule is
-// abstract-in-practice only by convention (it has no pure virtuals), so a bare subclass
-// with a public ScratchBuffer member is all the fixture needs.
+// A minimal concrete MoonModule to own scratch buffers in these tests. MoonModule is abstract-in-practice only by convention (it has no pure virtuals), so a bare subclass with a public ScratchBuffer member is all the fixture needs.
 struct Owner : MoonModule {
     ScratchBuffer<uint8_t> buf{*this};
 };
@@ -21,8 +19,7 @@ struct Point { int16_t x; int16_t y; };   // a 4-byte element to exercise sizeof
 
 } // namespace
 
-// resize(N) allocates N elements, count()/bytes() reflect it, data() is non-null, and the
-// owner's dynamicBytes tracks the buffer's byte count.
+// resize(N) allocates N elements, count()/bytes() reflect it, data() is non-null, and the owner's dynamicBytes tracks the buffer's byte count.
 TEST_CASE("ScratchBuffer resize allocates and reports bytes to its owner") {
     Owner o;
     CHECK(o.dynamicBytes() == 0);
@@ -82,8 +79,7 @@ TEST_CASE("ScratchBuffer sizes by element type") {
     CHECK(o.pts[3].y == -9);
 }
 
-// release() on the owner frees every registered buffer (the disable-without-destroy path
-// applyState() takes) — the buffer is emptied and the owner's total returns to zero.
+// release() on the owner frees every registered buffer (the disable-without-destroy path applyState() takes), the buffer is emptied and the owner's total returns to zero.
 TEST_CASE("ScratchBuffer is freed by the owner's release()") {
     Owner o;
     o.buf.resize(300);
@@ -101,8 +97,7 @@ TEST_CASE("ScratchBuffer is freed by the owner's release()") {
     CHECK(o.dynamicBytes() == 300);
 }
 
-// Multiple buffers on one module each report independently; the owner's total is their sum,
-// and release() frees them all (the StarSky/GameOfLife multi-buffer case).
+// Multiple buffers on one module each report independently; the owner's total is their sum, and release() frees them all (the StarSky/GameOfLife multi-buffer case).
 TEST_CASE("ScratchBuffer multiple buffers on one module sum and release together") {
     struct MultiOwner : MoonModule {
         ScratchBuffer<uint8_t> a{*this};
@@ -121,8 +116,7 @@ TEST_CASE("ScratchBuffer multiple buffers on one module sum and release together
     CHECK_FALSE(static_cast<bool>(o.c));
 }
 
-// A buffer's destructor frees its heap and deregisters from the still-alive owner — no leak,
-// no dangling list node. (ASAN in the test build is the real guard; this pins the accounting.)
+// A buffer's destructor frees its heap and deregisters from the still-alive owner, no leak, no dangling list node. (ASAN in the test build is the real guard; this pins the accounting.)
 TEST_CASE("ScratchBuffer destructor frees and deregisters") {
     Owner o;
     {

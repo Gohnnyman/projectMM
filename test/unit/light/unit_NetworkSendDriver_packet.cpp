@@ -1,4 +1,4 @@
-// @module NetworkSendDriver
+/// @module NetworkSendDriver
 
 #include "doctest.h"
 #include "light/drivers/NetworkSendDriver.h"
@@ -77,7 +77,7 @@ TEST_CASE("ArtNet universe splitting for 256 RGB lights") {
     CHECK(sent == totalBytes);
 }
 
-// The data-length field is encoded big-endian (high byte first), unlike the universe field — matching the Art-Net spec.
+// The data-length field is encoded big-endian (high byte first), unlike the universe field, matching the Art-Net spec.
 TEST_CASE("ArtNet packet length field is big-endian") {
     uint8_t data[510];
     std::memset(data, 0, sizeof(data));
@@ -90,7 +90,7 @@ TEST_CASE("ArtNet packet length field is big-endian") {
     CHECK(packet[17] == 0xFE);
 }
 
-// The built E1.31 packet carries the exact ACN layout strict sACN receivers (and tools like xLights) validate: identifier, the three flags+length fields, CID, source name, priority, universe, property count, start code.
+// The built E1.31 packet carries the exact ACN layout strict sACN receivers (and tools like xLights) validate. Identifier, the three flags+length fields, CID, source name, priority, universe, property count, start code.
 TEST_CASE("E1.31 packet header format") {
     uint8_t cid[mm::E131_CID_LENGTH];
     for (uint8_t i = 0; i < mm::E131_CID_LENGTH; i++) cid[i] = static_cast<uint8_t>(0xC0 + i);
@@ -107,8 +107,7 @@ TEST_CASE("E1.31 packet header format") {
     CHECK(pkt[21] == 0x04);
     CHECK(std::memcmp(pkt + 22, cid, mm::E131_CID_LENGTH) == 0);
 
-    // Framing layer: flags+length (129-38=91), vector, source name, priority 100,
-    // sequence, universe big-endian.
+    // Framing layer: flags+length (129-38=91), vector, source name, priority 100, sequence, universe big-endian.
     CHECK(pkt[38] == 0x70); CHECK(pkt[39] == 91);
     CHECK(pkt[43] == 0x02);
     CHECK(std::strcmp(reinterpret_cast<const char*>(pkt + 44), "projectMM") == 0);
@@ -116,8 +115,7 @@ TEST_CASE("E1.31 packet header format") {
     CHECK(pkt[111] == 42);
     CHECK(pkt[113] == 0x01); CHECK(pkt[114] == 0x03);
 
-    // DMP layer: flags+length (129-115=14), vector, address/data type, increment,
-    // property count = 1 + 3, start code 0; then the data.
+    // DMP layer: flags+length (129-115=14), vector, address/data type, increment, property count = 1 + 3, start code 0; then the data.
     CHECK(pkt[115] == 0x70); CHECK(pkt[116] == 14);
     CHECK(pkt[117] == 0x02);
     CHECK(pkt[118] == 0xA1);
@@ -146,11 +144,7 @@ TEST_CASE("DDP packet header format") {
     CHECK(pkt[0] == 0x41);                    // push set on the frame's last packet
 }
 
-// The destination list is EMPTY by default, so an unconfigured driver idles instead of falling back
-// to the 255.255.255.255 broadcast. Broadcast does not scale and its failure lands on the NETWORK,
-// not the device: an ArtNet universe id sits in the payload, so every host on the segment must
-// receive and parse every packet before it can discard it (~4,850 pkt/s on a 128x128 grid — measured
-// starving an ESP32 until its HTTP stopped answering). Art-Net 4 forbids broadcast ArtDmx outright.
+// The destination list is EMPTY by default, so an unconfigured driver idles instead of falling back to the 255.255.255.255 broadcast. Broadcast does not scale and its failure lands on the NETWORK, not the device: an ArtNet universe id sits in the payload, so every host on the segment must receive and parse every packet before it can discard it (~4,850 pkt/s on a 128x128 grid, measured starving an ESP32 until its HTTP stopped answering). Art-Net 4 forbids broadcast ArtDmx outright.
 TEST_CASE("NetworkSendDriver: no destination by default — it idles, and says why") {
     mm::NetworkSendDriver d;
     CHECK(d.ips[0] == '\0');            // blank, NOT an inherited broadcast address
@@ -159,10 +153,7 @@ TEST_CASE("NetworkSendDriver: no destination by default — it idles, and says w
     CHECK(d.status() != nullptr);        // explains itself rather than idling silently
 }
 
-// The multi-destination fan-out: ONE driver feeds N tubes, each with its own IP and its own
-// contiguous run of the window. This is the Art-Net-conformant shape (ArtDmx must be unicast to the
-// node owning each universe), and it costs the same total packets as a single broadcast stream while
-// keeping every packet off the other nodes' NICs.
+// The multi-destination fan-out: ONE driver feeds N tubes, each with its own IP and its own contiguous run of the window. This is the Art-Net-conformant shape (ArtDmx must be unicast to the node owning each universe), and it costs the same total packets as a single broadcast stream while keeping every packet off the other nodes' NICs.
 TEST_CASE("NetworkSendDriver: a range fans the window out over its tubes, one slice each") {
     mm::Buffer src;
     src.allocate(300, 3);                     // 300 lights to spread over the tubes
@@ -206,10 +197,7 @@ TEST_CASE("NetworkSendDriver: lightsPerIp follows the ledsPerPin idiom") {
     }
 }
 
-// A malformed entry must leave the driver IDLE, not half-configured. parseIpList fills its output as
-// it goes, so a bad address AFTER good ones (a typo in tube 3 of 5) yields a partial list; publishing
-// that would send real packets to a real subset of hosts while the card shows an error. Wrong output is
-// worse than no output — so prepare() parses into locals and publishes only when everything validates.
+// A malformed entry must leave the driver IDLE, not half-configured. parseIpList fills its output as it goes, so a bad address AFTER good ones (a typo in tube 3 of 5) yields a partial list; publishing that would send real packets to a real subset of hosts while the card shows an error. Wrong output is worse than no output, so prepare() parses into locals and publishes only when everything validates.
 TEST_CASE("NetworkSendDriver: a malformed ips entry idles the driver — no partial destination list") {
     mm::Buffer src;
     src.allocate(300, 3);
@@ -237,9 +225,7 @@ TEST_CASE("NetworkSendDriver: a malformed ips entry idles the driver — no part
     }
 }
 
-// A hand-typed lightsPerIp list will sometimes not match the destination count — the likeliest real
-// typo. It must not silently mis-slice: a SHORT list even-splits the remainder across the rest (the
-// documented ledsPerPin broadcasting rule), and a LONG list simply ignores the extras.
+// A hand-typed lightsPerIp list will sometimes not match the destination count, the likeliest real typo. It must not silently mis-slice: a SHORT list even-splits the remainder across the rest (the documented ledsPerPin broadcasting rule), and a LONG list simply ignores the extras.
 TEST_CASE("NetworkSendDriver: a lightsPerIp list that doesn't match the tube count still slices sanely") {
     mm::Buffer src;
     src.allocate(300, 3);
@@ -266,10 +252,7 @@ TEST_CASE("NetworkSendDriver: a lightsPerIp list that doesn't match the tube cou
     }
 }
 
-// sACN's native addressing: the universe is IN the destination group, 239.255.{hi}.{lo}
-// (E1.31 section 9.3.1). That is what lets a switch with IGMP snooping filter per universe in
-// hardware, so a node's NIC sees only the universes it joined. Unicast E1.31 stays the default
-// because multicast floods exactly like broadcast on a switch that does NOT snoop.
+// sACN's native addressing: the universe is IN the destination group, 239.255.{hi}.{lo} (E1.31 section 9.3.1). That is what lets a switch with IGMP snooping filter per universe in hardware, so a node's NIC sees only the universes it joined. Unicast E1.31 stays the default because multicast floods exactly like broadcast on a switch that does NOT snoop.
 TEST_CASE("sACN multicast puts the universe number in the destination address") {
     uint8_t addr[4];
     mm::NetworkSendDriver::e131MulticastAddr(1, addr);
@@ -283,19 +266,12 @@ TEST_CASE("sACN multicast puts the universe number in the destination address") 
     CHECK(addr[2] == 1); CHECK(addr[3] == 44);  // 300 = 0x012C
 }
 
-// A fixture must not straddle two DMX universes. At 512 channels per universe an 11-channel
-// moving head divides 46 times with 6 bytes left over, so an unrounded chunk would put fixture 47
-// half in one packet and half in the next, and that fixture would read a neighbour's channels as
-// its own pan and tilt. Harmless on a 3-channel strip (a partial pixel is just a pixel), which is
-// why it only surfaced once fixtures had more than color in them.
+// A fixture must not straddle two DMX universes. At 512 channels per universe an 11-channel moving head divides 46 times with 6 bytes left over, so an unrounded chunk would put fixture 47 half in one packet and half in the next, and that fixture would read a neighbor's channels as its own pan and tilt. Harmless on a 3-channel strip (a partial pixel is just a pixel), which is why it only surfaced once fixtures had more than color in them.
 TEST_CASE("A DMX universe carries whole fixtures, never a split one") {
     constexpr size_t kUniverse = 512;
     // The rounding the driver applies: floor the universe to a whole number of fixtures.
     //
-    // A RESTATEMENT of NetworkSendDriver's arithmetic, not a call into it: the real rounding is
-    // inline in the send path (NetworkSendDriver.h, the `whole` line), which has no seam a unit
-    // test can reach without a socket. So this pins the RULE and would not catch the driver
-    // drifting away from it. Driving the real path needs a capture harness around the send seam.
+    // A RESTATEMENT of NetworkSendDriver's arithmetic, not a call into it: the real rounding is inline in the send path (NetworkSendDriver.h, the `whole` line), which has no seam a unit test can reach without a socket. So this pins the RULE and would not catch the driver drifting away from it. Driving the real path needs a capture harness around the send seam.
     auto wholeFixtures = [](size_t chunk, uint8_t bytesPerLight) {
         const size_t whole = (chunk / bytesPerLight) * bytesPerLight;
         return whole > 0 ? whole : chunk;
@@ -307,7 +283,6 @@ TEST_CASE("A DMX universe carries whole fixtures, never a split one") {
     CHECK(wholeFixtures(kUniverse, 4) == 512);    // divides exactly: unchanged
     CHECK(wholeFixtures(kUniverse, 1) == 512);
 
-    // A fixture wider than a universe cannot be served: keep the full universe rather than
-    // sending zero bytes forever, so it fails visibly instead of going silently dead.
+    // A fixture wider than a universe cannot be served: keep the full universe rather than sending zero bytes forever, so it fails visibly instead of going silently dead.
     CHECK(wholeFixtures(kUniverse, 255) == 510);
 }

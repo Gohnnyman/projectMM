@@ -38,8 +38,7 @@
     #if defined(__clang__)
         #pragma GCC diagnostic ignored "-Wnullability-completeness"
         #pragma GCC diagnostic ignored "-Wnullability-extension"
-        // Only local/newer clang knows this experimental group; CI's Apple clang errors on
-        // the unknown name under -Werror, so probe before naming it.
+        // Only local/newer clang knows this experimental group; CI's Apple clang errors on the unknown name under -Werror, so probe before naming it.
         #if __has_warning("-Wfunction-effects")
             #pragma GCC diagnostic ignored "-Wfunction-effects"
         #endif
@@ -69,9 +68,7 @@ namespace mm::platform {
 
 namespace {
 
-// One capture pipeline at a time (AudioService is a single active seat; a second concurrent
-// device would race one ring). 4096 samples ≈ 186 ms at 22050 Hz, comfortably above one
-// render tick's consumption, small enough to bound latency.
+// One capture pipeline at a time (AudioService is a single active seat; a second concurrent device would race one ring). 4096 samples ≈ 186 ms at 22050 Hz, comfortably above one render tick's consumption, small enough to bound latency.
 SpscRing<int32_t, 4096> ring_;
 
 ma_context ctx_;
@@ -79,9 +76,7 @@ bool ctxReady_ = false;
 ma_device device_;
 bool deviceOpen_ = false;
 
-// The enumeration cache the `device` Select borrows: stable storage owned here, entry 0 is
-// always "default". Sized for a generous desk (more devices than kMaxDevices simply don't
-// list; the default entry always works).
+// The enumeration cache the `device` Select borrows: stable storage owned here, entry 0 is always "default". Sized for a generous desk (more devices than kMaxDevices simply don't list; the default entry always works).
 constexpr size_t kMaxDevices = 16;
 constexpr size_t kNameLen = 64;
 char nameBuf_[kMaxDevices][kNameLen];
@@ -96,8 +91,7 @@ bool ensureContext() {
     return true;
 }
 
-// miniaudio device thread -> ring. s32 frames, mono (configured in audioCaptureInit); a full
-// ring drops the newest block (see SpscRing).
+// miniaudio device thread -> ring. s32 frames, mono (configured in audioCaptureInit); a full ring drops the newest block (see SpscRing).
 void captureCallback(ma_device* /*dev*/, void* /*out*/, const void* in, ma_uint32 frames) {
     if (in == nullptr) return;
     ring_.push(static_cast<const int32_t*>(in), frames);
@@ -119,9 +113,7 @@ size_t audioCaptureDevices(const char* const** optionsOut) {
         ma_uint32 count = 0;
         if (ma_context_get_devices(&ctx_, nullptr, nullptr, &infos, &count) == MA_SUCCESS) {
             for (ma_uint32 i = 0; i < count && deviceCount_ < kMaxDevices; i++) {
-                // Truncation to kNameLen is intentional (long device names get cut for the
-                // dropdown); the explicit precision states it, which GCC's -Wformat-truncation
-                // requires under -Werror.
+                // Truncation to kNameLen is intentional (long device names get cut for the dropdown); the explicit precision states it, which GCC's -Wformat-truncation requires under -Werror.
                 std::snprintf(nameBuf_[deviceCount_], kNameLen, "%.63s", infos[i].name);
                 namePtrs_[deviceCount_] = nameBuf_[deviceCount_];
                 deviceIds_[deviceCount_] = infos[i].id;
@@ -136,8 +128,7 @@ size_t audioCaptureDevices(const char* const** optionsOut) {
 bool audioCaptureInit(AudioMicHandle& h, uint8_t deviceIndex, uint32_t sampleRate) {
     if (!ensureContext()) return false;
     if (deviceOpen_) { audioMicDeinit(h); }
-    // Index 0 = OS default device (null id). A stale persisted index past the current list
-    // fails loudly here rather than opening some other device.
+    // Index 0 = OS default device (null id). A stale persisted index past the current list fails loudly here rather than opening some other device.
     if (deviceIndex >= deviceCount_ && deviceIndex != 0) {
         // The list may simply not have been enumerated yet this boot (e.g. a direct init).
         audioCaptureDevices(nullptr);
@@ -146,8 +137,7 @@ bool audioCaptureInit(AudioMicHandle& h, uint8_t deviceIndex, uint32_t sampleRat
 
     ma_device_config cfg = ma_device_config_init(ma_device_type_capture);
     if (deviceIndex > 0) cfg.capture.pDeviceID = &deviceIds_[deviceIndex];
-    // s32 mono at the service's rate: full-scale s32 IS the seam's 24-bit-left-justified
-    // regime, and miniaudio converts/resamples from whatever the hardware runs natively.
+    // s32 mono at the service's rate: full-scale s32 IS the seam's 24-bit-left-justified regime, and miniaudio converts/resamples from whatever the hardware runs natively.
     cfg.capture.format = ma_format_s32;
     cfg.capture.channels = 1;
     cfg.sampleRate = sampleRate;
@@ -183,8 +173,7 @@ void audioMicDeinit(AudioMicHandle& h) {
     h.impl = nullptr;
 }
 
-// The pin-based I2S init cannot exist on a desktop host; capture goes through
-// audioCaptureInit. Kept failing (not asserting) so shared code degrades.
+// The pin-based I2S init cannot exist on a desktop host; capture goes through audioCaptureInit. Kept failing (not asserting) so shared code degrades.
 bool audioMicInit(AudioMicHandle& /*h*/, uint16_t /*wsPin*/, uint16_t /*sdPin*/,
                   uint16_t /*sckPin*/, int16_t /*mclkPin*/, uint32_t /*sampleRate*/) {
     return false;

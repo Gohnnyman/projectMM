@@ -1,19 +1,22 @@
-// Kernel micro-bench: nanoseconds per call for the power-function kernels, on the host.
-//
-// The gate for a kernel swap: the generative-fields plan replaces value noise with gradient noise
-// behind the same names and accepts the swap only within 1.3x of the value-noise cost per sample.
-// That bound is meaningless without the number it is measured against, so this target records it,
-// before the swap, and every later kernel adds a row. Host timings, not ESP32 cycles: the S3 is
-// 20-40x slower per core (performance.md, the `collide` measurement) and the ratio between two rows
-// is what transfers, not the absolute figure.
-//
-// Method: sweep a 256x256 grid of 16.0 fixed coordinates at a fixed step (the same shape a noise
-// effect samples), accumulate every result into a checksum the compiler cannot elide, repeat, and
-// keep the best of several runs so a scheduler hiccup does not become a slower kernel. Output is a
-// Markdown table so the rows paste into performance.md unchanged.
-//
-// Not a doctest: a benchmark that asserts a timing is a flaky test, and one that does not assert is
-// a report. This is the report. Run by hand or through moondeck/check/bench_kernels.py.
+/// Kernel micro-bench: nanoseconds per call for the power-function kernels, on the host.
+///
+/// The gate for a kernel swap.
+/// The generative-fields plan replaces value noise with gradient noise behind the same names and accepts the swap only within 1.3x of the value-noise cost per sample.
+/// That bound is meaningless without the number it is measured against, so this target records it, before the swap, and every later kernel adds a row.
+/// Host timings, not ESP32 cycles: the S3 is 20-40x slower per core (performance.md, the `collide` measurement) and the ratio between two rows is what transfers, not the absolute figure.
+///
+/// @moreinfo
+///
+/// ## Method
+///
+/// Sweep a 256x256 grid of 16.0 fixed coordinates at a fixed step (the same shape a noise effect samples), accumulate every result into a checksum the compiler cannot elide, repeat, and keep the best of several runs so a scheduler hiccup does not become a slower kernel.
+/// Output is a Markdown table so the rows paste into performance.md unchanged.
+///
+/// ## Why it is not a doctest
+///
+/// A benchmark that asserts a timing is a flaky test, and one that does not assert is a report.
+/// This is the report.
+/// Run by hand or through moondeck/check/bench_kernels.py.
 
 #include "core/util/math16.h"
 #include "core/util/noise.h"
@@ -30,10 +33,9 @@ constexpr int kRuns = 5;                 // best-of
 
 /// Time one kernel over the grid; returns the best ns per sample across kRuns.
 ///
-/// The kernel arrives as a TEMPLATE parameter, not a std::function: a type-erased call cannot be
-/// inlined, so it adds an indirect call to every sample and lands in the same nanoseconds the
-/// measurement is trying to attribute to the kernel. At 5 ns a sample that is a large share of what
-/// is being reported.
+/// The kernel arrives as a TEMPLATE parameter, not a std::function.
+/// A type-erased call cannot be inlined, so it adds an indirect call to every sample and lands in the same nanoseconds the measurement is trying to attribute to the kernel.
+/// At 5 ns a sample that is a large share of what is being reported.
 template <typename Fn>
 double bench(Fn fn) {
     double best = 1e18;

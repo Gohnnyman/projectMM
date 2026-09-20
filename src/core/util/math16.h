@@ -333,7 +333,7 @@ constexpr uint8_t ballistic(uint8_t current, uint8_t target, uint8_t rise, uint8
     return smoothFollow(current, target, target > current ? rise : fall);
 }
 
-/// The falling-peak meter: rise INSTANTLY to a new high, then decay slowly. The asymmetry is the whole point: a peak that eased upward would miss transients, and one that dropped instantly would show nothing to read. Every VU meter with a floating peak dot is this function.
+/// The falling-peak meter: rise INSTANTLY to a new high, then decay slowly, which is what catches a transient and leaves it readable. Every VU meter with a floating peak dot is this function.
 constexpr uint8_t peakHold(uint8_t peak, uint8_t value, uint8_t decay) {
     if (value > peak) return value;                    // instant attack
     return peak > decay ? static_cast<uint8_t>(peak - decay) : 0;

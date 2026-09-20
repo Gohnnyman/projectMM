@@ -1,12 +1,11 @@
-// @module math8
+/// @module math8
 
 #include "doctest.h"
 #include "core/util/math8.h"
 
 using namespace mm;
 
-// sin8: a 256-entry sine LUT centred on 128, peaking near 255 and 0 a quarter and three-quarters
-// of the way round. cos8 is sin8 shifted a quarter turn.
+// sin8: a 256-entry sine LUT centered on 128, peaking near 255 and 0 a quarter and three-quarters of the way round. cos8 is sin8 shifted a quarter turn.
 TEST_CASE("math8: sin8 / cos8 trace a sine over the 256-step circle") {
     CHECK(sin8(0) == 128);                 // zero crossing rising
     CHECK(sin8(64) >= 254);                // peak near +1
@@ -46,8 +45,7 @@ TEST_CASE("math8: beat8 ramps 0..255 once per beat") {
     CHECK(beat8(0, 1234) == 0);            // 0 bpm is inert, not a divide-by-zero
 }
 
-// beatsin8: a sine oscillating in [low,high] at bpm. Stays in range across the cycle and actually
-// moves (not stuck at one value).
+// beatsin8: a sine oscillating in [low,high] at bpm. Stays in range across the cycle and actually moves (not stuck at one value).
 TEST_CASE("math8: beatsin8 oscillates within [low,high]") {
     uint8_t lo = 255, hi = 0;
     for (uint32_t ms = 0; ms < 1000; ms += 20) {       // one full beat at 60 bpm
@@ -60,8 +58,7 @@ TEST_CASE("math8: beatsin8 oscillates within [low,high]") {
     CHECK(hi - lo >= 100);                 // swept most of the range, so it genuinely oscillates
 }
 
-// Random8: a seeded PRNG — same seed gives the same sequence (determinism), and below(n) stays
-// under n. Two different seeds diverge.
+// Random8: a seeded PRNG, same seed gives the same sequence (determinism), and below(n) stays under n. Two different seeds diverge.
 TEST_CASE("math8: Random8 is deterministic per seed and below(n) is bounded") {
     Random8 a(12345), b(12345);
     bool identical = true;
@@ -86,9 +83,7 @@ TEST_CASE("math8: atan2_8 and dist8 cover the basics") {
     CHECK(dist8(10, 10) > 10);             // diagonal longer than one axis
 }
 
-// map8 rescales 0..255 onto [lo,hi] inclusively — the top of the input must REACH hi (FastLED's
-// map8 == map(in,0,255,lo,hi)). Regression: an earlier scale8-based form left hi unreachable, so a
-// one-step span (a bar height of 1) collapsed to 0 — the bug GEQ3D's height mapping hit.
+// map8 rescales 0..255 onto [lo,hi] inclusively, the top of the input must REACH hi (FastLED's map8 == map(in,0,255,lo,hi)). Regression: an earlier scale8-based form left hi unreachable, so a one-step span (a bar height of 1) collapsed to 0, the bug GEQ3D's height mapping hit.
 TEST_CASE("math8: map8 reaches both range ends, including one-step spans") {
     CHECK(map8(0, 0, 255) == 0);           // input floor → range floor
     CHECK(map8(255, 0, 255) == 255);       // input top → range top (no wrap on the 256-span)

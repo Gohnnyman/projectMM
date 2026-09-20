@@ -1,4 +1,4 @@
-// The out-of-line half of ScratchBuffer: the free-list registration and the resize that owns memory.
+/// The out-of-line half of ScratchBuffer: the free-list registration and the resize that owns memory.
 
 #include "core/util/ScratchBuffer.h"
 

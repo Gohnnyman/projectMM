@@ -114,13 +114,44 @@ MAX_CLASS_DOC = 10      # lines of `///` directly above `class X`
 MAX_MOREINFO_SECTION = 10  # lines of ONE `## ` section inside the `@moreinfo` appendix
 MAX_MEMBER_DOC = 1      # lines of a `///` run that is NOT a class comment
 MAX_DOC_WORDS = 30      # words in one sentence of a comment, `///` or `//`
-MAX_CODE_COMMENT = 1    # lines of a `//` run in a header, which has a page to keep readable
-# A `.cpp` generates no page, so the one-line cap there enforced a documentation constraint on
-# text that never reaches the documentation. It read as verbosity control and was not: the word
-# budget below is what catches a rambling comment, and it applies to both. What the line count
-# catches in an implementation file is an ESSAY, so the limit is where one starts rather than at
-# one line. Past it the reasoning belongs in the file lead's appendix with an `@xref` back.
-MAX_CODE_COMMENT_CPP = 4
+# Characters of one `//` line, whatever it holds. The word budget governs a sentence and the
+# no-wrap rule keeps a sentence whole, so neither bounds a line carrying several of them: without
+# this a comment stays legal while running off the side of the screen. Related sentences share a
+# line up to here, which is what keeps a dense comment compact instead of fanning out one line per
+# sentence.
+#
+# An IMPLEMENTATION file's `//` only, because the limit is about reading SOURCE. A header's
+# comment becomes a paragraph on a generated page, where the browser wraps it and its length
+# reaches no reader: a 200-character line renders exactly like a 100-character one. Applied to
+# headers it reported 475 lines whose rendering it could not improve, and asked for a rewording
+# the 30-word budget already governs from the sentence side.
+# 250 for now, on the way down. One number, so tightening it is this line and nothing else.
+# 120 was tried first and punished the compactness the other rules ask for: several short
+# sentences sharing a line is good writing and runs past 120 easily, so the cap fired on 4727
+# lines whose sentences were each already inside the word budget. At 250 it catches the runaway
+# a reader actually struggles with, the 320-to-1057-character paragraph living on one line.
+MAX_COMMENT_LINE_CHARS = 250
+# The same budget over a whole `///` RUN, so the line cap cannot be satisfied by chopping. A run
+# is measured in lines and each line in characters, and neither catches the move that splits one
+# over-long line into two half-long ones: the text is identical and every rule passes. Multiplying
+# the line cap by the run's line budget states the real limit, which is how much a reader is asked
+# to take in before the next declaration.
+MAX_RUN_CHARS = MAX_CLASS_DOC * MAX_COMMENT_LINE_CHARS
+# A LEAD's line, which is wider. A lead is the summary that opens a header or a class, so one of
+# its lines carries what the whole file is for: what the thing is, which hardware it runs on, where
+# the shared body lives, what the wire format is. Held to the member cap, the driver headers each
+# lost about a third of that, and what went was content rather than padding. The run budget above
+# still bounds the lead as a whole, so the wider line buys density rather than sprawl.
+MAX_LEAD_LINE_CHARS = 400
+# The phrase a line-length finding carries, so `_blocks` can recognise the one rule that warns
+# even in a header. Matching on the reason keeps the exception in ONE place rather than making
+# every rule pass its own severity.
+_LINE_LENGTH_RULE = "chars >"
+# One line, in every file. Depth is not forbidden, it is HOMED: a header carries it in an
+# `@moreinfo` appendix (212 do) and an implementation file carries it in the same appendix on its
+# own file lead. A cap of 8 in a `.cpp` was an attempt to give depth a home inline, which leaves
+# the reasoning beside one call rather than where a reader looks for it.
+MAX_CODE_COMMENT = 1
 
 
 def _generates_a_page(rel: str) -> bool:
@@ -134,7 +165,7 @@ def _generates_a_page(rel: str) -> bool:
     """
     return not rel.endswith(".cpp")
 
-def _blocks(key: str) -> bool:
+def _blocks(key: str, why: str = "") -> bool:
     """Whether a finding fails the gate or annotates it.
 
     The same split `_generates_a_page` draws, carried through to severity. A header's comments
@@ -150,20 +181,48 @@ def _blocks(key: str) -> bool:
     that an implementation comment matters less. When the `.cpp` side reaches zero this function
     goes and every finding blocks, the same way `.vale.ini` promotes a page to error once the
     sweep has finished it and loses its per-page section when the last page lands.
+
+    ONE rule is staged separately: the line-length cap warns in a header too. Every other rule
+    describes how this tree is already written, so a finding is a defect against a standard the
+    file was written under. The cap is new, so its findings are lines nobody wrote wrongly, and
+    erroring on 820 of them would stop commits over a target rather than a defect. It joins the
+    others as an error once the tree meets it, which is the same staging this function is.
     """
+    if _LINE_LENGTH_RULE in why:
+        return False
     return _generates_a_page(key.partition("::")[0])
 
 
 # No hard wrap: a sentence continued on the next `///` line. The one-line budget above already
-# forbids this on a member or code comment, so it bites only where a block is ALLOWED to be
-# multi-line: the class comment and the `@moreinfo` appendix, which becomes a markdown page.
+# forbids this on a header's member or code comment, so it bites where a block is ALLOWED to be
+# multi-line: the class comment, the `@moreinfo` appendix, and any multi-line run in a `.cpp`.
 # Same reason markdown forbids it: let the editor soft-wrap, so a one-word edit is a one-word
 # diff rather than a reflowed paragraph.
 _WRAP_SKIP = ("##", "@", "-", "*", "|", "```", ">")
+# A NUMBERED item is a bullet that happens to start with a digit, so it is structure exactly as
+# `-` is. Left out, an enumerated spec read as prose being wrapped and the joiner fused a five-item
+# list onto one 299-character line, which is the layout carrying the meaning destroyed to satisfy
+# a rule about sentences. Matched rather than prefixed because the marker is `1.`, not one string.
+_LIST_ITEM_RE = re.compile(r"^\d+[.)]\s")
 # An INDENTED line inside a comment is a block, not prose: a wire table, a listing, a diagram.
 # Joining one destroys the layout that carries its meaning, and a reference table read as a
 # sentence is the worst of both. Four spaces after the marker is the markdown convention.
 _WRAP_INDENT = 4
+
+
+
+def _is_structural(body: str) -> bool:
+    """Whether a comment line is layout rather than prose: a list item, a table row, a fence.
+
+    Structure is measured by what it shows, so its line count is not a budget to meet. The same
+    set the no-wrap rule skips, plus an indented line, which is a block by the markdown rule the
+    standards already name.
+    """
+    b = body.strip()
+    if not b:
+        return True                     # a blank `//` line separates paragraphs
+    return (b.startswith(_WRAP_SKIP) or bool(_LIST_ITEM_RE.match(b))
+            or body.startswith(" " * _WRAP_INDENT))
 
 
 
@@ -336,7 +395,7 @@ _RULE_NAMES = (
     "details table cell", "details table has", "details section", "details heading",
     "public function has no", "public variable has no", "second column",
     "file opens with //", "file lead missing", "@moreinfo on a member", "@xref",
-    "code comment", "comment line",
+    "code comment", "comment line", "doc line", "lead",
     "appendix section",
     "class comment", "member comment", "no image", "image is", "one control",
     "description", "controls", "doc sentence", "hard wrap",
@@ -357,6 +416,8 @@ _RULE_LABELS = {
     "class comment": "over-long class comments",
     "doc sentence": "over-long sentences",
     "comment line": "over-long comment lines",
+    "doc line": "over-long doc lines",
+    "lead": "over-long leads",
     "appendix section": "over-long appendix sections",
     "@moreinfo on a member": "@moreinfo on a member",
     "@xref": "unresolved @xref",
@@ -424,6 +485,12 @@ def _wrap_rule(rel: str, lines: list, k: int, end: int, start: int = 0):
     A function rather than a loop body, because two callers need it: a member or class run,
     and a `@defgroup` file lead. The `@defgroup` branch returns early on its own budget, and
     when this test lived inline there it simply never ran on a file-level block.
+
+    Every file, header or implementation. The reason is the DIFF, not the page: a sentence
+    split across lines reflows every one of them when a word changes, so a one-word edit reads
+    as a rewritten paragraph in review. That cost is the same in a `.cpp`, and one sentence per
+    line is as available there as anywhere: the line simply runs long, which is what the editor
+    soft-wraps.
     """
     # A list item, a heading, a table row or a fence is structure rather than prose being
     # wrapped, so each is skipped rather than read as a continuation.
@@ -435,19 +502,22 @@ def _wrap_rule(rel: str, lines: list, k: int, end: int, start: int = 0):
     # same exemption the section cap already makes, and the one the standards state.
     fenced = False
     for j in range(start, k):
-        if re.sub(r"^\s*///\s*", "", lines[j]).strip().startswith("```"):
+        if re.sub(r"^\s*//+\s*", "", lines[j]).strip().startswith("```"):
             fenced = not fenced
     if fenced:
         return []
-    body = re.sub(r"^\s*///\s*", "", lines[k]).strip()
-    nbody = re.sub(r"^\s*///\s*", "", lines[k + 1]).strip()
+    # `//+` rather than `///`: the rule binds on both markers, and stripping only the Doxygen one
+    # left every `//` line with its slashes attached, so no continuation ever matched.
+    body = re.sub(r"^\s*//+\s*", "", lines[k]).strip()
+    nbody = re.sub(r"^\s*//+\s*", "", lines[k + 1]).strip()
     if not body or not nbody:
         return []
-    if body.startswith(_WRAP_SKIP) or nbody.startswith(_WRAP_SKIP):
+    if (body.startswith(_WRAP_SKIP) or nbody.startswith(_WRAP_SKIP)
+            or _LIST_ITEM_RE.match(body) or _LIST_ITEM_RE.match(nbody)):
         return []
     # Either side indented means a block: leave its layout alone.
-    raw = re.sub(r"^\s*///", "", lines[k])
-    nraw = re.sub(r"^\s*///", "", lines[k + 1])
+    raw = re.sub(r"^\s*//+", "", lines[k])
+    nraw = re.sub(r"^\s*//+", "", lines[k + 1])
     if (len(raw) - len(raw.lstrip()) >= _WRAP_INDENT
             or len(nraw) - len(nraw.lstrip()) >= _WRAP_INDENT):
         return []
@@ -545,9 +615,15 @@ _VAR_RE = re.compile(r"^[\w:<>,\s\*&]+\s+(\w+)\s*(=[^;]+)?;")
 def _file_comment_end(lines) -> int:
     """Where the file comment stops, as a line index.
 
-    The file comment is the `//` block at the top, before anything is declared. Include lines,
-    pragmas and blank lines come before or between its parts and do not end it; the first line
-    that declares something does. A file with no leading comment answers 0, so nothing is exempt.
+    The file comment is the `//` block at the top, before any code. Include lines and pragmas may
+    precede it and blank lines separate its paragraphs; the first line of actual content ends it,
+    an `#include` included. A file with no leading comment answers 0, so nothing is exempt.
+
+    A BLANK LINE does not end it either, which is the whole reason this is a scan rather than a
+    single run: a lead is written in paragraphs, and stopping at the first blank exempted only
+    the opening one. The rest then read as prose sitting on the next declaration and were
+    reported as essays in the wrong place, when they are the file's documentation in the only
+    place a `.cpp` has for it.
     """
     started = False
     end = 0
@@ -557,11 +633,11 @@ def _file_comment_end(lines) -> int:
             started = True
             end = i + 1            # the block reaches at least this far
             continue
-        if started:
-            break                  # once it has started, the next other line ends it
-        if not st or st.startswith(("#", "/*", "*")):
-            continue               # includes, pragmas and blanks still precede it
-        break                      # a declaration: there is no file comment
+        if not st:
+            continue               # a blank line separates the lead's paragraphs
+        if not started and st.startswith(("#", "/*", "*")):
+            continue               # includes and pragmas may still precede it
+        break                      # anything else, an include included, ends the lead
     return end
 
 
@@ -623,14 +699,13 @@ def _file_lead_rule(rel: str, lines: list[str], out: list) -> None:
         if st.startswith("///"):
             return                      # a `///` lead: @defgroup or a class comment, both fine
         if st.startswith("//"):
-            # A `//` block at the top is the file comment, which generates no page. That matters
-            # in a HEADER, whose lead IS its page's opening; an implementation file generates
-            # nothing either way, so there `//` is a note to the next reader and reads correctly.
-            # The lead still has to EXIST in both: a file that opens on code says nothing about
-            # itself to anyone. So only the spelling is a header's business.
-            if _generates_a_page(rel):
-                out.append((f"{rel}::line {i + 1}",
-                            "file opens with // : a header leads with /// so it generates a page"))
+            # Every file leads with `///`, header or not. A lead is the one comment written for
+            # someone who has not read the file yet, and `///` is what carries it onto a page and
+            # what lets an `@moreinfo` appendix hang off it: spelled `//` the same words reach
+            # nobody but the next person to scroll past them. 216 implementation files still lead
+            # with `//`, which is the sweep this states rather than an exemption.
+            out.append((f"{rel}::line {i + 1}",
+                        "file opens with // : a file leads with /// so it can carry an appendix"))
             return
         # Code before any comment: no lead at all. `namespace`, `using` and a forward declaration
         # are not a file's documentation, so keep looking until something documented turns up.
@@ -650,8 +725,6 @@ def _group_scope_rule(rel: str, lines: list[str], out: list) -> None:
     namespace, just before it ends, which is where the majority of the tree already puts it and
     what keeps group membership the same in every file.
     """
-    if not _generates_a_page(rel):
-        return
     opens = [i for i, l in enumerate(lines) if l.strip() == "/// @{"]
     closes = [i for i, l in enumerate(lines) if l.strip() == "/// @}"]
     if len(opens) == len(closes):
@@ -678,8 +751,6 @@ def _group_appendix_publishes_rule(rel: str, lines: list[str], out: list) -> Non
     The symptom is an appendix a reader can never reach, which is why this is checked from the
     source shape rather than from a page that was never written.
     """
-    if not _generates_a_page(rel):
-        return
     opens = [i for i, l in enumerate(lines) if l.strip() == "/// @{"]
     closes = [i for i, l in enumerate(lines) if l.strip() == "/// @}"]
     if not opens or not closes:
@@ -721,8 +792,7 @@ def _redundant_defgroup_rule(rel: str, lines: list[str], out: list) -> None:
     Nested types do not count either, being implementation detail rather than anything the page
     documents.
     """
-    if not _generates_a_page(rel):
-        return                          # a .cpp generates no page, so it has no lead to shape
+
     grp = next((i for i, l in enumerate(lines) if l.strip().startswith("/// @defgroup")), None)
     if grp is None:
         return
@@ -792,12 +862,33 @@ def _moreinfo_placement_rule(rel: str, lines: list[str], out: list) -> None:
     for start, end, nxt in _doc_runs(lines):
         if not any("@moreinfo" in lines[k] for k in range(start, end)):
             continue
-        if any("@defgroup" in lines[k] for k in range(start, end)):
+        # A bare `///` run at the TOP of the file is a lead too. The `@defgroup` spelling is how a
+        # header gathers free declarations under one page, and a file that needs no group still
+        # opens with prose saying what it is for: read as a member comment that block gets one
+        # line, so every such lead reported its own length as a finding. What makes a lead is its
+        # POSITION, not the marker it happens to carry.
+        is_lead = any("@defgroup" in lines[k] for k in range(start, end)) or (
+            start == _first_content_line(lines))
+        if is_lead:
             continue                    # the file lead
         if _CLASS_RE.match(nxt):
             continue                    # a class or struct comment
         out.append((f"{rel}::{_declared_key(nxt, start)}",
                     "@moreinfo on a member: the appendix belongs on the file or class lead"))
+
+
+def _first_content_line(lines: list[str]) -> int:
+    """The index of the first line that is neither blank nor a preprocessor or block-comment line.
+
+    What a file lead sits on. Include lines and pragmas may precede a lead, so a `///` run opening
+    at this index is the file's own comment rather than one documenting a declaration.
+    """
+    for i, ln in enumerate(lines):
+        st = ln.strip()
+        if not st or st.startswith(("#", "/*", "*")):
+            continue
+        return i
+    return 0
 
 
 def _header_rules(rel: str, text: str):
@@ -828,12 +919,25 @@ def _header_rules(rel: str, text: str):
         # a constant or nothing at all, so the one-line member budget measured the whole block and
         # reported a 45-line finding on every such header. It is a lead comment, so it is held to
         # the class budget and splits at @moreinfo the same way.
-        if any("@defgroup" in lines[k] for k in range(start, end)):
+        # A bare `///` run at the TOP of the file is a lead too, and gets the lead budget. The
+        # `@defgroup` spelling is how a header gathers free declarations under one page; a file
+        # needing no group still opens with prose saying what it is for. Read as a member comment
+        # that block gets ONE line, so each such lead reported its own length as a finding: what
+        # makes a lead is its POSITION, not the marker it carries.
+        if (any("@defgroup" in lines[k] for k in range(start, end))
+                or start == _first_content_line(lines)):
             head = next((k for k in range(start, end) if "@moreinfo" in lines[k]), end)
             n = head - start
             if n > MAX_CLASS_DOC:
                 out.append((f"{rel}::line {start + 1}",
                             f"class comment {n} lines > {MAX_CLASS_DOC}"))
+            # And the same budget in CHARACTERS, so the line cap cannot be met by chopping one
+            # long line into two shorter ones: the run is what a reader takes in, and splitting
+            # it leaves that unchanged.
+            chars = sum(len(re.sub(r"^\s*///\s?", "", lines[k])) for k in range(start, head))
+            if chars > MAX_RUN_CHARS:
+                out.append((f"{rel}::line {start + 1}",
+                            f"lead {chars} chars > {MAX_RUN_CHARS}"))
             # The word cap applies here too: a file-level block is prose a reader sees on the
             # generated page, and skipping the check exempted every `@defgroup` header from it.
             for k in range(start, end):
@@ -841,6 +945,9 @@ def _header_rules(rel: str, text: str):
                     if len(sentence.split()) > MAX_DOC_WORDS:
                         out.append((f"{rel}::line {k + 1}",
                                     f"doc sentence {len(sentence.split())} words > {MAX_DOC_WORDS}"))
+                if len(lines[k]) > MAX_LEAD_LINE_CHARS:
+                    out.append((f"{rel}::line {k + 1}",
+                                f"doc line {len(lines[k])} chars > {MAX_LEAD_LINE_CHARS}"))
                 # The no-wrap rule binds here too: the file lead is the longest block in the
                 # tree, so exempting it exempted the prose most likely to be wrapped.
                 out += _wrap_rule(rel, lines, k, end, start)
@@ -855,6 +962,9 @@ def _header_rules(rel: str, text: str):
                 out.append((f"{rel}::{nxt.split()[1].rstrip('{:')}",
                             f"class comment {n} lines > {MAX_CLASS_DOC}"))
         elif n > MAX_MEMBER_DOC:
+            # Both kinds of file. A `.cpp` carries a file lead with its own `@moreinfo` appendix
+            # exactly as a header does, so "move the deep dive after @moreinfo" names a place
+            # that exists there too: the rule was scoped away on a reason that does not hold.
             out.append((f"{rel}::{_declared_key(nxt, start)}",
                         f"member comment {n} lines > {MAX_MEMBER_DOC}: "
                         f"a deep dive goes after @moreinfo"))
@@ -870,6 +980,12 @@ def _header_rules(rel: str, text: str):
                 if words > MAX_DOC_WORDS:
                     out.append((f"{rel}::line {k + 1}",
                                 f"doc sentence {words} words > {MAX_DOC_WORDS}"))
+            # A LEAD's line is wider than a member's: it carries what the whole type is for,
+            # and held to the member cap the driver headers each lost about a third of that.
+            cap = MAX_LEAD_LINE_CHARS if _CLASS_RE.match(nxt) else MAX_COMMENT_LINE_CHARS
+            if len(lines[k]) > cap:
+                out.append((f"{rel}::line {k + 1}",
+                            f"doc line {len(lines[k])} chars > {cap}"))
             out += _wrap_rule(rel, lines, k, end, start)
 
     # A file OPENS with `///`, so the generated page says what the file is for. The lead is a
@@ -953,18 +1069,37 @@ def _header_rules(rel: str, text: str):
             while j < len(lines) and lines[j].strip().startswith("//") \
                     and not lines[j].strip().startswith("///"):
                 j += 1
-            cap = MAX_CODE_COMMENT if _generates_a_page(rel) else MAX_CODE_COMMENT_CPP
-            if j - i > cap and i >= file_comment_end:
+            cap = MAX_CODE_COMMENT
+            # A list, a table or a fenced block is STRUCTURE, and its lines are its layout rather
+            # than an over-long run of prose. Counted, an enumerated spec could only satisfy the
+            # cap by being fused onto one line, which is the layout destroyed to pass a rule about
+            # sentences. The lines that are prose still count, so an essay with a list in it is
+            # measured on the essay.
+            structural = sum(1 for k in range(i, j)
+                             if _is_structural(re.sub(r"^\s*//+\s?", "", lines[k])))
+            if j - i - structural > cap and i >= file_comment_end:
                 nxt = next((lines[k].strip() for k in range(j, len(lines)) if lines[k].strip()), "")
                 out.append((f"{rel}::{_declared_key(nxt, i) if nxt else f'line {i + 1}'}",
-                            f"code comment {j - i} lines > {cap}"))
-            # The same word budget as a `///` line, and for the same reason: one line is a
-            # sentence, not a paragraph that happens to lack line breaks.
+                            f"code comment {j - i - structural} lines > {cap}"))
+            # The same word budget as a `///` line, and measured the same way: PER SENTENCE.
+            # Counting the whole line instead made this rule fight the no-wrap rule above, which
+            # asks for one sentence per line: a dense three-sentence comment then had to fan out
+            # over three lines to pass, which is longer to read rather than shorter. A line
+            # carrying several short sentences is good writing, and one rambling sentence is not.
             for k in range(i, j):
-                words = len(re.sub(r"^\s*//+\s*", "", lines[k]).split())
-                if words > MAX_DOC_WORDS:
+                text_ = re.sub(r"^\s*//+\s*", "", lines[k]).strip()
+                for sentence in _sentences(text_):
+                    words = len(sentence.split())
+                    if words > MAX_DOC_WORDS:
+                        out.append((f"{rel}::line {k + 1}",
+                                    f"comment line {words} words > {MAX_DOC_WORDS}"))
+                if len(lines[k]) > MAX_COMMENT_LINE_CHARS:
                     out.append((f"{rel}::line {k + 1}",
-                                f"comment line {words} words > {MAX_DOC_WORDS}"))
+                                f"comment line {len(lines[k])} chars > {MAX_COMMENT_LINE_CHARS}"))
+                # And the same no-wrap rule. It used to run on `///` only, which left every `//`
+                # block in the tree unmeasured: the budget above says a line is a sentence, and
+                # a sentence carried onto the next line breaks that whichever marker spells it.
+                out += _wrap_rule(rel, lines, k, j, i)
             i = j
         else:
             i += 1
@@ -1052,6 +1187,11 @@ def _header_rules(rel: str, text: str):
         prev = lines[j].lstrip() if j >= 0 else ""
         if prev.startswith("///") or "///" in ln:
             continue
+        # Header-only, and this is the ONE place that is a detector limit rather than a rule
+        # difference. Everything else applies to both kinds of file; "public" here is read from a
+        # declaration's SHAPE, which cannot see `namespace {` or a function body, and a `.cpp` is
+        # mostly bodies. Turned on there it names `true`, `false`, `nullptr` and `break` as public
+        # variables wanting a doc comment: 5599 findings, none of them real.
         if (_FUNC_RE.match(st) or _SPECIAL_FUNC_RE.match(st)) and _generates_a_page(rel):
             # In a `.cpp` this matched the constructor or destructor of a file-local RAII struct:
             # `~WinsockInit`, `Lock`, `ParkGuard`. None is public API, and each is already explained
@@ -1270,8 +1410,8 @@ def _write_report(found) -> None:
     for key, why in found:
         page, _, title = key.partition("::")
         by_page[page].append((title, why))
-    errs = [f for f in found if _blocks(f[0])]
-    warns = [f for f in found if not _blocks(f[0])]
+    errs = [f for f in found if _blocks(f[0], f[1])]
+    warns = [f for f in found if not _blocks(f[0], f[1])]
     rules = Counter(_rule_name(why) for _, why in found)
     rules_e = Counter(_rule_name(why) for _, why in errs)
     rules_w = Counter(_rule_name(why) for _, why in warns)
@@ -1305,8 +1445,10 @@ def _write_report(found) -> None:
             continue
         area = _doc_area(page)
         areas[area] += len(items)
-        blocks = _generates_a_page(page)
-        (areas_e if blocks else areas_w)[area] += len(items)
+        # Per FINDING, through _blocks: a file is not wholly one severity, because a header's
+        # line-length finding warns while its neighbours block.
+        for _, why in items:
+            (areas_e if _blocks(page, why) else areas_w)[area] += 1
     if areas:
         out += ["", "## By documentation area", "",
                 "The unit a sweep runs in: one summary page and the headers it owns, as the "
@@ -1341,27 +1483,33 @@ def _write_report(found) -> None:
         # Ranked WITHIN each kind, and each kind gets its own head, so the biggest warning file
         # cannot be buried in the tail behind ten smaller errors. An 88-finding implementation
         # file is worth seeing even though it does not block.
-        errs_a = sum(len(v) for k, v in files.items() if _generates_a_page(k))
+        # Counted through _blocks, which reads the REASON as well as the file: a header's
+        # line-length finding warns, so a file holding only those is a warning file. Grouping
+        # on the file alone labelled 74 such files "error" under a report saying 0 errors.
+        def _blocking(page, items):
+            return [f for f in items if _blocks(page, f[1])]
+        errs_a = sum(len(_blocking(k, v)) for k, v in files.items())
         out += [f"### {area}", "",
                 f"**{errs_a} error(s)** and **{total - errs_a} warning(s)** "
                 f"across {len(files)} file(s).", "",
                 "| Findings | File | |", "|---:|---|---|"]
         HEAD = 10
         for kind, blocking in (("error", True), ("warning", False)):
-            group = sorted((k for k in files if _generates_a_page(k) == blocking),
-                           key=lambda k: (-len(files[k]), k))
+            counts = {k: len([f for f in v if bool(_blocks(k, f[1])) == blocking])
+                      for k, v in files.items()}
+            group = sorted((k for k in files if counts[k]), key=lambda k: (-counts[k], k))
             for page in group[:HEAD]:
-                out.append(f"| {len(files[page])} | `{page}` | {kind} |")
+                out.append(f"| {counts[page]} | `{page}` | {kind} |")
             tail = group[HEAD:]
             if tail:
-                n = sum(len(files[p]) for p in tail)
-                lo, hi = min(len(files[p]) for p in tail), max(len(files[p]) for p in tail)
+                n = sum(counts[p] for p in tail)
+                lo, hi = min(counts[p] for p in tail), max(counts[p] for p in tail)
                 span = f"{lo}" if lo == hi else f"{lo}-{hi}"
                 out.append(f"| {span} each | *{len(tail)} more {kind} files, {n} findings* | |")
         mix = Counter(_rule_name(why) for k, v in files.items()
-                      if _generates_a_page(k) for _, why in v)
+                      for _, why in v if _blocks(k, why))
         mix_w = Counter(_rule_name(why) for k, v in files.items()
-                        if not _generates_a_page(k) for _, why in v)
+                        for _, why in v if not _blocks(k, why))
         out += [""]
         if mix:
             out += ["By rule, errors: "
@@ -1408,8 +1556,8 @@ def main() -> int:
     if not args.noreport:
         _write_report(found)
 
-    errors = [f for f in found if _blocks(f[0])]
-    warnings = [f for f in found if not _blocks(f[0])]
+    errors = [f for f in found if _blocks(f[0], f[1])]
+    warnings = [f for f in found if not _blocks(f[0], f[1])]
 
     if not found:
         print(f"Docgen check: clean. Limits: description {MAX_DESC} "

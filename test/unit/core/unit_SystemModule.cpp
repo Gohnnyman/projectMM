@@ -1,4 +1,4 @@
-// @module SystemModule
+/// @module SystemModule
 
 #include "doctest.h"
 #include "core/system/SystemModule.h"
@@ -7,10 +7,7 @@
 #include <string>
 
 namespace {
-// Stand-in wired-by-code child: counts the lifecycle callbacks a real fixed
-// System child (Tasks, I2cScan) would use (setup to init, tick20ms/tick1s to
-// poll + format). Pins that SystemModule's overridden setup()/tick1s() chain to
-// base — without that, a child would never initialise or poll.
+// Stand-in wired-by-code child: counts the lifecycle callbacks a real fixed System child (Tasks, I2cScan) would use (setup to init, tick20ms/tick1s to poll + format). Pins that SystemModule's overridden setup()/tick1s() chain to base, without that, a child would never initialize or poll.
 class CountingChild : public mm::MoonModule {
 public:
     uint32_t setupCalls = 0, tick20msCalls = 0, tick1sCalls = 0;
@@ -22,9 +19,7 @@ public:
 
 /// The derived name is "MM-" plus the last two MAC bytes in hex, whatever those bytes are.
 ///
-/// Pinned by SHAPE rather than against one literal: the desktop MAC is a stored per-install
-/// identity now (platform_desktop.cpp, getMacAddress), so a fresh install generates its own and
-/// asserting "MM-CAFE" would pin the old hardcoded constant rather than the derivation.
+/// Pinned by SHAPE rather than against one literal: the desktop MAC is a stored per-install identity now (platform_desktop.cpp, getMacAddress), so a fresh install generates its own and asserting "MM-CAFE" would pin the old hardcoded constant rather than the derivation.
 bool looksLikeMacName(const char* name) {
     uint8_t mac[6] = {};
     mm::platform::getMacAddress(mac);
@@ -35,8 +30,7 @@ bool looksLikeMacName(const char* name) {
 
 // The auto-generated device name is "MM-" plus the last two MAC bytes (see looksLikeMacName).
 TEST_CASE("SystemModule MAC-to-deviceName") {
-    // Desktop platform returns MAC DE:AD:BE:EF:CA:FE
-    // deviceName follows the MAC, whatever this install's stored identity is
+    // Desktop platform returns MAC DE:AD:BE:EF:CA:FE deviceName follows the MAC, whatever this install's stored identity is
     mm::SystemModule sys;
     sys.setup();
     CHECK(looksLikeMacName(sys.deviceName()));
@@ -60,9 +54,7 @@ TEST_CASE("SystemModule deviceName control") {
 }
 
 namespace {
-// Overwrite SystemModule's deviceName buffer through its bound control pointer —
-// the same buffer the persistence overlay and an /api/control write target. Lets a
-// test seed an invalid name and then drive the module's sanitisation.
+// Overwrite SystemModule's deviceName buffer through its bound control pointer, the same buffer the persistence overlay and an /api/control write target. Lets a test seed an invalid name and then drive the module's sanitisation.
 void writeDeviceName(mm::SystemModule& sys, const char* value) {
     for (uint8_t i = 0; i < sys.controls().count(); i++) {
         if (std::strcmp(sys.controls()[i].name, "deviceName") == 0) {
@@ -72,15 +64,12 @@ void writeDeviceName(mm::SystemModule& sys, const char* value) {
             return;
         }
     }
-    // No `deviceName` control found — a setup regression. Fail loudly rather than
-    // silently no-op, which would let the calling test "pass" against a stale buffer.
+    // No `deviceName` control found, a setup regression. Fail loudly rather than silently no-op, which would let the calling test "pass" against a stale buffer.
     REQUIRE_MESSAGE(false, "writeDeviceName: no 'deviceName' control on SystemModule");
 }
 } // namespace
 
-// deviceName is the single network identity, so SystemModule keeps it a valid hostname.
-// A live edit to an invalid value ("My Room!") is coerced on the next tick1s tick
-// (mm::sanitizeHostname), the same path mDNS/AP/DHCP read — so they never see spaces.
+// deviceName is the single network identity, so SystemModule keeps it a valid hostname. A live edit to an invalid value ("My Room!") is coerced on the next tick1s tick (mm::sanitizeHostname), the same path mDNS/AP/DHCP read, so they never see spaces.
 TEST_CASE("SystemModule sanitises a live deviceName edit") {
     mm::SystemModule sys;
     sys.setup();
@@ -90,8 +79,7 @@ TEST_CASE("SystemModule sanitises a live deviceName edit") {
     CHECK(std::strcmp(sys.deviceName(), "My-Living-Room") == 0);
 }
 
-// An all-invalid name collapses to empty after sanitising; the MAC fallback then fills
-// it, so deviceName is never empty (mDNS/AP/DHCP always have a name to register).
+// An all-invalid name collapses to empty after sanitising; the MAC fallback then fills it, so deviceName is never empty (mDNS/AP/DHCP always have a name to register).
 TEST_CASE("SystemModule falls back to the MAC name when deviceName is all-invalid") {
     mm::SystemModule sys;
     sys.setup();
@@ -101,7 +89,7 @@ TEST_CASE("SystemModule falls back to the MAC name when deviceName is all-invali
     CHECK(looksLikeMacName(sys.deviceName()));   // the MAC-derived fallback
 }
 
-// An already-valid name is left untouched (idempotent) — a normal user name survives.
+// An already-valid name is left untouched (idempotent), a normal user name survives.
 TEST_CASE("SystemModule leaves a valid deviceName unchanged") {
     mm::SystemModule sys;
     sys.setup();
@@ -111,14 +99,13 @@ TEST_CASE("SystemModule leaves a valid deviceName unchanged") {
     CHECK(std::strcmp(sys.deviceName(), "Bench-S3") == 0);
 }
 
-// (firmware identity controls — version / build / firmware — moved to FirmwareUpdateModule;
-// see test/unit/core/unit_FirmwareUpdateModule.cpp.)
+// (firmware identity controls, version / build / firmware, moved to FirmwareUpdateModule; see test/unit/core/unit_FirmwareUpdateModule.cpp.)
 
 // The `bootReason` control is populated from platform::resetReason; on desktop it reports "OK".
 TEST_CASE("SystemModule bootReason control populated") {
-    // The bootReason control is wired in setup() (from platform::resetReason). On
-    // desktop the platform stub always returns "OK". The UI uses this to set the
-    // reboot button's crashed-state styling — see ui-spec.md.
+    // The bootReason control is wired in setup() (from platform::resetReason).
+    // On desktop the platform stub always returns "OK".
+    // The UI uses this to set the reboot button's crashed-state styling, see ui-spec.md.
     mm::SystemModule sys;
     sys.setup();
     sys.defineControls();
@@ -138,21 +125,14 @@ TEST_CASE("SystemModule bootReason control populated") {
     CHECK(found);
 }
 
-// System is fixed infrastructure — it accepts no user-added children (they live under
-// the Services container). Its own children (Tasks, I2cScan) are wired by code.
+// System is fixed infrastructure, it accepts no user-added children (they live under the Services container). Its own children (Tasks, I2cScan) are wired by code.
 TEST_CASE("SystemModule accepts no user-added children") {
-    // System is fixed infrastructure: its children (Tasks, I2cScan) are wired by
-    // code, so it accepts no user-added role. User-added capability modules live
-    // under the Services container instead.
+    // System is fixed infrastructure: its children (Tasks, I2cScan) are wired by code, so it accepts no user-added role. User-added capability modules live under the Services container instead.
     mm::SystemModule sys;
     CHECK(std::strcmp(sys.acceptsChildRoles(), "") == 0);
 }
 
-// Regression: SystemModule overrides setup() and tick1s(); both must chain to
-// MoonModule's base so a wired-by-code child's setup()/tick1s() actually fire.
-// Without the chain a fixed child (Tasks/I2cScan) would never init or poll (the
-// "children miss callbacks" trap). tick20ms() isn't
-// overridden, so the base default already propagates it.
+// Regression: SystemModule overrides setup() and tick1s(); both must chain to MoonModule's base so a wired-by-code child's setup()/tick1s() actually fire. Without the chain a fixed child (Tasks/I2cScan) would never init or poll (the "children miss callbacks" trap). tick20ms() isn't overridden, so the base default already propagates it.
 TEST_CASE("SystemModule propagates lifecycle to a wired-by-code child") {
     mm::SystemModule sys;
     CountingChild child;
@@ -173,10 +153,9 @@ TEST_CASE("Service role name") {
     CHECK(std::strcmp(mm::roleName(mm::ModuleRole::Service), "service") == 0);
 }
 
-// The persisted `firmware` text must not outlive the image that wrote it. A device flashed from one
-// variant to another loaded the old name back over the compile-time one (bench, MHC P4 shield,
-// 2026-09-08) and MoonBase would have offered the wrong flash layout. The constant wins on every
-// write of the control, which is the moment a stale value lands.
+// The persisted `firmware` text must not outlive the image that wrote it.
+// A device flashed from one variant to another loaded the old name back over the compile-time one (bench, MHC P4 shield, 2026-09-08) and MoonBase would have offered the wrong flash layout.
+// The constant wins on every write of the control, which is the moment a stale value lands.
 TEST_CASE("SystemModule: a persisted firmware name is overwritten by the compile-time one") {
     mm::SystemModule m;
     m.defineControls();

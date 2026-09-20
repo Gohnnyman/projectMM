@@ -11,7 +11,7 @@
 
 namespace mm {
 
-/// The one registered parallel WS2812B LED-output driver: up to 16 strands clocking out at once, one GPIO lane each. Each is fed consecutive slices of the source buffer, over whichever peripheral the control selects. Backends: I80Peripheral.h, MoonI80Peripheral.h, ParlioPeripheral.h.
+/// The registered parallel WS2812B driver: up to 16 strands clocking out at once, one GPIO lane each, fed consecutive slices of the source buffer over whichever peripheral the control selects. Backends: I80Peripheral.h, MoonI80Peripheral.h, ParlioPeripheral.h.
 ///
 /// The whole frame is encoded up front and shipped as one autonomous transfer. So there is no CPU deadline while it is on the wire. The encode is a fused correct and transpose, per row (ParallelSlots.h). Vocabulary: strand, lane, slot, row, under
 /// @xref{terminology|More info → Terminology}.
@@ -20,7 +20,7 @@ namespace mm {
 ///
 /// ## Why single-shot
 ///
-/// A driver that refills buffers as the DMA drains them must beat the clock every time. A WiFi interrupt at the wrong moment garbles the rest of the frame. Encoding first makes that impossible. MoonI80Peripheral's ring gives this up: the price of a frame too big to hold.
+/// Encoding the whole frame first removes the deadline: a driver refilling as the DMA drains must beat the clock every time, and a WiFi interrupt garbles the rest. MoonI80Peripheral's ring gives this up to hold a frame too big for memory.
 ///
 /// ## Terminology
 ///
@@ -28,7 +28,7 @@ namespace mm {
 ///
 /// ## The frame transpose (correct + transpose, per row)
 ///
-/// The source has each light's bytes together. The wire needs each bus WORD to carry one bit of EVERY strand at the same instant. So the encoder turns 8 lights on their side, an 8x8 bit matrix transpose. It writes one word per slot, fused with the per-light correction in one pass. A Parlio bus word and an i80 bus word have the same meaning.
+/// The source holds each light's bytes together; the wire needs each bus WORD to carry one bit of EVERY strand at once. The encoder turns 8 lights on their side, an 8x8 bit matrix transpose, writing one word per slot fused with the correction. A Parlio bus word and an i80 bus word have the same meaning.
 class ParallelLedDriver : public DriverBase {
 public:
     /// Test-only: borrow a mock backend, dropping any existing one. The caller keeps ownership.

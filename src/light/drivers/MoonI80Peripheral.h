@@ -7,7 +7,7 @@
 
 namespace mm {
 
-/// A `LedPeripheral` backend: parallel WS2812B on the LCD_CAM peripheral, driven by our own DMA code rather than ESP-IDF's `esp_lcd`. Same peripheral, pins and wire contract as the `i80` backend, with the difference underneath. It buys two things `esp_lcd` cannot: a streamed frame, and a 74HCT595 expander driving 8 strands per GPIO.
+/// A `LedPeripheral` backend: parallel WS2812B on the LCD_CAM peripheral, driven by our own DMA code. Same peripheral, pins and wire contract as the `i80` backend, differing underneath, and it buys a streamed frame and a 74HCT595 expander driving 8 strands per GPIO.
 ///
 /// Prior art: hpwit's I2SClocklessVirtualLedDriver and his expander board, written fresh here.
 /// The wiring and the peripheral comparison are on the drivers page.
@@ -16,13 +16,13 @@ namespace mm {
 ///
 /// ## Why our own DMA driver
 ///
-/// `esp_lcd` re-arms the peripheral on every transaction, resetting it mid-stream. An LCD panel is addressed and does not care. WS2812 is one unbroken self-clocked bit stream, so a frame cannot be split across transactions at any chunk size. That forces a whole frame into one contiguous DMA-reachable block, which is the cap this backend exists to lift.
+/// `esp_lcd` re-arms the peripheral on every transaction, resetting it mid-stream, which suits an addressed LCD panel. WS2812 is one unbroken self-clocked bit stream, so a whole frame belongs in one contiguous DMA-reachable block, which is the cap this backend exists to lift.
 ///
-/// The hardware never demanded it. The LCD peripheral has no data-length register: it clocks what the DMA feeds it and stops when the chain ends. So one `gdma_start()` over an arbitrarily long descriptor chain is a single gapless stream. Built on IDF's HAL and GDMA APIs, one level below `esp_lcd` rather than at the registers.
+/// The LCD peripheral clocks what the DMA feeds it and stops when the chain ends, so one `gdma_start()` over an arbitrarily long descriptor chain is a single gapless stream. Built on IDF's HAL and GDMA APIs, one level below `esp_lcd` rather than at the registers.
 ///
 /// ## What streaming costs
 ///
-/// The whole-frame path has no CPU deadline once armed; the ring does. Its refill runs from the end-of-buffer interrupt and must beat the wire. That is 28.8 µs per light at 20 MHz, or the strands see a gap. That trade is why `useRing` is a switch rather than a constant.
+/// The whole-frame path runs free once armed; the ring carries a deadline. Its refill runs from the end-of-buffer interrupt and must beat the wire at 28.8 µs per light at 20 MHz, which is why `useRing` is a switch.
 ///
 /// @card MoonI80Peripheral.png
 class MoonI80Peripheral : public LedPeripheral {

@@ -1,10 +1,7 @@
-// @module AnalogService
-// @also InputMapping, Scheduler
+/// @module AnalogService
+/// @also InputMapping, Scheduler
 
-// The analog input path end to end: an ADC reading, through the row's travel mapping and filter,
-// into a control. The platform seam is a host stub whose value the test injects
-// (platform::setTestAdcValue), so "the pedal is halfway" is expressed exactly as the module sees it
-// on a board.
+/// The analog input path end to end: an ADC reading, through the row's travel mapping and filter, into a control. The platform seam is a host stub whose value the test injects (platform::setTestAdcValue), so "the pedal is halfway" is expressed exactly as the module sees it on a board.
 
 #include "doctest.h"
 #include "core/services/AnalogService.h"
@@ -71,9 +68,7 @@ struct Rig {
 }  // namespace
 
 TEST_CASE("an analog input drives a control across its travel") {
-    // The whole path in one: a pin reading becomes a control value. The ends are what a user
-    // actually notices, because a pedal that cannot reach 0 or full is the complaint this module's
-    // min/max exists to answer.
+    // The whole path in one: a pin reading becomes a control value. The ends are what a user actually notices, because a pedal that cannot reach 0 or full is the complaint this module's min/max exists to answer.
     Rig rig;
     const uint16_t full = platform::adcMaxCount();
 
@@ -90,8 +85,7 @@ TEST_CASE("an analog input drives a control across its travel") {
 }
 
 TEST_CASE("a pedal's usable travel is what maps, not the full sweep") {
-    // The reason a row carries inMin/inMax: a real pedal rests well above 0 and tops out well below
-    // full scale, so a raw mapping would give a control that never reaches either end.
+    // The reason a row carries inMin/inMax: a real pedal rests well above 0 and tops out well below full scale, so a raw mapping would give a control that never reaches either end.
     Rig rig;
     rig.set("inMin", 1000);
     rig.set("inMax", 3000);
@@ -109,8 +103,7 @@ TEST_CASE("a pedal's usable travel is what maps, not the full sweep") {
 }
 
 TEST_CASE("an inverted input reads the other way round") {
-    // A pot wired the other way is a wiring choice, not a fault, so it is a checkbox rather than a
-    // reason to resolder.
+    // A pot wired the other way is a wiring choice, not a fault, so it is a checkbox rather than a reason to resolder.
     Rig rig;
     rig.set("invert", 1);
     rig.hold(0);
@@ -120,8 +113,7 @@ TEST_CASE("an inverted input reads the other way round") {
 }
 
 TEST_CASE("a reversed min/max pair means inverted, rather than being an error") {
-    // A user calibrating by moving the pedal to each end sets whichever end they reached first.
-    // Refusing that would reject a calibration that says exactly what it means.
+    // A user calibrating by moving the pedal to each end sets whichever end they reached first. Refusing that would reject a calibration that says exactly what it means.
     Rig rig;
     rig.set("inMin", 3000);
     rig.set("inMax", 1000);
@@ -132,9 +124,7 @@ TEST_CASE("a reversed min/max pair means inverted, rather than being an error") 
 }
 
 TEST_CASE("a resting input stops writing, so jitter does not flood the control") {
-    // The deadband's whole purpose. An ADC wobbles a count or two at rest, and without this the row
-    // would write its target fifty times a second forever, which on a persisted control also means
-    // a save every time.
+    // The deadband's whole purpose. An ADC wobbles a count or two at rest, and without this the row would write its target fifty times a second forever, which on a persisted control also means a save every time.
     Rig rig;
     rig.hold(2000);
     const uint8_t settled = rig.surface->fader1;
@@ -152,8 +142,7 @@ TEST_CASE("a resting input stops writing, so jitter does not flood the control")
 }
 
 TEST_CASE("the first reading is taken whole, so a pedal does not sweep up from zero on boot") {
-    // Seeding the filter with 0 would make every input ramp from the bottom at startup, writing its
-    // target the whole way: a light that fades up on boot because a pedal is plugged in.
+    // Seeding the filter with 0 would make every input ramp from the bottom at startup, writing its target the whole way: a light that fades up on boot because a pedal is plugged in.
     Rig rig;
     platform::setTestAdcValue(kPin, platform::adcMaxCount());
     rig.svc->tick20ms();                          // ONE poll
@@ -161,8 +150,7 @@ TEST_CASE("the first reading is taken whole, so a pedal does not sweep up from z
 }
 
 TEST_CASE("an analog row scales into whatever range its target actually holds") {
-    // A pedal is configured once and works on any target: the 0..255 travel is rescaled to the
-    // control's own bounds, so a bool gets on/off and a narrower control gets its own maximum.
+    // A pedal is configured once and works on any target: the 0..255 travel is rescaled to the control's own bounds, so a bool gets on/off and a narrower control gets its own maximum.
     Rig rig;
     rig.set("target", "\"Control.on\"");
     rig.hold(0);
@@ -172,9 +160,7 @@ TEST_CASE("an analog row scales into whatever range its target actually holds") 
 }
 
 TEST_CASE("an analog row refuses a field it would silently ignore") {
-    // `runInputLevel` writes the scaled reading, so `kind` and `value` have nothing to say here.
-    // Accepting them would store a setting the module ignores, which reads as a bug in the mapping
-    // rather than in the row's configuration.
+    // `runInputLevel` writes the scaled reading, so `kind` and `value` have nothing to say here. Accepting them would store a setting the module ignores, which reads as a bug in the mapping rather than in the row's configuration.
     Rig rig;
     CHECK_FALSE(rig.svc->setListRowField(rig.rowId, "kind", "{\"value\":\"toggle\"}"));
     CHECK_FALSE(rig.svc->setListRowField(rig.rowId, "value", "{\"value\":42}"));
@@ -183,8 +169,7 @@ TEST_CASE("an analog row refuses a field it would silently ignore") {
 }
 
 TEST_CASE("an out-of-range pin is refused rather than narrowed into a different pin") {
-    // parseInt answers an int and the row stores an int8_t, so 300 would become 44 and point the
-    // row at a pin nobody named. -1 stays valid: it is the unconfigured state the poll checks for.
+    // parseInt answers an int and the row stores an int8_t, so 300 would become 44 and point the row at a pin nobody named. -1 stays valid: it is the unconfigured state the poll checks for.
     Rig rig;
     CHECK_FALSE(rig.svc->setListRowField(rig.rowId, "pin", "{\"value\":300}"));
     CHECK_FALSE(rig.svc->setListRowField(rig.rowId, "pin", "{\"value\":-2}"));
@@ -193,10 +178,7 @@ TEST_CASE("an out-of-range pin is refused rather than narrowed into a different 
 }
 
 TEST_CASE("an analog row pointed at a pad refuses, rather than firing it every tick") {
-    // A pad is a momentary thing, so "a pedal held at 40% of a preset" has no reading. The refusal
-    // has to be REPORTED as well as silent-at-the-target: a row that quietly did nothing would look
-    // like a broken pot, and one that fired on every poll would re-apply the preset 50 times a
-    // second for as long as the input sat there.
+    // A pad is a momentary thing, so "a pedal held at 40% of a preset" has no reading. The refusal has to be REPORTED as well as silent-at-the-target: a row that quietly did nothing would look like a broken pot, and one that fired on every poll would re-apply the preset 50 times a second for as long as the input sat there.
     Rig rig;
     rig.set("target", "\"Control.pad1\"");
     rig.hold(2000);
@@ -204,14 +186,12 @@ TEST_CASE("an analog row pointed at a pad refuses, rather than firing it every t
     CHECK(rig.surface->fader1 == 0);
     const char* s = rig.svc->status();
     REQUIRE(s != nullptr);
-    // The PAD-specific refusal, not the generic "has no such control": runInputLevel rejects a pad
-    // target before any lookup, so this holds whether or not a pad grid exists.
+    // The PAD-specific refusal, not the generic "has no such control": runInputLevel rejects a pad target before any lookup, so this holds whether or not a pad grid exists.
     CHECK(std::strstr(s, "a pad takes a press") != nullptr);
 }
 
 TEST_CASE("an unconfigured or unassigned row does nothing, quietly") {
-    // Robustness: a fresh row has no pin and no target, which is a valid state a user passes through
-    // rather than a fault to report.
+    // Robustness: a fresh row has no pin and no target, which is a valid state a user passes through rather than a fault to report.
     Scheduler sched;
     auto* surface = new FakeSurface();
     auto* svc = new AnalogService();

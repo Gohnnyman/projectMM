@@ -1,11 +1,8 @@
-// @module polar
-// @also math16, ScratchBuffer
+/// @module polar
+/// @also math16, ScratchBuffer
 
-// The polar address table: the angle and radius of every pixel, computed once instead of per frame.
-// These pin what a radial effect depends on when it reads the table instead of calling atan16 and
-// dist16: that the address is the same one it would have computed, that the center and the edges
-// land where the geometry says, that resizing the grid rebuilds it, and that a device too tight for
-// the tables still renders rather than crashing.
+/// The polar address table: the angle and radius of every pixel, computed once instead of per frame.
+/// These pin what a radial effect depends on when it reads the table instead of calling atan16 and dist16: that the address is the same one it would have computed, that the center and the edges land where the geometry says, that resizing the grid rebuilds it, and that a device too tight for the tables still renders rather than crashing.
 
 #include "doctest.h"
 #include "core/module/MoonModule.h"
@@ -75,8 +72,7 @@ TEST_CASE("the radius runs from nothing at the center to full scale at the furth
 }
 
 TEST_CASE("a wide panel fills to its edges instead of banding in a circle inside it") {
-    // The aspect-ratio property: radii scale against the furthest corner, so a 64x16 strip reaches
-    // full scale at its ends rather than saturating everywhere past the short axis.
+    // The aspect-ratio property: radii scale against the furthest corner, so a 64x16 strip reaches full scale at its ends rather than saturating everywhere past the short axis.
     Owner o;
     REQUIRE(o.lut.prepare(64, 16, true));
     CHECK(o.lut.radiusAt(0, 8) > 55000);             // the far end of the long axis
@@ -180,10 +176,7 @@ TEST_CASE("the index form and the coordinate form address the same pixel") {
 }
 
 TEST_CASE("the table is refused rather than taking the last of a small heap") {
-    // On a device without PSRAM the tables are a real fraction of the heap. Asking for a wall-sized
-    // grid must leave the reserve that protects stacks, WiFi and HTTP intact, and the caller then
-    // computes the address per pixel instead. The desktop reports unlimited heap, so this pins the
-    // arithmetic of the gate rather than the allocation.
+    // On a device without PSRAM the tables are a real fraction of the heap. Asking for a wall-sized grid must leave the reserve that protects stacks, WiFi and HTTP intact, and the caller then computes the address per pixel instead. The desktop reports unlimited heap, so this pins the arithmetic of the gate rather than the allocation.
     Owner o;
     const std::size_t reserve = platform::HEAP_RESERVE;
     const std::size_t free = platform::freeHeap();
@@ -227,8 +220,7 @@ TEST_CASE("releasing the table gives the memory back and the next prepare rebuil
 // These pin what each one promises, and that the default costs an existing 2D fixture nothing.
 
 TEST_CASE("at one light deep every projection is the flat address, so no panel changes") {
-    // The property that makes cylindrical a safe default: a panel is a depth-1 volume, and all
-    // three mappings have to agree there or switching one would alter a fixture that has no depth.
+    // The property that makes cylindrical a safe default: a panel is a depth-1 volume, and all three mappings have to agree there or switching one would alter a fixture that has no depth.
     Owner flat, cyl, sph, rad;
     REQUIRE(flat.lut.prepare(24, 24, true));
     REQUIRE(cyl.lut.prepare(24, 24, 1, true, PolarLut::Mapping::Cylindrical));
@@ -244,8 +236,7 @@ TEST_CASE("at one light deep every projection is the flat address, so no panel c
 }
 
 TEST_CASE("cylindrical carries depth separately, so every slice reads the same address") {
-    // A tube or a stack of panels: the pattern is the same at every height, which is what lets an
-    // effect use depth for something else entirely.
+    // A tube or a stack of panels: the pattern is the same at every height, which is what lets an effect use depth for something else entirely.
     Owner o;
     REQUIRE(o.lut.prepare(16, 16, 8, true, PolarLut::Mapping::Cylindrical));
     for (uint16_t z = 1; z < 8; z++)
@@ -283,8 +274,7 @@ TEST_CASE("spherical adds an elevation, so a sphere maps evenly instead of pinch
 }
 
 TEST_CASE("only spherical pays for the third table") {
-    // The second angle is what spherical needs and the others do not, so it is what spherical alone
-    // allocates: a fixture on cylindrical must not carry memory for a value it never reads.
+    // The second angle is what spherical needs and the others do not, so it is what spherical alone allocates: a fixture on cylindrical must not carry memory for a value it never reads.
     Owner cyl, sph;
     REQUIRE(cyl.lut.prepare(16, 16, 4, false, PolarLut::Mapping::Cylindrical));
     REQUIRE(sph.lut.prepare(16, 16, 4, false, PolarLut::Mapping::Spherical));
@@ -303,8 +293,7 @@ TEST_CASE("switching projection live rebuilds the table and frees what the new o
 }
 
 TEST_CASE("the volumetric index matches the buffer's own ordering") {
-    // A pixel loop reads by running index; if the table ordered its lights differently the field
-    // would be sheared through the volume rather than merely wrong at one light.
+    // A pixel loop reads by running index; if the table ordered its lights differently the field would be sheared through the volume rather than merely wrong at one light.
     Owner o;
     REQUIRE(o.lut.prepare(5, 4, 3, true, PolarLut::Mapping::Spherical));
     std::size_t i = 0;
@@ -318,10 +307,7 @@ TEST_CASE("the volumetric index matches the buffer's own ordering") {
 }
 
 TEST_CASE("an effect can bind the polar controls before it has a fixture") {
-    // defineControls() runs before an effect is attached to a layer, and again on the throwaway
-    // instances the /api/types probe builds, so anything it asks about the fixture dereferences a
-    // null layer. An earlier addControls() hid the mapping on a flat fixture and segfaulted the
-    // framerate sweep for exactly that reason.
+    // defineControls() runs before an effect is attached to a layer, and again on the throwaway instances the /api/types probe builds, so anything it asks about the fixture dereferences a null layer. An earlier addControls() hid the mapping on a flat fixture and segfaulted the framerate sweep for exactly that reason.
     AuroraEffect a;
     PolarNoiseEffect p;
     TunnelEffect t;

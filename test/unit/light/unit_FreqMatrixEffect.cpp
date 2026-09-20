@@ -1,5 +1,5 @@
-// @module FreqMatrixEffect
-// @also AudioService
+/// @module FreqMatrixEffect
+/// @also AudioService
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -8,24 +8,11 @@
 #include "core/services/AudioService.h"
 #include "platform/platform.h"   // setTestNowMs — deterministic virtual time
 
-// FreqMatrixEffect is audio-driven: it paints the new x=0/y=0 pixel from
-// AudioService::latestFrame() (hue from peakHz, brightness from levelSmoothed) and
-// scrolls the column away from y=0 each tick. To pin real behaviour the frame is
-// fed through a live AudioService in simulate=4 (sweep, always): on desktop
-// (hasI2sMic=false) tick() runs synthesizeFrame, elects the module as the active
-// mic, and fills a DETERMINISTIC frame off platform::millis(). At the frozen time
-// t=375 the sweep is at step pos=1 (peakHz = 80 + 1*700 = 780 Hz, comfortably
-// above the effect's 80 Hz tone gate) and env=triwave8(127)=254 (a near-full
-// level). Driving the mic's tick() repeatedly at that time converges the smoothed
-// level (a /4 EMA of 254) well past the effect's `levelSmoothed > 64` gate, so the
-// painted pixel is guaranteed lit — letting us assert the paint and the scroll,
-// not just "renders non-zero".
+// FreqMatrixEffect is audio-driven: it paints the new x=0/y=0 pixel from AudioService::latestFrame() (hue from peakHz, brightness from levelSmoothed) and scrolls the column away from y=0 each tick. To pin real behavior the frame is fed through a live AudioService in simulate=4 (sweep, always): on desktop (hasI2sMic=false) tick() runs synthesizeFrame, elects the module as the active mic, and fills a DETERMINISTIC frame off platform::millis(). At the frozen time t=375 the sweep is at step pos=1 (peakHz = 80 + 1*700 = 780 Hz, comfortably above the effect's 80 Hz tone gate) and env=triwave8(127)=254 (a near-full level). Driving the mic's tick() repeatedly at that time converges the smoothed level (a /4 EMA of 254) well past the effect's `levelSmoothed > 64` gate, so the painted pixel is guaranteed lit, letting us assert the paint and the scroll, not just "renders non-zero".
 
 namespace {
 
-// Owns the Layouts/GridLayout/Layer wiring every case shares: build a grid of the
-// given dimensions, parent it, and configure the layer's channels. Same struct-Ctx
-// idiom as unit_effects_render.cpp; each case adds its FreqMatrixEffect afterward.
+// Owns the Layouts/GridLayout/Layer wiring every case shares: build a grid of the given dimensions, parent it, and configure the layer's channels. Same struct-Ctx idiom as unit_effects_render.cpp; each case adds its FreqMatrixEffect afterward.
 struct GridLayer {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -41,8 +28,7 @@ struct GridLayer {
     }
 };
 
-// Restores real-clock behaviour and vacates the process-wide active-mic seat so
-// each case is independent (both are global state a prior case could leave set).
+// Restores real-clock behavior and vacates the process-wide active-mic seat so each case is independent (both are global state a prior case could leave set).
 struct AudioGuard {
     mm::AudioService& mic;
     ~AudioGuard() {
@@ -54,9 +40,7 @@ struct AudioGuard {
 // Frozen time at which the sweep sits on band 1 with a near-full level.
 constexpr uint32_t kToneMs = 375;
 
-// Converge the mic's smoothed level to a lit value at the frozen time, then return
-// it as the (now) active source. Several ticks let the /4 EMA climb past 254*3/4…
-// so f->levelSmoothed clears the effect's >64 gate deterministically.
+// Converge the mic's smoothed level to a lit value at the frozen time, then return it as the (now) active source. Several ticks let the /4 EMA climb past 254*3/4… so f->levelSmoothed clears the effect's >64 gate deterministically.
 void driveLoudTone(mm::AudioService& mic) {
     mic.simulate = 4;   // sweep, always — deterministic single-band sweep
     mm::platform::setTestNowMs(kToneMs);
@@ -106,8 +90,7 @@ TEST_CASE("FreqMatrixEffect scrolls the painted pixel one step along Y") {
     const uint8_t r0 = data[0], g0 = data[1], b0 = data[2];
     REQUIRE((r0 > 0 || g0 > 0 || b0 > 0));   // something lit landed at the source
 
-    // Advance the clock so the throttle passes again and the sweep still lands a
-    // lit band (pos = (t/250)%16 = 1 at t=380, env still high) — the column shifts.
+    // Advance the clock so the throttle passes again and the sweep still lands a lit band (pos = (t/250)%16 = 1 at t=380, env still high), the column shifts.
     mm::platform::setTestNowMs(kToneMs + 5);
     mic.tick();     // refresh the frame at the new time (still a loud tone on band 1)
     g.layer.tick();   // tick 2: the y=0 color of tick 1 moves up to y=1
@@ -121,8 +104,7 @@ TEST_CASE("FreqMatrixEffect scrolls the painted pixel one step along Y") {
 
 // Silence (no active mic → the static silent frame) paints black: no tone, no light.
 TEST_CASE("FreqMatrixEffect paints black on silence") {
-    // Ensure no mic holds the active seat, so latestFrame() is the all-zero frame
-    // (peakHz 0, levelSmoothed 0) — both below the effect's gates.
+    // Ensure no mic holds the active seat, so latestFrame() is the all-zero frame (peakHz 0, levelSmoothed 0), both below the effect's gates.
     { mm::AudioService idle; idle.release(); }
     mm::platform::setTestNowMs(1000);
 
@@ -137,7 +119,7 @@ TEST_CASE("FreqMatrixEffect paints black on silence") {
     g.layer.tick();
 
     auto* data = g.layer.buffer().data();
-    // The freshly-painted source pixel is black — silence scrolls dark.
+    // The freshly-painted source pixel is black, silence scrolls dark.
     CHECK(data[0] == 0);
     CHECK(data[1] == 0);
     CHECK(data[2] == 0);

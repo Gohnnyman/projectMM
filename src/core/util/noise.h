@@ -369,7 +369,7 @@ inline uint8_t turbulence8(uint32_t x, uint32_t y, uint32_t z, uint8_t octaves) 
 
 /// Domain warp: displace the sample coordinate by a noise field, then sample there. `strength` is how far the displacement reaches, in the same fixed-point units as the coordinates.
 
-/// 3D domain warp: the same displacement with a z axis, so the field flows through a volume rather than through a plane. Three probes rather than two, each offset by its own constant so the axes displace independently: sampling one field three times would move everything along a diagonal.
+/// 3D domain warp: the same displacement with a z axis, so the field flows through a volume. Three probes, each offset by its own constant, so the axes displace independently.
 template <int Dims>
 inline uint8_t warpImpl(uint32_t x, uint32_t y, uint32_t z, uint16_t strength, uint8_t octaves) {
     // Offset so the axes displace independently, rather than all along one diagonal.

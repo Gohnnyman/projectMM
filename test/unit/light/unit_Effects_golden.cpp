@@ -1,51 +1,31 @@
-// @module EffectBase
-// DemoReelEffect is deliberately ABSENT too, for a different reason: it hosts whichever effects the
-// ModuleFactory registry happens to contain, and that registry is global and populated by whatever
-// tests ran before — so its frame depends on test ORDER, not on its own code. A hash there would
-// flap. Its behaviour test (unit_DemoReelEffect) covers it with an explicit registry.
-//
-// Audio-driven effects (Blurz, GEQ, GEQ3D, FreqMatrix, FreqSaws, NoiseMeter, PaintBrush,
-// AudioSpectrum) are deliberately ABSENT: their output depends on whatever the audio service holds,
-// so a hash over their frames would pin the test rig's audio state rather than the effect. Their
-// migrations rely on their behaviour tests plus the Canvas equivalence test in unit_Canvas.
-// @also AuroraEffect, BallpitEffect, BouncingBallsEffect, DissolveEffect, DistortionWavesEffect, EchoEffect,
-// @also FireEffect, FireworksEffect, FishTankEffect, FixedRectangleEffect, FluidEffect,
-// @also FlyingToastersEffect, GameOfLifeEffect, LavaLampEffect, LissajousEffect, MetaballsEffect,
-// @also NebulaEffect, NoiseEffect, PacmanEffect, PlasmaEffect, PolarNoiseEffect, PraxisEffect,
-// @also RainbowEffect, RingsEffect, RubiksCubeEffect, SdfShapesEffect, SineEffect, SolidEffect,
-// @also SphereMoveEffect, SpiralEffect, StarFieldEffect, StarSkyEffect, TetrixEffect, TextEffect,
-// @also RadialSpectrumEffect, VuMetersEffect, TrailsEffect, TruchetEffect, TunnelEffect, WaterRippleEffect, WaveEffect
+/// @module EffectBase
+///
+/// @moreinfo
+///
+/// ## What carries no golden, and why
+///
+/// DemoReelEffect is absent because it hosts whichever effects the ModuleFactory registry happens to contain, and that registry is global and populated by whatever tests ran before, so its frame depends on test ORDER, not on its own code. A hash there would flap. Its behavior test (unit_DemoReelEffect) covers it with an explicit registry.
+///
+/// Audio-driven effects (Blurz, GEQ, GEQ3D, FreqMatrix, FreqSaws, NoiseMeter, PaintBrush, AudioSpectrum) are deliberately ABSENT: their output depends on whatever the audio service holds, so a hash over their frames would pin the test rig's audio state rather than the effect. Their migrations rely on their behavior tests plus the Canvas equivalence test in unit_Canvas.
+/// @also AuroraEffect, BallpitEffect, BouncingBallsEffect, DissolveEffect, DistortionWavesEffect, EchoEffect,
+/// @also FireEffect, FireworksEffect, FishTankEffect, FixedRectangleEffect, FluidEffect,
+/// @also FlyingToastersEffect, GameOfLifeEffect, LavaLampEffect, LissajousEffect, MetaballsEffect,
+/// @also NebulaEffect, NoiseEffect, PacmanEffect, PlasmaEffect, PolarNoiseEffect, PraxisEffect,
+/// @also RainbowEffect, RingsEffect, RubiksCubeEffect, SdfShapesEffect, SineEffect, SolidEffect,
+/// @also SphereMoveEffect, SpiralEffect, StarFieldEffect, StarSkyEffect, TetrixEffect, TextEffect,
+/// @also RadialSpectrumEffect, VuMetersEffect, TrailsEffect, TruchetEffect, TunnelEffect, WaterRippleEffect, WaveEffect
 
-// Pins the EXACT rendered output of the time-driven effects, so the power-function migration's
-// "renders exactly the same" claim is proved rather than asserted.
-//
-// These ten effects each hand-roll the same BPM phase accumulator, and step 1 of the migration
-// replaces that hand-rolled arithmetic with the shared BeatPhase. A behaviour test still passes if
-// the replacement is off by one LSB or drifts over frames; only a hash over the frame catches it.
-//
-// Five hashes were UPDATED on 2026-08-06 with the BeatPhase migration — Sine, Plasma,
-// DistortionWaves, Spiral and Metaballs — all for the SAME reason, deliberately: the
-// hand-rolled accumulator started from `lastElapsed_ = 0`, so on the very first tick it added
-// `now * bpm` and the startup phase depended on how long the device had been running — the same
-// pattern would make an effect start at a different point in its animation on every boot. BeatPhase
-// uses the first call as the time base only. Verified as the SOLE cause by reproducing the old
-// first-tick behaviour on top of BeatPhase and watching the original hash return.
-//
-// The control case proves it: WaveEffect ALREADY carried that guard, and its hash did NOT move
-// across the same migration. So a moved hash here means "this effect gained the guard", not "the
-// migration drifted". (NoiseEffect was a second control case until the gradient-noise swap and the
-// two-noise merge moved its hash for reasons of their own, recorded below.)
-//
-// Every other hash below was captured from the code BEFORE the migration and must not move. If one does,
-// either the migration changed the arithmetic (a bug — the accumulators are meant to be identical)
-// or the change was intentional and reviewed, in which case the golden is updated in the same commit
-// with the reason in the message.
-//
-// Every FrameTime user carries hashes captured AFTER two changes: their motion moved onto elapsed
-// time (architecture.md, tick-rate rule), and FrameTime's reference period became exact — deriving
-// it as `1000 / 60` truncated to 16 ms, a 62.5 Hz reference that ran every 60-fps-calibrated setting
-// about 4% fast. What these effects draw on a given frame changed; the motion per SECOND is now
-// correct rather than merely consistent. unit_Effects_framerate.cpp pins the behaviour behind them.
+/// Pins the EXACT rendered output of the time-driven effects, so the power-function migration's "renders exactly the same" claim is proved rather than asserted.
+///
+/// These ten effects each hand-roll the same BPM phase accumulator, and step 1 of the migration replaces that hand-rolled arithmetic with the shared BeatPhase. A behavior test still passes if the replacement is off by one LSB or drifts over frames; only a hash over the frame catches it.
+///
+/// Five hashes were UPDATED on 2026-08-06 with the BeatPhase migration, Sine, Plasma, DistortionWaves, Spiral and Metaballs, all for the SAME reason, deliberately: the hand-rolled accumulator started from `lastElapsed_ = 0`, so on the very first tick it added `now * bpm` and the startup phase depended on how long the device had been running, the same pattern would make an effect start at a different point in its animation on every boot. BeatPhase uses the first call as the time base only. Verified as the SOLE cause by reproducing the old first-tick behavior on top of BeatPhase and watching the original hash return.
+///
+/// The control case proves it: WaveEffect ALREADY carried that guard, and its hash did NOT move across the same migration. So a moved hash here means "this effect gained the guard", not "the migration drifted". (NoiseEffect was a second control case until the gradient-noise swap and the two-noise merge moved its hash for reasons of their own, recorded below.)
+///
+/// Every other hash below was captured from the code BEFORE the migration and must not move. If one does, either the migration changed the arithmetic (a bug, the accumulators are meant to be identical) or the change was intentional and reviewed, in which case the golden is updated in the same commit with the reason in the message.
+///
+/// Every FrameTime user carries hashes captured AFTER two changes: their motion moved onto elapsed time (architecture.md, tick-rate rule), and FrameTime's reference period became exact, deriving it as `1000 / 60` truncated to 16 ms, a 62.5 Hz reference that ran every 60-fps-calibrated setting about 4% fast. What these effects draw on a given frame changed; the motion per SECOND is now correct rather than merely consistent. unit_Effects_framerate.cpp pins the behavior behind them.
 
 #include "golden_frame.h"
 
@@ -93,39 +73,12 @@
 
 using namespace mm;
 
-// A 2D grid wide enough that a phase error shows as a visible column shift, small enough to stay a
-// fast unit test. Eight frames at the real 20 ms cadence exercise the accumulator's carry.
+// A 2D grid wide enough that a phase error shows as a visible column shift, small enough to stay a fast unit test.
+// Eight frames at the real 20 ms cadence exercise the accumulator's carry.
 //
-// Four goldens moved when the trail fade became the Layer's, and each for a stated reason.
-// Fireworks and Lissajous carried their own elapsed-to-amount conversion (both flooring to 1, which
-// over-faded at high rates) and now pass a rate. StarField's fade left the step gate that was
-// throttling it twice. BouncingBalls moved because the Layer now resets its fade clock in
-// prepare(), which discards the idle gap before the first frame: the guarantee LissajousEffect used
-// to give for its own trail, given once for every effect. Reviewed and re-blessed together.
-// Four goldens moved on 2026-09-03 when the noise core became Perlin improved gradient noise
-// (PolarNoise, Tunnel, Noise, Noise2D). The names, coordinates and output ranges are unchanged; the
-// field itself is a different, smoother one, which is the point of the swap. No other golden moved,
-// which is the evidence that the change is confined to the noise callers.
-// The three fbm effects (PolarNoise, Tunnel, Aurora) moved again on 2026-09-04 when fbm stopped
-// narrowing its own range: octaves are near-independent, so their spread grows like the root of the
-// sum of squares while the normalizer divides by the sum of amplitudes, and 4 octaves had shrunk to
-// 54..199 of 0..255. Every fbm field is now higher contrast, which is a visible improvement rather
-// than a neutral change; unit_noise pins the range at every octave count.
-// Trails moved on 2026-09-04, for two deliberate fixes. Its first tick now measures a ZERO delta
-// rather than the whole uptime, which had teleported the flow and decayed the trail away on the
-// frame it started. And its emitters are paced by TIME rather than firing every frame: writing a
-// head per frame injects light at the framerate (measured 1.37 at 1200 fps against 60, which the
-// framerate audit caught). Scaling the head's brightness by dt was tried first and is wrong here,
-// because writeWide SETS the pixel rather than accumulating, so twenty dim writes do not add up to
-// one bright one and the fast device came out twice as dark instead.
-// Tunnel moved on 2026-09-04 for the same reason as PolarNoise below, and Spiral moved with them
-// (it has no golden). All three are pinned instead by unit_PolarLut_equivalence, which renders each
-// through the table and through the computed address and requires the 16-bit table to be identical.
-// PolarNoise moved again on 2026-09-04: it reads its per-pixel angle and radius from PolarLut
-// instead of calling atan16 and dist16 every frame, and takes its drift from an oscillator. The
-// address is the same one, and unit_PolarLut_equivalence pins that the 16-bit table renders
-// BIT-IDENTICALLY to the computed path; the default 8-bit table quantizes the angle to 256 steps,
-// which is what moved the hash.
+// A hash moves only when the rendered output does, so a move is a decision rather than a failure.
+// Re-bless it once the change is understood, and name in the commit which effects moved and why.
+// Spiral, Tunnel and PolarNoise are pinned by unit_PolarLut_equivalence instead, which requires the 16-bit table to render bit-identically to the computed address.
 TEST_CASE("time-driven effects render byte-identical frames (migration guard)") {
     SUBCASE("two SDF shapes orbit and melt together, with a soft edge")       { SdfShapesEffect e;       golden::checkGolden("SdfShapesEffect", golden::renderHash(e, 16, 16, 1), 0xbcfb74b4836606a3ull); }
     SUBCASE("a warped noise field folded into a kaleidoscope")      { PolarNoiseEffect e;      golden::checkGolden("PolarNoiseEffect", golden::renderHash(e, 16, 16, 1), 0x8d48e0d1e0180610ull); }
@@ -144,9 +97,7 @@ TEST_CASE("time-driven effects render byte-identical frames (migration guard)") 
     SUBCASE("balls fall, pile up and shove each other aside")         { BallpitEffect e;         golden::checkGolden("BallpitEffect", golden::renderHash(e, 16, 16, 1), 0xdd4efe1ccba2a4b2ull); }
     SUBCASE("fish swim across the tank, each its own color from the palette")  { FishTankEffect e;  golden::checkGolden("FishTankEffect", golden::renderHash(e, 16, 16, 1), 0x3564663bebacac3aull); }
     SUBCASE("Pacman and the ghosts cross the wall, each ghost its own color")  { PacmanEffect e;  golden::checkGolden("PacmanEffect", golden::renderHash(e, 16, 16, 1), 0x776b749b4d02eb9bull); }
-    // The hash moved 2026-08-28: launch() draws its speed span with next16() instead of an
-    // 8-bit value, which the old draw clamped at large sprite scales. Per-toaster velocities
-    // change, so the frame does; the effect is correct, the golden was re-recorded.
+    // The hash moved 2026-08-28: launch() draws its speed span with next16() instead of an 8-bit value, which the old draw clamped at large sprite scales. Per-toaster velocities change, so the frame does; the effect is correct, the golden was re-recorded.
     SUBCASE("toasters flap and drift diagonally, toast trails along")  { FlyingToastersEffect e;  golden::checkGolden("FlyingToastersEffect", golden::renderHash(e, 16, 16, 1), 0x8958d378f86b9e3bull); }
     SUBCASE("arc tiles join into endless winding paths")         { TruchetEffect e;         golden::checkGolden("TruchetEffect", golden::renderHash(e, 16, 16, 1), 0xdcb9b41536eff043ull); }
     SUBCASE("SineEffect")            { SineEffect e;            golden::checkGolden("SineEffect",            golden::renderHash(e, 16, 16, 1), 0xe96c6fd2da1b264bull); }

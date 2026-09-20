@@ -1,12 +1,7 @@
-// @module ImprovOpReassembler
+/// @module ImprovOpReassembler
 
-// Unit tests for src/core/ImprovOpReassembler.h — the chunk-reassembly + sequence
-// guard behind the device's APPLY_OP (0xFC) handler ("Improv = REST over serial").
-// The ESP32 handler (platform_esp32_improv.cpp::improvHandleApplyOp) owns the serial
-// I/O and hands each [seq][last][bytes] chunk here; isolating the state machine lets
-// us prove every path — in-order multi-chunk, duplicate, out-of-order, overflow,
-// recovery — without an MCU + serial cable. This is the heart of config-push: a bug
-// here silently misconfigures a freshly-flashed device.
+/// Unit tests for src/core/ImprovOpReassembler.h, the chunk-reassembly + sequence guard behind the device's APPLY_OP (0xFC) handler ("Improv = REST over serial").
+/// The ESP32 handler (platform_esp32_improv.cpp::improvHandleApplyOp) owns the serial I/O and hands each [seq][last][bytes] chunk here; isolating the state machine lets us prove every path, in-order multi-chunk, duplicate, out-of-order, overflow, recovery, without an MCU + serial cable. This is the heart of config-push: a bug here silently misconfigures a freshly-flashed device.
 
 #include "doctest.h"
 #include "core/util/ImprovOpReassembler.h"
@@ -17,8 +12,7 @@
 using namespace mm;
 using R = ImprovOpReassembler::Result;
 
-// Feed a chunk from a string; chunk index + last flag explicit so a test reads like
-// the wire frames it models.
+// Feed a chunk from a string; chunk index + last flag explicit so a test reads like the wire frames it models.
 static R feedStr(ImprovOpReassembler& r, uint8_t seq, bool last, const std::string& s) {
     return r.feed(seq, last, reinterpret_cast<const uint8_t*>(s.data()), s.size());
 }
@@ -48,8 +42,7 @@ TEST_CASE("a duplicate chunk is rejected and resets the buffer") {
     CHECK(feedStr(r, 1, false, "BBB") == R::Continue);
     // The installer re-sends seq 1 (a misread-timeout retry): out of sequence → Error.
     CHECK(feedStr(r, 1, false, "BBB") == R::Error);
-    // Buffer reset: a stale partial can't leak into the next op. A fresh op (seq 0)
-    // recovers cleanly.
+    // Buffer reset: a stale partial can't leak into the next op. A fresh op (seq 0) recovers cleanly.
     CHECK(feedStr(r, 0, true, "{\"ok\":1}") == R::Ready);
     CHECK(std::string(r.out()) == "{\"ok\":1}");
 }
@@ -95,8 +88,7 @@ TEST_CASE("seq 0 mid-stream abandons a partial op and starts fresh") {
     char buf[128];
     ImprovOpReassembler r(buf, sizeof(buf));
     CHECK(feedStr(r, 0, false, "partial-") == R::Continue);
-    // A new op begins (seq 0) before the previous finished — the old partial is dropped,
-    // not concatenated. (Models the installer moving to the next op after an error.)
+    // A new op begins (seq 0) before the previous finished, the old partial is dropped, not concatenated. (Models the installer moving to the next op after an error.)
     CHECK(feedStr(r, 0, true, "{\"fresh\":1}") == R::Ready);
     CHECK(std::string(r.out()) == "{\"fresh\":1}");
 }

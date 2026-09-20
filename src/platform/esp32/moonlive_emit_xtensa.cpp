@@ -35,9 +35,7 @@ namespace mm::moonlive {
 #if defined(__XTENSA__)
 
 // --- Xtensa (LX6/LX7: classic ESP32, ESP32-S3) ---------------------------------------
-// Little-endian, mixed 24-bit and 16-bit (narrow) instructions; windowed ABI prologue/
-// epilogue `entry`/`retw` so a plain C function pointer calls it. Color bytes are the
-// immediate byte of three wide `movi`s (forced wide so all patch identically), at kR/kG/kB.
+// Little-endian, mixed 24-bit and 16-bit (narrow) instructions; windowed ABI prologue/ epilogue `entry`/`retw` so a plain C function pointer calls it. Color bytes are the immediate byte of three wide `movi`s (forced wide so all patch identically), at kR/kG/kB.
 
 /// The plain fill template: @xref{the-templates|its disassembly and patch offsets}.
 static const uint8_t kXtensaFill[] = {

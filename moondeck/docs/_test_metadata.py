@@ -44,7 +44,9 @@ def parse_unit_file(path: Path) -> dict:
             if s.startswith("#") or s.startswith("namespace") or s.startswith("TEST_"):
                 break
             continue
-        body = s[2:].strip()
+        # `//` or `///`: a file lead is spelled with three slashes, and stripping exactly two
+        # left `/ @module` behind, which matched nothing and put every file in "Uncategorized".
+        body = s.lstrip("/").strip()
         if body.startswith("@module "):
             module = body[len("@module "):].strip()
         elif body.startswith("@also "):

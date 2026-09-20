@@ -1,5 +1,5 @@
-// @module BlendMap
-// @also MappingLUT
+/// @module BlendMap
+/// @also MappingLUT
 
 #include "doctest.h"
 #include "light/layers/BlendMap.h"
@@ -30,9 +30,7 @@ TEST_CASE("blendMap identity (no LUT) copies buffer") {
 
 // One logical light routed to multiple physical positions copies the color to each (mirror-style mappings work).
 TEST_CASE("blendMap 1:N mapping duplicates pixels") {
-    // 2 logical lights, 4 physical lights
-    // Logical 0 → physical {0, 3}
-    // Logical 1 → physical {1, 2}
+    // 2 logical lights, 4 physical lights Logical 0 → physical {0, 3} Logical 1 → physical {1, 2}
     mm::Buffer src, dst;
     src.allocate(2, 3);  // 2 logical lights
     dst.allocate(4, 3);  // 4 physical lights
@@ -72,15 +70,11 @@ TEST_CASE("blendMap 1:N mapping duplicates pixels") {
     CHECK(dst.data()[11] == 0);
 }
 
-// A paged LUT (forced via the maxAllocBlock test cap) must produce a
-// byte-identical dst to a single-alloc LUT with the same mapping. Paging is an
-// allocation detail; blendMap output must not depend on it. This is the
-// end-to-end pin for the no-PSRAM-fragmentation fix.
+// A paged LUT (forced via the maxAllocBlock test cap) must produce a byte-identical dst to a single-alloc LUT with the same mapping. Paging is an allocation detail; blendMap output must not depend on it. This is the end-to-end pin for the no-PSRAM-fragmentation fix.
 TEST_CASE("blendMap is identical for single-alloc and paged LUTs") {
     struct Cap { ~Cap() { mm::platform::setTestMaxAllocBlock(0); } } cap;
 
-    // 200 logical → up to 5000 physical destinations: large enough that paging
-    // spans multiple 4096-entry pages, with a run crossing a page boundary.
+    // 200 logical → up to 5000 physical destinations: large enough that paging spans multiple 4096-entry pages, with a run crossing a page boundary.
     const mm::nrOfLightsType logical = 200, physical = 5000;
     mm::Buffer src, dstSingle, dstPaged;
     src.allocate(logical, 3);
@@ -88,8 +82,7 @@ TEST_CASE("blendMap is identical for single-alloc and paged LUTs") {
     dstPaged.allocate(physical, 3);
     for (size_t i = 0; i < src.bytes(); i++) src.data()[i] = static_cast<uint8_t>((i * 37) & 0xFF);
 
-    // Build the same mapping into both LUTs; each logical light maps to ~25
-    // physicals (200 × 25 = 5000), filled sequentially so runs straddle pages.
+    // Build the same mapping into both LUTs; each logical light maps to ~25 physicals (200 × 25 = 5000), filled sequentially so runs straddle pages.
     auto fill = [&](mm::MappingLUT& lut) {
         REQUIRE(lut.build(logical, physical));
         mm::nrOfLightsType phys = 0;
@@ -116,11 +109,7 @@ TEST_CASE("blendMap is identical for single-alloc and paged LUTs") {
     CHECK(std::memcmp(dstSingle.data(), dstPaged.data(), dstSingle.bytes()) == 0);
 }
 
-// An additive (overwrites=false) LUT folding two sources onto one physical light
-// adds and clamps at 255 (no overflow). overwrites=false is the opt-in for the
-// within-layer overlap case; the default copy path would instead overwrite, and a
-// full-opacity Overwrite op still routes through this additive accumulate, so this
-// pins the contract explicitly (the regression after the multi-layer rewrite).
+// An additive (overwrites=false) LUT folding two sources onto one physical light adds and clamps at 255 (no overflow). overwrites=false is the opt-in for the within-layer overlap case; the default copy path would instead overwrite, and a full-opacity Overwrite op still routes through this additive accumulate, so this pins the contract explicitly (the regression after the multi-layer rewrite).
 TEST_CASE("blendMap additive clamping (overwrites=false)") {
     mm::Buffer src, dst;
     src.allocate(1, 3);
@@ -128,7 +117,7 @@ TEST_CASE("blendMap additive clamping (overwrites=false)") {
 
     src.data()[0] = 200; src.data()[1] = 200; src.data()[2] = 200;
 
-    // Map logical 0 to physical 0 TWICE — forces double-add with clamping
+    // Map logical 0 to physical 0 TWICE, forces double-add with clamping
     mm::MappingLUT lut;
     lut.build(1, 2);
     lut.setOverwrites(false);  // opt into additive blending
@@ -143,8 +132,7 @@ TEST_CASE("blendMap additive clamping (overwrites=false)") {
     CHECK(dst.data()[2] == 255);
 }
 
-// The default (overwrites=true) path plain-copies: two sources mapped to the
-// same physical means the LAST writer wins, no addition. Pins the fast path.
+// The default (overwrites=true) path plain-copies: two sources mapped to the same physical means the LAST writer wins, no addition. Pins the fast path.
 TEST_CASE("blendMap overwrite path: last write wins, no add") {
     mm::Buffer src, dst;
     src.allocate(2, 3);
@@ -167,11 +155,7 @@ TEST_CASE("blendMap overwrite path: last write wins, no add") {
     CHECK(dst.data()[2] == 50);
 }
 
-// Sparse overwrite mapping clears untouched physical cells. A sphere-style
-// layout maps only a subset of the physical box to a source; the rest must end
-// up black, not retain stale data from a previous frame. Pre-fills dst dirty
-// and asserts unmapped cells are zeroed — fails if BlendMap's dst.clear() is
-// removed (the regression target).
+// Sparse overwrite mapping clears untouched physical cells. A sphere-style layout maps only a subset of the physical box to a source; the rest must end up black, not retain stale data from a previous frame. Pre-fills dst dirty and asserts unmapped cells are zeroed, fails if BlendMap's dst.clear() is removed (the regression target).
 TEST_CASE("blendMap overwrite path clears untouched cells (sparse mapping)") {
     mm::Buffer src, dst;
     src.allocate(2, 3);   // 2 logical lights
@@ -202,8 +186,7 @@ TEST_CASE("blendMap overwrite path clears untouched cells (sparse mapping)") {
 
 // --- Multi-layer composition: BlendOp + opacity + clearFirst (the new params). ---
 
-// Build an identity LUT (1 logical → 1 physical) in place — MappingLUT owns a
-// heap buffer and is non-copyable, so it can't be returned by value.
+// Build an identity LUT (1 logical → 1 physical) in place, MappingLUT owns a heap buffer and is non-copyable, so it can't be returned by value.
 static void buildIdentityLut1(mm::MappingLUT& lut) {
     lut.build(1, 1);
     mm::nrOfLightsType m[] = {0};
@@ -211,8 +194,7 @@ static void buildIdentityLut1(mm::MappingLUT& lut) {
     lut.finalize();
 }
 
-// Alpha-over at half opacity: dst = src*α + dst*(255-α). With dst=200, src=100,
-// α=128 → 100*128 + 200*127 = 12800 + 25400 = 38200; /255 ≈ 150.
+// Alpha-over at half opacity: dst = src*α + dst*(255-α). With dst=200, src=100, α=128 → 100*128 + 200*127 = 12800 + 25400 = 38200; /255 ≈ 150.
 TEST_CASE("blendMap alpha-over blends src over dst by opacity") {
     mm::Buffer src, dst;
     src.allocate(1, 3); dst.allocate(1, 3);
@@ -237,7 +219,7 @@ TEST_CASE("blendMap alpha at opacity 255 == overwrite") {
     CHECK(dst.data()[0] == 10); CHECK(dst.data()[1] == 20); CHECK(dst.data()[2] == 30);
 }
 
-// Alpha at opacity 0 is a no-op (dst unchanged) — the invisible-layer case.
+// Alpha at opacity 0 is a no-op (dst unchanged), the invisible-layer case.
 TEST_CASE("blendMap alpha at opacity 0 leaves dst unchanged") {
     mm::Buffer src, dst;
     src.allocate(1, 3); dst.allocate(1, 3);
@@ -248,8 +230,7 @@ TEST_CASE("blendMap alpha at opacity 0 leaves dst unchanged") {
     CHECK(dst.data()[0] == 77); CHECK(dst.data()[1] == 77); CHECK(dst.data()[2] == 77);
 }
 
-// Additive with opacity scales the source before adding, then clamps. dst=100,
-// src=200, opacity=128 → add 200*128/255 ≈ 100 → 200.
+// Additive with opacity scales the source before adding, then clamps. dst=100, src=200, opacity=128 → add 200*128/255 ≈ 100 → 200.
 TEST_CASE("blendMap additive scales source by opacity then clamps") {
     mm::Buffer src, dst;
     src.allocate(1, 3); dst.allocate(1, 3);
@@ -262,8 +243,7 @@ TEST_CASE("blendMap additive scales source by opacity then clamps") {
     CHECK(dst.data()[2] == 200);
 }
 
-// clearFirst=false preserves dst cells the source doesn't touch — the mechanic
-// that lets a top layer blend onto the bottom layer's already-composited frame.
+// clearFirst=false preserves dst cells the source doesn't touch, the mechanic that lets a top layer blend onto the bottom layer's already-composited frame.
 TEST_CASE("blendMap clearFirst=false accumulates onto existing frame") {
     mm::Buffer src, dst;
     src.allocate(2, 3); dst.allocate(2, 3);
@@ -287,14 +267,9 @@ TEST_CASE("blendMap clearFirst=false accumulates onto existing frame") {
 }
 
 // --- No-LUT (dense grid, identity 1:1) blend paths. blendMap has a SEPARATE
-// implementation for a layer with no LUT (logical index == physical index, no
-// lookup) — the common dense-grid case that composites directly. These mirror
-// the LUT blend tests above but on the no-LUT branch (an empty MappingLUT, so
-// hasLUT()==false). This is the path that runs on a real grid layer; it was the
-// one that initially failed to composite, so each op is pinned here explicitly.
+// implementation for a layer with no LUT (logical index == physical index, no lookup), the common dense-grid case that composites directly. These mirror the LUT blend tests above but on the no-LUT branch (an empty MappingLUT, so hasLUT()==false). This is the path that runs on a real grid layer; it was the one that initially failed to composite, so each op is pinned here explicitly.
 
-// No-LUT alpha-over at half opacity: dst = div255(src*α + dst*(255-α)).
-// dst=200, src=100, α=128 → div255(100*128 + 200*127) = div255(38200) = 149.
+// No-LUT alpha-over at half opacity: dst = div255(src*α + dst*(255-α)). dst=200, src=100, α=128 → div255(100*128 + 200*127) = div255(38200) = 149.
 TEST_CASE("blendMap no-LUT alpha-over blends 1:1 by opacity") {
     mm::Buffer src, dst;
     src.allocate(2, 3); dst.allocate(2, 3);
@@ -326,8 +301,7 @@ TEST_CASE("blendMap no-LUT alpha at opacity 0 leaves dst unchanged") {
     CHECK(dst.data()[0] == 77); CHECK(dst.data()[1] == 77); CHECK(dst.data()[2] == 77);
 }
 
-// No-LUT additive with opacity scales the source then clamps at 255.
-// dst=100, src=200, opacity=128 → 100 + div255(200*128)=100 → 200.
+// No-LUT additive with opacity scales the source then clamps at 255. dst=100, src=200, opacity=128 → 100 + div255(200*128)=100 → 200.
 TEST_CASE("blendMap no-LUT additive scales by opacity then clamps") {
     mm::Buffer src, dst;
     src.allocate(2, 3); dst.allocate(2, 3);
@@ -350,14 +324,9 @@ TEST_CASE("blendMap no-LUT additive clamps at 255") {
 
 // A mapping outliving the buffer it was built for must not write past that buffer.
 //
-// This is the resize window: prepareTree rebuilds the layer's mapping and the driver's output buffer
-// in separate steps, and a render tick landing between them sees the NEW mapping's physical indices
-// with the OLD, smaller buffer. Unbounded, the write ran off the end and corrupted the heap — the
-// crash then surfaced later inside an unrelated allocation, which is why resizing a scripted layout
-// looked intermittently fatal rather than pointing at the real writer.
+// This is the resize window: prepareTree rebuilds the layer's mapping and the driver's output buffer in separate steps, and a render tick landing between them sees the NEW mapping's physical indices with the OLD, smaller buffer. Unbounded, the write ran off the end and corrupted the heap, the crash then surfaced later inside an unrelated allocation, which is why resizing a scripted layout looked intermittently fatal rather than pointing at the real writer.
 //
-// A mapped light the destination cannot hold is skipped. The frame is briefly wrong (the window is
-// an ordering problem, not fixed here); it cannot corrupt memory, which is the property that counts.
+// A mapped light the destination cannot hold is skipped. The frame is briefly wrong (the window is an ordering problem, not fixed here); it cannot corrupt memory, which is the property that counts.
 TEST_CASE("a mapping larger than its destination writes only what the buffer holds") {
     mm::Buffer src, dst;
     src.allocate(8, 3);        // eight logical lights

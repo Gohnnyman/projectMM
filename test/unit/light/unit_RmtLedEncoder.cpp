@@ -1,5 +1,5 @@
-// @module RmtLedDriver
-// @also Correction
+/// @module RmtLedDriver
+/// @also Correction
 
 #include "doctest.h"
 #include "light/drivers/RmtSymbol.h"
@@ -9,19 +9,14 @@
 #include <cstdint>
 
 // The wire bytes and their bit shapes are the CI-tier proof of correctness for the LED driver.
-// The bit EXPANSION itself no longer runs on the host: the driver hands the peripheral wire bytes
-// and the expansion happens in the IDF bytes encoder or, on the classic ESP32, in the level-5
-// refill. Neither exists off-target, so these tests pin the two halves that ARE host-visible:
+// The bit EXPANSION itself no longer runs on the host: the driver hands the peripheral wire bytes and the expansion happens in the IDF bytes encoder or, on the classic ESP32, in the level-5 refill. Neither exists off-target, so these tests pin the two halves that ARE host-visible:
 //   - makeRmtSymbol's word layout, which is what pushBitTiming programs the hardware with;
 //   - Correction's channel ordering, which decides which byte goes out first.
-// `expand` below mirrors what the hardware does (MSB-first, one symbol per data bit) so the
-// contract stays legible and a change in bit order still fails a test rather than only a wall.
+// `expand` below mirrors what the hardware does (MSB-first, one symbol per data bit) so the contract stays legible and a change in bit order still fails a test rather than only a wall.
 
 namespace {
 
-// Reference expander: what the bytes encoder and rmtHiFill both do to each wire byte.
-// MSB-first, one symbol per bit, `sym1` for a set bit. Mirrors the hardware so the ordering
-// contract is checkable on the host; it is not the shipping path.
+// Reference expander: what the bytes encoder and rmtHiFill both do to each wire byte. MSB-first, one symbol per bit, `sym1` for a set bit. Mirrors the hardware so the ordering contract is checkable on the host; it is not the shipping path.
 void expand(const uint8_t* wire, uint8_t channels, uint16_t t0h, uint16_t t1h,
             uint16_t period, uint32_t* out) {
     const uint32_t sym0 = mm::makeRmtSymbol(t0h, 1, static_cast<uint16_t>(period - t0h), 0);
@@ -32,8 +27,7 @@ void expand(const uint8_t* wire, uint8_t channels, uint16_t t0h, uint16_t t1h,
             out[s++] = (wire[ch] & (1u << bit)) ? sym1 : sym0;
 }
 
-// Default WS2812B timing at a 40 MHz / 25 ns-per-tick RMT resolution:
-//   t0h 350 ns -> 14 ticks,  t1h 700 ns -> 28 ticks,  period 1250 ns -> 50 ticks.
+// Default WS2812B timing at a 40 MHz / 25 ns-per-tick RMT resolution: t0h 350 ns -> 14 ticks,  t1h 700 ns -> 28 ticks,  period 1250 ns -> 50 ticks.
 constexpr uint16_t T0H = 14;
 constexpr uint16_t T1H = 28;
 constexpr uint16_t PERIOD = 50;
@@ -43,8 +37,7 @@ struct Half { uint8_t level; uint16_t duration; };
 Half low16(uint32_t s)  { return { static_cast<uint8_t>((s >> 15) & 1), static_cast<uint16_t>(s & 0x7FFF) }; }
 Half high16(uint32_t s) { return { static_cast<uint8_t>((s >> 31) & 1), static_cast<uint16_t>((s >> 16) & 0x7FFF) }; }
 
-// Assert one symbol is a correct WS2812 bit: HIGH for `highTicks`, then LOW for
-// (PERIOD - highTicks).
+// Assert one symbol is a correct WS2812 bit: HIGH for `highTicks`, then LOW for (PERIOD - highTicks).
 void checkBit(uint32_t sym, uint16_t highTicks) {
     Half h0 = low16(sym);
     Half h1 = high16(sym);
@@ -83,10 +76,7 @@ TEST_CASE("a light's channels go out in wire-byte order, 8 bits each") {
 }
 
 TEST_CASE("GRB ordering comes from Correction: the driver ships whatever bytes it produced") {
-    // Correction with GRB preset turns logical RGB into wire GRB; the encoder then
-    // just emits the bytes it's handed. Logical red (255,0,0) → wire GRB (0,255,0):
-    // green byte first. So the FIRST 8 symbols (wire byte 0 = G = 0x00) are all 0s,
-    // and the SECOND 8 (wire byte 1 = R = 0xFF) are all 1s.
+    // Correction with GRB preset turns logical RGB into wire GRB; the encoder then just emits the bytes it's handed. Logical red (255,0,0) → wire GRB (0,255,0): green byte first. So the FIRST 8 symbols (wire byte 0 = G = 0x00) are all 0s, and the SECOND 8 (wire byte 1 = R = 0xFF) are all 1s.
     mm::Correction c;
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::GRB);   // full brightness, GRB
     const uint8_t logicalRed[3] = {255, 0, 0};

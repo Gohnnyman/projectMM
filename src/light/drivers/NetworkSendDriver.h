@@ -14,7 +14,7 @@ namespace mm {
 
 /// Output driver: streams the buffer over UDP, one driver carrying three industry protocols selected by a control. Byte layouts live beside the receiver, so the two sides cannot drift.
 ///
-/// One driver feeds many receivers, each taking a contiguous run of the window and each addressed only by itself. So a wall of tubes is one driver, the twin of one LED driver fanning out to several lanes. Unicast is the default rather than an option among equals.
+/// One driver feeds many receivers, each taking a contiguous run of the window under its own address. A wall of tubes is one driver, the twin of one LED driver fanning out to several lanes, and unicast is the default.
 ///
 /// Prior art: MoonLight's D_NetworkOut, and the Art-Net 4, E1.31 and DDP specifications.
 ///
@@ -22,7 +22,7 @@ namespace mm {
 ///
 /// ## Why unicast is the default
 ///
-/// The Art-Net 4 spec leaves no room: broadcast is not allowed, and survives here only as legacy compatibility. The reason is receive cost, and it is asymmetric. A universe number lives in the payload rather than a header. So a receiver discards a universe it does not own late. Its stack has already carried the packet up and parsed it. Broadcast therefore makes every host on the segment pay for every universe. Two independent sources put the practical ceiling near fifteen universes. A large grid measured on the bench starved an ESP32's network stack.
+/// Art-Net 4 requires unicast; broadcast survives here as legacy compatibility. A universe number lives in the payload rather than a header, so a receiver parses every packet before discarding the universes it lacks. Broadcast makes each host pay for all of them. The practical ceiling is near fifteen universes, measured on the bench where a large grid starved an ESP32's network stack.
 ///
 /// Unicast duplicates nothing when each node owns a different slice, which is the normal case. The sender emits as many packets as a broadcast stream would, each reaching only its owner.
 ///

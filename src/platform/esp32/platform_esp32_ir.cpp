@@ -29,7 +29,7 @@ namespace mm::platform {
 
 namespace {
 
-// NEC timings in µs (RX resolution is 1 µs — see kResolutionHz). ±30 % windows absorb drift.
+// NEC timings in µs (RX resolution is 1 µs, see kResolutionHz). ±30 % windows absorb drift.
 constexpr uint32_t kLeadMark  = 9000;
 constexpr uint32_t kLeadSpace = 4500;
 constexpr uint32_t kBitMark   = 560;
@@ -126,9 +126,7 @@ bool irRead(uint16_t pin, uint32_t& codeOut) {
     // Decode, then re-arm: doing it here rather than in the handler keeps the buffer stable.
     const bool ok = decodeNec(rxBuf_, n, codeOut);
     if (!arm()) {
-        // Re-arm failed → the channel is enabled but not receiving, and ensureChannel() would
-        // treat it as still-open (pin unchanged) and never recover it. Tear it down so the next
-        // irRead reopens a fresh channel on this pin.
+        // Re-arm failed → the channel is enabled but not receiving, and ensureChannel() would treat it as still-open (pin unchanged) and never recover it. Tear it down so the next irRead reopens a fresh channel on this pin.
         closeChannel();
         return false;
     }
@@ -137,9 +135,7 @@ bool irRead(uint16_t pin, uint32_t& codeOut) {
 
 void irStop() { closeChannel(); }   // release the RX channel + its pin; irRead reopens it lazily
 
-// Open-or-confirm the RX channel and report whether it's live — same lazy open irRead uses, exposed
-// so InfraredService can tell "pin set" from "channel actually bound + armed". Fails when the RMT channel
-// can't be created (a busy pin, a bad GPIO, no free RMT block).
+// Open-or-confirm the RX channel and report whether it's live, same lazy open irRead uses, exposed so InfraredService can tell "pin set" from "channel actually bound + armed". Fails when the RMT channel can't be created (a busy pin, a bad GPIO, no free RMT block).
 bool irChannelReady(uint16_t pin) { return ensureChannel(static_cast<int>(pin)); }
 
 }  // namespace mm::platform

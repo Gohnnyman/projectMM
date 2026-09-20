@@ -1,10 +1,7 @@
-// @module draw
-// @also Canvas, FreqMatrixEffect
+/// @module draw
+/// @also Canvas, FreqMatrixEffect
 
-// `scroll` — the shift register FreqMatrix hand-rolled as a per-pixel copy loop. Two behaviours in
-// one primitive: a shift (content falls off the end, the vacated edge goes dark) and a wrap (content
-// re-enters the far edge), which is the marquee idiom. The tests pin direction, the vacated edge,
-// and that a wrap conserves every light.
+/// `scroll`, the shift register FreqMatrix hand-rolled as a per-pixel copy loop. Two behaviors in one primitive: a shift (content falls off the end, the vacated edge goes dark) and a wrap (content re-enters the far edge), which is the marquee idiom. The tests pin direction, the vacated edge, and that a wrap conserves every light.
 
 #include "doctest.h"
 #include "light/powerfunctions/draw.h"
@@ -26,7 +23,7 @@ struct Surface {
     uint8_t at(lengthType x, lengthType y, lengthType z = 0) const {
         return buf.data()[draw::Canvas{cv}.offsetOf({x, y, z})];
     }
-    /// Sum of the red channel — a wrap must conserve this, a shift must lose the part that fell off.
+    /// Sum of the red channel, a wrap must conserve this, a shift must lose the part that fell off.
     uint32_t total() const {
         uint32_t s = 0;
         for (nrOfLightsType i = 0; i < buf.count(); i++) s += buf.data()[static_cast<size_t>(i) * cv.cpl];
@@ -55,8 +52,7 @@ TEST_CASE("scrolling left moves content toward decreasing x") {
     CHECK(s.at(3, 0) == 0);      // vacated at the far end
 }
 
-// The FreqMatrix case: a column shifted one step away from the source end, new content painted at
-// the freed row. This is the loop the effect used to write by hand.
+// The FreqMatrix case: a column shifted one step away from the source end, new content painted at the freed row. This is the loop the effect used to write by hand.
 TEST_CASE("scrolling down moves each row one step and frees the top row") {
     Surface s(1, 4);
     s.set(0, 0, 10); s.set(0, 1, 20); s.set(0, 2, 30); s.set(0, 3, 40);
@@ -162,11 +158,7 @@ TEST_CASE("scrolling a 1-channel fixture moves whole lights") {
     CHECK(s.buf.data()[3] == 30);
 }
 
-// A wrapping scroll on a STRIDED axis (a column, not a row) rotates cells that are not adjacent in
-// memory, and must move a light's whole channel set whatever that count is — a DMX moving head can
-// carry far more than RGBW. The rotation swaps cells in place rather than copying through a
-// temporary, so there is no fixed-size buffer to overflow and no channel ceiling to pick; this case
-// pins that a wide fixture rotates intact.
+// A wrapping scroll on a STRIDED axis (a column, not a row) rotates cells that are not adjacent in memory, and must move a light's whole channel set whatever that count is, a DMX moving head can carry far more than RGBW. The rotation swaps cells in place rather than copying through a temporary, so there is no fixed-size buffer to overflow and no channel ceiling to pick; this case pins that a wide fixture rotates intact.
 TEST_CASE("a wrapping column scroll moves every channel of a wide fixture") {
     constexpr uint8_t kWide = 32;                // a moving head's worth of channels
     Surface s(1, 4, 1, kWide);
@@ -177,7 +169,7 @@ TEST_CASE("a wrapping column scroll moves every channel of a wide fixture") {
 
     draw::scroll(s.cv, /*axis=*/1, 1, /*wrap=*/true);
 
-    // Row 0 now holds what row 3 held — every channel, not just the first few.
+    // Row 0 now holds what row 3 held, every channel, not just the first few.
     for (uint8_t c = 0; c < kWide; c++) {
         CAPTURE(c);
         CHECK(s.buf.data()[0 * kWide + c] == static_cast<uint8_t>(3 * 40 + c));
@@ -192,9 +184,7 @@ TEST_CASE("a strided wrap conserves every light, whatever the rotation") {
     for (int i = 0; i < 3; i++) draw::scroll(s.cv, 1, 2, /*wrap=*/true);
     CHECK(s.total() == before);                  // a rotation loses nothing
 
-    // Three steps of 2 on a 5-element axis is a net rotation of one (6 mod 5), so every light has
-    // moved exactly one position down and the last has come around to the front. Conservation alone
-    // would still hold if the content were scrambled; the positions are what pin the rotation.
+    // Three steps of 2 on a 5-element axis is a net rotation of one (6 mod 5), so every light has moved exactly one position down and the last has come around to the front. Conservation alone would still hold if the content were scrambled; the positions are what pin the rotation.
     CHECK(s.at(0, 0) == 50);
     CHECK(s.at(0, 1) == 10);
     CHECK(s.at(0, 2) == 20);

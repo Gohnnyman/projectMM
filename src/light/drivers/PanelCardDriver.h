@@ -7,7 +7,7 @@
 
 namespace mm {
 
-/// Output driver: streams the buffer to LED panel cards over raw Ethernet frames, below IP. These cards take a sender-card feed rather than a pixel protocol. So they need an L2 seam rather than a socket. The wire format lives in ColorLight5A75Packet.h. This driver owns the window, the correction and the chunking, as NetworkSendDriver does for the pixel protocols. The board renders and sends, so a device with this driver is a complete panel controller.
+/// Output driver: streams the buffer to LED panel cards over raw Ethernet frames, below IP. These cards take a sender-card feed, so they need an L2 seam rather than a socket. The wire format lives in ColorLight5A75Packet.h, and this driver owns the window, the correction and the chunking. The board renders and sends, making the device a complete panel controller.
 ///
 /// Prior art: FPP (Falcon Player), which drives these cards from a Raspberry Pi, and the ColorLight 5A-75 documented byte layout. The wiring, the vendors and the host setup are on the panel cards page.
 ///
@@ -15,9 +15,9 @@ namespace mm {
 ///
 /// ## Why a gigabit link
 ///
-/// The cards require a 1000 Mbps link, for wire time rather than bandwidth. They are dumb receivers with no buffering and no flow control. They latch on the sync frame, so a whole frame must arrive inside the inter-frame window. At 100 Mbit the same bytes take ten times as long. That overruns the frame budget and breaks the timing the sync depends on.
+/// The cards require a 1000 Mbps link, for wire time rather than bandwidth. They latch on the sync frame with no buffering, so a whole frame must arrive inside the inter-frame window. At 100 Mbit the same bytes overrun the frame budget and break the timing the sync depends on.
 ///
-/// Nothing errors when this happens. Frames go out, the link is up, and the panels tear or never latch. So the driver reads the negotiated speed and says so. A slow link should not look like a format bug. It still sends at 100 Mbit: a small panel may be fine.
+/// A slow link is silent: frames go out, the link is up, and the panels tear or never latch. The driver reads the negotiated speed and says so, then sends anyway, since a small panel may be fine.
 ///
 /// ## No geometry controls
 ///

@@ -34,7 +34,7 @@ namespace mm {
 ///
 /// ## Its own channel, and why
 ///
-/// Preview frames are lossy and large; control-plane state is small and latency-sensitive. Sharing one WebSocket made the small messages queue behind the big ones, which users saw as a flickering connection indicator. Separate connections is the standard remedy.
+/// Preview frames are lossy and large; control-plane state is small and latency-sensitive. Sharing one WebSocket queues the small messages behind the big ones, which reads as a flickering connection indicator, so each gets its own.
 ///
 /// @card PreviewDriver.png
 class PreviewDriver : public DriverBase, public BinaryBroadcaster::ClientMessageSink {

@@ -25,8 +25,7 @@
 /// On the wide bus a slot is two bytes, so the cost per light doubles and the lights per lane halve.
 /// Reaching the higher totals needs the chunked-transfer work, which is backlogged; this is not an input guard, and the driver surfaces it as a status.
 //
-// Compiles on every ESP32 chip: everything is under SOC_PARLIO_SUPPORTED with
-// inert stubs otherwise; the driver never calls in (platform::parlioLanes == 0).
+// Compiles on every ESP32 chip: everything is under SOC_PARLIO_SUPPORTED with inert stubs otherwise; the driver never calls in (platform::parlioLanes == 0).
 
 #include "platform/platform.h"
 
@@ -53,25 +52,19 @@ namespace {
 
 static const char* PAR_TAG = "mm_parlio";
 
-// Parlio data_width is power-of-two only (≤ SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH),
-// derived from the lane count: ≤8 lanes → an 8-bit bus (uint8 encoder slots, bit
-// L = lane L), 9..16 → a 16-bit bus (uint16 slots). Unlike i80, Parlio accepts an
-// NC unused lane, so a sub-width lane count just leaves the extra data lines NC.
+// Parlio data_width is power-of-two only (≤ SOC_PARLIO_TX_UNIT_MAX_DATA_WIDTH), derived from the lane count: ≤8 lanes → an 8-bit bus (uint8 encoder slots, bit L = lane L), 9..16 → a 16-bit bus (uint16 slots). Unlike i80, Parlio accepts an NC unused lane, so a sub-width lane count just leaves the extra data lines NC.
 constexpr size_t kMaxBusWidth = 16;   // both peripherals' physical ceiling
 
-// WS2812 slot rate (375 ns @ 2.67 MHz), same value the driver passes at init —
-// the loopback creates its own private unit and needs the constant directly.
+// WS2812 slot rate (375 ns @ 2.67 MHz), same value the driver passes at init, the loopback creates its own private unit and needs the constant directly.
 constexpr uint32_t kPclkHz = 2'666'666;
 
-// Two frame buffers for the deferred-wait double buffer, the same shape the sibling backend uses, the second null when its allocation did not fit.
-// Transfers complete in order and the event carries no token, so the same two-slot queue routes each signal to the buffer that finished.
+// Two frame buffers for the deferred-wait double buffer, the same shape the sibling backend uses, the second null when its allocation did not fit. Transfers complete in order and the event carries no token, so the same two-slot queue routes each signal to the buffer that finished.
 struct ParlioState {
     parlio_tx_unit_handle_t unit = nullptr;
     SemaphoreHandle_t done[2] = {nullptr, nullptr};
     uint8_t* buf[2] = {nullptr, nullptr};
     size_t cap = 0;   // shared per-buffer capacity (both buffers equal)
-    // Storage for the two done-semaphores. Static (not xSemaphoreCreateBinary) so the control
-    // block lives inside this internal-RAM struct, where the cache-safe ISR can reach it.
+    // Storage for the two done-semaphores. Static (not xSemaphoreCreateBinary) so the control block lives inside this internal-RAM struct, where the cache-safe ISR can reach it.
     StaticSemaphore_t doneBuf[2] = {};
     volatile uint8_t fifo[2] = {0, 0};
     volatile uint8_t fifoHead = 0;
@@ -81,9 +74,7 @@ struct ParlioState {
     volatile uint32_t lastTransmitUs = 0;
 };
 
-// Done-callback: the DMA transfer finished — pop the oldest enqueued buffer index (in-order
-// completion), record the wire duration, and release THAT buffer's waiter. esp_timer_get_time() is
-// ISR-safe. IRAM_ATTR-safe: esp_timer_get_time reads a hardware counter (no flash access).
+// Done-callback: the DMA transfer finished, pop the oldest enqueued buffer index (in-order completion), record the wire duration, and release THAT buffer's waiter. esp_timer_get_time() is ISR-safe. IRAM_ATTR-safe: esp_timer_get_time reads a hardware counter (no flash access).
 bool IRAM_ATTR parlioDoneCb(parlio_tx_unit_handle_t, const parlio_tx_done_event_data_t*,
                             void* user) {
     auto* st = static_cast<ParlioState*>(user);
@@ -92,18 +83,14 @@ bool IRAM_ATTR parlioDoneCb(parlio_tx_unit_handle_t, const parlio_tx_done_event_
     const int64_t now = esp_timer_get_time();
     st->lastTransmitUs = static_cast<uint32_t>(now - st->txStartUs[slot]);
     st->fifoTail = (st->fifoTail + 1u) & 1u;
-    // In-order queue: if another buffer is already queued behind this one, the hardware starts it the
-    // instant this transfer ends — stamp its true start here, since parlioWs2812Transmit deliberately
-    // skipped stamping it (the wire was busy). This is what keeps the second buffer's frameTime honest.
+    // In-order queue: if another buffer is already queued behind this one, the hardware starts it the instant this transfer ends, stamp its true start here, since parlioWs2812Transmit deliberately skipped stamping it (the wire was busy). This is what keeps the second buffer's frameTime honest.
     if (st->fifoTail != st->fifoHead) st->txStartUs[st->fifoTail] = now;
     BaseType_t high = pdFALSE;
     xSemaphoreGiveFromISR(st->done[b], &high);
     return high == pdTRUE;
 }
 
-// The struct is placement-new'd into heap_caps_aligned_alloc'd memory using alignof(ParlioState),
-// so any alignment it needs is honoured by construction. This pins the assumption that the value is
-// a power of two the allocator accepts — a member needing more would otherwise fail silently.
+// The struct is placement-new'd into heap_caps_aligned_alloc'd memory using alignof(ParlioState), so any alignment it needs is honoured by construction. This pins the assumption that the value is a power of two the allocator accepts, a member needing more would otherwise fail silently.
 static_assert(alignof(ParlioState) <= 16 && (alignof(ParlioState) & (alignof(ParlioState) - 1)) == 0,
               "ParlioState alignment must be a small power of two for heap_caps_aligned_alloc");
 
@@ -119,8 +106,7 @@ void destroyState(ParlioState* st) {
     heap_caps_free(st);
 }
 
-// One TX unit + DMA buffer(s). pclkHz is the WS2812 slot rate (2.67 MHz). `wantSecond` allocates the
-// async double-buffer's second frame buffer (best-effort); false → buffer 0 only.
+// One TX unit + DMA buffer(s). pclkHz is the WS2812 slot rate (2.67 MHz). `wantSecond` allocates the async double-buffer's second frame buffer (best-effort); false → buffer 0 only.
 ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
                          uint32_t pclkHz, size_t bufferBytes, bool wantSecond) {
     // Internal memory rather than a plain allocation, since the default allocator may hand back external memory while the completion callback runs cache-safe and fires when that is unreachable.
@@ -142,10 +128,7 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
         cfg.data_gpio_nums[i] = static_cast<gpio_num_t>(dataPins[i]);
     cfg.clk_out_gpio_num = GPIO_NUM_NC;       // WS2812 ignores the clock line
     cfg.valid_gpio_num = GPIO_NUM_NC;
-    // Queue depth 2 for the deferred-wait double-buffer: the tick can enqueue the next frame's
-    // transfer while the current one drains. The driver waits before REUSING a buffer, so at most
-    // two transfers (one per buffer) are outstanding. Single-buffer boards use only buf[0]; the
-    // extra depth is harmless.
+    // Queue depth 2 for the deferred-wait double-buffer: the tick can enqueue the next frame's transfer while the current one drains. The driver waits before REUSING a buffer, so at most two transfers (one per buffer) are outstanding. Single-buffer boards use only buf[0]; the extra depth is harmless.
     cfg.trans_queue_depth = 2;
     cfg.max_transfer_size = bufferBytes;
     cfg.dma_burst_size = 64;
@@ -186,15 +169,11 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
     std::memset(st->buf[0], 0, bufferBytes);
     st->cap = bufferBytes;
 
-    // Second buffer for the async double-buffer — ONLY when asked (wantSecond); off by default, so the
-    // common path allocates exactly one buffer. Same allocate-and-degrade as the i80 driver: buf[1]
-    // null (won't-fit or not-wanted) means single-buffer mode.
+    // Second buffer for the async double-buffer, ONLY when asked (wantSecond); off by default, so the common path allocates exactly one buffer. Same allocate-and-degrade as the i80 driver: buf[1] null (won't-fit or not-wanted) means single-buffer mode.
     if (wantSecond) {
         st->done[1] = xSemaphoreCreateBinaryStatic(&st->doneBuf[1]);
         if (st->done[1]) {
-            // PSRAM first (no internal-heap impact). Internal fallback ONLY if it leaves HEAP_RESERVE
-            // intact — the second buffer is a nice-to-have, so it must never eat the WiFi/HTTP reserve
-            // (see the i80 driver). Degrade to single-buffer otherwise.
+            // PSRAM first (no internal-heap impact). Internal fallback ONLY if it leaves HEAP_RESERVE intact, the second buffer is a nice-to-have, so it must never eat the WiFi/HTTP reserve (see the i80 driver). Degrade to single-buffer otherwise.
             st->buf[1] = static_cast<uint8_t*>(heap_caps_malloc(
                 bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED));
             if (!st->buf[1]
@@ -223,12 +202,9 @@ bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
                       uint8_t laneCount, uint32_t pclkHz, size_t bufferBytes,
                       bool wantSecondBuffer) {
     if (!dataPins || laneCount == 0 || bufferBytes == 0) return false;
-    // Reject a frame larger than the peripheral can clock out in one transaction — else the created
-    // unit would fail every transmit silently (see kParlioMaxTransferBytes). The driver reports the
-    // init failure as a status; the fix for the user is fewer lights/lane or the start/count window.
+    // Reject a frame larger than the peripheral can clock out in one transaction, else the created unit would fail every transmit silently (see kParlioMaxTransferBytes). The driver reports the init failure as a status; the fix for the user is fewer lights/lane or the start/count window.
     if (bufferBytes > kParlioMaxTransferBytes) return false;
-    // Can the frame be placed at all? This mirrors what the allocation actually does, external first and only then internal.
-    // Gating on internal alone rejected frames external memory could hold, a real capacity loss, and the reserve applies only to the internal path.
+    // Can the frame be placed at all? This mirrors what the allocation actually does, external first and only then internal. Gating on internal alone rejected frames external memory could hold, a real capacity loss, and the reserve applies only to the internal path.
     const bool fitsPsram = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM) >= bufferBytes;
     const bool fitsInternal = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
                               >= bufferBytes + HEAP_RESERVE;
@@ -256,8 +232,7 @@ bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes) {
     if (!st || buffer >= 2 || !st->buf[buffer] || bytes == 0 || bytes > st->cap) return false;
     parlio_transmit_config_t xcfg = {};
     xcfg.idle_value = 0;   // lines rest LOW between/after the frame (the latch)
-    // Push onto the completion queue before enqueuing, the push and the pop touching different slots while a transfer is in flight, so it is safe without a lock.
-    // Do not wrap the transmit in a critical section: it blocks on an internal queue, and a blocking call with interrupts off panics.
+    // Push onto the completion queue before enqueuing, the push and the pop touching different slots while a transfer is in flight, so it is safe without a lock. Do not wrap the transmit in a critical section: it blocks on an internal queue, and a blocking call with interrupts off panics.
     const uint8_t slot = st->fifoHead;
     const bool wireIdle = (st->fifoHead == st->fifoTail);   // nothing in flight → this one starts NOW
     st->fifo[slot] = buffer;
@@ -275,9 +250,7 @@ bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes) {
 bool parlioWs2812Wait(ParlioWs2812Handle& h, uint8_t buffer, uint32_t timeoutMs) {
     auto* st = static_cast<ParlioState*>(h.impl);
     if (!st || buffer >= 2 || !st->done[buffer]) return true;   // nothing to wait on = not in flight
-    // Wait on the specific buffer's done-semaphore (the ISR gives it via the completion FIFO) and
-    // REPORT the outcome: on a timeout the DMA may still be reading this buffer, so the caller must
-    // not re-encode into it (see i80Ws2812Wait).
+    // Wait on the specific buffer's done-semaphore (the ISR gives it via the completion FIFO) and REPORT the outcome: on a timeout the DMA may still be reading this buffer, so the caller must not re-encode into it (see i80Ws2812Wait).
     return xSemaphoreTake(st->done[buffer], pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
 }
 
@@ -298,9 +271,7 @@ void parlioWs2812Deinit(ParlioWs2812Handle& h) {
 // This is the sibling backend's loopback with its transmit swapped for this one's: no control pins, and the length given in bits.
 // The capture half is identical, the wire signal being the same whichever bus produced it.
 
-// loopbackJumperOk + captureAndVerifyFrame live in platform_esp32_rmt.cpp (the
-// shared continuity check and the shared capture+bit-verify all three loopback
-// rigs reuse); declared here so this TU can call them.
+// loopbackJumperOk + captureAndVerifyFrame live in platform_esp32_rmt.cpp (the shared continuity check and the shared capture+bit-verify all three loopback rigs reuse); declared here so this TU can call them.
 namespace detail {
 bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio);
 void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
@@ -308,8 +279,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                            const std::function<void()>& transmitOnce,
                            RmtLoopbackResult& r, bool rideMode = false,
                            uint32_t* rxSymbols = nullptr);
-// Pre-allocate the capture buffer, one contiguous internal block, so a caller can take it before its own allocations fragment the heap.
-// Ownership transfers regardless of outcome, and passing nothing on failure is fine: the helper retries and reports it.
+// Pre-allocate the capture buffer, one contiguous internal block, so a caller can take it before its own allocations fragment the heap. Ownership transfers regardless of outcome, and passing nothing on failure is fine: the helper retries and reports it.
 uint32_t* allocLoopbackCapture(size_t dataBytes);
 }
 
@@ -327,8 +297,7 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
                                                 static_cast<uint8_t>(rxGpio));
     if (!r.jumperDetected) return r;
 
-    // The continuity check above reset txGpio's GPIO matrix route; the TX unit
-    // creation below re-claims it.
+    // The continuity check above reset txGpio's GPIO matrix route; the TX unit creation below re-claims it.
     ParlioState* st = createState(dataPins, laneCount, kPclkHz, frameBytes,
                                   /*wantSecond=*/false);   // one transfer — single buffer
     if (!st) {
@@ -337,15 +306,11 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
     }
     std::memcpy(st->buf[0], frame, frameBytes);   // loopback uses buffer 0 only (single transfer)
 
-    // The Parlio-specific transmit: ship one frame from buffer 0 (length in BITS,
-    // not bytes) and wait for its done-callback. FIFO/semaphore bookkeeping matches
-    // the runtime path. Everything else (capture, cadence, bit-verify) is the shared helper.
+    // The Parlio-specific transmit: ship one frame from buffer 0 (length in BITS, not bytes) and wait for its done-callback. FIFO/semaphore bookkeeping matches the runtime path. Everything else (capture, cadence, bit-verify) is the shared helper.
     parlio_transmit_config_t xcfg = {};
     xcfg.idle_value = 0;   // lines rest LOW between frames (the latch)
     auto transmitOnce = [st, frameBytes, &xcfg]() {
-        // Loopback self-test path (not the render hot path): a failed enqueue or a
-        // done-callback timeout would otherwise be silent and just surface later as
-        // a capture mismatch — log it so the real cause is visible in the verdict.
+        // Loopback self-test path (not the render hot path): a failed enqueue or a done-callback timeout would otherwise be silent and just surface later as a capture mismatch, log it so the real cause is visible in the verdict.
         st->fifo[st->fifoHead] = 0;
         st->fifoHead = (st->fifoHead + 1u) & 1u;
         const esp_err_t err = parlio_tx_unit_transmit(st->unit, st->buf[0],

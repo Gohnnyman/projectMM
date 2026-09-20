@@ -17,8 +17,7 @@
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
 
-// esp_codec_dev is only pulled on the S31 (idf_component.yml rule). Gate the codec
-// implementation on its presence so the file still compiles on every other target.
+// esp_codec_dev is only pulled on the S31 (idf_component.yml rule). Gate the codec implementation on its presence so the file still compiles on every other target.
 #if SOC_I2S_SUPPORTED && __has_include("esp_codec_dev.h")
 #define MM_HAS_ES8311 1
 #endif
@@ -38,8 +37,7 @@ namespace {
 
 const char* ES_TAG = "mm_es8311";
 
-// The codec device + the interfaces and I2C bus it sits on, kept alive between
-// init and deinit (the codec keeps streaming once opened; the I2S read drains it).
+// The codec device + the interfaces and I2C bus it sits on, kept alive between init and deinit (the codec keeps streaming once opened; the I2S read drains it).
 struct CodecState {
     i2c_master_bus_handle_t   i2cBus  = nullptr;
     const audio_codec_ctrl_if_t* ctrl = nullptr;
@@ -69,7 +67,7 @@ bool audioCodecInit(CodecType type, const AudioCodecPins& pins, uint32_t sampleR
     auto* st = new (std::nothrow) CodecState();
     if (!st) return false;
 
-    // The platform's I2C master bus — owned by the codec (no other platform user yet).
+    // The platform's I2C master bus, owned by the codec (no other platform user yet).
     i2c_master_bus_config_t busCfg = {};
     busCfg.i2c_port = I2C_NUM_0;
     busCfg.sda_io_num = static_cast<gpio_num_t>(pins.i2cSda);
@@ -83,10 +81,7 @@ bool audioCodecInit(CodecType type, const AudioCodecPins& pins, uint32_t sampleR
         return false;
     }
 
-    // ES8311 over I2C — the codec's control interface (the I2S *data* interface is
-    // ours: audioMicInit owns the RX channel, so we don't hand esp_codec_dev the I2S
-    // handles or use esp_codec_dev_read; the codec just needs its registers set so it
-    // streams the ADC onto the bus). The mic path is record-only.
+    // ES8311 over I2C, the codec's control interface (the I2S *data* interface is ours: audioMicInit owns the RX channel, so we don't hand esp_codec_dev the I2S handles or use esp_codec_dev_read; the codec just needs its registers set so it streams the ADC onto the bus). The mic path is record-only.
     audio_codec_i2c_cfg_t i2cCtrlCfg = {};
     i2cCtrlCfg.port = I2C_NUM_0;
     i2cCtrlCfg.addr = pins.i2cAddr;          // ES8311 default 0x18
@@ -99,8 +94,7 @@ bool audioCodecInit(CodecType type, const AudioCodecPins& pins, uint32_t sampleR
     es8311Cfg.codec_mode = ESP_CODEC_DEV_WORK_MODE_ADC;   // record / mic only
     es8311Cfg.use_mclk = true;                            // MCLK provided to the codec on GPIO52
     es8311Cfg.mclk_div = 256;                             // MCLK = 256 * sample_rate (the standard
-                                                          // I2S ratio; the codec's coeff table is
-                                                          // keyed on it — 0 fails "configure rate").
+                                                          // I2S ratio; the codec's coeff table is keyed on it, 0 fails "configure rate").
     es8311Cfg.pa_pin = -1;                                // mic path needs no power amp
     st->codec = es8311_codec_new(&es8311Cfg);
     if (!st->codec) { ESP_LOGE(ES_TAG, "es8311_codec_new failed"); deinitState(st); return false; }
@@ -138,8 +132,7 @@ void audioCodecDeinit() {
 
 namespace mm::platform {
 bool audioCodecInit(CodecType type, const AudioCodecPins&, uint32_t) {
-    // No codec: there's nothing to configure, so a None request succeeds and any
-    // codec request fails (a board asking for a codec this build can't drive).
+    // No codec: there's nothing to configure, so a None request succeeds and any codec request fails (a board asking for a codec this build can't drive).
     return type == CodecType::None;
 }
 void audioCodecDeinit() {}

@@ -1,12 +1,9 @@
-// @module MoonModule
-// @also GridLayout, MultiplyModifier, NoiseEffect, Drivers
+/// @module MoonModule
+/// @also GridLayout, MultiplyModifier, NoiseEffect, Drivers
 
-// Pins the selective control-change rebuild gate. `handleSetControl` rebuilds
-// the pipeline only when `affectsPrepare()` returns true.
-// Layout + Modifier opt in (their controls reshape physical dims / LUT shape);
-// Effects and Drivers opt out (their controls are values read in the hot path).
-// Regression target: a change here that made effect controls rebuild would
-// re-introduce the slider stutter we just fixed.
+/// Pins the selective control-change rebuild gate. `handleSetControl` rebuilds the pipeline only when `affectsPrepare()` returns true.
+/// Layout + Modifier opt in (their controls reshape physical dims / LUT shape); Effects and Drivers opt out (their controls are values read in the hot path).
+/// Regression target: a change here that made effect controls rebuild would re-introduce the slider stutter we just fixed.
 
 #include "doctest.h"
 #include "light/drivers/Drivers.h"

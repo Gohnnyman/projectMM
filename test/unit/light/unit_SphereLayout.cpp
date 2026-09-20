@@ -1,4 +1,4 @@
-// @module SphereLayout
+/// @module SphereLayout
 
 #include "doctest.h"
 #include "light/layouts/SphereLayout.h"
@@ -6,10 +6,7 @@
 #include <algorithm>
 #include <vector>
 
-// SphereLayout places lights on the surface of a hollow sphere — a one-light-
-// thick lattice shell, centre excluded. These tests pin: the shell is hollow
-// (no centre / interior point), lightCount() matches what placeLights emits,
-// the points are symmetric about the centre, and the radius-1 base case.
+// SphereLayout places lights on the surface of a hollow sphere, a one-light-thick lattice shell, center excluded. These tests pin: the shell is hollow (no center / interior point), lightCount() matches what placeLights emits, the points are symmetric about the center, and the radius-1 base case.
 
 namespace {
 
@@ -25,8 +22,7 @@ std::vector<Pt> collectPoints(const mm::SphereLayout& s) {
 
 } // namespace
 
-// lightCount() must equal the number of points placeLights emits: they share
-// one shell predicate, so allocation and fill can never disagree.
+// lightCount() must equal the number of points placeLights emits: they share one shell predicate, so allocation and fill can never disagree.
 TEST_CASE("SphereLayout lightCount matches the iterator") {
     for (mm::lengthType r : {1, 2, 4, 8}) {
         mm::SphereLayout s;
@@ -37,8 +33,7 @@ TEST_CASE("SphereLayout lightCount matches the iterator") {
     }
 }
 
-// The sphere is HOLLOW: the centre lattice point (r,r,r) is never emitted, and
-// neither is any interior point (distance < radius-0.5 from centre).
+// The sphere is HOLLOW: the center lattice point (r,r,r) is never emitted, and neither is any interior point (distance < radius-0.5 from center).
 TEST_CASE("SphereLayout is hollow — no centre or interior points") {
     mm::SphereLayout s;
     s.radius = 5;
@@ -55,14 +50,13 @@ TEST_CASE("SphereLayout is hollow — no centre or interior points") {
     }
 }
 
-// radius = 1 is the smallest hollow sphere: the 6 axis neighbours (d^2=1) plus
-// the 12 edge points (d^2=2) of the centre — 18 lights, no centre.
+// radius = 1 is the smallest hollow sphere: the 6 axis neighbors (d^2=1) plus the 12 edge points (d^2=2) of the center, 18 lights, no center.
 TEST_CASE("SphereLayout radius 1 is the 18-point base shell") {
     mm::SphereLayout s;
     s.radius = 1;
     auto pts = collectPoints(s);
     CHECK(pts.size() == 18);
-    // All within the 3x3x3 box (coords 0..2), none at the centre (1,1,1).
+    // All within the 3x3x3 box (coords 0..2), none at the center (1,1,1).
     for (const auto& p : pts) {
         CHECK(p.x >= 0); CHECK(p.x <= 2);
         CHECK(p.y >= 0); CHECK(p.y <= 2);
@@ -71,8 +65,7 @@ TEST_CASE("SphereLayout radius 1 is the 18-point base shell") {
     }
 }
 
-// The shell is symmetric about the centre: for every emitted point its mirror
-// through the centre is also emitted (a sphere has no preferred direction).
+// The shell is symmetric about the center: for every emitted point its mirror through the center is also emitted (a sphere has no preferred direction).
 TEST_CASE("SphereLayout shell is centre-symmetric") {
     mm::SphereLayout s;
     s.radius = 4;
@@ -85,15 +78,14 @@ TEST_CASE("SphereLayout shell is centre-symmetric") {
         });
     };
     for (const auto& p : pts) {
-        // Mirror through centre: (r - d) on each axis.
+        // Mirror through center: (r - d) on each axis.
         CHECK(has(static_cast<mm::lengthType>(2 * r - p.x),
                   static_cast<mm::lengthType>(2 * r - p.y),
                   static_cast<mm::lengthType>(2 * r - p.z)));
     }
 }
 
-// Physical indices are sequential 0..N-1 over the emitted shell points (no gaps
-// from the unindexed lattice voids), so the buffer maps 1:1 to emitted lights.
+// Physical indices are sequential 0..N-1 over the emitted shell points (no gaps from the unindexed lattice voids), so the buffer maps 1:1 to emitted lights.
 TEST_CASE("SphereLayout emits sequential physical indices") {
     mm::SphereLayout s;
     s.radius = 3;

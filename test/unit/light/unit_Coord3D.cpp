@@ -1,12 +1,9 @@
-// @module light_types
+/// @module light_types
 
 #include "doctest.h"
 #include "light/util/light_types.h"
 
-// Coord3D is the coordinate/size type the modifier fold interface mutates. The
-// per-axis (Hadamard) operators are what let a modifier read like geometry
-// (`pos = pos % size`); the % and / variants must guard a zero/degenerate axis so
-// a fold over a 1-wide or empty axis can't divide by zero or wrap.
+// Coord3D is the coordinate/size type the modifier fold interface mutates. The per-axis (Hadamard) operators are what let a modifier read like geometry (`pos = pos % size`); the % and / variants must guard a zero/degenerate axis so a fold over a 1-wide or empty axis can't divide by zero or wrap.
 
 TEST_CASE("Coord3D arithmetic is per-axis") {
     mm::Coord3D a{10, 20, 30};
@@ -26,8 +23,7 @@ TEST_CASE("Coord3D modulo and divide fold per axis") {
 
 TEST_CASE("Coord3D % and / guard a zero or degenerate axis") {
     mm::Coord3D pos{7, 5, 3};
-    // A 0-extent or 1-extent axis must not divide-by-zero or wrap; the coordinate
-    // passes through (% ) or stays put-ish (/), so a fold over a flat axis is safe.
+    // A 0-extent or 1-extent axis must not divide-by-zero or wrap; the coordinate passes through (% ) or stays put-ish (/), so a fold over a flat axis is safe.
     mm::Coord3D zero{0, 1, 0};
     CHECK((pos % zero) == mm::Coord3D{7, 0, 3});   // x: %0 → unchanged, y: %1 → 0, z: %0 → unchanged
     CHECK((pos / zero) == mm::Coord3D{7, 5, 3});   // /0 → unchanged on x and z, /1 → unchanged on y

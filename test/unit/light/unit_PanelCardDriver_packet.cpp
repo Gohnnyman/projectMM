@@ -1,12 +1,11 @@
-// @module PanelCardDriver
+/// @module PanelCardDriver
 
 #include "doctest.h"
 #include "light/drivers/ColorLight5A75Packet.h"
 
 #include <cstring>
 
-// The cards filter on a fixed destination MAC, so a frame sent anywhere else (broadcast, or from
-// this device's own address) is discarded without any error the sender can see.
+// The cards filter on a fixed destination MAC, so a frame sent anywhere else (broadcast, or from this device's own address) is discarded without any error the sender can see.
 TEST_CASE("Panel frames carry the fixed MAC pair the cards filter on") {
     uint8_t packet[mm::COLORLIGHT_MAX_FRAME];
     const uint8_t pixels[3] = {1, 2, 3};
@@ -19,9 +18,7 @@ TEST_CASE("Panel frames carry the fixed MAC pair the cards filter on") {
     CHECK(std::memcmp(packet + 6, src, 6) == 0);
 }
 
-// The format overloads the EtherType field: byte 12 is the packet type and byte 13 is ALREADY the
-// first payload byte. Pinning this is what stops the whole layout drifting one byte, which the
-// cards answer with silence rather than an error.
+// The format overloads the EtherType field: byte 12 is the packet type and byte 13 is ALREADY the first payload byte. Pinning this is what stops the whole layout drifting one byte, which the cards answer with silence rather than an error.
 TEST_CASE("Panel payload starts at byte 13, inside the EtherType field") {
     uint8_t packet[mm::COLORLIGHT_MAX_FRAME];
     const uint8_t pixels[6] = {255, 0, 128, 10, 20, 30};
@@ -55,8 +52,7 @@ TEST_CASE("Panel row number above 255 is big-endian across two bytes") {
     CHECK(packet[14] == 0x2C);
 }
 
-// A row wider than one packet splits, each carrying its own pixel offset so the card can place the
-// chunk without depending on arrival order.
+// A row wider than one packet splits, each carrying its own pixel offset so the card can place the chunk without depending on arrival order.
 TEST_CASE("Panel row wider than one packet carries a pixel offset") {
     uint8_t packet[mm::COLORLIGHT_MAX_FRAME];
     static uint8_t pixels[mm::COLORLIGHT_MAX_PIXELS_PER_PACKET * 3] = {};
@@ -70,8 +66,7 @@ TEST_CASE("Panel row wider than one packet carries a pixel offset") {
     CHECK(len == mm::COLORLIGHT_ROW_PREFIX + 9);
 }
 
-// A full-width packet is the largest frame the format builds, and it sizes the driver's one reused
-// buffer — if this grew past COLORLIGHT_MAX_FRAME the driver would overrun it.
+// A full-width packet is the largest frame the format builds, and it sizes the driver's one reused buffer, if this grew past COLORLIGHT_MAX_FRAME the driver would overrun it.
 TEST_CASE("Panel full row packet fits the driver's frame buffer") {
     uint8_t packet[mm::COLORLIGHT_MAX_FRAME];
     static uint8_t pixels[mm::COLORLIGHT_MAX_PIXELS_PER_PACKET * 3] = {};
@@ -83,8 +78,7 @@ TEST_CASE("Panel full row packet fits the driver's frame buffer") {
     CHECK(len == 1512);   // 21-byte prefix + 497 pixels x 3
 }
 
-// The sync frame latches everything sent since the last one. Fixed size, mostly zeros, with
-// brightness repeated in the four places the cards read it.
+// The sync frame latches everything sent since the last one. Fixed size, mostly zeros, with brightness repeated in the four places the cards read it.
 TEST_CASE("Panel sync frame is 112 bytes and carries brightness") {
     uint8_t packet[mm::COLORLIGHT_SYNC_FRAME];
 

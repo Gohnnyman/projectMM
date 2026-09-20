@@ -522,12 +522,12 @@ def test_a_ten_line_class_comment_is_accepted():
 def test_a_member_comment_past_one_line_is_flagged():
     """One line beside the thing it describes. The generated page shows the first
     sentence as the summary, so a second line is the author still talking."""
-    issues = _hdr("/// one\n/// two\nvoid doThing();")
+    issues = _hdr("#include <x.h>\n\nvoid g();\n\n/// one\n/// two\nvoid doThing();")
     assert issues and "member comment 2 lines" in issues[0][1]
 
 
 def test_a_one_line_member_comment_is_accepted():
-    assert not [i for i in _hdr("/// one\nvoid doThing();") if "member comment" in i[1]]
+    assert not [i for i in _hdr("#include <x.h>\n\nvoid g();\n\n/// one\nvoid doThing();") if "member comment" in i[1]]
 
 
 def test_a_header_leads_with_a_defgroup_block():
@@ -627,7 +627,8 @@ def test_a_moreinfo_does_not_exempt_a_member_comment():
     Relaxing this let a four-line block stand on every function in a swept header. The budget is
     one line because the generated page shows that line as the summary; depth belongs on the
     class comment or the module's page."""
-    src = "/// one\n///\n/// @moreinfo a detail\n/// and another\nvoid doThing();"
+    src = ("#include <x.h>\n\nvoid g();\n\n"
+               "/// one\n///\n/// @moreinfo a detail\n/// and another\nvoid doThing();")
     issues = [i for i in _hdr(src) if "member comment" in i[1]]
     assert issues and "member comment 4 lines" in issues[0][1]
 
@@ -836,11 +837,11 @@ def test_a_cpp_file_is_held_to_the_comment_rules():
            "public:\n"
            "    /// Does the thing.\n"
            "    void f() {\n"
-           + "".join(f"        // line {i}\n" for i in range(5)) +
+           + "".join(f"        // line {i}\n" for i in range(9)) +
            "    }\n"
            "};")
     whys = [why for _, why in check_docgen._header_rules("src/core/x.cpp", src)]
-    assert any("code comment 5 lines > 4" in w for w in whys), whys
+    assert any("code comment 9 lines > 1" in w for w in whys), whys
 
 
 def test_a_cpp_is_asked_for_no_member_docs():
@@ -856,6 +857,80 @@ def test_a_cpp_is_asked_for_no_member_docs():
     assert not cpp, cpp
     hdr = [w for _, w in check_docgen._header_rules("src/core/x.h", src) if "public variable" in w]
     assert hdr, hdr
+
+
+def test_one_rule_set_applies_to_both_kinds_of_file():
+    """A `.cpp` follows the same rules as a `.h`; only the SEVERITY differs. Three rules were
+    scoped away from implementation files on reasons that did not hold: a `.cpp` carries a file
+    lead with its own `@moreinfo` appendix, declares classes, and is read as source like any
+    other file. Scoping them back out is how the two columns drift apart again."""
+    import check_docgen
+    src = ("#include <x.h>\n"
+           "\n"
+           "void g();\n"
+           "\n"
+           "/// A two-line note\n"
+           "/// about the thing below.\n"
+           "void f();\n")
+    for rel in ("src/core/x.h", "src/core/x.cpp"):
+        whys = [w for _, w in check_docgen._header_rules(rel, src) if "member comment" in w]
+        assert whys, (rel, "the member budget applies to both")
+
+
+def test_a_list_is_structure_rather_than_an_over_long_run():
+    """A numbered item is a bullet that starts with a digit, so it is layout exactly as `-` is.
+    Counted as prose, an enumerated spec can satisfy the one-line cap only by being fused onto
+    one line, which destroys the layout that carries its meaning: a five-item wire-format spec
+    became one 299-character line that way. The prose lines in a run still count, so an essay
+    with a list in it is measured on the essay."""
+    import check_docgen
+    lead = "#include <x.h>\n\nvoid g();\n\n"
+    lst = ("// Pins three things:\n"
+           "//   1. the first\n"
+           "//   2. the second\n"
+           "//   3. the third\n"
+           "void f();\n")
+    whys = [w for _, w in check_docgen._header_rules("src/core/x.cpp", lead + lst)]
+    assert not [w for w in whys if "code comment" in w], whys
+    assert not [w for w in whys if "hard wrap" in w], whys
+
+    essay = lead + "".join(f"// prose line {i}.\n" for i in range(5)) + "void f();\n"
+    runs = [w for _, w in check_docgen._header_rules("src/core/x.cpp", essay) if "code comment" in w]
+    assert runs == ["code comment 5 lines > 1"], runs
+
+
+def test_a_lead_is_measured_as_a_block_so_chopping_does_not_satisfy_it():
+    """The line cap alone is satisfiable by splitting one long line into two shorter ones, which
+    leaves the text identical and every rule passing. A run is what a reader takes in before the
+    next declaration, so it carries the same budget over the whole block: line count times line
+    length. Pinned because the chopping move is the cheapest way to make this check green, and a
+    check that rewards it measures the wrong thing."""
+    import check_docgen
+    # Twelve lines of 240 characters: every LINE is inside the cap, the run is not.
+    lead = "\n".join("/// " + "x" * 236 for _ in range(12))
+    src = "/// @defgroup g G\n" + lead + "\n/// @{\nvoid f();\n/// @}\n"
+    whys = [w for _, w in check_docgen._header_rules("src/core/x.h", src)]
+    assert any("lead" in w and "chars" in w for w in whys), whys
+    assert not any("doc line" in w for w in whys), \
+        "no single line is over the cap, which is the point of measuring the block"
+
+
+def test_the_line_length_cap_warns_even_in_a_header():
+    """The one staged exception. Every other rule describes how the tree is already written, so
+    a finding is a defect against a standard the file was written under. This cap is new, so its
+    findings are lines nobody wrote wrongly, and erroring on them would stop commits over a
+    target rather than a defect. It becomes an error once the tree meets it."""
+    import check_docgen
+    long_line = "/// " + "word " * 60
+    assert len(long_line) > check_docgen.MAX_COMMENT_LINE_CHARS
+    src = "#include <x.h>\n\nvoid g();\n\n" + long_line + "\nvoid f();\n"
+    hits = [(k, w) for k, w in check_docgen._header_rules("src/core/x.h", src) if "chars >" in w]
+    assert hits, "a header's over-long line is still REPORTED"
+    assert not any(check_docgen._blocks(k, w) for k, w in hits), \
+        "but it warns rather than blocking, unlike every other header finding"
+    # A header finding of any OTHER kind still blocks, or the exception has swallowed the rule.
+    other = [(k, w) for k, w in check_docgen._header_rules("src/core/x.h", src) if "chars >" not in w]
+    assert any(check_docgen._blocks(k, w) for k, w in other), other
 
 
 def test_a_local_struct_in_an_allman_function_is_not_a_member():
@@ -948,8 +1023,9 @@ def test_a_defgroup_is_asked_for_only_where_a_lone_class_already_leads():
         assert not whys(G + free + "\n" + quiet), (free, "a free declaration justifies the group")
 
     lone = G + "class Thing {\n" + MEM
-    assert not [w for _, w in check_docgen._header_rules("src/core/x.cpp", lone) if "@defgroup on" in w], \
-        "a .cpp generates no page, so it has no lead to shape"
+    assert [w for _, w in check_docgen._header_rules("src/core/x.cpp", lone) if "@defgroup on" in w], \
+        "an implementation file leads the same way: a group around its lone class is still a " \
+        "second lead saying the same thing twice"
 
 
 def test_two_headers_claiming_one_group_id_are_reported(tmp_path, monkeypatch):
@@ -992,8 +1068,10 @@ def test_a_group_that_documents_nothing_is_reported():
     assert not whys("namespace mm {\n" + LEAD + "/// A thing.\ninline void f();\n/// @}\n}\n"), \
         "a group closing after its declarations is the working shape"
     assert not whys(LEAD + "/// @}\n"), "a header with no declaration at all is not this fault"
-    assert not whys(LEAD + "/// @}\n\nnamespace mm {\ninline void f();\n}\n",
-                    rel="src/core/x.cpp"), "a .cpp generates no page to lose"
+    assert whys(LEAD + "/// @}\n\nnamespace mm {\ninline void f();\n}\n",
+                rel="src/core/x.cpp"), \
+        "an implementation file carries groups too, so a group closing before its first " \
+        "declaration loses the same appendix there"
 
 
 def test_an_xref_that_cannot_render_is_reported():
@@ -1037,8 +1115,8 @@ def test_an_unclosed_group_scope_is_reported():
     assert whys("/// @defgroup g G\n/// @{\n/// A lead.\ninline void f();\n")
     assert whys("/// A lead.\ninline void f();\n/// @}\n")
     assert not whys("/// @defgroup g G\n/// @{\n/// A lead.\ninline void f();\n/// @}\n")
-    assert not whys("/// @defgroup g G\n/// @{\n/// A lead.\ninline void f();\n",
-                    rel="src/core/x.cpp"), "a .cpp has no page to reshape"
+    assert whys("/// @defgroup g G\n/// @{\n/// A lead.\ninline void f();\n",
+                rel="src/core/x.cpp"), "an unbalanced scope is a defect in either kind of file"
 
 
 def test_a_cpp_may_open_with_a_plain_comment_but_must_open_with_one():
@@ -1048,8 +1126,8 @@ def test_a_cpp_may_open_with_a_plain_comment_but_must_open_with_one():
     at all: a file that opens on code says nothing about itself to anybody."""
     import check_docgen
     plain, none_ = "// what this file is for\nint f() { return 1; }\n", "#include <x>\nint f() { return 1; }\n"
-    assert not [w for _, w in check_docgen._header_rules("src/core/x.cpp", plain) if "file" in w]
-    assert [w for _, w in check_docgen._header_rules("src/core/x.h", plain) if "opens with //" in w]
+    for rel in ("src/core/x.cpp", "src/core/x.h"):
+        assert [w for _, w in check_docgen._header_rules(rel, plain) if "opens with //" in w], rel
     for rel in ("src/core/x.cpp", "src/core/x.h"):
         assert [w for _, w in check_docgen._header_rules(rel, none_) if "file lead missing" in w], rel
 
@@ -1113,12 +1191,12 @@ def test_prose_after_a_closed_fence_is_still_checked():
     assert whys, whys
 
 
-def test_a_cpp_code_comment_gets_four_lines_where_a_header_gets_one():
-    """The one-line budget protects a GENERATED PAGE, and a `.cpp` has none, so there it
-    enforced a documentation constraint on text that never reaches the documentation. The word
-    budget is what catches a rambling comment and is unchanged on both; what a line count
-    catches in an implementation file is an essay, so the limit sits where an essay starts.
-    Measured over the platform backends, one line fired on 182 well-commented blocks."""
+def test_one_comment_cap_holds_in_both_kinds_of_file():
+    """A `//` run gets one line wherever it sits. Depth is not forbidden but HOMED: a header
+    carries it in an `@moreinfo` appendix and an implementation file carries it in the same
+    appendix on its own file lead, so the escape hatch exists in both. A larger cap in a `.cpp`
+    was an attempt to home depth inline, which leaves the reasoning beside one call rather than
+    where a reader goes looking for it."""
     import check_docgen
     body = ("class X {\n"
             "public:\n"
@@ -1127,10 +1205,9 @@ def test_a_cpp_code_comment_gets_four_lines_where_a_header_gets_one():
             + "".join(f"        // line {i}\n" for i in range(4)) +
             "    }\n"
             "};")
-    cpp = [w for _, w in check_docgen._header_rules("src/core/x.cpp", body) if "code comment" in w]
-    assert not cpp, cpp
-    hdr = [w for _, w in check_docgen._header_rules("src/core/x.h", body) if "code comment" in w]
-    assert any("code comment 4 lines > 1" in w for w in hdr), hdr
+    for rel in ("src/core/x.h", "src/core/x.cpp"):
+        whys = [w for _, w in check_docgen._header_rules(rel, body) if "code comment" in w]
+        assert any("code comment 4 lines > 1" in w for w in whys), (rel, whys)
 
 
 def test_the_scan_reaches_beyond_src():
@@ -1162,6 +1239,31 @@ def test_the_file_comment_is_exempt_but_nothing_below_it_is():
     whys = [why for _, why in check_docgen._header_rules("src/core/x.h", src)]
     assert [w for w in whys if "code comment 2 lines" in w], whys
     assert len([w for w in whys if "code comment" in w]) == 1, whys
+
+
+def test_a_file_lead_written_in_paragraphs_stays_exempt():
+    """A lead is written in paragraphs, and a blank line between two of them does not end it.
+    Stopping at the first blank exempted only the opening paragraph and reported the rest as
+    essays sitting on the next declaration, when they are the file's documentation in the only
+    place a `.cpp` has for it. The `@module`/`@also` lead of unit_Effects_golden.cpp is the
+    case: 33 lines that no appendix could hold, because they ARE the lead."""
+    import check_docgen
+    src = ("// The first paragraph of the lead.\n"
+           "//\n"
+           "// The second, after a blank line inside the comment.\n"
+           "\n"
+           "// A third, after a blank line BETWEEN blocks, still the lead:\n"
+           "// nothing has been declared yet.\n"
+           "\n"
+           "#include <cstdint>\n"
+           "\n"
+           "void f();\n"
+           "\n"
+           + "".join(f"// essay line {i}\n" for i in range(9)) +
+           "void g();\n")
+    whys = [why for _, why in check_docgen._header_rules("src/core/x.cpp", src)]
+    runs = [w for w in whys if "code comment" in w]
+    assert runs == ["code comment 9 lines > 1"], runs
 
 
 def test_a_file_with_no_leading_comment_exempts_nothing():

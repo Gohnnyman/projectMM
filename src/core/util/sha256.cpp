@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+/// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "sha256.h"
 
@@ -8,8 +8,7 @@ namespace mm {
 
 namespace {
 
-// The first 32 bits of the fractional parts of the cube roots of the first 64 primes (FIPS 180-4
-// §4.2.2). A constant of the algorithm, not a choice.
+// The first 32 bits of the fractional parts of the cube roots of the first 64 primes (FIPS 180-4 §4.2.2). A constant of the algorithm, not a choice.
 constexpr uint32_t kK[64] = {
     0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
     0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
@@ -26,8 +25,7 @@ inline uint32_t rotr(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
 /// One 64-byte block into the running state (FIPS 180-4 §6.2.2).
 void compress(uint32_t h[8], const uint8_t block[64]) {
     uint32_t w[64];
-    // Big-endian by construction rather than by cast: the digest must be identical on the
-    // little-endian hosts here and any big-endian target, so the bytes are assembled explicitly.
+    // Big-endian by construction rather than by cast: the digest must be identical on the little-endian hosts here and any big-endian target, so the bytes are assembled explicitly.
     for (int i = 0; i < 16; i++) {
         w[i] = (static_cast<uint32_t>(block[i * 4]) << 24) |
                (static_cast<uint32_t>(block[i * 4 + 1]) << 16) |
@@ -61,8 +59,7 @@ void compress(uint32_t h[8], const uint8_t block[64]) {
 }  // namespace
 
 void sha256(const void* data, size_t len, uint8_t out[kSha256DigestSize]) {
-    // The first 32 bits of the fractional parts of the square roots of the first 8 primes
-    // (FIPS 180-4 §5.3.3).
+    // The first 32 bits of the fractional parts of the square roots of the first 8 primes (FIPS 180-4 §5.3.3).
     uint32_t h[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
                      0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
 
@@ -75,11 +72,9 @@ void sha256(const void* data, size_t len, uint8_t out[kSha256DigestSize]) {
         remaining -= 64;
     }
 
-    // Padding: the 0x80 terminator, zeroes, then the length in BITS as a big-endian 64-bit value.
-    // Two blocks when the tail plus the terminator leaves no room for that length (FIPS 180-4 §5.1.1).
+    // Padding: the 0x80 terminator, zeroes, then the length in BITS as a big-endian 64-bit value. Two blocks when the tail plus the terminator leaves no room for that length (FIPS 180-4 §5.1.1).
     uint8_t tail[128] = {};
-    // Guarded: memcpy's src is `nonnull` even for a zero length, so sha256(nullptr, 0) is UB by the
-    // letter of the standard and UBSan reports it. Hashing nothing is a legal thing to ask for.
+    // Guarded: memcpy's src is `nonnull` even for a zero length, so sha256(nullptr, 0) is UB by the letter of the standard and UBSan reports it. Hashing nothing is a legal thing to ask for.
     if (remaining) std::memcpy(tail, p, remaining);
     tail[remaining] = 0x80;
     const size_t tailLen = (remaining >= 56) ? 128 : 64;

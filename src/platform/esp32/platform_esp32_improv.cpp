@@ -69,9 +69,7 @@
 namespace mm::platform {
 namespace {
 
-// Improv-serial framing — see src/core/ImprovFrame.h. That header carries
-// the parser, builder, and checksum, all unit-tested at test/test_improv_frame.cpp.
-// This task only does the IO + RPC dispatch.
+// Improv-serial framing, see src/core/ImprovFrame.h. That header carries the parser, builder, and checksum, all unit-tested at test/test_improv_frame.cpp. This task only does the IO + RPC dispatch.
 
 // Shared with the Improv task; const after init.
 struct ImprovTaskState {
@@ -86,13 +84,11 @@ struct ImprovTaskState {
     char* statusBuf = nullptr;        // module shows as `provision_status`
     size_t statusBufLen = 0;
 
-    // Vendor SET_TX_POWER RPC (command 0xFD): pre-association TX-power cap in
-    // whole dBm for brown-out-prone boards. Same producer/consumer dance.
+    // Vendor SET_TX_POWER RPC (command 0xFD): pre-association TX-power cap in whole dBm for brown-out-prone boards. Same producer/consumer dance.
     uint8_t* txPowerOut = nullptr;
     std::atomic<bool>* txPowerReady = nullptr;
 
-    // The operation buffer and its ready flag, the same producer and consumer dance as the credentials: @xref{the-two-vendor-operations|what it carries}.
-    // Module-owned and sized for the largest operation; only these two are shared state here.
+    // The operation buffer and its ready flag, the same producer and consumer dance as the credentials: @xref{the-two-vendor-operations|what it carries}. Module-owned and sized for the largest operation; only these two are shared state here.
     char* opOut = nullptr;
     size_t opOutLen = 0;
     std::atomic<bool>* opReady = nullptr;
@@ -109,8 +105,7 @@ static void improvSetStatus(const char* fmt, ...) {
     va_end(args);
 }
 
-// Whether the USB read driver is up, which gates sending on that transport so a board without it never writes into a dead peripheral.
-// Read and written on the same task, so a plain flag is enough.
+// Whether the USB read driver is up, which gates sending on that transport so a board without it never writes into a dead peripheral. Read and written on the same task, so a plain flag is enough.
 #if SOC_USB_SERIAL_JTAG_SUPPORTED
 static bool g_jtagReady = false;
 #endif
@@ -119,8 +114,7 @@ static bool g_jtagReady = false;
 enum class ImprovSource : uint8_t { Both, Uart, Jtag };
 static ImprovSource g_replySource = ImprovSource::Both;
 
-// Send a framed message, routed to the transport that received the request being replied to, or broadcast when no particular source is set.
-// The frame-type values match the upstream protocol numerically; the host test path keeps its own enumeration rather than including that header.
+// Send a framed message, routed to the transport that received the request being replied to, or broadcast when no particular source is set. The frame-type values match the upstream protocol numerically; the host test path keeps its own enumeration rather than including that header.
 static void improvSend(ImprovFrameType type, const std::vector<uint8_t>& payload) {
     uint8_t frame[6 + 1 + 1 + 1 + kImprovMaxPayload + 1];
     size_t n = buildImprovFrame(type, payload.data(), payload.size(),
@@ -137,8 +131,7 @@ static void improvSend(ImprovFrameType type, const std::vector<uint8_t>& payload
     }
 #if SOC_USB_SERIAL_JTAG_SUPPORTED
     if (g_jtagReady && g_replySource != ImprovSource::Uart) {
-        // Non-blocking, so a host that opened the endpoint without draining cannot stall the task: what fits is queued and the rest dropped, and the installer retries.
-        // Replies are small and fit one transaction on any healthy host.
+        // Non-blocking, so a host that opened the endpoint without draining cannot stall the task: what fits is queued and the rest dropped, and the installer retries. Replies are small and fit one transaction on any healthy host.
         usb_serial_jtag_write_bytes(frame, n, 0);
     }
 #endif
@@ -210,17 +203,11 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
     g_improv.ssidOut[g_improv.ssidOutLen - 1] = 0;
     std::strncpy(g_improv.passwordOut, cmd.password.c_str(), g_improv.passwordOutLen - 1);
     g_improv.passwordOut[g_improv.passwordOutLen - 1] = 0;
-    // release-store: pairs with the module's acquire-load in tick1s() so the
-    // SSID/password buffer writes above are visible before the consumer sees
-    // ready=true (matters on the dual-core ESP32-S3; single-core ESP32 is a
-    // no-op but the explicit ordering documents intent).
+    // release-store: pairs with the module's acquire-load in tick1s() so the SSID/password buffer writes above are visible before the consumer sees ready=true (matters on the dual-core ESP32-S3; single-core ESP32 is a no-op but the explicit ordering documents intent).
     g_improv.ready->store(true, std::memory_order_release);
     improvSendCurrentState(improv::STATE_PROVISIONING);
 
-    // Wait up to 30 s for a usable IP. Polls existing platform state — no extra
-    // wiring. Loop until the lease actually lands (a non-zero address), not merely
-    // until association: DHCP completes shortly after WIFI_EVENT_STA_CONNECTED, so
-    // breaking on wifiStaConnected() alone could read 0.0.0.0.
+    // Wait up to 30 s for a usable IP. Polls existing platform state, no extra wiring. Loop until the lease actually lands (a non-zero address), not merely until association: DHCP completes shortly after WIFI_EVENT_STA_CONNECTED, so breaking on wifiStaConnected() alone could read 0.0.0.0.
     uint8_t ip[4] = {};
     for (int i = 0; i < 300; i++) {  // 30 s @ 100 ms
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -229,16 +216,14 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
             if (ip[0] || ip[1] || ip[2] || ip[3]) break;   // have a real address
         }
     }
-    // No usable lease (never associated, or associated but DHCP never completed) is a
-    // failure, same as the timeout — http://0.0.0.0/ would be worse than an honest error.
+    // No usable lease (never associated, or associated but DHCP never completed) is a failure, same as the timeout, http://0.0.0.0/ would be worse than an honest error.
     if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) {
         improvSetStatus("error: no IP after 30s");
         improvSendError(improv::ERROR_UNABLE_TO_CONNECT);
         return;
     }
     improvSetStatus("connected: %s", cmd.ssid.c_str());
-    // Success frame: RPC response carrying the device URL. Format the dotted-quad
-    // inline (platform layer doesn't pull core/Control.h's formatDottedQuad).
+    // Success frame: RPC response carrying the device URL. Format the dotted-quad inline (platform layer doesn't pull core/Control.h's formatDottedQuad).
     char url[64];
     std::snprintf(url, sizeof(url), "http://%u.%u.%u.%u/", ip[0], ip[1], ip[2], ip[3]);
     std::vector<std::string> urls = { url };
@@ -249,8 +234,7 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
 
 #endif // MM_NO_WIFI — end WiFi-provisioning RPCs
 
-// The transmit-power operation, the escape hatch for a board that browns out at full power: @xref{the-two-vendor-operations|why it must arrive before association}.
-// The payload is one byte of whole decibels, zero lifting any cap; the module's tick persists and applies it.
+// The transmit-power operation, the escape hatch for a board that browns out at full power: @xref{the-two-vendor-operations|why it must arrive before association}. The payload is one byte of whole decibels, zero lifting any cap; the module's tick persists and applies it.
 static constexpr uint8_t IMPROV_CMD_SET_TX_POWER = 0xFD;
 static constexpr uint8_t IMPROV_ERROR_INVALID_TX_POWER = 0x81;
 
@@ -284,10 +268,7 @@ static void improvHandleApplyOp(const uint8_t* payload, uint8_t len) {
         improvSendError(improv::ERROR_UNKNOWN_RPC);
         return;
     }
-    // Single-buffered: refuse a new op while the module hasn't consumed the previous
-    // one (opReady still set), so a fast installer can't overwrite an unapplied op.
-    // The installer treats this error as "retry shortly" and re-sends. Acquire-load
-    // pairs with the module's release-store when it clears the flag after applying.
+    // Single-buffered: refuse a new op while the module hasn't consumed the previous one (opReady still set), so a fast installer can't overwrite an unapplied op. The installer treats this error as "retry shortly" and re-sends. Acquire-load pairs with the module's release-store when it clears the flag after applying.
     if (g_improv.opReady->load(std::memory_order_acquire)) {
         improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_OP));
         return;
@@ -302,16 +283,13 @@ static void improvHandleApplyOp(const uint8_t* payload, uint8_t len) {
     const uint8_t* chunk = payload + 3;
     size_t chunkLen = static_cast<size_t>(len) - 3;
 
-    // `last` is a boolean flag on the wire; anything but 0/1 is a malformed frame
-    // (a desync the parser's checksum didn't catch, or a non-conforming sender).
-    // Reject before reassembly rather than coerce a stray value to "more chunks".
+    // `last` is a boolean flag on the wire; anything but 0/1 is a malformed frame (a desync the parser's checksum didn't catch, or a non-conforming sender). Reject before reassembly rather than coerce a stray value to "more chunks".
     if (last > 1) {
         improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_OP));
         return;
     }
 
-    // Reassembly and the duplicate guard live in a core helper tested without hardware, leaving only the serial handling here.
-    // Bound once at the first call, the buffer being set before the task starts and one task living for the device's lifetime, so it never sees a stale one.
+    // Reassembly and the duplicate guard live in a core helper tested without hardware, leaving only the serial handling here. Bound once at the first call, the buffer being set before the task starts and one task living for the device's lifetime, so it never sees a stale one.
     static mm::ImprovOpReassembler reasm(g_improv.opOut, g_improv.opOutLen);
     switch (reasm.feed(seq, last, chunk, chunkLen)) {
         case mm::ImprovOpReassembler::Result::Error:
@@ -331,13 +309,10 @@ static void improvHandleApplyOp(const uint8_t* payload, uint8_t len) {
     improvSend(ImprovFrameType::RpcResponse, rpc);
 }
 
-// Dispatch a completed frame from the parser. Only RPC frames carry commands
-// we care about; the spec lets the other types through silently.
+// Dispatch a completed frame from the parser. Only RPC frames carry commands we care about; the spec lets the other types through silently.
 static void improvDispatchFrame(const ImprovFrameParser& parser) {
     if (parser.lastType() != improv::TYPE_RPC) return;
-    // Vendor RPCs short-circuit the standard improv::parse_improv_data path because
-    // that helper is WIFI_SETTINGS-shaped (n length-prefixed strings into ssid/password).
-    // Peek at the command byte first; vendor-RPC parsing handles its own payload.
+    // Vendor RPCs short-circuit the standard improv::parse_improv_data path because that helper is WIFI_SETTINGS-shaped (n length-prefixed strings into ssid/password). Peek at the command byte first; vendor-RPC parsing handles its own payload.
     const uint8_t* raw = parser.lastPayload();
     uint8_t rawLen = parser.lastPayloadLen();
     if (rawLen >= 1 && raw[0] == IMPROV_CMD_SET_TX_POWER) {
@@ -352,10 +327,7 @@ static void improvDispatchFrame(const ImprovFrameParser& parser) {
         parser.lastPayload(), parser.lastPayloadLen(), false);
     switch (cmd.command) {
         case improv::GET_CURRENT_STATE: {
-            // "Connected" means: on WiFi, the STA has an IP; on Ethernet-only, the eth
-            // link is up with a DHCP lease. Either way report PROVISIONED + the device
-            // URL (the way ESPHome does — makes the protocol self-describing on every
-            // reconnect; observable via improv_probe.py). Not connected → AUTHORIZED.
+            // "Connected" means: on WiFi, the STA has an IP; on Ethernet-only, the eth link is up with a DHCP lease. Either way report PROVISIONED + the device URL (the way ESPHome does, makes the protocol self-describing on every reconnect; observable via improv_probe.py). Not connected → AUTHORIZED.
             uint8_t ip[4] = {};
             bool connected = false;
 #ifndef MM_NO_WIFI
@@ -380,9 +352,7 @@ static void improvDispatchFrame(const ImprovFrameParser& parser) {
         case improv::GET_DEVICE_INFO: improvSendDeviceInfo(); break;
 #ifndef MM_NO_WIFI
         case improv::GET_WIFI_NETWORKS:
-            // Refuse scans while WiFi STA is connected — esp_wifi_scan_start puts the
-            // radio into scan mode for 2-5 s, dropping inbound ArtNet (a visible glitch
-            // on a 16K-LED rig). GET_CURRENT_STATE already reports online.
+            // Refuse scans while WiFi STA is connected, esp_wifi_scan_start puts the radio into scan mode for 2-5 s, dropping inbound ArtNet (a visible glitch on a 16K-LED rig). GET_CURRENT_STATE already reports online.
             if (wifiStaConnected()) improvSendError(improv::ERROR_UNABLE_TO_CONNECT);
             else                    improvSendWifiNetworks();
             break;
@@ -392,8 +362,7 @@ static void improvDispatchFrame(const ImprovFrameParser& parser) {
     }
 }
 
-// Feed one byte into the parser and dispatch as needed, the source naming which transport it arrived on so the reply routes back there alone.
-// Reset to both afterwards, so any later unsolicited send broadcasts as before.
+// Feed one byte into the parser and dispatch as needed, the source naming which transport it arrived on so the reply routes back there alone. Reset to both afterwards, so any later unsolicited send broadcasts as before.
 static void improvFeedByte(ImprovFrameParser& parser, uint8_t b, ImprovSource source) {
     switch (parser.feed(b)) {
         case ImprovFeedResult::NeedMore:
@@ -409,15 +378,13 @@ static void improvFeedByte(ImprovFrameParser& parser, uint8_t b, ImprovSource so
             g_replySource = ImprovSource::Both;
             break;
         case ImprovFeedResult::OversizePayload:
-            // Length byte > 128 — almost certainly noise / bit-flip; resync silently.
+            // Length byte > 128, almost certainly noise / bit-flip; resync silently.
             break;
     }
 }
 
 static void improvTask(void* /*arg*/) {
-    // UART0 driver install. UART0 is already configured at 115200-8N1 by
-    // the bootloader; we just claim the interrupt + RX FIFO. RX buf 256 is
-    // plenty (Improv RPC payloads max out around 96 bytes).
+    // UART0 driver install. UART0 is already configured at 115200-8N1 by the bootloader; we just claim the interrupt + RX FIFO. RX buf 256 is plenty (Improv RPC payloads max out around 96 bytes).
     bool uartReady = false;
     esp_err_t uart_err = uart_driver_install(UART_NUM_0, 256, 0, 0, nullptr, 0);
     if (uart_err == ESP_OK) {
@@ -440,8 +407,7 @@ static void improvTask(void* /*arg*/) {
                      esp_err_to_name(jtag_err));
         }
     } else {
-        // Someone else already installed it (rare). We can still read +
-        // write through it.
+        // Someone else already installed it (rare). We can still read + write through it.
         g_jtagReady = true;
     }
 #endif
@@ -458,10 +424,7 @@ static void improvTask(void* /*arg*/) {
         return;
     }
 
-    // Compound status so a user inspecting `provision_status` can see
-    // partial failures (one transport up, the other failed). Without this
-    // the listening-state status overwrites any prior warn line and the
-    // failure is invisible in the UI.
+    // Compound status so a user inspecting `provision_status` can see partial failures (one transport up, the other failed). Without this the listening-state status overwrites any prior warn line and the failure is invisible in the UI.
 #if SOC_USB_SERIAL_JTAG_SUPPORTED
     if (uartReady && g_jtagReady)         improvSetStatus("listening");
     else if (uartReady)                   improvSetStatus("listening (jtag unavailable)");
@@ -477,8 +440,7 @@ static void improvTask(void* /*arg*/) {
 #endif
     uint8_t b;
     for (;;) {
-        // A symmetric non-blocking poll of both, draining whichever has data and yielding only when both come up empty.
-        // Blocking on one made the other lumpy on a board that has both.
+        // A symmetric non-blocking poll of both, draining whichever has data and yielding only when both come up empty. Blocking on one made the other lumpy on a board that has both.
         bool anyRead = false;
         if (uartReady) {
             for (int drained = 0; drained < 64; ++drained) {
@@ -540,9 +502,7 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
     g_improv.opOutLen = opOutLen;
     g_improv.opReady = opReady;
 
-    // 6 KB stack: parser is small, scan response uses std::vector + std::string
-    // (some short-string-optimised, some heap). Priority 4 — below OTA (5),
-    // above idle. Single task per device; not pinned to a core.
+    // 6 KB stack: parser is small, scan response uses std::vector + std::string (some short-string-optimized, some heap). Priority 4, below OTA (5), above idle. Single task per device; not pinned to a core.
     BaseType_t ok = xTaskCreate(&improvTask, "improv", 6144, nullptr, 4, nullptr);
     if (ok != pdPASS) {
         improvSetStatus("error: task create failed");

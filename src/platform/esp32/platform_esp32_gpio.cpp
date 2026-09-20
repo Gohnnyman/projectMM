@@ -55,9 +55,7 @@
 #include "esp_efuse.h"        // esp_efuse_get_pkg_ver: the classic ESP32's PACKAGE decides its pin table
 #include "soc/efuse_defs.h"   // EFUSE_RD_CHIP_VER_PKG_*: the package ids
 #include "esp_heap_caps.h"    // heap_caps_get_total_size(MALLOC_CAP_SPIRAM): detect PSRAM without a new
-                              // component dep (the heap component is always linked; esp_psram is not,
-                              // and adding it to REQUIRES would switch main to strict mode, hiding the
-                              // implicitly-available components the other platform files rely on)
+                              // component dep (the heap component is always linked; esp_psram is not, and adding it to REQUIRES would switch main to strict mode, hiding the implicitly-available components the other platform files rely on)
 
 #include <cstddef>
 #include <cstdint>
@@ -66,16 +64,14 @@ namespace mm::platform {
 
 namespace {
 
-// The per-chip strap and reserved pins, from the hardware reference page: @xref{two-lists-per-chip-one-of-them-conditional|what each list means}.
-// Both helpers are plain linear scans over tiny fixed arrays.
+// The per-chip strap and reserved pins, from the hardware reference page: @xref{two-lists-per-chip-one-of-them-conditional|what each list means}. Both helpers are plain linear scans over tiny fixed arrays.
 bool inList(uint8_t gpio, const uint8_t* list, size_t n) {
     for (size_t i = 0; i < n; i++) if (list[i] == gpio) return true;
     return false;
 }
 
 #if defined(CONFIG_IDF_TARGET_ESP32)
-// Classic ESP32 in a plain module (WROOM / WROVER, a D0WD die): flash 6-11 always; 16/17 are the
-// extra flash/PSRAM bus on WROVER modules only.
+// Classic ESP32 in a plain module (WROOM / WROVER, a D0WD die): flash 6-11 always; 16/17 are the extra flash/PSRAM bus on WROVER modules only.
 constexpr uint8_t kReserved[]        = {6, 7, 8, 9, 10, 11};
 constexpr uint8_t kReservedIfPsram[] = {16, 17};
 constexpr uint8_t kStrap[]           = {0, 2, 5, 12, 15};
@@ -101,14 +97,12 @@ constexpr uint8_t kReservedIfPsram[] = {};
 #endif
 constexpr uint8_t kStrap[]           = {0, 3, 45, 46};
 #elif defined(CONFIG_IDF_TARGET_ESP32P4)
-// ESP32-P4: flash/PSRAM are module-internal (the SDK's valid-GPIO query already excludes the
-// bonded ones on a given package); straps 34-38.
+// ESP32-P4: flash/PSRAM are module-internal (the SDK's valid-GPIO query already excludes the bonded ones on a given package); straps 34-38.
 constexpr uint8_t kReserved[]        = {};
 constexpr uint8_t kReservedIfPsram[] = {};
 constexpr uint8_t kStrap[]           = {34, 35, 36, 37, 38};
 #elif defined(CONFIG_IDF_TARGET_ESP32S31)
-// ESP32-S31: flash/PSRAM module-internal (SDK query excludes them). Board-wired peripheral pins
-// (RGMII/codec/SD) are a per-board concern the catalog owns, not a chip strap/reserved fact.
+// ESP32-S31: flash/PSRAM module-internal (SDK query excludes them). Board-wired peripheral pins (RGMII/codec/SD) are a per-board concern the catalog owns, not a chip strap/reserved fact.
 constexpr uint8_t kReserved[]        = {};
 constexpr uint8_t kReservedIfPsram[] = {};
 constexpr uint8_t kStrap[]           = {};
@@ -118,9 +112,7 @@ constexpr uint8_t kReservedIfPsram[] = {};
 constexpr uint8_t kStrap[]           = {};
 #endif
 
-// Queried once and cached: PSRAM presence cannot change after boot. The heap-caps total for the
-// SPIRAM region is the cheap read, 0 meaning none (the heap component is always linked, unlike
-// esp_psram, see the include note).
+// Queried once and cached: PSRAM presence cannot change after boot. The heap-caps total for the SPIRAM region is the cheap read, 0 meaning none (the heap component is always linked, unlike esp_psram, see the include note).
 bool psramPresent() {
     static const bool present = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
     return present;
@@ -134,9 +126,7 @@ GpioCapability gpioCapability(uint8_t gpio) {
     c.outputCapable = GPIO_IS_VALID_OUTPUT_GPIO(gpio);
     c.rtc           = rtc_gpio_is_valid_gpio(static_cast<gpio_num_t>(gpio));
     c.strap         = inList(gpio, kStrap, sizeof(kStrap));
-    // kReservedIfPsram is gated on PSRAM being PRESENT, except where the image itself fixes the
-    // pins: an octal-PSRAM S3 build wires 33-37 to the PSRAM bus whatever the runtime finds, and a
-    // board whose PSRAM failed to init would otherwise hand those pads out as free GPIO.
+    // kReservedIfPsram is gated on PSRAM being PRESENT, except where the image itself fixes the pins: an octal-PSRAM S3 build wires 33-37 to the PSRAM bus whatever the runtime finds, and a board whose PSRAM failed to init would otherwise hand those pads out as free GPIO.
 #if defined(CONFIG_IDF_TARGET_ESP32S3) && CONFIG_SPIRAM_MODE_OCT
     constexpr bool kPsramPinsFixedByImage = true;
 #else
@@ -177,9 +167,7 @@ GpioLiveState gpioLiveState(uint8_t gpio) {
     gpio_drive_cap_t cap = GPIO_DRIVE_CAP_DEFAULT;
     gpio_get_drive_capability(static_cast<gpio_num_t>(gpio), &cap);
     s.driveCap = static_cast<uint8_t>(cap);    // 0..3 = WEAK / MEDIUM / STRONG / STRONGEST
-    // Live pin DIRECTION straight off the pad config (not the role's intent): is the output driver /
-    // input buffer enabled right now. A role that should drive but reads back !output = the pin isn't
-    // being driven (a dead driver or wire fault), the mismatch the map flags.
+    // Live pin DIRECTION straight off the pad config (not the role's intent): is the output driver / input buffer enabled right now. A role that should drive but reads back !output = the pin isn't being driven (a dead driver or wire fault), the mismatch the map flags.
     gpio_io_config_t io = {};
     if (gpio_get_io_config(static_cast<gpio_num_t>(gpio), &io) == ESP_OK) {
         s.output = io.oe;
@@ -189,15 +177,11 @@ GpioLiveState gpioLiveState(uint8_t gpio) {
 }
 
 // --- GPIO as a working input/output -----------------------------------------------------------
-// The two above are the pin map's diagnostics. These are the role: a module that owns a pin reads a
-// switch or drives a line through them. Thin by design - gpio_config once, then the register-level
-// get/set - so a per-tick poll costs a read and the module keeps the policy (debounce, edges).
+// The two above are the pin map's diagnostics. These are the role: a module that owns a pin reads a switch or drives a line through them. Thin by design - gpio_config once, then the register-level get/set - so a per-tick poll costs a read and the module keeps the policy (debounce, edges).
 
 bool gpioInputBegin(uint8_t gpio, GpioPull pull) {
     if (!GPIO_IS_VALID_GPIO(gpio)) return false;
-    // A RESERVED pin is wired to flash, PSRAM or native USB, and routing I/O there corrupts the
-    // device (gpioCapability's own words). Refused rather than configured: the caller reports a pin
-    // it could not open, where a corrupted flash reports nothing at all.
+    // A RESERVED pin is wired to flash, PSRAM or native USB, and routing I/O there corrupts the device (gpioCapability's own words). Refused rather than configured: the caller reports a pin it could not open, where a corrupted flash reports nothing at all.
     if (gpioCapability(gpio).reserved) return false;
     gpio_config_t cfg = {};
     cfg.pin_bit_mask = 1ULL << gpio;
@@ -214,15 +198,11 @@ bool gpioRead(uint8_t gpio) {
 }
 
 bool gpioWrite(uint8_t gpio, bool high) {
-    // Output-capable, not merely valid: the classic ESP32's 34-39 are input-only, and driving one
-    // silently does nothing. Refusing here is what lets a caller report the pin rather than wonder.
+    // Output-capable, not merely valid: the classic ESP32's 34-39 are input-only, and driving one silently does nothing. Refusing here is what lets a caller report the pin rather than wonder.
     if (!GPIO_IS_VALID_OUTPUT_GPIO(gpio)) return false;
-    // And not RESERVED, the same policy gpioInputBegin applies: a pin wired to flash, PSRAM or
-    // native USB corrupts the device when driven, and a relay list is exactly where a wrong number
-    // gets typed.
+    // And not RESERVED, the same policy gpioInputBegin applies: a pin wired to flash, PSRAM or native USB corrupts the device when driven, and a relay list is exactly where a wrong number gets typed.
     if (gpioCapability(gpio).reserved) return false;
-    // Configured on first use so a caller that owns the pin just writes it. gpio_config is
-    // idempotent, and this runs on a control change, never per frame.
+    // Configured on first use so a caller that owns the pin just writes it. gpio_config is idempotent, and this runs on a control change, never per frame.
     gpio_config_t cfg = {};
     cfg.pin_bit_mask = 1ULL << gpio;
     // Input and output together: @xref{pins-are-configured-for-input-and-output-together|why a plain output makes the map lie}.
@@ -257,9 +237,7 @@ bool adcRead(uint8_t gpio, uint16_t& raw) {
     }
     if (!g_adcChanReady[chan]) {
         adc_oneshot_chan_cfg_t cfg = {};
-        // 12 dB (the full ~0..3.1 V span) and the chip's widest resolution: a sense divider and a
-        // pedal both swing across the whole range, and a narrower attenuation would clip them
-        // silently. adcMaxCount() reports the matching full scale so a caller scales correctly.
+        // 12 dB (the full ~0..3.1 V span) and the chip's widest resolution: a sense divider and a pedal both swing across the whole range, and a narrower attenuation would clip them silently. adcMaxCount() reports the matching full scale so a caller scales correctly.
         cfg.atten    = ADC_ATTEN_DB_12;
         cfg.bitwidth = ADC_BITWIDTH_DEFAULT;
         if (adc_oneshot_config_channel(g_adc1, static_cast<adc_channel_t>(chan), &cfg) != ESP_OK)
@@ -311,8 +289,7 @@ bool adcReadMv(uint8_t gpio, uint16_t& mv) {
     return true;
 }
 
-// The test seams are desktop-only: on a board the pins are real, and a test that wants to inject a
-// level has the hardware to do it.
+// The test seams are desktop-only: on a board the pins are real, and a test that wants to inject a level has the hardware to do it.
 void setTestGpioLevel(uint8_t, bool) {}
 void clearTestGpioLevel() {}
 void setTestAdcValue(uint8_t, uint16_t) {}

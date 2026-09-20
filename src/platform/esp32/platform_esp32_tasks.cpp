@@ -74,8 +74,7 @@ size_t taskSnapshot(TaskInfo* out, size_t maxTasks) {
         o.state = mapState(t.eCurrentState);
         o.priority = static_cast<uint8_t>(t.uxCurrentPriority);
         o.stackFreeBytes = t.usStackHighWaterMark;
-        // TaskStatus_t.xCoreID exists only when configTASKLIST_INCLUDE_COREID is set (it is not by
-        // default, even on a dual-core chip). Without it we can't know the per-task core, so report
+        // TaskStatus_t.xCoreID exists only when configTASKLIST_INCLUDE_COREID is set (it is not by default, even on a dual-core chip). Without it we can't know the per-task core, so report
         // -1 (unknown); the current-task-per-core view (core0/core1) still works via a separate call.
     #if defined(configTASKLIST_INCLUDE_COREID) && configTASKLIST_INCLUDE_COREID == 1
         o.core = (t.xCoreID == tskNO_AFFINITY) ? -1 : static_cast<int8_t>(t.xCoreID);
@@ -105,8 +104,7 @@ void currentTaskOnCore(int core, char* out, size_t cap) {
 #endif
 }
 
-// The name of the calling task, which today IS the render task, everything running on the one task, so the nesting is correct.
-// True only while single-tasked: once a dedicated render task lands, the serialization would still run elsewhere and this seam must capture the name from inside the render loop instead.
+// The name of the calling task, which today IS the render task, everything running on the one task, so the nesting is correct. True only while single-tasked: once a dedicated render task lands, the serialization would still run elsewhere and this seam must capture the name from inside the render loop instead.
 const char* renderTaskName() { return pcTaskGetName(nullptr); }
 
 #else  // trace facility off — inert stubs; the module falls back to its cost table only.

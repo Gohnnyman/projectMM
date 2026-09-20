@@ -1,7 +1,7 @@
 #include "core/moonlive/MoonLiveSpill.h"
 #include "core/moonlive/moonlive_emit.h"
 
-// Linear-scan register allocation spilling to the call frame, so a nested call pushes its own.
+/// Linear-scan register allocation spilling to the call frame, so a nested call pushes its own.
 
 namespace mm::moonlive {
 

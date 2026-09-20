@@ -1,5 +1,5 @@
-// @module NoiseMeterEffect
-// @also AudioService
+/// @module NoiseMeterEffect
+/// @also AudioService
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -7,14 +7,7 @@
 #include "light/layouts/GridLayout.h"
 #include "core/services/AudioService.h"
 
-// NoiseMeter is an audio-reactive 1D effect: a vertical VU column whose height tracks the overall sound
-// level and whose color is a scrolling 2D noise field. It writes only the x=0 column and Layer::extrude
-// fans each lit row across every x (and z), so a lit row is a complete horizontal band. The column fills
-// bottom-up: row y=0 lights first (the floor is buffer row height-1, since drawY = sizeY-1-y). The frame
-// comes from AudioService::latestFrame() (a process-wide static); on the host with no I2S mic we run a
-// live AudioService with `simulate` set to an "always" mode so synthesizeFrame() fills the level each
-// tick(). Every audio case brackets its own AudioService setup()/release() so it never leaks the
-// active-mic pointer into another test file. Buffer index = (y*width + x)*3.
+// NoiseMeter is an audio-reactive 1D effect: a vertical VU column whose height tracks the overall sound level and whose color is a scrolling 2D noise field. It writes only the x=0 column and Layer::extrude fans each lit row across every x (and z), so a lit row is a complete horizontal band. The column fills bottom-up: row y=0 lights first (the floor is buffer row height-1, since drawY = sizeY-1-y). The frame comes from AudioService::latestFrame() (a process-wide static); on the host with no I2S mic we run a live AudioService with `simulate` set to an "always" mode so synthesizeFrame() fills the level each tick(). Every audio case brackets its own AudioService setup()/release() so it never leaks the active-mic pointer into another test file. Buffer index = (y*width + x)*3.
 
 // Helper: is any byte of the pixel at (x,y) on a width-W grid non-zero.
 static bool pixelLit(mm::Layer& layer, int x, int y, int W) {
@@ -40,8 +33,7 @@ TEST_CASE("NoiseMeterEffect fades to dark without an audio frame") {
     layer.addChild(&meter);
 
     layer.applyState();
-    // No AudioService is active → latestFrame() is the static all-silence frame (level 0). Each loop fades
-    // then reads silence → maxLen 0 → nothing drawn, so the buffer decays to fully dark.
+    // No AudioService is active → latestFrame() is the static all-silence frame (level 0). Each loop fades then reads silence → maxLen 0 → nothing drawn, so the buffer decays to fully dark.
     for (int i = 0; i < 16; i++) layer.tick();
 
     auto& buf = layer.buffer();
@@ -53,9 +45,7 @@ TEST_CASE("NoiseMeterEffect fades to dark without an audio frame") {
     CHECK_FALSE(anyLit);
 }
 
-// Fed a loud audio frame the meter fills from the floor upward: a lit row above the floor implies every
-// row below it (down to the floor) is also lit — the column never floats. Extrude also means a lit row
-// is complete across x, so column 0 and the last column of a lit row agree.
+// Fed a loud audio frame the meter fills from the floor upward: a lit row above the floor implies every row below it (down to the floor) is also lit, the column never floats. Extrude also means a lit row is complete across x, so column 0 and the last column of a lit row agree.
 TEST_CASE("NoiseMeterEffect fills the column from the floor upward") {
     mm::AudioService audio;
     audio.defineControls();
@@ -90,8 +80,7 @@ TEST_CASE("NoiseMeterEffect fills the column from the floor upward") {
         // Floor is buffer row H-1 (drawY = sizeY-1-y, y=0 draws there first).
         if (pixelLit(layer, 0, H - 1, W)) {
             sawFill = true;
-            // Walk up from the floor: once a dark row is found, every row above it must also be dark
-            // (a contiguous fill from the bottom, no floating segment).
+            // Walk up from the floor: once a dark row is found, every row above it must also be dark (a contiguous fill from the bottom, no floating segment).
             bool darkSeen = false;
             for (int y = H - 1; y >= 0; y--) {
                 bool lit = pixelLit(layer, 0, y, W);
@@ -107,8 +96,7 @@ TEST_CASE("NoiseMeterEffect fills the column from the floor upward") {
     audio.release();
 }
 
-// The `width` gain control scales level→length: width=0 zeroes the length (tmpSound2 = level*2*0/255),
-// so even a loud audio frame lights no row and the buffer stays dark.
+// The `width` gain control scales level→length: width=0 zeroes the length (tmpSound2 = level*2*0/255), so even a loud audio frame lights no row and the buffer stays dark.
 TEST_CASE("NoiseMeterEffect width 0 keeps the meter dark despite loud audio") {
     mm::AudioService audio;
     audio.defineControls();
@@ -145,8 +133,7 @@ TEST_CASE("NoiseMeterEffect width 0 keeps the meter dark despite loud audio") {
     audio.release();
 }
 
-// The "runs at every grid size" hard rule: 0×0×0 and 1×1 both render with a live audio frame every tick
-// without crashing (the sizeX/sizeY<=0 early-out and the maxLen constrain cover them).
+// The "runs at every grid size" hard rule: 0×0×0 and 1×1 both render with a live audio frame every tick without crashing (the sizeX/sizeY<=0 early-out and the maxLen constrain cover them).
 TEST_CASE("NoiseMeterEffect survives degenerate grid sizes") {
     mm::AudioService audio;
     audio.defineControls();

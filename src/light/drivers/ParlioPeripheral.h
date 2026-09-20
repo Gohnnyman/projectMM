@@ -12,9 +12,9 @@ namespace mm {
 ///
 /// @moreinfo
 ///
-/// Parlio is the simpler peripheral, so this backend adds less than the i80 one. No sacrificial WR/DC lines, since it generates the pixel clock itself. No rounding either, since its bus width IS the pin count. Either way the user names only the pins that drive a strand.
+/// Parlio is the simpler peripheral, so this backend adds less than the i80 one: it generates the pixel clock itself and its bus width IS the pin count. The user names only the pins that drive a strand.
 ///
-/// Every control defaults to unset, because the strand is user-soldered and a hard-coded pin could drive one committed elsewhere. The P4-NANO bench uses pins 20-27 with loopbackRxPin 33. Its clear GPIOs are 20-27, 32-33 and 39-48; the rest are strapping, Ethernet, SDIO and I2C.
+/// Every control defaults to unset, because the strand is user-soldered and a hard-coded pin could drive one committed elsewhere. The P4-NANO bench uses pins 20-27 with loopbackRxPin 33, its clear GPIOs being 20-27, 32-33 and 39-48.
 class ParlioPeripheral : public LedPeripheral {
 public:
     /// Parlio lanes this chip provides; 0 makes the orchestrator's guards hold the driver inert.

@@ -40,18 +40,14 @@ size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut) {
     busCfg.glitch_ignore_cnt = 7;
     busCfg.flags.enable_internal_pullup = true;
 
-    // A failure here is most often "port already in use" — another driver (the
-    // ES8311 codec on I2C_NUM_0) currently holds the bus. Report that distinctly
-    // so the UI shows "bus in use", not a misleading "0 devices found".
+    // A failure here is most often "port already in use", another driver (the ES8311 codec on I2C_NUM_0) currently holds the bus. Report that distinctly so the UI shows "bus in use", not a misleading "0 devices found".
     i2c_master_bus_handle_t bus = nullptr;
     if (i2c_new_master_bus(&busCfg, &bus) != ESP_OK) {
         ESP_LOGW(I2C_TAG, "i2c bus unavailable (sda %u scl %u) — already in use?", sda, scl);
         return kI2cBusUnavailable;
     }
 
-    // Probe the 7-bit address range (0x01–0x77; 0x00 and 0x78+ are reserved).
-    // A 50 ms per-address timeout is ample on a quiet bus and keeps a full scan
-    // well under a second — this runs from a UI button, off the render path.
+    // Probe the 7-bit address range (0x01–0x77; 0x00 and 0x78+ are reserved). A 50 ms per-address timeout is ample on a quiet bus and keeps a full scan well under a second, this runs from a UI button, off the render path.
     size_t found = 0;
     for (uint8_t addr = 0x01; addr < 0x78 && found < maxOut; addr++) {
         if (i2c_master_probe(bus, addr, 50) == ESP_OK) out[found++] = addr;
@@ -67,8 +63,7 @@ size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut) {
 
 namespace mm::platform {
 
-// No I2C peripheral on this target — report the bus as unavailable, distinct from a
-// successful scan that found nothing (the module shows "bus in use / unavailable").
+// No I2C peripheral on this target, report the bus as unavailable, distinct from a successful scan that found nothing (the module shows "bus in use / unavailable").
 size_t i2cScan(uint16_t, uint16_t, uint8_t*, size_t) { return kI2cBusUnavailable; }
 
 }  // namespace mm::platform

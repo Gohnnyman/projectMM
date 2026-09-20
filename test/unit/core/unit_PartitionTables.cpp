@@ -1,9 +1,5 @@
-// Every shipped partition table has to be internally consistent. These are hand-edited CSVs whose
-// offsets are absolute and whose mistakes are invisible until a board fails to boot or an OTA
-// silently truncates, so the arithmetic is pinned here rather than discovered on hardware.
-// Rules come from the ESP-IDF partition-table format: partitions may not overlap, must sit inside
-// the flash the table is written for, must not start before the table itself ends, and an APP
-// partition must be 64 KB aligned (the MMU maps app code in 64 KB pages).
+/// Every shipped partition table has to be internally consistent. These are hand-edited CSVs whose offsets are absolute and whose mistakes are invisible until a board fails to boot or an OTA silently truncates, so the arithmetic is pinned here rather than discovered on hardware.
+/// Rules come from the ESP-IDF partition-table format: partitions may not overlap, must sit inside the flash the table is written for, must not start before the table itself ends, and an APP partition must be 64 KB aligned (the MMU maps app code in 64 KB pages).
 
 #include "doctest.h"
 
@@ -29,9 +25,7 @@ struct Table {
     std::vector<Partition> parts;
 };
 
-// Each table's flash capacity, DECLARED rather than inferred from the largest end offset:
-// an inferred capacity would grow with an oversized table and hide exactly the overflow this
-// suite exists to catch. A new table must be added here, which is the point.
+// Each table's flash capacity, DECLARED rather than inferred from the largest end offset: an inferred capacity would grow with an oversized table and hide exactly the overflow this suite exists to catch. A new table must be added here, which is the point.
 uint32_t declaredFlashBytes(const std::string& file) {
     static const std::pair<const char*, uint32_t> kCapacity[] = {
         {"esp32dev.csv",          4u * 1024 * 1024},
@@ -69,8 +63,7 @@ bool parseNumber(std::string tok, uint32_t& out) {
     char* end = nullptr;
     const unsigned long v = std::strtoul(tok.c_str(), &end, 0);   // base 0: 0x.. is hex
     if (errno != 0 || end == tok.c_str() || *end != '\0') return false;
-    // The K/M multiply (and the plain value) must fit uint32: 4096M or 0x100000000 is a typo,
-    // not a 4 GB partition.
+    // The K/M multiply (and the plain value) must fit uint32: 4096M or 0x100000000 is a typo, not a 4 GB partition.
     if (v > UINT32_MAX / mult) return false;
     out = static_cast<uint32_t>(v) * mult;
     return true;
@@ -139,8 +132,7 @@ TEST_CASE("every partition table describes a layout that fits its flash without 
         CAPTURE(t.file);
         REQUIRE(t.parts.size() >= 3);
 
-        // The bootloader lives below 0x8000 and the partition table itself at 0x8000, so no
-        // partition may start before 0x9000 (the first usable offset ESP-IDF documents).
+        // The bootloader lives below 0x8000 and the partition table itself at 0x8000, so no partition may start before 0x9000 (the first usable offset ESP-IDF documents).
         for (const auto& p : t.parts) {
             CAPTURE(p.name);
             CHECK(p.offset >= 0x9000u);
@@ -148,8 +140,7 @@ TEST_CASE("every partition table describes a layout that fits its flash without 
             CHECK(p.end() <= t.flashBytes);
         }
 
-        // No two partitions may overlap. Compared pairwise rather than by sorting, so the failure
-        // message names both culprits.
+        // No two partitions may overlap. Compared pairwise rather than by sorting, so the failure message names both culprits.
         for (size_t i = 0; i < t.parts.size(); i++) {
             for (size_t j = i + 1; j < t.parts.size(); j++) {
                 const auto& a = t.parts[i];
@@ -175,10 +166,7 @@ TEST_CASE("app partitions are 64 KB aligned, as the MMU requires") {
 }
 
 TEST_CASE("a table carries either two OTA slots or one slot plus a recovery app, never a mix") {
-    // Dual-OTA (ota_0 + ota_1) buys a power-fail rollback at the cost of holding two copies of the
-    // firmware. The safeboot shape (factory + ota_0) spends that space on the app instead and
-    // recovers through the factory image. Both are valid; a table that has ota_1 AND a factory
-    // partition would be paying for both and is a mistake.
+    // Dual-OTA (ota_0 + ota_1) buys a power-fail rollback at the cost of holding two copies of the firmware. The safeboot shape (factory + ota_0) spends that space on the app instead and recovers through the factory image. Both are valid; a table that has ota_1 AND a factory partition would be paying for both and is a mistake.
     for (const auto& t : allTables()) {
         CAPTURE(t.file);
         int ota = 0, factory = 0;
@@ -196,11 +184,7 @@ TEST_CASE("a table carries either two OTA slots or one slot plus a recovery app,
 }
 
 TEST_CASE("every MoonBase factory slot can be erased and holds a MoonBase image") {
-    // The app installs a new MoonBase by erasing this partition and streaming into it, and
-    // esp_partition_erase_range works in whole 4 KB sectors: an offset or size that is not a
-    // multiple would erase past the slot or leave a tail behind. Both are 64 KB aligned today
-    // (the app-alignment rule above), which satisfies this, but the erase depends on the weaker
-    // property and should say so rather than inherit it by luck.
+    // The app installs a new MoonBase by erasing this partition and streaming into it, and esp_partition_erase_range works in whole 4 KB sectors: an offset or size that is not a multiple would erase past the slot or leave a tail behind. Both are 64 KB aligned today (the app-alignment rule above), which satisfies this, but the erase depends on the weaker property and should say so rather than inherit it by luck.
     constexpr uint32_t kSector = 4096;
     constexpr uint32_t kImageBytes = 743 * 1024;   // the built image, which the slot must hold
     int factories = 0;
@@ -215,7 +199,6 @@ TEST_CASE("every MoonBase factory slot can be erased and holds a MoonBase image"
             CHECK(p.size >= kImageBytes);
         }
     }
-    // A zero here would mean the tables stopped carrying MoonBase, or that this test stopped
-    // finding them: either way the checks above proved nothing.
+    // A zero here would mean the tables stopped carrying MoonBase, or that this test stopped finding them: either way the checks above proved nothing.
     CHECK(factories > 0);
 }

@@ -1,4 +1,4 @@
-// @module SolidEffect
+/// @module SolidEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"

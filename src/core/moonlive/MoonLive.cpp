@@ -1,3 +1,6 @@
+/// The MoonLive runtime: compiled script code, its control arena, and the calls into both.
+/// The language, the compiler and the instruction encoders live behind MoonLive.h.
+
 #include "core/moonlive/MoonLive.h"
 #include <cstdio>
 #include "core/moonlive/MoonLiveCompiler.h"

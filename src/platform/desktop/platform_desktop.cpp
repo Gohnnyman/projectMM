@@ -292,9 +292,7 @@ uint32_t millis() MM_NONBLOCKING {
     );
 }
 
-// The OS thread identity as an integer. std::this_thread::get_id() is the portable spelling but is
-// not convertible to an integer, so each platform's own call is used: GetCurrentThreadId on Windows,
-// pthread_self elsewhere. The +1 guarantees a non-zero result so callers can treat 0 as "none".
+// The OS thread identity as an integer. std::this_thread::get_id() is the portable spelling but is not convertible to an integer, so each platform's own call is used: GetCurrentThreadId on Windows, pthread_self elsewhere. The +1 guarantees a non-zero result so callers can treat 0 as "none".
 uintptr_t currentThreadId() MM_NONBLOCKING {
 #ifdef _WIN32
     return static_cast<uintptr_t>(GetCurrentThreadId()) + 1;
@@ -354,8 +352,7 @@ void free(void* ptr) {
     std::free(raw);
 }
 
-// Executable memory for emitted code.
-// One platform allows a page to be writable or executable but never both, so the write happens later behind a per-thread toggle; the others allow one plain page.
+// Executable memory for emitted code. One platform allows a page to be writable or executable but never both, so the write happens later behind a per-thread toggle; the others allow one plain page.
 void* allocExec(size_t bytes) {
     if (bytes == 0) return nullptr;
 #ifdef _WIN32
@@ -402,8 +399,7 @@ void writeExec(void* dst, const void* src, size_t len) {
 }
 
 void yield() {
-    // Hand the processor to another runnable thread, and really yield.
-    // The frame boundary polls this waiting for the encode worker, so a no-op would pin a core and starve the very worker it waits for.
+    // Hand the processor to another runnable thread, and really yield. The frame boundary polls this waiting for the encode worker, so a no-op would pin a core and starve the very worker it waits for.
     std::this_thread::yield();
 }
 
@@ -524,8 +520,7 @@ void taskWdtUnsubscribe() {}   // no watchdog on the host
 void taskWdtReset() {}         // no watchdog on the host
 
 
-// A host has no pins to protect, so the map flags nothing, which is correct: there is no silicon to corrupt.
-// A test can override one pin's capability to exercise the severity derivation, held in a small fixed table.
+// A host has no pins to protect, so the map flags nothing, which is correct: there is no silicon to corrupt. A test can override one pin's capability to exercise the severity derivation, held in a small fixed table.
 namespace {
 struct GpioCapOverride { uint8_t gpio; GpioCapability cap; bool set; };
 GpioCapOverride g_gpioCapOverrides[16] = {};
@@ -589,8 +584,7 @@ const char* macString() {
 }
 
 const char* chipModel() {
-    // The real instruction set rather than the word desktop, since on a device this names the silicon and a category would leave every host indistinguishable.
-    // Compile-time, because a binary is built for one architecture; an emulated one reports what is actually running, which is the truthful answer.
+    // The real instruction set rather than the word desktop, since on a device this names the silicon and a category would leave every host indistinguishable. Compile-time, because a binary is built for one architecture; an emulated one reports what is actually running, which is the truthful answer.
 #if defined(__aarch64__) || defined(_M_ARM64)
     return "arm64";
 #elif defined(__x86_64__) || defined(_M_X64)
@@ -724,8 +718,7 @@ bool httpsPost(const char* url, const char* body, uint32_t timeoutMs) {
 }
 
 const char* hostPlatform() {
-    // The same names the release packaging uses, so a breakdown lines up with the downloads it came from rather than inventing a second vocabulary.
-    // A container reports as one rather than as its host system, since being a container is what changes how it behaves, and the system underneath is already visible elsewhere.
+    // The same names the release packaging uses, so a breakdown lines up with the downloads it came from rather than inventing a second vocabulary. A container reports as one rather than as its host system, since being a container is what changes how it behaves, and the system underneath is already visible elsewhere.
 #if defined(__linux__)
     // The marker the runtime itself creates, checked once, since a process cannot move in or out of a container while it runs.
     static const bool inContainer = std::filesystem::exists("/.dockerenv");
@@ -908,8 +901,7 @@ bool fsMount() {
     std::error_code ec;
     std::filesystem::create_directories(fsRoot_, ec);
     if (!std::filesystem::is_directory(fsRoot_, ec)) return false;
-    // Existence does not imply writability, and creating a directory is silent about all three ways it can fail, so probe with the operation that actually matters.
-    // Owner-only through the same helper the config writes use, since a file this code creates should not be the loosest thing in the directory.
+    // Existence does not imply writability, and creating a directory is silent about all three ways it can fail, so probe with the operation that actually matters. Owner-only through the same helper the config writes use, since a file this code creates should not be the loosest thing in the directory.
     const auto probe = fsRoot_ / ".mm-write-probe";
     std::error_code rm;
     std::filesystem::remove(probe, rm);
@@ -1009,8 +1001,7 @@ bool fsWriteStream(const char* path, FsWriteSrc src, void* user) {
 
     FILE* f = openOwnerOnly(tmp.string().c_str());
     if (!f) return false;
-    // Pull chunks from the source and write each straight through — fixed buffer, any file size.
-    // `abort` set by the source (a short/timed-out upload) means the data is incomplete → discard.
+    // Pull chunks from the source and write each straight through, fixed buffer, any file size. `abort` set by the source (a short/timed-out upload) means the data is incomplete → discard.
     char chunk[1024];
     bool ok = true, abort = false;
     for (;;) {
@@ -1078,8 +1069,7 @@ void setEthConfig(const EthPinConfig&) {}   // no eth on desktop; ethInit stubs 
 void ethStop() {}                           // no eth on desktop
 bool ethInit() { return false; }
 
-// Raw-frame capture, the host half of the send seam: sending a real frame needs privileges no test should ask for, so the host records what the driver emitted instead.
-// Fixed capacity and no allocation, since an unbounded recorder would turn a long run into unbounded memory; frames past the cap are counted rather than stored.
+// Raw-frame capture, the host half of the send seam: sending a real frame needs privileges no test should ask for, so the host records what the driver emitted instead. Fixed capacity and no allocation, since an unbounded recorder would turn a long run into unbounded memory; frames past the cap are counted rather than stored.
 namespace {
 // Sized for the largest frame sequence a test asserts over, and allocated on first capture rather than from boot.
 // As a static array it cost a fifth of a megabyte in a shipped binary that may never record a frame.
@@ -1130,8 +1120,7 @@ PcapQQueueFn      pcapQQueue_ = nullptr;
 PcapQTransmitFn   pcapQTransmit_ = nullptr;
 PcapQDestroyFn    pcapQDestroy_ = nullptr;
 PcapT*            pcapHandle_ = nullptr;   // the open adapter, or null for capture mode
-// The batch the send fills and the flush hands over, allocated once at bind time because the send path must not allocate.
-// Null when the library is too old to offer it.
+// The batch the send fills and the flush hands over, allocated once at bind time because the send path must not allocate. Null when the library is too old to offer it.
 PcapSendQueue*    pcapQueue_ = nullptr;
 // Sized for one wall frame with headroom, a one-time allocation on a machine that has just chosen to drive a wall.
 constexpr unsigned kSendQueueBytes = 264u * (unsigned)(kEthTestFrameMax + sizeof(PcapPktHdr));
@@ -1244,8 +1233,7 @@ bool winDescForPcapName(const MIB_IF_TABLE2* table, const char* pcapName, char* 
 }  // namespace
 
 void getMacAddress(uint8_t mac[6]) {
-    // A stored identity, generated once and kept beside the config: @xref{the-identity-is-stored-not-read-from-a-nic|why}.
-    // Cached per ROOT rather than per process, since the root is settable and a stale cache would describe the wrong install.
+    // A stored identity, generated once and kept beside the config: @xref{the-identity-is-stored-not-read-from-a-nic|why}. Cached per ROOT rather than per process, since the root is settable and a stale cache would describe the wrong install.
     static std::filesystem::path resolvedFor;
     static uint8_t cached[6] = {0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE};
     if (resolvedFor != fsRoot_) {
@@ -1266,8 +1254,7 @@ void getMacAddress(uint8_t mac[6]) {
             }
         }
         if (!loaded) {
-            // No stored identity, so this is a fresh install or one predating the file; they are told apart by whether the tree already holds config.
-            // Reading that here is safe because this runs before the config load, so a fresh tree genuinely has none at this instant.
+            // No stored identity, so this is a fresh install or one predating the file; they are told apart by whether the tree already holds config. Reading that here is safe because this runs before the config load, so a fresh tree genuinely has none at this instant.
             bool existing = false;
             if (std::filesystem::is_directory(fsRoot_ / ".config", ec) && !ec) {
                 for (const auto& e : std::filesystem::directory_iterator(fsRoot_ / ".config", ec)) {
@@ -1285,8 +1272,7 @@ void getMacAddress(uint8_t mac[6]) {
             const int n = std::snprintf(line, sizeof(line), "%02X %02X %02X %02X %02X %02X\n",
                                         cached[0], cached[1], cached[2], cached[3], cached[4], cached[5]);
             if (n > 0) (void)fsWriteAtomic("/.config/identity", line, static_cast<size_t>(n));
-            // A write failure is not fatal for this run, since the address above serves.
-            // What it costs is persistence: a fresh install on a read-only mount then moves its name on every start.
+            // A write failure is not fatal for this run, since the address above serves. What it costs is persistence: a fresh install on a read-only mount then moves its name on every start.
         }
     }
     for (int i = 0; i < 6; i++) mac[i] = cached[i];
@@ -1325,8 +1311,7 @@ bool ethBindRawInterface(const char* ifName) {
     // This handle only ever sends, so capture stays non-promiscuous: otherwise it would cost interrupts for frames nothing reads.
     PcapT* h = pcapOpenLive_(hit->name, 65536, 0, 1, err);
     if (h) {
-        // Keep the identifier the link query matches on.
-        // The description was the old key and fell back to a string no row can match, so a bound adapter reported no link forever.
+        // Keep the identifier the link query matches on. The description was the old key and fell back to a string no row can match, so a bound adapter reported no link forever.
         guidFromPcapName(hit->name, boundGuid_, sizeof(boundGuid_));
     }
     pcapFreeAllDevs_(devs);
@@ -1374,8 +1359,7 @@ bool ethBindRawInterface(const char* ifName) {
 #endif  // _WIN32
 }
 
-// Send the frame on the bound interface, or record it when none is bound. The capture branch is
-// what every unit test exercises; the raw branch is what makes a host a panel controller.
+// Send the frame on the bound interface, or record it when none is bound. The capture branch is what every unit test exercises; the raw branch is what makes a host a panel controller.
 bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
     if (!frame || len == 0) return false;
     if (ethTestSendFails_) { ethSendFails_++; ethFailTotal_++; return false; }   // simulated link-down / full ring
@@ -1388,8 +1372,7 @@ bool ethSendRaw(const uint8_t* frame, size_t len) MM_NONBLOCKING {
         PcapPktHdr hdr = {};
         hdr.caplen = static_cast<unsigned>(len);
         hdr.len    = static_cast<unsigned>(len);
-        // The streak is not cleared here, since queuing says nothing about reaching the wire.
-        // Only the flush knows how many bytes went out, and clearing on enqueue would pin the streak at zero forever.
+        // The streak is not cleared here, since queuing says nothing about reaching the wire. Only the flush knows how many bytes went out, and clearing on enqueue would pin the streak at zero forever.
         if (pcapQQueue_(pcapQueue_, &hdr, frame) == 0) return true;
         // Queue full: flush and retry once, so an unexpectedly large wall degrades to two batches rather than dropping the rest of the frame.
         ethFlushRaw();
@@ -1468,8 +1451,7 @@ void ethFlushRaw() MM_NONBLOCKING {
     // Transmit at wire speed rather than replaying the queued timestamps, since the card wants the whole burst inside one window.
     const unsigned queued = pcapQueue_->len;
     const unsigned sent = pcapQTransmit_(pcapHandle_, pcapQueue_, 0);
-    // The one place that knows the burst left, so it owns both ends of the streak.
-    // A short write is the failure, and a complete one the only honest reason to clear it.
+    // The one place that knows the burst left, so it owns both ends of the streak. A short write is the failure, and a complete one the only honest reason to clear it.
     if (sent < queued) { ethSendFails_++; ethFailTotal_++; }
     else               { ethSendFails_ = 0; }
     // Reset for the next frame: the queue is a buffer, and transmit does not rewind it.
@@ -1647,8 +1629,7 @@ uint32_t wifiApClientCount() { return 0; }
 // Host sockets work whatever the link predicates above say, and there is no initialization race, so this is always safe.
 bool networkReady() { return true; }
 int wifiTxPower() { return 0; }
-// Zero is a successful no-op and anything else fails, there being no radio.
-// The module passes its no-override sentinel through here to lift a prior cap, which is trivially true with no radio.
+// Zero is a successful no-op and anything else fails, there being no radio. The module passes its no-override sentinel through here to lift a prior cap, which is trivially true with no radio.
 bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 
 bool mdnsInit(const char* /*deviceName*/) { return false; }
@@ -1670,7 +1651,7 @@ bool http_fetch_to_ota(const char* /*url*/,
 
 bool otaWriteStream(FsWriteSrc /*src*/, void* /*user*/, size_t /*contentLen*/,
                     char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut) {
-    // No OTA partition on desktop — call sites guard with `if constexpr (mm::platform::hasOta)`.
+    // No OTA partition on desktop, call sites guard with `if constexpr (mm::platform::hasOta)`.
     if (statusBuf && statusBufLen > 0) std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
     if (bytesReadOut) *bytesReadOut = 0;
     return false;
@@ -1712,8 +1693,7 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     if (body && bodyLen) body[0] = '\0';
     if (!method || !host || !path) return 0;
 
-    // One shared budget for every phase rather than a fresh one each, which let the total reach three times the caller's timeout.
-    // The remainder is floored above zero, since zero means block forever, and it is tracked as elapsed time, which stays correct across the counter's rollover.
+    // One shared budget for every phase rather than a fresh one each, which let the total reach three times the caller's timeout. The remainder is floored above zero, since zero means block forever, and it is tracked as elapsed time, which stays correct across the counter's rollover.
     const uint32_t start = millis();
     auto remainingMs = [&]() -> uint32_t {
         const uint32_t elapsed = millis() - start;
@@ -1729,8 +1709,7 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     addr.sin_port = htons(port);
     if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return 0;
 
-    // Bound the connect too, since a blocking one to an unreachable host hangs for tens of seconds.
-    // This shares a thread with the render loop, so it connects without blocking and waits for writability.
+    // Bound the connect too, since a blocking one to an unreachable host hangs for tens of seconds. This shares a thread with the render loop, so it connects without blocking and waits for writability.
     if (make_nonblocking(fd) != 0) return 0;
     int cr = ::connect(sock(fd), reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
     // A connect that did not complete at once reports as in progress, under a different name per platform; anything else is a hard failure.
@@ -1829,8 +1808,7 @@ void reboot() {
     // The device is the host process, so exit cleanly and let the supervisor restart it, which matches what the browser's reconnect expects.
     std::printf("platform::reboot() — exiting\n");
     std::fflush(stdout);
-    // Exiting is the reboot here, there being no firmware to restart into; the thread-safety warning describes exactly the abrupt teardown a reboot models.
-    // NOLINTNEXTLINE(concurrency-mt-unsafe)
+    // Exiting is the reboot here, there being no firmware to restart into; the thread-safety warning describes exactly the abrupt teardown a reboot models. NOLINTNEXTLINE(concurrency-mt-unsafe)
     std::exit(0);
 }
 
@@ -1945,8 +1923,7 @@ int TcpConnection::read(uint8_t* buf, size_t maxLen) {
 
 bool TcpConnection::write(const uint8_t* data, size_t len) {
     if (fd_ < 0) return false;
-    // Send every byte, since a response must arrive complete, bounded because this runs on the render thread and a stalled peer would otherwise block it forever.
-    // Two bounds, as on a device: progress resets the stall one so a slow but steady transfer finishes, while the total one keeps a trickling peer from holding the loop.
+    // Send every byte, since a response must arrive complete, bounded because this runs on the render thread and a stalled peer would otherwise block it forever. Two bounds, as on a device: progress resets the stall one so a slow but steady transfer finishes, while the total one keeps a trickling peer from holding the loop.
     constexpr uint32_t kWriteStallMs = 2000;
     constexpr uint32_t kWriteTotalMs = 8000;
     const uint32_t start = millis();
@@ -2103,8 +2080,7 @@ void TcpServer::close() {
     }
 }
 
-// The symbol-based output on the host: accepted and counted rather than refused, since refusing made that driver inert off device.
-// There is nothing to hand back, the driver owning the symbols, and the resolution is echoed so its timing arithmetic works on real numbers.
+// The symbol-based output on the host: accepted and counted rather than refused, since refusing made that driver inert off device. There is nothing to hand back, the driver owning the symbols, and the resolution is echoed so its timing arithmetic works on real numbers.
 namespace {
 struct HostRmt { uint32_t resolutionHz = 0; };
 HostRmt* hostRmt(void*& impl) {
@@ -2293,8 +2269,7 @@ bool parlioWs2812Wait(ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*
 uint32_t parlioWs2812LastTransmitUs(const ParlioWs2812Handle& /*h*/) { return 0; }
 void parlioWs2812Deinit(ParlioWs2812Handle& h) { freeHostBus(h.impl); }
 
-// No panel on a desktop, and inert rather than emulated: this port has no analogue worth faking, and its encoder is already tested on plain buffers.
-// So the init refuses with a cause and the driver reports it as it would on a chip without the silicon.
+// No panel on a desktop, and inert rather than emulated: this port has no analogue worth faking, and its encoder is already tested on plain buffers. So the init refuses with a cause and the driver reports it as it would on a chip without the silicon.
 const char* hub75LastError() { return "HUB75 needs an ESP32-S3, P4 or S31"; }
 bool hub75BackendAvailable(Hub75Backend /*backend*/, size_t /*frameBytes*/) { return false; }
 const char* hub75BackendLabel(Hub75Backend backend) {
@@ -2320,8 +2295,7 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*l
 
 // The codec and capture live in their own file: the codec succeeds with nothing to bring up, and the microphone reads the system capture device.
 
-// The textbook in-place radix-2 transform, the production kernel now that live capture runs blocks dozens of times a second on the render tick.
-// The contract is unchanged and it is numerically equivalent to the direct form, pinned against one by a test.
+// The textbook in-place radix-2 transform, the production kernel now that live capture runs blocks dozens of times a second on the render tick. The contract is unchanged and it is numerically equivalent to the direct form, pinned against one by a test.
 void audioFft(const float* windowed, size_t n, float* outMag) {
     if (!windowed || !outMag || n == 0 || (n & (n - 1)) != 0) return;
     constexpr size_t kMaxN = 4096;
@@ -2368,18 +2342,14 @@ size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*ma
 // A host has no pins either, so reads come from what a test injected.
 // The button logic is ordinary code and gets tested here, leaving only the electrical half for the bench.
 namespace {
-// A flat table rather than a map: a pin number IS the index, there are at most 48 of them, and this
-// allocates nothing.
+// A flat table rather than a map: a pin number IS the index, there are at most 48 of them, and this allocates nothing.
 constexpr uint8_t kMaxGpio = 48;
 bool g_gpioLevel[kMaxGpio] = {};
 }
 
 bool gpioInputBegin(uint8_t gpio, GpioPull pull) {
     if (gpio >= kMaxGpio) return false;
-    // The PULL sets the resting level, as it does on a board: a pull-up idles HIGH, a pull-down
-    // idles LOW. Without this every pin idled LOW, which an active-low button reads as HELD, so a
-    // desktop with no hardware reported a phantom press the moment a row named a pin. A test that
-    // wants a different level still calls setTestGpioLevel after this.
+    // The PULL sets the resting level, as it does on a board: a pull-up idles HIGH, a pull-down idles LOW. Without this every pin idled LOW, which an active-low button reads as HELD, so a desktop with no hardware reported a phantom press the moment a row named a pin. A test that wants a different level still calls setTestGpioLevel after this.
     g_gpioLevel[gpio] = (pull == GpioPull::Up);
     return true;
 }
@@ -2387,8 +2357,7 @@ bool gpioInputBegin(uint8_t gpio, GpioPull pull) {
 bool gpioRead(uint8_t gpio) { return gpio < kMaxGpio && g_gpioLevel[gpio]; }
 
 bool gpioWrite(uint8_t gpio, bool high) {
-    // A write is observable through gpioRead, so a test can drive a pin and read back what a module
-    // put there (a relay enable, MoonLive's write-then-read hello world).
+    // A write is observable through gpioRead, so a test can drive a pin and read back what a module put there (a relay enable, MoonLive's write-then-read hello world).
     if (gpio >= kMaxGpio) return false;
     g_gpioLevel[gpio] = high;
     return true;
@@ -2398,14 +2367,10 @@ void setTestGpioLevel(uint8_t gpio, bool level) { if (gpio < kMaxGpio) g_gpioLev
 void clearTestGpioLevel() { for (bool& b : g_gpioLevel) b = false; }
 
 // --- ADC ---
-// The desktop has no converter, so a read reports whatever a test injected. Same arrangement as the
-// GPIO level above: a pedal's mapping, its min/max/invert and its smoothing are ordinary logic, and
-// this is what lets all of it be pinned on the host with no hardware attached.
+// The desktop has no converter, so a read reports whatever a test injected. Same arrangement as the GPIO level above: a pedal's mapping, its min/max/invert and its smoothing are ordinary logic, and this is what lets all of it be pinned on the host with no hardware attached.
 namespace {
 uint16_t g_adcValue[kMaxGpio] = {};
-// Millivolts are injected SEPARATELY from the raw count rather than derived from it. On a board the
-// two are related by the chip's own eFuse curve, which a host cannot reproduce, so deriving one here
-// would let a test pass against an arithmetic relationship that does not hold on hardware.
+// Millivolts are injected SEPARATELY from the raw count rather than derived from it. On a board the two are related by the chip's own eFuse curve, which a host cannot reproduce, so deriving one here would let a test pass against an arithmetic relationship that does not hold on hardware.
 uint16_t g_adcMv[kMaxGpio] = {};
 }
 
@@ -2415,8 +2380,7 @@ bool adcRead(uint8_t gpio, uint16_t& raw) {
     return true;
 }
 
-// The ESP32's 12-bit full scale, reported here too so a host test scales exactly as the board does:
-// a mapping verified against 4095 on the desktop cannot then behave differently on a device.
+// The ESP32's 12-bit full scale, reported here too so a host test scales exactly as the board does: a mapping verified against 4095 on the desktop cannot then behave differently on a device.
 uint16_t adcMaxCount() { return 4095; }
 
 void setTestAdcValue(uint8_t gpio, uint16_t raw) { if (gpio < kMaxGpio) g_adcValue[gpio] = raw; }
@@ -2440,7 +2404,7 @@ namespace {
 
 using NdiSendInstance = void*;
 
-// Processing.NDI.structs.h — NDIlib_video_frame_v2_t, verbatim field order.
+// Processing.NDI.structs.h, NDIlib_video_frame_v2_t, verbatim field order.
 struct NdiVideoFrameV2 {
     int         xres, yres;
     int         FourCC;                 // NDIlib_FourCC_video_type_e — an int-sized enum
@@ -2454,15 +2418,14 @@ struct NdiVideoFrameV2 {
     int64_t     timestamp;
 };
 
-// Processing.NDI.Send.h — NDIlib_send_create_t, verbatim field order.
+// Processing.NDI.Send.h, NDIlib_send_create_t, verbatim field order.
 struct NdiSendCreate {
     const char* p_ndi_name;
     const char* p_groups;
     bool        clock_video, clock_audio;
 };
 
-// NDI_LIB_FOURCC('B','G','R','X') — X, not A: projectMM has no alpha to send, and an ignored
-// alpha channel is exactly what the X variants mean. Little-endian packing, as the macro builds it.
+// NDI_LIB_FOURCC('B','G','R','X'), X, not A: projectMM has no alpha to send, and an ignored alpha channel is exactly what the X variants mean. Little-endian packing, as the macro builds it.
 constexpr int kFourCCBgrx = 'B' | ('G' << 8) | ('R' << 16) | (static_cast<int>('X') << 24);
 constexpr int kFrameFormatProgressive = 1;   // NDIlib_frame_format_type_progressive
 
@@ -2478,8 +2441,7 @@ NdiSendCreateFn  ndiSendCreate_  = nullptr;
 NdiSendVideoFn   ndiSendVideo_   = nullptr;
 NdiSendDestroyFn ndiSendDestroy_ = nullptr;
 
-// Test capture (platform.h § NDI test seam). Recording is OFF unless a test turns it on, so a
-// desktop build with a real runtime behaves exactly as it would in production.
+// Test capture (platform.h § NDI test seam). Recording is OFF unless a test turns it on, so a desktop build with a real runtime behaves exactly as it would in production.
 struct NdiCapturedFrame { uint16_t w, h; uint8_t fps; std::vector<uint8_t> rgb; };
 NdiTestMode                  ndiTestMode_ = NdiTestMode::Off;
 std::vector<NdiCapturedFrame> ndiCaptured_;
@@ -2495,10 +2457,7 @@ const char* const kNdiLibNames[] = {
 #if defined(_WIN32)
     "Processing.NDI.Lib.x64.dll", "Processing.NDI.Lib.x86.dll",
 #elif defined(__APPLE__)
-    // NDI Tools for macOS ships the runtime INSIDE its app bundles rather than installing a
-    // system-wide dylib, so a plain name resolves nothing however complete the install is. The
-    // bundle paths are tried by name (verified to export the send API on a real NDI Tools install);
-    // `libndi_advanced` is the file NDI Tools ships, `libndi` the one bundled with Resolume.
+    // NDI Tools for macOS ships the runtime INSIDE its app bundles rather than installing a system-wide dylib, so a plain name resolves nothing however complete the install is. The bundle paths are tried by name (verified to export the send API on a real NDI Tools install); `libndi_advanced` is the file NDI Tools ships, `libndi` the one bundled with Resolume.
     "libndi.dylib", "/usr/local/lib/libndi.dylib", "/opt/homebrew/lib/libndi.dylib",
     "/Applications/NDI Video Monitor.app/Contents/Frameworks/libndi_advanced.dylib",
     "/Applications/NDI Studio Monitor.app/Contents/Frameworks/libndi_advanced.dylib",
@@ -2539,8 +2498,7 @@ bool ndiLoad() {
         ndiSendVideo_ = nullptr;         // treat a partial resolve as absent
         return false;
     }
-    // NDIlib_initialize returns false when the CPU is unsupported — a real "cannot use it" that
-    // must not read as "installed and working".
+    // NDIlib_initialize returns false when the CPU is unsupported, a real "cannot use it" that must not read as "installed and working".
     if (!ndiInit_()) { ndiSendVideo_ = nullptr; return false; }
     return true;
 }
@@ -2562,9 +2520,7 @@ bool ndiSenderOpen(const char* name) {
     NdiSendCreate create{};
     create.p_ndi_name = ndiName_.c_str();   // the string must outlive the sender, hence ndiName_
     create.p_groups   = nullptr;
-    // FALSE deliberately: clock_video makes send_send_video_v2 BLOCK to pace the caller, and this
-    // is called from the render thread which must never block. The driver already rate-limits to
-    // its fps control, so the pacing is ours to do.
+    // FALSE deliberately: clock_video makes send_send_video_v2 BLOCK to pace the caller, and this is called from the render thread which must never block. The driver already rate-limits to its fps control, so the pacing is ours to do.
     create.clock_video = false;
     create.clock_audio = false;             // no audio is sent
     ndiSender_ = ndiSendCreate_(&create);
@@ -2590,8 +2546,7 @@ bool ndiSendFrame(const uint8_t* rgb, uint16_t w, uint16_t h, uint8_t fps) {
     if (!ndiSender_) return false;
     const size_t pixels = static_cast<size_t>(w) * h;
     ndiFrame_.resize(pixels * 4);           // no-op once warm; the only allocation, never per frame
-    // RGB -> BGRX. The 4th byte is the ignored X, written once as 0xFF so a receiver that reads it
-    // as alpha sees opaque rather than transparent.
+    // RGB -> BGRX. The 4th byte is the ignored X, written once as 0xFF so a receiver that reads it as alpha sees opaque rather than transparent.
     for (size_t i = 0; i < pixels; ++i) {
         ndiFrame_[i * 4 + 0] = rgb[i * 3 + 2];
         ndiFrame_[i * 4 + 1] = rgb[i * 3 + 1];
@@ -2634,15 +2589,10 @@ void ndiTestClearFrames() { ndiCaptured_.clear(); }
 // A test seam mirrors the video one, so continuous integration never needs the encoder installed.
 
 namespace {
-// Threading model: encoderStart/Stop/Running are LIFECYCLE calls, made only from the render
-// task (prepare/release/tick1s), so they need no lock among themselves. encoderWrite crosses
-// threads (the encode worker) and the writer thread consumes: those three share encMutex_,
-// which guards only the queue and the dead/stop flags, never a blocking write.
+// Threading model: encoderStart/Stop/Running are LIFECYCLE calls, made only from the render task (prepare/release/tick1s), so they need no lock among themselves. encoderWrite crosses threads (the encode worker) and the writer thread consumes: those three share encMutex_, which guards only the queue and the dead/stop flags, never a blocking write.
 std::mutex encMutex_;
 std::condition_variable encCv_;
-// A fixed ring of REUSED frame slots, whole frames only (tearing is structurally out): the
-// enqueue path must not heap-allocate per frame (assign() reuses each slot's capacity after
-// the first lap), and 3 slots of burst absorption is the drop-newest boundary.
+// A fixed ring of REUSED frame slots, whole frames only (tearing is structurally out): the enqueue path must not heap-allocate per frame (assign() reuses each slot's capacity after the first lap), and 3 slots of burst absorption is the drop-newest boundary.
 constexpr size_t kEncQueueMax = 3;
 std::vector<uint8_t> encSlots_[kEncQueueMax];
 size_t encHead_ = 0;    // slot the writer consumes next
@@ -2666,17 +2616,13 @@ int encStdin_ = -1;
 }  // namespace
 
 
-// Stop the child and the writer, deadlock-free: signal stop, TERM the child FIRST (a writer
-// blocked in write() only reliably unblocks when the read side dies: EPIPE), join, then close
-// stdin and reap with a short grace before SIGKILL. Called only from the render task.
+// Stop the child and the writer, deadlock-free: signal stop, TERM the child FIRST (a writer blocked in write() only reliably unblocks when the read side dies: EPIPE), join, then close stdin and reap with a short grace before SIGKILL. Called only from the render task.
 static void stopEncoderProcess() {
     if (encTestMode_ != EncoderTestMode::Off) return;
     {
         std::lock_guard<std::mutex> lk(encMutex_);
         encWriterStop_ = true;
-        // The ring counters are NOT reset here: the writer may be mid-write on the head slot,
-        // and a producer racing this stop must keep seeing that slot as occupied. encoderStart
-        // resets the ring under the lock after the join, when nothing can touch it.
+        // The ring counters are NOT reset here: the writer may be mid-write on the head slot, and a producer racing this stop must keep seeing that slot as occupied. encoderStart resets the ring under the lock after the join, when nothing can touch it.
         encCv_.notify_all();
     }
 #ifdef _WIN32
@@ -2698,8 +2644,7 @@ static void stopEncoderProcess() {
 #endif
 }
 
-// Spawn `argv` (argv[0] resolved via PATH) with its stdin piped from us. The ffmpeg command line
-// is assembled by encoderStart below; this half is pure process plumbing.
+// Spawn `argv` (argv[0] resolved via PATH) with its stdin piped from us. The ffmpeg command line is assembled by encoderStart below; this half is pure process plumbing.
 static bool spawnEncoderProcess(const char* const argv[]) {
     stopEncoderProcess();
     if (encTestMode_ != EncoderTestMode::Off) {
@@ -2736,10 +2681,7 @@ static bool spawnEncoderProcess(const char* const argv[]) {
     encProcess_ = pi.hProcess;
     encStdin_ = writeEnd;
 #else
-    // posix_spawn, not fork/exec: fork in a threaded process can deadlock on the allocator
-    // lock before exec, and a plain exec would leak every parent fd (the HTTP listen socket,
-    // the Art-Net/DDP ports) into a child that outlives a restart. Everything except the
-    // dup2'd stdin is closed in the child: CLOEXEC_DEFAULT on macOS, closefrom on glibc.
+    // posix_spawn, not fork/exec: fork in a threaded process can deadlock on the allocator lock before exec, and a plain exec would leak every parent fd (the HTTP listen socket, the Art-Net/DDP ports) into a child that outlives a restart. Everything except the dup2'd stdin is closed in the child: CLOEXEC_DEFAULT on macOS, closefrom on glibc.
     int fds[2];
     if (::pipe(fds) != 0) return false;
     posix_spawn_file_actions_t fa;
@@ -2764,10 +2706,7 @@ static bool spawnEncoderProcess(const char* const argv[]) {
     encPid_ = pid;
     encStdin_ = fds[1];
 #endif
-    // The writer thread does the BLOCKING writes: the render tick only ever enqueues, so an
-    // encoder that stops reading for a while (scheduler starvation under a free-running render
-    // loop stalled it >250 ms on the bench) costs queued-then-dropped frames, never a stalled
-    // tick, never a torn frame, and never a false death.
+    // The writer thread does the BLOCKING writes: the render tick only ever enqueues, so an encoder that stops reading for a while (scheduler starvation under a free-running render loop stalled it >250 ms on the bench) costs queued-then-dropped frames, never a stalled tick, never a torn frame, and never a false death.
     {
         std::lock_guard<std::mutex> lk(encMutex_);   // producers may race this restart
         encWriterStop_ = false;
@@ -2817,9 +2756,7 @@ static bool spawnEncoderProcess(const char* const argv[]) {
     return true;
 }
 
-// The ffmpeg invocation IS the desktop encode contract: raw RGB in at the grid size and rate,
-// zerolatency x264 out, 1 s segments on a short rolling playlist (the live tuning that puts
-// glass-to-glass at 2-5 s), segments deleted as they fall off it.
+// The ffmpeg invocation IS the desktop encode contract: raw RGB in at the grid size and rate, zerolatency x264 out, 1 s segments on a short rolling playlist (the live tuning that puts glass-to-glass at 2-5 s), segments deleted as they fall off it.
 bool encoderStart(const EncoderConfig& cfg) {
     char geo[16], rate[8], gop[8], bv[12], out[192];
     std::snprintf(geo, sizeof(geo), "%ux%u", static_cast<unsigned>(cfg.width),
@@ -2833,10 +2770,7 @@ bool encoderStart(const EncoderConfig& cfg) {
     // The frame slots are sized HERE, off the render tick, since the write path would otherwise allocate on its first lap and must not allocate at all.
     // A failure here fails the start, where the driver already reports it, rather than throwing from a later write.
     const size_t frameBytes = static_cast<size_t>(cfg.width) * cfg.height * 3;
-    // Stop FIRST, then resize. The previous writer thread reads a slot's data pointer in its
-    // blocking write loop WITHOUT encMutex_ held, so reserving under it is both a data race and,
-    // once a geometry or scale change grows frameBytes, a reallocation that frees the buffer the
-    // writer is still reading. spawnEncoderProcess stops again below; that call is then a no-op.
+    // Stop FIRST, then resize. The previous writer thread reads a slot's data pointer in its blocking write loop WITHOUT encMutex_ held, so reserving under it is both a data race and, once a geometry or scale change grows frameBytes, a reallocation that frees the buffer the writer is still reading. spawnEncoderProcess stops again below; that call is then a no-op.
     stopEncoderProcess();
     try {
         for (auto& slot : encSlots_) slot.reserve(frameBytes);
@@ -2863,8 +2797,7 @@ bool encoderStart(const EncoderConfig& cfg) {
     return spawnEncoderProcess(argv);
 }
 
-// ffmpeg writes the playlist and segments to disk itself, so there is nothing in RAM to serve and
-// the HTTP server uses its normal file path.
+// ffmpeg writes the playlist and segments to disk itself, so there is nothing in RAM to serve and the HTTP server uses its normal file path.
 bool hlsSegment(const char*, const uint8_t**, size_t*) { return false; }
 void hlsSegmentRelease() {}
 
@@ -2877,8 +2810,7 @@ int encoderWrite(const uint8_t* data, size_t len) {
     }
     if (encWriterDead_) return -1;
     if (encCount_ >= kEncQueueMax) return 0;   // encoder behind: drop-newest, stay live
-    // assign() into the reused slot. The capacity was reserved by encoderStart, so this copies
-    // without allocating -- including the first lap, which is why the reserve is there.
+    // assign() into the reused slot. The capacity was reserved by encoderStart, so this copies without allocating -- including the first lap, which is why the reserve is there.
     encSlots_[(encHead_ + encCount_) % kEncQueueMax].assign(data, data + len);
     encCount_++;
     encCv_.notify_one();
@@ -2928,14 +2860,10 @@ const char* encoderTestArgs() { return encCapturedArgs_.c_str(); }
 void encoderTestClearFrames() { encCaptured_.clear(); }
 
 
-// Raw-interface enumeration for the driver's selection: labels for humans, bind names for the binder, the first entry always the capture-only row.
-// One system lists through the capture library and labels by the adapter's friendly description, its device name being an identifier nobody recognizes; on the other the name IS the label.
+// Raw-interface enumeration for the driver's selection: labels for humans, bind names for the binder, the first entry always the capture-only row. One system lists through the capture library and labels by the adapter's friendly description, its device name being an identifier nobody recognizes; on the other the name IS the label.
 
 namespace {
-// FIXED storage, refilled in place: a Select's aux keeps pointing at these arrays across
-// re-enumerations, so two panel-card instances rebuilding in one sweep can never dangle each
-// other's option pointers (rows update under a stale aux, which is harmless; freed rows would
-// not be). 16 NICs + the capture row cover any sane host.
+// FIXED storage, refilled in place: a Select's aux keeps pointing at these arrays across re-enumerations, so two panel-card instances rebuilding in one sweep can never dangle each other's option pointers (rows update under a stale aux, which is harmless; freed rows would not be). 16 NICs + the capture row cover any sane host.
 constexpr size_t kRawIfMax = 17;
 char rawIfLabels_[kRawIfMax][64];
 char rawIfNames_[kRawIfMax][64];
@@ -2945,8 +2873,7 @@ std::vector<std::string> rawIfTest_;   // test seam: label == bind name
 
 void rawIfPush(const char* label, const char* name) {
     if (rawIfCount_ >= kRawIfMax) return;
-    // 63 not 64: the Select apply path rejects labels that FILL its 64-byte buffer as
-    // overlong, so a row must persist at <= 62 chars or the pick dies on reboot.
+    // 63 not 64: the Select apply path rejects labels that FILL its 64-byte buffer as overlong, so a row must persist at <= 62 chars or the pick dies on reboot.
     std::snprintf(rawIfLabels_[rawIfCount_], 63, "%s", label);
     std::snprintf(rawIfNames_[rawIfCount_], sizeof(rawIfNames_[0]), "%s", name);
     rawIfCount_++;
@@ -2954,8 +2881,7 @@ void rawIfPush(const char* label, const char* name) {
 }  // namespace
 
 void setTestRawInterfaces(const char* const* names, size_t count) {
-    // The documented reset is (nullptr, 0), and `names + count` on a null pointer is undefined
-    // even when count is zero, so the reset is its own path rather than a degenerate range.
+    // The documented reset is (nullptr, 0), and `names + count` on a null pointer is undefined even when count is zero, so the reset is its own path rather than a degenerate range.
     if (!names || count == 0) { rawIfTest_.clear(); return; }
     rawIfTest_.assign(names, names + count);
 }
@@ -2974,8 +2900,7 @@ size_t rawInterfaces(const char* const** optionsOut) {
                 MIB_IF_TABLE2* table = nullptr;
                 if (::GetIfTable2(&table) != NO_ERROR) table = nullptr;
                 for (const PcapIf* d = devs; d; d = d->next) {
-                    // Show only what could carry panel frames, which the other branch does with a name blocklist while here the interface table answers it.
-                    // Skipped only when that table could not be read, since otherwise every row would be filtered out and the picker would be an empty dead end on perfectly usable hardware.
+                    // Show only what could carry panel frames, which the other branch does with a name blocklist while here the interface table answers it. Skipped only when that table could not be read, since otherwise every row would be filtered out and the picker would be an empty dead end on perfectly usable hardware.
                     if (table && !winIsPanelCapableNic(winRowForPcapName(table, d->name))) continue;
                     char desc[256] = {};
                     const char* label = nullptr;
@@ -2984,8 +2909,7 @@ size_t rawInterfaces(const char* const** optionsOut) {
                     else label = d->name;   // pcap reports no description for some adapters
                     char row[64];
                     std::snprintf(row, sizeof(row), "%s", label);
-                    // Two identical adapters would collide as Select rows: suffix the device
-                    // name's tail so each row stays a distinct, matchable label.
+                    // Two identical adapters would collide as Select rows: suffix the device name's tail so each row stays a distinct, matchable label.
                     for (size_t i = 1; i < rawIfCount_; i++) {
                         if (std::strcmp(rawIfLabels_[i], row) == 0) {
                             const char* tail = d->name + (std::strlen(d->name) > 8 ? std::strlen(d->name) - 8 : 0);
@@ -3000,9 +2924,7 @@ size_t rawInterfaces(const char* const** optionsOut) {
             }
         }
 #else
-        // The OS's virtual plumbing can never reach a panel card and only buries the real
-        // NICs: loopback plus the well-known virtual prefixes (macOS: VPN tunnels, the
-        // AirDrop/AirPlay radios, Apple-silicon debug, bridges; Linux: container veths).
+        // The OS's virtual plumbing can never reach a panel card and only buries the real NICs: loopback plus the well-known virtual prefixes (macOS: VPN tunnels, the AirDrop/AirPlay radios, Apple-silicon debug, bridges; Linux: container veths).
         static constexpr const char* kVirtualPrefixes[] = {
             "lo", "utun", "awdl", "llw", "anpi", "bridge", "gif", "stf", "ap", "pktap",
             "veth", "docker", "br-", "virbr",
@@ -3033,9 +2955,7 @@ size_t rawInterfaces(const char* const** optionsOut) {
                 for (size_t i = 1; i < rawIfCount_; i++)
                     if (std::strcmp(rawIfNames_[i], a->ifa_name) == 0) { seen = true; break; }
                 if (seen) continue;   // getifaddrs lists one row per address family
-                // Label carries the speed, bind name does not: the name is the adapter's
-                // identity and the speed changes when a link renegotiates (platform.h § raw
-                // interfaces). Same "NAME, N Gb" shape as the Windows branch.
+                // Label carries the speed, bind name does not: the name is the adapter's identity and the speed changes when a link renegotiates (platform.h § raw interfaces). Same "NAME, N Gb" shape as the Windows branch.
                 char label[64];
                 std::snprintf(label, sizeof(label), "%s", a->ifa_name);
                 appendLinkSpeed(label, sizeof(label), linkMbps(a->ifa_name));

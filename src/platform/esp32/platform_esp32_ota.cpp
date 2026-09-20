@@ -61,12 +61,10 @@
 
 namespace mm::platform {
 
-// One upload chunk. 4 KB matches the flash page granularity esp_ota_write prefers and is
-// the size the HTTP path already streams in.
+// One upload chunk. 4 KB matches the flash page granularity esp_ota_write prefers and is the size the HTTP path already streams in.
 constexpr size_t kOtaChunkBytes = 4096;
 
-// The factory partition, which holds MoonBase, or null on the dual-OTA tables. One lookup for
-// every caller below: the same find_first was written out four times as this file grew.
+// The factory partition, which holds MoonBase, or null on the dual-OTA tables. One lookup for every caller below: the same find_first was written out four times as this file grew.
 const esp_partition_t* moonBasePartition() {
     return esp_partition_find_first(ESP_PARTITION_TYPE_APP,
                                     ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr);
@@ -83,8 +81,7 @@ struct OtaTaskParams {
     uint32_t* bytesTotalOut;  // image size; 0 until esp_https_ota reports it
 };
 
-// One bounded status writer for the file, replacing three identical local copies that each put the format behind a template.
-// A plain variadic function takes the format attribute, so the compiler checks each format against its arguments and a non-literal one is a build error rather than a scanner note.
+// One bounded status writer for the file, replacing three identical local copies that each put the format behind a template. A plain variadic function takes the format attribute, so the compiler checks each format against its arguments and a non-literal one is a build error rather than a scanner note.
 __attribute__((format(printf, 3, 4)))
 void statusf(char* buf, size_t len, const char* fmt, ...) {
     if (!buf || len == 0) return;
@@ -109,18 +106,15 @@ void otaTask(void* arg) {
     *p->bytesReadOut = 0;
     *p->bytesTotalOut = 0;   // unknown until esp_https_ota reports it
 
-    // The bundled trust anchors, the same mechanism a browser uses, with no certificate baked in.
-    // Attached unconditionally: a secure URL verifies the server, and on a plain local one it goes unused while still satisfying the begin call's verification check.
+    // The bundled trust anchors, the same mechanism a browser uses, with no certificate baked in. Attached unconditionally: a secure URL verifies the server, and on a plain local one it goes unused while still satisfying the begin call's verification check.
     esp_http_client_config_t http_config = {};
     http_config.url = p->url;
     http_config.crt_bundle_attach = esp_crt_bundle_attach;
     http_config.timeout_ms = 10000;
-    // GitHub release-asset URLs 302-redirect to objects.githubusercontent.com.
-    // Default redirect handling is off in esp_http_client; force-follow.
+    // GitHub release-asset URLs 302-redirect to objects.githubusercontent.com. Default redirect handling is off in esp_http_client; force-follow.
     http_config.disable_auto_redirect = false;
     http_config.max_redirection_count = 10;
-    // The default header buffer is far too small for the host's redirect response, whose policy header overflows it and fails the update before the download even starts.
-    // Raising both directions covers the longest headers with room to spare, at a few kilobytes of heap freed when the task exits.
+    // The default header buffer is far too small for the host's redirect response, whose policy header overflows it and fails the update before the download even starts. Raising both directions covers the longest headers with room to spare, at a few kilobytes of heap freed when the task exits.
     http_config.buffer_size = 4096;
     http_config.buffer_size_tx = 4096;
 
@@ -131,10 +125,7 @@ void otaTask(void* arg) {
     esp_https_ota_handle_t handle = nullptr;
     esp_err_t err = esp_https_ota_begin(&ota_config, &handle);
     if (err != ESP_OK) {
-        // esp_https_ota_begin collapses ~6 distinct failures (DNS, TLS,
-        // HTTP, partition init, header-buffer overflow) into one ESP_FAIL,
-        // so the only useful detail is in the IDF log on the serial console.
-        // We surface the IDF error name plus a pointer to the log.
+        // esp_https_ota_begin collapses ~6 distinct failures (DNS, TLS, HTTP, partition init, header-buffer overflow) into one ESP_FAIL, so the only useful detail is in the IDF log on the serial console. We surface the IDF error name plus a pointer to the log.
         otaSetStatus(p, "error: ota begin %s (see serial log)",
                      esp_err_to_name(err));
         delete p;
@@ -156,10 +147,7 @@ void otaTask(void* arg) {
 
     int total = esp_https_ota_get_image_size(handle);
     if (total > 0) {
-        // Publish the real total so the UI can render "X KB / Y KB".
-        // FirmwareUpdateModule's tick1s() rebuildControls picks this up on
-        // the next 1 Hz poll (re-binds the progress descriptor with the new
-        // total snapshot).
+        // Publish the real total so the UI can render "X KB / Y KB". FirmwareUpdateModule's tick1s() rebuildControls picks this up on the next 1 Hz poll (re-binds the progress descriptor with the new total snapshot).
         *p->bytesTotalOut = static_cast<uint32_t>(total);
     }
     otaSetStatus(p, "flashing");
@@ -167,8 +155,7 @@ void otaTask(void* arg) {
     while ((err = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
         int got = esp_https_ota_get_image_len_read(handle);
         if (got >= 0) *p->bytesReadOut = static_cast<uint32_t>(got);
-        // The counts ride the status in the same shape both writers report, so the interface reads progress identically whichever image is installed.
-        // They used to reach a control that no longer exists, which showed an indeterminate sweep that never resolved on a device working perfectly.
+        // The counts ride the status in the same shape both writers report, so the interface reads progress identically whichever image is installed. They used to reach a control that no longer exists, which showed an indeterminate sweep that never resolved on a device working perfectly.
         if (total > 0) {
             otaSetStatus(p, "flashing: %u of %u bytes",
                          static_cast<unsigned>(got > 0 ? got : 0), static_cast<unsigned>(total));
@@ -192,20 +179,18 @@ void otaTask(void* arg) {
 
     err = esp_https_ota_finish(handle);
     if (err != ESP_OK) {
-        // After finish, abort isn't valid — handle is consumed. Surface and exit.
+        // After finish, abort isn't valid, handle is consumed. Surface and exit.
         otaSetStatus(p, "error: ota finish %s", esp_err_to_name(err));
         delete p;
         vTaskDelete(nullptr);
         return;
     }
 
-    // Final byte count match — pull from the OTA handle one last time so the
-    // UI's last frame before reboot shows a clean "Y KB / Y KB".
+    // Final byte count match, pull from the OTA handle one last time so the UI's last frame before reboot shows a clean "Y KB / Y KB".
     if (*p->bytesTotalOut > 0) *p->bytesReadOut = *p->bytesTotalOut;
     otaSetStatus(p, "rebooting");
     delete p;
-    // 600 ms delay gives the HTTP response time to make it back to the browser
-    // before the device drops the socket on restart.
+    // 600 ms delay gives the HTTP response time to make it back to the browser before the device drops the socket on restart.
     vTaskDelay(pdMS_TO_TICKS(600));
     esp_restart();
 }
@@ -219,9 +204,7 @@ bool http_fetch_to_ota(const char* url,
         return false;
     }
 
-    // Reject oversize URLs explicitly rather than silently truncating with
-    // strncpy — a truncated URL almost always 404s or fetches the wrong
-    // file, with no clue in the status surface.
+    // Reject oversize URLs explicitly rather than silently truncating with strncpy, a truncated URL almost always 404s or fetches the wrong file, with no clue in the status surface.
     size_t urlLen = std::strlen(url);
     constexpr size_t kUrlMax = sizeof(OtaTaskParams::url) - 1;
     if (urlLen > kUrlMax) {
@@ -230,8 +213,7 @@ bool http_fetch_to_ota(const char* url,
         return false;
     }
 
-    // std::nothrow so OOM doesn't abort the process. Status string carries
-    // the failure back to the route, which returns 500 to the browser.
+    // std::nothrow so OOM doesn't abort the process. Status string carries the failure back to the route, which returns 500 to the browser.
     auto* p = new (std::nothrow) OtaTaskParams{};
     if (!p) {
         std::snprintf(statusBuf, statusBufLen, "error: out of memory");
@@ -243,9 +225,7 @@ bool http_fetch_to_ota(const char* url,
     p->bytesReadOut = bytesReadOut;
     p->bytesTotalOut = bytesTotalOut;
 
-    // 12 KB stack matches v1's working number (TLS handshake + HTTPS body
-    // buffering inside esp_https_ota). Priority 5 = above idle, below
-    // FreeRTOS critical drivers.
+    // 12 KB stack matches v1's working number (TLS handshake + HTTPS body buffering inside esp_https_ota). Priority 5 = above idle, below FreeRTOS critical drivers.
     BaseType_t ok = xTaskCreate(&otaTask, "urlOta", 12288, p, 5, nullptr);
     if (ok != pdPASS) {
         otaSetStatus(p, "error: task create failed");
@@ -272,9 +252,7 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
         setStatus("error: one app slot, reboot to MoonBase first");
         return false;
     }
-    // SIZE GUARD. Without it an oversized image fails partway through esp_ota_write, leaving the
-    // target slot half-written and the user staring at a generic write error. Content-Length is
-    // advisory, so this only fires when the caller knows the size.
+    // SIZE GUARD. Without it an oversized image fails partway through esp_ota_write, leaving the target slot half-written and the user staring at a generic write error. Content-Length is advisory, so this only fires when the caller knows the size.
     if (contentLen && contentLen > part->size) {
         setStatus("error: image too large (%u > %u)",
                   static_cast<unsigned>(contentLen), static_cast<unsigned>(part->size));
@@ -283,8 +261,7 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
 
     setStatus("flashing");
     esp_ota_handle_t handle = 0;
-    // OTA_SIZE_UNKNOWN: the upload streams, so we don't pre-declare the exact size (Content-Length
-    // is advisory for the UI); esp_ota_begin erases lazily as writes arrive.
+    // OTA_SIZE_UNKNOWN: the upload streams, so we don't pre-declare the exact size (Content-Length is advisory for the UI); esp_ota_begin erases lazily as writes arrive.
     esp_err_t err = esp_ota_begin(part, OTA_SIZE_UNKNOWN, &handle);
     if (err != ESP_OK) { setStatus("error: ota begin %s", esp_err_to_name(err)); return false; }
 
@@ -314,9 +291,7 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
         // Refuse a recovery image, decided on enough bytes rather than on the first chunk: @xref{writing-the-wrong-image-is-the-unrecoverable-direction|why a short prefix would let it through}.
         if (!vetted) {
             if (written + n < firmware::kIdentifyBytes) {
-                // Not enough yet, and nothing written: keep accumulating in the OTA partition is
-                // not an option (a rejected image must leave no bytes), so refuse a body that
-                // ends before it can be identified. Any real image is far larger.
+                // Not enough yet, and nothing written: keep accumulating in the OTA partition is not an option (a rejected image must leave no bytes), so refuse a body that ends before it can be identified. Any real image is far larger.
                 if (contentLen && contentLen < firmware::kIdentifyBytes) {
                     setStatus("error: too short to be a firmware image");
                     esp_ota_abort(handle);
@@ -346,8 +321,7 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
         written += static_cast<uint32_t>(n);
         *bytesReadOut = written;
     }
-    // Guard a truncated upload: if the client sent fewer bytes than Content-Length, the image is
-    // incomplete — don't commit a half-image. (contentLen 0 = unknown; skip the check then.)
+    // Guard a truncated upload: if the client sent fewer bytes than Content-Length, the image is incomplete, don't commit a half-image. (contentLen 0 = unknown; skip the check then.)
     if (contentLen && written < contentLen) {
         setStatus("error: incomplete upload (%u/%u)",
                   static_cast<unsigned>(written), static_cast<unsigned>(contentLen));
@@ -361,18 +335,13 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
     if (err != ESP_OK) { setStatus("error: set boot %s", esp_err_to_name(err)); return false; }
 
     setStatus("rebooting");
-    // Image committed + boot pointer flipped. Return to the caller so it can send its HTTP 200
-    // BEFORE the reboot (the caller closes the socket + reboots, same sequence as /api/reboot) —
-    // that's what lets the browser see a clean "flashed" response instead of an aborted socket.
+    // Image committed + boot pointer flipped. Return to the caller so it can send its HTTP 200 BEFORE the reboot (the caller closes the socket + reboots, same sequence as /api/reboot), that's what lets the browser see a clean "flashed" response instead of an aborted socket.
     return true;
 }
 
-// Updating the recovery image itself: @xref{updating-the-recovery-image-itself|why only the application can, and why the checks come first}.
-// Point this at an error page, the wrong chip's image or an application build, and the device still has its recovery image.
+// Updating the recovery image itself: @xref{updating-the-recovery-image-itself|why only the application can, and why the checks come first}. Point this at an error page, the wrong chip's image or an application build, and the device still has its recovery image.
 
-// Does this first chunk begin a MoonBase image for THIS chip? The parsing and the rules live in
-// core/FirmwareImage.h so a host test can drive them: this code erases a device's only recovery
-// image, and "the check was never exercised" is not a risk worth carrying for a header parse.
+// Does this first chunk begin a MoonBase image for THIS chip? The parsing and the rules live in core/FirmwareImage.h so a host test can drive them: this code erases a device's only recovery image, and "the check was never exercised" is not a risk worth carrying for a header parse.
 bool moonBaseImageRejected(const uint8_t* buf, size_t n, char* why, size_t whyLen) {
     const auto info = firmware::identify(buf, n);
     const char* reason = firmware::moonBaseRejection(
@@ -390,9 +359,7 @@ bool otaWriteMoonBase(FsWriteSrc src, void* user, size_t contentLen,
 
     const esp_partition_t* part = moonBasePartition();
     if (!part) { setStatus("error: no MoonBase on this device"); return false; }
-    // The inverse of otaWriteStream's single-slot guard, and the reason this path is safe at all:
-    // the app runs from ota_0, so factory is never what we are executing. Running from MoonBase
-    // means the app slot is the writable one, and this is the wrong call.
+    // The inverse of otaWriteStream's single-slot guard, and the reason this path is safe at all: the app runs from ota_0, so factory is never what we are executing. Running from MoonBase means the app slot is the writable one, and this is the wrong call.
     if (part == esp_ota_get_running_partition()) {
         setStatus("error: running from MoonBase, boot the app first");
         return false;
@@ -409,16 +376,13 @@ bool otaWriteMoonBase(FsWriteSrc src, void* user, size_t contentLen,
     if (!buf) { setStatus("error: out of memory for the update buffer"); return false; }
 
     setStatus("checking");
-    // FIRST CHUNK BEFORE ANY ERASE. Everything that can reject the image is decided here, while
-    // the existing MoonBase is still intact and the worst case is a status line.
+    // FIRST CHUNK BEFORE ANY ERASE. Everything that can reject the image is decided here, while the existing MoonBase is still intact and the worst case is a status line.
     bool abort = false;
     size_t first = src(reinterpret_cast<char*>(buf), kOtaChunkBytes, user, &abort);
     if (abort || first == 0) { setStatus("error: no image received"); return false; }
     if (moonBaseImageRejected(buf, first, statusBuf, statusBufLen)) return false;
 
-    // PAST THIS LINE THE DEVICE HAS NO RECOVERY IMAGE until the write completes. Erase and write
-    // in one pass: on a 4 MB board there is nowhere to stage 743 KB first (the app slot has
-    // ~520 KB free, the filesystem 548), so a second copy is not an option the hardware offers.
+    // PAST THIS LINE THE DEVICE HAS NO RECOVERY IMAGE until the write completes. Erase and write in one pass: on a 4 MB board there is nowhere to stage 743 KB first (the app slot has ~520 KB free, the filesystem 548), so a second copy is not an option the hardware offers.
     setStatus("erasing");
     esp_err_t err = esp_partition_erase_range(part, 0, part->size);
     if (err != ESP_OK) { setStatus("error: erase %s", esp_err_to_name(err)); return false; }
@@ -432,21 +396,17 @@ bool otaWriteMoonBase(FsWriteSrc src, void* user, size_t contentLen,
         const size_t whole = eof ? ((held + 3u) & ~size_t{3}) : (held & ~size_t{3});
         if (whole) {
             if (eof && whole > held) std::memset(buf + held, 0xFF, whole - held);
-            // Compared on the IMAGE bytes, not the padded write: at EOF `whole` rounds up past
-            // the image's end, and rejecting a slot-filling image for its own padding would be
-            // refusing something that fits. Unreachable at today's sizes; correct anyway.
+            // Compared on the IMAGE bytes, not the padded write: at EOF `whole` rounds up past the image's end, and rejecting a slot-filling image for its own padding would be refusing something that fits. Unreachable at today's sizes; correct anyway.
             if (written + (eof ? held : whole) > part->size) {
                 setStatus("error: image overruns the slot");
                 return false;
             }
             err = esp_partition_write(part, written, buf, whole);
             if (err != ESP_OK) { setStatus("error: write %s", esp_err_to_name(err)); return false; }
-            // The IMAGE grew by what it held, not by the padding: a padded tail is flash the
-            // image does not occupy, and counting it would report more written than was sent.
+            // The IMAGE grew by what it held, not by the padding: a padded tail is flash the image does not occupy, and counting it would report more written than was sent.
             written += static_cast<uint32_t>(eof ? held : whole);
             *bytesReadOut = written;
-            // The counts ride the STATUS, the way MoonBase's own page reports them: one channel
-            // for the UI to read, and the overlay draws its bar from a string it already polls.
+            // The counts ride the STATUS, the way MoonBase's own page reports them: one channel for the UI to read, and the overlay draws its bar from a string it already polls.
             if (contentLen) {
                 setStatus("writing MoonBase: %u of %u bytes",
                           static_cast<unsigned>(written), static_cast<unsigned>(contentLen));
@@ -470,17 +430,14 @@ bool otaWriteMoonBase(FsWriteSrc src, void* user, size_t contentLen,
         return false;
     }
 
-    // What esp_ota_end did on the app path: checksum the image actually on flash. A failure here
-    // is the serious one, since the slot no longer holds a working MoonBase, so it says so
-    // plainly rather than reporting a generic write error.
+    // What esp_ota_end did on the app path: checksum the image actually on flash. A failure here is the serious one, since the slot no longer holds a working MoonBase, so it says so plainly rather than reporting a generic write error.
     esp_partition_pos_t pos = { .offset = part->address, .size = part->size };
     esp_image_metadata_t meta = {};
     if (esp_image_verify(ESP_IMAGE_VERIFY, &pos, &meta) != ESP_OK) {
         setStatus("error: MoonBase did not verify, retry before rebooting");
         return false;
     }
-    // No reboot and no boot-partition change: the app keeps running, and the new MoonBase is
-    // simply what the device falls back to from now on.
+    // No reboot and no boot-partition change: the app keeps running, and the new MoonBase is simply what the device falls back to from now on.
     setStatus("idle");
     return true;
 }
@@ -506,9 +463,7 @@ bool moonBaseFetchUrlSync(const char* url, char* statusBuf, size_t statusBufLen,
     auto setStatus = [&](const char* fmt, auto... a) { statusf(statusBuf, statusBufLen, fmt, a...); };
     esp_http_client_config_t cfg = {};
     cfg.url = url;
-    // Same TLS and redirect handling the app's OTA fetch needs, and for the same reasons: a
-    // release asset 302s to objects.githubusercontent.com, whose headers overflow the 512-byte
-    // default buffer.
+    // Same TLS and redirect handling the app's OTA fetch needs, and for the same reasons: a release asset 302s to objects.githubusercontent.com, whose headers overflow the 512-byte default buffer.
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
     cfg.timeout_ms = 10000;
     cfg.disable_auto_redirect = false;
@@ -527,8 +482,7 @@ bool moonBaseFetchUrlSync(const char* url, char* statusBuf, size_t statusBufLen,
     const int64_t len = esp_http_client_fetch_headers(client);
     const int status = esp_http_client_get_status_code(client);
     if (status != 200) {
-        // A 404 page is a valid HTTP response carrying HTML, which the image checks would catch
-        // anyway; failing here says the useful thing instead of "not a firmware image".
+        // A 404 page is a valid HTTP response carrying HTML, which the image checks would catch anyway; failing here says the useful thing instead of "not a firmware image".
         setStatus("error: the server answered %d", status);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
@@ -545,15 +499,11 @@ bool moonBaseFetchUrlSync(const char* url, char* statusBuf, size_t statusBufLen,
     return ok;
 }
 
-// The install runs on its own task so the HTTP request can answer 202 immediately, exactly as the
-// app's URL install does. That is not a detail: while the request is open the browser cannot poll
-// for progress, so a synchronous install can only ever report "installing" and then "installed".
-// Same task shape, same status buffer, same byte counters, so ONE progress display serves both.
+// The install runs on its own task so the HTTP request can answer 202 immediately, exactly as the app's URL install does. That is not a detail: while the request is open the browser cannot poll for progress, so a synchronous install can only ever report "installing" and then "installed". Same task shape, same status buffer, same byte counters, so ONE progress display serves both.
 void moonBaseUrlTask(void* arg) {
     auto* p = static_cast<OtaTaskParams*>(arg);
     moonBaseFetchUrlSync(p->url, p->statusBuf, p->statusBufLen, p->bytesReadOut, p->bytesTotalOut);
-    // No reboot on either outcome: the app is running from the other partition and is untouched.
-    // On failure the status already says what went wrong, and it stays there for the UI to read.
+    // No reboot on either outcome: the app is running from the other partition and is untouched. On failure the status already says what went wrong, and it stays there for the UI to read.
     delete p;
     vTaskDelete(nullptr);
 }
@@ -580,8 +530,7 @@ bool otaFetchMoonBaseUrl(const char* url, char* statusBuf, size_t statusBufLen,
     *bytesReadOut = 0;
     *bytesTotalOut = 0;
     std::snprintf(statusBuf, statusBufLen, "starting");
-    // 8 KB against the app OTA's 12: no esp_https_ota state machine here, just an http client
-    // feeding a writer. Priority 5 and the same core assignment as urlOta.
+    // 8 KB against the app OTA's 12: no esp_https_ota state machine here, just an http client feeding a writer. Priority 5 and the same core assignment as urlOta.
     if (xTaskCreate(&moonBaseUrlTask, "mbOta", 8192, p, 5, nullptr) != pdPASS) {
         std::snprintf(statusBuf, statusBufLen, "error: task create failed");
         delete p;
@@ -591,9 +540,7 @@ bool otaFetchMoonBaseUrl(const char* url, char* statusBuf, size_t statusBufLen,
 }
 
 
-// Does this device's partition table carry a factory app? True on the MoonBase layout, false on
-// the dual-OTA tables. The caller uses it to decide whether an update needs the
-// reboot-into-MoonBase hop, and the UI to say which kind of device this is.
+// Does this device's partition table carry a factory app? True on the MoonBase layout, false on the dual-OTA tables. The caller uses it to decide whether an update needs the reboot-into-MoonBase hop, and the UI to say which kind of device this is.
 bool otaHasMoonBase() {
     return moonBasePartition() != nullptr;
 }
@@ -613,8 +560,7 @@ bool otaMoonBaseVersion(char* out, size_t len) {
     return out[0] != 0;
 }
 
-// When MoonBase was built, from the same descriptor. The UI shows the app's build stamp beside its
-// version, and shows the same pair for MoonBase, so this is the other half of that.
+// When MoonBase was built, from the same descriptor. The UI shows the app's build stamp beside its version, and shows the same pair for MoonBase, so this is the other half of that.
 bool otaMoonBaseBuild(char* out, size_t len) {
     if (!out || len == 0) return false;
     out[0] = 0;
@@ -636,9 +582,7 @@ bool otaMoonBaseSize(uint32_t* used, uint32_t* total) {
     if (!part) return false;
     if (total) *total = part->size;
     if (used) {
-        // Read the image length straight out of the header, which is a plain partition read and
-        // needs no flash mapping: the first bytes of a valid image are its header, and its
-        // segments follow. esp_partition_read is the same call the vetting path uses.
+        // Read the image length straight out of the header, which is a plain partition read and needs no flash mapping: the first bytes of a valid image are its header, and its segments follow. esp_partition_read is the same call the vetting path uses.
         esp_image_header_t hdr = {};
         *used = 0;
         if (esp_partition_read(part, 0, &hdr, sizeof(hdr)) == ESP_OK &&
@@ -705,8 +649,7 @@ bool httpsPost(const char* url, const char* body, uint32_t timeoutMs) {
     cfg.url = url;
     cfg.method = HTTP_METHOD_POST;
     cfg.timeout_ms = static_cast<int>(timeoutMs);
-    // The SAME trust-anchor bundle the OTA path uses: IDF's built-in root certificates, so this
-    // verifies a public server without us shipping or maintaining a CA store.
+    // The SAME trust-anchor bundle the OTA path uses: IDF's built-in root certificates, so this verifies a public server without us shipping or maintaining a CA store.
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
