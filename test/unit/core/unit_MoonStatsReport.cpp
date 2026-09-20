@@ -1,4 +1,4 @@
-// @module MoonStatsReport
+/// @module MoonStatsReport
 
 #include "doctest.h"
 #include "core/system/MoonStatsModule.h"
@@ -12,10 +12,7 @@
 
 namespace {
 
-/// A module carrying exactly the controls a real device would expose that MUST NEVER be reported:
-/// the identifying ones (device name, MAC), the secret ones (SSID, password), and free text the
-/// user typed. Built to look as much like the real System module as possible, because a builder
-/// that walked the tree rather than naming its fields would happily emit all of these.
+/// A module carrying exactly the controls a real device would expose that MUST NEVER be reported: the identifying ones (device name, MAC), the secret ones (SSID, password), and free text the user typed. Built to look as much like the real System module as possible, because a builder that walked the tree rather than naming its fields would happily emit all of these.
 class LeakyModule : public mm::MoonModule {
 public:
     LeakyModule() { setName("System"); }
@@ -48,8 +45,7 @@ private:
     char flash_[8] = {};
 };
 
-/// A scripted module, the shape MoonLiveEffect and friends have: a `script` FilePath control
-/// holding a file NAME, plus whatever that script declared.
+/// A scripted module, the shape MoonLiveEffect and friends have: a `script` FilePath control holding a file NAME, plus whatever that script declared.
 class ScriptedModule : public mm::MoonModule {
 public:
     ScriptedModule(const char* name, const char* script, mm::ModuleRole role)
@@ -93,13 +89,9 @@ std::string report(mm::MoonStatsEvent event = mm::MoonStatsEvent::Install,
 
 }  // namespace
 
-/// The report never carries anything that identifies the person or their network, however much of
-/// it the module tree holds.
+/// The report never carries anything that identifies the person or their network, however much of it the module tree holds.
 ///
-/// This is the privacy policy made executable. The policy promises no device name, no network
-/// addresses, no credentials and no free text the user typed, and the tree here holds all four
-/// sitting beside the hardware fields that ARE reported. A builder that emitted what it found
-/// rather than naming each field would fail this the first time it ran.
+/// This is the privacy policy made executable. The policy promises no device name, no network addresses, no credentials and no free text the user typed, and the tree here holds all four sitting beside the hardware fields that ARE reported. A builder that emitted what it found rather than naming each field would fail this the first time it ran.
 TEST_CASE("the usage report cannot carry identifying or secret values") {
     const std::string json = report();
 
@@ -110,8 +102,7 @@ TEST_CASE("the usage report cannot carry identifying or secret values") {
     CHECK(json.find("hunter2-secret") == std::string::npos);
     CHECK(json.find("my bedroom wall") == std::string::npos);
 
-    // The KEYS, so a later refactor cannot reintroduce the field with an empty value and look
-    // harmless while the next change fills it in.
+    // The KEYS, so a later refactor cannot reintroduce the field with an empty value and look harmless while the next change fills it in.
     CHECK(json.find("deviceName") == std::string::npos);
     CHECK(json.find("\"mac\"") == std::string::npos);
     CHECK(json.find("ssid") == std::string::npos);
@@ -119,8 +110,7 @@ TEST_CASE("the usage report cannot carry identifying or secret values") {
     CHECK(json.find("note") == std::string::npos);
 }
 
-/// The hardware facts the report exists for do arrive, so the test above is not passing merely
-/// because the builder emits nothing.
+/// The hardware facts the report exists for do arrive, so the test above is not passing merely because the builder emits nothing.
 TEST_CASE("the usage report carries the hardware facts it exists to collect") {
     const std::string json = report();
     CHECK(json.find("ESP32-S3") != std::string::npos);
@@ -129,8 +119,7 @@ TEST_CASE("the usage report carries the hardware facts it exists to collect") {
     CHECK(json.find("\"flash\"") != std::string::npos);
 }
 
-/// An install and an upgrade are told apart by the report itself, with no identifier involved: a
-/// previous version present means the firmware changed under an existing install.
+/// An install and an upgrade are told apart by the report itself, with no identifier involved: a previous version present means the firmware changed under an existing install.
 TEST_CASE("an upgrade is distinguished from a fresh install by the previous version") {
     const std::string fresh = report(mm::MoonStatsEvent::Install, nullptr, "4.0.0", nullptr);
     CHECK(fresh.find("\"event\":\"install\"") != std::string::npos);
@@ -141,9 +130,8 @@ TEST_CASE("an upgrade is distinguished from a fresh install by the previous vers
     CHECK(upgraded.find("\"previousVersion\":\"4.0.0\"") != std::string::npos);
 }
 
-/// The button's event. Install and Upgrade are decided by a version comparison, which cannot see a
-/// setup that changed without one: someone who reported a bare board and then wired up the fixtures
-/// they actually run. Distinct from the other two so the install count stays a count of installs.
+/// The button's event. Install and Upgrade are decided by a version comparison, which cannot see a setup that changed without one.
+/// Someone who reported a bare board and then wired up the fixtures they actually run. Distinct from the other two so the install count stays a count of installs.
 TEST_CASE("a user-triggered refresh is its own event, carrying the same payload") {
     const std::string refreshed = report(mm::MoonStatsEvent::Refresh, nullptr, "4.0.0", nullptr);
     CHECK(refreshed.find("\"event\":\"refresh\"") != std::string::npos);
@@ -155,19 +143,11 @@ TEST_CASE("a user-triggered refresh is its own event, carrying the same payload"
     CHECK(refreshed.find("\"event\":\"upgrade\"") == std::string::npos);
 }
 
-/// A refresh carries no previousVersion. The server reads that field's PRESENCE as what makes a
-/// row an upgrade, and the value it would carry (`reportedVersion`) is non-empty whenever the
-/// button is pressed: sending it would report every refresh as an upgrade from the version already
-/// running. Caught by CodeRabbit on PR #104.
+/// A refresh carries no previousVersion. The server reads that field's PRESENCE as what makes a row an upgrade, and the value it would carry (`reportedVersion`) is non-empty whenever the button is pressed: sending it would report every refresh as an upgrade from the version already running. Caught by CodeRabbit on PR #104.
 TEST_CASE("a refresh names no previous version, so it cannot read as an upgrade") {
-    // The GUARD is in MoonStatsModule::sendReport, which passes previousVersion() only on Upgrade:
-    // the value it would otherwise carry is `reportedVersion`, non-empty whenever the button is
-    // pressed, and the server reads that field's PRESENCE as what makes a row an upgrade. So a
-    // refresh would have reported as an upgrade from the version already running.
+    // The GUARD is in MoonStatsModule::sendReport, which passes previousVersion() only on Upgrade: the value it would otherwise carry is `reportedVersion`, non-empty whenever the button is pressed, and the server reads that field's PRESENCE as what makes a row an upgrade. So a refresh would have reported as an upgrade from the version already running.
     //
-    // This builder is a pure function over its arguments and rightly emits whatever it is handed,
-    // so passing a previous version here WOULD produce one. What it pins is the other half: with
-    // no predecessor supplied, a refresh carries none, and the field never appears by itself.
+    // This builder is a pure function over its arguments and rightly emits whatever it is handed, so passing a previous version here WOULD produce one. What it pins is the other half: with no predecessor supplied, a refresh carries none, and the field never appears by itself.
     const std::string refreshed = report(mm::MoonStatsEvent::Refresh, nullptr, "4.0.0", nullptr);
     CHECK(refreshed.find("\"event\":\"refresh\"") != std::string::npos);
     CHECK(refreshed.find("previousVersion") == std::string::npos);
@@ -177,19 +157,14 @@ TEST_CASE("a refresh names no previous version, so it cannot read as an upgrade"
     CHECK(upgraded.find("\"previousVersion\":\"4.0.0\"") != std::string::npos);
 }
 
-/// A failed BUTTON press must not consume the automatic report. Pressing it before the install
-/// report has gone out, and having the send fail, used to mark the version reported anyway: the
-/// install was then never counted, and the user had been told the press failed. The automatic path
-/// still marks either way, because nobody is waiting for it.
+/// A failed BUTTON press must not consume the automatic report. Pressing it before the install report has gone out, and having the send fail, used to mark the version reported anyway: the install was then never counted, and the user had been told the press failed. The automatic path still marks either way, because nobody is waiting for it.
 TEST_CASE("a refresh that did not send leaves the automatic report still due") {
-    // Documents the rule the code encodes (MoonStatsModule::sendReport): the mark is conditional
-    // on Refresh, unconditional otherwise. A build asserting it end to end needs a server.
+    // Documents the rule the code encodes (MoonStatsModule::sendReport): the mark is conditional on Refresh, unconditional otherwise. A build asserting it end to end needs a server.
     CHECK(mm::MoonStatsEvent::Refresh != mm::MoonStatsEvent::Install);
     CHECK(mm::MoonStatsEvent::Refresh != mm::MoonStatsEvent::Upgrade);
 }
 
-/// A report built without consent carries no installation id at all, rather than an empty or
-/// placeholder one: nothing is generated until the user says yes.
+/// A report built without consent carries no installation id at all, rather than an empty or placeholder one: nothing is generated until the user says yes.
 TEST_CASE("no installation id appears until one is supplied") {
     CHECK(report().find("installationId") == std::string::npos);
 
@@ -201,8 +176,8 @@ TEST_CASE("no installation id appears until one is supplied") {
 
 /// Memory and light count ride the report as RAW numbers, for the server to bucket into ranges.
 ///
-/// Nothing pinned them, and the worker's own `clean()` drops anything that is not a string unless a
-/// field has a branch of its own: exactly the regression that stored three zeros for every device.
+/// Nothing pinned them, and the worker's own `clean()` drops anything that is not a string unless a field has a branch of its own.
+/// Exactly the regression that stored three zeros for every device.
 TEST_CASE("the report carries memory and light count as numbers") {
     mm::SystemModule system;
     system.setName("System");
@@ -216,25 +191,20 @@ TEST_CASE("the report carries memory and light count as numbers") {
     CHECK(json.find("\"lightCount\":256") != std::string::npos);
     // Unquoted: a JSON number, not a string, which is what the server's numeric branch accepts.
     CHECK(json.find("\"lightCount\":\"") == std::string::npos);
-    // The VALUES, unquoted: the server's numeric branch accepts a JSON number and its generic
-    // string test drops anything else, which is how three zeros were stored for every device.
+    // The VALUES, unquoted: the server's numeric branch accepts a JSON number and its generic string test drops anything else, which is how three zeros were stored for every device.
     CHECK(json.find("\"totalHeap\":282152") != std::string::npos);
     CHECK(json.find("\"freeHeap\":84788") != std::string::npos);
 }
 
 /// The report names what the user ADDED, not the boot tree every device shares.
 ///
-/// Counting main.cpp's wired modules made every slice read "2 of 2 devices", which says only that
-/// both booted. What varies between installations is what someone chose to run, so a wired module
-/// is skipped while its children are still walked: a user's effect hangs under a wired parent.
+/// Counting main.cpp's wired modules made every slice read "2 of 2 devices", which says only that both booted. What varies between installations is what someone chose to run, so a wired module is skipped while its children are still walked: a user's effect hangs under a wired parent.
 TEST_CASE("the report names modules by ROLE, not by how they were wired") {
-    // A plain container. NOT wired by code, so only the ROLE rule excludes it: under the older
-    // isWiredByCode() test this one would have been reported.
+    // A plain container. NOT wired by code, so only the ROLE rule excludes it: under the older isWiredByCode() test this one would have been reported.
     mm::MoonModule container;
     container.setName("Container");
 
-    // Wired by code AND a real role: the mirror case, reported under the role rule and dropped
-    // under the old one. Together these two fail if the filter ever switches back.
+    // Wired by code AND a real role. The mirror case, reported under the role rule and dropped under the old one. Together these two fail if the filter ever switches back.
     mm::AudioService added;
     added.setName("SomeService");
     added.markWiredByCode();
@@ -254,11 +224,7 @@ TEST_CASE("the report names modules by ROLE, not by how they were wired") {
     CHECK(json.find("Disabled") == std::string::npos);              // switched off
 }
 
-/// A second instance of a layout must not become a second SLICE. Scheduler uniquifies an instance
-/// name (`Ring`, `Ring-2`, `Ring-3`), and a user may rename a module to anything, so reporting
-/// `name()` counted one person's three rings as three layouts and would have sent whatever someone
-/// typed. The TYPE is the fixed vocabulary: displayNameFor turns the factory key into the same
-/// label the UI shows, so all three report `layout:Ring`.
+/// A second instance of a layout must not become a second SLICE. Scheduler uniquifies an instance name (`Ring`, `Ring-2`, `Ring-3`), and a user may rename a module to anything, so reporting `name()` counted one person's three rings as three layouts and would have sent whatever someone typed. The TYPE is the fixed vocabulary: displayNameFor turns the factory key into the same label the UI shows, so all three report `layout:Ring`.
 TEST_CASE("a module reports its type, not the instance name a user sees") {
     mm::AudioService first;
     first.setName("Audio");
@@ -285,9 +251,7 @@ TEST_CASE("a module reports its type, not the instance name a user sees") {
     CHECK(json.find("Ewoud bedroom") == std::string::npos);  // nor does a name somebody typed
 }
 
-/// The preview driver is on every device, so counting it said only that a device booted. Excluded
-/// by TYPE, not by isWiredByCode(): that flag marks only children, and filtering on it once
-/// reported every top-level module as `generic:System`. The case above pins that distinction.
+/// The preview driver is on every device, so counting it said only that a device booted. Excluded by TYPE, not by isWiredByCode(): that flag marks only children, and filtering on it once reported every top-level module as `generic:System`. The case above pins that distinction.
 TEST_CASE("the preview driver is boot wiring, so it is never reported") {
     mm::PreviewDriver preview;
     preview.setName("Preview");
@@ -328,18 +292,16 @@ TEST_CASE("a module added under a wired parent is still reported") {
     CHECK(json.find("Effects") == std::string::npos);
 }
 
-/// A scripted module reports WHICH script it runs, because "MoonLive" alone says nothing: the
-/// interesting fact is that a device is running `aurora.mle`.
+/// A scripted module reports WHICH script it runs, because "MoonLive" alone says nothing: the interesting fact is that a device is running `aurora.mle`.
 TEST_CASE("a scripted module reports the shipped script it runs") {
     const std::string json = scriptedReport("aurora.mle");
     CHECK(json.find("effect:MoonLive/aurora.mle") != std::string::npos);
 }
 
-/// The other half, and the one that matters: a script a USER wrote is a name they invented, which
-/// is text they typed. The module still counts, under its bare type name.
+/// The other half, and the one that matters.
+/// A script a USER wrote is a name they invented, which is text they typed. The module still counts, under its bare type name.
 ///
-/// Without this the feature would be a privacy regression wearing a usage-statistics hat: a script
-/// called "ewoud-bedroom-test.mle" would travel to the server exactly like a shipped name.
+/// Without this the feature would be a privacy regression wearing a usage-statistics hat: a script called "ewoud-bedroom-test.mle" would travel to the server exactly like a shipped name.
 TEST_CASE("a script the user wrote is counted but never named") {
     const std::string json = scriptedReport("ewoud-bedroom-test.mle");
     CHECK(json.find("ewoud-bedroom-test") == std::string::npos);
@@ -347,21 +309,15 @@ TEST_CASE("a script the user wrote is counted but never named") {
     CHECK(json.find("effect:MoonLive/") == std::string::npos);
 }
 
-/// A shipped name under the WRONG extension is not a shipped script: the catalogs are per role, so
-/// a lookup that scanned them all would let `aurora.mle` through on a layout and, worse, would make
-/// "is this ours" depend on a name rather than a name plus its kind.
+/// A shipped name under the WRONG extension is not a shipped script: the catalogs are per role, so a lookup that scanned them all would let `aurora.mle` through on a layout and, worse, would make "is this ours" depend on a name rather than a name plus its kind.
 TEST_CASE("a catalog name is matched against its own role's catalog") {
     const std::string json = scriptedReport("grid.mll", mm::ModuleRole::Layout);
     CHECK(json.find("layout:MoonLive/grid.mll") != std::string::npos);
 }
 
-/// The status slot describes THE LAST ATTEMPT, so a verdict has to be retractable. Without this the
-/// failure text outlived the failure: a send that failed once painted "Could not reach the server"
-/// permanently, and the card kept reporting a send as outstanding long after the next one had
-/// arrived. Observed on a NanoPi, whose report HAD landed while the card still showed the error.
+/// The status slot describes THE LAST ATTEMPT, so a verdict has to be retractable. Without this the failure text outlived the failure: a send that failed once painted "Could not reach the server" permanently, and the card kept reporting a send as outstanding long after the next one had arrived. Observed on a NanoPi, whose report HAD landed while the card still showed the error.
 ///
-/// The retraction follows DriverBase's "clear only MY status" rule: a module that cleared
-/// unconditionally would wipe a line something else had every right to show.
+/// The retraction follows DriverBase's "clear only MY status" rule: a module that cleared unconditionally would wipe a line something else had every right to show.
 TEST_CASE("a stats verdict is retracted before the next one is formed") {
     struct Probe : mm::MoonStatsModule {
         using mm::MoonStatsModule::setOwnStatus;
@@ -383,8 +339,8 @@ TEST_CASE("a stats verdict is retracted before the next one is formed") {
     CHECK(m.status() == kSent);
 }
 
-/// The other half of the rule, and the one that makes it safe: a status set by SOMETHING ELSE is
-/// never cleared by this module. Retracting unconditionally would turn one fixed bug into another.
+/// The other half of the rule, and the one that makes it safe.
+/// A status set by SOMETHING ELSE is never cleared by this module. Retracting unconditionally would turn one fixed bug into another.
 TEST_CASE("a stats retraction leaves a foreign status alone") {
     struct Probe : mm::MoonStatsModule {
         using mm::MoonStatsModule::setOwnStatus;
@@ -403,14 +359,10 @@ TEST_CASE("a stats retraction leaves a foreign status alone") {
     CHECK(m.status() == kForeign);   // not ours to clear
 }
 
-/// The automatic report waits for a MEASURED frame rate. `Scheduler::fps()` divides by
-/// `tickTimeUs_`, which is computed only when the first 1-second timing window closes, and the
-/// housekeeping tick that sends the report runs inside that window. Without the guard every install
-/// and upgrade row carried `fps: 0` (verified on a NanoPi: the automatic row read 0 while a button
-/// press from the same device read 124), so the pie described only the rare user who pressed it.
+/// The automatic report waits for a MEASURED frame rate. `Scheduler::fps()` divides by `tickTimeUs_`, which is computed only when the first 1-second timing window closes, and the housekeeping tick that sends the report runs inside that window. Without the guard every install and upgrade row carried `fps: 0` (verified on a NanoPi: the automatic row read 0 while a button press from the same device read 124), so the pie described only the rare user who pressed it.
 ///
-/// Pinned at the builder, which is the layer that decides what a zero MEANS: the report carries
-/// whatever fps it is handed, so the guard belongs in the caller and the zero must stay expressible.
+/// Pinned at the builder, which is the layer that decides what a zero MEANS.
+/// The report carries whatever fps it is handed, so the guard belongs in the caller and the zero must stay expressible.
 TEST_CASE("a report carries the frame rate it is given, zero included") {
     mm::AudioService mod;
     mod.setName("Audio");
@@ -423,8 +375,7 @@ TEST_CASE("a report carries the frame rate it is given, zero included") {
                              nullptr, "1.0.0", nullptr, 0, 0, 0, 124);
     CHECK(std::string(measured.data()).find("\"fps\":124") != std::string::npos);
 
-    // A cold start is what the tick1s guard exists to avoid sending, so the builder must still be
-    // able to express it: the guard is the policy, not the format.
+    // A cold start is what the tick1s guard exists to avoid sending, so the builder must still be able to express it: the guard is the policy, not the format.
     mm::JsonSink cold;
     mm::buildMoonStatsReport(cold, tree, 1, mm::MoonStatsEvent::Install,
                              nullptr, "1.0.0", nullptr, 0, 0, 0, 0);

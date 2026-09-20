@@ -1,5 +1,5 @@
-// @module Hub75Driver
-// @also Hub75Slots
+/// @module Hub75Driver
+/// @also Hub75Slots
 
 #include "doctest.h"
 #include "light/drivers/Hub75Slots.h"
@@ -7,9 +7,9 @@
 #include <cstring>
 #include <vector>
 
-// The success spec for the HUB75 bit-plane encode: a known RGB frame -> the exact
-// bus-byte stream. Pins the three things a panel cannot tell us it got wrong, and
-// which no amount of looking at a wall diagnoses:
+// The success spec for the HUB75 bit-plane encode: a known RGB frame -> the exact bus-byte stream.
+// Pins the three things a panel cannot tell us it got wrong, and which no amount of looking at a wall diagnoses:
+//
 //
 //   1. the row address rides EVERY column slot, not only the blanking one
 //   2. a bit plane reads the HIGH bits, so depth < 8 loses precision not range
@@ -19,8 +19,7 @@
 //   5. every plane is stored once: the 2^p weighting is the peripheral's OE window,
 //      not 2^p copies in the buffer (that would be a megabyte for one panel)
 //
-// Pure data, no platform: this runs in CI with no ESP32 and no panel, which is the
-// whole point of keeping the encoder a free function on plain buffers.
+// Pure data, no platform: this runs in CI with no ESP32 and no panel, which is the whole point of keeping the encoder a free function on plain buffers.
 
 namespace {
 
@@ -35,9 +34,9 @@ void setPixel(std::vector<uint8_t>& f, uint16_t w, uint16_t x, uint16_t y,
     f[i + 0] = r; f[i + 1] = g; f[i + 2] = b;
 }
 
-/// Slot `n` as the 16-bit bus word the peripheral latches, little-endian. Every check below
-/// reads through this rather than indexing bytes: a slot is a WORD, and testing one byte of
-/// it is how an encoder that drops the high lines passes its own test.
+/// Slot `n` as the 16-bit bus word the peripheral latches, little-endian.
+/// Every check below reads through this rather than indexing bytes.
+/// A slot is a WORD, and testing one byte of it is how an encoder that drops the high lines passes its own test.
 uint16_t slot(const std::vector<uint8_t>& out, size_t n) {
     return static_cast<uint16_t>(out[n * 2] | (out[n * 2 + 1] << 8));
 }
@@ -48,8 +47,7 @@ TEST_CASE("HUB75 encode: the frame is bit-plane major, one blanking byte per row
     mm::Hub75Geometry geo;
     geo.width = 8; geo.height = 4; geo.scanRate = 2; geo.bitDepth = 2;
 
-    // 2 planes x 2 scan rows x (8 columns x 1 pair + 1 blank) = 36 slots, and 2 bytes
-    // each because the bus is 16 bits wide.
+    // 2 planes x 2 scan rows x (8 columns x 1 pair + 1 blank) = 36 slots, and 2 bytes each because the bus is 16 bits wide.
     CHECK(geo.frameSlots() == 36 + 1);        // + the frame's dark tail word
     CHECK(geo.frameBytes() == (36 + 1) * 2);
 
@@ -59,10 +57,9 @@ TEST_CASE("HUB75 encode: the frame is bit-plane major, one blanking byte per row
 }
 
 TEST_CASE("HUB75 encode: the row address rides every column byte") {
-    // The failure this prevents: addressing only on the blanking byte lets the panel
-    // see the address change while color data is still clocking, which ghosts the
-    // previous row into this one. It looks like a blur on the wall and like nothing
-    // at all in the buffer, so it is pinned here.
+    // The failure this prevents.
+    // Addressing only on the blanking byte lets the panel see the address change while color data is still clocking, which ghosts the previous row into this one.
+    // It looks like a blur on the wall and like nothing at all in the buffer, so it is pinned here.
     mm::Hub75Geometry geo;
     geo.width = 4; geo.height = 4; geo.scanRate = 2; geo.bitDepth = 2;
     mm::Hub75Layout lay;   // the DEFAULT layout: a=8, b=9, above the low byte
@@ -71,8 +68,8 @@ TEST_CASE("HUB75 encode: the row address rides every column byte") {
     std::vector<uint8_t> out(geo.frameBytes(), 0);
     REQUIRE(mm::hub75Encode(rgb.data(), out.data(), geo, lay) == geo.frameBytes());
 
-    // The default layout is the one that must work: its address, latch and OE sit at bits
-    // 8-14, so an encoder emitting a BYTE per slot drops them and the panel never lights.
+    // The default layout is the one that must work.
+    // Its address, latch and OE sit at bits 8-14, so an encoder emitting a BYTE per slot drops them and the panel never lights.
     // Reading the whole 16-bit word is what catches that, and only the whole word does.
     // Row 0 of plane 0: columns carry no address bit.
     for (uint16_t x = 0; x < geo.width; x++) CHECK((slot(out, x) & (1u << lay.a)) == 0);
@@ -82,8 +79,7 @@ TEST_CASE("HUB75 encode: the row address rides every column byte") {
         CHECK((slot(out, row1 + x) & (1u << lay.a)) != 0);
     }
 
-    // A board is free to re-map the lines into the low byte, and that must keep working:
-    // Hub75Layout exists so a different wiring costs a struct rather than an encoder.
+    // A board is free to re-map the lines into the low byte, and that must keep working: Hub75Layout exists so a different wiring costs a struct rather than an encoder.
     mm::Hub75Layout low;
     low.r1 = 0; low.g1 = 1; low.b1 = 2; low.r2 = 3; low.g2 = 4; low.b2 = 5;
     low.a = 6; low.b = 7; low.c = 7; low.d = 7; low.e = 7;
@@ -97,9 +93,7 @@ TEST_CASE("HUB75 encode: the row address rides every column byte") {
 }
 
 TEST_CASE("HUB75 encode: a color bit lands on its own line, for both half-panels") {
-    // A walking-one per color line: the test that catches a swapped pair (red where
-    // green should be) and an upper/lower mix-up. A panel shows both as "wrong
-    // colors", which is the least diagnostic symptom there is.
+    // A walking-one per color line: the test that catches a swapped pair (red where green should be) and an upper/lower mix-up. A panel shows both as "wrong colors", which is the least diagnostic symptom there is.
     mm::Hub75Geometry geo;
     geo.width = 2; geo.height = 4; geo.scanRate = 2; geo.bitDepth = 4;
     mm::Hub75Layout lay;
@@ -134,9 +128,7 @@ TEST_CASE("HUB75 encode: a color bit lands on its own line, for both half-panels
 }
 
 TEST_CASE("HUB75 encode: depth below 8 keeps the HIGH bits") {
-    // Dropping the low bits costs precision; dropping the high ones would cost RANGE,
-    // so a bright pixel would come out dim. The difference is invisible in a buffer
-    // dump and obvious on a wall, which is the wrong way round.
+    // Dropping the low bits costs precision; dropping the high ones would cost RANGE, so a bright pixel would come out dim. The difference is invisible in a buffer dump and obvious on a wall, which is the wrong way round.
     mm::Hub75Geometry geo;
     geo.width = 1; geo.height = 2; geo.scanRate = 1; geo.bitDepth = 2;
     mm::Hub75Layout lay;
@@ -154,8 +146,7 @@ TEST_CASE("HUB75 encode: depth below 8 keeps the HIGH bits") {
     CHECK((slot(out, plane0) & (1u << lay.r1)) != 0);
     CHECK((slot(out, plane1) & (1u << lay.r1)) != 0);
 
-    // 0x30 (0011 0000) is in the LOW half: at 2-bit depth it reads as black, which is
-    // the precision loss the depth control trades for refresh.
+    // 0x30 (0011 0000) is in the LOW half: at 2-bit depth it reads as black, which is the precision loss the depth control trades for refresh.
     auto dim = blackFrame(geo.width, geo.height);
     setPixel(dim, geo.width, 0, 0, 0x30, 0, 0);
     std::vector<uint8_t> out2(geo.frameBytes(), 0);
@@ -165,9 +156,7 @@ TEST_CASE("HUB75 encode: depth below 8 keeps the HIGH bits") {
 }
 
 TEST_CASE("HUB75 encode: a panel driving four rows per address step encodes every pair") {
-    // A 64-row 1/16 panel steps 16 addresses and drives FOUR rows each: two pairs, the
-    // second offset by 2 x scanRate. An encoder assuming two rows would leave three
-    // quarters of the panel dark, and the geometry is common enough to matter.
+    // A 64-row 1/16 panel steps 16 addresses and drives FOUR rows each: two pairs, the second offset by 2 x scanRate. An encoder assuming two rows would leave three quarters of the panel dark, and the geometry is common enough to matter.
     mm::Hub75Geometry geo;
     geo.width = 2; geo.height = 8; geo.scanRate = 2; geo.bitDepth = 4;
     mm::Hub75Layout lay;
@@ -189,9 +178,9 @@ TEST_CASE("HUB75 encode: a panel driving four rows per address step encodes ever
 }
 
 TEST_CASE("HUB75 encode: the blanking byte blanks before it latches") {
-    // OE high (dark) AND latch in the same byte: the panel must be dark while the
-    // shift register hands its row to the output drivers, or the row being addressed
-    // briefly shows the previous row's data. That ghost is what this pins.
+    // OE high (dark) AND latch in the same byte.
+    // The panel must be dark while the shift register hands its row to the output drivers, or the row being addressed briefly shows the previous row's data.
+    // That ghost is what this pins.
     mm::Hub75Geometry geo;
     geo.width = 2; geo.height = 2; geo.scanRate = 1; geo.bitDepth = 2;
     mm::Hub75Layout lay;
@@ -207,25 +196,21 @@ TEST_CASE("HUB75 encode: the blanking byte blanks before it latches") {
 }
 
 TEST_CASE("HUB75 encode: the frame ends dark, so the DMA wrap does not double row 0") {
-    // The peripheral LOOPS this buffer forever: there is no per-frame transmit, so the word
-    // after the last one is the FIRST word of the same buffer again. Every row is blanked by
-    // the word that closes it, and the next row's first column then drives OE low again.
+    // The peripheral LOOPS this buffer forever: there is no per-frame transmit, so the word after the last one is the FIRST word of the same buffer again.
+    // Every row is blanked by the word that closes it, and the next row's first column then drives OE low again.
     //
-    // The last row of the last plane has no next row inside the frame. Its blanking word is
-    // followed by row 0's first column, so row 0 is lit for its own time PLUS the time that
-    // belonged to the final row. On a wall that is one row brighter than every other, which
-    // reads as a row the brightness curve was never applied to.
+    // The last row of the last plane has no next row inside the frame.
+    // Its blanking word is followed by row 0's first column, so row 0 is lit for its own time PLUS the time that belonged to the final row.
+    // On a wall that is one row brighter than every other, which reads as a row the brightness curve was never applied to.
     //
-    // So the frame must end with a word that leaves OE HIGH and selects no row: the wrap point
-    // is then dark, and every row gets exactly its own window.
+    // So the frame must end with a word that leaves OE HIGH and selects no row: the wrap point is then dark, and every row gets exactly its own window.
     mm::Hub75Geometry geo;
     geo.width = 2; geo.height = 4; geo.scanRate = 2; geo.bitDepth = 2;
     mm::Hub75Layout lay;
     lay.lat = 6; lay.oe = 7;
     lay.a = 8; lay.b = 9; lay.c = 10; lay.d = 11; lay.e = 12;
 
-    // Every pixel white: row 0 lit twice is then unmistakable on a wall, and here it is the
-    // final word that says whether it happens.
+    // Every pixel white: row 0 lit twice is then unmistakable on a wall, and here it is the final word that says whether it happens.
     std::vector<uint8_t> rgb(static_cast<size_t>(geo.width) * geo.height * 3, 255);
     std::vector<uint8_t> out(geo.frameBytes(), 0);
     REQUIRE(mm::hub75Encode(rgb.data(), out.data(), geo, lay) == geo.frameBytes());
@@ -233,8 +218,7 @@ TEST_CASE("HUB75 encode: the frame ends dark, so the DMA wrap does not double ro
     const size_t last = geo.frameSlots() - 1;
     const uint16_t tail = slot(out, last);
     CHECK((tail & (1u << lay.oe)) != 0);      // dark across the wrap
-    // No row selected: the address lines are what a lit row needs, and holding one here
-    // would light whichever row the last address happened to name.
+    // No row selected: the address lines are what a lit row needs, and holding one here would light whichever row the last address happened to name.
     const uint16_t addrMask = static_cast<uint16_t>((1u << lay.a) | (1u << lay.b) |
                                                     (1u << lay.c) | (1u << lay.d) |
                                                     (1u << lay.e));
@@ -242,8 +226,7 @@ TEST_CASE("HUB75 encode: the frame ends dark, so the DMA wrap does not double ro
 }
 
 TEST_CASE("HUB75 encode: an unusable geometry writes nothing") {
-    // Zero rather than a partial write. A half-encoded frame on a panel is a worse
-    // failure than a dark one, and the driver turns this into a status the user reads.
+    // Zero rather than a partial write. A half-encoded frame on a panel is a worse failure than a dark one, and the driver turns this into a status the user reads.
     auto rgb = blackFrame(8, 8);
     std::vector<uint8_t> out(4096, 0xAA);
 
@@ -270,13 +253,10 @@ TEST_CASE("HUB75 encode: an unusable geometry writes nothing") {
 }
 
 TEST_CASE("HUB75 frame size is what decides the peripheral") {
-    // The arithmetic the plan's memory table rests on, pinned so a change to the wire
-    // format cannot silently move the Parlio cliff. Parlio's single-shot cap is
-    // 65,535 bytes; the i80/LCD_CAM path allocates from PSRAM and has no such wall.
-    // Two bytes a slot: the bus is 16 bits wide, which is what doubles these against a
-    // byte-per-slot encoder that could not reach the address lines at all. The trailing
-    // +1 slot is the frame's dark tail word, one per frame rather than one per row.
-    // 4-bit throughout: the deepest the driver offers while planes are unweighted.
+    // The arithmetic the plan's memory table rests on, pinned so a change to the wire format cannot silently move the Parlio cliff.
+    // Parlio's single-shot cap is 65,535 bytes; the i80/LCD_CAM path allocates from PSRAM and has no such wall.
+    // Two bytes a slot: the bus is 16 bits wide, which is what doubles these against a byte-per-slot encoder that could not reach the address lines at all.
+    // The trailing +1 slot is the frame's dark tail word, one per frame rather than one per row. 4-bit throughout: the deepest the driver offers while planes are unweighted.
     mm::Hub75Geometry one;    // one 64x64 panel, 1/32 scan
     one.width = 64; one.height = 64; one.scanRate = 32; one.bitDepth = 4;
     CHECK(one.frameBytes() == (4 * 32 * (64 * 1 + 1) + 1) * 2);      // 16,642

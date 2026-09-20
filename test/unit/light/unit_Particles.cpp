@@ -1,10 +1,9 @@
-// @module particles
-// @also draw, math16
+/// @module particles
+/// @also draw, math16
 
-// The particle kernel. Five effects each carried their own integrator, wall bounce and aging before
-// this existed. These tests pin the PHYSICS an effect relies on — that a constant force accelerates,
-// that a bounce loses the right fraction of speed, that a dead slot is reusable — rather than exact
-// coordinates, which are an implementation detail of the fixed-point scale.
+/// The particle kernel.
+/// Five effects each carried their own integrator, wall bounce and aging before this existed.
+/// These tests pin the PHYSICS an effect relies on, that a constant force accelerates, that a bounce loses the right fraction of speed, that a dead slot is reusable, rather than exact coordinates, which are an implementation detail of the fixed-point scale.
 
 #include "doctest.h"
 #include "light/powerfunctions/particles.h"
@@ -16,8 +15,8 @@ using namespace mm::particles;
 using draw::toSub;
 
 namespace {
-/// A pool over plain arrays — the test's stand-in for an effect's ScratchBuffers. The kernel is a
-/// view and owns nothing, which is exactly what makes this possible.
+/// A pool over plain arrays, the test's stand-in for an effect's ScratchBuffers.
+/// The kernel is a view and owns nothing, which is exactly what makes this possible.
 template <uint16_t N>
 struct TestPool {
     draw::pos_t x[N]{}, y[N]{}, vx[N]{}, vy[N]{};
@@ -46,8 +45,7 @@ TEST_CASE("spawning brings a particle to life and consumes a slot") {
     CHECK(t.pool.findFree() == 1);          // slot 0 is taken, 1 is next
 }
 
-// A pool is a fixed budget: an emitter must be told when it is full rather than overwriting a
-// living particle, which would make bursts eat each other.
+// A pool is a fixed budget: an emitter must be told when it is full rather than overwriting a living particle, which would make bursts eat each other.
 TEST_CASE("spawning into a full pool fails rather than overwriting") {
     TestPool<2> t;
     CHECK(t.pool.spawn(0, 0, 0, 0, 50, 0) == true);
@@ -80,9 +78,7 @@ TEST_CASE("a particle with no velocity stays where it was put") {
     CHECK(t.y[0] == toSub(4));
 }
 
-// The reason for semi-implicit Euler: under a constant force the particle must ACCELERATE, each
-// frame covering more ground than the last. An integrator that applied the old velocity would move
-// at a constant rate for the first frame and lag permanently.
+// The reason for semi-implicit Euler: under a constant force the particle must ACCELERATE, each frame covering more ground than the last. An integrator that applied the old velocity would move at a constant rate for the first frame and lag permanently.
 TEST_CASE("gravity accelerates: each frame covers more ground than the last") {
     TestPool<2> t;
     t.pool.spawn(toSub(0), toSub(0), 0, 0, 255, 0);
@@ -197,8 +193,7 @@ TEST_CASE("restitution sets how much speed a bounce keeps") {
     CHECK(dead.vx[0] == 0);                         // stops dead at the wall
 }
 
-// A ball dropped under gravity onto a lossy floor must settle, not gain energy — the classic
-// integrator bug is a bounce that grows.
+// A ball dropped under gravity onto a lossy floor must settle, not gain energy, the classic integrator bug is a bounce that grows.
 TEST_CASE("a bouncing particle loses energy rather than gaining it") {
     TestPool<2> t;
     t.pool.spawn(toSub(8), toSub(1), 0, 0, 255, 0);
@@ -211,8 +206,7 @@ TEST_CASE("a bouncing particle loses energy rather than gaining it") {
         const draw::pos_t s = t.vy[0] < 0 ? -t.vy[0] : t.vy[0];
         if (s > peakSpeed) peakSpeed = s;
     }
-    // Terminal speed under this gravity and restitution is bounded; an energy-gaining bounce would
-    // run away instead.
+    // Terminal speed under this gravity and restitution is bounded; an energy-gaining bounce would run away instead.
     CHECK(peakSpeed < toSub(8));
 }
 
@@ -238,8 +232,7 @@ TEST_CASE("a burst stops early rather than overflowing the pool") {
     CHECK(t.pool.liveCount() == 4);          // filled the pool, then stopped
 }
 
-// A burst must actually spread: particles all sharing one velocity would read as a single moving
-// dot rather than an explosion.
+// A burst must actually spread: particles all sharing one velocity would read as a single moving dot rather than an explosion.
 TEST_CASE("a burst sends particles in different directions") {
     TestPool<16> t;
     t.pool.angleEmit(toSub(8), toSub(8), 0, toSub(3), 16384, 8, 200, 0, 99);
@@ -249,8 +242,7 @@ TEST_CASE("a burst sends particles in different directions") {
     CHECK(distinct >= 5);
 }
 
-// The supersync property: the same seed must produce the same burst on any device, which a stream
-// RNG could not guarantee.
+// The supersync property: the same seed must produce the same burst on any device, which a stream RNG could not guarantee.
 TEST_CASE("the same seed produces the same burst") {
     TestPool<8> a, b;
     a.pool.angleEmit(toSub(4), toSub(4), 1000, toSub(2), 8192, 5, 100, 7, 555);
@@ -271,16 +263,12 @@ TEST_CASE("an attractor pulls a particle toward it") {
     CHECK(t.vy[0] == 0);                    // no vertical component: it is level with it
 }
 
-// The near-field clamp: a particle sitting on the attractor must not receive an unbounded impulse,
-// which is where an unclamped inverse-square divides by zero.
+// The near-field clamp: a particle sitting on the attractor must not receive an unbounded impulse, which is where an unclamped inverse-square divides by zero.
 TEST_CASE("an attractor does not fling a particle sitting on top of it") {
     TestPool<2> t;
     t.pool.spawn(toSub(8), toSub(8), 0, 0, 200, 0);
     t.pool.attract(toSub(8), toSub(8), 100000);
-    // MAGNITUDE, not just the upper side: an unclamped inverse-square blows up in whichever
-    // direction the rounding sends it, and a one-sided check passes on a large negative.
-    // Widen before taking the magnitude: draw::pos_t is int32, and std::abs of its minimum has no
-    // representation in the same type.
+    // MAGNITUDE, not just the upper side: an unclamped inverse-square blows up in whichever direction the rounding sends it, and a one-sided check passes on a large negative. Widen before taking the magnitude: draw::pos_t is int32, and std::abs of its minimum has no representation in the same type.
     CHECK(std::llabs(static_cast<int64_t>(t.vx[0])) < toSub(100));   // finite, not a blowup
     CHECK(std::llabs(static_cast<int64_t>(t.vy[0])) < toSub(100));
 }
@@ -313,8 +301,7 @@ TEST_CASE("an empty pool renders nothing") {
     for (size_t i = 0; i < buf.bytes(); i++) CHECK(buf.data()[i] == 0);
 }
 
-// Brightness rides ttl, so a particle fades out as it dies without the effect tracking a second
-// quantity.
+// Brightness rides ttl, so a particle fades out as it dies without the effect tracking a second quantity.
 TEST_CASE("a dying particle renders dimmer than a fresh one") {
     Buffer fresh, dying;
     fresh.allocate(8 * 8, 3); fresh.clear();
@@ -336,8 +323,7 @@ TEST_CASE("a dying particle renders dimmer than a fresh one") {
     CHECK(sum(dying) < sum(fresh));
 }
 
-// A particle outside the grid must clip rather than write out of bounds — the robustness rule the
-// draw primitives already follow, checked here because the pool is a new caller of them.
+// A particle outside the grid must clip rather than write out of bounds, the robustness rule the draw primitives already follow, checked here because the pool is a new caller of them.
 TEST_CASE("particles outside the grid draw nothing and do not crash") {
     Buffer buf;
     buf.allocate(8 * 8, 3);
@@ -350,8 +336,7 @@ TEST_CASE("particles outside the grid draw nothing and do not crash") {
     for (size_t i = 0; i < buf.bytes(); i++) CHECK(buf.data()[i] == 0);
 }
 
-// An invalid pool is a real state: an effect whose ScratchBuffer allocation failed must degrade,
-// never crash.
+// An invalid pool is a real state: an effect whose ScratchBuffer allocation failed must degrade, never crash.
 TEST_CASE("a pool with no storage reports itself invalid") {
     Pool p;
     CHECK(p.valid() == false);
@@ -359,9 +344,9 @@ TEST_CASE("a pool with no storage reports itself invalid") {
 
 // --- The industry-standard details ------------------------------------------------------------
 
-// The documented rounding trap: `-1 >> 1` is `-1`, not `0`, so a signed right shift rounds negative
-// values away from zero and positive ones toward it. Applied per frame that asymmetry is a drift —
-// particles moving left creep further than particles moving right. Scaling must be symmetric.
+// The documented rounding trap: `-1 >> 1` is `-1`, not `0`, so a signed right shift rounds negative values away from zero and positive ones toward it.
+// Applied per frame that asymmetry is a drift, particles moving left creep further than particles moving right.
+// Scaling must be symmetric.
 TEST_CASE("drag slows left and right movers by the same amount") {
     TestPool<4> t;
     t.pool.spawn(0, 0,  toSub(3), 0, 200, 0);   // moving right
@@ -380,8 +365,7 @@ TEST_CASE("a bounce loses the same speed in either direction") {
     CHECK(a.vx[0] == -b.vx[0]);                 // mirror images, exactly
 }
 
-// The 3.4 accumulator: a force below one velocity unit per frame would truncate to nothing, so
-// gentle wind and weak attractors would simply be invisible. The fraction has to build up and spill.
+// The 3.4 accumulator: a force below one velocity unit per frame would truncate to nothing, so gentle wind and weak attractors would simply be invisible. The fraction has to build up and spill.
 TEST_CASE("a sub-unit force eventually moves a particle") {
     TestPool<2> t;
     t.pool.spawn(toSub(8), toSub(8), 0, 0, 255, 0);
@@ -405,8 +389,7 @@ TEST_CASE("a sub-unit force works in both directions") {
     CHECK(t.vx[0] == -1);
 }
 
-// The accumulator is optional storage: an effect that does not need sub-unit forces should not have
-// to allocate for it, and calling the function without it must degrade rather than crash.
+// The accumulator is optional storage. An effect that does not need sub-unit forces should not have to allocate for it, and calling the function without it must degrade rather than crash.
 TEST_CASE("a pool without an accumulator ignores sub-unit forces") {
     TestPool<2> t;
     t.pool.acc = nullptr;
@@ -417,10 +400,9 @@ TEST_CASE("a pool without an accumulator ignores sub-unit forces") {
 
 // --- Framerate independence -------------------------------------------------------------------
 
-// The system rule (architecture.md): everything that changes over time is driven by elapsed time,
-// never by the frame count. A pool advanced a fixed amount per frame has physics that are a property
-// of the hardware — the same gravity is an explosion at 5000 fps and a drift at 60. Simulating the
-// same span of real time at wildly different framerates must land a particle in the same place.
+// The system rule (architecture.md): everything that changes over time is driven by elapsed time, never by the frame count.
+// A pool advanced a fixed amount per frame has physics that are a property of the hardware, the same gravity is an explosion at 5000 fps and a drift at 60.
+// Simulating the same span of real time at wildly different framerates must land a particle in the same place.
 TEST_CASE("a particle lands in the same place at any framerate") {
     auto simulate = [](int fps) {
         TestPool<2> t;
@@ -446,8 +428,7 @@ TEST_CASE("a particle lands in the same place at any framerate") {
     }
 }
 
-// A frame faster than the millisecond timer reports dt == 0. Dropping those frames' share of a force
-// would leave a very fast device with no gravity at all, so the remainder has to carry.
+// A frame faster than the millisecond timer reports dt == 0. Dropping those frames' share of a force would leave a very fast device with no gravity at all, so the remainder has to carry.
 TEST_CASE("gravity still acts when frames are faster than the clock can resolve") {
     TestPool<2> t;
     t.pool.spawn(toSub(8), toSub(8), 0, 0, 255, 0);
@@ -486,11 +467,10 @@ TEST_CASE("particles too far apart do not interact") {
     CHECK(t.vx[1] == v1);
 }
 
-// Already-separating pairs must be left alone, or a particle that has just bounced gets kicked
-// again and the pair sticks together vibrating.
+// Already-separating pairs must be left alone, or a particle that has just bounced gets kicked again and the pair sticks together vibrating.
 TEST_CASE("particles already moving apart are not kicked again") {
     TestPool<4> t;
-    t.pool.spawn(toSub(4), toSub(4), -toSub(1), 0, 200, 0);   // moving away from its neighbour
+    t.pool.spawn(toSub(4), toSub(4), -toSub(1), 0, 200, 0);   // moving away from its neighbor
     t.pool.spawn(toSub(5), toSub(4),  toSub(1), 0, 200, 0);
     const draw::pos_t v0 = t.vx[0], v1 = t.vx[1];
     t.pool.collide(toSub(2), 256);
@@ -498,8 +478,7 @@ TEST_CASE("particles already moving apart are not kicked again") {
     CHECK(t.vx[1] == v1);
 }
 
-// The documented trap: pushing BOTH particles apart makes each shove create the overlap the other
-// resolves, so the pair jitters forever. Exactly one moves, and the pair must settle.
+// The documented trap: pushing BOTH particles apart makes each shove create the overlap the other resolves, so the pair jitters forever. Exactly one moves, and the pair must settle.
 TEST_CASE("overlapping particles separate instead of jittering forever") {
     TestPool<4> t;
     t.pool.spawn(toSub(4), toSub(4), 0, 0, 200, 0);
@@ -540,8 +519,7 @@ TEST_CASE("the same seed produces the same spray") {
 
 // --- The base-set additions (industry audit, 2026-08-07) ----------------------------------------
 
-// A byte capped life at 255 reference frames — about 4.25 s at 60 Hz — so slow smoke, drifting snow
-// and long fades were not expressible at all. WLED-PS uses the same width for the same reason.
+// A byte capped life at 255 reference frames, about 4.25 s at 60 Hz, so slow smoke, drifting snow and long fades were not expressible at all. WLED-PS uses the same width for the same reason.
 TEST_CASE("a particle can outlive the old 8-bit ceiling") {
     TestPool<2> t;
     t.pool.spawn(0, 0, 0, 0, /*life=*/3000, 0);
@@ -551,8 +529,7 @@ TEST_CASE("a particle can outlive the old 8-bit ceiling") {
     CHECK(t.ttl[0] == 2000);
 }
 
-// Wrapping is the third wall behavior beside bounce and killOutside, and the one an endless field
-// needs: snow, rain and marquees want to re-enter, not rattle in a box or fall off a cliff.
+// Wrapping is the third wall behavior beside bounce and killOutside, and the one an endless field needs. Snow, rain and marquees want to re-enter, not rattle in a box or fall off a cliff.
 TEST_CASE("a particle leaving one edge re-enters the opposite one") {
     TestPool<4> t;
     const draw::pos_t w = toSub(16), h = toSub(16);
@@ -574,9 +551,7 @@ TEST_CASE("wrapping can be enabled per axis") {
     CHECK(t.y[0] < 0);                            // ...y was left alone, so a snowfall still lands
 }
 
-// Wrapping reduces by modulo rather than by repeated subtraction, so a particle thrown a long way
-// out costs the same as one just over the line. These pin the exact landing points, including the
-// two edges, because "somewhere back inside" would pass for an implementation that is off by a span.
+// Wrapping reduces by modulo rather than by repeated subtraction, so a particle thrown a long way out costs the same as one just over the line. These pin the exact landing points, including the two edges, because "somewhere back inside" would pass for an implementation that is off by a span.
 TEST_CASE("wrapping puts a particle at an exact position, however far out it started") {
     TestPool<4> t;
     const draw::pos_t w = toSub(16), h = toSub(16);
@@ -589,9 +564,7 @@ TEST_CASE("wrapping puts a particle at an exact position, however far out it sta
     CHECK(t.x[2] == toSub(5));
 }
 
-// The two edges are deliberately not symmetric: coming down from above stops AT the far edge, while
-// climbing from below stops at 0. Both name the same point on a wrapped axis, and the wall passes
-// agree with this, so it is pinned rather than left to drift.
+// The two edges are deliberately not symmetric: coming down from above stops AT the far edge, while climbing from below stops at 0. Both name the same point on a wrapped axis, and the wall passes agree with this, so it is pinned rather than left to drift.
 TEST_CASE("an exact multiple of the axis lands on the edge it approached from") {
     TestPool<4> t;
     const draw::pos_t w = toSub(16), h = toSub(16);
@@ -610,8 +583,7 @@ TEST_CASE("wrapping leaves a particle already inside the grid untouched") {
     CHECK(t.y[0] == toSub(8));
 }
 
-// Size is what makes a pool read as blobs rather than a scatter of points — the signature look of a
-// particle system, and its absence is the likeliest "these aren't real particles" complaint.
+// Size is what makes a pool read as blobs rather than a scatter of points, the signature look of a particle system, and its absence is the likeliest "these aren't real particles" complaint.
 TEST_CASE("a sized particle draws a disc rather than a point") {
     Buffer small, big;
     small.allocate(16 * 16, 3); small.clear();
@@ -649,40 +621,32 @@ TEST_CASE("a pool without size storage still renders every particle") {
     CHECK((buf.data()[at] || buf.data()[at + 1] || buf.data()[at + 2]));   // drawn, not skipped
 }
 
-// FrameTime is the branch's shared answer to "how much of a reference frame did this frame cover".
-// Its reference PERIOD has to be exact: deriving it as `1000 / referenceHz` truncates to 16 ms for
-// 60 Hz, which is a 62.5 Hz reference, and every 60-fps-calibrated setting in the codebase then runs
-// about 4% fast — invisible per frame, a drift of seconds over a minute.
+// FrameTime is the branch's shared answer to "how much of a reference frame did this frame cover". Its reference PERIOD has to be exact: deriving it as `1000 / referenceHz` truncates to 16 ms for 60 Hz, which is a 62.5 Hz reference, and every 60-fps-calibrated setting in the codebase then runs about 4% fast, invisible per frame, a drift of seconds over a minute.
 TEST_CASE("one second of motion is the same amount of motion however fast the device renders") {
-    // A setting written against 60 fps has to mean the same thing everywhere: one second of real
-    // time is 60 reference frames of movement, whether the device drew 30 frames or 1200. Deriving
-    // the reference period as `1000 / 60` gives 16 ms — a 62.5 Hz clock — and every calibrated
-    // setting in the codebase then runs about 4% fast, which is a drift of seconds over a minute.
+    // A setting written against 60 fps has to mean the same thing everywhere.
+    // One second of real time is 60 reference frames of movement, whether the device drew 30 frames or 1200.
+    // Deriving the reference period as `1000 / 60` gives 16 ms, a 62.5 Hz clock, and every calibrated setting in the codebase then runs about 4% fast, which is a drift of seconds over a minute.
     for (int fps : {30, 60, 240, 1200}) {
         CAPTURE(fps);
         particles::FrameTime t{60};
         uint64_t total = 0;
-        // Inclusive of f == fps, so the timeline really covers 0..1000 ms; stopping one frame short
-        // measures slightly less than a second and hides a small rate error in the shortfall.
+        // Inclusive of f == fps, so the timeline really covers 0..1000 ms. Stopping one frame short measures slightly less than a second and hides a small rate error in the shortfall.
         for (int f = 0; f <= fps; f++)
             total += t.advance(static_cast<uint32_t>(static_cast<uint64_t>(f) * 1000 / fps));
         const double refFrames = static_cast<double>(total) / particles::FrameTime::kOne;
-        // One reference frame of tolerance: the first advance() seeds the time base and returns a
-        // whole unit, and the last partial unit stays in the carry. A wrong reference period is a
-        // flat 4% (2.4 frames), so it does not fit inside this band.
+        // One reference frame of tolerance: the first advance() seeds the time base and returns a whole unit, and the last partial unit stays in the carry. A wrong reference period is a flat 4% (2.4 frames), so it does not fit inside this band.
         CHECK(refFrames > 59.0);
         CHECK(refFrames < 62.0);
     }
 }
 
-// Slots map onto DISTINCT lanes at any count. Effects assign slots by species or role, and
-// species differ in speed, so a straight stride sorts the scene and the fast ones bunch at one
-// edge; the interleave exists to mix them. Its step must be coprime with the count, or the
-// mapping collapses: `(i * 5) % 5` is zero for every i, which stacked a five-character cast on
-// one row (bench, PacmanEffect).
+// Slots map onto DISTINCT lanes at any count.
+// Effects assign slots by species or role, and species differ in speed, so a straight stride sorts the scene and the fast ones bunch at one edge.
+// The interleave exists to mix them.
+// Its step must be coprime with the count, or the mapping collapses.
+// `(i * 5) % 5` is zero for every i, which stacked a five-character cast on one row (bench, PacmanEffect).
 TEST_CASE("spreadLane gives every slot its own lane, for any count") {
-    // The extent is a multiple of every count tested, so each lane lands on its own exact
-    // position and two slots sharing a lane is a real collision rather than a rounding artifact.
+    // The extent is a multiple of every count tested, so each lane lands on its own exact position and two slots sharing a lane is a real collision rather than a rounding artifact.
     constexpr mm::lengthType kExtent = 27720;   // lcm(1..12), divisible by every count below
     for (uint16_t slots = 1; slots <= 12; slots++) {
         bool seen[16] = {};
@@ -698,12 +662,9 @@ TEST_CASE("spreadLane gives every slot its own lane, for any count") {
     }
 }
 
-// The interleave is the point: consecutive slots must not land on adjacent lanes, or assigning
-// slots by species puts every fast one together regardless of the lanes being distinct.
+// The interleave is the point: consecutive slots must not land on adjacent lanes, or assigning slots by species puts every fast one together regardless of the lanes being distinct.
 TEST_CASE("spreadLane interleaves rather than striding in order") {
-    // EVERY consecutive pair must be non-adjacent, not merely one of them. The weaker form of
-    // this test passed against a stride of `slots - 1`, which is coprime but congruent to -1, so
-    // consecutive slots walked DOWN neighboring lanes and nothing was interleaved at all.
+    // EVERY consecutive pair must be non-adjacent, not merely one of them. The weaker form of this test passed against a stride of `slots - 1`, which is coprime but congruent to -1, so consecutive slots walked DOWN neighboring lanes and nothing was interleaved at all.
     constexpr mm::lengthType kExtent = 27720;      // lcm(1..12): every count below divides it
     for (uint16_t slots = 5; slots <= 12; slots++) {
         if (slots == 6) continue;   // 6 has no coprime near 3 (2 and 3 both share a factor)
@@ -718,8 +679,7 @@ TEST_CASE("spreadLane interleaves rather than striding in order") {
     }
 }
 
-// audio-reactive sprites: the behavior a viewer judges is "it moves with the music, and it stops
-// when the music stops". Both halves are pinned here because both were explicit requirements.
+// audio-reactive sprites: the behavior a viewer judges is "it moves with the music, and it stops when the music stops". Both halves are pinned here because both were explicit requirements.
 TEST_CASE("Silence stands the sprites still") {
     mm::AudioFrame quiet;                       // levelSmoothed 0: no music playing
     for (uint16_t i = 0; i < 8; i++) CHECK(mm::particles::audioDrive(&quiet, i, 8) == 0);
@@ -738,8 +698,7 @@ TEST_CASE("Loud music moves the sprites faster than quiet music") {
     CHECK(mm::particles::audioDrive(&loud, 0, 8) > mm::particles::audioDrive(&quiet, 0, 8));
 }
 
-// The point of a per-sprite band rather than one overall volume: a bass-heavy moment moves the
-// bass sprites and leaves the treble ones alone, so the scene never surges as a single block.
+// The point of a per-sprite band rather than one overall volume. A bass-heavy moment moves the bass sprites and leaves the treble ones alone, so the scene never surges as a single block.
 TEST_CASE("Each sprite follows its own frequency band") {
     mm::AudioFrame f;
     f.levelSmoothed = 128;
@@ -751,18 +710,16 @@ TEST_CASE("Each sprite follows its own frequency band") {
     CHECK(treble > 0);                           // a quiet band drifts, it does not freeze mid-air
 }
 
-// The bands must be spread over the sprites that EXIST, not over the pool's capacity. Passing
-// the capacity (a Pool is allocated for the maximum, then partly filled) crowds every live sprite
-// into the low bands and leaves the treble driving nothing at all: with 5 sprites in a pool of 12,
-// `i * 16 / 12` yields bands 0,1,2,4,5 - all bass. Caught in review after shipping; the earlier
-// tests missed it because they all passed the live count as `slots`.
+// The bands must be spread over the sprites that EXIST, not over the pool's capacity.
+// Passing the capacity (a Pool is allocated for the maximum, then partly filled) crowds every live sprite into the low bands and leaves the treble driving nothing at all.
+// With 5 sprites in a pool of 12, `i * 16 / 12` yields bands 0,1,2,4,5 - all bass.
+// Caught in review after shipping; the earlier tests missed it because they all passed the live count as `slots`.
 TEST_CASE("The spectrum is spread over the live sprites, not the pool capacity") {
     AudioFrame f;
     f.levelSmoothed = 128;
     for (uint8_t b = 0; b < 16; b++) f.bands[b] = 0;
 
-    // Five live sprites in a pool sized for twelve. Spread over the LIVE count they take bands
-    // 0, 3, 6, 9, 12; spread over the capacity they would take 0, 1, 2, 4, 5 - the bottom third.
+    // Five live sprites in a pool sized for twelve. Spread over the LIVE count they take bands 0, 3, 6, 9, 12; spread over the capacity they would take 0, 1, 2, 4, 5 - the bottom third.
     const uint16_t live = 5, capacity = 12;
     f.bands[12] = 255;                     // energy where only the live-count spread reaches
 

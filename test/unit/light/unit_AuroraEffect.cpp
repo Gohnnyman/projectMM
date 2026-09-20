@@ -1,10 +1,7 @@
-// @module AuroraEffect
-// @also polar, oscillators, noise
+/// @module AuroraEffect
+/// @also polar, oscillators, noise
 
-// Aurora is a composition rather than a picture of anything, so what is pinned here is that the
-// composition behaves: that curtains appear and are distinct rather than an even haze, that the
-// contrast control decides how much of the field lights, that the layers move independently, and
-// that raising the cost knob costs something. The golden pins the plumbing; these pin the look.
+/// Aurora is a composition rather than a picture of anything, so what is pinned here is that the composition behaves: that curtains appear and are distinct rather than an even haze, that the contrast control decides how much of the field lights, that the layers move independently, and that raising the cost knob costs something. The golden pins the plumbing; these pin the look.
 
 #include "doctest.h"
 #include "light/effects/AuroraEffect.h"
@@ -72,8 +69,7 @@ std::size_t differing(const std::vector<uint8_t>& a, const std::vector<uint8_t>&
 }  // namespace
 
 TEST_CASE("the contrast control decides how much of the field lights up") {
-    // This is what makes Aurora curtains rather than cloud: a high window leaves only the peaks of
-    // the field visible, a low one lets most of it through.
+    // This is what makes Aurora curtains rather than cloud: a high window leaves only the peaks of the field visible, a low one lets most of it through.
     const auto sharp = render(32, 32, [](AuroraEffect& e) { e.contrast = 200; });
     const auto soft  = render(32, 32, [](AuroraEffect& e) { e.contrast = 40; });
     CHECK(litShare(sharp) < litShare(soft));
@@ -82,8 +78,7 @@ TEST_CASE("the contrast control decides how much of the field lights up") {
 }
 
 TEST_CASE("curtains appear rather than an even wash of light") {
-    // A field that lit every pixel equally would be a blur. The frame must have real dark and real
-    // bright in it at the default contrast.
+    // A field that lit every pixel equally would be a blur. The frame must have real dark and real bright in it at the default contrast.
     const auto frame = render(32, 32, [](AuroraEffect&) {});
     uint8_t lo = 255, hi = 0;
     for (uint8_t v : frame) { lo = v < lo ? v : lo; hi = v > hi ? v : hi; }
@@ -104,8 +99,7 @@ TEST_CASE("a still speed holds the picture, so a fixture can be frozen") {
 }
 
 TEST_CASE("each layer adds structure, so the cost knob buys something") {
-    // One layer is a single field; three layers interfere. If more layers changed nothing, the
-    // effect's main control would be paying for nothing.
+    // One layer is a single field; three layers interfere. If more layers changed nothing, the effect's main control would be paying for nothing.
     const auto one   = render(32, 32, [](AuroraEffect& e) { e.layers = 1; });
     const auto three = render(32, 32, [](AuroraEffect& e) { e.layers = 3; });
     CHECK(differing(one, three) > one.size() / 4);
@@ -137,16 +131,14 @@ TEST_CASE("Aurora renders on a grid too small to have a center") {
 }
 
 TEST_CASE("Aurora renders the same picture whether or not the polar table is available") {
-    // The table is an optimization, not part of the look: a device that cannot spare the memory
-    // gets the same composition.
+    // The table is an optimization, not part of the look: a device that cannot spare the memory gets the same composition.
     const auto tabled = render(32, 32, [](AuroraEffect& e) { e.polar.wide = true; });
     const auto exact  = render(32, 32, [](AuroraEffect& e) { e.polar.use = false; });
     CHECK(differing(tabled, exact) == 0);
 }
 
 TEST_CASE("on a volumetric fixture the curtains have depth instead of one repeated slice") {
-    // What a cube buys over a panel: the field is sampled through the volume, so a light at the
-    // front and one at the back of the same column are in different parts of the composition.
+    // What a cube buys over a panel: the field is sampled through the volume, so a light at the front and one at the back of the same column are in different parts of the composition.
     const auto f = render3(8, 8, 6, [](AuroraEffect& e) { e.contrast = 40; }, 40);
     const std::size_t slice = 8 * 8 * 3;
     REQUIRE(f.size() >= slice * 6);
@@ -170,8 +162,7 @@ TEST_CASE("each projection composes the volume differently") {
 }
 
 TEST_CASE("Aurora renders on a strip, a panel and a cube alike") {
-    // Any effect on any dimension: a strip is one line through a field designed around two axes, so
-    // it is not what Aurora is for, but it must still light rather than fail or go dark.
+    // Any effect on any dimension: a strip is one line through a field designed around two axes, so it is not what Aurora is for, but it must still light rather than fail or go dark.
     for (auto dims : {std::array<lengthType, 3>{64, 1, 1}, {16, 16, 1}, {8, 8, 8}}) {
         const auto f = render3(dims[0], dims[1], dims[2], [](AuroraEffect& e) { e.contrast = 30; }, 30);
         REQUIRE(f.size() == static_cast<std::size_t>(dims[0]) * dims[1] * dims[2] * 3);

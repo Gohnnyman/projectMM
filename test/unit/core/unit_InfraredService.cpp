@@ -1,12 +1,11 @@
-// @module InfraredService
-// @also Scheduler
+/// @module InfraredService
+/// @also Scheduler
 
-// Pins the infrared service's mapping path: a learned remote code drives another module's control
-// through the shared Scheduler::setControl primitive, clamped to the control's own bounds. A fake
-// "Drivers" module stands in for the real one, so the test needs no light-domain modules.
-//
-// The reception side is a platform stub (irRead returns false on the host), so a code is injected
-// the way a decoded frame would arrive. That is the whole point of injectCodeForTest.
+/// Pins the infrared service's mapping path: a learned remote code drives another module's control through the shared Scheduler::setControl primitive, clamped to the control's own bounds.
+/// A fake "Drivers" module stands in for the real one, so the test needs no light-domain modules.
+///
+/// The reception side is a platform stub (irRead returns false on the host), so a code is injected the way a decoded frame would arrive.
+/// That is the whole point of injectCodeForTest.
 
 #include "doctest.h"
 #include "core/services/InfraredService.h"
@@ -21,8 +20,7 @@ using namespace mm;
 
 namespace {
 
-// Stands in for Drivers: an `on` Bool, a brightness Uint8 (0-255) and a palette Select (0-3). Named
-// "Drivers" so a row targeting "Drivers.on" resolves to it.
+// Stands in for Drivers: an `on` Bool, a brightness Uint8 (0-255) and a palette Select (0-3). Named "Drivers" so a row targeting "Drivers.on" resolves to it.
 struct FakeDrivers : public MoonModule {
     bool on = true;
     uint8_t brightness = 100;
@@ -36,8 +34,7 @@ struct FakeDrivers : public MoonModule {
     }
 };
 
-// Scheduler + FakeDrivers + the service, set up so Scheduler::instance() is live and controls are
-// bound. The scheduler owns the heap-allocated modules.
+// Scheduler + FakeDrivers + the service, set up so Scheduler::instance() is live and controls are bound. The scheduler owns the heap-allocated modules.
 struct Rig {
     Scheduler scheduler;
     FakeDrivers* drivers = new FakeDrivers();
@@ -72,8 +69,8 @@ struct Rig {
     }
     void fire(uint32_t code) { ir->injectCodeForTest(code); }
 
-    /// The id of row `n`, read from the row itself rather than assumed: ids are handed out in
-    /// sequence and every earlier test in this file consumes some, so a literal would be brittle.
+    /// The id of row `n`, read from the row itself rather than assumed.
+    /// Ids are handed out in sequence and every earlier test in this file consumes some, so a literal would be brittle.
     uint32_t rowId(uint8_t n) const {
         char buf[256];
         JsonSink sink(buf, sizeof(buf));
@@ -108,8 +105,7 @@ TEST_CASE("a delta row nudges its target and stops at the control's own bounds")
     rig.fire(0x2222);
     CHECK(rig.drivers->brightness == 100);
 
-    // The clamp is the CONTROL's, not the row's: the row says +16 and the control says 255, so the
-    // control wins. Without this a held key would wrap a uint8 back to 0.
+    // The clamp is the CONTROL's, not the row's: the row says +16 and the control says 255, so the control wins. Without this a held key would wrap a uint8 back to 0.
     for (int i = 0; i < 20; i++) rig.fire(0x1111);
     CHECK(rig.drivers->brightness == 255);
     for (int i = 0; i < 40; i++) rig.fire(0x2222);
@@ -126,8 +122,7 @@ TEST_CASE("a delta row steps a select and clamps at both ends") {
     CHECK(rig.drivers->palette == 1);
     rig.fire(0xAAAA);
     CHECK(rig.drivers->palette == 2);
-    // A 4-option select's max is 3, so stepping past it holds rather than wrapping into a
-    // nonexistent option.
+    // A 4-option select's max is 3, so stepping past it holds rather than wrapping into a nonexistent option.
     rig.fire(0xAAAA); rig.fire(0xAAAA); rig.fire(0xAAAA);
     CHECK(rig.drivers->palette == 3);
     for (int i = 0; i < 6; i++) rig.fire(0xBBBB);
@@ -154,8 +149,7 @@ TEST_CASE("arming a row disarms any other, so one code cannot bind twice") {
     const uint32_t a = rig.addRow("Drivers.on", "toggle");
     const uint32_t b = rig.addRow("Drivers.brightness", "delta", 10);
 
-    // Arm a, then arm b without delivering a code: only b should be waiting. Otherwise the next
-    // frame binds to whichever row the scan reached first, which is not a user's intent.
+    // Arm a, then arm b without delivering a code: only b should be waiting. Otherwise the next frame binds to whichever row the scan reached first, which is not a user's intent.
     REQUIRE(rig.ir->setListRowField(a, "learn", "{\"value\":true}"));
     REQUIRE(rig.ir->setListRowField(b, "learn", "{\"value\":true}"));
     rig.fire(0x9999);
@@ -213,15 +207,12 @@ TEST_CASE("rows are added and deleted at runtime, which is what a fixed action t
 TEST_CASE("the pin state decides what the service reports about itself") {
     Rig rig;
     rig.ir->prepare();
-    // No pin: a warning, because a receiver with no GPIO can never see a code, and saying "ready"
-    // there would be a lie a user cannot see through.
+    // No pin: a warning, because a receiver with no GPIO can never see a code, and saying "ready" there would be a lie a user cannot see through.
     CHECK(std::strstr(rig.ir->status(), "set pin") != nullptr);
 }
 
 TEST_CASE("a code that is not a number is refused rather than binding something else") {
-    // A typed code is parsed, and a bad one has to be REFUSED: silently keeping whatever prefix
-    // parsed would bind a different code entirely, and the user would press the remote, see nothing
-    // happen, and find a number in the row they never typed.
+    // A typed code is parsed, and a bad one has to be REFUSED: silently keeping whatever prefix parsed would bind a different code entirely, and the user would press the remote, see nothing happen, and find a number in the row they never typed.
     Rig rig;
     uint32_t id = 0;
     REQUIRE(rig.ir->addListRow(id));
@@ -243,9 +234,9 @@ TEST_CASE("a code that is not a number is refused rather than binding something 
 }
 
 TEST_CASE("a set row is refused on a remote, which has no release to clear it") {
-    // `set` means "write while held, clear on release". A remote code is a single event with no
-    // release, so running one would latch the control with nothing able to undo it: the row would
-    // look like it worked once and then break the control it targeted.
+    // `set` means "write while held, clear on release".
+    // A remote code is a single event with no release, so running one would latch the control with nothing able to undo it.
+    // The row would look like it worked once and then break the control it targeted.
     Rig rig;
     const uint32_t id = rig.addRow("Drivers.brightness", "set", 200);
     rig.learn(id, 0x5150);
@@ -262,8 +253,7 @@ TEST_CASE("a set row is refused on a remote, which has no release to clear it") 
 }
 
 TEST_CASE("one remote key binds to one row, so a re-learned key moves rather than duplicates") {
-    // Dispatch fires the FIRST row holding a code and stops, so a duplicate is a row that can never
-    // run: it reads as bound in the list while the key does another row's action.
+    // Dispatch fires the FIRST row holding a code and stops, so a duplicate is a row that can never run. It reads as bound in the list while the key does another row's action.
     Rig rig;
     const uint32_t a = rig.addRow("Drivers.on", "toggle");
     const uint32_t b = rig.addRow("Drivers.brightness", "delta", 10);
@@ -277,17 +267,16 @@ TEST_CASE("one remote key binds to one row, so a re-learned key moves rather tha
 }
 
 TEST_CASE("an explicit false disarms a row, so a learn can be canceled") {
-    // The UI's button sends {"value":""} and means "arm". The API can also send a real boolean, and
-    // `false` has to mean disarm: parseString reads only quoted strings, so a JSON boolean left the
-    // buffer empty and took the same path as the button, making a row impossible to un-arm.
+    // The UI's button sends {"value":""} and means "arm".
+    // The API can also send a real boolean, and `false` has to mean disarm.
+    // ParseString reads only quoted strings, so a JSON boolean left the buffer empty and took the same path as the button, making a row impossible to un-arm.
     Rig rig;
     uint32_t id = 0;
     REQUIRE(rig.ir->addListRow(id));
 
     REQUIRE(rig.ir->setListRowField(id, "learn", "{\"value\":true}"));
     REQUIRE(rig.ir->setListRowField(id, "learn", "{\"value\":false}"));
-    // Disarmed: the next code is NOT captured, so the row stays unbound and reports the code as
-    // unassigned rather than silently learning it.
+    // Disarmed: the next code is NOT captured, so the row stays unbound and reports the code as unassigned rather than silently learning it.
     rig.fire(0x2468);
     CHECK(std::strstr(rig.ir->status(), "unassigned") != nullptr);
 }

@@ -1,10 +1,7 @@
-// @module NoiseEffect
-// @also noise, Palette
+/// @module NoiseEffect
+/// @also noise, Palette
 
-// Noise is the plainest field effect: a gradient-noise sample straight into the palette. Its one
-// character control decides what moves, which is what used to be two separate effects (the second
-// was Noise2D, whose morph behavior is the `morph` option here). These pin that both options render,
-// that they differ, and that each moves the way its name says.
+/// Noise is the plainest field effect: a gradient-noise sample straight into the palette. Its one character control decides what moves, which is what used to be two separate effects (the second was Noise2D, whose morph behavior is the `morph` option here). These pin that both options render, that they differ, and that each moves the way its name says.
 
 #include "doctest.h"
 
@@ -27,8 +24,7 @@ namespace {
 /// Render Noise for `frames` on a w x h x d fixture and return the final buffer.
 std::vector<uint8_t> render(lengthType w, lengthType h, lengthType d, uint8_t motion,
                             uint16_t frames = 40) {
-    // RAII, so the override is cleared even if a REQUIRE below exits early: a leaked test clock
-    // freezes time for every test that runs after this one in the same binary.
+    // RAII, so the override is cleared even if a REQUIRE below exits early: a leaked test clock freezes time for every test that runs after this one in the same binary.
     const mm::golden::ScopedTestClock clock(1000);
     Layouts layouts;
     GridLayout grid;
@@ -66,11 +62,7 @@ TEST_CASE("both motions paint a field rather than a flat wash") {
 }
 
 TEST_CASE("drift moves the field across the fixture; morph changes it in place") {
-    // The distinction the control exists for, and the reason the two used to be separate effects.
-    // Drift scrolls the sample coordinates, so a later frame is the same field shifted. Morph holds
-    // the coordinates and advances time, so the field changes without going anywhere. Either way
-    // the picture must move, which is what this checks: a still frame would mean the motion control
-    // does nothing at all.
+    // The distinction the control exists for, and the reason the two used to be separate effects. Drift scrolls the sample coordinates, so a later frame is the same field shifted. Morph holds the coordinates and advances time, so the field changes without going anywhere. Either way the picture must move, which is what this checks: a still frame would mean the motion control does nothing at all.
     for (uint8_t motion = 0; motion < 2; motion++) {
         const auto early = render(24, 24, 1, motion, 10);
         const auto late  = render(24, 24, 1, motion, 120);
@@ -85,9 +77,7 @@ TEST_CASE("the two motions are genuinely different fields") {
 }
 
 TEST_CASE("on a volumetric fixture drifting slices differ from each other") {
-    // What a 3D fixture buys: the light's own depth is the third noise axis, so the field has real
-    // depth rather than one slice repeated. Morph spends that axis on time instead, so its slices
-    // are identical by design and only drift is checked here.
+    // What a 3D fixture buys: the light's own depth is the third noise axis, so the field has real depth rather than one slice repeated. Morph spends that axis on time instead, so its slices are identical by design and only drift is checked here.
     const auto f = render(8, 8, 4, 0, 40);
     const std::size_t slice = 8 * 8 * 3;
     REQUIRE(f.size() >= slice * 4);
@@ -97,8 +87,7 @@ TEST_CASE("on a volumetric fixture drifting slices differ from each other") {
 }
 
 TEST_CASE("Noise renders on a strip, a panel and a cube alike") {
-    // Any effect on any fixture: a 1D strip is not what a field effect is designed around, but it
-    // must still paint something rather than failing or going dark.
+    // Any effect on any fixture: a 1D strip is not what a field effect is designed around, but it must still paint something rather than failing or going dark.
     for (auto dims : {std::array<lengthType, 3>{64, 1, 1}, {16, 16, 1}, {8, 8, 8}}) {
         const auto f = render(dims[0], dims[1], dims[2], 0);
         REQUIRE(f.size() == static_cast<std::size_t>(dims[0]) * dims[1] * dims[2] * 3);
@@ -114,10 +103,7 @@ TEST_CASE("Noise survives a degenerate grid rather than faulting") {
 }
 
 TEST_CASE("morph shows the same field in every slice, because time is its third axis") {
-    // The two motions divide the one spare axis between them: drift spends it on depth, morph on
-    // time. So a volumetric fixture under morph is the same field repeated, which is what the
-    // catalog card promises. The code briefly added a depth term here as well, which made morph a
-    // second drift and left the documentation wrong rather than the behavior.
+    // The two motions divide the one spare axis between them: drift spends it on depth, morph on time. So a volumetric fixture under morph is the same field repeated, which is what the catalog card promises. The code briefly added a depth term here as well, which made morph a second drift and left the documentation wrong rather than the behavior.
     const auto f = render(8, 8, 4, 1, 40);
     const std::size_t slice = 8 * 8 * 3;
     REQUIRE(f.size() >= slice * 4);

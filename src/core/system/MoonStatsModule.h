@@ -36,14 +36,12 @@
 
 namespace mm {
 
-// The report is a pure function over the live tree: it opens no socket and persists nothing,
-// so a test calls it with a tree built by hand. The allowlist is the design, each field named
-// and copied by name, because a builder that emitted what it found would leak on its first run.
+// A pure function over the live tree, allowlisted: emitting what it found would leak on run one.
 
 /// What the report says happened, the first two automatic and the third a button press.
 enum class MoonStatsEvent : uint8_t { Install, Upgrade, Refresh };
 
-/// Read one control by name, so a rename drops the field rather than emitting its neighbour.
+/// Read one control by name, so a rename drops the field rather than emitting its neighbor.
 inline bool readControl(const MoonModule* mod, const char* name, JsonSink& out) {
     if (!mod) return false;
     auto& ctrls = mod->controls();
@@ -174,8 +172,7 @@ inline void buildMoonStatsReport(JsonSink& sink,
         sink.writeJsonString(previousVersion);
     }
 
-    // Raw numbers, bucketed by the server: bucketing here would freeze every stored row at
-    // today's boundaries. Passed in rather than read, so the builder stays a pure function.
+    // Raw, since bucketing here would freeze every stored row at today's boundaries.
     sink.appendf(",\"totalHeap\":%u,\"freeHeap\":%u,\"lightCount\":%u,\"fps\":%u",
                  static_cast<unsigned>(totalHeap),
                  static_cast<unsigned>(freeHeap),

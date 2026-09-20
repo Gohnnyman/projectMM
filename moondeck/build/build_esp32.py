@@ -332,7 +332,7 @@ FIRMWARES: dict[str, dict] = {
 # IDF target → chip-family label. ONE source for the family vocabulary, shared by:
 #   * the ESP Web Tools manifest (`chipFamily`, generate_manifest.py),
 #   * the installer's detect-vs-board comparison (deviceModels.json `chip` uses these
-#     same strings; install-orchestrator.js normalises detected silicon to them).
+#     same strings; install-orchestrator.js normalizes detected silicon to them).
 # (firmwares.json does NOT store a per-variant family — it's derivable from `chip`;
 # see generate_firmwares.py.)
 # projectMM aims to support every ESP32-family chip, so new SoCs are added HERE
@@ -605,7 +605,7 @@ def resolve_firmware(args: argparse.Namespace) -> str:
         print(f"--profile is deprecated; use --firmware {alias} instead.")
         return alias
 
-    # No flag → keep the prior default behaviour (WiFi-only ESP32 classic).
+    # No flag → keep the prior default behavior (WiFi-only ESP32 classic).
     return "esp32"
 
 

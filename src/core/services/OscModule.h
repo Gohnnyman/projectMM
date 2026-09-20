@@ -1,13 +1,5 @@
 #pragma once
 
-// OSC control ingest: a fader move in another application becomes a control write here.
-//
-// It owns no surface of its own: the control module already has the pads, encoders and faders,
-// and everything here lands in the same control-set primitive the API and the UI use.
-// So OSC gains no privilege, every validator still runs, and there is no second copy of state.
-//
-// Not here: sending OSC, bundles, and address wildcards.
-
 #include "core/system/ControlModule.h"
 #include "core/util/ControlSurface.h"
 #include "core/module/MoonModule.h"
@@ -41,6 +33,15 @@ namespace mm {
 ///
 /// The port is unauthenticated and writes controls, so it is off until turned on.
 /// Feedback is off for the same reason, sending unasked-for traffic to whatever last wrote.
+/// OSC control ingest: a fader move in another application becomes a control write here.
+///
+/// @moreinfo
+///
+/// It owns no surface of its own.
+/// The control module already has the pads, encoders and faders, and everything here lands in the same control-set primitive the API and the UI use.
+///
+/// So OSC gains no privilege, every validator still runs, and there is no second copy of state.
+/// Sending OSC, bundles and address wildcards are all out of scope.
 class OscModule : public MoonModule, public ControlSurface {
 public:
     /// A service, so the container accepts it as a child.

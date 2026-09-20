@@ -5,15 +5,19 @@
 
 namespace mm {
 
-// SHA-1 (RFC 3174) — minimal implementation for the WebSocket handshake in
-// HttpServerModule. Not a general-purpose crypto primitive; SHA-1 is broken
-// for security and is only used here because RFC 6455 mandates it for the
-// `Sec-WebSocket-Accept` derivation.
-//
-// Out-of-class so it isn't bound to HttpServerModule's translation unit. Lives
-// in the `mm` namespace so callers don't need a class qualifier. Inline so any
-// future TU that wants SHA-1 can include this header without a separate .cpp;
-// the function is small enough that duplicating across TUs is fine.
+/// @defgroup Sha1 SHA-1 for the WebSocket handshake
+/// @{
+/// A minimal RFC 3174 implementation, used only where RFC 6455 mandates it.
+///
+/// @moreinfo
+///
+/// This is not a general-purpose crypto primitive.
+/// SHA-1 is broken for security, and it appears here solely because the WebSocket standard requires it for the accept-key derivation.
+///
+/// It sits out of class so it is not bound to one translation unit, and in the namespace so a caller needs no qualifier.
+/// It is inline so any future unit that wants SHA-1 includes this header without a separate implementation file, the function being small enough that duplicating it costs little.
+
+/// Hash `len` bytes at `data` into `out`, which must hold 20 bytes.
 inline void sha1(const uint8_t* data, size_t len, uint8_t out[20]) {
     uint32_t h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE,
              h3 = 0x10325476, h4 = 0xC3D2E1F0;
@@ -63,4 +67,5 @@ inline void sha1(const uint8_t* data, size_t len, uint8_t out[20]) {
     store32(out + 12, h3); store32(out + 16, h4);
 }
 
+/// @}
 } // namespace mm

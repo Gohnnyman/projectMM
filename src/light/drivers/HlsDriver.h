@@ -21,11 +21,11 @@ namespace mm {
 ///
 /// ## Pixel-exact contract
 ///
-/// The encoded frame is the grid from the layer, letterboxed by the display. Above scale 1 a light becomes a solid square block rather than one pixel. That is still pixel-exact in the sense that matters. Replication invents no color the wall lacks, and every light stays visible. Scaling exists because a hardware encoder refuses a frame under its own floor. A small wall streamed one to one is also a postage stamp in the player.
+/// The encoded frame is the grid from the layer, letterboxed by the display. Above scale 1 a light becomes a solid square block, still pixel-exact since replication invents no color. Scaling exists because a hardware encoder has a minimum frame size, and a small wall at one to one is a postage stamp.
 ///
 /// ## Frame pacing
 ///
-/// A fixed schedule, not a last-sent timestamp. Dividing into milliseconds truncates, so the stream would run about one percent fast. Re-basing on each frame's arrival lets one late tick shift the schedule for good. Either drifts until the player stalls to re-buffer.
+/// A fixed schedule rather than a last-sent timestamp. Millisecond division truncates and re-basing on arrival lets one late tick shift the schedule, and either drift ends in the player re-buffering.
 ///
 /// ## Where it runs
 ///

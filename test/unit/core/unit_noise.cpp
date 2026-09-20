@@ -1,4 +1,4 @@
-// @module noise
+/// @module noise
 
 #include "doctest.h"
 #include "core/util/noise.h"
@@ -9,22 +9,18 @@
 
 using namespace mm;
 
-// Determinism: the same coordinate always gives the same value (a pure function of position),
-// so a field is reproducible frame to frame and across the 2D/3D entry points at z = 0.
+// Determinism: the same coordinate always gives the same value (a pure function of position), so a field is reproducible frame to frame and across the 2D/3D entry points at z = 0.
 TEST_CASE("noise: inoise8 is deterministic and the lower-D calls agree at zero on the extra axes") {
     CHECK(inoise8(1234u) == inoise8(1234u));
     CHECK(inoise8(50u, 80u) == inoise8(50u, 80u));
     CHECK(inoise8(7u, 9u, 11u) == inoise8(7u, 9u, 11u));
-    // 1D is NOT 2D at y=0: it draws ±1 gradients of its own (core/noise.h says why).
-    // 3D at z=0 equals 2D at the same (x,y).
+    // 1D is NOT 2D at y=0: it draws ±1 gradients of its own (core/noise.h says why). 3D at z=0 equals 2D at the same (x,y).
     CHECK(inoise8(640u, 128u, 0u) == inoise8(640u, 128u));
 }
 
-// Smoothness: neighboring positions WITHIN a cell (sub-256 steps) differ only a little: that's
-// what makes it noise rather than a raw hash (which would jump randomly every step).
+// Smoothness: neighboring positions WITHIN a cell (sub-256 steps) differ only a little: that's what makes it noise rather than a raw hash (which would jump randomly every step).
 TEST_CASE("noise: inoise8 varies smoothly inside a cell") {
-    // Walk across one cell (x from 0x100 to 0x1FF — cell index 1) in small steps; consecutive
-    // samples must not jump wildly. (Across a cell BOUNDARY it can change more — that's expected.)
+    // Walk across one cell (x from 0x100 to 0x1FF, cell index 1) in small steps; consecutive samples must not jump wildly. (Across a cell BOUNDARY it can change more, that's expected.)
     int maxStep = 0;
     uint8_t prev = inoise8(0x100u);
     for (uint32_t x = 0x110u; x <= 0x1F0u; x += 0x10u) {
@@ -50,15 +46,10 @@ TEST_CASE("noise: inoise8 spans a wide range across a field") {
 
 // --- The 16-bit tier ---------------------------------------------------------------------------
 //
-// The reason it exists: 256 levels band visibly on a large fixture, so a field an effect draws
-// against carries 16. Both tests below pin a property that was WRONG when the tier was first
-// written, and neither failure was visible from reading the output — only from counting it.
+// The reason it exists: 256 levels band visibly on a large fixture, so a field an effect draws against carries 16. Both tests below pin a property that was WRONG when the tier was first written, and neither failure was visible from reading the output, only from counting it.
 
 TEST_CASE("16-bit noise fills the range instead of stepping through 256 levels") {
-    // fbm16 summed its octaves after shifting each sample down by 8, which fits a 32-bit
-    // accumulator but throws away the low byte — the result was an 8-bit field in a uint16_t,
-    // exactly the banding this tier removes. Counting distinct values is what catches that: the
-    // output LOOKS like plausible noise either way.
+    // fbm16 summed its octaves after shifting each sample down by 8, which fits a 32-bit accumulator but throws away the low byte, the result was an 8-bit field in a uint16_t, exactly the banding this tier removes. Counting distinct values is what catches that: the output LOOKS like plausible noise either way.
     std::set<uint16_t> values;
     int lowByteSet = 0;
     for (uint32_t i = 0; i < 20000; i++) {
@@ -71,13 +62,11 @@ TEST_CASE("16-bit noise fills the range instead of stepping through 256 levels")
 }
 
 TEST_CASE("16-bit interpolation stays exact across the full range") {
-    // lerp16's delta*t reaches 4.29e9 against an INT32_MAX of 2.15e9: signed overflow, undefined
-    // behaviour, on roughly a quarter of samples. It happened to produce the right low bits on
-    // wrap-around hardware, so only the endpoints and the midpoint reveal it.
+    // lerp16's delta*t reaches 4.29e9 against an INT32_MAX of 2.15e9: signed overflow, undefined behavior, on roughly a quarter of samples. It happened to produce the right low bits on wrap-around hardware, so only the endpoints and the midpoint reveal it.
     CHECK(noise::lerp16(0, 65535, 0) == 0);
     CHECK(noise::lerp16(0, 65535, 65535) == 65534);       // t is a fraction of 65536, not of 65535
     CHECK(noise::lerp16(1000, 1000, 40000) == 1000);      // equal endpoints never move
-    // The worst case for the product, from both directions — a wrapped intermediate lands far away.
+    // The worst case for the product, from both directions, a wrapped intermediate lands far away.
     CHECK(noise::lerp16(0, 65535, 49152) == 49151);      // exact: integer arithmetic
     CHECK(noise::lerp16(65535, 0, 49152) == 16383);
     // Monotonic: interpolating further along never goes backwards.
@@ -90,19 +79,14 @@ TEST_CASE("16-bit interpolation stays exact across the full range") {
 }
 
 TEST_CASE("16-bit noise is smooth where the 8-bit form would step") {
-    // The whole point of the tier: sampling finer than an 8-bit fraction resolves must produce
-    // intermediate values rather than a staircase. Four cells along x at a fixed y, sixteen samples
-    // per 8-bit step: a field stepping at 8 bits could show at most 4 * 256 distinct values.
+    // The whole point of the tier: sampling finer than an 8-bit fraction resolves must produce intermediate values rather than a staircase. Four cells along x at a fixed y, sixteen samples per 8-bit step: a field stepping at 8 bits could show at most 4 * 256 distinct values.
     std::set<uint16_t> values;
     for (uint32_t f = 0; f < 4u * 4096u; f++) values.insert(inoise16(0x10000u + f * 16u, 0x18000u));
     CHECK(values.size() > 2000);
 }
 
 TEST_CASE("fbm keeps its full range however many octaves are summed") {
-    // Octaves are near-independent, so their spread grows like the root of the sum of squares while
-    // the normalizer divides by the sum of amplitudes. Left uncorrected the field narrows with every
-    // octave added: 4 octaves measured 54..199 of 0..255, so an effect stretching the top of the
-    // field could never reach full brightness and every fbm read flatter than the noise under it.
+    // Octaves are near-independent, so their spread grows like the root of the sum of squares while the normalizer divides by the sum of amplitudes. Left uncorrected the field narrows with every octave added: 4 octaves measured 54..199 of 0..255, so an effect stretching the top of the field could never reach full brightness and every fbm read flatter than the noise under it.
     for (uint8_t octaves = 1; octaves <= 4; octaves++) {
         uint8_t lo = 255, hi = 0;
         for (uint32_t y = 0; y < 1200; y += 7)
@@ -130,9 +114,7 @@ TEST_CASE("16-bit fbm keeps its range too") {
     }
 }
 
-// The contract that makes the field library dimension-generic: a 2D call is the 3D call with the
-// missing axis at zero. Without it a volumetric fixture and a panel would sample different fields
-// for the same coordinates, and an effect could not simply pass z through.
+// The contract that makes the field library dimension-generic: a 2D call is the 3D call with the missing axis at zero. Without it a volumetric fixture and a panel would sample different fields for the same coordinates, and an effect could not simply pass z through.
 TEST_CASE("every field kernel's 2D form is its 3D form with z at zero") {
     for (uint32_t y = 0; y < 4000; y += 231) {
         for (uint32_t x = 0; x < 4000; x += 197) {
@@ -148,8 +130,7 @@ TEST_CASE("every field kernel's 2D form is its 3D form with z at zero") {
 }
 
 TEST_CASE("the z axis actually changes the field, rather than being carried and ignored") {
-    // The other half of the contract: passing z must do something, or "3D support" is a signature
-    // change. A volumetric fixture's slices have to differ from each other.
+    // The other half of the contract: passing z must do something, or "3D support" is a signature change. A volumetric fixture's slices have to differ from each other.
     int differing = 0, total = 0;
     for (uint32_t y = 0; y < 3000; y += 311) {
         for (uint32_t x = 0; x < 3000; x += 271) {
@@ -162,13 +143,9 @@ TEST_CASE("the z axis actually changes the field, rather than being carried and 
 }
 
 TEST_CASE("a curl field has no sources or sinks, so what it carries cannot pile up") {
-    // The reason curl exists rather than sampling noise straight into a velocity. A field with
-    // divergence has places where flow converges (anything carried there collects into a clump) and
-    // places where it diverges (the medium thins to nothing). Curl is the perpendicular gradient of
-    // a potential, so its divergence is zero by construction, and what it carries keeps its shape.
+    // The reason curl exists rather than sampling noise straight into a velocity. A field with divergence has places where flow converges (anything carried there collects into a clump) and places where it diverges (the medium thins to nothing). Curl is the perpendicular gradient of a potential, so its divergence is zero by construction, and what it carries keeps its shape.
     //
-    // Measured here against the naive alternative over the same points: two noise samples used
-    // directly as vx and vy.
+    // Measured here against the naive alternative over the same points: two noise samples used directly as vx and vy.
     double curlDiv = 0, naiveDiv = 0;
     int n = 0;
     constexpr uint32_t kCell = 1u << 16, kEps = 4096;

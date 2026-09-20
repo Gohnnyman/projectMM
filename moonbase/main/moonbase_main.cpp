@@ -1,20 +1,26 @@
-// MoonBase: the second boot image.
-//
-// A 4 MB board has room for one application, not two, so its partition table carries this small
-// image in the `factory` slot instead of a second copy of the firmware. When the application must
-// be replaced, the device reboots here: MoonBase owns the board, writes the new firmware into the
-// application slot it is not itself running from, and hands control back.
-//
-// Everything here is written directly against ESP-IDF. It shares no code with the application on
-// purpose: the app's platform layer pulls in RMT, I2S, PSRAM and the JIT, which measured 788 KB
-// with an empty entry point. This file plus its sdkconfig measures around a quarter of the flash
-// instead. The other half of the budget is in ../sdkconfig.defaults, which is part of the design.
-//
-// The flow, in order:
-//   1. mount the application's filesystem read-only and read the stored WiFi credentials
-//   2. bring up the network: Ethernet if the board has it, else WiFi STA, else our own AP
-//   3. serve one page: install by upload, or install from a URL
-//   4. write the application slot, point the bootloader at it, reboot
+/// MoonBase: the second boot image.
+///
+/// A 4 MB board has room for one application, not two.
+/// Its partition table carries this small image in the `factory` slot instead of a second copy of the firmware.
+/// When the application must be replaced, the device reboots here.
+/// MoonBase owns the board, writes the new firmware into the application slot it is not itself running from, and hands control back.
+///
+/// @moreinfo
+///
+/// ## Why it shares no code with the application
+///
+/// Everything here is written directly against ESP-IDF.
+/// It shares no code with the application on purpose: the app's platform layer pulls in RMT, I2S, PSRAM and the JIT, which measured 788 KB with an empty entry point.
+/// This file plus its sdkconfig measures around a quarter of the flash instead.
+/// The other half of the budget is in ../sdkconfig.defaults, which is part of the design.
+///
+/// ## The boot flow
+///
+/// In order:
+///   1. mount the application's filesystem read-only and read the stored WiFi credentials
+///   2. bring up the network: Ethernet if the board has it, else WiFi STA, else our own AP
+///   3. serve one page: install by upload, or install from a URL
+///   4. write the application slot, point the bootloader at it, reboot
 
 #include <cstdio>
 #include <cstdlib>
@@ -48,10 +54,9 @@
 
 namespace {
 
-// The application writes its config as /.config/<TypeName>.json on a LittleFS volume. Tables
-// written from 2026-08 label that partition `littlefs`; older ones label it `spiffs`, so both are
-// tried by subtype then label. MoonBase only ever READS it, so a failed install cannot
-// corrupt user config.
+// The application writes its config as /.config/<TypeName>.json on a LittleFS volume.
+// Tables written from 2026-08 label that partition `littlefs`; older ones label it `spiffs`, so both are tried by subtype then label.
+// MoonBase only ever READS it, so a failed install cannot corrupt user config.
 struct FsCandidate { esp_partition_subtype_t subtype; const char* label; };
 constexpr FsCandidate kFsCandidates[] = {
     {ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, "littlefs"},
@@ -59,13 +64,10 @@ constexpr FsCandidate kFsCandidates[] = {
 };
 constexpr const char* kFsMountPoint     = "/fs";
 constexpr const char* kNetworkConfig    = "/fs/.config/NetworkModule.json";
-// The application persists its build variant here, which is the one fact this image cannot know
-// about the board it is on: MoonBase is chip-specific and variant-agnostic, so without it the
-// release picker can only offer every firmware for the chip and ask a user in recovery to choose.
+// The application persists its build variant here, which is the one fact this image cannot know about the board it is on. MoonBase is chip-specific and variant-agnostic, so without it the release picker can only offer every firmware for the chip and ask a user in recovery to choose.
 constexpr const char* kSystemConfig     = "/fs/.config/SystemModule.json";
 
-// The AP fallback address matches the application's (NetworkModule uses 4.3.2.1), so a user who
-// has provisioned this device before sees the same address in both firmwares.
+// The AP fallback address matches the application's (NetworkModule uses 4.3.2.1), so a user who has provisioned this device before sees the same address in both firmwares.
 constexpr const char* kApAddress = "4.3.2.1";
 constexpr const char* kApName    = "MoonBase";
 
@@ -82,11 +84,7 @@ constexpr int kNetGotIp = BIT0;
 // Credentials
 // ---------------------------------------------------------------------------------------------
 
-// Extract one top-level string value from the config JSON. Deliberately not a JSON parser:
-// MoonBase reads exactly two known keys out of a file this project itself wrote, and linking a
-// parser to do it would cost more than the whole feature. The scan is anchored on `"key":"` at
-// the TOP level only, which matters because the same file carries a child module's "0.password"
-// (the MQTT broker's) that a naive substring search would find first.
+// One top-level string out of the config, deliberately not a parser: two known keys from a file this project wrote, where linking one would cost more than the feature. Anchored at the top level, because the same file carries a child module's password a naive search would find.
 bool jsonFindString(const char* json, const char* key, char* out, size_t outLen) {
     char needle[40];
     const int n = std::snprintf(needle, sizeof(needle), "\"%s\":\"", key);
@@ -98,10 +96,9 @@ bool jsonFindString(const char* json, const char* key, char* out, size_t outLen)
     while (*p && *p != '"' && i + 1 < outLen) {
         char c = *p++;
         if (c == '\\' && *p) {
-            // The app's writer (JsonSink, RFC 8259) escapes with \" \\ \/ \n \r \t, and
-            // \uXXXX for other control bytes. All but \u are decoded here; a credential
-            // holding a raw control byte fails the join and lands on the access point,
-            // visible and recoverable, which is not worth a \u decoder in this image.
+            // The app's writer (JsonSink, RFC 8259) escapes with \" \\ \/ \n \r \t, and \uXXXX for other control bytes.
+            // All but \u are decoded here.
+            // A credential holding a raw control byte fails the join and lands on the access point, visible and recoverable, which is not worth a \u decoder in this image.
             const char e = *p++;
             switch (e) {
                 case 'n': c = '\n'; break;
@@ -117,8 +114,7 @@ bool jsonFindString(const char* json, const char* key, char* out, size_t outLen)
     return i > 0;
 }
 
-// Top-level numeric key: "key":123 or "key":-1 (same anchored scan as jsonFindString).
-// Absent leaves `out` untouched, so callers pre-load their defaults.
+// Top-level numeric key: "key":123 or "key":-1 (same anchored scan as jsonFindString). Absent leaves `out` untouched, so callers pre-load their defaults.
 void jsonFindInt(const char* json, const char* key, int* out) {
     char needle[40];
     const int n = std::snprintf(needle, sizeof(needle), "\"%s\":", key);
@@ -140,10 +136,9 @@ void jsonFindBool(const char* json, const char* key, bool* out) {
     if (std::strncmp(v, "false", 5) == 0) *out = false;
 }
 
-// The board's Ethernet wiring, from the same config file the credentials come from.
-// ethType 1 is the app's LAN8720/RMII option, the only interface a 4 MB classic has;
-// 0 or absent means no Ethernet on this board. Absent pin keys keep the silicon
-// defaults (MDC 23 / MDIO 18; clock IN on GPIO0), the same rule the app applies.
+// The board's Ethernet wiring, from the same config file the credentials come from. ethType 1 is the app's LAN8720/RMII option, the only interface a 4 MB classic has.
+// 0 or absent means no Ethernet on this board.
+// Absent pin keys keep the silicon defaults (MDC 23 / MDIO 18; clock IN on GPIO0), the same rule the app applies.
 struct {
     int  type       = 0;
     int  phyAddr    = -1;      // -1: scan the MDIO bus
@@ -154,20 +149,18 @@ struct {
     bool clockExtIn = true;
 } ethCfg_;
 
-// The board's WiFi TX cap in dBm (0 = no override): some assemblies brown out at full TX
-// (the catalog pins e.g. 8 dBm for them), and a brownout during recovery is the worst time.
+// The board's WiFi TX cap in dBm (0 = no override): some assemblies brown out at full TX (the catalog pins e.g. 8 dBm for them), and a brownout during recovery is the worst time.
 int txPowerDbm_ = 0;
 
 // The application's build variant ("esp32s3-zero"), or empty when the app has never run here.
-// Empty is the honest answer for a freshly flashed or wiped device, and the page falls back to
-// offering every firmware for the chip rather than pretending to know which one this board takes.
+// Empty is the honest answer for a freshly flashed or wiped device.
+// The page falls back to offering every firmware for the chip rather than pretending to know which one this board takes.
 char g_appVariant[24] = {};
 
 void loadAppVariant() {
     FILE* f = std::fopen(kSystemConfig, "r");
     if (!f) return;
-    // Same bounded prefix read as the credentials above, and for the same reason: the file carries
-    // every child module's config behind the identity keys this image needs.
+    // Same bounded prefix read as the credentials above, and for the same reason: the file carries every child module's config behind the identity keys this image needs.
     char buf[1024];
     const size_t got = std::fread(buf, 1, sizeof(buf) - 1, f);
     buf[got] = '\0';
@@ -175,8 +168,7 @@ void loadAppVariant() {
     jsonFindString(buf, "firmware", g_appVariant, sizeof(g_appVariant));
 }
 
-// Read the stored WiFi credentials and Ethernet wiring, if there are any. Absent, unreadable
-// or empty all mean the same thing to the caller: fall through the cascade.
+// Read the stored WiFi credentials and Ethernet wiring, if there are any. Absent, unreadable or empty all mean the same thing to the caller: fall through the cascade.
 void loadCredentials() {
     const char* label = nullptr;
     for (const auto& c : kFsCandidates) {
@@ -191,10 +183,7 @@ void loadCredentials() {
 
     FILE* f = std::fopen(kNetworkConfig, "r");
     if (f) {
-        // The credentials are the first keys the module writes, so a bounded prefix read finds
-        // them without holding the whole file (which carries every child module's config too).
-        // The bound is a cross-image contract with NetworkModule's control order; the app pins
-        // it with a unit test (unit_MoonBaseContract).
+        // The credentials are the first keys the module writes, so a bounded prefix read finds them without holding the whole file (which carries every child module's config too). The bound is a cross-image contract with NetworkModule's control order; the app pins it with a unit test (unit_MoonBaseContract).
         char buf[2048];
         const size_t got = std::fread(buf, 1, sizeof(buf) - 1, f);
         buf[got] = '\0';
@@ -210,9 +199,10 @@ void loadCredentials() {
         jsonFindBool(buf, "ethClockExtIn", &ethCfg_.clockExtIn);
         jsonFindInt(buf, "txPowerSetting", &txPowerDbm_);
     }
-    // BEFORE THE UNMOUNT. This function owns the only window in which the volume is mounted: it
-    // registers the partition above and unregisters it here, so anything that reads a file has to
-    // do it now. Reading the variant after this call returned "no file" for exactly that reason.
+    // BEFORE THE UNMOUNT.
+    // This function owns the only window in which the volume is mounted.
+    // It registers the partition above and unregisters it here, so anything that reads a file has to do it now.
+    // Reading the variant after this call returned "no file" for exactly that reason.
     loadAppVariant();
     esp_vfs_littlefs_unregister(label);
 }
@@ -222,8 +212,7 @@ void loadCredentials() {
 // ---------------------------------------------------------------------------------------------
 
 void onGotIp(void*, esp_event_base_t, int32_t id, void*) {
-    // Registered for every IP event; only an acquired STA address means online
-    // (IP_EVENT_STA_LOST_IP arrives on the same base and must not set the bit).
+    // Registered for every IP event; only an acquired STA address means online (IP_EVENT_STA_LOST_IP arrives on the same base and must not set the bit).
     if (id == IP_EVENT_STA_GOT_IP || id == IP_EVENT_ETH_GOT_IP)
         xEventGroupSetBits(netEvents_, kNetGotIp);
 }
@@ -231,19 +220,17 @@ void onGotIp(void*, esp_event_base_t, int32_t id, void*) {
 void onWifiEvent(void*, esp_event_base_t, int32_t id, void*) {
     if (id == WIFI_EVENT_STA_START || id == WIFI_EVENT_STA_DISCONNECTED) esp_wifi_connect();
 }
-// Bring up the on-chip EMAC with the wiring the app's config names (RMII, the only interface
-// a 4 MB classic has; a distilled copy of the app's ethInitEmac). Fire-and-forget by design:
-// the driver stays installed even when no link appears in the wait window, so a cable plugged
-// in later still gets the device an address; the shared GOT_IP bit reports either interface.
-// Returns false only when nothing was configured or a create step failed.
+// Bring up the on-chip MAC with the wiring the app's config names.
+// Fire-and-forget by design: the driver stays installed when no link appears in the window, so a cable plugged in later still gets an address.
+// False only when nothing was configured or a step failed.
 esp_eth_handle_t ethHandle_ = nullptr;
 esp_netif_t* ethNetif_ = nullptr;
 
 bool ethStart() {
 #if !SOC_EMAC_SUPPORTED
-    // No internal EMAC on this chip (the S3 and other WiFi-only parts). MoonBase's job is to
-    // get a recovery UI onto the network, and on such a board that is WiFi; the RMII path below
-    // would not link, and its esp_eth_mac_new_esp32 does not even exist there.
+    // No internal EMAC on this chip (the S3 and other WiFi-only parts).
+    // MoonBase's job is to get a recovery UI onto the network, and on such a board that is WiFi.
+    // The RMII path below would not link, and its esp_eth_mac_new_esp32 does not even exist there.
     return false;
 #else
     if (ethCfg_.type != 1) return false;   // 1 = LAN8720/RMII in the app's ethType vocabulary
@@ -292,8 +279,7 @@ bool ethStart() {
 #endif  // SOC_EMAC_SUPPORTED
 }
 
-// Tear Ethernet down again when no lease arrived in its window: like the app, MoonBase runs
-// ONE interface at a time, so WiFi only takes over from a dead link, never alongside it.
+// Tear Ethernet down again when no lease arrived in its window. Like the app, MoonBase runs ONE interface at a time, so WiFi only takes over from a dead link, never alongside it.
 void ethStop() {
     if (!ethHandle_) return;
     esp_eth_stop(ethHandle_);
@@ -322,17 +308,11 @@ bool wifiStation(uint32_t waitMs) {
     const EventBits_t bits = xEventGroupWaitBits(netEvents_, kNetGotIp, pdFALSE, pdFALSE,
                                                  pdMS_TO_TICKS(waitMs));
     if (bits & kNetGotIp) {
-        // Modem power save (the default, re-armed at association) throttles receive
-        // throughput to tens of KB/s. Disabled AFTER the connection is up so nothing
-        // re-enables it; MoonBase runs for minutes on a powered board, full RX beats
-        // the milliwatts.
+        // Modem power save (the default, re-armed at association) throttles receive throughput to tens of KB/s. Disabled AFTER the connection is up so nothing re-enables it; MoonBase runs for minutes on a powered board, full RX beats the milliwatts.
         esp_wifi_set_ps(WIFI_PS_NONE);
-        // The board's TX cap, applied like the app applies it: only a real cap (1..21 dBm,
-        // converted to IDF's quarter-dBm), and only AFTER the connection is up. Calling
-        // esp_wifi_set_max_tx_power at 0 or inside the radio-start call stack hangs the
-        // classic ESP32 (NetworkModule::syncTxPower documents the boot-loop). The AP
-        // fallback deliberately skips the cap: a hang in the recovery image outranks a
-        // possible brownout on a misconfigured-power board.
+        // The transmit cap, applied as the app applies it.
+        // Only a real value, and only once the connection is up, because setting it at zero or inside the radio-start stack hangs a classic ESP32.
+        // The access-point fallback skips it: a hang in the recovery image outranks a possible brownout.
         if (txPowerDbm_ >= 1 && txPowerDbm_ <= 21) {
             esp_wifi_set_max_tx_power(static_cast<int8_t>(txPowerDbm_ * 4));
         }
@@ -343,8 +323,7 @@ bool wifiStation(uint32_t waitMs) {
     return false;
 }
 
-// The last resort, and the reason SoftAP stays in the size budget: a board whose stored
-// credentials no longer work is still reachable without a cable.
+// The last resort, and the reason SoftAP stays in the size budget: a board whose stored credentials no longer work is still reachable without a cable.
 bool wifiAccessPoint() {
     esp_netif_t* ap = esp_netif_create_default_wifi_ap();
     if (!ap) return false;
@@ -372,11 +351,9 @@ bool wifiAccessPoint() {
 // Installing
 // ---------------------------------------------------------------------------------------------
 
-// The one page MoonBase serves. Inline and tiny: no filesystem read, no compression, no assets.
-// The chip this image was built for, as the release assets spell it: `firmware-esp32s3-zero-...`
-// begins with the IDF target. MoonBase is chip-specific and variant-agnostic, so this is the most
-// it can know about the board, and it is exactly enough to filter a release's asset list down to
-// the firmwares that could run here.
+// The one page this image serves: inline and tiny, with no filesystem read and no assets.
+// The chip it was built for, spelled as the release assets spell it.
+// This image is chip-specific and variant-agnostic, so that is the most it can know, and enough to filter an asset list.
 #ifndef MOONBASE_CHIP
 #define MOONBASE_CHIP CONFIG_IDF_TARGET
 #endif
@@ -402,22 +379,19 @@ const char kPage[] =
     "<a id=hlp target=_blank rel=noopener title='MoonBase documentation' "
     "href='https://moonmodules.org/projectMM/gettingstarted.html#if-your-device-shows-moonbase'>?</a></div>"
     "<p class=sub>Install firmware to return this device to normal operation."
-    // WHICH MoonBase this is. Filled by the boot script below rather than baked into this
-    // literal: PROJECT_VER is defined only for IDF's own descriptor TU, and the descriptor is
-    // already in the image, so reading it back costs nothing and cannot drift from it.
+    // WHICH MoonBase this is.
+    // Filled by the boot script below rather than baked into this literal.
+    // PROJECT_VER is defined only for IDF's own descriptor TU, and the descriptor is already in the image, so reading it back costs nothing and cannot drift from it.
     "<br><small id=v></small></p>"
     "<section><b>From a file</b><br><input type=file id=f accept=.bin>"
     "<button onclick=up()>Install</button>"
-    // The last resort when no URL is at hand: name where the firmware-<variant>-v*.bin files
-    // live. A plain link, so it works from any device that can reach the internet.
+    // The last resort when no URL is at hand: name where the firmware-<variant>-v*.bin files live. A plain link, so it works from any device that can reach the internet.
     "<br><small>Firmware files: <a href='https://github.com/MoonModules/projectMM/releases' "
     "target=_blank rel=noopener>github.com/MoonModules/projectMM/releases</a> "
     "(the firmware-...bin matching this board)</small></section>"
-    // FROM A RELEASE, without typing a URL. The browser fetches the release list from GitHub
-    // itself (api.github.com sends access-control-allow-origin: *), so THIS image gains no network
-    // code at all: it still only receives a URL, which is what it already accepts. That matters
-    // because a device in recovery is the one that most needs an easy install and the one least
-    // able to offer the application's own picker.
+    // Installing from a release without typing a URL.
+    // The browser fetches the release list itself, so this image gains no network code and still only receives a URL.
+    // A device in recovery most needs an easy install and can least offer the application's own picker.
     "<section><b>From a release</b><br>"
     "<select id=rel></select> <select id=fw></select> <button onclick=rl()>Install</button>"
     "<br><small id=rs></small></section>"
@@ -428,71 +402,52 @@ const char kPage[] =
     // Shown only while an install is running (S() toggles it): the one moment cancel applies.
     "<button id=c onclick=cx() style=display:none>Cancel install</button></section>"
     "<div id=s></div>"
-    // A real bar, not a sweep: an install is a minute of a user watching a number they cannot
-    // read as a fraction. Hidden until a byte count actually arrives.
+    // A real bar, not a sweep: an install is a minute of a user watching a number they cannot read as a fraction. Hidden until a byte count actually arrives.
     "<progress id=p max=100 style='display:none;width:100%'></progress>"
     "<script>"
     // S() renders the status AND reveals Cancel only while an install is running.
     "const S=t=>{document.getElementById('s').textContent=t;"
     "document.getElementById('c').style.display="
     "/downloading|starting|preparing|retrying/.test(t)?'':'none';"
-    // The status already carries "N of M bytes"; reading the fraction out of it keeps one source
-    // of truth rather than adding a second endpoint that could disagree with the text.
-    //
-    // A THIRD reader of that shape, and the one that cannot be shared: this page lives in the
-    // MoonBase image, which shares no sources with the app (that is the trade for an image that
-    // stays small). The app's own two readers were merged into installProgress(); this one has
-    // to match it by hand, so keep the shape the same on both sides when either changes.
+    // The status already carries the byte counts, so reading the fraction out of it keeps one source of truth.
+    // This is the third reader of that shape and the one that cannot be shared, since this image shares no sources with the app.
+    // Keep both sides in step by hand.
     "const m=/(\\d+) of (\\d+)/.exec(t),b=document.getElementById('p');"
     "if(m&&+m[2]>0){b.style.display='';b.value=100*m[1]/m[2];}else{b.style.display='none';}};"
-    // Surface the last install status on load: after a failed unattended install the user lands
-    // here, and the page should say what went wrong rather than look freshly booted.
+    // Surface the last install status on load: after a failed unattended install the user lands here, and the page should say what went wrong rather than look freshly booted.
     "fetch('/moonbase').then(r=>r.text()).then(t=>{if(t&&t!='idle'){S(t);"
-    // AND WATCH IT. An install staged by the app runs unattended, so nothing on this page had
-    // started the watcher: the install finished, the app came back at this same address, and the
-    // page sat on its last status until someone reloaded by hand.
+    // AND WATCH IT.
+    // An install staged by the app runs unattended, so nothing on this page had started the watcher.
+    // The install finished, the app came back at this same address, and the page sat on its last status until someone reloaded by hand.
     "if(/downloading|starting|preparing|retrying/.test(t))W();}}).catch(()=>{});"
-    // A device that cannot say which MoonBase it runs cannot be diagnosed: two boards looked
-    // identical while one could not install firmware, and telling them apart took a git bisect.
+    // A device that cannot say which MoonBase it runs cannot be diagnosed: two boards looked identical while one could not install firmware, and telling them apart took a git bisect.
     "fetch('/api/version').then(r=>r.text()).then(t=>{"
     "document.getElementById('v').textContent='version '+t}).catch(()=>{});"
-    // The file is sent as the RAW request body, not multipart: the device then writes bytes
-    // straight to flash with no boundary parsing, which is a meaningful saving in an image this
-    // size and matches how the application's own upload route works.
+    // The file is sent as the RAW request body, not multipart: the device then writes bytes straight to flash with no boundary parsing, which is a meaningful saving in an image this size and matches how the application's own upload route works.
     "async function up(){const f=document.getElementById('f').files[0];if(!f)return;"
     "S('installing '+(f.size/1024|0)+' KB...');"
     "const r=await fetch('/api/firmware/upload',{method:'POST',body:f});"
     "S(await r.text());}"
-    // The install runs on its own task (202); W() watches its status until the app answers
-    // (404 on /moonbase means the new firmware is up, at this same address).
+    // The install runs on its own task (202); W() watches its status until the app answers (404 on /moonbase means the new firmware is up, at this same address).
     "function W(){const t=setInterval(async()=>{try{const p=await fetch('/moonbase');"
     "if(p.status==404){clearInterval(t);S('done, the app is starting...');"
     "setTimeout(()=>location.reload(),3000);}else{S(await p.text());}}"
     "catch(_){S('restarting...');}},2000);}"
-    // The release list, filtered to assets this CHIP can run. MoonBase is chip-specific and
-    // variant-agnostic (one image serves every variant of a chip), so it cannot know which variant
-    // the board runs: it offers the ones that fit and lets the user pick, which is the same choice
-    // the application's picker presents.
+    // The release list, filtered to assets this CHIP can run.
+    // MoonBase is chip-specific and variant-agnostic (one image serves every variant of a chip), so it cannot know which variant the board runs.
+    // It offers the ones that fit and lets the user pick, which is the same choice the application's picker presents.
     "const CHIP='" MOONBASE_CHIP "';let RELS=[],VAR='';"
-    // The board's own variant, when the application has run here and persisted it. With it the
-    // list is the ONE firmware this board takes, as the application's picker shows; without it,
-    // every firmware for the chip, because guessing which of three flash layouts a board has is
-    // how a user in recovery installs the wrong one.
+    // The board's own variant, when the application has run here and persisted it.
+    // With it the list is the ONE firmware this board takes, as the application's picker shows.
+    // Without it, every firmware for the chip, because guessing which of three flash layouts a board has is how a user in recovery installs the wrong one.
     "fetch('/api/variant').then(r=>r.text()).then(t=>{VAR=t.trim();fillFw();}).catch(()=>{});"
     "function fwList(i){const r=RELS[i];if(!r)return [];"
     "return (r.assets||[]).map(a=>a.name).filter(n=>/^firmware-.+\\.bin$/.test(n)"
     "&&!/-(bootloader|partition-table|ota-data|slot0)\\.bin$/.test(n)"
-    // The chip must match to a BOUNDARY: "esp32s31" starts with "esp32s3" and is different
-    // silicon, so a plain prefix test offered an S31 image on an S3 board. Most assets spell the
-    // chip then a hyphen, whether a variant follows ("esp32s3-zero-v...") or the version does
-    // ("esp32-v..."), so requiring that hyphen is the rule.
-    //
-    // The P4 is the exception: CONFIG_IDF_TARGET is "esp32p4" while every asset carries the
-    // SILICON REVISION in the same token ("esp32p4rev1-eth-v..."), so the character after the chip
-    // is a digit-bearing "rev", not a hyphen. Requiring the hyphen alone left a P4 in MoonBase with
-    // an EMPTY firmware list, which is the one place a user has no other way to install. Accept
-    // "rev<digit>" as an alternative boundary: it keeps the s3/s31 separation (nothing spells
-    // "esp32s3rev") while matching every P4 asset we publish.
+    // The chip must match to a boundary: one target name is a prefix of another's, so a plain prefix test offered the wrong silicon's image.
+    // Most assets spell the chip then a hyphen.
+    // The P4 is the exception, carrying its silicon revision in the same token.
+    // Requiring the hyphen alone left it with an empty list, so a revision suffix is a boundary too.
     "&&n.slice(9).startsWith(CHIP)"
     "&&(n.slice(9+CHIP.length).startsWith('-')||/^rev\\d/.test(n.slice(9+CHIP.length)))"
     "&&(!VAR||n.slice(9).startsWith(VAR+'-')));}"
@@ -507,22 +462,17 @@ const char kPage[] =
     "s.onchange=fillFw;fillFw();})"
     ".catch(()=>{document.getElementById('rs').textContent="
     "'could not reach github: use a URL or a file below';});"
-    // Installing a release is installing its URL: one path, so the vetting, the progress and the
-    // retry all behave identically however the URL was chosen.
+    // Installing a release is installing its URL: one path, so the vetting, the progress and the retry all behave identically however the URL was chosen.
     "async function rl(){const r=RELS[document.getElementById('rel').selectedIndex];"
     "const n=document.getElementById('fw').value;if(!r||!n)return;"
     "const a=(r.assets||[]).find(x=>x.name===n);if(!a)return;"
     "document.getElementById('u').value=a.browser_download_url;url();}"
     "async function url(){const u=document.getElementById('u').value;if(!u)return;"
     "const r=await fetch('/api/firmware/url',{method:'POST',body:u});S(await r.text());if(r.ok)W();}"
-    // Prefill the URL field with the last install source (RAM-held), so Install doubles as
-    // retry: the escape after a cancel or failure wiped the app slot.
+    // Prefill the URL field with the last install source (RAM-held), so Install doubles as retry: the escape after a cancel or failure wiped the app slot.
     "fetch('/api/firmware/last-url').then(r=>r.text()).then(u=>{if(u)document.getElementById('u').value=u;})"
     ".catch(()=>{});"
-    // RELOAD WHEN THE APP ANSWERS, not after a fixed wait. Eight seconds was a guess that an
-    // S3-Zero misses, so the page reloaded while the device was still booting and showed a failed
-    // page the user then had to refresh by hand. /moonbase is the identity probe: MoonBase answers
-    // it and the app 404s it, so a 404 means the application is up and serving.
+    // RELOAD WHEN THE APP ANSWERS, not after a fixed wait. Eight seconds was a guess that an S3-Zero misses, so the page reloaded while the device was still booting and showed a failed page the user then had to refresh by hand. /moonbase is the identity probe: MoonBase answers it and the app 404s it, so a 404 means the application is up and serving.
     "async function ba(){const r=await fetch('/api/firmware/boot-app',{method:'POST'});S(await r.text());"
     "if(!r.ok)return;S('booting the app...');"
     "for(let i=0;i<60;i++){await new Promise(f=>setTimeout(f,1000));"
@@ -532,31 +482,23 @@ const char kPage[] =
     "async function cx(){S(await (await fetch('/api/firmware/cancel',{method:'POST'})).text());}"
     "</script>";
 
-// The application's build variant ("esp32s3-zero"), or empty when the app has never run here.
-// Empty is the honest answer for a freshly flashed or wiped device, and the page falls back to
-// offering every firmware for the chip rather than pretending to know.
+// The application's build variant ("esp32s3-zero"), or empty when the app has never run here. Empty is the honest answer for a freshly flashed or wiped device, and the page falls back to offering every firmware for the chip rather than pretending to know.
 
-// The application slot. From the factory partition esp_ota_get_next_update_partition returns the
-// first OTA slot, which is the one we want and is never the one we are running from.
-//
-// UNLESS THIS IMAGE IS ITSELF IN THE APP SLOT, which happens when someone installs MoonBase as if
-// it were the app: both partitions then hold MoonBase, next_update_partition hands back the one
-// executing, and every install fails with ESP_ERR_OTA_PARTITION_CONFLICT (0x1501) while boot-app
-// points the bootloader at itself. The device answers, serves this page, and cannot be recovered
-// over the network. Returning null here is what lets the callers say so rather than loop.
+// The application slot, which from the factory partition is never the one we run from.
+// Unless this image is itself in the app slot, which happens when someone installs it as the app.
+// Both partitions then hold it, every install fails with a conflict, and the device answers but cannot be recovered over the network.
+// Null here lets a caller say so rather than loop.
 const esp_partition_t* appPartition() {
     const esp_partition_t* part = esp_ota_get_next_update_partition(nullptr);
     return (part && part == esp_ota_get_running_partition()) ? nullptr : part;
 }
 
-// Write a firmware image pulled from `url` straight into the application slot. This is what makes
-// an unattended install possible: point MoonBase at a release asset and it fetches it itself.
-// True while any install is writing the app slot. Torn reads are harmless (same display-only
-// pattern the app uses); the guard only has to stop a SECOND install from starting.
+// Write a firmware image pulled from `url` straight into the application slot.
+// This is what makes an unattended install possible: point MoonBase at a release asset and it fetches it itself.
+// True while any install is writing the app slot.
+// Torn reads are harmless (same display-only pattern the app uses); the guard only has to stop a SECOND install from starting.
 volatile bool installing_ = false;
-// Set by POST /cancel; the install loops poll it and abort cleanly back to the page. The app
-// slot is left half-written, exactly like a power cut: MoonBase stays the boot target until a
-// later install completes.
+// Set by POST /cancel; the install loops poll it and abort cleanly back to the page. The app slot is left half-written, exactly like a power cut: MoonBase stays the boot target until a later install completes.
 volatile bool cancelRequested_ = false;
 
 bool installFromUrl(const char* url) {
@@ -565,40 +507,30 @@ bool installFromUrl(const char* url) {
     http.timeout_ms = 20000;
     http.keep_alive_enable = true;
     http.crt_bundle_attach = esp_crt_bundle_attach;   // GitHub and friends are HTTPS
-    // A GitHub release asset 302-redirects to a signed URL whose Location header (plus a
-    // multi-KB content-security-policy on the redirect response) overflows the client's
-    // default 512-byte header buffer, failing the connection AFTER a clean TLS handshake.
-    // Same values as the app's http_fetch_to_ota (platform_esp32_ota.cpp).
+    // A GitHub release asset 302-redirects to a signed URL whose Location header (plus a multi-KB content-security-policy on the redirect response) overflows the client's default 512-byte header buffer, failing the connection AFTER a clean TLS handshake. Same values as the app's http_fetch_to_ota (platform_esp32_ota.cpp).
     http.disable_auto_redirect = false;
     http.max_redirection_count = 10;
-    // Large receive chunks: fewer, larger flash writes per loop. Measured on the bench
-    // (classic ESP32, 40 MHz DIO flash): 4 KB chunks stream at ~46 KB/s, 16 KB at ~86,
-    // 32 KB roughly the same as 16 (write-bound from there); RAM is plentiful here.
+    // Large receive chunks: fewer, larger flash writes per loop. Measured on the bench (classic ESP32, 40 MHz DIO flash): 4 KB chunks stream at ~46 KB/s, 16 KB at ~86, 32 KB roughly the same as 16 (write-bound from there); RAM is plentiful here.
     http.buffer_size = 32768;
     http.buffer_size_tx = 4096;
     esp_https_ota_config_t ota = {};
     ota.http_config = &http;
-    // One bulk erase of the whole slot up front instead of a sector erase inlined with every
-    // 4 KB write: per-sector erases dominated the install at ~25 KB/s (identical over TLS and
-    // plain HTTP, so the wire was never the limit). The upfront erase costs a few seconds,
-    // "preparing the install" covers it.
+    // One bulk erase of the whole slot up front instead of a sector erase inlined with every 4 KB write.
+    // Per-sector erases dominated the install at ~25 KB/s (identical over TLS and plain HTTP, so the wire was never the limit).
+    // The upfront erase costs a few seconds, "preparing the install" covers it.
     ota.bulk_flash_erase = true;
 
     esp_https_ota_handle_t handle = nullptr;
     esp_err_t beginErr = esp_https_ota_begin(&ota, &handle);
     if (beginErr != ESP_OK) {
-        // Numeric on purpose: the error-name table is compiled out for size
-        // (ESP_ERR_TO_NAME_LOOKUP=n), so esp_err_to_name would say "UNKNOWN ERROR".
+        // Numeric on purpose: the error-name table is compiled out for size (ESP_ERR_TO_NAME_LOOKUP=n), so esp_err_to_name would say "UNKNOWN ERROR".
         std::snprintf(status_, sizeof(status_), "error: cannot start the download (0x%x)",
                       static_cast<unsigned>(beginErr));
         return false;
     }
-    // NOT ANOTHER MOONBASE. This writes the APP slot, and a MoonBase image landing there leaves
-    // both partitions holding MoonBase: every install then fails with a partition conflict
-    // because next_update_partition hands back the running one, and boot-app points the
-    // bootloader at itself. The device still answers and still serves this page, which is what
-    // makes it so easy to do and so hard to undo: only a cable gets it back. The two images sit
-    // side by side on the releases page, one paste apart.
+    // Not another recovery image: this writes the app slot, and one landing there leaves both partitions holding it, after which every install fails with a conflict.
+    // The device still answers and still serves this page, which is what makes it easy to do and hard to undo.
+    // Only a cable gets it back, and the two images sit one paste apart on the releases page.
     esp_app_desc_t incoming = {};
     if (esp_https_ota_get_img_desc(handle, &incoming) == ESP_OK &&
         std::strncmp(incoming.project_name, "projectMM-moonbase",
@@ -634,13 +566,7 @@ bool installFromUrl(const char* url) {
 }
 
 
-// ---------------------------------------------------------------------------------------------
-// The HTTP server
-// ---------------------------------------------------------------------------------------------
-//
-// Hand-written on raw sockets rather than esp_http_server: MoonBase serves one page and receives
-// one file, and the component would cost more than the handlers do. One connection at a time is
-// the right model here, since installing firmware is exclusive by nature.
+// The HTTP server, hand-written on raw sockets rather than the framework component: this image serves one page and receives one file, and the component would cost more than the handlers. One connection at a time is the right model, installing firmware being exclusive by nature.
 
 constexpr size_t kRecvChunk = 4096;
 
@@ -668,8 +594,7 @@ void sendBinary(int sock, const char* type, const uint8_t* data, size_t len) {
 }
 
 void sendResponse(int sock, const char* status, const char* type, const char* body) {
-    // no-store on everything: this address serves TWO different UIs over time (the app's and
-    // this one), and a browser that re-serves a cached copy of either shows a dead page.
+    // no-store on everything: this address serves TWO different UIs over time (the app's and this one), and a browser that re-serves a cached copy of either shows a dead page.
     char head[192];
     const int n = std::snprintf(head, sizeof(head),
                                 "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %u\r\n"
@@ -679,13 +604,11 @@ void sendResponse(int sock, const char* status, const char* type, const char* bo
     sendAll(sock, body, std::strlen(body));
 }
 
-// Write `contentLen` bytes from the socket into the application slot. `prefix` carries whatever
-// arrived in the same read as the headers.
+// Write `contentLen` bytes from the socket into the application slot. `prefix` carries whatever arrived in the same read as the headers.
 bool installFromSocketLocked(int sock, const char* prefix, size_t prefixLen, size_t contentLen) {
     const esp_partition_t* part = appPartition();
     if (!part) {
-        // Either no OTA slot at all, or this MoonBase is running FROM it (see appPartition):
-        // the second is what a user meets, and a cable is the only way back.
+        // Either no OTA slot at all, or this MoonBase is running FROM it (see appPartition): the second is what a user meets, and a cable is the only way back.
         std::snprintf(status_, sizeof(status_),
                       "error: this MoonBase is in the app slot; reflash over USB");
         return false;
@@ -704,14 +627,9 @@ bool installFromSocketLocked(int sock, const char* prefix, size_t prefixLen, siz
 
     size_t written = 0;
     if (prefixLen > contentLen) prefixLen = contentLen;   // never store bytes past the declared body
-    // Same refusal as the URL path, from the bytes already in hand. The offsets and the rule come
-    // from core/FirmwareImage.h, the same header the app's install path uses: hand-written
-    // offsets here would be a second copy of the image format to keep in step.
-    //
-    // Refused when the prefix is too SHORT to identify, rather than passed. identify() on a short
-    // buffer reports "no description" for an image that has one, so a guard that only rejects a
-    // described MoonBase image would wave it through whenever the headers arrived alone. Every
-    // real image carries its descriptor in the first 128 bytes.
+    // The same refusal as the URL path, from the bytes in hand, its offsets shared with the app's own install path rather than copied.
+    // Refused when the prefix is too short to identify rather than passed.
+    // A short buffer reports no description for an image that has one, so a guard keyed on that would wave it through whenever the headers arrived alone.
     if (prefixLen < mm::firmware::kIdentifyBytes) {
         esp_ota_abort(handle);
         std::snprintf(status_, sizeof(status_), "error: could not identify the image");
@@ -756,8 +674,7 @@ bool installFromSocketLocked(int sock, const char* prefix, size_t prefixLen, siz
                       static_cast<unsigned>(written), static_cast<unsigned>(contentLen));
         return false;
     }
-    // esp_ota_end validates the image (magic and checksum) before we ever point the bootloader at
-    // it, which is what makes a power cut mid-write safe: otadata still names MoonBase.
+    // esp_ota_end validates the image (magic and checksum) before we ever point the bootloader at it, which is what makes a power cut mid-write safe: otadata still names MoonBase.
     if (esp_ota_end(handle) != ESP_OK) {
         std::snprintf(status_, sizeof(status_), "error: the image is not valid firmware");
         return false;
@@ -770,17 +687,15 @@ bool installFromSocketLocked(int sock, const char* prefix, size_t prefixLen, siz
     return true;
 }
 
-// Read the request head, dispatch, and (on a successful install) restart into the application.
-// The staged-URL install, off the main task (which serves meanwhile). A connect attempted
-// straight after GOT_IP can fail (0x7002, ESP_ERR_HTTP_CONNECT) where the same connect succeeds
-// seconds later: the LAN is still warming up around a freshly associated station. A short retry
-// absorbs that; a genuinely unreachable URL still fails through to the page after the last
-// attempt, where status_ shows the error.
+// Read the request head, dispatch, and on a successful install restart into the application.
+
+// The staged-URL install, off the main task, which serves meanwhile.
+// A connect attempted straight after an address arrives can fail where the same one succeeds seconds later, the network still warming up around a fresh association.
+// A short retry absorbs it.
 char stagedUrlTask_[256];
 
 void unattendedInstallTask(void*) {
-    // Remember the source across reboots (key "last_url", page prefill only): the retry
-    // escape must survive a power cycle, not just this session.
+    // Remember the source across reboots (key "last_url", page prefill only): the retry escape must survive a power cycle, not just this session.
     nvs_handle_t nh;
     if (nvs_open("moonbase", NVS_READWRITE, &nh) == ESP_OK) {
         nvs_set_str(nh, "last_url", stagedUrlTask_);
@@ -790,9 +705,7 @@ void unattendedInstallTask(void*) {
     for (int attempt = 0; attempt < 3 && !cancelRequested_; attempt++) {
         if (attempt) vTaskDelay(pdMS_TO_TICKS(3000));
         if (installFromUrl(stagedUrlTask_)) esp_restart();   // straight back into the new app
-        // A failed attempt leaves its error in status_; while retries remain that error is
-        // TRANSIENT, and a watcher treating "error:" as terminal (the app's overlay does)
-        // must not see it. The final attempt's error stays as the terminal answer.
+        // A failed attempt leaves its error in status_; while retries remain that error is TRANSIENT, and a watcher treating "error:" as terminal (the app's overlay does) must not see it. The final attempt's error stays as the terminal answer.
         if (attempt < 2 && !cancelRequested_)
             std::snprintf(status_, sizeof(status_), "download failed, retrying");
     }
@@ -802,9 +715,7 @@ void unattendedInstallTask(void*) {
 }
 
 void serveOne(int sock) {
-    // TCP does not coalesce: the header block (or a small body) can arrive in several
-    // segments, so read until the blank line is seen, bounded by the buffer. A request
-    // whose headers do not fit 1023 bytes is not one of ours and falls out as 404.
+    // TCP does not coalesce: the header block (or a small body) can arrive in several segments, so read until the blank line is seen, bounded by the buffer. A request whose headers do not fit 1023 bytes is not one of ours and falls out as 404.
     char head[1024];
     size_t got = 0;
     const char* bodyStart = nullptr;
@@ -820,8 +731,7 @@ void serveOne(int sock) {
     const size_t headLen = bodyStart ? static_cast<size_t>(bodyStart + 4 - head) : got;
     size_t prefixLen = got - headLen;
 
-    // HTTP header names are case-insensitive; strcasestr is not in the std namespace but is
-    // provided by newlib, and the probe is bounded by the header buffer.
+    // HTTP header names are case-insensitive; strcasestr is not in the std namespace but is provided by newlib, and the probe is bounded by the header buffer.
     size_t contentLen = 0;
     if (const char* cl = strcasestr(head, "Content-Length:")) {
         contentLen = static_cast<size_t>(std::strtoul(cl + 15, nullptr, 10));
@@ -839,8 +749,7 @@ void serveOne(int sock) {
             prefixLen += static_cast<size_t>(n);
         }
         if (contentLen >= sizeof(stagedUrlTask_)) {
-            // Same 255-byte contract the app's route enforces (platform.h): refusing beats
-            // truncating into a URL that fails later as a misleading download error.
+            // Same 255-byte contract the app's route enforces (platform.h): refusing beats truncating into a URL that fails later as a misleading download error.
             sendResponse(sock, "400 Bad Request", "text/plain", "error: url too long (max 255)");
         } else {
             std::memcpy(stagedUrlTask_, head + headLen, prefixLen);
@@ -849,14 +758,12 @@ void serveOne(int sock) {
             cancelRequested_ = false;   // a /cancel racing the previous task's exit must not latch
             installing_ = true;   // cleared by the task after its final attempt
             if (xTaskCreate(unattendedInstallTask, "mb_install", 12288, nullptr, 5, nullptr) != pdPASS) {
-                // A failed spawn with the flag left set would refuse every later install: THE
-                // deadlock this guard exists to prevent.
+                // A failed spawn with the flag left set would refuse every later install: THE deadlock this guard exists to prevent.
                 installing_ = false;
                 std::snprintf(status_, sizeof(status_), "error: cannot start the install task");
                 sendResponse(sock, "500 Internal Server Error", "text/plain", status_);
             } else {
-                // 202: the install runs on its own task while this server keeps answering GET
-                // /moonbase with live progress; the caller watches that, not this response.
+                // 202: the install runs on its own task while this server keeps answering GET /moonbase with live progress; the caller watches that, not this response.
                 sendResponse(sock, "202 Accepted", "text/plain", status_);
             }
         }
@@ -873,16 +780,12 @@ void serveOne(int sock) {
         // Booting away mid-write would abandon a half-written slot; refuse, visibly.
         sendResponse(sock, "409 Conflict", "text/plain", "error: an install is already running");
     } else if (std::strncmp(head, "POST /api/firmware/boot-app", 27) == 0) {
-        // Switch back to the installed application without installing anything.
-        // esp_ota_set_boot_partition validates the image first, so a half-written app is
-        // refused and the device stays here: only a bootable app can be booted.
+        // Switch back to the installed application without installing anything. esp_ota_set_boot_partition validates the image first, so a half-written app is refused and the device stays here. Only a bootable app can be booted.
         const esp_partition_t* app = appPartition();
         const bool ok = app && esp_ota_set_boot_partition(app) == ESP_OK;
         if (ok) std::snprintf(status_, sizeof(status_), "booting the app");
         else if (!app) {
-            // appPartition returns null when THIS image is the one in the app slot. Before this,
-            // boot-app pointed the bootloader at itself and reported success, so the device
-            // "rebooted into the app" and arrived back here, forever.
+            // appPartition returns null when THIS image is the one in the app slot. Before this, boot-app pointed the bootloader at itself and reported success, so the device "rebooted into the app" and arrived back here, forever.
             std::snprintf(status_, sizeof(status_),
                           "error: this MoonBase is in the app slot; reflash over USB");
         }
@@ -892,14 +795,10 @@ void serveOne(int sock) {
     } else if (std::strncmp(head, "GET /logo.png", 13) == 0) {
         sendBinary(sock, "image/png", logoStart, static_cast<size_t>(logoEnd - logoStart));
     } else if (std::strncmp(head, "GET /api/firmware/last-url", 26) == 0) {
-        // The most recent install source, RAM-held: the page prefills its URL field with it,
-        // so Install doubles as retry, the escape after a cancel wiped the app slot. Empty
-        // after a power cycle.
+        // The most recent install source, RAM-held: the page prefills its URL field with it, so Install doubles as retry, the escape after a cancel wiped the app slot. Empty after a power cycle.
         sendResponse(sock, "200 OK", "text/plain", stagedUrlTask_);
     } else if (std::strncmp(head, "POST /api/firmware/cancel", 25) == 0) {
-        // Cancel a running URL install: its loop polls the flag and aborts back to this page.
-        // (An upload cancels by dropping the connection; this server is busy receiving it.)
-        // Nothing to cancel is not an error worth a scary status, just say so.
+        // Cancel a running URL install: its loop polls the flag and aborts back to this page. (An upload cancels by dropping the connection; this server is busy receiving it.) Nothing to cancel is not an error worth a scary status, just say so.
         if (installing_) {
             cancelRequested_ = true;
             sendResponse(sock, "200 OK", "text/plain", "canceling");
@@ -907,23 +806,16 @@ void serveOne(int sock) {
             sendResponse(sock, "200 OK", "text/plain", "nothing to cancel");
         }
     } else if (std::strncmp(head, "GET /api/variant", 16) == 0) {
-        // The application's build variant, read from its config at boot. Empty when the app has
-        // never run here, which the page treats as "offer every firmware for the chip".
+        // The application's build variant, read from its config at boot. Empty when the app has never run here, which the page treats as "offer every firmware for the chip".
         sendResponse(sock, "200 OK", "text/plain", g_appVariant);
     } else if (std::strncmp(head, "GET /api/version", 16) == 0) {
-        // This image's version, from the app descriptor IDF puts in every binary (PROJECT_VER,
-        // set by build_moonbase to the same string the application reports). Its own route
-        // rather than an addition to /moonbase, whose body the app UI parses as install status.
-        //
-        // The app reads the same version from the factory partition instead (otaMoonBaseVersion),
-        // because it cannot ask an image that is not running. Two readers, two situations: this
-        // one serves a user looking at MoonBase's own page, that one a user looking at the app's.
+        // This image's version, from the descriptor the toolchain puts in every binary.
+        // Its own route rather than an addition to the status one, whose body the app parses.
+        // The app reads the same version from the partition instead, since it cannot ask an image that is not running: two readers for two situations.
         const esp_app_desc_t* d = esp_app_get_description();
         sendResponse(sock, "200 OK", "text/plain", d ? d->version : "unknown");
     } else if (std::strncmp(head, "GET /moonbase", 13) == 0) {
-        // Identity probe: the app UI polls this across the update cycle to tell which image is
-        // answering at the shared address (the app 404s it). Body = the live install status, so
-        // the poll doubles as a progress read during an unattended install.
+        // Identity probe: the app UI polls this across the update cycle to tell which image is answering at the shared address (the app 404s it). Body = the live install status, so the poll doubles as a progress read during an unattended install.
         sendResponse(sock, "200 OK", "text/plain", status_);
     } else if (std::strncmp(head, "GET / ", 6) == 0 || std::strncmp(head, "GET /?", 6) == 0 ||
                std::strncmp(head, "GET /index", 10) == 0) {
@@ -957,8 +849,7 @@ void serveForever() {
     while (true) {
         const int sock = ::accept(listener, nullptr, nullptr);
         if (sock < 0) continue;
-        // A stalled peer must not hold MoonBase forever: the whole point is that the device stays
-        // reachable for the next attempt.
+        // A stalled peer must not hold MoonBase forever: the whole point is that the device stays reachable for the next attempt.
         timeval tv = {};
         tv.tv_sec = 30;
         ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -982,15 +873,11 @@ extern "C" void app_main() {
 
     loadCredentials();   // also reads the app's build variant, inside its mount window
 
-    // The cascade: Ethernet where the config wires it (its DHCP window overlaps the WiFi
-    // join since the GOT_IP bit is shared), then WiFi STA with the stored credentials, then
-    // the open access point: the guarantee that a board is never unreachable because its
-    // credentials went stale.
-    // The unattended handoff: the app may have staged an install URL in NVS before rebooting
-    // into MoonBase (platform::moonbaseStageInstallUrl). Read AND erase it unconditionally,
-    // before anything can fail: a URL that crashes or fails can then never boot-loop the
-    // device, and a stale URL can never survive a failed network join to hijack a later,
-    // unrelated visit to MoonBase (one try per staging, ever).
+    // The cascade: Ethernet where the config wires it, then the stored credentials, then an open access point, so a board is never unreachable because its credentials went stale.
+
+    // The unattended handoff: the app may have staged an install URL before rebooting here.
+    // Read and erase it unconditionally, before anything can fail.
+    // A URL that fails can never boot-loop the device and a stale one can never survive to hijack a later visit.
     char stagedUrl[256] = {};
     {
         nvs_handle_t h;
@@ -1003,8 +890,7 @@ extern "C" void app_main() {
         }
     }
 
-    // With nothing staged, prefill the retry buffer from the remembered last source so the
-    // page offers it after any reboot. Never auto-installed: only the page's Install uses it.
+    // With nothing staged, prefill the retry buffer from the remembered last source so the page offers it after any reboot. Never auto-installed: only the page's Install uses it.
     if (!stagedUrl[0]) {
         nvs_handle_t h;
         if (nvs_open("moonbase", NVS_READONLY, &h) == ESP_OK) {
@@ -1014,30 +900,22 @@ extern "C" void app_main() {
         }
     }
 
-    // ONE interface at a time, in the app's own preference order (eth where configured, else
-    // WiFi, else the AP): the app runs a single interface, so the browser is on that
-    // interface's address, and mirroring the preference is what keeps the address valid
-    // across the handoff without a second lease to confuse anyone.
+    // ONE interface at a time, in the app's own preference order (eth where configured, else WiFi, else the AP): the app runs a single interface. The browser is on that interface's address, and mirroring the preference is what keeps the address valid across the handoff without a second lease to confuse anyone.
     bool online = false;
     if (ethStart()) {
         online = (xEventGroupWaitBits(netEvents_, kNetGotIp, pdFALSE, pdFALSE,
                                       pdMS_TO_TICKS(8000)) & kNetGotIp) != 0;
         if (!online) {
             ethStop();   // no link or no lease: WiFi takes over, alone
-            // A lease that raced in between the wait timing out and the teardown is an
-            // interface that no longer exists; it must not satisfy the WiFi wait below.
+            // A lease that raced in between the wait timing out and the teardown is an interface that no longer exists; it must not satisfy the WiFi wait below.
             xEventGroupClearBits(netEvents_, kNetGotIp);
         }
     }
     if (!online) online = wifiStation(20000);
 
-    // STA only: on the fallback AP the URL's network is not reachable, and a user is present.
-    // The install runs on its OWN task so the main task serves throughout: GET /moonbase then
-    // reports "downloading: N of M bytes" live, which is what the app's update overlay renders
-    // as a progress bar. 12 KB stack for the same reason as the main task: the TLS handshake.
+    // STA only: on the fallback AP the URL's network is not reachable, and a user is present. The install runs on its OWN task so the main task serves throughout: GET /moonbase then reports "downloading: N of M bytes" live, which is what the app's update overlay renders as a progress bar. 12 KB stack for the same reason as the main task: the TLS handshake.
     if (online && stagedUrl[0]) {
-        // Status set BEFORE the task spawns: the overlay polls from the moment MoonBase
-        // answers, and "idle" would read as nothing happening while an install is pending.
+        // Status set BEFORE the task spawns: the overlay polls from the moment MoonBase answers, and "idle" would read as nothing happening while an install is pending.
         std::snprintf(status_, sizeof(status_), "preparing the install");
         std::snprintf(stagedUrlTask_, sizeof(stagedUrlTask_), "%s", stagedUrl);
         cancelRequested_ = false;   // a /cancel racing a previous task's exit must not latch
@@ -1050,8 +928,7 @@ extern "C" void app_main() {
 
     if (!online) online = wifiAccessPoint();
 
-    // With no network there is nothing MoonBase can do but wait: a user who cannot reach it will
-    // reflash over USB, and restarting into an application slot that may be empty helps nobody.
+    // With no network there is nothing MoonBase can do but wait. A user who cannot reach it will reflash over USB, and restarting into an application slot that may be empty helps nobody.
     if (online) serveForever();
     while (true) vTaskDelay(pdMS_TO_TICKS(1000));
 }

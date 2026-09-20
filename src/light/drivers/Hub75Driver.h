@@ -12,20 +12,20 @@ namespace mm {
 
 /// Output driver: HUB75 panels driven directly from the board's own pins, with no receiving card.
 ///
-/// The sibling of `PanelCardDriver`, which drives the same panels over raw Ethernet to a 5A-75B/E card. That is the right path above roughly 16,384 pixels, and overhead below it. The bit-plane wire format this one encodes into is Hub75Slots.h, pure data and host-tested.
+/// The sibling of `PanelCardDriver`, which reaches the same panels over raw Ethernet to a 5A-75B/E card and wins above roughly 16,384 pixels. The bit-plane wire format is Hub75Slots.h, pure data and host-tested.
 ///
 /// Prior art: the HUB75 lineage generally (mrcodetastic/ESP32-HUB75-MatrixPanel-DMA, hzeller/rpi-rgb-led-matrix, ESPHome's hub75 component). The scan and bit-plane structure belongs to the panel rather than to any library; studied, not copied.
 ///
 /// @moreinfo
 ///
 /// **Output is continuous.** A WS2812 strand latches a frame and holds it; a HUB75 panel holds
-/// nothing and is lit only while being clocked. So the platform arms one scan and re-sends the same buffer forever. This driver writes the next frame into that buffer between scans. There is no per-frame transmit and no wait, which is why tick() looks unlike every other driver's. How a panel scans, and why brightness is time rather than amplitude, is in `Hub75Slots.h`.
+/// nothing and is lit only while being clocked, so the platform arms one scan and re-sends the same buffer forever. This driver writes the next frame into that buffer between scans, which is why tick() transmits nothing and waits for nothing. `Hub75Slots.h` covers scanning and why brightness is time.
 ///
 /// **The `board` select supplies the pins**, defaulting to MoonHub75 and prefilling all fourteen on
 /// first definition, because a soldered line must never be guessed from nothing. Each map is taken from that board's own published source. The maps themselves are on the driver's page. A user wiring a panel reads them beside the rest of the card.
 ///
 /// **Two naming traps, both worth knowing before wiring.** A panel's ribbon numbers its color lines
-/// R1/G1/B1 (upper half) and R2/G2/B2 (lower half); some board docs call the same pairs R0/G0/B0 and R1/G1/B1. And WLED's pin array is `{R1,G1,B1,R2,G2,B2,A,B,C,D,E,LAT,OE,CLK}`, so latch and output-enable come BEFORE the clock. A map transcribed as `...CLK,LAT,OE` silently swaps three lines. Every map here is in this driver's own control order (clk, lat, oe), converted already.
+/// R1/G1/B1 (upper half) and R2/G2/B2 (lower half); some board docs call the same pairs R0/G0/B0 and R1/G1/B1. WLED's pin array ends `...LAT,OE,CLK`, so a map transcribed as `...CLK,LAT,OE` swaps three lines silently. Every map here is already in this driver's control order (clk, lat, oe).
 ///
 class Hub75Driver : public DriverBase {
 public:

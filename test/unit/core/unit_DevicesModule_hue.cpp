@@ -1,9 +1,6 @@
-// @module DevicesModule
+/// @module DevicesModule
 
-// Pins the Hue-bridge listing: a HueDriver registers a bridge through upsertHueBridge() (the
-// explicit, out-of-band entry — a bridge isn't a UDP-presence device), and DevicesModule lists
-// it like any peer, carrying its color-light count for layout sizing. Also pins the round
-// trip through writeListRow / restoreList so a persisted bridge comes back as a Hue row.
+/// Pins the Hue-bridge listing: a HueDriver registers a bridge through upsertHueBridge() (the explicit, out-of-band entry, a bridge isn't a UDP-presence device), and DevicesModule lists it like any peer, carrying its color-light count for layout sizing. Also pins the round trip through writeListRow / restoreList so a persisted bridge comes back as a Hue row.
 
 #include "doctest.h"
 #include "core/system/DevicesModule.h"
@@ -52,8 +49,7 @@ TEST_CASE("DevicesModule: a persisted Hue bridge restores as a Hue row with its 
 }
 
 TEST_CASE("DevicesModule: a corrupt persisted color clamps to the valid range, row still restores") {
-    // A negative count and an over-127 count (corrupt / hand-edited file) must clamp to 0..127
-    // before narrowing to uint8_t — never wrap into a bogus value. The row otherwise restores.
+    // A negative count and an over-127 count (corrupt / hand-edited file) must clamp to 0..127 before narrowing to uint8_t, never wrap into a bogus value. The row otherwise restores.
     struct Case { const char* color; const char* want; };
     const Case cases[] = {
         {"-5",    "\"color\":0"},     // negative → 0

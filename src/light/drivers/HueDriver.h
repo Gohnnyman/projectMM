@@ -9,7 +9,7 @@
 
 namespace mm {
 
-/// Output driver: sends the buffer to Philips Hue bulbs as pixels, a driver rather than a listed device. The bulbs are pixels of an effect: make a small grid and run any effect. This driver reads its window of the shared buffer and pushes each light's color to the bridge. The same shape as NetworkSendDriver, over the Hue v1 HTTP API rather than UDP.
+/// Output driver: sends the buffer to Philips Hue bulbs as pixels, so a small grid runs any effect. It reads its window of the shared buffer and pushes each light's color to the bridge, the same shape as NetworkSendDriver, over the Hue v1 HTTP API rather than UDP.
 ///
 /// It is HTTP rather than a wire protocol, so the rate is bounded by connection churn. Each PUT opens a fresh connection. That gives smooth ambient color, not real time.
 ///

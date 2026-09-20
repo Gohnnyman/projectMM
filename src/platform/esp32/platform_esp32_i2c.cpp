@@ -1,15 +1,15 @@
-// I2C bus diagnostics — the platform::i2cScan seam (declared in platform.h).
-// Domain-neutral: probes any I2C bus and reports which addresses ACK, the
-// standard `i2cdetect` operation. The I2cScanModule (src/core/I2cScanModule.h)
-// surfaces it; any I2C bring-up (a codec, a sensor) uses it to confirm wiring.
-//
-// Self-contained: opens a temporary master bus on the given pins, probes every
-// 7-bit address, tears the bus down. It does not hold a bus another driver owns
-// (the ES8311 codec owns its own bus in platform_esp32_es8311.cpp) — the scan
-// is a momentary diagnostic, so it allocates and frees its bus per call.
-//
-// Gated on SOC_I2C_SUPPORTED with an inert stub otherwise, so any I2C-less
-// target links (the module then reports "no I2C on this target").
+/// @defgroup platform_esp32_i2c I2C bus diagnostics
+/// The scan seam: probe any bus and report which addresses answer, the standard i2cdetect operation.
+///
+/// Domain-neutral, so any bring-up of a codec or a sensor uses it to confirm wiring.
+///
+/// @moreinfo
+///
+/// ## Self-contained, and momentary
+///
+/// It opens a temporary master bus on the given pins, probes every address and tears the bus down.
+/// So it never holds a bus another driver owns, and it allocates and frees per call.
+/// An inert stub elsewhere, so a target without the peripheral still links and reports as much.
 
 #include "platform/platform.h"
 
@@ -40,18 +40,14 @@ size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut) {
     busCfg.glitch_ignore_cnt = 7;
     busCfg.flags.enable_internal_pullup = true;
 
-    // A failure here is most often "port already in use" — another driver (the
-    // ES8311 codec on I2C_NUM_0) currently holds the bus. Report that distinctly
-    // so the UI shows "bus in use", not a misleading "0 devices found".
+    // A failure here is most often "port already in use", another driver (the ES8311 codec on I2C_NUM_0) currently holds the bus. Report that distinctly so the UI shows "bus in use", not a misleading "0 devices found".
     i2c_master_bus_handle_t bus = nullptr;
     if (i2c_new_master_bus(&busCfg, &bus) != ESP_OK) {
         ESP_LOGW(I2C_TAG, "i2c bus unavailable (sda %u scl %u) — already in use?", sda, scl);
         return kI2cBusUnavailable;
     }
 
-    // Probe the 7-bit address range (0x01–0x77; 0x00 and 0x78+ are reserved).
-    // A 50 ms per-address timeout is ample on a quiet bus and keeps a full scan
-    // well under a second — this runs from a UI button, off the render path.
+    // Probe the 7-bit address range (0x01–0x77; 0x00 and 0x78+ are reserved). A 50 ms per-address timeout is ample on a quiet bus and keeps a full scan well under a second, this runs from a UI button, off the render path.
     size_t found = 0;
     for (uint8_t addr = 0x01; addr < 0x78 && found < maxOut; addr++) {
         if (i2c_master_probe(bus, addr, 50) == ESP_OK) out[found++] = addr;
@@ -67,8 +63,7 @@ size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut) {
 
 namespace mm::platform {
 
-// No I2C peripheral on this target — report the bus as unavailable, distinct from a
-// successful scan that found nothing (the module shows "bus in use / unavailable").
+// No I2C peripheral on this target, report the bus as unavailable, distinct from a successful scan that found nothing (the module shows "bus in use / unavailable").
 size_t i2cScan(uint16_t, uint16_t, uint8_t*, size_t) { return kI2cBusUnavailable; }
 
 }  // namespace mm::platform

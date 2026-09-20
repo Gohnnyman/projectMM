@@ -1,11 +1,8 @@
-// @module oscillators
-// @also math16
+/// @module oscillators
+/// @also math16
 
-// The oscillator bank: the animated quantities of a generative field, advanced once per frame and
-// read per pixel. These pin what an effect author relies on: that a value stays inside the range
-// they asked for, that two oscillators sharing a rate hold their relationship for as long as the
-// device runs, that changing a rate mid-run does not jump the picture, and that the bank costs one
-// pass per frame rather than one per read.
+/// The oscillator bank: the animated quantities of a generative field, advanced once per frame and read per pixel.
+/// These pin what an effect author relies on: that a value stays inside the range they asked for, that two oscillators sharing a rate hold their relationship for as long as the device runs, that changing a rate mid-run does not jump the picture, and that the bank costs one pass per frame rather than one per read.
 
 #include "doctest.h"
 #include "core/util/oscillators.h"
@@ -14,10 +11,9 @@ using namespace mm;
 
 namespace {
 
-/// Run a bank forward to `untilMs` on the device clock, in `dtMs` steps, the way a render loop
-/// does. `from` is where the clock already stands, so successive calls continue rather than
-/// restarting: the first advance of a fresh bank only establishes the time base (BeatPhase's
-/// first-tick guard), and calling this again from 0 would establish it a second time.
+/// Run a bank forward to `untilMs` on the device clock, in `dtMs` steps, the way a render loop does.
+/// `from` is where the clock already stands, so successive calls continue rather than restarting.
+/// The first advance of a fresh bank only establishes the time base (BeatPhase's first-tick guard), and calling this again from 0 would establish it a second time.
 template <uint8_t N>
 uint32_t run(OscillatorBank<N>& bank, uint32_t untilMs, uint32_t dtMs, uint32_t from = 0) {
     if (from == 0) bank.advanceTo(0);
@@ -55,8 +51,7 @@ TEST_CASE("a range given backwards runs the shape backwards") {
 }
 
 TEST_CASE("two oscillators at the same rate hold their phase relationship indefinitely") {
-    // The property a composition depends on: layers set a quarter-cycle apart must not drift, or a
-    // deliberate arrangement decays into noise over an evening.
+    // The property a composition depends on: layers set a quarter-cycle apart must not drift, or a deliberate arrangement decays into noise over an evening.
     OscillatorBank<2> bank;
     bank.set(0, {.rate = 45, .low = 0, .high = 65535, .phaseOffset = 0,     .wave = Wave::Sine});
     bank.set(1, {.rate = 45, .low = 0, .high = 65535, .phaseOffset = 16384, .wave = Wave::Sine});
@@ -103,16 +98,14 @@ TEST_CASE("the four waveforms have the shapes their names promise") {
     for (uint8_t i = 0; i < 4; i++)
         bank.set(i, {.rate = 60, .low = 0, .high = 65535, .phaseOffset = 0, .wave = static_cast<Wave>(i)});
 
-    // A quarter of a cycle in (60 BPM is one cycle a second, so 250 ms): the sine is at its peak,
-    // the triangle halfway up its rise, the saw a quarter of the way along, the square still low.
+    // A quarter of a cycle in (60 BPM is one cycle a second, so 250 ms): the sine is at its peak, the triangle halfway up its rise, the saw a quarter of the way along, the square still low.
     uint32_t t = run(bank, 250, 10);
     CHECK(bank.unitValue(0) > 64000);                                   // Sine
     CHECK(bank.unitValue(1) == doctest::Approx(32768).epsilon(0.05));   // Triangle
     CHECK(bank.unitValue(2) == doctest::Approx(16384).epsilon(0.05));   // Saw
     CHECK(bank.unitValue(3) == 0);                                      // Square
 
-    // Half a cycle: the sine is back through its midpoint on the way down, the triangle at ITS peak
-    // (it turns at the half, where the sine turned at the quarter), the square now high.
+    // Half a cycle: the sine is back through its midpoint on the way down, the triangle at ITS peak (it turns at the half, where the sine turned at the quarter), the square now high.
     t = run(bank, 500, 10, t);
     CHECK(bank.unitValue(0) == doctest::Approx(32768).epsilon(0.02));
     CHECK(bank.unitValue(1) > 64000);

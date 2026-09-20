@@ -9,7 +9,7 @@
 
 namespace mm {
 
-/// Output driver: WS2812B-class addressable LEDs over the ESP32 RMT peripheral. One GPIO and one RMT TX channel per strand, fed consecutive slices of the source buffer. The default driver for classic-ESP32 and S3 boards, and the readable example future drivers copy. It fuses the correction and the wire-byte encode into one pass, then hands per-pin slices to the platform.
+/// Output driver: WS2812B-class addressable LEDs over the ESP32 RMT peripheral, one GPIO and one RMT TX channel per strand fed consecutive slices of the source buffer. The default on classic-ESP32 and S3 boards, and the example future drivers copy. It fuses the correction and the wire-byte encode into one pass, then hands per-pin slices to the platform.
 ///
 /// Prior art: WS2812B on FastLED and WLED, and the clockless RMT techniques of hpwit (Yves Bazin).
 ///
@@ -19,7 +19,7 @@ namespace mm {
 ///
 /// ## The wire contract
 ///
-/// One-wire NRZ at 800 kHz, no clock line. Each bit is a 1.25 µs cell that starts high then drops low. The high duration encodes the bit, MSB-first per byte. Channel order is applied by `Correction` before the encode, so the encoder is order-agnostic. Frames latch on 300 µs or more of idle-low. Timings convert to RMT ticks from the granted resolution, never hard-coded.
+/// One-wire NRZ at 800 kHz. Each bit is a 1.25 µs cell starting high then dropping low, the high duration encoding the bit, MSB-first per byte. `Correction` applies channel order before the encode, and a frame latches on 300 µs of idle-low. Timings convert to RMT ticks from the granted resolution, never hard-coded.
 ///
 /// ## Which RMT API
 ///

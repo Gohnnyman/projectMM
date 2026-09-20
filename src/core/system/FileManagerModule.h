@@ -1,5 +1,4 @@
 #pragma once
-// The bodies live in FileManagerModule.cpp, so an edit recompiles only that file.
 
 #include "core/module/MoonModule.h"
 
@@ -12,6 +11,7 @@ namespace mm {
 ///
 /// The counterpart to FilesystemModule, which is the persistence engine rather than a browser.
 /// This module owns only the view toggle and the usage gauges.
+/// Its bodies live in the `.cpp`, so an edit recompiles only that file.
 /// @card FileManagerModule.png
 ///
 /// @moreinfo

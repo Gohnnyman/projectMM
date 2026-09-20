@@ -1,5 +1,5 @@
-// @module ParlioPeripheral
-// @also ParallelLedDriver, Drivers, Correction
+/// @module ParlioPeripheral
+/// @also ParallelLedDriver, Drivers, Correction
 
 #include "doctest.h"
 #include "host_bus.h"
@@ -11,37 +11,21 @@
 
 #include <cstring>
 
-// Host-side half of the Parlio driver: lane slicing (the shared PinList
-// semantics), the frame-byte arithmetic (latch pad, 64-byte alignment, RGBW
-// growth), and the parse-error/recovery shape. The hardware half (TX unit init,
-// DMA transmit) is inert on the host — desktop stubs return false/nullptr — and
-// is proven on the P4. The encoder itself is shared with the LCD driver and is
-// covered by unit_ParallelSlots.cpp, so it isn't re-tested here.
+// Host-side half of the Parlio driver: lane slicing (the shared PinList semantics), the frame-byte arithmetic (latch pad, 64-byte alignment, RGBW growth), and the parse-error/recovery shape. The hardware half (TX unit init, DMA transmit) is inert on the host, desktop stubs return false/nullptr, and is proven on the P4. The encoder itself is shared with the LCD driver and is covered by unit_ParallelSlots.cpp, so it isn't re-tested here.
 //
-// The one behavioural difference from the LCD driver pinned below: Parlio has
-// NO exactly-8-pins rule — 1..8 lanes are all valid (it takes the data GPIOs
-// directly, no all-lanes-required i80 bus).
+// The one behavioral difference from the LCD driver pinned below: Parlio has NO exactly-8-pins rule, 1..8 lanes are all valid (it takes the data GPIOs directly, no all-lanes-required i80 bus).
 //
-// mm::ParallelLedDriver is the ONE registered driver; this file drives it with an
-// injected mm::ParlioPeripheral backend, the backend this header defines and registers
-// under the "Parlio" peripheral label.
+// mm::ParallelLedDriver is the ONE registered driver; this file drives it with an injected mm::ParlioPeripheral backend, the backend this header defines and registers under the "Parlio" peripheral label.
 
 namespace {
 
-// The peripheral is declared BEFORE the driver at every call site (see this helper's
-// parameter order) so it outlives the driver — setPeripheralForTest borrows, it does
-// not own (see unit_ParallelLedDriver_doublebuffer.cpp's wire()).
+// The peripheral is declared BEFORE the driver at every call site (see this helper's parameter order) so it outlives the driver, setPeripheralForTest borrows, it does not own (see unit_ParallelLedDriver_doublebuffer.cpp's wire()).
 void wire(mm::ParallelLedDriver& d, mm::ParlioPeripheral& peripheral, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights) {
     d.setPeripheralForTest(&peripheral);
-    // Pins default to UNSET now (the "default only when it cannot do harm" rule —
-    // the user solders the strand to its own GPIOs), so a fresh driver idles until
-    // configured. These slicing/frame tests exercise the lane logic, not the
-    // default value, so the helper supplies the bench 8-pin set unless a case set
-    // its own pins first.
+    // Pins default to UNSET now (the "default only when it cannot do harm" rule, the user solders the strand to its own GPIOs), so a fresh driver idles until configured. These slicing/frame tests exercise the lane logic, not the default value, so the helper supplies the bench 8-pin set unless a case set its own pins first.
     if (d.pins[0] == '\0') std::strcpy(d.pins, "20,21,22,23,24,25,26,27");
-    // allocate succeeds exactly when lights > 0 (zero-grid wires an empty buffer
-    // on purpose); a masked alloc failure would fail cases downstream.
+    // allocate succeeds exactly when lights > 0 (zero-grid wires an empty buffer on purpose); a masked alloc failure would fail cases downstream.
     REQUIRE(src.allocate(lights, 3) == (lights > 0));
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);   // 3 out-channels
     d.defineControls();
@@ -50,8 +34,7 @@ void wire(mm::ParallelLedDriver& d, mm::ParlioPeripheral& peripheral, mm::Buffer
     d.applyState();
 }
 
-// frameBytes = (maxLaneLights × outCh × 24 + 864 latch pad) × slotBytes, rounded up
-// to 64. slotBytes = 1 for the 8-bit bus (≤8 lanes), 2 for the 16-bit bus (9..16).
+// frameBytes = (maxLaneLights × outCh × 24 + 864 latch pad) × slotBytes, rounded up to 64. slotBytes = 1 for the 8-bit bus (≤8 lanes), 2 for the 16-bit bus (9..16).
 size_t expectFrame(mm::nrOfLightsType maxLights, uint8_t outCh, uint8_t slotBytes = 1) {
     if (maxLights == 0) return 0;
     const size_t raw = (static_cast<size_t>(maxLights) * outCh * 24 + 800 + 64) * slotBytes;
@@ -60,8 +43,7 @@ size_t expectFrame(mm::nrOfLightsType maxLights, uint8_t outCh, uint8_t slotByte
 
 } // namespace
 
-// Three lanes (Parlio accepts any 1..8 count) slice the buffer consecutively;
-// the frame is sized by the LONGEST lane.
+// Three lanes (Parlio accepts any 1..8 count) slice the buffer consecutively; the frame is sized by the LONGEST lane.
 TEST_CASE("ParlioPeripheral slices lanes and sizes the frame by the longest") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
@@ -82,8 +64,7 @@ TEST_CASE("ParlioPeripheral slices lanes and sizes the frame by the longest") {
     CHECK(d.frameBytes() == expectFrame(50, 3));
 }
 
-// Empty ledsPerPin (the default) splits evenly over the 8 lanes — shared PinList
-// semantics, same as the RMT/LCD drivers.
+// Empty ledsPerPin (the default) splits evenly over the 8 lanes, shared PinList semantics, same as the RMT/LCD drivers.
 TEST_CASE("ParlioPeripheral even split over 8 lanes") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
@@ -112,8 +93,7 @@ TEST_CASE("ParlioPeripheral accepts any lane count from 1 to 8") {
         uint8_t expected = 1;
         for (const char* p = pinList; *p; p++) if (*p == ',') expected++;
         CHECK(d.laneCount() == expected);
-        // Success now carries a neutral info readout ("driving N of M lights"), not a null
-        // status — assert it's info (not an error) and names the consumption.
+        // Success now carries a neutral info readout ("driving N of M lights"), not a null status, assert it's info (not an error) and names the consumption.
         CHECK(d.severity() != mm::MoonModule::Severity::Error);
         CHECK(d.status() != nullptr);
         CHECK(std::strstr(d.status(), "driving") != nullptr);
@@ -142,9 +122,7 @@ TEST_CASE("ParlioPeripheral accepts 9..16 pins, rejects more than 16") {
     }
 }
 
-// A 16-lane (>8) config uses the 16-bit bus, so each slot is 2 bytes: the frame is
-// DOUBLE the byte size of the same per-lane lights at ≤8 lanes. Pins the slotBytes
-// threading through frameBytesFor (including the doubled latch pad).
+// A 16-lane (>8) config uses the 16-bit bus, so each slot is 2 bytes: the frame is DOUBLE the byte size of the same per-lane lights at ≤8 lanes. Pins the slotBytes threading through frameBytesFor (including the doubled latch pad).
 TEST_CASE("ParlioPeripheral 16-lane frame doubles the byte size (16-bit bus)") {
     mm::Buffer src;
     mm::Correction corr;
@@ -188,24 +166,14 @@ TEST_CASE("ParlioPeripheral frame grows on RGBW preset") {
     CHECK(d.frameBytes() == expectFrame(50, 4));
 }
 
-// Parlio single-transfer hardware ceiling (PARLIO_LL_TX_MAX_BITS_PER_FRAME = 0x7FFFF bits = 65535
-// bytes on P4/S3/most targets): the peripheral clocks the WHOLE frame out in one transaction, so a
-// per-lane strand whose frameBytes exceeds this is rejected by parlioWs2812Init (fixed — was a silent
-// tx failure). The ceiling is a **byte** limit (65535 bytes/lane), so the equivalent LIGHT count
-// depends on channels-per-light: WS2812 encodes 24 slot-bytes per channel, plus a ~864-byte per-lane
-// latch pad. So the max lights/lane is ~ (65535 − 864) / (channels × 24): **897 for RGB (3ch)**, ~673
-// for RGBW (4ch), ~538 for RGBCCT (5ch) — wider fixtures fit fewer lights per one-shot transfer. This
-// pins the boundary in host-visible frameBytes terms for the RGB and RGBW cases. The reject itself is
-// hardware-only (the host bus allocates but enforces no Parlio transfer ceiling), verified on the P4 (LEDs burn at 8×896 RGB/lane; the
-// driver reports a status error above the ceiling). Catches the ceiling shifting if the encoding
-// changes. Mirrors the platform constant.
+// Parlio single-transfer hardware ceiling (PARLIO_LL_TX_MAX_BITS_PER_FRAME = 0x7FFFF bits = 65535 bytes on P4/S3/most targets): the peripheral clocks the WHOLE frame out in one transaction, so a per-lane strand whose frameBytes exceeds this is rejected by parlioWs2812Init (fixed, was a silent tx failure). The ceiling is a **byte** limit (65535 bytes/lane), so the equivalent LIGHT count depends on channels-per-light: WS2812 encodes 24 slot-bytes per channel, plus a ~864-byte per-lane latch pad. So the max lights/lane is ~ (65535 − 864) / (channels × 24): **897 for RGB (3ch)**, ~673 for RGBW (4ch), ~538 for RGBCCT (5ch), wider fixtures fit fewer lights per one-shot transfer. This pins the boundary in host-visible frameBytes terms for the RGB and RGBW cases. The reject itself is hardware-only (the host bus allocates but enforces no Parlio transfer ceiling), verified on the P4 (LEDs burn at 8×896 RGB/lane; the driver reports a status error above the ceiling). Catches the ceiling shifting if the encoding changes. Mirrors the platform constant.
 TEST_CASE("ParlioPeripheral frame at the Parlio single-transfer ceiling (byte limit, channel-relative)") {
     constexpr size_t kParlioMaxTransferBytes = 0x7FFFF / 8;   // 65535, matches platform_esp32_parlio.cpp
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
-    // 896 RGB lights/lane — the HW-tested config — FITS one transfer.
+    // 896 RGB lights/lane, the HW-tested config, FITS one transfer.
     std::strcpy(d.pins, "20,21,22,23,24,25,26,27");
     std::strcpy(d.ledsPerPin, "896,896,896,896,896,896,896,896");
     wire(d, peripheral, src, corr, 896 * 8);
@@ -215,7 +183,7 @@ TEST_CASE("ParlioPeripheral frame at the Parlio single-transfer ceiling (byte li
     // The exact RGB (3ch) boundary: 897 fits, 898 overflows.
     CHECK(expectFrame(897, 3) <= kParlioMaxTransferBytes);
     CHECK(expectFrame(898, 3) > kParlioMaxTransferBytes);
-    // RGBW (4ch) fits FEWER lights per one-shot transfer — the ceiling is bytes, not lights: ~673.
+    // RGBW (4ch) fits FEWER lights per one-shot transfer, the ceiling is bytes, not lights: ~673.
     CHECK(expectFrame(673, 4) <= kParlioMaxTransferBytes);
     CHECK(expectFrame(674, 4) > kParlioMaxTransferBytes);
 }
@@ -241,10 +209,7 @@ TEST_CASE("ParlioPeripheral bad pins → status error → recovery") {
     CHECK(std::strstr(d.status() ? d.status() : "", "driving") != nullptr);
 }
 
-// Pins now default UNSET (the "default only when it cannot do harm" rule — the
-// strand is user-soldered). A fresh, unconfigured driver idles, never grabbing a
-// GPIO. (wire() back-fills empty pins for the slicing cases, so this one wires
-// the buffer directly to keep pins empty.)
+// Pins now default UNSET (the "default only when it cannot do harm" rule, the strand is user-soldered). A fresh, unconfigured driver idles, never grabbing a GPIO. (wire() back-fills empty pins for the slicing cases, so this one wires the buffer directly to keep pins empty.)
 TEST_CASE("ParlioPeripheral with the empty default pins idles cleanly") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
@@ -280,8 +245,7 @@ TEST_CASE("ParlioPeripheral tolerates a zero-light buffer") {
     CHECK(true);
 }
 
-// tick() is crash-safe across single-pin / multi-pin / pre-init configs (the
-// transmit path is gated out on the host; this pins the reachable contract).
+// tick() is crash-safe across single-pin / multi-pin / pre-init configs (the transmit path is gated out on the host; this pins the reachable contract).
 TEST_CASE("ParlioPeripheral tick is crash-safe for every pin configuration") {
     mm::Correction corr;
     mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
@@ -349,11 +313,7 @@ TEST_CASE("ParlioPeripheral loopbackRxPin tracks the loopbackTest toggle") {
     CHECK(found);
 }
 
-// loopbackTxPin (optional lane-0 TX override) is bound always, hidden until the
-// test is on — same conditional-control contract as loopbackRxPin. The override's
-// lane-0 substitution is hardware-only (parlioLanes==0 on desktop); the visibility
-// contract is host-testable here via the shared helper (toggles loopbackTest both
-// ways and asserts the control stays bound while flipping visibility).
+// loopbackTxPin (optional lane-0 TX override) is bound always, hidden until the test is on, same conditional-control contract as loopbackRxPin. The override's lane-0 substitution is hardware-only (parlioLanes==0 on desktop); the visibility contract is host-testable here via the shared helper (toggles loopbackTest both ways and asserts the control stays bound while flipping visibility).
 TEST_CASE("ParlioPeripheral loopbackTxPin tracks the loopbackTest toggle") {
     mm::ParlioPeripheral peripheral;
     mm::ParallelLedDriver d;
@@ -365,9 +325,7 @@ TEST_CASE("ParlioPeripheral loopbackTxPin tracks the loopbackTest toggle") {
     mm::test::checkConditionalControl(d, "loopbackTxPin", setTest, /*visibleWhenTrue=*/true);
 }
 
-// The host bus is REAL MEMORY, not a refusal: `busInit` used to return false on desktop, so
-// every bus assertion was unreachable off-device and the driver's encode path only ever ran
-// on hardware. The contract is identical for all three peripherals, so it lives in one place.
+// The host bus is REAL MEMORY, not a refusal: `busInit` used to return false on desktop, so every bus assertion was unreachable off-device and the driver's encode path only ever ran on hardware. The contract is identical for all three peripherals, so it lives in one place.
 TEST_CASE("ParlioPeripheral allocates a real host bus the driver can encode into") {
     mm::test::checkHostBusAllocates<mm::ParlioPeripheral>();
 }

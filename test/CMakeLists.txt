@@ -49,6 +49,7 @@ add_executable(mm_tests
     unit/core/unit_JsonUtil_parse.cpp
     unit/core/unit_JsonUtil_parseint.cpp
     unit/core/unit_JsonSink_detach.cpp
+    unit/core/unit_JsonSink_number.cpp
     unit/core/unit_JsonSink_overflow.cpp
     unit/core/unit_MappingLUT.cpp
     unit/core/unit_ModuleFactory.cpp

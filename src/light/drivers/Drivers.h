@@ -20,7 +20,7 @@
 
 namespace mm {
 
-/// Top-level container for one or more drivers: the consumer side of the pipeline. Owns the shared output buffer and composites every enabled layer into it each frame. It holds the global power, brightness and palette that each driver's Correction multiplies with.
+/// Top-level container for the drivers: the consumer side of the pipeline. Owns the shared output buffer, composites every enabled layer into it each frame, and holds the global power, brightness and palette each Correction multiplies with.
 ///
 /// Prior art: MoonLight's PhysicalLayer, which owns the display buffer and maps virtual channels into it.
 ///
@@ -28,7 +28,7 @@ namespace mm {
 ///
 /// ## The shared output buffer
 ///
-/// Blend and map write to arbitrary physical positions through a LUT. So a driver cannot read the output chunk by chunk until it is whole. One enabled layer with a 1:1 unshuffled mapping is the exception. Drivers then read that layer's buffer directly, at the cost of parallelism.
+/// Blend and map write to arbitrary physical positions through a LUT, so the output is readable only once whole. One enabled layer with a 1:1 unshuffled mapping is the exception: drivers read that layer's buffer directly, giving up parallelism.
 ///
 /// Two or more enabled layers composite in Effects order, bottom to top. Drivers owns that because only it sees both the stack order and the output buffer.
 ///

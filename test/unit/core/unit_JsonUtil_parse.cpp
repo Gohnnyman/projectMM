@@ -1,11 +1,6 @@
-// @module JsonUtil
+/// @module JsonUtil
 
-// Pins the recursive JSON reader (mm::json::parse + the walk accessors). The flat
-// helpers (parseString/hasKey/parseInt/parseBool) stay first-match-only and are
-// covered elsewhere; this file exercises the recursive-descent parser that fills a
-// bounded node arena. The headline case is an array of small objects — the persisted
-// device list DevicesModule loads at boot. Robustness is the other half: malformed,
-// truncated, garbage, null, and oversized inputs must fail cleanly with no crash.
+/// Pins the recursive JSON reader (mm::json::parse + the walk accessors). The flat helpers (parseString/hasKey/parseInt/parseBool) stay first-match-only and are covered elsewhere; this file exercises the recursive-descent parser that fills a bounded node arena. The headline case is an array of small objects, the persisted device list DevicesModule loads at boot. Robustness is the other half: malformed, truncated, garbage, null, and oversized inputs must fail cleanly with no crash.
 
 #include "doctest.h"
 #include "core/util/JsonUtil.h"
@@ -132,9 +127,7 @@ TEST_CASE("malformed inputs fail cleanly without crashing") {
 }
 
 TEST_CASE("no node cap: a large array parses (heap-grown node pool)") {
-    // The node pool is heap-allocated and grows as needed — there is NO fixed node cap. An array
-    // far larger than the old 128-node limit must PARSE, not fail. The pool grows via realloc, and
-    // nodes are index-addressed so the growth never dangles a child/next reference.
+    // The node pool is heap-allocated and grows as needed, there is NO fixed node cap. An array far larger than the old 128-node limit must PARSE, not fail. The pool grows via realloc, and nodes are index-addressed so the growth never dangles a child/next reference.
     const int N = 5000;
     std::string big = "[";
     for (int i = 0; i < N; i++) { if (i) big += ","; big += "1"; }
@@ -149,8 +142,7 @@ TEST_CASE("no node cap: a large array parses (heap-grown node pool)") {
 }
 
 TEST_CASE("overflow safety: nesting deeper than kMaxDepth fails cleanly") {
-    // Depth is STILL bounded (the one remaining cap — it guards the ESP32 task stack against a
-    // pathologically-nested input). Nesting past kMaxDepth fails cleanly, no stack blow.
+    // Depth is STILL bounded (the one remaining cap, it guards the ESP32 task stack against a pathologically-nested input). Nesting past kMaxDepth fails cleanly, no stack blow.
     std::string deep;
     for (int i = 0; i < json::kMaxDepth + 5; i++) deep += "[";
     for (int i = 0; i < json::kMaxDepth + 5; i++) deep += "]";
@@ -161,8 +153,7 @@ TEST_CASE("overflow safety: nesting deeper than kMaxDepth fails cleanly") {
 }
 
 TEST_CASE("no length cap: a long input parses (heap-sized text arena)") {
-    // The text arena is heap-allocated sized to the input — no fixed length cap. A long string
-    // value (well past the old 4096-byte buffer) must parse. Build a valid ~10 KB JSON string.
+    // The text arena is heap-allocated sized to the input, no fixed length cap. A long string value (well past the old 4096-byte buffer) must parse. Build a valid ~10 KB JSON string.
     std::string huge = "\"";
     huge.append(10000, 'x');
     huge += "\"";
@@ -171,9 +162,7 @@ TEST_CASE("no length cap: a long input parses (heap-sized text arena)") {
     CHECK(doc.valid());
 }
 
-// parseString must DECODE the JSON string escapes our own writer emits (JsonSink/writeJsonString)
-// — \" \\ \n \r \t \b \f — so reader and writer are symmetric. A multi-line value (a script with
-// `\n`) must arrive as a real newline, not a literal backslash-n.
+// parseString must DECODE the JSON string escapes our own writer emits (JsonSink/writeJsonString), \" \\ \n \r \t \b \f, so reader and writer are symmetric. A multi-line value (a script with `\n`) must arrive as a real newline, not a literal backslash-n.
 TEST_CASE("parseString decodes the standard JSON string escapes (symmetric with the writer)") {
     char out[64];
     json::parseString("{\"s\":\"a\\nb\\tc\"}", "s", out, sizeof(out));
@@ -182,11 +171,11 @@ TEST_CASE("parseString decodes the standard JSON string escapes (symmetric with 
     json::parseString("{\"s\":\"q=\\\"x\\\" back=\\\\\"}", "s", out, sizeof(out));
     CHECK(std::strcmp(out, "q=\"x\" back=\\") == 0);  // \" and \\ still work
 
-    // \r \b \f — the remaining named escapes the writer emits
+    // \r \b \f, the remaining named escapes the writer emits
     json::parseString("{\"s\":\"r\\rb\\bf\\f\"}", "s", out, sizeof(out));
     CHECK(std::strcmp(out, "r\rb\bf\f") == 0);
 
-    // \u00XX — the writer emits this for control bytes < 0x20; the reader decodes the low byte
+    // \u00XX, the writer emits this for control bytes < 0x20; the reader decodes the low byte
     json::parseString("{\"s\":\"x\\u0001y\\u001f\"}", "s", out, sizeof(out));
     CHECK(out[0] == 'x'); CHECK(out[1] == 0x01); CHECK(out[2] == 'y'); CHECK(out[3] == 0x1f);
 

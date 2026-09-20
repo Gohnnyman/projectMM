@@ -10,21 +10,73 @@
 
 namespace mm {
 
-// Shared magnitude → 0..255 mapping on a LOGARITHMIC (decibel) scale — used by
-// BOTH the level path (this file) and the spectrum path (AudioBands.h) so a VU
-// meter and a spectrum bar share one consistent scaling. dB = 20·log10(m) is
-// mapped through a window [floorDb, floorDb+spanDb] → [0,255]:
-//   - `noiseFloor` sets the window bottom: floorDb = 60 + noiseFloor/2 dB.
-//   - `gain` is sensitivity, the INTUITIVE direction — HIGHER gain = NARROWER
-//     window = a sound fills more of the range: spanDb = (255-gain)/4 + 4.
-// Human hearing is logarithmic and FFT/RMS magnitudes span a huge range, so a
-// linear map crushes the quiet or saturates the loud; this is the standard fix.
+/// @defgroup AudioLevel Sound-level analysis for one block of samples
+/// @{
+/// The loudness path: a block of microphone samples in, one level byte out.
+///
+/// @moreinfo
+///
+/// This is pure domain maths with no platform header, so it is host-tested without a device.
+/// The platform owns only the read that produces the samples, the same host-testable shape the RMT and slot encoders take.
+///
+/// ## Why the scale is logarithmic
+///
+/// The magnitude-to-byte mapping is shared with the spectrum path, so a VU meter and a spectrum bar scale alike.
+/// A magnitude is taken to decibels and mapped through a window onto the byte range.
+///
+/// The noise floor sets the window's bottom, and the gain is sensitivity in the intuitive direction: a higher gain narrows the window, so a sound fills more of the range.
+///
+/// Human hearing is logarithmic and these magnitudes span a huge range, so a linear map would crush the quiet or saturate the loud.
+/// This is the standard fix.
+///
+/// ## Why the saturation bound is not the type's maximum
+///
+/// Casting a float outside the integer range is undefined, and a settling transient can briefly push the filter's output past the bounds, so it saturates first.
+/// The positive bound is the largest float strictly below two to the thirty-first, not the type's maximum.
+/// That maximum has no exact float and rounds up to a value itself out of range.
+/// Clamping to it would still cast out of range.
+/// The negative bound is exactly representable, so it needs no such care.
+///
+/// ## The three range constants
+///
+/// A learned follower credits its input with some minimum dynamic range, which exists only to bound the window it divides by; a collapsed follower would otherwise drive that toward infinity.
+/// It is deliberately small, because the silence gate is what keeps a quiet room quiet and this is not a second mechanism for the same job.
+/// A large value flattens real music instead: at twelve decibels a band swinging six filled only half the display, which reads as vivid bands with no dynamic range.
+/// The gate can tell silence from a quiet passage, which a range clamp fundamentally cannot, so the gate does that work and this stays out of the way.
+///
+/// The level's own minimum is larger, for the same reason its gate sits lower: it follows a whole block's RMS, which swings far less than any single band's peak.
+/// At the band's value the meter stretched that small natural variation to full scale and sat pinned at the top.
+///
+/// The level is scaled by gain rather than sized from it.
+/// Gain sizes the band window directly, but a block RMS covers far more decibels than a single bin's peak.
+/// Feeding one raw number to both left the meter in its bottom third at the settings that made the spectrum look right.
+/// Scaling keeps the knob meaning what it means in both paths, and twenty decibels is the room's measured speech-to-quiet range on the bench parts.
+///
+/// ## Why the level's silence gate differs from a band's
+///
+/// A band gate reads a single bin's peak magnitude, while the level reads the whole block's RMS, which for real music sits well below the strongest bin.
+/// Gating both at the band threshold left the spectrum lively with the meter pinned at zero.
+///
+/// The window floor is the level a manual setup displays, so it is audible by definition, and silence sits a fixed margin below it.
+///
+/// ## What an I2S microphone forces
+///
+/// Two facts about a MEMS part drive the maths, both straight from how it behaves rather than from any tuning recipe.
+///
+/// It carries a DC bias: the sample stream sits on a large constant offset.
+/// A plain RMS would be dominated by the bias and a silent room would read as loud.
+/// The block mean is subtracted first.
+///
+/// Its quietest output is hiss rather than zero, so a noise-floor threshold treats anything below it as silence and idle hiss never twitches the LEDs.
+/// The gain then scales what is left.
+///
+/// The sample format is 24-bit signed data left-justified in a 32-bit slot, so the magnitude lives in the top bits.
+/// An arithmetic shift lands it in an integer, and the accumulation is 64-bit so a full block cannot overflow.
 /// The display window in dB: where it starts and how wide it is. One home for the two knobs.
 inline float windowFloorDb(uint16_t noiseFloor) { return 60.0f + static_cast<float>(noiseFloor) * 0.5f; }
 inline float windowSpanDb(uint16_t gain)        { return static_cast<float>(255 - gain) * 0.25f + 4.0f; }
 
-/// A value already in dB onto 0..255 through the window. The band path conditions in dB first
-/// (AudioBands.h, BandConditioner) and then comes here, so the window means one thing everywhere.
+/// Map a value already in decibels onto the byte range through the window.
 inline uint8_t dbToByte(float db, uint16_t noiseFloor, uint16_t gain) {
     const float t = (db - windowFloorDb(noiseFloor)) / windowSpanDb(gain);
     if (t <= 0.0f) return 0;
@@ -37,19 +89,15 @@ inline uint8_t magToByte(float m, uint16_t noiseFloor, uint16_t gain) {
     return dbToByte(20.0f * std::log10(m), noiseFloor, gain);
 }
 
-// DC-blocker: the standard one-pole/one-zero high-pass that removes the constant
-// (DC) offset and sub-bass rumble from the sample stream before any analysis —
-// y[n] = x[n] - x[n-1] + R·y[n-1]. R near 1 sets the cutoff: R = 0.99 ≈ 40 Hz at
-// 22 kHz. State (the two delay registers) persists across blocks, so the filter
-// is continuous frame to frame. Hot-path-trivial: one subtract + one multiply-add
-// per sample, two floats of state, no allocation. Host-tested.
+/// The standard one-pole high-pass that removes the DC offset and sub-bass rumble before analysis.
 struct DcBlocker {
-    float xPrev = 0.0f;   // x[n-1]
-    float yPrev = 0.0f;   // y[n-1]
+    float xPrev = 0.0f;   ///< the previous input sample
+    float yPrev = 0.0f;   ///< the previous output sample
 
+    /// Forget the filter's state, so the next block starts clean.
     void reset() { xPrev = 0.0f; yPrev = 0.0f; }
 
-    // Filter `n` samples in place. R is the pole (0..1); higher = lower cutoff.
+    /// Filter `n` samples in place, `r` being the pole: higher means a lower cutoff.
     void process(int32_t* samples, size_t n, float r = 0.99f) {
         if (!samples) return;
         for (size_t i = 0; i < n; i++) {
@@ -57,14 +105,7 @@ struct DcBlocker {
             const float y = x - xPrev + r * yPrev;
             xPrev = x;
             yPrev = y;
-            // Clamp before narrowing: casting a float outside the int32 range to
-            // int32_t is undefined behaviour. A settling transient (or a degenerate
-            // r) can briefly push y past the bounds, so saturate first. The positive
-            // bound is 2147483520.0f (2^31 - 128), NOT INT32_MAX: INT32_MAX
-            // (2147483647) has no exact float and rounds UP to 2^31, which is itself
-            // out of int32 range — clamping to it would still cast out of range.
-            // 2147483520 is the largest float strictly below 2^31, so the cast is
-            // always defined. -2^31 (INT32_MIN) is exactly representable, so it's fine.
+            // Saturate before narrowing: see the appendix on why this bound, not the type's max.
             const float clamped = y < -2147483648.0f ? -2147483648.0f
                                 : y >  2147483520.0f ?  2147483520.0f : y;
             samples[i] = static_cast<int32_t>(clamped);
@@ -72,78 +113,30 @@ struct DcBlocker {
     }
 };
 
-// Sound-level (loudness) analysis for one block of I2S microphone samples — pure
-// domain math, no platform header, so it is host-tested without an ESP32 (the
-// platform owns only the I2S read that produces these samples; see platform.h
-// audioMic*). The same host-testable shape as RmtSymbol.h / ParallelSlots.h.
-//
-// Two facts about an I2S MEMS microphone drive the math here, both straight from
-// how the part behaves (e.g. the INMP441 datasheet), not from any tuning recipe:
-//   - It carries a DC bias. The 24-bit sample stream sits on a large constant
-//     offset, so a plain RMS is dominated by the bias, not the sound — a silent
-//     room would read "loud". Subtract the block mean first.
-//   - Its quietest output is hiss, not zero. A `noiseFloor` threshold treats any
-//     level below it as silence so idle hiss doesn't twitch the LEDs; `gain` then
-//     scales what's left.
-//
-// INMP441 sample format: 24-bit signed data left-justified in a 32-bit slot, so
-// the magnitude lives in the top bits. We arithmetic-shift right by 8 to land the
-// 24-bit value in an int32, then accumulate in 64-bit so a full block can't
-// overflow.
-
-// The 64-bit integer square root this RMS path needs lives in core/math16.h beside the other
-// integer roots (isqrt), so there is one implementation rather than two.
-
-// Analyse `n` samples into `frame.level` — the overall RMS loudness mapped
-// through the same log/dB window the bands use (magToByte), so the VU meter and
-// the spectrum share one scaling and the noiseFloor/gain knobs mean the same
-// thing for both. Empty/null input yields zero (silence), never a crash.
-//
-/// The narrowest dynamic range a learned follower credits its input with, shared by the level and
-/// the per-band conditioners so the two paths behave alike. It exists only to bound
-/// `windowSpan / range`, which a collapsed follower would otherwise drive toward infinity.
-///
-/// Deliberately SMALL, because the silence gate is what keeps a quiet room quiet and this is not a
-/// second mechanism for the same job. A large value flattens real music instead: at 12 dB a band
-/// swinging 6 dB filled only half the display, which reads as "vivid bands, no dynamic range".
-/// The gate can tell silence from a quiet passage, which a range clamp fundamentally cannot, so
-/// the gate does that work and this stays out of the way.
+/// The narrowest dynamic range a learned follower credits its input with.
 inline constexpr float kConditionerMinRangeDb = 3.0f;
 
-/// The level's own minimum, larger than a band's for the same reason its gate is lower: this
-/// follows a whole block's RMS, which swings far less than any single band's peak. At the band
-/// value the meter stretched that small natural variation to full scale and sat pinned at 255.
+/// The level's own minimum, larger than a band's because it follows a whole block's RMS.
 inline constexpr float kLevelMinRangeDb = 20.0f;
 
-/// The manual level window's width at full `gain`. The level is scaled BY gain rather than sized
-/// from it: `gain` sizes the band window directly, but a block RMS covers far more dB than a single
-/// bin's peak, so feeding one raw number to both left the VU in the bottom third of the meter at
-/// the settings that made the spectrum look right. Scaling keeps the knob meaning what it means
-/// (higher gain = narrower window = hotter meter) in both paths. 20 dB is the room's measured
-/// speech-to-quiet range on the bench parts.
+/// The manual level window's width at full gain.
 inline constexpr float kLevelWindowSpanDb = 20.0f;
 
-/// The manual level window's span for a given `gain`: the base at gain 255, widening to twice that
-/// as gain falls to 0, so the control spans a useful range either side of its midpoint.
+/// The manual level window's span for a given gain, widening as the gain falls.
 inline float levelWindowSpanDb(uint16_t gain) {
     return kLevelWindowSpanDb * (2.0f - static_cast<float>(gain) / 255.0f);
 }
 
-/// How far below the display window a level has to fall before it counts as silence rather than a
-/// quiet passage. The window floor is what a manual setup shows as its lowest visible level, so
-/// anything at it is audible; the margin is what separates "quiet" from "nothing at all".
+/// How far below the display window a level falls before it counts as silence.
 inline constexpr float kMuteMarginDb = 20.0f;
 
-/// The level's own floor and peak, learned the way BandConditioner learns a band's. With `levels`
-/// automatic the display window is measured rather than dialed in, so the VU levels itself along
-/// with the bands and the manual sliders are genuinely manual-only. Same followers and the same
-/// minimum range as the band tables, so the two paths behave alike and cannot disagree.
+/// The level's own floor and peak, learned the way a band's are.
 struct LevelConditioner {
-    static constexpr float kMinRangeDb = kLevelMinRangeDb;
+    static constexpr float kMinRangeDb = kLevelMinRangeDb;   ///< the narrowest window it will learn
 
-    float floorDb = 0.0f;
-    float peakDb = 0.0f;
-    bool  primed = false;
+    float floorDb = 0.0f;   ///< the learned bottom of the window
+    float peakDb = 0.0f;    ///< the learned top of it
+    bool  primed = false;   ///< whether a first block has seeded the two
 
     /// Learn from this block's RMS and return the dB window [floor, floor+span] to display it in.
     void observe(float db, uint32_t dtMs, float& windowFloor, float& windowSpan,
@@ -180,16 +173,10 @@ inline void computeLevel(const int32_t* samples, size_t n,
     const uint64_t meanSq = sqSum / static_cast<uint64_t>(n);
     const uint64_t rms = isqrt64(meanSq);
 
-    // Automatic: the window is the level's own learned range, so a quiet room and a loud one both
-    // fill the meter. Manual: the floor/gain sliders, exactly as before.
+    // Automatic learns the window from the level itself; manual takes the two sliders.
     if (cond) {
         const float db = rms <= 1 ? 0.0f : 20.0f * std::log10(static_cast<float>(rms));
-        // Silence for the LEVEL is not the same number as silence for a band, and the caller has
-        // already halved `floor` for that reason: a band gate reads a single bin's PEAK magnitude
-        // while this reads the whole block's RMS, which for real music sits well below the
-        // strongest bin. Gating both at the band threshold left the spectrum lively with the VU
-        // pinned at zero (measured: flux 32-100 against level 0). The window floor is the level a
-        // manual setup DISPLAYS, so it is audible by definition; silence is kMuteMarginDb below it.
+        // The level's silence is not a band's: see the appendix on why the two gates differ.
         const float gateDb = windowFloorDb(noiseFloor) - kMuteMarginDb;
         if (db < gateDb) { frame.level = 0; return; }
         float wFloor = 0.0f, wSpan = 1.0f;
@@ -199,8 +186,7 @@ inline void computeLevel(const int32_t* samples, size_t n,
         frame.level = static_cast<uint8_t>(clamped * 255.0f + 0.5f);
         return;
     }
-    // Manual. `floor` positions the window and `gain` scales its width, both as they do for the
-    // bands, but from the level's own base span (see levelWindowSpanDb).
+    // Manual: the floor positions the window and the gain scales it, from the level's own base span.
     const float db = rms <= 1 ? 0.0f : 20.0f * std::log10(static_cast<float>(rms));
     const float wFloor = windowFloorDb(noiseFloor);
     const float t = (db - wFloor) / levelWindowSpanDb(gain);
@@ -208,4 +194,5 @@ inline void computeLevel(const int32_t* samples, size_t n,
     frame.level = rms <= 1 ? 0 : static_cast<uint8_t>(clamped * 255.0f + 0.5f);
 }
 
+/// @}
 } // namespace mm

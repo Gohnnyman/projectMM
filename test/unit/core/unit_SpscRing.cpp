@@ -1,10 +1,6 @@
-// @module SpscRing
+/// @module SpscRing
 
-// The lock-free single-producer single-consumer ring behind desktop audio capture: the
-// miniaudio callback thread pushes samples, AudioService's polled tick pops them. These tests
-// pin the contract a consumer can rely on: strict FIFO order across index wrap, drop-newest
-// on overflow with an honest accepted-count, and an unbroken sequence under real two-thread
-// concurrency.
+/// The lock-free single-producer single-consumer ring behind desktop audio capture: the miniaudio callback thread pushes samples, AudioService's polled tick pops them. These tests pin the contract a consumer can rely on: strict FIFO order across index wrap, drop-newest on overflow with an honest accepted-count, and an unbroken sequence under real two-thread concurrency.
 
 #include "doctest.h"
 #include "core/util/SpscRing.h"
@@ -28,8 +24,7 @@ TEST_CASE("SpscRing delivers strict FIFO order across index wrap") {
     }
 }
 
-// A full ring drops the NEWEST data: push reports how much was accepted and what was already
-// queued is untouched, the consumer never sees a gap in the middle, only a truncated tail.
+// A full ring drops the NEWEST data: push reports how much was accepted and what was already queued is untouched, the consumer never sees a gap in the middle, only a truncated tail.
 TEST_CASE("SpscRing overflow drops newest, reports the accepted count, and keeps queued data intact") {
     mm::SpscRing<uint32_t, 16> ring;   // 15 usable slots
     uint32_t in[20];
@@ -43,8 +38,7 @@ TEST_CASE("SpscRing overflow drops newest, reports the accepted count, and keeps
     CHECK(ring.pop(out, 20) == 0);     // drained
 }
 
-// Two real threads, producer faster than consumer at times and vice versa: every value that
-// push() accepted arrives exactly once, in order, the acquire/release pairing at work.
+// Two real threads, producer faster than consumer at times and vice versa: every value that push() accepted arrives exactly once, in order, the acquire/release pairing at work.
 TEST_CASE("SpscRing hands an unbroken in-order sequence across two threads") {
     mm::SpscRing<uint32_t, 256> ring;
     constexpr uint32_t kTotal = 200000;
@@ -66,8 +60,7 @@ TEST_CASE("SpscRing hands an unbroken in-order sequence across two threads") {
         uint32_t out[61];
         const size_t got = ring.pop(out, 61);
         for (size_t i = 0; i < got && ordered; i++) {
-            // Recorded rather than REQUIREd inside the loop: an aborting assertion here would
-            // skip producer.join() and take the whole test binary down with the thread.
+            // Recorded rather than REQUIREd inside the loop: an aborting assertion here would skip producer.join() and take the whole test binary down with the thread.
             ordered = (out[i] == expect);
             expect++;
         }

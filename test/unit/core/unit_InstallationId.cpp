@@ -1,4 +1,4 @@
-// @module InstallationId
+/// @module InstallationId
 
 #include "doctest.h"
 #include "core/system/MoonCloudModule.h"
@@ -18,8 +18,7 @@ std::string id() {
 }
 }  // namespace
 
-/// The id is 32 lowercase hex characters, which is what the server stores and what the privacy
-/// policy describes.
+/// The id is 32 lowercase hex characters, which is what the server stores and what the privacy policy describes.
 TEST_CASE("the installation id is 32 hex characters") {
     const std::string value = id();
     CHECK(value.size() == mm::kInstallationIdChars);
@@ -29,17 +28,15 @@ TEST_CASE("the installation id is 32 hex characters") {
     }
 }
 
-/// The same installation reports the same id every time, which is the property the whole feature
-/// rests on: without it an upgrade cannot be told from a new install.
+/// The same installation reports the same id every time, which is the property the whole feature rests on: without it an upgrade cannot be told from a new install.
 TEST_CASE("the installation id is stable across calls") {
     CHECK(id() == id());
 }
 
 /// The id is not the MAC address, in any recognizable form.
 ///
-/// The privacy policy promises the address itself is never sent. A hash that happened to contain
-/// the address as a substring, or that were simply the address in hex, would break that promise
-/// while still looking like an opaque identifier.
+/// The privacy policy promises the address itself is never sent.
+/// A hash that happened to contain the address as a substring, or that were simply the address in hex, would break that promise while still looking like an opaque identifier.
 TEST_CASE("the installation id does not contain the underlying address") {
     uint8_t mac[6] = {};
     mm::platform::getMacAddress(mac);
@@ -62,11 +59,9 @@ TEST_CASE("the installation id does not contain the underlying address") {
 
 /// A different address gives a different id, so two installations are told apart.
 ///
-/// Checked through the hash directly rather than by moving the platform's address, which a unit
-/// test cannot do: the property under test is that the construction separates its inputs.
+/// Checked through the hash directly rather than by moving the platform's address, which a unit test cannot do: the property under test is that the construction separates its inputs.
 TEST_CASE("a different address produces a different installation id") {
-    // The REAL salt, not a copy of its text: retyping it means a salt change passes this test while
-    // silently re-identifying every installation in the world.
+    // The REAL salt, not a copy of its text: retyping it means a salt change passes this test while silently re-identifying every installation in the world.
     const size_t saltLen = std::strlen(mm::kMoonCloudSalt);
     uint8_t a[64] = {}, b[64] = {};
     std::memcpy(a, mm::kMoonCloudSalt, saltLen);
@@ -82,9 +77,8 @@ TEST_CASE("a different address produces a different installation id") {
     CHECK(std::string(idA) != std::string(idB));
 }
 
-/// The MoonStats id differs from any other identifier derived from the same address, so a report
-/// cannot be matched against the MQTT topic or Home Assistant unique_id a device publishes on the
-/// user's own network. That separation is the salt's job.
+/// The MoonStats id differs from any other identifier derived from the same address, so a report cannot be matched against the MQTT topic or Home Assistant unique_id a device publishes on the user's own network.
+/// That separation is the salt's job.
 TEST_CASE("the installation id cannot be correlated with the network identity") {
     uint8_t mac[6] = {};
     mm::platform::getMacAddress(mac);

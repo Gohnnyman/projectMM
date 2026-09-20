@@ -1,10 +1,9 @@
-// Out-of-line half of JsonUtil.h. Only what must not be inlined lives here.
-//
-// The rest of the header is deliberately header-only (see its own comment): small first-match
-// readers whose callers benefit from inlining. `parseIntStr` is the exception — its three
-// validity checks are duplicated into every caller when inline, which measured 1712 bytes of
-// flash on the S3 across the ~10 call sites. Every caller is off the hot path, so the call is
-// free in practice.
+/// Out-of-line half of JsonUtil.h.
+/// Only what must not be inlined lives here.
+///
+/// The rest of the header is deliberately header-only (see its own comment): small first-match readers whose callers benefit from inlining.
+/// `parseIntStr` is the exception, its three validity checks are duplicated into every caller when inline, which measured 1712 bytes of flash on the S3 across the ~10 call sites.
+/// Every caller is off the hot path, so the call is free in practice.
 
 #include "core/util/JsonUtil.h"
 

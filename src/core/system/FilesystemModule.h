@@ -1,6 +1,5 @@
 #pragma once
 
-// The bodies live in FilesystemModule.cpp, keeping the recompile cost off the tree.
 
 #include "core/module/MoonModule.h"
 
@@ -20,6 +19,7 @@ struct ControlDescriptor;
 ///
 /// It is always loaded and runs first, so its load hook fires before any other module sets up.
 /// Storage is one flat JSON file per top-level module, named after the module's type.
+/// Its bodies live in the `.cpp`, keeping the recompile cost off the tree.
 ///
 /// @moreinfo
 ///

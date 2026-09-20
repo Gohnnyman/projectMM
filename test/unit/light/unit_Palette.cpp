@@ -1,8 +1,6 @@
-// @module Palette
+/// @module Palette
 
-// Pins the palette's gradient→16-entry expansion and the colorFromPalette lookup: endpoint
-// fidelity, mid-gradient interpolation, the 0-255 wheel wrap, the brightness fold, and that the
-// Palettes::active() seam swaps on setActive. The live Drivers wiring is the bench test.
+/// Pins the palette's gradient→16-entry expansion and the colorFromPalette lookup: endpoint fidelity, mid-gradient interpolation, the 0-255 wheel wrap, the brightness fold, and that the Palettes::active() seam swaps on setActive. The live Drivers wiring is the bench test.
 
 #include "doctest.h"
 #include "light/util/Palette.h"
@@ -50,7 +48,7 @@ TEST_CASE("Palette: the index wraps at 255→0 (no out-of-range read)") {
     const uint8_t stops[] = {0,255,0,0, 255,0,0,255};
     mm::Palette p;
     p.fromGradient(stops, sizeof(stops));
-    // index 255 blends entry[15] toward entry[0] (the wrap) — must not read past the array.
+    // index 255 blends entry[15] toward entry[0] (the wrap), must not read past the array.
     mm::RGB c = mm::colorFromPalette(p, 255);
     CHECK((c.r <= 255));   // a valid color, no crash/garbage
     // Sweeping every index never faults.
@@ -76,16 +74,13 @@ TEST_CASE("Palettes::active swaps the global palette on setActive") {
     // An out-of-range index clamps to the first built-in, doesn't crash.
     mm::Palettes::setActive(250);
     (void)mm::colorFromPalette(*mm::Palettes::active(), 0);
-    // Restore the default active palette — it's a global other effects' tests read.
+    // Restore the default active palette, it's a global other effects' tests read.
     mm::Palettes::setActive(0);
 }
 
-// The HomeKit-color-wheel → palette mapping (MQTT/Homebridge). Each palette's representative
-// (hue, sat) is computed from its expanded entries; nearestForHue picks the closest. A vivid hue
-// snaps to that hue's palette family; a low-saturation target snaps to the desaturated Rainbow.
+// The HomeKit-color-wheel → palette mapping (MQTT/Homebridge). Each palette's representative (hue, sat) is computed from its expanded entries; nearestForHue picks the closest. A vivid hue snaps to that hue's palette family; a low-saturation target snaps to the desaturated Rainbow.
 TEST_CASE("Palettes::nearestForHue maps a color to the closest palette") {
-    // A vivid red hue lands on a red/orange-family palette (Party≈13° / Lava≈24° are the reds),
-    // never on the all-hue Rainbow (index 0, which has ~0 saturation).
+    // A vivid red hue lands on a red/orange-family palette (Party≈13° / Lava≈24° are the reds), never on the all-hue Rainbow (index 0, which has ~0 saturation).
     const uint8_t redIdx = mm::Palettes::nearestForHue(5, 255);
     CHECK(redIdx != 0);
     uint16_t rh = 0, rs = 0; mm::Palettes::representativeHueSat(redIdx, rh, rs);
@@ -104,7 +99,7 @@ TEST_CASE("Palettes::nearestForHue maps a color to the closest palette") {
     CHECK(gh > 60);
     CHECK(gh < 180);
 
-    // Very low saturation (the wheel's desaturated centre) → the low-sat Rainbow (index 0).
+    // Very low saturation (the wheel's desaturated center) → the low-sat Rainbow (index 0).
     CHECK(mm::Palettes::nearestForHue(0, 5) == 0);
 
     // Hue wraps: 359° is adjacent to 0°, so it picks the same red family as ~0°.
@@ -113,9 +108,7 @@ TEST_CASE("Palettes::nearestForHue maps a color to the closest palette") {
     CHECK((wh < 45 || wh > 315));         // red/orange either side of the 0/360 seam
 }
 
-// Regression (reviewer #4): a hue >= 360 (a broker client can send "400,…" on hsv/set) must not
-// overflow the int32 squared-distance math — nearestForHue folds any input into 0..359 up front.
-// 400 % 360 == 40 (orange), 720 % 360 == 0 (red), so both resolve to a valid, sensible index.
+// Regression (reviewer #4): a hue >= 360 (a broker client can send "400,…" on hsv/set) must not overflow the int32 squared-distance math, nearestForHue folds any input into 0..359 up front. 400 % 360 == 40 (orange), 720 % 360 == 0 (red), so both resolve to a valid, sensible index.
 TEST_CASE("Palettes::nearestForHue folds an out-of-range hue instead of overflowing") {
     const uint8_t i400 = mm::Palettes::nearestForHue(400, 255);   // == 40°
     const uint8_t i40  = mm::Palettes::nearestForHue(40, 255);
@@ -123,16 +116,11 @@ TEST_CASE("Palettes::nearestForHue folds an out-of-range hue instead of overflow
     const uint8_t i720 = mm::Palettes::nearestForHue(720, 255);   // == 0°
     const uint8_t i0   = mm::Palettes::nearestForHue(0, 255);
     CHECK(i720 == i0);                     // 720 folds to 0 → same palette
-    // A large value doesn't crash / return garbage — any index < kCount is acceptable.
+    // A large value doesn't crash / return garbage, any index < kCount is acceptable.
     CHECK(mm::Palettes::nearestForHue(65535, 200) < mm::palettes::kCount);
 }
 
-// Regression: /api/state crashed with SIGSEGV (strlen on a dangling pointer) whenever a device
-// carried .mlp files. The LivePalettes seam references its publisher's arrays, a throwaway Drivers
-// (the /api/modules probe) published on construction and was immediately destroyed, and the seam
-// kept pointing into the freed object. The fix is twofold: publication moved to prepare() (a probe
-// never runs it), and clear() takes the caller's array so a departing publisher can only ever
-// unpublish itself. These pin the seam half.
+// Regression: /api/state crashed with SIGSEGV (strlen on a dangling pointer) whenever a device carried .mlp files. The LivePalettes seam references its publisher's arrays, a throwaway Drivers (the /api/modules probe) published on construction and was immediately destroyed, and the seam kept pointing into the freed object. The fix is twofold: publication moved to prepare() (a probe never runs it), and clear() takes the caller's array so a departing publisher can only ever unpublish itself. These pin the seam half.
 
 TEST_CASE("LivePalettes: a departing publisher cannot unpublish its successor") {
     static const char* aNames[] = {"a.mlp"};
@@ -157,11 +145,7 @@ TEST_CASE("LivePalettes: an unconditional clear detaches whoever owns the seam")
     CHECK(std::strcmp(mm::LivePalettes::nameAt(0), "") == 0);   // and reads stay safe
 }
 
-// The WLED shim serves `palettes` as a POSITIONAL array and `palcount` as its length: Home Assistant
-// renders one dropdown entry per name and sends the index back as seg[0].pal. Both stopped at the
-// built-ins while the device's own `palette` control already accepted the scripted indices above
-// them, so a scripted palette was unnameable and unselectable from HA. paletteCount() is the one
-// home for that length; this pins it to what paletteNames() actually writes.
+// The WLED shim serves `palettes` as a POSITIONAL array and `palcount` as its length: Home Assistant renders one dropdown entry per name and sends the index back as seg[0].pal. Both stopped at the built-ins while the device's own `palette` control already accepted the scripted indices above them, so a scripted palette was unnameable and unselectable from HA. paletteCount() is the one home for that length; this pins it to what paletteNames() actually writes.
 TEST_CASE("the WLED palette list and its count cover the scripted palettes too") {
     static const char* names[] = {"aurora.mlp", "ember.mlp"};
     static const char* tags[]  = {"", ""};
@@ -171,8 +155,7 @@ TEST_CASE("the WLED palette list and its count cover the scripted palettes too")
     mm::LivePalettes::set(names, tags, 2);
     CHECK(mm::paletteCount() == mm::palettes::kCount + 2);
 
-    // And the array agrees with the count: one entry per name, scripted ones last so the built-in
-    // indices every saved selection depends on never move.
+    // And the array agrees with the count: one entry per name, scripted ones last so the built-in indices every saved selection depends on never move.
     char buf[4096] = {};
     mm::JsonSink sink(buf, sizeof(buf));
     mm::paletteNames(sink);

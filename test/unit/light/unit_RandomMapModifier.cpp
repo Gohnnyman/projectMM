@@ -1,5 +1,5 @@
-// @module RandomMapModifier
-// @also Layer
+/// @module RandomMapModifier
+/// @also Layer
 
 #include "doctest.h"
 #include "light/modifiers/RandomMapModifier.h"
@@ -11,10 +11,7 @@
 
 #include <vector>
 
-// RandomMapModifier remaps every light to another — a 1:1 permutation — and reshuffles
-// on a bpm timer. A static fold: modifyLogical folds a physical coord to its permuted
-// logical coord (the box is unchanged). These pin the bijection, determinism, reshuffle,
-// and the empty-grid degrade, plus the tick() beat behaviour through a real Layer.
+// RandomMapModifier remaps every light to another, a 1:1 permutation, and reshuffles on a bpm timer. A static fold: modifyLogical folds a physical coord to its permuted logical coord (the box is unchanged). These pin the bijection, determinism, reshuffle, and the empty-grid degrade, plus the tick() beat behavior through a real Layer.
 
 namespace {
 
@@ -56,8 +53,7 @@ TEST_CASE("RandomMapModifier does not resize the logical box") {
     CHECK(size == mm::Coord3D{64, 32, 4});
 }
 
-// The core property: a true bijection over [0, w*h*d) — every destination index
-// appears exactly once (no gaps, no duplicates).
+// The core property: a true bijection over [0, w*h*d), every destination index appears exactly once (no gaps, no duplicates).
 TEST_CASE("RandomMapModifier is a bijection (every pixel mapped once)") {
     mm::RandomMapModifier m;
     const mm::lengthType w = 8, h = 8, d = 1;
@@ -92,7 +88,7 @@ TEST_CASE("RandomMapModifier reshuffle changes the mapping, stays a bijection") 
     for (mm::nrOfLightsType i = 0; i < n; i++) CHECK(seen[i] == 1);
 }
 
-// Robustness: an empty (0×0×0) box must not crash — it folds to a no-op.
+// Robustness: an empty (0×0×0) box must not crash, it folds to a no-op.
 TEST_CASE("RandomMapModifier tolerates an empty box") {
     mm::RandomMapModifier m;
     mm::Coord3D size{0, 0, 0};
@@ -114,9 +110,7 @@ TEST_CASE("RandomMapModifier rebuilds on a grid resize") {
     for (mm::nrOfLightsType i = 0; i < n; i++) CHECK(seen[i] == 1);
 }
 
-// tick() timer behaviour through a real Layer: the modifier reads the Layer clock and,
-// on a beat, asks the Layer to rebuild (coalesced). We observe the MODIFIER'S MAPPING
-// before vs after a timed run. A beat reshuffles (mapping differs); bpm 0 freezes it.
+// tick() timer behavior through a real Layer: the modifier reads the Layer clock and, on a beat, asks the Layer to rebuild (coalesced). We observe the MODIFIER'S MAPPING before vs after a timed run. A beat reshuffles (mapping differs); bpm 0 freezes it.
 namespace {
 bool mappingChangesOverMs(uint8_t bpm, int total_ms) {
     mm::Layouts layouts;

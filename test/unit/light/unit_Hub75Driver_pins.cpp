@@ -1,5 +1,5 @@
-// @module Hub75Driver
-// @also PinsModule
+/// @module Hub75Driver
+/// @also PinsModule
 
 #include "doctest.h"
 #include "light/drivers/Hub75Driver.h"
@@ -16,10 +16,7 @@
 
 using namespace mm;
 
-// A published board map hides its fourteen pin controls (soldered lines, nothing to edit), and the
-// pin map reads a hidden pin control as free. These tests pin the bridge: while such a board is
-// selected the lines reach the map through fixedPins(), so a collision with another driver is
-// flagged; while an editable board is selected the visible controls carry the claim instead.
+// A published board map hides its fourteen pin controls (soldered lines, nothing to edit), and the pin map reads a hidden pin control as free. These tests pin the bridge: while such a board is selected the lines reach the map through fixedPins(), so a collision with another driver is flagged; while an editable board is selected the visible controls carry the claim instead.
 
 namespace {
 
@@ -29,9 +26,7 @@ uint8_t boardNamed(const Hub75Driver& d, const char* label) {
         const ControlDescriptor& c = d.controls()[i];
         if (std::strcmp(c.name, "board") != 0) continue;
         const char* const* options = reinterpret_cast<const char* const*>(c.aux);
-        // int32_t to match the descriptor's own `max`: a uint8_t counter compared against a
-        // wider signed type is the narrowing CodeQL flags, and it would never terminate on a
-        // select with more options than a byte holds.
+        // int32_t to match the descriptor's own `max`: a uint8_t counter compared against a wider signed type is the narrowing CodeQL flags, and it would never terminate on a select with more options than a byte holds.
         for (int32_t k = 0; k < c.max; k++)
             if (std::strcmp(options[k], label) == 0) return static_cast<uint8_t>(k);
     }
@@ -45,8 +40,7 @@ void selectBoard(Hub75Driver& d, const char* label) {
     d.onControlChanged("board");   // writes the board's map into the pins and re-renders, as the API does
 }
 
-// The capability override is global, so it must come off on EVERY exit path: a failing REQUIRE
-// unwinds past a trailing clearTestGpioCapability() and leaks the fake pin into later cases.
+// The capability override is global, so it must come off on EVERY exit path: a failing REQUIRE unwinds past a trailing clearTestGpioCapability() and leaks the fake pin into later cases.
 struct ScopedGpioCapability {
     ScopedGpioCapability(uint8_t gpio, platform::GpioCapability cap) {
         platform::clearTestGpioCapability();
@@ -136,10 +130,7 @@ TEST_CASE("PinsModule flags a HUB75 board line colliding with an LED lane") {
     CHECK(flagged == 2);
 }
 
-// A published map can land a line on a pin THIS module has wired to PSRAM (the MatrixPortal's b, d
-// and b2 sit on 35-37, free on its quad-PSRAM part and the PSRAM bus on an octal one). Routing the
-// LCD bus there resets the chip with no panic, so the driver refuses before init and names the
-// line, the same guard ParallelLedDriver applies to its lanes.
+// A published map can land a line on a pin THIS module has wired to PSRAM (the MatrixPortal's b, d and b2 sit on 35-37, free on its quad-PSRAM part and the PSRAM bus on an octal one). Routing the LCD bus there resets the chip with no panic, so the driver refuses before init and names the line, the same guard ParallelLedDriver applies to its lanes.
 TEST_CASE("Hub75Driver refuses a line on a flash/PSRAM pin and names it, rather than resetting") {
     platform::GpioCapability psram;
     psram.reserved = true;

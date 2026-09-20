@@ -1,4 +1,4 @@
-// @module SineEffect
+/// @module SineEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"

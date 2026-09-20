@@ -148,7 +148,7 @@ TIERS = ("tick", "tick20ms", "tick1s")
 #
 # Each matcher names the GUARDED REGION, never the whole statement. A call in an `if`'s CONDITION
 # runs every time the `if` is reached — `if (!listener_.open()) return;` (DevicesModule.h:385) is
-# an unconditional call to a blocking function — so matching the bare `ifStmt` labelled it `if`
+# an unconditional call to a blocking function — so matching the bare `ifStmt` labeled it `if`
 # and sorted it below the unconditional rows, i.e. wrong in the reassuring direction. Same for a
 # loop's condition, a `switch`'s subject, and the LHS of `&&`/`||`, which is always evaluated.
 _GUARD_MATCHERS = (
@@ -180,7 +180,7 @@ _GUARD_MATCHERS = (
 #
 # `returnStmt` ONLY. `continue`/`break` leave the enclosing LOOP, not the function, so one above
 # a call — in a drain loop that has already closed, say — guards nothing about that call, and
-# counting it labelled an unconditional site as guarded. A call genuinely inside the loop body is
+# counting it labeled an unconditional site as guarded. A call genuinely inside the loop body is
 # the `loop` matcher's to claim.
 _EXIT_MATCHER = ("functionDecl(forEachDescendant("
                  "  returnStmt(hasAncestor(ifStmt())).bind(\"c\")))")

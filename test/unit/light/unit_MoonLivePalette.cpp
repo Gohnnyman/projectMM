@@ -1,9 +1,8 @@
-// @module MoonLivePalette
-// @also Palette, Effects
+/// @module MoonLivePalette
+/// @also Palette, Effects
 
-// A palette authored as a SCRIPT: sixteen entries recomputed every frame, so a palette can follow
-// audio or drift where a gradient stop list is frozen. These pin what the binding guarantees to the
-// effects that sample it, which is that the palette is either wholly old or wholly new, never both.
+/// A palette authored as a SCRIPT: sixteen entries recomputed every frame, so a palette can follow audio or drift where a gradient stop list is frozen.
+/// These pin what the binding guarantees to the effects that sample it, which is that the palette is either wholly old or wholly new, never both.
 
 #include "doctest.h"
 #include "light/moonlive/MoonLivePalette.h"
@@ -21,11 +20,11 @@ using namespace mm;
 #if MM_MOONLIVE_HAS_HOST_JIT
 
 namespace {
-/// A module for the binding to report status through, which is how a scripted palette's errors
-/// reach a card.
+/// A module for the binding to report status through, which is how a scripted palette's errors reach a card.
 struct Host : public MoonModule {};
 
-/// Compile `src` as a palette and run one frame. Returns the resulting active palette.
+/// Compile `src` as a palette and run one frame.
+/// Returns the resulting active palette.
 Palette runPalette(const char* src) {
     Host host;
     MoonLivePalette pal;
@@ -53,8 +52,7 @@ TEST_CASE("a scripted palette fills all sixteen entries") {
 
 TEST_CASE("setPalEntryHSV reaches the same table, in the space a palette is reasoned in") {
     const Palette before = *Palettes::active();
-    // Full-value red is hue 0: the conversion is the engine's, so this pins that the builtin is
-    // wired to it rather than writing the raw HSV bytes.
+    // Full-value red is hue 0: the conversion is the engine's, so this pins that the builtin is wired to it rather than writing the raw HSV bytes.
     const Palette p = runPalette("class P { void tick() { setPalEntryHSV(0, 0, 255, 255); } }");
     CHECK(p.entry[0].r > 200);
     CHECK(p.entry[0].g < 60);
@@ -63,8 +61,7 @@ TEST_CASE("setPalEntryHSV reaches the same table, in the space a palette is reas
 }
 
 TEST_CASE("an out-of-range entry index writes nothing at all") {
-    // Bounded rather than wrapped: a wrapped index would write a NEIGHBOURING entry and produce a
-    // palette nobody wrote, which reads as an engine fault rather than a script bug.
+    // Bounded rather than wrapped: a wrapped index would write a NEIGHBORING entry and produce a palette nobody wrote, which reads as an engine fault rather than a script bug.
     const Palette before = *Palettes::active();
     Palette seed;
     for (int i = 0; i < 16; i++) seed.entry[i] = RGB{7, 7, 7};
@@ -72,11 +69,10 @@ TEST_CASE("an out-of-range entry index writes nothing at all") {
 
     Host host;
     MoonLivePalette pal;
-    // HONEST LIMIT: this pins the CONTRACT (an out-of-range index changes no entry) but cannot
-    // prove the bound exists. Without it the write lands past the sixteen entries, on the scratch
-    // Palette's own stack storage, where no assertion here can see it. Removing the bound and
-    // re-running leaves this test green, which was checked rather than assumed. What actually
-    // catches a missing bound is ASan on the same case, which the CI sanitizer lane runs.
+    // HONEST LIMIT: this pins the CONTRACT (an out-of-range index changes no entry) but cannot prove the bound exists.
+    // Without it the write lands past the sixteen entries, on the scratch Palette's own stack storage, where no assertion here can see it.
+    // Removing the bound and re-running leaves this test green, which was checked rather than assumed.
+    // What actually catches a missing bound is ASan on the same case, which the CI sanitizer lane runs.
     pal.setScript(mmWriteScript("class P { void tick() { setPalEntry(16, 255, 255, 255); } }"));
     pal.prepare(host);
     REQUIRE(pal.ok());
@@ -88,8 +84,7 @@ TEST_CASE("an out-of-range entry index writes nothing at all") {
 }
 
 TEST_CASE("entries the script does not write keep their previous color") {
-    // Seeded from the live palette, so a script that fills four entries leaves the other twelve as
-    // they were rather than showing whatever was on the stack.
+    // Seeded from the live palette, so a script that fills four entries leaves the other twelve as they were rather than showing whatever was on the stack.
     const Palette before = *Palettes::active();
     Palette seed;
     for (int i = 0; i < 16; i++) seed.entry[i] = RGB{3, 4, 5};
@@ -109,8 +104,7 @@ TEST_CASE("entries the script does not write keep their previous color") {
 }
 
 TEST_CASE("a broken palette script leaves the last good palette, rather than going dark") {
-    // The other bindings degrade to dark, which is honest when the script IS the picture. Here it is
-    // not: the effects still run, so a black palette would blame the effect for the palette's fault.
+    // The other bindings degrade to dark, which is honest when the script IS the picture. Here it is not: the effects still run, so a black palette would blame the effect for the palette's fault.
     const Palette before = *Palettes::active();
     Palette seed;
     for (int i = 0; i < 16; i++) seed.entry[i] = RGB{9, 9, 9};
@@ -129,8 +123,7 @@ TEST_CASE("a broken palette script leaves the last good palette, rather than goi
 }
 
 TEST_CASE("setPalEntry does nothing outside a palette script") {
-    // The sink is installed for exactly one tick, so an EFFECT calling setPalEntry changes nothing
-    // rather than corrupting the palette every other effect is sampling.
+    // The sink is installed for exactly one tick, so an EFFECT calling setPalEntry changes nothing rather than corrupting the palette every other effect is sampling.
     const Palette before = *Palettes::active();
     Palette seed;
     for (int i = 0; i < 16; i++) seed.entry[i] = RGB{11, 11, 11};

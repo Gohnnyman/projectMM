@@ -193,18 +193,6 @@
       "script": "check/check_docgen.py"
     },
     {
-      "id": "check_docgen_report",
-      "tab": "desktop",
-      "group": "check",
-      "label": "Docgen Report",
-      "speed": "instant",
-      "help": "check_docgen",
-      "script": "check/check_docgen.py",
-      "args": [
-        "--report"
-      ]
-    },
-    {
       "id": "check_platform_boundary",
       "tab": "desktop",
       "group": "check",

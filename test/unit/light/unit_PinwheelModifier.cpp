@@ -1,4 +1,4 @@
-// @module PinwheelModifier
+/// @module PinwheelModifier
 
 #include "doctest.h"
 #include "light/modifiers/PinwheelModifier.h"
@@ -6,11 +6,9 @@
 #include <set>
 
 // PinwheelModifier folds the box into `petals` angular wedges. modifyLogicalSize reshapes the box:
-//  - 2D+ (incoming y > 1): {petals, radius+1, 1} — petals on X, radius along Y.
-//  - 1D  (incoming y == 1): {1, petals, 1} — petals on Y (the D1-runs-along-Y convention).
-// modifyLogical maps a physical (x,y) to the petal index on the axis the reshape chose. The 1D case
-// is the regression here: routing the petal onto X (extent 1) would drop every petal but 0, collapsing
-// the pinwheel to a single lit cell — the layer rejects a logical x >= 1.
+//  - 2D+ (incoming y > 1): {petals, radius+1, 1}, petals on X, radius along Y.
+//  - 1D  (incoming y == 1): {1, petals, 1}, petals on Y (the D1-runs-along-Y convention).
+// modifyLogical maps a physical (x,y) to the petal index on the axis the reshape chose. The 1D case is the regression here: routing the petal onto X (extent 1) would drop every petal but 0, collapsing the pinwheel to a single lit cell, the layer rejects a logical x >= 1.
 
 static mm::Coord3D sizeFor(mm::PinwheelModifier& p, mm::Coord3D box) {
     p.modifyLogicalSize(box);
@@ -37,10 +35,7 @@ TEST_CASE("PinwheelModifier 1D reshape puts petals on Y (1 x petals x 1)") {
     CHECK(s.z == 1);
 }
 
-// The regression: on a 1D layer, sweeping the source x must map to MORE THAN ONE petal cell, and each
-// mapped coordinate must land within the reshaped {1, petals, 1} box (x == 0, 0 <= y < petals). Before
-// the fix the petal index went to pos.x, so every cell mapped to x == value >= 1 (out of the 1-wide
-// logical box) except petal 0 — the pinwheel collapsed to a single petal.
+// The regression: on a 1D layer, sweeping the source x must map to MORE THAN ONE petal cell, and each mapped coordinate must land within the reshaped {1, petals, 1} box (x == 0, 0 <= y < petals). Before the fix the petal index went to pos.x, so every cell mapped to x == value >= 1 (out of the 1-wide logical box) except petal 0, the pinwheel collapsed to a single petal.
 TEST_CASE("PinwheelModifier 1D maps the sweep across distinct petals on Y") {
     mm::PinwheelModifier p;
     p.petals = 8;
@@ -56,6 +51,6 @@ TEST_CASE("PinwheelModifier 1D maps the sweep across distinct petals on Y") {
         CHECK(pos.y < 8);                  // within the reshaped petals-on-y box
         petalYs.insert(pos.y);
     }
-    // The sweep must touch more than one petal — the whole point of the effect.
+    // The sweep must touch more than one petal, the whole point of the effect.
     CHECK(petalYs.size() > 1);
 }

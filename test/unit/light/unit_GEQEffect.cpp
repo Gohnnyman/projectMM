@@ -1,5 +1,5 @@
-// @module GEQEffect
-// @also AudioService
+/// @module GEQEffect
+/// @also AudioService
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -9,13 +9,7 @@
 
 #include <array>
 
-// GEQ is an audio-reactive 2D effect: the 16 bands spread across the columns and each column rises as a
-// bar from the floor (bottom row) up to a height set by its band's loudness. The frame comes from
-// AudioService::latestFrame() (a process-wide static). To feed a signal on the host (no I2S mic) we run a
-// live AudioService with `simulate` set to an "always" mode — synthesizeFrame() fills the bands each
-// tick(). Every case that needs audio brackets its own AudioService setup()/release() so it never leaks
-// the active-mic pointer into another test file. Buffer index = (y*width + x)*3, y=0 is the TOP row so
-// y=height-1 is the floor the bars grow up from.
+// GEQ is an audio-reactive 2D effect: the 16 bands spread across the columns and each column rises as a bar from the floor (bottom row) up to a height set by its band's loudness. The frame comes from AudioService::latestFrame() (a process-wide static). To feed a signal on the host (no I2S mic) we run a live AudioService with `simulate` set to an "always" mode, synthesizeFrame() fills the bands each tick(). Every case that needs audio brackets its own AudioService setup()/release() so it never leaks the active-mic pointer into another test file. Buffer index = (y*width + x)*3, y=0 is the TOP row so y=height-1 is the floor the bars grow up from.
 
 // With no live audio source every band is silent, so no bar rises and the buffer stays black.
 TEST_CASE("GEQEffect stays black without an audio frame") {
@@ -35,8 +29,7 @@ TEST_CASE("GEQEffect stays black without an audio frame") {
     layer.addChild(&geq);
 
     layer.applyState();
-    // No AudioService is active → latestFrame() is the static all-silence frame (bands all 0). Each loop
-    // fades then reads silence → every bar height 0 → nothing drawn.
+    // No AudioService is active → latestFrame() is the static all-silence frame (bands all 0). Each loop fades then reads silence → every bar height 0 → nothing drawn.
     for (int i = 0; i < 8; i++) layer.tick();
 
     auto& buf = layer.buffer();
@@ -48,8 +41,7 @@ TEST_CASE("GEQEffect stays black without an audio frame") {
     CHECK_FALSE(anyLit);
 }
 
-// A bar grows from the floor up: when a column's band is loud, its bottom (floor) pixel is lit while a
-// pixel above the bar's top stays dark — bars fill upward from the bottom row, not top-down or floating.
+// A bar grows from the floor up: when a column's band is loud, its bottom (floor) pixel is lit while a pixel above the bar's top stays dark, bars fill upward from the bottom row, not top-down or floating.
 TEST_CASE("GEQEffect fills columns from the floor upward") {
     mm::AudioService audio;
     audio.defineControls();
@@ -87,8 +79,7 @@ TEST_CASE("GEQEffect fills columns from the floor upward") {
         return d[idx] || d[idx + 1] || d[idx + 2];
     };
 
-    // Sweep steps a lit band every ~250 ms; run frames until some column's floor lights, then assert
-    // the invariant on that column: if the floor is dark, the top must be dark too (a bar never floats).
+    // Sweep steps a lit band every ~250 ms; run frames until some column's floor lights, then assert the invariant on that column: if the floor is dark, the top must be dark too (a bar never floats).
     bool sawBar = false;
     for (int i = 0; i < 64; i++) {
         audio.tick();
@@ -104,8 +95,7 @@ TEST_CASE("GEQEffect fills columns from the floor upward") {
     audio.release();
 }
 
-// colorBars colors each bar by its column index, so two well-separated lit columns take different hues
-// rather than sharing the row-height gradient — the toggle changes what color a bar is.
+// colorBars colors each bar by its column index, so two well-separated lit columns take different hues rather than sharing the row-height gradient, the toggle changes what color a bar is.
 TEST_CASE("GEQEffect colorBars colors bars per column") {
     mm::AudioService audio;
     audio.defineControls();
@@ -148,8 +138,7 @@ TEST_CASE("GEQEffect colorBars colors bars per column") {
         layer.tick();
         auto ca = color(xa), cb = color(xb);
         if (lit(ca) && lit(cb)) {
-            // Column 0 (hue 0) and column 15 (hue 255) are opposite ends of the palette: their bar
-            // colors differ, confirming the color is driven by column, not by shared row height.
+            // Column 0 (hue 0) and column 15 (hue 255) are opposite ends of the palette: their bar colors differ, confirming the color is driven by column, not by shared row height.
             CHECK((ca[0] != cb[0] || ca[1] != cb[1] || ca[2] != cb[2]));
             compared = true;
         }
@@ -159,8 +148,7 @@ TEST_CASE("GEQEffect colorBars colors bars per column") {
     audio.release();
 }
 
-// The hard rule: the effect runs at any grid size without crashing, including 0×0×0 and 1×1, with a live
-// audio frame feeding it every tick.
+// The hard rule: the effect runs at any grid size without crashing, including 0×0×0 and 1×1, with a live audio frame feeding it every tick.
 TEST_CASE("GEQEffect survives degenerate grid sizes") {
     mm::AudioService audio;
     audio.defineControls();

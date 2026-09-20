@@ -1,5 +1,5 @@
-// @module NetworkReceiveEffect
-// @also NetworkSendDriver
+/// @module NetworkReceiveEffect
+/// @also NetworkSendDriver
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -12,11 +12,7 @@
 
 #include <cstring>
 
-// These tests pin the E1.31 and DDP halves of the multi-protocol receive: each
-// wire format round-trips build→parse, malformed and cross-protocol datagrams
-// are rejected, DDP's byte-direct placement clamps safely, ArtPoll is
-// recognised, and one real localhost round-trip drives all three protocol
-// sockets at once. (The ArtNet half is pinned by unit_NetworkReceiveEffect.cpp.)
+// These tests pin the E1.31 and DDP halves of the multi-protocol receive: each wire format round-trips build→parse, malformed and cross-protocol datagrams are rejected, DDP's byte-direct placement clamps safely, ArtPoll is recognized, and one real localhost round-trip drives all three protocol sockets at once. (The ArtNet half is pinned by unit_NetworkReceiveEffect.cpp.)
 
 namespace {
 
@@ -47,7 +43,7 @@ struct Rig {
 
 // --- E1.31 wire format ---------------------------------------------------------
 
-// A packet built by the sender's builder parses back to the same universe and payload — the two sides can't drift.
+// A packet built by the sender's builder parses back to the same universe and payload, the two sides can't drift.
 TEST_CASE("E1.31 build→parse round-trip") {
     uint8_t cid[mm::E131_CID_LENGTH];
     cidFill(cid);
@@ -142,7 +138,7 @@ TEST_CASE("DDP parse rejects malformed packets") {
 
 // --- cross-protocol rejects -------------------------------------------------------
 
-// Each universe-protocol parser refuses the other protocols' datagrams — port mix-ups degrade to silence, not garbage.
+// Each universe-protocol parser refuses the other protocols' datagrams, port mix-ups degrade to silence, not garbage.
 TEST_CASE("cross-protocol datagrams are rejected") {
     uint8_t cid[mm::E131_CID_LENGTH];
     cidFill(cid);
@@ -162,18 +158,14 @@ TEST_CASE("cross-protocol datagrams are rejected") {
     CHECK_FALSE(mm::parseE131Packet(art, artLen, universe, data, dataLen));
     CHECK_FALSE(mm::parseE131Packet(ddp, ddpLen, universe, data, dataLen));
     CHECK_FALSE(mm::parseDdpPacket(e131, e131Len, offset, data, dataLen));
-    // An ArtNet datagram CAN slip past DDP's thin 2-bit version check when its
-    // payload is large ('A' = 0x41 has the right version bits) — the dedicated
-    // port, not the header, is DDP's real discriminator, and the garbage
-    // offset it yields is absorbed by applyBytes' bound check. With a small
-    // payload the lying length still rejects it:
+    // An ArtNet datagram CAN slip past DDP's thin 2-bit version check when its payload is large ('A' = 0x41 has the right version bits), the dedicated port, not the header, is DDP's real discriminator, and the garbage offset it yields is absorbed by applyBytes' bound check. With a small payload the lying length still rejects it:
     CHECK_FALSE(mm::parseDdpPacket(art, artLen, offset, data, dataLen));
 }
 
 // --- ArtPoll recognition -----------------------------------------------------------
 
-// An ArtPoll datagram is recognised (the discovery hook Resolume/Madrix use); OpDmx and non-ArtNet packets are not polls.
-TEST_CASE("isArtPoll recognises polls and nothing else") {
+// An ArtPoll datagram is recognized (the discovery hook Resolume/Madrix use); OpDmx and non-ArtNet packets are not polls.
+TEST_CASE("isArtPoll recognizes polls and nothing else") {
     uint8_t poll[14] = {'A', 'r', 't', '-', 'N', 'e', 't', 0, 0x00, 0x20, 0, 14, 0, 0};
     CHECK(mm::isArtPoll(poll, sizeof(poll)));
     CHECK_FALSE(mm::isArtPoll(poll, 10));   // truncated
@@ -238,8 +230,7 @@ TEST_CASE("applyDmx honours channels_per_universe") {
     CHECK(r.fx.stagingData()[511] == 0xCD);
     CHECK(r.fx.stagingData()[512] == 7);   // universe 1 starts at byte 512, not 510
 
-    // A 512-byte payload with stride 510 clamps to 510 — the 2 padding bytes
-    // cannot bleed into the next universe's slot.
+    // A 512-byte payload with stride 510 clamps to 510, the 2 padding bytes cannot bleed into the next universe's slot.
     r.fx.channelsPerUniverse = 510;
     std::memset(const_cast<uint8_t*>(r.fx.stagingData()), 0, r.fx.stagingBytes());
     r.fx.applyDmx(0, u0, sizeof(u0));
@@ -249,7 +240,7 @@ TEST_CASE("applyDmx honours channels_per_universe") {
 
 // --- localhost round-trip: all three protocols into one effect ------------------------
 
-// Three senders — one per protocol — hit the same effect on its three ports; each payload lands. The autodetect proof.
+// Three senders, one per protocol, hit the same effect on its three ports; each payload lands. The autodetect proof.
 TEST_CASE("NetworkReceiveEffect receives all three protocols at once over localhost") {
     Rig r;
     r.fx.setup();
@@ -263,8 +254,7 @@ TEST_CASE("NetworkReceiveEffect receives all three protocols at once over localh
     REQUIRE((e131Tx.open() && e131Tx.connect("127.0.0.1", mm::E131_PORT)));
     REQUIRE((ddpTx.open() && ddpTx.connect("127.0.0.1", mm::DDP_PORT)));
 
-    // Three distinct payloads at three distinct buffer positions: ArtNet →
-    // universe 0 (offset 0), E1.31 → universe 1 (offset 510), DDP → byte 600.
+    // Three distinct payloads at three distinct buffer positions: ArtNet → universe 0 (offset 0), E1.31 → universe 1 (offset 510), DDP → byte 600.
     uint8_t a[3] = {11, 12, 13}, e[3] = {21, 22, 23}, d[3] = {31, 32, 33};
     uint8_t pkt[mm::E131_HEADER_SIZE + 3];
     artTx.sendTo(pkt, mm::buildArtDmxPacket(pkt, 0, 0, a, 3));
@@ -279,9 +269,7 @@ TEST_CASE("NetworkReceiveEffect receives all three protocols at once over localh
         if (!landed) mm::platform::delayMs(1);
     }
     CHECK(landed);
-    // The "receiving <protocol> from <ip>" diagnostic carries the sender's IP. This test's packets travel
-    // over loopback (the same round-trip `landed` above already relies on), so the source is 127.0.0.1 and
-    // the status names it — the direct check that the source IP surfaces in the status.
+    // The "receiving <protocol> from <ip>" diagnostic carries the sender's IP. This test's packets travel over loopback (the same round-trip `landed` above already relies on), so the source is 127.0.0.1 and the status names it, the direct check that the source IP surfaces in the status.
     REQUIRE(r.fx.status() != nullptr);
     CHECK(std::strstr(r.fx.status(), "receiving ") != nullptr);
     CHECK(std::strstr(r.fx.status(), "from 127.0.0.1") != nullptr);

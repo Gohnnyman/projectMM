@@ -1,4 +1,4 @@
-// @module draw
+/// @module draw
 
 #include "doctest.h"
 #include "light/powerfunctions/draw.h"
@@ -54,8 +54,7 @@ TEST_CASE("draw: line fills a 1D row inclusive of both endpoints") {
     }
 }
 
-// A 2D diagonal: endpoints are lit and the line is contiguous (one pixel per step on the main
-// diagonal of a square).
+// A 2D diagonal: endpoints are lit and the line is contiguous (one pixel per step on the main diagonal of a square).
 TEST_CASE("draw: line draws a 2D diagonal, endpoints inclusive") {
     Buffer buf;
     Coord3D dims{5, 5, 1};
@@ -88,10 +87,7 @@ TEST_CASE("draw: a line partly off the grid clips cleanly") {
     // (cells x>=4 don't exist; the test passing without a crash proves the clip)
 }
 
-// The `shorten` parameter pulls the far endpoint back toward `a` by shorten/255 (with WLEDMM *2
-// rounding), so an effect can sweep a partial segment. For a→b = (0,0)→(8,0): shorten 255 draws the
-// whole line (tip at 8), 128 ≈ half (tip at (16*128/255+1)/2 = 4), 1 = just the start pixel (tip 0),
-// 0 = nothing. This pins the rounding of the shorten branch.
+// The `shorten` parameter pulls the far endpoint back toward `a` by shorten/255 (with WLEDMM *2 rounding), so an effect can sweep a partial segment. For a→b = (0,0)→(8,0): shorten 255 draws the whole line (tip at 8), 128 ≈ half (tip at (16*128/255+1)/2 = 4), 1 = just the start pixel (tip 0), 0 = nothing. This pins the rounding of the shorten branch.
 TEST_CASE("draw: line shorten pulls the far endpoint back toward the start") {
     Coord3D dims{9, 1, 1};
     auto litUpTo = [&](uint8_t shorten) {
@@ -110,9 +106,7 @@ TEST_CASE("draw: line shorten pulls the far endpoint back toward the start") {
 }
 
 namespace {
-// Reference blur (the FastLED blur1d carryover-seep, written the slow-but-obvious way) along x for
-// one row, used to pin draw::blur's fast byte-level pass to the canonical behavior. Mirrors
-// MoonLight's blurRows for a single row.
+// Reference blur (the FastLED blur1d carryover-seep, written the slow-but-obvious way) along x for one row, used to pin draw::blur's fast byte-level pass to the canonical behavior. Mirrors MoonLight's blurRows for a single row.
 void refBlurRowX(Buffer& b, Coord3D dims, lengthType y, lengthType z, uint8_t amt) {
     const uint8_t keep = static_cast<uint8_t>(255 - amt), seep = static_cast<uint8_t>(amt >> 1);
     uint8_t* d = b.data();
@@ -129,8 +123,7 @@ void refBlurRowX(Buffer& b, Coord3D dims, lengthType y, lengthType z, uint8_t am
 }
 }  // namespace
 
-// draw::blur on a 1D row matches the canonical carryover-seep reference byte-for-byte (same
-// behavior as FastLED blur1d / MoonLight blurRows), and is symmetric around a centerd bright pixel.
+// draw::blur on a 1D row matches the canonical carryover-seep reference byte-for-byte (same behavior as FastLED blur1d / MoonLight blurRows), and is symmetric around a centerd bright pixel.
 TEST_CASE("draw: blur matches the reference carryover-seep on a 1D row") {
     Buffer got, ref;
     Coord3D dims{5, 1, 1};
@@ -147,16 +140,14 @@ TEST_CASE("draw: blur matches the reference carryover-seep on a 1D row") {
         const RGB g = at(got, dims, x, 0, 0), r = at(ref, dims, x, 0, 0);
         CHECK(g.r == r.r); CHECK(g.g == r.g); CHECK(g.b == r.b);
     }
-    // Center stays brightest, the two immediate neighbors are equally lit (symmetry), the center
-    // still has the most energy, and it spread outward (neighbors non-black).
+    // Center stays brightest, the two immediate neighbors are equally lit (symmetry), the center still has the most energy, and it spread outward (neighbors non-black).
     CHECK(at(got, dims, 1, 0, 0).r == at(got, dims, 3, 0, 0).r);
     CHECK(at(got, dims, 2, 0, 0).r > at(got, dims, 1, 0, 0).r);
     CHECK_FALSE(isBlack(at(got, dims, 1, 0, 0)));
     CHECK_FALSE(isBlack(at(got, dims, 3, 0, 0)));
 }
 
-// blur runs separably on every axis with extent>1: a 2D blur spreads a center pixel to all four
-// orthogonal neighbors; a 3D blur reaches the z neighbors too. And it never writes out of bounds.
+// blur runs separably on every axis with extent>1: a 2D blur spreads a center pixel to all four orthogonal neighbors; a 3D blur reaches the z neighbors too. And it never writes out of bounds.
 TEST_CASE("draw: blur spreads in 2D and 3D and is safe at degenerate sizes") {
     {   // 2D: center pixel of a 5×5 reaches its 4 orthogonal neighbors.
         Buffer buf; Coord3D dims{5, 5, 1};
@@ -189,10 +180,7 @@ TEST_CASE("draw: blur spreads in 2D and 3D and is safe at degenerate sizes") {
     }
 }
 
-// A glyph blits in the correct orientation: neither X-mirrored (a 'b' as a 'd') nor Y-flipped.
-// 'L' is the ideal probe: its vertical bar must be on the LEFT and its foot on the BOTTOM row. This
-// guards the column-bit and row-direction reads, so the DemoReel name overlay renders each letter
-// upright and un-mirrored.
+// A glyph blits in the correct orientation: neither X-mirrored (a 'b' as a 'd') nor Y-flipped. 'L' is the ideal probe: its vertical bar must be on the LEFT and its foot on the BOTTOM row. This guards the column-bit and row-direction reads, so the DemoReel name overlay renders each letter upright and un-mirrored.
 TEST_CASE("draw: glyph renders upright and un-mirrored (the 'L' probe)") {
     Buffer buf;
     const auto& f = fonts::kFont6x8;                 // 6x8: 'L' bar at col 1, foot on row 6
@@ -221,9 +209,7 @@ TEST_CASE("draw: glyph renders upright and un-mirrored (the 'L' probe)") {
     CHECK(topLit == 1);     // just the bar at the top
 }
 
-// draw::sprite, the multi-color sibling of glyph: palette-indexed frames with index 0 as the
-// transparent key. These pin the contract a screensaver effect stands on: the right frame at
-// the right place, holes where the key is, silence at the edges and on bad indices.
+// draw::sprite, the multi-color sibling of glyph: palette-indexed frames with index 0 as the transparent key. These pin the contract a screensaver effect stands on: the right frame at the right place, holes where the key is, silence at the edges and on bad indices.
 TEST_CASE("draw::sprite blits the requested frame with transparent holes") {
     Buffer buf;
     Coord3D dims{6, 4, 1};
@@ -271,8 +257,7 @@ TEST_CASE("draw::sprite clips at every edge and survives bad frame and palette i
     CHECK(isBlack(at(buf, dims, 1, 1, 0)));
 }
 
-// Art that faces one way serves both: flipX mirrors the sprite's READ, so the blit still lands
-// at the same (x, y) with the same footprint rather than needing a mirrored copy of every frame.
+// Art that faces one way serves both: flipX mirrors the sprite's READ, so the blit still lands at the same (x, y) with the same footprint rather than needing a mirrored copy of every frame.
 TEST_CASE("draw::sprite mirrors horizontally without moving the sprite") {
     Buffer buf;
     Coord3D dims{4, 2, 1};
@@ -296,9 +281,7 @@ TEST_CASE("draw::sprite mirrors horizontally without moving the sprite") {
     CHECK(at(buf, dims, 3, 0, 0).r == 10);
 }
 
-// draw::decay is the framerate-independent trail fade: a duration, not a per-frame amount. These
-// pin the property a user actually sees, which is that the same effect looks the same on a slow
-// device and a fast one.
+// draw::decay is the framerate-independent trail fade: a duration, not a per-frame amount. These pin the property a user actually sees, which is that the same effect looks the same on a slow device and a fast one.
 
 TEST_CASE("decay dims a plane by half over one half-life at a realistic frame time") {
     Buffer buf;
@@ -313,10 +296,7 @@ TEST_CASE("decay dims a plane by half over one half-life at a realistic frame ti
 }
 
 TEST_CASE("a 16-bit trail plane decays at the same rate whatever the framerate") {
-    // The property a byte plane CANNOT hold: re-rounding a byte hundreds of times a second either
-    // erases the trail (truncating) or freezes it solid (rounding). Measured, decaying 200 over a
-    // 500 ms half-life in 500 ms of frames, where the exact answer is 100: a byte plane gives 96 at
-    // 50 ms frames, 73 at 5 ms and 0 at 1 ms. The wide plane below holds 100/101/102.
+    // The property a byte plane CANNOT hold: re-rounding a byte hundreds of times a second either erases the trail (truncating) or freezes it solid (rounding). Measured, decaying 200 over a 500 ms half-life in 500 ms of frames, where the exact answer is 100: a byte plane gives 96 at 50 ms frames, 73 at 5 ms and 0 at 1 ms. The wide plane below holds 100/101/102.
     auto runWide = [](int frames, uint32_t dt) {
         uint16_t plane[16];
         for (uint16_t& v : plane) v = 200 * 257;               // 200 widened to 16 bits
@@ -348,8 +328,7 @@ TEST_CASE("decay leaves a plane alone when no time has passed, and clears it aft
     CHECK(isBlack(at(buf, dims, 0, 0, 0)));
 }
 
-// draw::advect moves a plane along a velocity field: the transport half of a flow, and what a
-// trail is made of. It samples BACKWARD, so every destination pixel is written exactly once.
+// draw::advect moves a plane along a velocity field: the transport half of a flow, and what a trail is made of. It samples BACKWARD, so every destination pixel is written exactly once.
 
 TEST_CASE("advect carries the picture along the flow, one whole pixel at a time") {
     Buffer src, dst;
@@ -369,9 +348,7 @@ TEST_CASE("advect carries the picture along the flow, one whole pixel at a time"
 }
 
 TEST_CASE("a uniform field survives being advected, so a flow does not dim what it carries") {
-    // The property that separates transport from blur: moving a region of equal values must not
-    // change them, whatever the sub-pixel offset. A half-pixel step is the worst case, since it
-    // blends two neighbors at full weight.
+    // The property that separates transport from blur: moving a region of equal values must not change them, whatever the sub-pixel offset. A half-pixel step is the worst case, since it blends two neighbors at full weight.
     Buffer src, dst;
     Coord3D dims{8, 8, 1};
     REQUIRE(src.allocate(64, 3));
@@ -407,8 +384,7 @@ TEST_CASE("the edge rule decides whether a flow loops the grid or leaves it") {
 }
 
 TEST_CASE("advect moves every slice of a volume, so a cube flows like a panel") {
-    // 3D is the default shape for this phase: the bench fixture is a 20-cube. A D2 rule leaves z
-    // alone, and each slice must still be carried.
+    // 3D is the default shape for this phase: the bench fixture is a 20-cube. A D2 rule leaves z alone, and each slice must still be carried.
     Buffer src, dst;
     Coord3D dims{4, 4, 3};
     REQUIRE(src.allocate(48, 3));
@@ -425,8 +401,7 @@ TEST_CASE("advect moves every slice of a volume, so a cube flows like a panel") 
     CHECK(at(dst, dims, 2, 1, 2).r == 200);
 }
 
-// disc and sphere: the SDF-shaded fills, where a sub-pixel center means a small shape can move
-// between cells instead of jumping one at a time.
+// disc and sphere: the SDF-shaded fills, where a sub-pixel center means a small shape can move between cells instead of jumping one at a time.
 
 TEST_CASE("a disc lights its interior and softens its edge") {
     Buffer buf;
@@ -498,13 +473,10 @@ TEST_CASE("a spiral is a radial flow with a turn added, so it both circles and e
     CHECK(sy != ry);                                   // and the angular part is what it adds
 }
 
-// draw::quantize is the 16-to-8 boundary every wide pipeline ends at. What the modes buy is not
-// more levels, it is where the discarded half of the value goes.
+// draw::quantize is the 16-to-8 boundary every wide pipeline ends at. What the modes buy is not more levels, it is where the discarded half of the value goes.
 
 TEST_CASE("truncating a slow gradient bands it, and dithering restores its true mean") {
-    // A dark, slow ramp is the worst case: 64 distinct 16-bit values that truncation flattens to a
-    // handful of steps. Neither mode can add levels to a single frame; what ordered dithering fixes
-    // is the MEAN, so the band sits where the real value is rather than below it.
+    // A dark, slow ramp is the worst case: 64 distinct 16-bit values that truncation flattens to a handful of steps. Neither mode can add levels to a single frame; what ordered dithering fixes is the MEAN, so the band sits where the real value is rather than below it.
     double trueSum = 0, truncSum = 0, ditherSum = 0;
     uint8_t carry = 0;
     for (int i = 0; i < 64; i++) {
@@ -519,10 +491,7 @@ TEST_CASE("truncating a slow gradient bands it, and dithering restores its true 
 }
 
 TEST_CASE("temporal dithering resolves neighbors that a single frame cannot") {
-    // The property that makes a 16-bit pipeline worth having on 8-bit LEDs: eight values a fraction
-    // of a byte apart all truncate to the same one or two levels, but averaged over frames they
-    // separate, and the eye does that averaging. This is what turns a stepped fade into a smooth
-    // one.
+    // The property that makes a 16-bit pipeline worth having on 8-bit LEDs: eight values a fraction of a byte apart all truncate to the same one or two levels, but averaged over frames they separate, and the eye does that averaging. This is what turns a stepped fade into a smooth one.
     constexpr int kLights = 8, kFrames = 32;
     uint16_t v[kLights];
     uint8_t carry[kLights] = {};
@@ -554,8 +523,7 @@ TEST_CASE("a dithered value never wraps past full, so a bright light cannot flas
 }
 
 TEST_CASE("the ordered pattern differs per z, so a volume does not repeat one texture") {
-    // On a cube every slice would otherwise share a threshold, and the dither would read as a
-    // pattern stamped through the volume rather than as noise.
+    // On a cube every slice would otherwise share a threshold, and the dither would read as a pattern stamped through the volume rather than as noise.
     uint8_t carry = 0;
     const uint16_t v = 0x2080;                      // a value squarely between two byte levels
     bool differs = false;
@@ -567,8 +535,7 @@ TEST_CASE("the ordered pattern differs per z, so a volume does not repeat one te
     CHECK(differs);
 }
 
-// draw::upscale16 is the fieldScale lever: compute a smooth field at a fraction of the fixture's
-// resolution and interpolate the rest, which is nearly free visually because a field is smooth.
+// draw::upscale16 is the fieldScale lever: compute a smooth field at a fraction of the fixture's resolution and interpolate the rest, which is nearly free visually because a field is smooth.
 
 TEST_CASE("an upscaled plane keeps a uniform value, so a flat field does not gain texture") {
     std::vector<uint16_t> src(4 * 4 * 3, 30000), dst(16 * 16 * 3, 0);
@@ -578,8 +545,7 @@ TEST_CASE("an upscaled plane keeps a uniform value, so a flat field does not gai
 }
 
 TEST_CASE("an upscaled ramp stays monotonic, so a gradient does not gain steps or reversals") {
-    // 8 wide, ramping left to right; stretched to 32. Every step must be non-decreasing, which is
-    // what a bilinear stretch guarantees and a nearest-neighbor one would not.
+    // 8 wide, ramping left to right; stretched to 32. Every step must be non-decreasing, which is what a bilinear stretch guarantees and a nearest-neighbor one would not.
     std::vector<uint16_t> src(8 * 3), dst(32 * 3, 0);
     for (int x = 0; x < 8; x++)
         for (int c = 0; c < 3; c++) src[x * 3 + c] = static_cast<uint16_t>(x * 8000);
@@ -591,8 +557,7 @@ TEST_CASE("an upscaled ramp stays monotonic, so a gradient does not gain steps o
 }
 
 TEST_CASE("a flat field stretches across a volume's depth without z work") {
-    // A 2D field on a 3D fixture: every slice gets the same picture, which is what a depth-1 source
-    // means, and it costs no interpolation along z.
+    // A 2D field on a 3D fixture: every slice gets the same picture, which is what a depth-1 source means, and it costs no interpolation along z.
     std::vector<uint16_t> src(4 * 4 * 3), dst(8 * 8 * 4 * 3, 0);
     for (size_t i = 0; i < src.size(); i++) src[i] = static_cast<uint16_t>(i * 700);
     std::vector<draw::UpscaleTap> taps(8);
@@ -603,8 +568,7 @@ TEST_CASE("a flat field stretches across a volume's depth without z work") {
 }
 
 TEST_CASE("a volumetric field interpolates along z as well, so a coarse cube fills a fine one") {
-    // Two source slices, black and white. The destination's middle slices must land between them
-    // rather than snapping to one.
+    // Two source slices, black and white. The destination's middle slices must land between them rather than snapping to one.
     std::vector<uint16_t> src(2 * 2 * 2 * 3), dst(4 * 4 * 8 * 3, 0);
     for (int z = 0; z < 2; z++)
         for (int i = 0; i < 2 * 2 * 3; i++) src[z * 12 + i] = z ? 60000 : 0;
@@ -618,10 +582,7 @@ TEST_CASE("a volumetric field interpolates along z as well, so a coarse cube fil
 }
 
 TEST_CASE("an upscaled saddle stays inside the values it was given, so a field that dips does not light up") {
-    // The fixtures above are uniform or monotone, so every interpolation ascends. A noise field is a
-    // saddle almost everywhere: along one diagonal it rises, along the other it falls. A descending
-    // pair is where an unsigned difference wraps, and blending a wrapped row against an unwrapped one
-    // lands far outside the input range (this fixture produced 98354 for inputs of 0 and 100).
+    // The fixtures above are uniform or monotone, so every interpolation ascends. A noise field is a saddle almost everywhere: along one diagonal it rises, along the other it falls. A descending pair is where an unsigned difference wraps, and blending a wrapped row against an unwrapped one lands far outside the input range (this fixture produced 98354 for inputs of 0 and 100).
     std::vector<uint16_t> src(2 * 2 * 3, 0), dst(8 * 8 * 3, 0);
     for (int c = 0; c < 3; c++) {
         src[(0 * 2 + 0) * 3 + c] = 100;      // high, low
@@ -633,22 +594,17 @@ TEST_CASE("an upscaled saddle stays inside the values it was given, so a field t
 }
 
 TEST_CASE("upscale16 declines rather than writing when the caller's tap table is too small") {
-    // The table is the caller's because tick() can neither allocate nor spare a large frame. A short
-    // one is a programming error, and the safe answer is to do nothing rather than run off its end.
+    // The table is the caller's because tick() can neither allocate nor spare a large frame. A short one is a programming error, and the safe answer is to do nothing rather than run off its end.
     std::vector<uint16_t> src(4 * 4 * 3, 30000), dst(16 * 16 * 3, 7);
     std::vector<draw::UpscaleTap> taps(4);               // 16 columns need 16
     draw::upscale16(dst.data(), 16, 16, 1, src.data(), 4, 4, 1, taps.data(), taps.size());
     for (uint16_t v : dst) CHECK(v == 7);                // untouched
 }
 
-// advect16 and blit16 are what every wide-plane effect (Trails, Nebula, Fluid, and a scripted
-// trail) actually renders through, and neither had a test: the 8-bit advect was pinned and its
-// 16-bit sibling was not, which is how a plane-wide primitive ships unverified.
+// advect16 and blit16 are what every wide-plane effect (Trails, Nebula, Fluid, and a scripted trail) actually renders through, and neither had a test: the 8-bit advect was pinned and its 16-bit sibling was not, which is how a plane-wide primitive ships unverified.
 
 TEST_CASE("a 16-bit plane carried by a whole-cell flow arrives intact, so light is transported rather than smeared away") {
-    // One lit cell, pushed one whole cell to the right each frame. A whole-cell step has no
-    // bilinear fraction, so the value must survive exactly: any loss here is the transport itself
-    // leaking, which over a hundred frames of a trail is the difference between a tail and a haze.
+    // One lit cell, pushed one whole cell to the right each frame. A whole-cell step has no bilinear fraction, so the value must survive exactly: any loss here is the transport itself leaking, which over a hundred frames of a trail is the difference between a tail and a haze.
     const lengthType W = 8, H = 1;
     std::vector<uint16_t> a(size_t(W) * H * 3, 0), b(a.size(), 0);
     a[(0 * 3) + 0] = 60000; a[(0 * 3) + 1] = 40000; a[(0 * 3) + 2] = 20000;
@@ -667,8 +623,7 @@ TEST_CASE("a 16-bit plane carried by a whole-cell flow arrives intact, so light 
 }
 
 TEST_CASE("a half-cell flow splits a 16-bit sample between the two cells it straddles, and loses none of it") {
-    // The bilinear case: half a cell of motion puts half the light in each neighbor. What matters
-    // is that the TOTAL is conserved, which is what keeps a long trail from fading on its own.
+    // The bilinear case: half a cell of motion puts half the light in each neighbor. What matters is that the TOTAL is conserved, which is what keeps a long trail from fading on its own.
     const lengthType W = 8;
     std::vector<uint16_t> a(size_t(W) * 3, 0), b(a.size(), 0);
     a[(4 * 3) + 0] = 40000;
@@ -685,11 +640,7 @@ TEST_CASE("a half-cell flow splits a 16-bit sample between the two cells it stra
 }
 
 TEST_CASE("a flow off the edge circulates under Wrap and carries the light out of the grid under Clamp") {
-    // The advection samples BACKWARD (every destination asks where its contents came from), so a
-    // leftward flow means cell x reads cell x+1. Under Wrap the left column reads the right one and
-    // the light comes round; under Clamp nothing reads past the wall, so light that flows off the
-    // edge is GONE rather than piling up against it. Both are correct and an effect picks one: a
-    // trail that should circulate wants Wrap, a fluid in a box wants Clamp.
+    // The advection samples BACKWARD (every destination asks where its contents came from), so a leftward flow means cell x reads cell x+1. Under Wrap the left column reads the right one and the light comes round; under Clamp nothing reads past the wall, so light that flows off the edge is GONE rather than piling up against it. Both are correct and an effect picks one: a trail that should circulate wants Wrap, a fluid in a box wants Clamp.
     const lengthType W = 4;
     std::vector<uint16_t> a(size_t(W) * 3, 0), b(a.size(), 0);
     a[(0 * 3)] = 50000;                          // at the left wall, pushed further left
@@ -706,9 +657,7 @@ TEST_CASE("a flow off the edge circulates under Wrap and carries the light out o
 }
 
 TEST_CASE("blit16 narrows a wide plane to the canvas, and dithering carries the error a truncation would drop") {
-    // A value just under the halfway point of an 8-bit step: truncation reports the lower step on
-    // every frame forever, while the carry accumulates and reaches the higher one part of the time.
-    // That difference IS the smooth fade the 16-bit planes exist for.
+    // A value just under the halfway point of an 8-bit step: truncation reports the lower step on every frame forever, while the carry accumulates and reaches the higher one part of the time. That difference IS the smooth fade the 16-bit planes exist for.
     const lengthType W = 4, H = 4;
     Buffer buf;
     REQUIRE(buf.allocate(static_cast<nrOfLightsType>(W) * H, 3));
@@ -730,10 +679,7 @@ TEST_CASE("blit16 narrows a wide plane to the canvas, and dithering carries the 
 }
 
 TEST_CASE("scrolling along y moves every column, and along z every cell of the volume") {
-    // The lines of a y-scroll are the (z, x) COLUMNS, and those are not evenly spaced by one
-    // stride: x steps by a light within a slice, z steps by a whole slice. Treating them as one
-    // evenly-spaced sequence scrolled the first column of each slice and left the rest standing,
-    // which reads as a partial scroll nobody would call a scroll.
+    // The lines of a y-scroll are the (z, x) COLUMNS, and those are not evenly spaced by one stride: x steps by a light within a slice, z steps by a whole slice. Treating them as one evenly-spaced sequence scrolled the first column of each slice and left the rest standing, which reads as a partial scroll nobody would call a scroll.
     Buffer buf; REQUIRE(buf.allocate(9, 3)); buf.clear();
     const draw::Canvas cv = draw::Canvas::of(buf, 3, 3, 1);
     for (lengthType y = 0; y < 3; y++)
@@ -764,8 +710,7 @@ TEST_CASE("scrolling along y moves every column, and along z every cell of the v
 
 // --- ring and strokeLine -----------------------------------------------------------------------
 //
-// The two shapes a fixed-point canvas needs beyond a disc: an outline and a thick line. Ported for
-// Sutaburosu's fixed-point demos, which draw clock hands, orbits and spokes from them.
+// The two shapes a fixed-point canvas needs beyond a disc: an outline and a thick line. Ported for Sutaburosu's fixed-point demos, which draw clock hands, orbits and spokes from them.
 
 TEST_CASE("a ring is hollow: lit on its band, dark at its center") {
     Buffer buf;
@@ -775,8 +720,7 @@ TEST_CASE("a ring is hollow: lit on its band, dark at its center") {
     draw::ring(cv, draw::toSub(5), draw::toSub(5), draw::toSub(3), draw::toSub(1),
                RGB{255, 255, 255});
 
-    // The hole is what separates a ring from a disc, and the property a caller relies on when
-    // stacking rings: the middle must stay dark however thick the stroke.
+    // The hole is what separates a ring from a disc, and the property a caller relies on when stacking rings: the middle must stay dark however thick the stroke.
     CHECK(isBlack(at(buf, dims, 5, 5, 0)));
     CHECK(at(buf, dims, 5, 2, 0).r > 0);       // on the band, three up from center
     CHECK(isBlack(at(buf, dims, 0, 0, 0)));    // outside it entirely
@@ -790,9 +734,7 @@ TEST_CASE("a ring's inner edge is antialiased, not cut") {
     draw::ring(cv, draw::toSub(10), draw::toSub(10), draw::toSub(6), draw::toSub(2),
                RGB{255, 255, 255});
 
-    // Walking in from the band toward the center must pass through a PARTIAL pixel. Two discs
-    // subtracted would step straight from full to black here, which is the bug this shape exists to
-    // avoid: the inner edge of a subtracted ring is never blended, only removed.
+    // Walking in from the band toward the center must pass through a PARTIAL pixel. Two discs subtracted would step straight from full to black here, which is the bug this shape exists to avoid: the inner edge of a subtracted ring is never blended, only removed.
     bool sawPartial = false;
     for (int y = 10; y >= 0; y--) {
         const uint8_t v = at(buf, dims, 10, static_cast<lengthType>(y), 0).r;
@@ -813,8 +755,7 @@ TEST_CASE("a thick line covers pixels a one-pixel line would miss") {
     draw::strokeLine(cvThick, draw::toSub(2), draw::toSub(7), draw::toSub(12), draw::toSub(7),
                      draw::toSub(3), RGB{255, 255, 255});
 
-    // Width is the whole point: a row either side of the axis is dark for the thin line and lit for
-    // the thick one.
+    // Width is the whole point: a row either side of the axis is dark for the thin line and lit for the thick one.
     CHECK(isBlack(at(thin, dims, 7, 5, 0)));
     CHECK(at(thick, dims, 7, 6, 0).r > 0);
     CHECK(at(thick, dims, 7, 8, 0).r > 0);
@@ -830,8 +771,7 @@ TEST_CASE("a thick line stops at its endpoints instead of running along the infi
                      draw::toSub(2), RGB{255, 255, 255});
 
     CHECK(at(buf, dims, 7, 7, 0).r > 0);       // on the segment
-    // Well past both ends must be dark. Without clamping the projection to the segment, every pixel
-    // in the row would be "on the line" and the stroke would span the whole grid.
+    // Well past both ends must be dark. Without clamping the projection to the segment, every pixel in the row would be "on the line" and the stroke would span the whole grid.
     CHECK(isBlack(at(buf, dims, 0, 7, 0)));
     CHECK(isBlack(at(buf, dims, 14, 7, 0)));
 }
@@ -841,8 +781,7 @@ TEST_CASE("a zero-length thick line draws a dot rather than nothing") {
     Coord3D dims{9, 9, 1};
     REQUIRE(buf.allocate(81, 3));
     const draw::Canvas cv = draw::Canvas::of(buf, 9, 9, 1);
-    // What a fully retracted clock hand asks for. Dividing by the length would be a divide by zero,
-    // so this case is handled rather than guarded against.
+    // What a fully retracted clock hand asks for. Dividing by the length would be a divide by zero, so this case is handled rather than guarded against.
     draw::strokeLine(cv, draw::toSub(4), draw::toSub(4), draw::toSub(4), draw::toSub(4),
                      draw::toSub(3), RGB{255, 255, 255});
 

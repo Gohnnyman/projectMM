@@ -495,7 +495,13 @@ def _arrow(new, old, key, fmt=str, lower_is_better=True):
     diff = new - old[key]
     sign = "+" if diff > 0 else "−"
     mark = "" if lower_is_better is None else (" ⚠" if (diff > 0) == lower_is_better else " ✓")
-    return f"{fmt(new)} ({sign}{fmt(abs(diff))}){mark}"
+    # The VALUE's unit is not always the DELTA's: a 224-byte move formatted in KB reads "+0 KB",
+    # a change the mark flags and the number then denies. So a delta too small for the value's
+    # unit falls back to the raw one, and the reader sees what actually moved.
+    shown = fmt(abs(diff))
+    if fmt is _kb and abs(diff) < 1024:
+        shown = f"{abs(diff):,} B"
+    return f"{fmt(new)} ({sign}{shown}){mark}"
 
 
 # Columns of the scenario matrix, in fleet order. A fixed list rather than whatever the data

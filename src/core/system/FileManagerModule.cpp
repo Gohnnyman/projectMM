@@ -1,3 +1,7 @@
+/// @defgroup file_manager_impl File Manager implementation
+/// The device's filesystem browser, whose surface is the UI tree panel rather than a control list.
+/// Public surface and class layout live in FileManagerModule.h.
+/// @{
 #include "core/system/FileManagerModule.h"
 
 #include "core/system/FilesystemModule.h"   // instance()->lastSavedStr() for the "last saved" readout
@@ -6,20 +10,16 @@
 namespace mm {
 
 void FileManagerModule::defineControls() {
-    // Only `show hidden` is a control: the whole File Manager surface is the tree panel (app.js
-    // renderFileManager), which lists over /api/dir and reads the gauges from /api/state; the
-    // mkdir/delete OPS are their own HTTP endpoints (POST/DELETE /api/dir?path=) — not persisted
-    // controls — so a create/delete carries its path in the request, not in device storage. The
-    // `show hidden` flag keeps it bound for the API while the generic control list skips it.
+    // Only `show hidden` is a control: the whole File Manager surface is the tree panel (app.js renderFileManager), which lists over /api/dir and reads the gauges from /api/state.
+    // The mkdir/delete OPS are their own HTTP endpoints (POST/DELETE /api/dir?path=), not persisted controls, so a create/delete carries its path in the request, not in device storage.
+    // The `show hidden` flag keeps it bound for the API while the generic control list skips it.
     controls_.addControl("show hidden", showHidden_);      // reveal dot-prefixed entries (e.g. .config)
     controls_.setHidden(controls_.count() - 1, true);
-    // Filesystem-usage gauge (used / total bytes), read from the platform. Shown below the tree in
-    // the panel — the File Manager is where filesystem space is relevant, so it owns the control.
-    // Bound only when the platform reports a real partition (desktop / a no-data-partition chip
-    // reports 0). Read the total ONCE (it's fixed) the first time controls are built; the used value
-    // is refreshed only on the throttled tick1s. defineControls() is re-runnable (a Select can rebuild
-    // the control set on any control write), so it must NOT re-scan the filesystem here — a LittleFS
-    // usage scan walks blocks and isn't free. Rebuild from the cached values instead.
+    // Filesystem-usage gauge (used / total bytes), read from the platform.
+    // Shown below the tree in the panel, the File Manager is where filesystem space is relevant, so it owns the control.
+    // Bound only when the platform reports a real partition (desktop / a no-data-partition chip reports 0).
+    // Read the total ONCE (it's fixed) the first time controls are built; the used value is refreshed only on the throttled tick1s. defineControls() is re-runnable (a Select can rebuild the control set on any control write), so it must NOT re-scan the filesystem here, a LittleFS usage scan walks blocks and isn't free.
+    // Rebuild from the cached values instead.
     if (totalBytes_ == 0) {
         totalBytes_ = static_cast<uint32_t>(platform::filesystemTotal());
         usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
@@ -28,12 +28,11 @@ void FileManagerModule::defineControls() {
         controls_.addProgress("filesystem", usedBytes_, totalBytes_);
         controls_.setHidden(controls_.count() - 1, true);   // renders as the usage bar in the panel, not generically
     }
-    // "last saved" readout — how long ago config was persisted. The value is OWNED by the
-    // FilesystemModule engine (non-UI); the File Manager just displays it here (this is where
-    // filesystem state is topical). Bind the control straight to the engine's live buffer — no
-    // per-instance copy — the same no-copy pattern SystemModule uses for its static strings. The
-    // engine is the boot-wired singleton (alive for the device's life), and its tick1s keeps the
-    // string current. Bound only when the engine exists (it's constructed before this module).
+    // "last saved" readout, how long ago config was persisted.
+    // The value is OWNED by the FilesystemModule engine (non-UI); the File Manager just displays it here (this is where filesystem state is topical).
+    // Bind the control straight to the engine's live buffer, no per-instance copy, the same no-copy pattern SystemModule uses for its static strings.
+    // The engine is the boot-wired singleton (alive for the device's life), and its tick1s keeps the string current.
+    // Bound only when the engine exists (it's constructed before this module).
     if (FilesystemModule* fs = FilesystemModule::instance()) {
         controls_.addReadOnly("lastSaved", fs->lastSavedStr());
         controls_.setHidden(controls_.count() - 1, true);   // shown in the panel header, not generically
@@ -42,16 +41,13 @@ void FileManagerModule::defineControls() {
 }
 
 void FileManagerModule::tick1s() MM_NONBLOCKING {
-    // ONCE A MINUTE, not once a second. `filesystemUsed()` is `esp_littlefs_info`, which walks every
-    // block of the partition to count what is in use: measured at ~80 ms on an S3, and tick1s runs
-    // INLINE on the render thread, so at 1 Hz it stuttered the fixture once a second. A particle
-    // effect made it obvious where a shader had hidden it: a shader redraws each frame from the
-    // clock and simply misses one, while a particle integrates the stall into its trajectory and
-    // visibly jumps (FrameTime spends the whole gap, by design).
+    // ONCE A MINUTE, not once a second.
+    // `filesystemUsed()` is `esp_littlefs_info`, which walks every block of the partition to count what is in use.
+    // Measured at ~80 ms on an S3, and tick1s runs INLINE on the render thread, so at 1 Hz it stuttered the fixture once a second.
+    // A particle effect made it obvious where a shader had hidden it: a shader redraws each frame from the clock and simply misses one, while a particle integrates the stall into its trajectory and visibly jumps (FrameTime spends the whole gap, by design).
     //
-    // The value feeds one progress bar on this card, so a minute-old figure is no worse to a reader
-    // and the scan stops being a per-second cost. Anything needing an exact figure should read it
-    // directly rather than this cache.
+    // The value feeds one progress bar on this card, so a minute-old figure is no worse to a reader and the scan stops being a per-second cost.
+    // Anything needing an exact figure should read it directly rather than this cache.
     if (totalBytes_ == 0) return;
     if (++secondsSinceScan_ < 60) return;
     secondsSinceScan_ = 0;
@@ -60,15 +56,14 @@ void FileManagerModule::tick1s() MM_NONBLOCKING {
 
 void FileManagerModule::setup() {
     MoonModule::setup();
-    // `show hidden` is a transient view preference, not device config — force it off on every boot
-    // regardless of any persisted value (setup() runs after persistence overlays it). A file manager
-    // opens with hidden entries hidden; the user re-toggles per session.
+    // `show hidden` is a transient view preference, not device config, force it off on every boot regardless of any persisted value (setup() runs after persistence overlays it). A file manager opens with hidden entries hidden; the user re-toggles per session.
     showHidden_ = false;
 }
 
-// mkdir/delete are HTTP endpoints (POST/DELETE /api/dir?path=) in HttpServerModule: a create/delete
-// carries its path in the request and touches the filesystem directly, so this module holds no op
-// state and writes nothing to persisted config. The path guard (reject `..`, root at mount) lives
-// once in HttpServerModule::parseFilePath, shared with /api/file + /api/dir GET.
+// mkdir/delete are HTTP endpoints (POST/DELETE /api/dir?path=) in HttpServerModule.
+// A create/delete carries its path in the request and touches the filesystem directly, so this module holds no op state and writes nothing to persisted config.
+// The path guard (reject `..`, root at mount) lives once in HttpServerModule::parseFilePath, shared with /api/file + /api/dir GET.
 
 } // namespace mm
+
+/// @}

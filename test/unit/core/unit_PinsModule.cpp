@@ -1,12 +1,7 @@
-// @module PinsModule
+/// @module PinsModule
 
-// Pins PinsModule's one job: walk the live module tree, collect every claimed GPIO (a
-// ControlType::Pin control set >= 0, plus the LED-driver "pins" CSV), and expose them as a
-// GPIO-keyed read-only list — owner + name-derived role + a severity flag when the claim lands
-// on an unsafe pin. A `-1` pin is unused and skipped; a GPIO claimed twice stays visible (both
-// owners in the row detail), which is the read-only surfacing this phase does instead of enforcing.
-// Severity reads platform::gpioCapability, which desktop stubs to "all safe" — so the severity
-// cases inject a fake capability via setTestGpioCapability (as unit_TasksModule injects a snapshot).
+/// Pins PinsModule's one job: walk the live module tree, collect every claimed GPIO (a ControlType::Pin control set >= 0, plus the LED-driver "pins" CSV), and expose them as a GPIO-keyed read-only list, owner + name-derived role + a severity flag when the claim lands on an unsafe pin. A `-1` pin is unused and skipped; a GPIO claimed twice stays visible (both owners in the row detail), which is the read-only surfacing this phase does instead of enforcing.
+/// Severity reads platform::gpioCapability, which desktop stubs to "all safe", so the severity cases inject a fake capability via setTestGpioCapability (as unit_TasksModule injects a snapshot).
 
 #include "doctest.h"
 #include "core/system/PinsModule.h"
@@ -21,9 +16,7 @@ using namespace mm;
 
 namespace {
 
-// A module that stakes GPIO claims: some Pin controls and (optionally) a "pins" CSV, exactly the
-// two claim shapes a real driver/mic/PHY exposes. Controls bind to members, so the Pin values are
-// read back live off ptr the way PinsModule reads them.
+// A module that stakes GPIO claims: some Pin controls and (optionally) a "pins" CSV, exactly the two claim shapes a real driver/mic/PHY exposes. Controls bind to members, so the Pin values are read back live off ptr the way PinsModule reads them.
 struct FakePinModule : MoonModule {
     int8_t sck = -1, ws = -1, sd = -1, tx = -1;
     char pins[32] = {};
@@ -41,8 +34,7 @@ struct FakePinModule : MoonModule {
     }
 };
 
-// Reach the `pins` control's ListSource so the row/detail JSON is exercised directly (same access
-// unit_TasksModule uses: descriptor.ptr → ListSource*).
+// Reach the `pins` control's ListSource so the row/detail JSON is exercised directly (same access unit_TasksModule uses: descriptor.ptr → ListSource*).
 const ListSource* pinsSource(const MoonModule& m) {
     for (uint8_t i = 0; i < m.controls().count(); i++)
         if (std::strcmp(m.controls()[i].name, "pins") == 0)
@@ -50,7 +42,7 @@ const ListSource* pinsSource(const MoonModule& m) {
     return nullptr;
 }
 
-// The whole list serialized, row by row — a cheap way to assert presence/absence of a GPIO.
+// The whole list serialized, row by row, a cheap way to assert presence/absence of a GPIO.
 std::string allRows(const ListSource& src) {
     std::string out;
     for (uint8_t i = 0; i < src.listRowCount(); i++) {
@@ -69,8 +61,7 @@ TEST_CASE("PinsModule: exposes a single read-only pins list, fixed System module
     for (uint8_t i = 0; i < pins.controls().count(); i++)
         if (std::strcmp(pins.controls()[i].name, "pins") == 0) hasList = true;
     CHECK(hasList);
-    // Wired-by-code System child (main.cpp), not user-added → base Generic role, so no container
-    // accepts it as a user-editable child and the UI shows no delete.
+    // Wired-by-code System child (main.cpp), not user-added → base Generic role, so no container accepts it as a user-editable child and the UI shows no delete.
     CHECK(pins.role() == ModuleRole::Generic);
 }
 
@@ -127,8 +118,7 @@ TEST_CASE("PinsModule: parses the LED-driver pins CSV into per-lane claims") {
 }
 
 TEST_CASE("PinsModule: rows are GPIO-ordered and a double-claim stays visible in the detail") {
-    // Two modules both claim GPIO 21 — the conflict phase-1 surfaces (not enforces). Give them
-    // out-of-order pins so the sort is exercised too.
+    // Two modules both claim GPIO 21, the conflict phase-1 surfaces (not enforces). Give them out-of-order pins so the sort is exercised too.
     Scheduler scheduler;
     FakePinModule a("Alpha");
     a.sck = 21; a.ws = 9;         // 21 (BCLK) + 9 (WS)
@@ -149,14 +139,13 @@ TEST_CASE("PinsModule: rows are GPIO-ordered and a double-claim stays visible in
     JsonSink r0; src->writeListRow(r0, 0);
     CHECK(std::string(r0.data()).find("\"gpio\":9") != std::string::npos);
 
-    // The detail for a GPIO-21 row lists BOTH claimants — the visible conflict.
+    // The detail for a GPIO-21 row lists BOTH claimants, the visible conflict.
     JsonSink detail; src->writeListRowDetail(detail, 1);
     const std::string det(detail.data());
     CHECK(det.find("Alpha \xC2\xB7 BCLK") != std::string::npos);
     CHECK(det.find("Beta \xC2\xB7 data") != std::string::npos);
 
-    // #3 conflict soft-flag: BOTH GPIO-21 rows are flagged severity error (the summary goes red, not
-    // just the detail); the lone GPIO-9 row is not.
+    // #3 conflict soft-flag: BOTH GPIO-21 rows are flagged severity error (the summary goes red, not just the detail); the lone GPIO-9 row is not.
     JsonSink r1; src->writeListRow(r1, 1);
     JsonSink r2; src->writeListRow(r2, 2);
     CHECK(std::string(r1.data()).find("\"severity\":\"error\"") != std::string::npos);
@@ -183,7 +172,7 @@ TEST_CASE("PinsModule: a conflict promotes a strap warn to error (severity is th
     scheduler.setup();
     pins.tick1s();
 
-    // Both GPIO-45 rows: the conflict (error) wins over the strap (warn) — severity is the max.
+    // Both GPIO-45 rows: the conflict (error) wins over the strap (warn), severity is the max.
     const std::string rows = allRows(*pinsSource(pins));
     CHECK(rows.find("\"severity\":\"error\"") != std::string::npos);
     CHECK(rows.find("\"severity\":\"warn\"") == std::string::npos);   // promoted, not left at warn
@@ -216,7 +205,7 @@ TEST_CASE("PinsModule: a disabled module's pins are released from the map, re-cl
 }
 
 TEST_CASE("PinsModule: a child module's pins are walked (depth-first), not just the roots") {
-    // A driver nested under a container still contributes its claims — the walk recurses children.
+    // A driver nested under a container still contributes its claims, the walk recurses children.
     Scheduler scheduler;
     FakePinModule container("Layout");
     FakePinModule child("NestedDriver");
@@ -236,10 +225,7 @@ TEST_CASE("PinsModule: a child module's pins are walked (depth-first), not just 
 }
 
 TEST_CASE("PinsModule: disabling a PARENT frees its children's pins (effectivelyEnabled cascade)") {
-    // Hardware-found (P4 .133): disabling the Drivers container stopped ParlioLed but the map still
-    // showed it owning GPIO 20 — the map read the child's own enabled() flag, not its effective state.
-    // The applyState() cascade tears a disabled parent's whole subtree down (child peripheral released),
-    // so the map must match: a child of a disabled parent shows its pins FREED, not falsely claimed.
+    // Hardware-found (P4 .133): disabling the Drivers container stopped ParlioLed but the map still showed it owning GPIO 20, the map read the child's own enabled() flag, not its effective state. The applyState() cascade tears a disabled parent's whole subtree down (child peripheral released), so the map must match: a child of a disabled parent shows its pins FREED, not falsely claimed.
     Scheduler scheduler;
     FakePinModule container("Drivers");
     FakePinModule child("ParlioLed");
@@ -254,8 +240,7 @@ TEST_CASE("PinsModule: disabling a PARENT frees its children's pins (effectively
     pins.tick1s();
     CHECK(allRows(*pinsSource(pins)).find("\"gpio\":20") != std::string::npos);
 
-    // Disable the PARENT (child's own flag stays true) — the child is now effectively-disabled, so its
-    // pin is freed from the map even though child.enabled() is still true.
+    // Disable the PARENT (child's own flag stays true), the child is now effectively-disabled, so its pin is freed from the map even though child.enabled() is still true.
     container.setEnabled(false);
     pins.tick1s();
     CHECK(child.enabled());   // the child's OWN flag is untouched
@@ -268,9 +253,7 @@ TEST_CASE("PinsModule: disabling a PARENT frees its children's pins (effectively
 }
 
 TEST_CASE("PinsModule: a claim survives its owning module being destroyed (no use-after-free)") {
-    // The map refreshes on tick1s but the UI serializes state right after a delete op — so a claim
-    // must NOT borrow a pointer into the (now-freed) module's name storage. Refresh with the module
-    // alive, destroy it, then serialize: the snapshot must still render its owner from its own copy.
+    // The map refreshes on tick1s but the UI serializes state right after a delete op, so a claim must NOT borrow a pointer into the (now-freed) module's name storage. Refresh with the module alive, destroy it, then serialize: the snapshot must still render its owner from its own copy.
     Scheduler scheduler;
     PinsModule pins;
     {
@@ -285,21 +268,18 @@ TEST_CASE("PinsModule: a claim survives its owning module being destroyed (no us
     const ListSource* src = pinsSource(pins);
     REQUIRE(src != nullptr);
     REQUIRE(src->listRowCount() == 1);
-    // Serialize AFTER the owner is gone — reads the copied owner, not freed memory.
+    // Serialize AFTER the owner is gone, reads the copied owner, not freed memory.
     JsonSink r0; src->writeListRow(r0, 0);
     const std::string row0(r0.data());
     CHECK(row0.find("\"gpio\":7") != std::string::npos);
     CHECK(row0.find("\"owner\":\"Doomed\"") != std::string::npos);
-    // The detail path reads owner too — exercise it as well.
+    // The detail path reads owner too, exercise it as well.
     JsonSink d0; src->writeListRowDetail(d0, 0);
     CHECK(std::string(d0.data()).find("Doomed \xC2\xB7 BCLK") != std::string::npos);
 }
 
 TEST_CASE("PinsModule: a CSV with an out-of-range pin claims nothing, and never a false GPIO") {
-    // parsePinList rejects any entry past the chip's MM_MAX_GPIO ceiling (the crash guard — a value
-    // like 300 parses as an integer but is not a GPIO, and handing it to IDF faults). So a lane list
-    // containing one bad pin is malformed as a whole: the map shows no lane claims for it, and — the
-    // point of this test — 300 never truncates to a real GPIO (300 & 0xFF = 44) in the pin map.
+    // parsePinList rejects any entry past the chip's MM_MAX_GPIO ceiling (the crash guard, a value like 300 parses as an integer but is not a GPIO, and handing it to IDF faults). So a lane list containing one bad pin is malformed as a whole: the map shows no lane claims for it, and, the point of this test, 300 never truncates to a real GPIO (300 & 0xFF = 44) in the pin map.
     Scheduler scheduler;
     FakePinModule driver("RmtLed");
     driver.withPinsCsv = true;
@@ -318,8 +298,7 @@ TEST_CASE("PinsModule: a CSV with an out-of-range pin claims nothing, and never 
 }
 
 // --- severity flagging (increment #2) ---------------------------------------------------------
-// gpioCapability is stubbed "all safe" on desktop, so inject an unsafe capability for one gpio and
-// assert PinsModule grades the claim: reserved→error, driven-role-on-strap/input-only→warn, else none.
+// gpioCapability is stubbed "all safe" on desktop, so inject an unsafe capability for one gpio and assert PinsModule grades the claim: reserved→error, driven-role-on-strap/input-only→warn, else none.
 
 TEST_CASE("PinsModule: a claim on a reserved pin is flagged severity error") {
     platform::clearTestGpioCapability();
@@ -423,8 +402,7 @@ TEST_CASE("PinsModule: a safe pin carries no severity field") {
 }
 
 // --- live state (increment #4) ----------------------------------------------------------------
-// gpioLiveState is stubbed valid=false on desktop (no real pins), so inject a live state and assert
-// PinsModule emits the level/drive columns; a pin with no live state omits them.
+// gpioLiveState is stubbed valid=false on desktop (no real pins), so inject a live state and assert PinsModule emits the level/drive columns; a pin with no live state omits them.
 
 TEST_CASE("PinsModule: a claimed pin with live state emits level + drive columns") {
     platform::clearTestGpioLiveState();
@@ -465,8 +443,7 @@ TEST_CASE("PinsModule: a pin with no live state (valid=false) omits the live col
 }
 
 // --- live direction (dir column) --------------------------------------------------------------
-// gpioLiveState carries the pad's live output/input enable. The map shows a `dir` column
-// (out/in/both/off) as INFORMATION — it does not auto-warn (see the "dir is shown as info" case).
+// gpioLiveState carries the pad's live output/input enable. The map shows a `dir` column (out/in/both/off) as INFORMATION, it does not auto-warn (see the "dir is shown as info" case).
 
 TEST_CASE("PinsModule: dir column reflects the live pad direction (out/in/both/off)") {
     platform::clearTestGpioLiveState();
@@ -497,10 +474,7 @@ TEST_CASE("PinsModule: dir column reflects the live pad direction (out/in/both/o
 }
 
 TEST_CASE("PinsModule: dir is shown as info, NOT a warning — a driven role with output off is unflagged") {
-    // The live direction is informational only: too many pins are legitimately not-driving-when-idle
-    // (I²C is bidirectional, a loopback Tx is off until the self-test runs, an RMII clock can be an
-    // input), so `dir` reading in/off must NOT auto-warn — that would be noise. Only the static
-    // capability flags (reserved / strap / input-only) drive severity.
+    // The live direction is informational only: too many pins are legitimately not-driving-when-idle (I²C is bidirectional, a loopback Tx is off until the self-test runs, an RMII clock can be an input), so `dir` reading in/off must NOT auto-warn, that would be noise. Only the static capability flags (reserved / strap / input-only) drive severity.
     platform::clearTestGpioLiveState();
     platform::GpioLiveState notDriving;   // a driven role's pin reads output-off — but this is NOT flagged
     notDriving.valid = true; notDriving.output = false; notDriving.input = true;
@@ -523,11 +497,7 @@ TEST_CASE("PinsModule: dir is shown as info, NOT a warning — a driven role wit
     platform::clearTestGpioLiveState();
 }
 
-// A peripheral can hold GPIOs that no control names: an EMAC's data bus is fixed IO_MUX pads the
-// silicon chose, so there is nothing to set and nothing for the control scan to find. Those pads
-// reach the map through MoonModule::fixedPins(). Without it the map showed twelve S31 pins free
-// while the MAC drove them, and an LED driver that took one corrupted every frame the MAC sent
-// while the link still reported 1000 Mbit with zero drops.
+// A peripheral can hold GPIOs that no control names: an EMAC's data bus is fixed IO_MUX pads the silicon chose, so there is nothing to set and nothing for the control scan to find. Those pads reach the map through MoonModule::fixedPins(). Without it the map showed twelve S31 pins free while the MAC drove them, and an LED driver that took one corrupted every frame the MAC sent while the link still reported 1000 Mbit with zero drops.
 namespace {
 struct FixedPinModule : MoonModule {
     bool holding = true;                 // stands in for "this interface is running"
@@ -562,14 +532,12 @@ TEST_CASE("PinsModule lists the pins a module holds without a control naming the
     CHECK(rows.find("\"role\":\"ethTxd2\"") != std::string::npos);
     CHECK(rows.find("\"owner\":\"Network\"") != std::string::npos);
 
-    // Released when the module stops holding them: an ethType of None frees the whole bus, which is
-    // why these are reported per-refresh rather than being a static reserved list.
+    // Released when the module stops holding them: an ethType of None frees the whole bus, which is why these are reported per-refresh rather than being a static reserved list.
     net.holding = false;
     pins.tick1s();
     CHECK(allRows(*pinsSource(pins)).find("\"role\":\"ethTxd2\"") == std::string::npos);
 
-    // The collector states a capacity, and the module is trusted to respect it: a module reporting
-    // more than `max` would write past the collector's stack buffer.
+    // The collector states a capacity, and the module is trusted to respect it: a module reporting more than `max` would write past the collector's stack buffer.
     CHECK(net.askedFor > 0);
     CHECK(net.askedFor <= 16);
 }

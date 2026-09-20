@@ -1,4 +1,4 @@
-// @module RandomEffect
+/// @module RandomEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -30,9 +30,7 @@ TEST_CASE("RandomEffect lights exactly one light per frame") {
 
     layer.tick();
 
-    // Count lights with any non-black channel. With fade=255 the whole buffer is cleared each frame,
-    // so precisely the one randomly chosen light survives — the direct equivalent of MoonLight's
-    // single index-based setRGB.
+    // Count lights with any non-black channel. With fade=255 the whole buffer is cleared each frame, so precisely the one randomly chosen light survives, the direct equivalent of MoonLight's single index-based setRGB.
     const uint8_t cpl = buf.channelsPerLight();
     int litLights = 0;
     for (size_t i = 0; i < buf.count(); i++) {
@@ -42,7 +40,7 @@ TEST_CASE("RandomEffect lights exactly one light per frame") {
     CHECK(litLights == 1);
 }
 
-// Over many frames with light fade the sparkle field fills — more than one light ends up lit.
+// Over many frames with light fade the sparkle field fills, more than one light ends up lit.
 TEST_CASE("RandomEffect scatters color across many lights over many frames") {
     mm::Layouts layouts;
     mm::GridLayout grid;

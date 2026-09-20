@@ -128,7 +128,7 @@ def main() -> int:
 
     parts = parts_from_flasher_args(flasher_args, prefix, size)
     if not parts:
-        print(f"generate_manifest: no recognised parts in {args.flasher_args}")
+        print(f"generate_manifest: no recognized parts in {args.flasher_args}")
         return 1
 
     # MoonBase firmwares: flasher_args stages the app at the first app partition: the factory

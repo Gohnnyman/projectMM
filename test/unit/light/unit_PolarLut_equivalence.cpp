@@ -1,10 +1,9 @@
-// @module polar
-// @also PolarNoiseEffect
+/// @module polar
+/// @also PolarNoiseEffect
 
-// The migration check for the polar table: an effect reading the table must look like the same
-// effect, not merely a plausible one. PolarNoise is rendered twice on the same grid at the same
-// frames, once through the table and once computing atan16/dist16 per pixel, and the frames are
-// compared pixel by pixel. This is the evidence behind the re-baselined golden.
+/// The migration check for the polar table: an effect reading the table must look like the same effect, not merely a plausible one.
+/// PolarNoise is rendered twice on the same grid at the same frames, once through the table and once computing atan16/dist16 per pixel, and the frames are compared pixel by pixel.
+/// This is the evidence behind the re-baselined golden.
 
 #include "doctest.h"
 
@@ -25,13 +24,12 @@ using namespace mm;
 
 namespace {
 
-/// Render one effect for `frames` and return the final buffer. `EffectT` is any effect carrying the
-/// polar-table controls, so the same comparison covers every effect that reads the address.
+/// Render one effect for `frames` and return the final buffer.
+/// `EffectT` is any effect carrying the polar-table controls, so the same comparison covers every effect that reads the address.
 template <typename EffectT>
 std::vector<uint8_t> render(lengthType w, lengthType h, bool useTable, bool wide = false,
                             uint16_t frames = 60, lengthType d = 1, uint8_t mapping = 0) {
-    // RAII, so the override is cleared even if a REQUIRE below exits early: a leaked test clock
-    // freezes time for every test that runs after this one in the same binary.
+    // RAII, so the override is cleared even if a REQUIRE below exits early. A leaked test clock freezes time for every test that runs after this one in the same binary.
     const mm::golden::ScopedTestClock clock(1000);
     Layouts layouts;
     GridLayout grid;
@@ -73,8 +71,8 @@ Diff compare(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b, int t
 
 TEST_CASE("the 16-bit table renders exactly what computing the address per pixel renders") {
     // At full precision the table IS the computation, cached: same angle, same radius, same field.
-    // Anything less would mean the table had introduced an error of its own. Every effect that
-    // reads the address is checked, because each scales and truncates it differently.
+    // Anything less would mean the table had introduced an error of its own.
+    // Every effect that reads the address is checked, because each scales and truncates it differently.
     SUBCASE("PolarNoise") {
         const Diff d = compare(render<PolarNoiseEffect>(64, 64, true, true), render<PolarNoiseEffect>(64, 64, false), 0);
         CHECK(d.worst == 0);
@@ -90,8 +88,7 @@ TEST_CASE("the 16-bit table renders exactly what computing the address per pixel
 }
 
 TEST_CASE("the 8-bit table costs a quantized angle, and nothing else") {
-    // The default trades 2 bytes per pixel for 256 angle steps. That shows up where the field is
-    // steepest and nowhere else, so most of the picture is untouched and no pixel is wildly wrong.
+    // The default trades 2 bytes per pixel for 256 angle steps. That shows up where the field is steepest and nowhere else, so most of the picture is untouched and no pixel is wildly wrong.
     const auto tabled = render<PolarNoiseEffect>(64, 64, true);
     const auto exact  = render<PolarNoiseEffect>(64, 64, false);
     const Diff d = compare(tabled, exact, 8);
@@ -109,9 +106,7 @@ TEST_CASE("an effect still renders when the polar table cannot be built") {
 }
 
 TEST_CASE("the computed fallback keeps the mapping the table would have used") {
-    // A device too tight for the table must show the SAME composition, not a different one. The
-    // fallback computed cylindrical unconditionally at first, so a fixture set to spherical or
-    // radial silently reverted the moment memory ran short: still rendering, quietly wrong.
+    // A device too tight for the table must show the SAME composition, not a different one. The fallback computed cylindrical unconditionally at first, so a fixture set to spherical or radial silently reverted the moment memory ran short: still rendering, quietly wrong.
     for (uint8_t mapping = 0; mapping < 3; mapping++) {
         const auto tabled = render<AuroraEffect>(8, 8, true,  /*wide=*/true, 40, 5, mapping);
         const auto exact  = render<AuroraEffect>(8, 8, false, /*wide=*/false, 40, 5, mapping);

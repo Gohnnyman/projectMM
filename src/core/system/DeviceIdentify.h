@@ -2,16 +2,19 @@
 
 #include <cstdint>
 
-// The device-kind enum + its wire labels, shared by DevicesModule, the interop
-// plugins (core/DevicePlugin.h), persistence, and the UI list. The matching plugin
-// classifies a device straight from its UDP presence packet (the 44-byte WledPacket
-// header, with a projectMM marker distinguishing a peer from a plain WLED), so the
-// classification logic lives with each plugin; this header carries only the small
-// shared vocabulary so the enum doesn't pull in the module.
+/// @defgroup DeviceIdentify What kind a discovered device is
+/// @{
+/// The device-kind enum and its wire labels, the small vocabulary discovery shares.
+///
+/// @moreinfo
+///
+/// It is shared by the devices module, the interop plugins, persistence and the UI list.
+/// A plugin classifies a device straight from its presence packet, so the classification logic lives with each plugin and this header carries only the vocabulary.
+/// Keeping it separate is what stops the enum pulling in the module.
 
 namespace mm {
 
-// What a discovered device is.
+/// What a discovered device is.
 enum class DevType : uint8_t { Generic = 0, ProjectMM = 1, Wled = 2, Hue = 3 };
 
 inline const char* devTypeStr(DevType t) {
@@ -24,4 +27,5 @@ inline const char* devTypeStr(DevType t) {
     return "generic";
 }
 
+/// @}
 }  // namespace mm

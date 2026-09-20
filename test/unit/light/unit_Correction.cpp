@@ -1,4 +1,4 @@
-// @module Correction
+/// @module Correction
 
 #include "doctest.h"
 #include "light/effects/MovingHeadEffect.h"
@@ -13,14 +13,7 @@
 #include <cstdint>
 #include <vector>
 
-// Pins the per-driver output correction: brightness LUT, channel reorder, and RGBW
-// white derivation. The Drivers container owns a Correction, rebuilds it on a
-// brightness/light-preset change, and hands it to each physical driver, which calls
-// apply() per light. These tests pin the transform so a regression in the LUT fill,
-// the preset→role-offset mapping, or the white math fails here. A light is a span of
-// outChannels bytes with a named offset per color role (offRed/offGreen/offBlue, and
-// offWhite for the RGBW family; kAbsent = no white), so the checks read the observable
-// apply() output plus outChannels, not an internal permutation table.
+// Pins the per-driver output correction: brightness LUT, channel reorder, and RGBW white derivation. The Drivers container owns a Correction, rebuilds it on a brightness/light-preset change, and hands it to each physical driver, which calls apply() per light. These tests pin the transform so a regression in the LUT fill, the preset→role-offset mapping, or the white math fails here. A light is a span of outChannels bytes with a named offset per color role (offRed/offGreen/offBlue, and offWhite for the RGBW family; kAbsent = no white), so the checks read the observable apply() output plus outChannels, not an internal permutation table.
 
 using mm::Correction;
 // At brightness=255, the LUT maps every input value to itself (no scaling).
@@ -57,7 +50,7 @@ TEST_CASE("Correction RGB preset: apply is identity at full brightness") {
     CHECK(out[2] == 30);
 }
 
-// GRB preset swaps R and G in the output (G first, then R, then B) — for WS2812-like drivers.
+// GRB preset swaps R and G in the output (G first, then R, then B), for WS2812-like drivers.
 TEST_CASE("Correction GRB preset: channels reordered, 3 output channels") {
     Correction c;
     c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
@@ -146,10 +139,7 @@ TEST_CASE("Correction: rebuild switches output channel count RGB<->RGBW") {
 
 using mm::WhiteMode;
 
-// whiteMode = Min is the default and derives W = min(scaled R,G,B) leaving RGB intact —
-// this is the byte-identical behavior the earlier RGBW tests already pin. whiteMode =
-// None forces the white channel to 0 each frame (for effects that drive W themselves) —
-// written, not skipped, so a reused buffer can't keep a stale value (see the assertion below).
+// whiteMode = Min is the default and derives W = min(scaled R,G,B) leaving RGB intact, this is the byte-identical behavior the earlier RGBW tests already pin. whiteMode = None forces the white channel to 0 each frame (for effects that drive W themselves), written, not skipped, so a reused buffer can't keep a stale value (see the assertion below).
 TEST_CASE("Correction whiteMode None: white channel forced to 0, RGB intact") {
     Correction c;
     c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
@@ -161,14 +151,11 @@ TEST_CASE("Correction whiteMode None: white channel forced to 0, RGB intact") {
     CHECK(out[0] == 10);
     CHECK(out[1] == 20);
     CHECK(out[2] == 30);
-    // None synthesizes no white, but MUST still write the channel to 0 each frame: the driver's
-    // corrected_ buffer is reused frame-to-frame, so leaving W unwritten would keep the stale 77 and
-    // stick the white LED on after a switch to None.
+    // None synthesizes no white, but MUST still write the channel to 0 each frame: the driver's corrected_ buffer is reused frame-to-frame, so leaving W unwritten would keep the stale 77 and stick the white LED on after a switch to None.
     CHECK(out[3] == 0);
 }
 
-// whiteMode = Accurate pulls the common white component OUT of RGB (so the white LED
-// carries it) rather than adding it on top — R,G,B each drop by min(R,G,B).
+// whiteMode = Accurate pulls the common white component OUT of RGB (so the white LED carries it) rather than adding it on top, R,G,B each drop by min(R,G,B).
 TEST_CASE("Correction whiteMode Accurate: white subtracted from RGB") {
     Correction c;
     c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
@@ -185,9 +172,7 @@ TEST_CASE("Correction whiteMode Accurate: white subtracted from RGB") {
 
 using mm::ChannelRole;
 
-// A Custom wiring is described by a channel-role array; rebuild() derives the color
-// offsets from it. Here: white first, then B, G, R — a 4-channel arbitrary order that no
-// curated preset names, proving the role array reaches any wiring.
+// A Custom wiring is described by a channel-role array; rebuild() derives the color offsets from it. Here: white first, then B, G, R, a 4-channel arbitrary order that no curated preset names, proving the role array reaches any wiring.
 TEST_CASE("Correction roles array: arbitrary Custom wiring derives correct offsets") {
     Correction c;
     c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
@@ -210,8 +195,7 @@ TEST_CASE("Correction roles array: arbitrary Custom wiring derives correct offse
     CHECK(out[0] == 30);   // W = min at channel 0
 }
 
-// A color role absent from the array stays kAbsent and apply() doesn't write it — a wiring
-// can carry any SUBSET of color roles (e.g. a 2-channel R,B light with no green channel).
+// A color role absent from the array stays kAbsent and apply() doesn't write it, a wiring can carry any SUBSET of color roles (e.g. a 2-channel R,B light with no green channel).
 TEST_CASE("Correction roles array: absent color role is not emitted") {
     Correction c;
     c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
@@ -228,8 +212,7 @@ TEST_CASE("Correction roles array: absent color role is not emitted") {
     CHECK(out[1] == 30);   // B — green (20) simply not written
 }
 
-// A non-color role (Pan) occupies a channel but apply()'s RGB path ignores it — the channel
-// is left for the fixture role writer, and outChannels still counts it.
+// A non-color role (Pan) occupies a channel but apply()'s RGB path ignores it, the channel is left for the fixture role writer, and outChannels still counts it.
 TEST_CASE("Correction roles array: non-color role reserves a channel apply() skips") {
     Correction c;
     c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
@@ -249,10 +232,7 @@ TEST_CASE("Correction roles array: non-color role reserves a channel apply() ski
     CHECK(out[3] == 30);   // B
 }
 
-// WarmWhite / Yellow / UV are synthesized from RGB off the SAME whiteMode as White, so a fixture
-// carrying them lights up (best-effort approximations, not a color model yet): WW ≈ min(RGB),
-// Yellow ≈ min(R,G), UV ≈ the blue-excess max(0, B-max(R,G)). This is the "all channels burn so
-// you can eyeball a fixture" behavior the finding asked for; a real per-emitter model comes later.
+// WarmWhite / Yellow / UV are synthesized from RGB off the SAME whiteMode as White, so a fixture carrying them lights up (best-effort approximations, not a color model yet): WW ≈ min(RGB), Yellow ≈ min(R,G), UV ≈ the blue-excess max(0, B-max(R,G)). This is the "all channels burn so you can eyeball a fixture" behavior the finding asked for; a real per-emitter model comes later.
 TEST_CASE("Correction: WarmWhite/Yellow/UV synthesised from RGB via whiteMode") {
     Correction c;
     c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
@@ -273,9 +253,7 @@ TEST_CASE("Correction: WarmWhite/Yellow/UV synthesised from RGB via whiteMode") 
     CHECK(out[5] == 100);  // UV = B - max(R,G) = 200 - 100 (fires on the blue excess)
 }
 
-// Under Accurate, White pulls its component OUT of RGB — but the additive stand-ins (WW/Yellow/UV)
-// must approximate from the RGB the effect produced, BEFORE that subtraction, or they collapse. This
-// pins the compute-stand-ins-before-White ordering (a regression would compute them post-subtraction).
+// Under Accurate, White pulls its component OUT of RGB, but the additive stand-ins (WW/Yellow/UV) must approximate from the RGB the effect produced, BEFORE that subtraction, or they collapse. This pins the compute-stand-ins-before-White ordering (a regression would compute them post-subtraction).
 TEST_CASE("Correction Accurate: Yellow/UV use pre-subtraction RGB, not post-White") {
     Correction c;
     c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
@@ -292,16 +270,12 @@ TEST_CASE("Correction Accurate: Yellow/UV use pre-subtraction RGB, not post-Whit
     CHECK(out[0] == 0);            // R after subtraction
     CHECK(out[1] == 60);           // G after subtraction
     CHECK(out[2] == 160);          // B after subtraction
-    // Yellow is computed from the PRE-subtraction RGB. Yellow = min(R,G) = min(40,100) = 40. This is
-    // the case that catches the bug: computed AFTER the subtraction it would be min(0,60) = 0 — the
-    // stand-in would collapse to near-zero exactly when White is active. (UV = B-max(R,G) happens to
-    // be subtraction-invariant since w cancels, so it stays 100 either way — Yellow is the witness.)
+    // Yellow is computed from the PRE-subtraction RGB. Yellow = min(R,G) = min(40,100) = 40. This is the case that catches the bug: computed AFTER the subtraction it would be min(0,60) = 0, the stand-in would collapse to near-zero exactly when White is active. (UV = B-max(R,G) happens to be subtraction-invariant since w cancels, so it stays 100 either way, Yellow is the witness.)
     CHECK(out[4] == 40);           // Yellow, from pre-subtraction RGB (post would be 0 — the regression)
     CHECK(out[5] == 100);          // UV = 200 - max(40,100) = 100
 }
 
-// UV stays dark on a warm color (no blue excess), and every synthesized emitter is forced to 0
-// under whiteMode=None so none holds a stale value — the same reuse-safety the White channel has.
+// UV stays dark on a warm color (no blue excess), and every synthesized emitter is forced to 0 under whiteMode=None so none holds a stale value, the same reuse-safety the White channel has.
 TEST_CASE("Correction: UV dark on warm colors; whiteMode None zeroes WW/Y/UV") {
     Correction c;
     c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
@@ -326,10 +300,7 @@ TEST_CASE("Correction: UV dark on warm colors; whiteMode None zeroes WW/Y/UV") {
     }
 }
 
-// A fixture with a master dimmer channel must actually be LIT. The dimmer is a real output, not
-// a motion role: a moving head whose preset maps Pan/Tilt/Dimmer/RGBW stayed completely dark on
-// the bench with a perfectly correct color map, because nothing ever wrote its dimmer and a
-// linear dimmer at 0 emits nothing. The pre-existing "IRGB" preset had the same defect.
+// A fixture with a master dimmer channel must actually be LIT. The dimmer is a real output, not a motion role: a moving head whose preset maps Pan/Tilt/Dimmer/RGBW stayed completely dark on the bench with a perfectly correct color map, because nothing ever wrote its dimmer and a linear dimmer at 0 emits nothing. The pre-existing "IRGB" preset had the same defect.
 TEST_CASE("A preset's master dimmer channel is driven, so the fixture actually lights") {
     using R = mm::ChannelRole;
     const R roles[] = {R::Pan, R::None, R::Tilt, R::None, R::None, R::Dimmer,
@@ -348,8 +319,7 @@ TEST_CASE("A preset's master dimmer channel is driven, so the fixture actually l
     CHECK(out[9] == 50);       // CH10 blue
 }
 
-// Motion roles are somebody else's to write: apply() must not touch them, or a future pan/tilt
-// writer would fight the color path every frame.
+// Motion roles are somebody else's to write: apply() must not touch them, or a future pan/tilt writer would fight the color path every frame.
 TEST_CASE("Pan and tilt channels are left alone by the color path") {
     using R = mm::ChannelRole;
     const R roles[] = {R::Pan, R::Tilt, R::Dimmer, R::Red, R::Green, R::Blue};
@@ -365,8 +335,7 @@ TEST_CASE("Pan and tilt channels are left alone by the color path") {
     CHECK(out[2] == 255);      // dimmer open
 }
 
-// Motion channels ride the same buffer as color: a wide light carries pan/tilt at the offsets the
-// preset gives them, and apply() hands those bytes to the fixture untouched.
+// Motion channels ride the same buffer as color: a wide light carries pan/tilt at the offsets the preset gives them, and apply() hands those bytes to the fixture untouched.
 TEST_CASE("Motion channels pass through to the fixture, unscaled by brightness") {
     using R = mm::ChannelRole;
     const R roles[] = {R::Pan, R::None, R::Tilt, R::None, R::None, R::Dimmer,
@@ -374,12 +343,10 @@ TEST_CASE("Motion channels pass through to the fixture, unscaled by brightness")
     mm::Correction c;
     c.rebuild(64, roles, 11);          // a QUARTER brightness, to catch any scaling of motion
 
-    // Color lives at the START of a light, whatever the fixture's own channel order; motion sits
-    // at the offset the preset gives it, which is where the effect wrote it.
+    // Color lives at the START of a light, whatever the fixture's own channel order; motion sits at the offset the preset gives it, which is where the effect wrote it.
     uint8_t rgb[11] = {};
     rgb[0] = 255; rgb[1] = 0; rgb[2] = 0;
-    // Motion goes in the LAYER's slots (packed after RGBW), not at the fixture's channel numbers:
-    // the fixture's pan is CH1, which in a layer light is the red byte.
+    // Motion goes in the LAYER's slots (packed after RGBW), not at the fixture's channel numbers: the fixture's pan is CH1, which in a layer light is the red byte.
     rgb[mm::FixtureChannels::kMotionBase + 0] = 200;   // pan
     rgb[mm::FixtureChannels::kMotionBase + 1] = 30;    // tilt
 
@@ -392,8 +359,7 @@ TEST_CASE("Motion channels pass through to the fixture, unscaled by brightness")
     CHECK(out[c.offRed] > 0);
 }
 
-// A fixture with no motion channels must not pay for motion support: the flag is what keeps the
-// hot path a single branch instead of a five-slot scan for every light of every frame.
+// A fixture with no motion channels must not pay for motion support: the flag is what keeps the hot path a single branch instead of a five-slot scan for every light of every frame.
 TEST_CASE("A plain RGB fixture reports no motion channels") {
     using R = mm::ChannelRole;
     const R rgb[] = {R::Red, R::Green, R::Blue};
@@ -406,11 +372,7 @@ TEST_CASE("A plain RGB fixture reports no motion channels") {
     CHECK(c.hasMotion);
 }
 
-// The layer must be wide enough to hold the motion slots BEFORE it allocates, or an effect's
-// setPan() falls outside the light and the fixture never moves. Modules prepare in registration
-// order with Effects ahead of Drivers, so this only works because Drivers publishes the fixture
-// layout in setup(), which runs for every module before any module's prepare(). Bench-observed
-// before the fix: 12 bytes for 4 lights on a cold boot, and a motionless head until a rebuild.
+// The layer must be wide enough to hold the motion slots BEFORE it allocates, or an effect's setPan() falls outside the light and the fixture never moves. Modules prepare in registration order with Effects ahead of Drivers, so this only works because Drivers publishes the fixture layout in setup(), which runs for every module before any module's prepare(). Bench-observed before the fix: 12 bytes for 4 lights on a cold boot, and a motionless head until a rebuild.
 TEST_CASE("A motion preset widens the light enough to carry pan and tilt") {
     using R = mm::ChannelRole;
     const R roles[] = {R::Pan, R::None, R::Tilt, R::None, R::None, R::Dimmer,
@@ -432,14 +394,11 @@ TEST_CASE("A motion preset widens the light enough to carry pan and tilt") {
     CHECK(fc.movable());
 }
 
-// The formations are the point of the moving-head effect: the same sweep, different relationships
-// between the heads. A formation that produced identical aim for every head would be `unison`
-// wearing another name, so each one is pinned by what makes it distinguishable on a real rig.
+// The formations are the point of the moving-head effect: the same sweep, different relationships between the heads. A formation that produced identical aim for every head would be `unison` wearing another name, so each one is pinned by what makes it distinguishable on a real rig.
 TEST_CASE("Each moving-head formation aims the rig differently") {
     mm::Layouts layouts;
     mm::GridLayout grid;
-    // A 1D layout is width 1 by height N: a rig of 4 heads is 1x4, not 4x1. Extrude duplicates
-    // the x=0 column, so the other way round would copy head 0 over every head.
+    // A 1D layout is width 1 by height N: a rig of 4 heads is 1x4, not 4x1. Extrude duplicates the x=0 column, so the other way round would copy head 0 over every head.
     grid.width = 1; grid.height = 4; grid.depth = 1;   // a 4-head chain
     layouts.addChild(&grid);
 
@@ -457,9 +416,7 @@ TEST_CASE("Each moving-head formation aims the rig differently") {
     auto aimOf = [&](uint8_t formation) {
         fx.formation = formation;
         layer.applyState();
-        // BeatPhase's first advance only establishes the time base, and it accumulates from
-        // elapsed() rather than frame count, so the clock has to MOVE or every head sits at
-        // sin(0) = center and the formations are indistinguishable.
+        // BeatPhase's first advance only establishes the time base, and it accumulates from elapsed() rather than frame count, so the clock has to MOVE or every head sits at sin(0) = center and the formations are indistinguishable.
         mm::platform::setTestNowMs(1);
         layer.tick();
         for (int f = 1; f <= 12; f++) { mm::platform::setTestNowMs(1 + f * 400u); layer.tick(); }
@@ -475,7 +432,7 @@ TEST_CASE("Each moving-head formation aims the rig differently") {
     REQUIRE(unison.size() == 4);
     for (size_t i = 1; i < unison.size(); i++) CHECK(unison[i] == unison[0]);
 
-    // Chase delays each head along the sweep, so neighbours differ.
+    // Chase delays each head along the sweep, so neighbors differ.
     const auto chase = aimOf(mm::MovingHeadEffect::kChase);
     bool chaseVaries = false;
     for (size_t i = 1; i < chase.size(); i++) if (chase[i] != chase[0]) chaseVaries = true;
@@ -494,9 +451,7 @@ TEST_CASE("Each moving-head formation aims the rig differently") {
 
 // --- The perceptual curve -------------------------------------------------------------------
 
-// CIE 1931 lightness (CIE 15 / ISO 11664-4) is the default because it models the thing actually
-// being corrected: the eye's response to luminance. The endpoints are what a user notices first, and
-// the shape between them is what makes a fade look even.
+// CIE 1931 lightness (CIE 15 / ISO 11664-4) is the default because it models the thing actually being corrected: the eye's response to luminance. The endpoints are what a user notices first, and the shape between them is what makes a fade look even.
 TEST_CASE("The CIE curve keeps the endpoints and bends the middle down") {
     Correction c;
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
@@ -505,16 +460,14 @@ TEST_CASE("The CIE curve keeps the endpoints and bends the middle down") {
 
     CHECK(c.briLut[0] == 0);       // black stays black
     CHECK(c.briLut[255] == 255);   // and full stays full: the curve redistributes, it does not dim
-    // A mid control position is well under half output, which is the whole point: half the
-    // PERCEIVED brightness is a small fraction of the luminance.
+    // A mid control position is well under half output, which is the whole point: half the PERCEIVED brightness is a small fraction of the luminance.
     CHECK(c.briLut[128] < 80);
     CHECK(c.briLut[128] > 30);
     // Monotonic, or a gradient would band or reverse.
     for (int v = 1; v < 256; v++) CHECK(c.briLut[v] >= c.briLut[v - 1]);
 }
 
-// The guard that stops a fade-out snapping to black. Every curve here crushes the low end at 8
-// bits, so without it the dimmest usable values are simply missing.
+// The guard that stops a fade-out snapping to black. Every curve here crushes the low end at 8 bits, so without it the dimmest usable values are simply missing.
 TEST_CASE("A non-zero value never curves down to black") {
     for (auto curve : {Correction::Curve::Cie, Correction::Curve::Gamma22, Correction::Curve::Gamma28}) {
         Correction c;
@@ -525,8 +478,7 @@ TEST_CASE("A non-zero value never curves down to black") {
     }
 }
 
-// Linear is not a fallback: a downstream device that corrects its own output needs the value on the
-// wire to mean duty cycle, or the picture is corrected twice.
+// Linear is not a fallback: a downstream device that corrects its own output needs the value on the wire to mean duty cycle, or the picture is corrected twice.
 TEST_CASE("Linear is an exact identity at full brightness, for a device that corrects itself") {
     Correction c;
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
@@ -535,8 +487,7 @@ TEST_CASE("Linear is an exact identity at full brightness, for a device that cor
     for (int v = 0; v < 256; v++) CHECK(c.briLut[v] == v);
 }
 
-// Brightness is a LINEAR pre-scale and the curve is applied last. Turning the slider down must not
-// change the shape of the curve, only how far up it reaches.
+// Brightness is a LINEAR pre-scale and the curve is applied last. Turning the slider down must not change the shape of the curve, only how far up it reaches.
 TEST_CASE("Brightness scales before the curve, so black stays black and the top tracks the slider") {
     Correction c;
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
@@ -553,9 +504,7 @@ TEST_CASE("Brightness scales before the curve, so black stays black and the top 
     CHECK(halfTop < fullTop / 2);
 }
 
-// The white emitters are derived in LINEAR light and curved on the way out, so min() and the
-// Accurate subtraction mean what they say. A curve applied before the subtraction would remove an
-// amount that does not correspond to the light the white LED adds back.
+// The white emitters are derived in LINEAR light and curved on the way out, so min() and the Accurate subtraction mean what they say. A curve applied before the subtraction would remove an amount that does not correspond to the light the white LED adds back.
 TEST_CASE("RGBW white is derived in linear light, then curved once") {
     Correction c;
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGBW);

@@ -1,6 +1,6 @@
 # Effects
 
-Every effect, one block each: its preview, what it does, and what each control means: together. An effect writes per-pixel color into its [Layer](moxygen/Layer.md)'s buffer each tick; [modifiers](modifiers.md) reshape the result and a [driver](moxygen/PreviewDriver.md) sends it out. Effects that name an index color read the global palette (the `palette` control on [Drivers](moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio: see the [tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behavior, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../contributing/documentation-standards.md#module-pages).)
+Every effect, one block each: its preview, what it does, and what each control means: together. An effect writes per-pixel color into its [Layer](moxygen/Layer.md)'s buffer each tick; [modifiers](modifiers.md) reshape the result and a [driver](moxygen/PreviewDriver.md) sends it out. Effects that name an index color read the global palette (the `palette` control on [Drivers](moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio: see the [tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behavior, and control descriptions together. How the layout here maps to the source and asset folders is the [folder-structure decision](../../contributing/documentation-standards.md#module-pages).
 
 Effects are built from the shared [power functions](power-functions.md): the drawing, field and motion routines every effect composes; that page lists each one with its callers.
 
@@ -304,6 +304,8 @@ Origin: projectMM original, on the WLED Particle System's firework family by Dam
 
 <a id="fishtank"></a>
 
+Detail: [technical](moxygen/FireworksEffect.md)
+
 ### Fish Tank 💫🎶✨👾 · 2D
 
 <img src="../../assets/light/effects/FishTankEffect.gif" width="300" alt="Fish Tank effect preview">
@@ -387,6 +389,8 @@ Origin: projectMM original
 
 <a id="pacman"></a>
 
+Detail: [technical](moxygen/MovingHeadEffect.md)
+
 ### Pacman 💫🎶✨👾 · 2D
 
 <img src="../../assets/light/effects/PacmanEffect.gif" width="300" alt="Pacman effect preview">
@@ -442,6 +446,8 @@ Colors come from the active palette, one per sprite, held for its whole flight.
 
 Origin: projectMM original
 
+Detail: [technical](moxygen/SpriteFountainEffect.md)
+
 <a id="pong"></a>
 
 ### Pong 💫🎵👾 · 2D
@@ -462,6 +468,8 @@ Uses the global palette.
 Origin: projectMM original, after Atari's Pong (1972)
 
 <a id="aurora"></a>
+
+Detail: [technical](moxygen/PongEffect.md)
 
 ### Aurora 💫🖌️🌫️🎡 · 3D
 
@@ -484,6 +492,8 @@ Origin: projectMM original, in the shader vocabulary Stefan Petrick made recogni
 
 <a id="ballpit"></a>
 
+Detail: [technical](moxygen/AuroraEffect.md)
+
 ### Ballpit 💫✨ · 2D
 
 <img src="../../assets/light/effects/BallpitEffect.gif" width="300" alt="Ballpit effect preview">
@@ -503,6 +513,8 @@ Origin: projectMM original, on the WLED Particle System's ballpit family by Dami
 
 <a id="dissolve"></a>
 
+Detail: [technical](moxygen/BallpitEffect.md)
+
 ### Dissolve 💫 · 2D
 
 <img src="../../assets/light/effects/DissolveEffect.gif" width="300" alt="Dissolve effect preview">
@@ -517,6 +529,8 @@ Two color fields trade places pixel by pixel in an order that looks random but i
 Origin: projectMM original, on the classic dissolve transition in its position-addressed (shader) form
 
 <a id="echo"></a>
+
+Detail: [technical](moxygen/DissolveEffect.md)
 
 ### Echo 💫✨ · 2D
 
@@ -536,6 +550,8 @@ Origin: projectMM original, on video feedback and the standard texture-feedback 
 
 <a id="spectrum"></a>
 
+Detail: [technical](moxygen/EchoEffect.md)
+
 ### Spectrum 💫🎶 · 2D
 
 <img src="../../assets/light/effects/SpectrumEffect.gif" width="300" alt="Spectrum effect preview">
@@ -553,6 +569,8 @@ The asymmetry is the whole point; a symmetric follower either misses the hit or 
 Origin: projectMM original, on standard VU/PPM meter ballistics and WLED's GEQ band mapping
 
 <a id="truchet"></a>
+
+Detail: [technical](moxygen/SpectrumEffect.md)
 
 ### Truchet 💫🖌️ · 2D
 
@@ -573,6 +591,8 @@ Origin: projectMM original, on Sébastien Truchet's 1704 tiling and the standard
 
 <a id="fluid"></a>
 
+Detail: [technical](moxygen/TruchetEffect.md)
+
 ### Fluid 💫🖌️🌊💨 · 3D
 
 <img src="../../assets/light/effects/FluidEffect.gif" width="300" alt="Fluid effect preview">
@@ -591,6 +611,8 @@ On a cube every depth slice is its own medium, so the slices differ. Sized for t
 Origin: projectMM original, after Stam 1999 "Stable Fluids"
 
 <a id="nebula"></a>
+
+Detail: [technical](moxygen/FluidEffect.md)
 
 ### Nebula 💫🖌️💨🌫️ · 3D
 
@@ -612,6 +634,8 @@ Origin: projectMM original, composing the noise-field and curl-flow kernels: the
 
 <a id="trails"></a>
 
+Detail: [technical](moxygen/NebulaEffect.md)
+
 ### Trails 💫🖌️💨🌫️ · 3D
 
 <img src="../../assets/light/effects/TrailsEffect.gif" width="300" alt="Trails effect preview">
@@ -630,6 +654,8 @@ Origin: projectMM original, in the flow-field idiom (4wheeljive's FlowFields, fr
 
 <a id="tunnel"></a>
 
+Detail: [technical](moxygen/TrailsEffect.md)
+
 ### Tunnel 💫🖌️🌫️🎡 · 3D
 
 <img src="../../assets/light/effects/TunnelEffect.gif" width="300" alt="Tunnel effect preview">
@@ -646,6 +672,8 @@ A texture mapped onto the inside of an infinite tube, so the viewer appears to f
 Origin: projectMM original, on the standard demoscene tunnel
 
 <a id="vectorballs"></a>
+
+Detail: [technical](moxygen/TunnelEffect.md)
 
 ### VectorBalls 💫🖌️ · 2D
 
@@ -665,6 +693,8 @@ Origin: projectMM original, on the Amiga-era demoscene vector-ball effect
 
 <a id="waterripple"></a>
 
+Detail: [technical](moxygen/VectorBallsEffect.md)
+
 ### WaterRipple 💫🧬 · 2D
 
 <img src="../../assets/light/effects/WaterRippleEffect.gif" width="300" alt="WaterRipple effect preview">
@@ -683,6 +713,8 @@ Distinct from [Ripples](#ripples), which draws clean concentric circles; this be
 Origin: projectMM original, on Hugo Elias's water surface algorithm
 
 <a id="raymarch"></a>
+
+Detail: [technical](moxygen/WaterRippleEffect.md)
 
 ### Raymarch 💫🖌️ · 2D
 
@@ -723,6 +755,8 @@ Origin: projectMM original, after Stefan Petrick's polar/noise vocabulary and I�
 
 <a id="sdfshapes"></a>
 
+Detail: [technical](moxygen/PolarNoiseEffect.md)
+
 ### SdfShapes 💫🖌️ · 2D
 
 <img src="../../assets/light/effects/SdfShapesEffect.gif" width="300" alt="SdfShapes effect preview">
@@ -741,6 +775,8 @@ Measured on an ESP32-S3 at 128×128: 20 fps, 728 cycles/pixel using the true-dis
 Origin: projectMM original, after Iñigo Quilez's distance-function catalogue and polynomial smooth-minimum (iquilezles.org)
 
 <a id="solid"></a>
+
+Detail: [technical](moxygen/SdfShapesEffect.md)
 
 ### Solid 💫 · 3D
 
@@ -859,7 +895,7 @@ Detail: [technical](moxygen/TextEffect.md)
 
 <img src="../../assets/light/effects/GameOfLifeEffect.gif" width="300" alt="GameOfLife effect preview">
 
-Conway's cellular automaton generalised to 2D/3D: selectable rulesets (+ custom `B#/S#`), cells that inherit a neighbor's palette color on birth, optional green→red age coloring, a dead-cell blur fading toward the background color, toroidal `wrap`, a 1.5 s settle pause, and 3-CRC stasis self-respawn (R-pentomino/glider) when the board goes static.
+Conway's cellular automaton generalized to 2D and 3D, with selectable rulesets and custom `B#/S#`. Cells inherit a neighbor's palette color on birth, dead cells blur toward the background, and the board wraps toroidally. A stasis check respawns a pentomino or glider when the board goes static.
 
 - `backgroundColorR` / `G` / `B`: the color dead cells fade toward.
 - `ruleset`: the birth and survive rule: Conway, HighLife, Maze and others.
@@ -1122,6 +1158,23 @@ Detail: [technical](moxygen/NoiseEffect.md)
 
 ## projectMM-native effects
 
+<a id="moonlive"></a>
+
+### MoonLive 📝 · any
+
+<img src="../../assets/light/effects/MoonLiveEffect.gif" width="300" alt="MoonLive scripted effect preview">
+
+An effect you write as text on the running device, compiled to native code on the next tick. Pick a script from the library or write your own, and it renders at the speed of a compiled effect. The language is [MoonLive](moonlive.md).
+
+- `script`: which `.mle` file runs, picked from the library and edited here.
+- Every control the script declares, editable live without a recompile.
+
+Origin: projectMM original, on the native-codegen approach of [ESPLiveScript](https://github.com/hpwit/ESPLiveScript) by Yves Bazin
+
+Detail: [technical](moxygen/MoonLiveEffect.md)
+
+[Tests](../../reference/tests/unit-tests.md#moonlive)
+
 <a id="audiospectrum"></a>
 
 ### AudioSpectrum 💫🎶
@@ -1155,6 +1208,8 @@ Origin: projectMM original, the two-buffer water simulation (Gomez 2000) driven 
 
 <a id="vumeters"></a>
 
+Detail: [technical](moxygen/BeatRipplesEffect.md)
+
 ### VuMeters 💫🎶🖌️ · 3D
 
 <img src="../../assets/light/effects/VuMetersEffect.gif" width="300" alt="VuMeters effect preview">
@@ -1172,6 +1227,8 @@ Origin: projectMM original, on the VU ballistics of IEC 60268-17
 
 <a id="radialspectrum"></a>
 
+Detail: [technical](moxygen/VuMetersEffect.md)
+
 ### RadialSpectrum 💫🎶🖌️🎡 · 3D
 
 <img src="../../assets/light/effects/RadialSpectrumEffect.gif" width="300" alt="RadialSpectrum effect preview">
@@ -1187,6 +1244,8 @@ The spectrum as ripples. Each band owns a sector around the center, mirrored lef
 Origin: projectMM original, the radial spectrogram on `PolarLut` and the onset detector
 
 <a id="demoreel"></a>
+
+Detail: [technical](moxygen/RadialSpectrumEffect.md)
 
 ### DemoReel 💫 · 3D
 

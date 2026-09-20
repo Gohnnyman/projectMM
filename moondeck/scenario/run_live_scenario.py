@@ -1035,7 +1035,7 @@ def main():
 
     if args.update_contract and not args.reason:
         parser.error("--update-contract requires --reason "
-                     "(e.g. --reason 'tightened after Layer optimisation')")
+                     "(e.g. --reason 'tightened after Layer optimization')")
 
     client = Client(args.host)
 
