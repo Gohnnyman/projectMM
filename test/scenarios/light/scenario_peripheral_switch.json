@@ -250,7 +250,7 @@
     },
     {
       "name": "i80-doublebuffer-on",
-      "description": "i80 supports the async double-buffer (esp_lcd has a real transaction queue) — turn it on.",
+      "description": "i80 supports the async double-buffer (esp_lcd has a real transaction queue), turn it on.",
       "op": "set_control",
       "id": "ParallelLed",
       "key": "doubleBuffer",
@@ -492,7 +492,7 @@
     },
     {
       "name": "moonI80-doublebuffer-off",
-      "description": "Explicitly turn doubleBuffer off on MoonI80 (a no-op behaviorally — it was already forced single — but exercises the control write on the hidden control).",
+      "description": "Explicitly turn doubleBuffer off on MoonI80 (a no-op behaviorally, it was already forced single, but exercises the control write on the hidden control).",
       "op": "set_control",
       "id": "ParallelLed",
       "key": "doubleBuffer",
@@ -750,7 +750,7 @@
     },
     {
       "name": "switch-back-i80",
-      "description": "Round-trip back to i80 — the driver must return to a clean, running state after the whole cycle.",
+      "description": "Round-trip back to i80, the driver must return to a clean, running state after the whole cycle.",
       "op": "set_control",
       "id": "ParallelLed",
       "key": "peripheral",

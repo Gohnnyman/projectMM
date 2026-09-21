@@ -125,6 +125,9 @@ const clampDot = (v) => Math.min(DOT_MAX, Math.max(DOT_MIN, Number.isFinite(v) ?
 let dotScale_ = clampDot(parseFloat(localStorage.getItem("mm_preview_dot")));
 let resetLayout_ = null;     // set by setupLayout(): restores docked/PiP state to defaults
 let previewBox_ = null;      // {x,y,z} bounding-box extent for camera auto-fit
+let previewPos_ = null;      // the table's raw (x,y,z) bytes: what the stride test reads
+let previewTableStride_ = 1; // the stride the CACHED table was built at, the finest available
+let previewEpochKey_ = 0;    // the epoch the cached table belongs to, keying the upsample map
 let lineProgram = null;      // separate program for the wireframe bounding box
 let lineLocs = null;
 let lineBuffer = null;
@@ -631,11 +634,12 @@ function parsePreviewCoords(view, buf) {
         coords[i * 3 + 1] = (pos[i * 3 + 1] / maxDim) - 0.5 * by / maxDim;
         coords[i * 3 + 2] = (pos[i * 3 + 2] / maxDim) - 0.5 * bz / maxDim;
     }
-    // CACHE the table per (epoch, stride): a stride change back to a cached rung costs zero table
-    // traffic, the lean channel's core idea. Tables from dead epochs are dropped (the device
-    // renumbered the world); browser memory for one epoch's whole ladder is a few hundred KB.
+    // ONE table per epoch, the finest the device will serve. Every coarser stride is derived from
+    // it here rather than fetched, so a stride change costs no table traffic at any rung and the
+    // preview keeps the layout's full extent at every detail level. Positions are static for an
+    // epoch, so this is also less traffic than a table per rung: one fetch, not three or four.
     for (const k of tableCache_.keys()) if (!k.startsWith(epoch + ":")) tableCache_.delete(k);
-    tableCache_.set(epoch + ":" + stride, { coords, count, maxDim, bx, by, bz });
+    tableCache_.set(epoch + ":" + stride, { coords, count, maxDim, bx, by, bz, stride, pos: new Uint8Array(pos) });
     activateTable(epoch, stride);
     // Draw the geometry NOW, dark, so a fresh page shows the layout the instant the table arrives,
     // not only once the first color frame lands. Color frames then light it.
@@ -645,15 +649,58 @@ function parsePreviewCoords(view, buf) {
 // Make a cached table the rendering one. Returns false when the cache misses (the caller then
 // asks the device for it: the pull model).
 function activateTable(epoch, stride) {
-    const t = tableCache_.get(epoch + ":" + stride);
+    // Any cached table for this epoch serves every stride: the colors are mapped onto it below.
+    const t = tableCache_.get(epoch + ":" + stride)
+           || [...tableCache_.keys()].filter(k => k.startsWith(epoch + ":"))
+                .map(k => tableCache_.get(k))[0];
     if (!t) return false;
     previewCoords_ = t.coords;
     previewCoordCount_ = t.count;
     previewMaxDim_ = t.maxDim;
     previewBox_ = { x: t.bx, y: t.by, z: t.bz };
+    previewPos_ = t.pos;
+    previewTableStride_ = t.stride ?? 1;
+    previewEpochKey_ = epoch;
     previewStride_ = stride;
     updatePreviewStatus();
     return true;
+}
+
+// Which table point each color in a stride-`s` frame belongs to. The device keeps a light when
+// `x % s == 0 && y % s == 0 && z % s == 0` (PreviewDriver::buildCoordTable), walking z, then y,
+// then x, so running the same test over the table's own positions reproduces its order exactly.
+// Every point then takes the color of the kept light leading its block: the layout stays whole
+// and only the detail coarsens. Cached per (table, stride), since it changes only when one does.
+let upsampleCache_ = new Map();
+function upsampleMap(stride) {
+    const base = previewTableStride_ || 1;
+    const n = previewCoordCount_;
+    if (!previewPos_ || stride <= base) return null;   // already the finest the device serves
+    const key = previewEpochKey_ + ":" + base + ":" + stride;
+    const hit = upsampleCache_.get(key);
+    if (hit && hit.length === n) return hit;
+    // The kept lights, in the device's emit order.
+    const kept = [];
+    for (let i = 0; i < n; i++) {
+        const x = previewPos_[i * 3], y = previewPos_[i * 3 + 1], z = previewPos_[i * 3 + 2];
+        if (x % stride === 0 && y % stride === 0 && z % stride === 0) kept.push(i);
+    }
+    // Each point to the nearest kept light at or before it on each axis: its block's leader.
+    const map = new Uint32Array(n);
+    const slot = new Map();
+    for (let k = 0; k < kept.length; k++) {
+        const i = kept[k];
+        slot.set(previewPos_[i * 3] + "," + previewPos_[i * 3 + 1] + "," + previewPos_[i * 3 + 2], k);
+    }
+    for (let i = 0; i < n; i++) {
+        const bxq = previewPos_[i * 3] - (previewPos_[i * 3] % stride);
+        const byq = previewPos_[i * 3 + 1] - (previewPos_[i * 3 + 1] % stride);
+        const bzq = previewPos_[i * 3 + 2] - (previewPos_[i * 3 + 2] % stride);
+        const k = slot.get(bxq + "," + byq + "," + bzq);
+        map[i] = k === undefined ? 0 : k;
+    }
+    upsampleCache_ = new Map([[key, map]]);   // one epoch, one stride in flight: keep the last
+    return map;
 }
 
 // Ask the device for the coordinate table ([0x52][stride]), at most once per half second: the
@@ -682,16 +729,31 @@ function renderPreviewFrame(view, buf) {
     // table traffic); a miss asks the device for the positions and skips this frame, the pull
     // model's whole geometry story.
     if ((epoch !== lastEpoch_ || stride !== previewStride_) && !activateTable(epoch, stride)) {
-        requestTable(stride);
+        // The FINEST table, once per epoch: every coarser stride is derived from it here.
+        requestTable(1);
         return;
     }
-    if (count !== previewCoordCount_) return;   // mid-rebuild mismatch: the next table realigns
+    previewStride_ = stride;
+    const up = upsampleMap(stride);
+    // A frame carries one color per kept light; without a map the two counts must agree.
+    if (!up && count !== previewCoordCount_) return;   // mid-rebuild mismatch: the next table realigns
     const rgb = new Uint8Array(buf, 9);
     // Kept for drawBeams: a moving head's beam is the color the fixture is EMITTING, so the beam
     // pass needs the same frame the dots were drawn from. A COPY, because this outlives the
     // message: drawBeams reads it on every orbit redraw, and a view onto a recycled receive
     // buffer would color beams from whatever arrived next.
-    previewRgb_ = new Uint8Array(rgb);
+    // UPSAMPLE: one color per kept light becomes one per table point, each taking its block's.
+    // The layout keeps its full extent and every light stays on screen; only the detail coarsens.
+    if (up) {
+        const full = new Uint8Array(previewCoordCount_ * 3);
+        for (let i = 0; i < previewCoordCount_; i++) {
+            const src = up[i] * 3;
+            full[i * 3] = rgb[src]; full[i * 3 + 1] = rgb[src + 1]; full[i * 3 + 2] = rgb[src + 2];
+        }
+        previewRgb_ = full;
+    } else {
+        previewRgb_ = new Uint8Array(rgb);
+    }
     // The first aim frame changes what the scene CONTAINS: beams extend well past the fixtures,
     // and a fit measured before they existed frames only the heads. Re-arm the auto-fit once so
     // the next one accounts for them; `sawAim_` keeps it to once, not once per aim frame.
@@ -702,7 +764,7 @@ function renderPreviewFrame(view, buf) {
     // showed beams on every light. The device alternates aim and color frames, so a couple of
     // color frames with no aim between them means the aim stream has ended.
     if (previewAim_ && ++framesSinceAim_ > kAimStaleFrames) { previewAim_ = null; sawAim_ = false; }
-    drawLights(rgb);
+    drawLights(previewRgb_);
     measureFrameRate();
 }
 

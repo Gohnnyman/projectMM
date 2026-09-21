@@ -2,9 +2,7 @@
 
 High-performance LED &amp; DMX lighting control for ESP32 and beyond.
 
-[:material-flash: Flash an ESP32 from your browser](/projectMM/install/){ .md-button .md-button--primary }
-&nbsp;
-[:material-github: GitHub](https://github.com/MoonModules/projectMM){ .md-button }
+[:material-flash: Flash an ESP32 from your browser](/projectMM/install/){ .md-button .md-button--primary } &nbsp; [:material-github: GitHub](https://github.com/MoonModules/projectMM){ .md-button }
 
 !!! tip "New here?"
     The [Getting started](gettingstarted.md) guide walks you from a blank ESP32 to your first running light show, step by step, with no build tools required.

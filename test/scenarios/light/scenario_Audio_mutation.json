@@ -48,7 +48,7 @@
     },
     {
       "name": "fix-layers",
-      "description": "Effects: the top-level container the Layer hangs under — the standard tree the live device boots with. A pinned single Layer (parent_id-less, props.layouts) is the older shape the host runner tolerates but the device's live reachability check does not.",
+      "description": "Effects: the top-level container the Layer hangs under, the standard tree the live device boots with. A pinned single Layer (parent_id-less, props.layouts) is the older shape the host runner tolerates but the device's live reachability check does not.",
       "op": "add_module",
       "id": "Effects",
       "type": "Effects",
@@ -490,7 +490,7 @@
     },
     {
       "name": "remove-audio-module",
-      "description": "Remove the mic while the consumer is STILL live. The consumer must fall back to AudioService::latestFrame()'s static silence — no dangling pointer, no crash. This is the robustness rule's hardest case for this pair.",
+      "description": "Remove the mic while the consumer is STILL live. The consumer must fall back to AudioService::latestFrame()'s static silence, no dangling pointer, no crash. This is the robustness rule's hardest case for this pair.",
       "op": "remove_module",
       "id": "Audio"
     },
@@ -585,7 +585,7 @@
     },
     {
       "name": "remove-audio-consumer",
-      "description": "Remove the orphaned consumer too — clean teardown, pipeline still live.",
+      "description": "Remove the orphaned consumer too, clean teardown, pipeline still live.",
       "op": "remove_module",
       "id": "Vol"
     },

@@ -552,7 +552,14 @@ private:
     static bool presetBuildable(const EthPreset& p) {
         if (p.type == 0) return true;                       // Custom, which names no PHY
         if (p.type == 3) return platform::hasEthW5500;      // SPI, a separate driver
-        return !platform::hasEthW5500;                      // the internal EMAC drives the rest
+        if (!platform::hasEthW5500) {
+            // A preset carries a PIN MAP as well as a PHY, so one the chip cannot wire persists pins that reach nothing. The desktop previews the catalog and sees them all.
+            constexpr bool knownChip = platform::isEsp32P4 || platform::isEsp32S31;
+            if (p.type == 2) return !knownChip || platform::isEsp32P4;    // IP101: the P4's
+            if (p.type == 4) return !knownChip || platform::isEsp32S31;   // YT8531 RGMII: the S31's
+            return !platform::isEsp32P4 && !platform::isEsp32S31;         // LAN8720: classic RMII
+        }
+        return false;
     }
 
     /// Offer the presets this build can drive, re-pointing the selection by label.

@@ -8,7 +8,7 @@ The device's fixed infrastructure: identity, network, provisioning, firmware, an
 
 ### System
 
-The device's identity and vitals: name (behind mDNS `<name>.local`, the SoftAP SSID, the DHCP hostname), uptime, heap, and per-module footprint reporting. Its fixed inspection children (Tasks, I2C scan) hang beneath it.
+The device's identity and vitals: name (behind mDNS `<name>.local`, the SoftAP SSID, the DHCP hostname), uptime, heap and the tick it renders at. Its fixed inspection children (Tasks, I2C scan) hang beneath it.
 
 <img src="../../assets/core/SystemModule.png" width="300" alt="System module controls">
 
@@ -16,7 +16,9 @@ The device's identity and vitals: name (behind mDNS `<name>.local`, the SoftAP S
 - `deviceModel`: the board model (drives the installer catalog entry).
 - `mode`: how much of the UI is shown, `user`, `expert` (🎚️) or `developer` (🔧), cumulative.
 - `logLevel`: serial verbosity, defaulting to Warn. The first 60 s always logs at Info.
-- read-only vitals: `uptime`, `fps`, `heap`, `psram`, `flash`, `chip`, and per-module footprint.
+- read-only rate: `uptime`, `fps`, `tickTimeUs`.
+- read-only memory: `heap`, `psram`, `maxBlock`, `flash`.
+- read-only identity: `mac`, `chip`, `cpu`, `sdk`, `bootReason`.
 
 Detail: [technical](moxygen/SystemModule.md)
 
@@ -30,12 +32,12 @@ WiFi / Ethernet connectivity, static-IP configuration, RSSI and TX-power reporti
 
 <img src="../../assets/core/NetworkModule.png" width="300" alt="Network module controls">
 
-- `mode`: WiFi / Ethernet / off.
 - `ssid` / `password`: WiFi credentials.
 - `mDNS`: the `<name>.local` hostname.
-- `addressing`: DHCP or static; static exposes IP / gateway / subnet / DNS fields.
-- `ethType` / `ethPhyAddr` / `ethRstGpio` / …, Ethernet PHY configuration.
-- read-only: `rssi` (dBm), `txPower` (dBm).
+- `addressing`: DHCP or static; static reveals `ip`, `gateway`, `subnet` and `dns`.
+- `ethBoard`: the board's Ethernet wiring by name; `Custom` exposes every pin.
+- `txPowerSetting`: caps the radio's transmit power for a board that browns out; 0 lifts it.
+- read-only: `mode`, the interface in use, with `rssi` / `txPower` (dBm) on a live radio.
 
 Detail: [technical](moxygen/NetworkModule.md)
 

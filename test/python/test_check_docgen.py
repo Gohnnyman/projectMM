@@ -951,6 +951,26 @@ def test_the_ratchet_refuses_a_rule_that_rose_against_the_committed_report(monke
     assert counts is None or not any(k.startswith("`") for k in counts), counts
 
 
+def test_the_ratchet_catches_a_rule_the_baseline_never_had(monkeypatch):
+    """A rule at zero is ABSENT from the report, so the baseline has no row for it. Iterating the
+    baseline alone let such a rule rise silently while the total fell, which is the same hole the
+    per-rule half exists to close. The comparison is over the union, a missing baseline reading
+    as zero."""
+    import check_docgen
+    base = {"(total)": 10, "multi-line comment blocks": 4}
+    monkeypatch.setattr(check_docgen, "_committed_counts", lambda: base)
+
+    cpp = "src/core/x.cpp"
+    # A warning-side rule with no baseline row. (A hard wrap cannot serve here: it blocks
+    # everywhere by design, so it is an error and never enters the warning column.)
+    fresh = "file opens with // rather than ///"
+    assert check_docgen._rule_label(check_docgen._rule_name(fresh)) not in base
+
+    rose = check_docgen._ratchet([(cpp, fresh)] * 5)
+    assert rose == [("files opening with //", 0, 5)], \
+        f"a rule absent from the baseline must still only shrink: {rose}"
+
+
 def test_a_hard_wrap_blocks_in_an_implementation_file_too():
     """The one rule staged the OTHER way. Every other `.cpp` finding warns while the sweep runs,
     but the tree is at ZERO hard wraps, so there is nothing left to stage and the exemption only

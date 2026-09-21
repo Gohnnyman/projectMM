@@ -13,7 +13,7 @@
     "Drivers",
     "PreviewDriver"
   ],
-  "description": "Stack TWO modifiers on one Layer (Region then Multiply) and verify the chain composes live end-to-end — the capability the old single-modifier engine couldn't do. Prepares its own canvas: Layout(Grid 32x32) + Layer + NoiseEffect + Region(0..50) + Multiply(2x), measures the composite, then adds a third (Checkerboard mask) and measures again, then removes the middle modifier and measures — exercising add/remove on a multi-modifier chain. A broken fold (null buffer, wrong light count, crash on a disabled/removed stage) shows up as a failed measure. The fold composition + order semantics are pinned by unit_Layer_modifier_chain; this is the live end-to-end gate.",
+  "description": "Stack TWO modifiers on one Layer (Region then Multiply) and verify the chain composes live end-to-end, the capability the old single-modifier engine couldn't do. Prepares its own canvas: Layout(Grid 32x32) + Layer + NoiseEffect + Region(0..50) + Multiply(2x), measures the composite, then adds a third (Checkerboard mask) and measures again, then removes the middle modifier and measures, exercising add/remove on a multi-modifier chain. A broken fold (null buffer, wrong light count, crash on a disabled/removed stage) shows up as a failed measure. The fold composition + order semantics are pinned by unit_Layer_modifier_chain; this is the live end-to-end gate.",
   "fixture": [
     {
       "name": "fix-layouts",
@@ -153,7 +153,7 @@
     },
     {
       "name": "add-mask",
-      "description": "Add a third modifier (Checkerboard mask) on top of the chain — a 3-deep fold. Measure that the deeper chain still renders.",
+      "description": "Add a third modifier (Checkerboard mask) on top of the chain, a 3-deep fold. Measure that the deeper chain still renders.",
       "op": "add_module",
       "id": "MASK",
       "type": "CheckerboardModifier",
@@ -213,7 +213,7 @@
     },
     {
       "name": "remove-middle",
-      "description": "Remove the middle modifier (Multiply) — the chain re-folds with Region then Checkerboard, no stale state. Measure.",
+      "description": "Remove the middle modifier (Multiply), the chain re-folds with Region then Checkerboard, no stale state. Measure.",
       "op": "remove_module",
       "id": "MULT",
       "measure": true,
@@ -244,7 +244,7 @@
     },
     {
       "name": "add-live-rotate",
-      "description": "Add a DYNAMIC Rotate on top of the static chain — its modifyLive runs the per-frame remap pass over the composed buffer. Verifies a static chain + a live modifier coexist (the buffer is remapped each frame on top of the baked Region/Checkerboard mapping) without a crash or null buffer.",
+      "description": "Add a DYNAMIC Rotate on top of the static chain, its modifyLive runs the per-frame remap pass over the composed buffer. Verifies a static chain + a live modifier coexist (the buffer is remapped each frame on top of the baked Region/Checkerboard mapping) without a crash or null buffer.",
       "op": "add_module",
       "id": "ROT",
       "type": "RotateModifier",

@@ -86,8 +86,12 @@ struct CaptureBroadcaster : mm::BinaryBroadcaster {
     int coordCount() const { return lastCoord.size() >= 5 ? static_cast<int>(u32le(lastCoord, 1)) : -1; }
     int frameCount() const { return lastFrame.size() >= 5 ? static_cast<int>(u32le(lastFrame, 1)) : -1; }
     int coordStride() const { return lastCoord.size() >= 11 ? lastCoord[8] | (lastCoord[9] << 8) : -1; }
+    // The color frame's own stride, which the link paces independently of the table's.
+    int frameStride() const { return lastFrame.size() >= 9 ? lastFrame[5] | (lastFrame[6] << 8) : -1; }
     int coordEpoch() const { return lastCoord.size() >= 11 ? lastCoord[10] : -1; }
     int frameEpoch() const { return lastFrame.size() >= 9 ? lastFrame[7] : -1; }
+    // The lights the BODY carries, which must equal what the header advertises or the browser misreads every frame.
+    int frameBodyLights() const { return lastFrame.size() >= 9 ? static_cast<int>((lastFrame.size() - 9) / 3) : -1; }
     int frameDrops() const { return lastFrame.size() >= 9 ? lastFrame[8] : -1; }
 
 private:
@@ -211,7 +215,7 @@ TEST_CASE("PreviewDriver small grid sends all lights exactly") {
     CHECK(rig.cap.coordStride() == 1);
 }
 
-// A large layout is SPATIALLY downsampled (a regular per-axis lattice, not every-Nth-flat-index) so the payload fits the send-buffer cap without the diagonal moiré that linear stride produced on a grid whose width didn't divide the stride. The wire "stride" field carries the per-axis lattice/downscale factor (color k still maps 1:1 to coord k).
+// A large layout is SPATIALLY downsampled on a regular per-axis lattice, and the COLOR frame carries that stride while the coordinate table stays whole, so the browser maps each color onto its block.
 TEST_CASE("PreviewDriver downsamples on a regular spatial lattice when a client asks coarser") {
     // There is NO display cap: a host build (unlimited memory) serves any layout at full detail, and coarseness exists only as a client REQUEST. Ask for 1/2 and pin the lattice geometry. The extent (199) is ≤255/axis, so positions are sent at EXACT integer grid coordinates (no byte-scaling rounding), letting the regularity check below compare true lattice positions.
     mm::GridLayout g;
@@ -222,10 +226,12 @@ TEST_CASE("PreviewDriver downsamples on a regular spatial lattice when a client 
     mm::platform::setTestNowMs(0);
     rig.produce();
 
-    CHECK(rig.cap.coordStride() == 2);            // served exactly as asked
-    CHECK(rig.cap.coordCount() == 100 * 100);     // ceil(200/2) per axis
+    // The FRAME carries the requested stride; the table stays full so the browser can upsample.
+    CHECK(rig.cap.frameStride() == 2);            // served exactly as asked
+    CHECK(rig.cap.frameCount() == 100 * 100);     // ceil(200/2) per axis
+    CHECK(rig.cap.coordStride() == 1);            // geometry is sent once, at full detail
+    CHECK(rig.cap.coordCount() == 200 * 200);     // every light, whatever the link asks
     CHECK(rig.cap.coordCount() > 0);
-    CHECK(rig.cap.coordCount() == rig.cap.frameCount());  // table + RGB agree (lockstep)
 
     // Regular lattice check: every sent X coordinate is a multiple of the same step, and so is every Y, i.e. the kept points sit on a grid, with NO per-row column drift (the diagonal-streak bug). Read the packed u8 positions back from the coord message.
     const auto& cd = rig.cap.lastCoord;
@@ -387,9 +393,10 @@ TEST_CASE("PreviewDriver dense downsample packs colors by closed-form index, in 
     mm::platform::setTestNowMs(2000); rig.preview->tick();
     mm::platform::setTestNowMs(0);
     rig.produce();                                     // ask for + receive the table (pull model)
-    const int s = rig.cap.coordStride();
+    // The COLOR frame strides; the table stays whole for the browser to upsample onto.
+    const int s = rig.cap.frameStride();
     REQUIRE(s == 3);                                   // served exactly as asked
-    const int kept = rig.cap.coordCount();
+    const int kept = rig.cap.frameCount();
     REQUIRE(kept == (width + s - 1) / s);              // ceil(width/s) — closed-form count
 
     // Paint the 2nd kept column (x = s) bright green; the rest black.
@@ -510,4 +517,39 @@ TEST_CASE("A rig with no moving heads sends no aim message at all") {
     rig.cap.lastFrame.clear();
     CHECK_FALSE(rig.preview->sendAim());                   // declines before doing any work
     CHECK(rig.cap.lastFrame.empty());                      // and nothing reached the wire
+}
+
+// Geometry is sent once per epoch at full resolution and colors carry the link's stride, so a slow link shows the whole layout at less detail rather than fewer lights.
+TEST_CASE("PreviewDriver sends the table whole and strides only the colors") {
+    mm::GridLayout g;
+    g.width = 16; g.height = 16; g.depth = 1;
+    PreviewRig rig(&g);
+    rig.cap.ask(4);                                   // a slow link: 1/4
+    mm::platform::setTestNowMs(2000); rig.preview->tick();
+    mm::platform::setTestNowMs(0);
+    rig.produce();
+
+    CHECK(rig.cap.coordStride() == 1);                // every light's position, once
+    CHECK(rig.cap.coordCount() == 16 * 16);
+    CHECK(rig.cap.frameStride() == 4);                // the link's pacing, on the colors alone
+    CHECK(rig.cap.frameCount() == 4 * 4);             // ceil(16/4) per axis
+    // The whole point: the browser can still draw every light, because it has every position.
+    CHECK(rig.cap.coordCount() > rig.cap.frameCount());
+}
+
+// The SPARSE path at a coarse stride: a mapped layout gathers through the cached index, built at the TABLE's stride, so a coarser frame must filter it or the body and header disagree.
+TEST_CASE("PreviewDriver strides a mapped layout's colors without re-walking the layout") {
+    mm::SphereLayout sph;
+    sph.radius = 8;
+    PreviewRig rig(&sph);
+    rig.cap.ask(2);                                   // a slow link, on a layout with no dense grid
+    mm::platform::setTestNowMs(2000); rig.preview->tick();
+    mm::platform::setTestNowMs(0);
+    rig.produce();
+
+    CHECK(rig.cap.coordStride() == 1);                // the table stays whole
+    CHECK(rig.cap.frameStride() == 2);                // the frame carries the link's stride
+    // The header's count IS the body's: a mismatch is the bug this pins.
+    CHECK(rig.cap.frameCount() < rig.cap.coordCount());
+    CHECK(rig.cap.frameBodyLights() == rig.cap.frameCount());
 }

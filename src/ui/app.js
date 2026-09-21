@@ -993,6 +993,7 @@ function uiMode() {
 function renderCards() {
     const main = document.getElementById("main");
     if (!main || !state) return;
+    renderedMode_ = uiMode();   // what these cards are being built for
     main.innerHTML = "";
 
     // One root visible at a time: render only the selected root's subtree.
@@ -1838,6 +1839,9 @@ function createCard(mod, depth) {
         stats.addEventListener("mouseleave", hide);
         stats.addEventListener("touchstart", (e) => { e.preventDefault(); show(); });
         stats.addEventListener("touchend", hide);
+        // A cancelled touch (a scroll takes over, a call arrives) fires no touchend, which left
+        // the peek latched until the next gesture.
+        stats.addEventListener("touchcancel", hide);
         title.appendChild(stats);
     }
 
@@ -2563,8 +2567,15 @@ function createControl(moduleName, moduleType, ctrl) {
     // get a distinct treatment so they read as a different tier: a left accent stripe + muted label.
     // One class per tier, because the glyph says WHICH mode reveals it: a reader in expert mode
     // meets both marks and the developer one tells them what they are still not seeing.
-    if ((ctrl.minMode | 0) === 1) row.classList.add("control-expert");
-    else if ((ctrl.minMode | 0) >= 2) row.classList.add("control-developer");
+    // The glyph is CSS ::after content, which a screen reader does not reliably announce, so the
+    // tier also rides a title: the same fact reaches a reader who cannot see the mark.
+    if ((ctrl.minMode | 0) === 1) {
+        row.classList.add("control-expert");
+        row.title = "Expert mode control";
+    } else if ((ctrl.minMode | 0) >= 2) {
+        row.classList.add("control-developer");
+        row.title = "Developer mode control";
+    }
     // A switch-row control renders as a strip like an encoder or fader, so switch N sits in the
     // same column as encoder N and fader N: a surface reads down a channel, not across a list.
     if (ctrl.switchRow) row.classList.add("control-switch");
@@ -2956,6 +2967,7 @@ function createControl(moduleName, moduleType, ctrl) {
             peek.addEventListener("mouseleave", hide);
             peek.addEventListener("touchstart", (e) => { e.preventDefault(); show(); });
             peek.addEventListener("touchend", hide);
+            peek.addEventListener("touchcancel", hide);   // a cancelled touch fires no touchend
             row.appendChild(peek);
             break;
         }
@@ -4461,8 +4473,21 @@ function setText(el, text) {
     if (el && el.textContent !== text) el.textContent = text;
 }
 
+// The mode the cards were BUILT at. `uiMode()` decides which controls and which stats line a card
+// gets, so a change to it reshapes the DOM rather than a value in it: the one case the no-rebuild
+// contract cannot patch. Tracked here because the change can come from another client entirely.
+let renderedMode_ = null;
+
 function updateValues() {
     if (!state || !state.modules) return;
+    // A mode change adds or removes rows, so patching values cannot express it: rebuild once.
+    const mode = uiMode();
+    if (renderedMode_ !== null && renderedMode_ !== mode) {
+        renderedMode_ = mode;
+        renderCards();
+        return;
+    }
+    renderedMode_ = mode;
     // Patch each visible card's controls and stats line; never rebuild the DOM here.
     for (const mod of allModules()) {
         updateTabDot(mod);   // a fault on a BACKGROUND tab must surface without opening it

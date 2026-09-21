@@ -3,7 +3,7 @@
   "module": "NetworkModule",
   "mode": "mutate",
   "live_only": true,
-  "description": "Cycle the Ethernet PHY type (ethType: None/LAN8720/IP101/W5500) live on a running device and confirm the render loop survives every transition. Pins the robustness principle for the runtime Ethernet config: changing ethType reshapes the platform eth config (NetworkModule.syncEthLive → setEthConfig, with a live ethStop+ethInit on W5500), and no value or transition order may crash or wedge the tick. Runs live only — the eth controls exist only on hasEthernet ESP32 builds, so the in-process desktop runner SKIPs it; on a device it drives the controls over HTTP. On RMII boards (Olimex) the change saves + asks for restart (no hot re-init), so the live HTTP connection is undisturbed; the W5500 path hot-reinits but the SPI bus teardown keeps the netif alive enough to keep serving.",
+  "description": "Cycle the Ethernet PHY type (ethType: None/LAN8720/IP101/W5500) live on a running device and confirm the render loop survives every transition. Pins the robustness principle for the runtime Ethernet config: changing ethType reshapes the platform eth config (NetworkModule.syncEthLive → setEthConfig, with a live ethStop+ethInit on W5500), and no value or transition order may crash or wedge the tick. Runs live only, the eth controls exist only on hasEthernet ESP32 builds, so the in-process desktop runner SKIPs it; on a device it drives the controls over HTTP. On RMII boards (Olimex) the change saves + asks for restart (no hot re-init), so the live HTTP connection is undisturbed; the W5500 path hot-reinits but the SPI bus teardown keeps the netif alive enough to keep serving.",
   "reset": [
     {
       "name": "reset-grid-width",
@@ -30,7 +30,7 @@
   "steps": [
     {
       "name": "ethType-lan8720",
-      "description": "LAN8720 (RMII) — the classic-ESP32 default. Baseline: device renders with Ethernet RMII selected.",
+      "description": "LAN8720 (RMII), the classic-ESP32 default. Baseline: device renders with Ethernet RMII selected.",
       "op": "set_control",
       "id": "Network",
       "key": "ethType",
@@ -225,7 +225,7 @@
     },
     {
       "name": "ethType-ip101",
-      "description": "Switch to IP101 (RMII) live — the P4 PHY. Exercises the last dropdown value; render loop must survive.",
+      "description": "Switch to IP101 (RMII) live, the P4 PHY. Exercises the last dropdown value; render loop must survive.",
       "op": "set_control",
       "id": "Network",
       "key": "ethType",
@@ -290,7 +290,7 @@
     },
     {
       "name": "ethType-back-to-lan8720",
-      "description": "Return to LAN8720 — confirms the cycle is reversible and leaves the device in a sane state.",
+      "description": "Return to LAN8720, confirms the cycle is reversible and leaves the device in a sane state.",
       "op": "set_control",
       "id": "Network",
       "key": "ethType",

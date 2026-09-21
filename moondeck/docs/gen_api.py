@@ -128,6 +128,12 @@ def _doxyfile(headers: list[str], xml_out: str) -> str:
         "JAVADOC_AUTOBRIEF = YES\n"          # a leading `///`/`//` line is the brief
         f"STRIP_FROM_PATH = {ROOT}\n"        # relative "Defined in src/…", never an abs path
         "QUIET = YES\nWARN_IF_UNDOCUMENTED = NO\n"
+        # A capability macro the compiler sets per target, which Doxygen never sees: left
+        # undefined it preprocesses the guarded code away, and a header that is entirely
+        # inside one documents nothing at all. Defined here so the page exists on every
+        # build, the same way the widest target compiles it.
+        "ENABLE_PREPROCESSING = YES\nMACRO_EXPANSION = YES\n"
+        "PREDEFINED = MM_HEAVY_COMPUTE=1\n"
     )
 
 
@@ -347,16 +353,30 @@ def _relocate_moreinfo(md: str) -> str:
 
 def _render_card_directives(md: str, domain: str, stem: str) -> str:
     """Replace each `@card <file>` directive with an <img> pointing at the resolved asset.
-    A file that doesn't exist on disk drops the directive (no broken image) — the same
-    fail-soft as a missing generated page."""
+
+    A moving preview names a `.gif`, and the module's own card screenshot sits beside it under the
+    same stem: both are emitted, the animation first and the controls that produced it second, so a
+    reader sees what it looks like and what it is made of. A file absent from disk drops silently,
+    the same fail-soft as a missing generated page."""
     def repl(m: re.Match) -> str:
         fname = m.group("file")
         # Search under docs/assets/<domain>/ for the file (handles the light/{drivers,effects,…} subdir).
         hits = list((_ASSETS / domain).rglob(fname))
         if not hits:
             return ""   # asset absent → emit nothing rather than a broken link
-        rel = os.path.relpath(hits[0], DOCS_MOONMODULES / domain / "moxygen")
-        return f'\n\n<img src="{rel}" alt="{stem} card" width="300">\n'
+        shots = [hits[0]]
+        # The controls screenshot pairs with a moving preview, and only there: a card that already
+        # IS the screenshot has no second image to add.
+        if hits[0].suffix == ".gif":
+            shot = hits[0].with_suffix(".png")
+            if shot.exists():
+                shots.append(shot)
+        out = ""
+        for i, sh in enumerate(shots):
+            rel = os.path.relpath(sh, DOCS_MOONMODULES / domain / "moxygen")
+            alt = f"{stem} card" if i == 0 else f"{stem} controls"
+            out += f'<img src="{rel}" alt="{alt}" width="300">\n'
+        return f"\n\n{out}"
     return _CARD_RE.sub(repl, md)
 
 
@@ -599,10 +619,34 @@ def generate() -> dict[str, str]:
                 else:
                     cls_blocks.setdefault(header, []).append(text)
 
+        # A class DECLARED OUTSIDE the group is absent from the group file, so appending its
+        # per-class block adds it rather than duplicating it. Keyed on the rendered heading: a
+        # class the group already covers is skipped, one it never saw is kept. Without this a
+        # mixed header, free functions in a group plus a class beside it, published the functions
+        # and silently dropped the class, and the card linking it arrived at a page without it.
         by_header: dict[str, list[str]] = {h: [md] for h, md in grp_headers.items()}
         for header, blocks in cls_blocks.items():
             if header not in by_header:
                 by_header[header] = blocks
+                continue
+            grp = by_header[header][0]
+            # The group file's OWN lead is its title, which for a `@defgroup JsonSink` is the class
+            # name itself: matching against it would read every such class as already rendered.
+            # So compare against the headings BELOW that lead, which are what the group really
+            # contains, and keep a class the group never rendered.
+            # The group's own `# Title` line is dropped before the comparison: for a
+            # `@defgroup JsonSink` it carries the class's name and would read as the class
+            # already being rendered. What follows it is what the group really contains.
+            lines = grp.split("\n")
+            for i, ln in enumerate(lines):
+                if ln.startswith("# "):
+                    lines = lines[i + 1:]
+                    break
+            grp_members = set(re.findall(r'^#+ (\S+)', "\n".join(lines), re.M))
+            for b in blocks:
+                m = re.search(r'^#+ (\S+)', b, re.M)
+                if m and m.group(1) not in grp_members:
+                    by_header[header].append(b)
 
         pages: dict[str, str] = {}
         for header, blocks in by_header.items():

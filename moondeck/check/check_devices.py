@@ -92,7 +92,10 @@ def eth_preset_drift():
 
     # label -> the PHY constant naming that chip's arm of the ethConfigDefault ternary.
     PAIRS = {"Classic RMII": "ethLan8720", "P4-NANO": "ethIp101", "S31 CoreBoard": "ethYt8531"}
-    FIELDS = ["phyAddr", "mdc", "mdio", "rst", "rmiiClk"]
+    # Every field `seedEthPresetFromPins` compares, or a drift it ignores reseeds a board to Custom.
+    FIELDS = ["phyAddr", "mdc", "mdio", "rst", "rmiiClk", "rmiiClockExtIn"]
+    # The preset table writes the PHY as its enum VALUE and the header names the constant.
+    PHY_VALUE = {"ethLan8720": "1", "ethIp101": "2", "ethW5500": "3", "ethYt8531": "4"}
     drift = []
     for label, phy in PAIRS.items():
         row = rows.get(label)
@@ -100,11 +103,14 @@ def eth_preset_drift():
             drift.append((label, "row", "present", "missing"))
             continue
         m = re.search(phy + r", /\*addr\*/ (-?\d+), /\*mdc\*/ (-?\d+), /\*mdio\*/ (-?\d+),"
-                      r"\s*/\*rst\*/ (-?\d+), /\*rmiiClk\*/ (-?\d+)", header)
+                      r"\s*/\*rst\*/ (-?\d+), /\*rmiiClk\*/ (-?\d+), /\*extIn\*/ (\w+)", header)
         if not m:
             drift.append((label, phy, "an ethConfigDefault arm", "not found"))
             continue
-        # row is label-less here: [type, phyAddr, mdc, mdio, rst, rmiiClk, ...]
+        # The PHY the preset selects must be the one whose default arm it restates.
+        if row[0] != PHY_VALUE.get(phy, row[0]):
+            drift.append((label, "phyType", PHY_VALUE[phy], row[0]))
+        # row is label-less here: [type, phyAddr, mdc, mdio, rst, rmiiClk, extIn, ...]
         for i, field in enumerate(FIELDS):
             want, got = m.group(i + 1), row[i + 1]
             if want != got:
@@ -310,8 +316,10 @@ def main():
             # are genuine BOARD WIRING are required — MDC/MDIO may stay at the IDF default (omit or
             # -1) on RMII, since that's a real standard, not a board-specific value.
             if mtype == "NetworkModule" and isinstance(controls, dict):
-                board = controls.get("ethBoard")
-                if board is not None:
+                # PRESENCE, not truthiness: a JSON `null` reads as None like a missing key, and the
+                # installer treats a present-but-null value as a named preset (null !== "Custom").
+                board = controls["ethBoard"] if "ethBoard" in controls else None
+                if "ethBoard" in controls:
                     if not isinstance(board, str):
                         errors.append(f"{where}: NetworkModule ethBoard must be the preset LABEL as a string, got {board!r}")
                     elif board not in eth_presets:

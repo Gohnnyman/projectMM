@@ -276,7 +276,7 @@
     },
     {
       "name": "shrink-to-128x64",
-      "description": "Shrink to 128x64. Measured: tick/heap captured so the runner reports the realloc behaviour against each target's contract. (The old relative-to-baseline FPS bound was removed — it compared against the runner's idle pre-scenario baseline, not the prior render step, so it false-failed on fast boards like the P4 where idle FPS dwarfs render FPS.)",
+      "description": "Shrink to 128x64. Measured: tick/heap captured so the runner reports the realloc behaviour against each target's contract. (The old relative-to-baseline FPS bound was removed, it compared against the runner's idle pre-scenario baseline, not the prior render step, so it false-failed on fast boards like the P4 where idle FPS dwarfs render FPS.)",
       "op": "set_control",
       "id": "Grid",
       "key": "height",

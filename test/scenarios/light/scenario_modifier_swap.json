@@ -147,7 +147,7 @@
       "name": "multiply-1",
       "op": "measure",
       "measure": true,
-      "description": "Multiply modifier active — pipeline live, LUT folds the grid.",
+      "description": "Multiply modifier active, pipeline live, LUT folds the grid.",
       "observed": {
         "desktop-macos": {
           "tick_us": {
@@ -291,7 +291,7 @@
       "name": "checkerboard",
       "op": "measure",
       "measure": true,
-      "description": "Checkerboard modifier active — masks half the lights; pipeline stays live (driver buffer non-null).",
+      "description": "Checkerboard modifier active, masks half the lights; pipeline stays live (driver buffer non-null).",
       "observed": {
         "desktop-macos": {
           "tick_us": {
@@ -435,7 +435,7 @@
       "name": "multiply-2",
       "op": "measure",
       "measure": true,
-      "description": "Back to Multiply — replace round-trips cleanly, pipeline live again.",
+      "description": "Back to Multiply, replace round-trips cleanly, pipeline live again.",
       "observed": {
         "desktop-macos": {
           "tick_us": {

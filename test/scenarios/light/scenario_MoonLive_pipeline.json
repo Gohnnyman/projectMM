@@ -55,7 +55,7 @@
     },
     {
       "name": "select-default-layout",
-      "description": "Point the scripted layout at the SHIPPED grid.mll — the fixture a user starts from. A shipped file, not a staged one: the live runner skips the fixture, so anything written there is absent on a real device.",
+      "description": "Point the scripted layout at the SHIPPED grid.mll, the fixture a user starts from. A shipped file, not a staged one: the live runner skips the fixture, so anything written there is absent on a real device.",
       "op": "set_control",
       "id": "MLL",
       "key": "script",

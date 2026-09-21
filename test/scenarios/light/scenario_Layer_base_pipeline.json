@@ -19,7 +19,7 @@
     },
     {
       "name": "add-grid",
-      "description": "Add a 128x128 GridLayout child to Layouts. Set explicitly (the module default is 16x16x1) so the tick is above the host's microsecond clock resolution — a 16x16 grid renders in <1us on desktop, flooring tick to 0.",
+      "description": "Add a 128x128 GridLayout child to Layouts. Set explicitly (the module default is 16x16x1) so the tick is above the host's microsecond clock resolution, a 16x16 grid renders in <1us on desktop, flooring tick to 0.",
       "op": "add_module",
       "id": "Grid",
       "type": "GridLayout",

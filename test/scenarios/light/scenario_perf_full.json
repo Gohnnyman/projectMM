@@ -14,7 +14,7 @@
     "SpiralEffect",
     "NoiseEffect"
   ],
-  "description": "Comprehensive incremental performance check (the SLOW, on-device companion to scenario_perf_light). Mutate mode + canvas-preparing: clear_children whatever the device already had (pre-wired apparatus like PreviewDriver/Board survives — clear_children only drops user-editable children), rebuild a known minimal tree, then add one subsystem at a time — audio, device discovery, a modifier, then EVERY output driver this board has (each optional + capped to 64 output LEDs so its per-frame cost is comparable, not its transmit-all-16K time), then a network driver — measuring the tick/heap delta after each so each subsystem's cost is isolated. Then sweep the grid 16²→32²→64²→128² (16K) for both a LIGHT effect (Spiral) and a HEAVY one (Noise) to bracket the compute range across sizes. LED drivers are platform-gated (RMT on classic/S3, LCD on S3, Parlio on P4; none on desktop) so each driver step is optional:true and skipped where absent — the all-drivers comparison is assembled across boards (S3 gives RMT vs LCD, P4 gives RMT vs Parlio). Subsumes the old scenario_Layer_buildup (incremental module cost), scenario_GridLayout_grid_sizes (grid sweep), and scenario_AllEffects_grid_sizes (per-effect size sweep, here reduced to a light/heavy bracket). Runs minutes on a device; not a per-commit gate.",
+  "description": "Comprehensive incremental performance check (the SLOW, on-device companion to scenario_perf_light). Mutate mode + canvas-preparing: clear_children whatever the device already had (pre-wired apparatus like PreviewDriver/Board survives, clear_children only drops user-editable children), rebuild a known minimal tree, then add one subsystem at a time, audio, device discovery, a modifier, then EVERY output driver this board has (each optional + capped to 64 output LEDs so its per-frame cost is comparable, not its transmit-all-16K time), then a network driver, measuring the tick/heap delta after each so each subsystem's cost is isolated. Then sweep the grid 16²→32²→64²→128² (16K) for both a LIGHT effect (Spiral) and a HEAVY one (Noise) to bracket the compute range across sizes. LED drivers are platform-gated (RMT on classic/S3, LCD on S3, Parlio on P4; none on desktop) so each driver step is optional:true and skipped where absent, the all-drivers comparison is assembled across boards (S3 gives RMT vs LCD, P4 gives RMT vs Parlio). Subsumes the old scenario_Layer_buildup (incremental module cost), scenario_GridLayout_grid_sizes (grid sweep), and scenario_AllEffects_grid_sizes (per-effect size sweep, here reduced to a light/heavy bracket). Runs minutes on a device; not a per-commit gate.",
   "fixture": [
     {
       "name": "fix-layouts",
@@ -673,7 +673,7 @@
     },
     {
       "name": "add-network-driver",
-      "description": "+NetworkSendDriver (ArtNet/DDP — works on every platform). Diff = the network output cost (capped by the 16² grid here).",
+      "description": "+NetworkSendDriver (ArtNet/DDP, works on every platform). Diff = the network output cost (capped by the 16² grid here).",
       "op": "add_module",
       "id": "Net",
       "type": "NetworkSendDriver",
@@ -796,7 +796,7 @@
     },
     {
       "name": "add-rmt-driver",
-      "description": "+RmtLedDriver capped to 64 output LEDs (one pin, ledsPerPin=64). Optional — classic + S3. Diff = the RMT per-frame cost at a fixed 64-LED output.",
+      "description": "+RmtLedDriver capped to 64 output LEDs (one pin, ledsPerPin=64). Optional, classic + S3. Diff = the RMT per-frame cost at a fixed 64-LED output.",
       "op": "add_module",
       "id": "Rmt",
       "type": "RmtLedDriver",
@@ -926,7 +926,7 @@
     },
     {
       "name": "add-i80-driver",
-      "description": "+ParallelLedDriver (peripheral=i80) capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). S3 ONLY — the pins below are the S3's clean set. The i80 peripheral also runs on the classic ESP32 (I2S backend) and the P4 (LCD_CAM), but NO 8-pin set is safe on all three (only GPIO 21 is common: the classic's 6-11 are the SPI flash bus, the P4 exposes a different range), so one shared step cannot measure them. On a non-S3 target the driver fails to init and the measure below is meaningless — the observed blocks are therefore S3/desktop only. Diff = the i80 per-frame cost.",
+      "description": "+ParallelLedDriver (peripheral=i80) capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). S3 ONLY, the pins below are the S3's clean set. The i80 peripheral also runs on the classic ESP32 (I2S backend) and the P4 (LCD_CAM), but NO 8-pin set is safe on all three (only GPIO 21 is common: the classic's 6-11 are the SPI flash bus, the P4 exposes a different range), so one shared step cannot measure them. On a non-S3 target the driver fails to init and the measure below is meaningless, the observed blocks are therefore S3/desktop only. Diff = the i80 per-frame cost.",
       "op": "add_module",
       "id": "MultiPin",
       "type": "ParallelLedDriver",
@@ -1023,7 +1023,7 @@
           "last_updated": "2026-09-01"
         }
       },
-      "description": "The i80 per-frame cost. Only meaningful where add-i80-driver's pins are valid (S3; desktop is inert but exercises the code path) — the classic/P4 blocks were removed: they recorded a driver that had failed to init, so the tiny tick was the bail-out path, not an encode."
+      "description": "The i80 per-frame cost. Only meaningful where add-i80-driver's pins are valid (S3; desktop is inert but exercises the code path), the classic/P4 blocks were removed: they recorded a driver that had failed to init, so the tiny tick was the bail-out path, not an encode."
     },
     {
       "name": "remove-i80-driver",
@@ -1033,7 +1033,7 @@
     },
     {
       "name": "add-parlio-driver",
-      "description": "+ParallelLedDriver (peripheral=Parlio) capped to 64 LEDs on lane 0. Optional — P4 only. Diff = the Parlio per-frame cost.",
+      "description": "+ParallelLedDriver (peripheral=Parlio) capped to 64 LEDs on lane 0. Optional, P4 only. Diff = the Parlio per-frame cost.",
       "op": "add_module",
       "id": "Parlio",
       "type": "ParallelLedDriver",
@@ -1645,7 +1645,7 @@
     },
     {
       "name": "swap-heavy",
-      "description": "Swap to the HEAVY effect (Noise) and repeat the sweep — the upper bracket of per-pixel compute.",
+      "description": "Swap to the HEAVY effect (Noise) and repeat the sweep, the upper bracket of per-pixel compute.",
       "op": "replace_module",
       "id": "FX",
       "type": "NoiseEffect",
@@ -2149,7 +2149,7 @@
     },
     {
       "name": "add-modifier-for-sweep",
-      "description": "Re-add the MultiplyModifier on the HEAVY effect and sweep grid sizes — the diff vs the matching measure-heavy-N step (no modifier) is the modifier's PER-FRAME cost at each grid, answering whether the ~180µs seen at 16² scales with pixel count or is fixed overhead.",
+      "description": "Re-add the MultiplyModifier on the HEAVY effect and sweep grid sizes, the diff vs the matching measure-heavy-N step (no modifier) is the modifier's PER-FRAME cost at each grid, answering whether the ~180µs seen at 16² scales with pixel count or is fixed overhead.",
       "op": "add_module",
       "id": "Mod",
       "type": "MultiplyModifier",

@@ -14,7 +14,7 @@
     "Drivers",
     "NetworkSendDriver"
   ],
-  "description": "Exercise a scripted MoonLiveEffect as a wired MoonModule end-to-end — the integration layer the unit tests can't reach. The effect compiles its `source` text to native code on-device and renders it into the Layer buffer each tick. Prepares its own canvas: Layout(Grid 16x16) + Layer + MoonLiveEffect, measures the default compile, then edits `source` live (a new fill color recompiles and keeps rendering), pushes a BROKEN script (compile fails, the previous code is freed, the effect renders dark and the parse error surfaces in status, no crash), recovers with a valid script, and finally removes + re-adds the effect (add/remove robustness in any order). A crash in the JIT/emit path, a failed recompile that wedges the tick, or a buffer overrun on an odd grid all show up as a failed measure. The compiler + emit golden bytes are pinned by unit_moonlive_compiler / unit_moonlive_fill; this is the live wired-module gate.",
+  "description": "Exercise a scripted MoonLiveEffect as a wired MoonModule end-to-end, the integration layer the unit tests can't reach. The effect compiles its `source` text to native code on-device and renders it into the Layer buffer each tick. Prepares its own canvas: Layout(Grid 16x16) + Layer + MoonLiveEffect, measures the default compile, then edits `source` live (a new fill color recompiles and keeps rendering), pushes a BROKEN script (compile fails, the previous code is freed, the effect renders dark and the parse error surfaces in status, no crash), recovers with a valid script, and finally removes + re-adds the effect (add/remove robustness in any order). A crash in the JIT/emit path, a failed recompile that wedges the tick, or a buffer overrun on an odd grid all show up as a failed measure. The compiler + emit golden bytes are pinned by unit_moonlive_compiler / unit_moonlive_fill; this is the live wired-module gate.",
   "fixture": [
     {
       "name": "fix-layouts",
@@ -307,7 +307,7 @@
     },
     {
       "name": "edit-source-broken",
-      "description": "Push a script that fails to parse. The compile fails, the engine reports the diagnostic in the module status and renders dark, but the device keeps running (robust, no reboot) — the script-editor failure path. The measure passes because the pipeline still ticks.",
+      "description": "Push a script that fails to parse. The compile fails, the engine reports the diagnostic in the module status and renders dark, but the device keeps running (robust, no reboot), the script-editor failure path. The measure passes because the pipeline still ticks.",
       "op": "set_control",
       "id": "ML",
       "key": "script",
@@ -417,7 +417,7 @@
     },
     {
       "name": "edit-source-recover",
-      "description": "Push a valid script again. The engine recompiles cleanly and rendering resumes — a broken edit is fully recoverable.",
+      "description": "Push a valid script again. The engine recompiles cleanly and rendering resumes, a broken edit is fully recoverable.",
       "op": "set_control",
       "id": "ML",
       "key": "script",
@@ -520,7 +520,7 @@
     },
     {
       "name": "shrink-grid-1x1",
-      "description": "Resize the canvas to 1x1 while the scripted effect renders — the smallest non-empty grid. The native fill loops over a single light; the run guards (non-null buffer, cpl>=3) keep it in-bounds. Pins the 'runs at every grid size' hard rule for the JIT'd routine.",
+      "description": "Resize the canvas to 1x1 while the scripted effect renders, the smallest non-empty grid. The native fill loops over a single light; the run guards (non-null buffer, cpl>=3) keep it in-bounds. Pins the 'runs at every grid size' hard rule for the JIT'd routine.",
       "op": "set_control",
       "id": "Grid",
       "key": "width",
@@ -893,7 +893,7 @@
     },
     {
       "name": "re-add-moonlive",
-      "description": "Re-add a MoonLiveEffect after removal — the exec memory is re-acquired fresh, no leak, no stale pointer. The scripted effect renders again.",
+      "description": "Re-add a MoonLiveEffect after removal, the exec memory is re-acquired fresh, no leak, no stale pointer. The scripted effect renders again.",
       "op": "add_module",
       "id": "ML2",
       "type": "MoonLiveEffect",

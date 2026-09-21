@@ -33,7 +33,7 @@
     },
     {
       "name": "add-layers-group",
-      "description": "Top-level Effects container — the multi-layer composition host.",
+      "description": "Top-level Effects container, the multi-layer composition host.",
       "op": "add_module",
       "id": "Effects",
       "type": "Effects",
@@ -43,7 +43,7 @@
     },
     {
       "name": "add-bottom-layer",
-      "description": "Bottom Layer (composited first — clears + overwrites the output buffer). RGB.",
+      "description": "Bottom Layer (composited first, clears + overwrites the output buffer). RGB.",
       "op": "add_module",
       "id": "LayerBottom",
       "type": "Layer",
@@ -62,7 +62,7 @@
     },
     {
       "name": "add-top-layer",
-      "description": "Top Layer (composited second — blends onto the bottom with its default blend). RGB.",
+      "description": "Top Layer (composited second, blends onto the bottom with its default blend). RGB.",
       "op": "add_module",
       "id": "LayerTop",
       "type": "Layer",
@@ -73,7 +73,7 @@
     },
     {
       "name": "add-top-effect",
-      "description": "Rainbow as the top layer's effect — composited over the Spiral base.",
+      "description": "Rainbow as the top layer's effect, composited over the Spiral base.",
       "op": "add_module",
       "id": "Rainbow",
       "type": "RainbowEffect",

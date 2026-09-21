@@ -47,8 +47,7 @@ Detail: [technical](moxygen/AudioService.md) · [the sync packet](../light/moxyg
 Receives [OSC](https://opensoundcontrol.stanford.edu/) over UDP and writes it onto this device's controls, so a fader in Resolume, TouchDesigner or TouchOSC drives projectMM directly. It owns no surface of its own: everything lands in the same control writes the HTTP API and the UI use, so every validator still runs. Addresses, feedback and setup: ⌄ details.
 
 - `listen` — receive OSC (default **off**). This opens an unauthenticated UDP port that writes
-  controls, on the same LAN-trust basis as the Art-Net and audio-sync receivers, so it is a
-  capability you turn on rather than one every device carries.
+  controls, on the same LAN-trust basis as the Art-Net and audio-sync receivers, so it is a capability you turn on rather than one every device carries.
 - `port` — the UDP port (default 9000, what TouchOSC uses). Applies live.
 - `status` — listening, off, or why the port could not be opened.
 
@@ -111,8 +110,7 @@ A Service added per board: **a MoonLive script that reads hardware and drives co
 Why a script rather than another module: a mapping row is right for a button and wrong for anything with a condition in it. A script holds state and chooses between outcomes.
 
 - `script`: which `.mls` file to run, picked from the script library. Naming a different one
-  recompiles live; a compile error shows on the status line and the service does nothing until it is
-  fixed.
+  recompiles live; a compile error shows on the status line and the service does nothing until it is fixed.
 - Everything the script declares appears as a real control on the card, so a slider move lands
   without a recompile.
 
@@ -159,21 +157,12 @@ A desktop device is picked by list position, so re-pick if the OS reorders them;
 
 #### WLED audio sync: what is on the wire
 
-Sending and receiving both use the **multicast address 239.0.0.1**, which is what WLED's own
-usermod does (`beginMulticast` on both ends). It never uses broadcast, so a broadcast sender is
-inaudible to WLED and a receiver that only binds the port never hears WLED. This is a
-network-layer address, unrelated to any device grouping.
+Sending and receiving both use the **multicast address 239.0.0.1**, which is what WLED's own usermod does (`beginMulticast` on both ends). It never uses broadcast, so a broadcast sender is inaudible to WLED and a receiver that only binds the port never hears WLED. This is a network-layer address, unrelated to any device grouping.
 
 **Port 11988 is the WLED contract**, and `syncPort` defaults to it. The port is configurable for
-projectMM peers that want a private stream, but a custom port is no longer WLED-compatible: the
-endpoint WLED speaks is 239.0.0.1:11988 specifically.
+projectMM peers that want a private stream, but a custom port is no longer WLED-compatible: the endpoint WLED speaks is 239.0.0.1:11988 specifically.
 
-Multicast is also the better neighbour, with a caveat worth knowing: a switch or access point that
-does **IGMP snooping** forwards the group only to the ports that joined it, so the other hosts
-never see the traffic at all. Without snooping the switch floods it exactly like broadcast, and on
-WiFi it goes out at the lowest basic rate to every station. So multicast can reduce how many hosts
-have to process ~40 packets a second, but it does not guarantee it. See
-[multicast and IGMP snooping](../../explanation/architecture/moonlight.md#multicast-and-igmp-snooping).
+Multicast is also the better neighbour, with a caveat worth knowing: a switch or access point that does **IGMP snooping** forwards the group only to the ports that joined it, so the other hosts never see the traffic at all. Without snooping the switch floods it exactly like broadcast, and on WiFi it goes out at the lowest basic rate to every station. So multicast can reduce how many hosts have to process ~40 packets a second, but it does not guarantee it. See [multicast and IGMP snooping](../../explanation/architecture/moonlight.md#multicast-and-igmp-snooping).
 
 The 44-byte v2 packet is byte-compatible with WLED, with one field that is not yet equivalent:
 
@@ -187,43 +176,24 @@ The 44-byte v2 packet is byte-compatible with WLED, with one field that is not y
 | `FFT_Magnitude` | 0..255 internally, x16 on the wire | ~0..4096 | compatible |
 
 **The magnitude scale differs, so it is converted at the wire.** WLED sends the raw magnitude of
-its FFT's dominant bin, scaled so that "the end result is linear and ~4096 max" (its own comment
-where it divides the input samples by 16). Its effects then divide that by 4, 8 or 16 depending on
-the effect and treat the result as a byte, which is why their thresholds read `< 48` squelch and
-`> 144` full brightness. projectMM byte-scales the peak magnitude to 0..255 instead, through the
-same noise floor and gain conditioning as the 16 bands, so one pair of knobs governs the whole
-spectrum.
+its FFT's dominant bin, scaled so that "the end result is linear and ~4096 max" (its own comment where it divides the input samples by 16). Its effects then divide that by 4, 8 or 16 depending on the effect and treat the result as a byte, which is why their thresholds read `< 48` squelch and `> 144` full brightness. projectMM byte-scales the peak magnitude to 0..255 instead, through the same noise floor and gain conditioning as the 16 bands, so one pair of knobs governs the whole spectrum.
 
 projectMM keeps its own units internally and multiplies by 16 on send, dividing by 16 on receive.
-The factor is exact rather than a fudge: it is the divisor WLED's effects apply, so our full-scale
-255 arrives as 4080, right on WLED's own ~4096 design target, and every effect's thresholds land
-where they were tuned to. Adopting WLED's range internally was the alternative, and was rejected
-because that range is an artifact of FFT size and input scaling rather than a specification (WLED's
-own fallback path admits "no idea if 10000 is a good value"), and importing it would cost the
-property that one floor/gain pair conditions every value the service publishes, in exchange for
-resolution the receiving effects discard anyway when they divide back down to a byte.
+The factor is exact rather than a fudge: it is the divisor WLED's effects apply, so our full-scale 255 arrives as 4080, right on WLED's own ~4096 design target, and every effect's thresholds land where they were tuned to. Adopting WLED's range internally was the alternative, and was rejected because that range is an artifact of FFT size and input scaling rather than a specification (WLED's own fallback path admits "no idea if 10000 is a good value"), and importing it would cost the property that one floor/gain pair conditions every value the service publishes, in exchange for resolution the receiving effects discard anyway when they divide back down to a byte.
 
-A received magnitude is clamped to 255, since a real WLED source reaches ~9500 and an unclamped
-value would drive effects harder than locally analyzed audio ever could.
+A received magnitude is clamped to 255, since a real WLED source reaches ~9500 and an unclamped value would drive effects harder than locally analyzed audio ever could.
 
 Prior art: the WLED-MM audio-reactive usermod by **Frank ([@softhack007](https://github.com/softhack007))**, the most-used open-source audio-reactive LED implementation, whose adaptive noise-gate concept the analysis here descends from (analyzed with his permission); and **[@troyhacks](https://github.com/troyhacks/WLED)**, who reworked that DSP onto Espressif's [esp-dsp](https://github.com/espressif/esp-dsp) FFT, the same choice this service makes. The line-in path exists because **wladi ([myhome-control](https://shop.myhome-control.de))** supplied the hardware and pinout for the [MHC-WLED ESP32-P4 shield](../../reference/hardware/mhc-wled-esp32-p4-shield.md): its onboard PCM1808 I2S ADC is what `mclkPin` is for.
 
 ## OSC, details
 **Feedback: the device answers.** With `feedback` on, a control that changes anywhere (the web UI, a
-preset recall, an audio-reactive effect) is mirrored back to the surface, which is what keeps a
-client honest and what moves a motorised fader. `feedbackTo` names the receiver, or is left empty to
-answer whoever last wrote to us; `feedbackPort` is where that client LISTENS, which is not the port
-we listen on (Open Stage Control calls its own `osc-port`).
+preset recall, an audio-reactive effect) is mirrored back to the surface, which is what keeps a client honest and what moves a motorised fader. `feedbackTo` names the receiver, or is left empty to answer whoever last wrote to us; `feedbackPort` is where that client LISTENS, which is not the port we listen on (Open Stage Control calls its own `osc-port`).
 
-A client learns the current state three ways: when it first writes to us from a new address, when
-its address changes, and whenever it sends **`/mm/hello`**. The last one exists because a client
-restarting on the SAME address is invisible to the other two, and most controllers send nothing of
-their own on load, so every widget would show its layout file's defaults until the user moved one.
+A client learns the current state three ways: when it first writes to us from a new address, when its address changes, and whenever it sends **`/mm/hello`**. The last one exists because a client restarting on the SAME address is invisible to the other two, and most controllers send nothing of their own on load, so every widget would show its layout file's defaults until the user moved one.
 The shipped session has a `sync from device` button for exactly this.
 
 **Setting one up**, from installing the app to using it from a phone, is its own page:
-[Driving projectMM from a phone or tablet](../../how-to/control-surface.md). It needs no
-checkout and no tooling, just the app and the session file from the latest release.
+[Driving projectMM from a phone or tablet](../../how-to/control-surface.md). It needs no checkout and no tooling, just the app and the session file from the latest release.
 
 **Addresses.** These are a public contract: a TouchOSC layout built against them keeps working, so
 they stay small and boring.
@@ -236,9 +206,7 @@ they stay small and boring.
 | `/mm/hello` | anything, or nothing | resend every value to the sender |
 | `/mm/control/<Module>/<control>` | float 0..1 or int 0..255 | any control directly |
 
-Both argument forms are accepted because controllers disagree: apps send a float in 0..1, hardware
-bridges send an int in the target's range. Out-of-range values are clamped rather than ignored, so
-a controller sending 0..127 does something sensible instead of appearing dead.
+Both argument forms are accepted because controllers disagree: apps send a float in 0..1, hardware bridges send an int in the target's range. Out-of-range values are clamped rather than ignored, so a controller sending 0..127 does something sensible instead of appearing dead.
 
 Send one from the bench with `uv run moondeck/check/send_osc.py <ip> /mm/fader/1 0.75`.
 
@@ -252,15 +220,9 @@ uv run moondeck/run/run_open_stage_control.py                   # device on this
 uv run moondeck/run/run_open_stage_control.py --host 192.168.1.42
 ```
 
-Open **http://127.0.0.1:8088** and the surface is there. On the device, turn `listen` and `feedback`
-on; nothing else needs configuring, because the launcher passes the session, the send address and
-the listen port as arguments rather than leaving them to be typed into a settings panel. The session
-itself sends `/mm/hello` when the page loads, so every widget shows the device's real values straight
-away instead of its layout file's defaults, and a browser refresh re-reads them.
+Open **http://127.0.0.1:8088** and the surface is there. On the device, turn `listen` and `feedback` on; nothing else needs configuring, because the launcher passes the session, the send address and the listen port as arguments rather than leaving them to be typed into a settings panel. The session itself sends `/mm/hello` when the page loads, so every widget shows the device's real values straight away instead of its layout file's defaults, and a browser refresh re-reads them.
 
-It runs **headless**: a web server rather than a desktop window. That is deliberate. The surface is
-then reachable from a phone or another laptop on the same network (the launcher prints those URLs),
-and on macOS it sidesteps the quarantine dialog an unsigned download otherwise raises.
+It runs **headless**: a web server rather than a desktop window. That is deliberate. The surface is then reachable from a phone or another laptop on the same network (the launcher prints those URLs), and on macOS it sidesteps the quarantine dialog an unsigned download otherwise raises.
 
 | | |
 |---|---|
@@ -270,30 +232,19 @@ and on macOS it sidesteps the quarantine dialog an unsigned download otherwise r
 | `--app` | the Open Stage Control binary, when it is not on PATH or in the usual place |
 | `--gui` | also open the desktop window; by default it is the server alone |
 
-The launcher looks on PATH first, then in each platform's default install location. **Windows and
-Linux are untested**: the paths are the ones those installers use, but only macOS has been run. If
-it cannot find the app, `--app` takes the full path and that always works.
+The launcher looks on PATH first, then in each platform's default install location. **Windows and Linux are untested**: the paths are the ones those installers use, but only macOS has been run. If it cannot find the app, `--app` takes the full path and that always works.
 
 **A ready-made control surface.** A session of the switches, encoders and faders ships as a release
-asset (`projectMM-control-surface.json`) and lives in the repo at
-[`docs/reference/examples/open-stage-control.json`](../../reference/examples/open-stage-control.json).
+asset (`projectMM-control-surface.json`) and lives in the repo at [`docs/reference/examples/open-stage-control.json`](../../reference/examples/open-stage-control.json).
 Editing the layout needs `read-only` off in the launcher.
 
 <img src="../../assets/core/OscModule-open-stage-control.png" width="600" alt="The shipped Open Stage Control session beside projectMM's own Control card: eight switches, eight encoders and eight faders in both">
 
 Driving the device from that session, beside the Control card it mirrors.
 
-It binds only to `/mm/switch/N`, `/mm/encoder/N` and `/mm/fader/N`, N being 1 to 8, on purpose. A surface should
-address the SURFACE, and [Control](system.md#control) decides what each one drives, so one layout keeps
-working as assignments change and a hardware desk lands on the same bindings. Reaching past it to
-`/mm/control/<Module>/<control>` also works and is the right answer for a one-off, but it hard-codes
-into the layout a mapping that belongs on the device. Two have targets today, `switch1`
-(`Drivers.on`) and `fader1` (`Drivers.brightness`); the rest wait for a target picker.
+It binds only to `/mm/switch/N`, `/mm/encoder/N` and `/mm/fader/N`, N being 1 to 8, on purpose. A surface should address the SURFACE, and [Control](system.md#control) decides what each one drives, so one layout keeps working as assignments change and a hardware desk lands on the same bindings. Reaching past it to `/mm/control/<Module>/<control>` also works and is the right answer for a one-off, but it hard-codes into the layout a mapping that belongs on the device. Two have targets today, `switch1` (`Drivers.on`) and `fader1` (`Drivers.brightness`); the rest wait for a target picker.
 
-The session also carries a **pad grid**, and those pads are inert: `/mm/pad/N` has no route in the
-OSC module yet, so pressing one sends a message nothing reads. It ships anyway because the grid is
-the layout a preset launcher wants and the addresses are the ones it will use; treat it as a
-placeholder rather than as part of the contract above.
+The session also carries a **pad grid**, and those pads are inert: `/mm/pad/N` has no route in the OSC module yet, so pressing one sends a message nothing reads. It ships anyway because the grid is the layout a preset launcher wants and the addresses are the ones it will use; treat it as a placeholder rather than as part of the contract above.
 
 **It does not reach a Mackie desk.** The X-Touch and QCon Pro G2 speak Mackie Control over MIDI,
 not OSC: see [control surfaces](../../reference/hardware/control-surfaces.md) for what would.
@@ -301,16 +252,9 @@ not OSC: see [control surfaces](../../reference/hardware/control-surfaces.md) fo
 ## Infrared, details
 Set a row's `learn` and the next code received binds to it, which is how any remote works without a shipped code table. Arming one row disarms any other, so a code cannot bind twice. A fresh service starts with no rows: add one, learn a key, pick a target. The status line reports whether the channel actually opened, not merely that a pin is set; on some boards the receiver shares its pin with another peripheral through a board switch.
 
-Nothing is fixed in firmware. A row IS the binding: learn a key onto it, pick what it drives from
-the target dropdown, and pick whether the press toggles that control, or nudges it by a value. A
-handset with twenty keys is twenty rows. `set` is offered only where an input reports a release, so
-it is unavailable here: a remote code is a single event, and a `set` row would latch the control
-with nothing able to clear it.
+Nothing is fixed in firmware. A row IS the binding: learn a key onto it, pick what it drives from the target dropdown, and pick whether the press toggles that control, or nudges it by a value. A handset with twenty keys is twenty rows. `set` is offered only where an input reports a release, so it is unavailable here: a remote code is a single event, and a `set` row would latch the control with nothing able to clear it.
 
-One key binds to one row. Learning a key that another row already holds moves the binding rather
-than duplicating it, because dispatch fires the first row holding a code and a duplicate could
-never run.
+One key binds to one row. Learning a key that another row already holds moves the binding rather than duplicating it, because dispatch fires the first row holding a code and a duplicate could never run.
 
-The status line reports setup state ("set pin to receive" / "ready"), the learn prompt, a binding
-("learned 0x..."), what a press did or why it did not, and an unbound code ("received 0x...
+The status line reports setup state ("set pin to receive" / "ready"), the learn prompt, a binding ("learned 0x..."), what a press did or why it did not, and an unbound code ("received 0x...
 (unassigned)").

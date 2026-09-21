@@ -49,7 +49,7 @@
     },
     {
       "name": "add-mirror",
-      "description": "Add MultiplyModifier — triggers LUT and driver-buffer allocation.",
+      "description": "Add MultiplyModifier, triggers LUT and driver-buffer allocation.",
       "op": "add_module",
       "id": "Multiply",
       "type": "MultiplyModifier",

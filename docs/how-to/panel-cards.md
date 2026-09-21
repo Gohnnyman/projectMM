@@ -55,9 +55,7 @@ The cards have no buffering and no flow control. They latch the image when the s
 
 The failure mode is the confusing part: **nothing errors**. The link is up, frames go out, and the panels tear, show wrong rows, or never latch. That is why projectMM reads the *negotiated* speed and warns you, rather than letting a slow link look like a format bug. It still sends, since a small wall on 100 Mbit is often fine, but if your picture is unstable, check this first.
 
-The cards can also be picky about negotiating a gigabit link with a 100 Mbit controller. A gigabit
-switch in between is the remedy: the card negotiates gigabit with the switch, the switch buffers, and
-the controller's slower link stops being the card's problem. This applies to the **P4 and the S3**.
+The cards can also be picky about negotiating a gigabit link with a 100 Mbit controller. A gigabit switch in between is the remedy: the card negotiates gigabit with the switch, the switch buffers, and the controller's slower link stops being the card's problem. This applies to the **P4 and the S3**.
 An **S31 is gigabit on its own** and connects directly.
 
 ---
@@ -72,23 +70,16 @@ An **S31 is gigabit on its own** and connects directly.
 | [7. Card firmware, and the flicker](#7-card-firmware-and-the-flicker) | The v13 defect, and the LED Upgrade 4.0 downgrade that clears it |
 | [8. When it does not light up](#8-when-it-does-not-light-up) | Symptom to cause |
 
-The two halves are independent: an ESP32 and a desktop drive the same card the same way, and neither
-is a prerequisite for the other. Pick whichever hardware you have.
+The two halves are independent: an ESP32 and a desktop drive the same card the same way, and neither is a prerequisite for the other. Pick whichever hardware you have.
 
 ---
 
 ## 4. Set the panels up in LED Vision
 
-The receiving card has to know what it is driving before projectMM sends it anything: how big each
-panel is, how many there are, and which driver IC they use. That configuration lives **on the card**,
-written once with ColorLight's own **[LEDVision](https://en.colorlightinside.com/product/download/380)**,
-and it is why projectMM itself needs no panel wiring settings at all (see
-[§5.4](#54-describe-the-wall)).
+The receiving card has to know what it is driving before projectMM sends it anything: how big each panel is, how many there are, and which driver IC they use. That configuration lives **on the card**, written once with ColorLight's own **[LEDVision](https://en.colorlightinside.com/product/download/380)**, and it is why projectMM itself needs no panel wiring settings at all (see [§5.4](#54-describe-the-wall)).
 
 **Which version.** An **8.x** build is what people running these cards in this scene actually use:
-this project's own wall is set up with **8.8**, and the walkthrough linked below uses **8.5**. Newer
-releases exist, and whether they are equally suitable here has not been established, so the safe
-advice is to take an 8.x build and only move if you have a reason to.
+this project's own wall is set up with **8.8**, and the walkthrough linked below uses **8.5**. Newer releases exist, and whether they are equally suitable here has not been established, so the safe advice is to take an 8.x build and only move if you have a reason to.
 
 > **Worth watching first:** [Setting up a Colorlight Card with FPP v6.3 and LED Vision 8.5](https://www.youtube.com/watch?v=L4lHbwUszAs)
 > walks through the whole card-and-panel setup on video. It drives the card from FPP rather than
@@ -103,17 +94,14 @@ advice is to take an 8.x build and only move if you have a reason to.
 2. Open LEDVision and go to the **receiving-card** setup (usually `Settings` then a receiving-card
    or `Screen` panel; some versions ask for a password, commonly `168`).
 3. Load the panel definition. Either pick your panel from the built-in module list, or load the
-   `.rcfgx` / `.rcvx` file the panel supplier provided, which is the reliable route for a panel that
-   is not a well-known model.
+   `.rcfgx` / `.rcvx` file the panel supplier provided, which is the reliable route for a panel that is not a well-known model.
 4. Set the **cabinet** size: how many pixels one card drives, across and down.
 5. Set the **panel arrangement**: how the HUB75 ribbons chain, and which physical panel is first.
    This is the step that makes the card, not projectMM, responsible for panel order.
 6. **Send to the receiving card**, then **Save** so the configuration survives a power cycle. Saving
-   is a separate action from sending in most versions, and skipping it is the usual reason a wall
-   comes back wrong after being unplugged.
+   is a separate action from sending in most versions, and skipping it is the usual reason a wall comes back wrong after being unplugged.
 
-When this is right, a test pattern from LEDVision fills the wall correctly. Get to that point before
-introducing projectMM: it separates "the panels are wired and configured" from "the sender works".
+When this is right, a test pattern from LEDVision fills the wall correctly. Get to that point before introducing projectMM: it separates "the panels are wired and configured" from "the sender works".
 
 ---
 
@@ -129,10 +117,7 @@ introducing projectMM: it separates "the panels are wired and configured" from "
 
 Other ESP32 variants do not ship panel-card support: their Ethernet is 100 Mbit at best, and most have none at all.
 
-The S3 needs a **W5500 Ethernet module** wired to its SPI pins, which the S3 firmwares already
-support; its pins come from the board entry in `deviceModels.json`. Because W5500 is 100 Mbit and
-sits behind SPI, it is the configuration most likely to need the gigabit switch described in
-[§2](#the-one-hardware-fact-that-decides-everything).
+The S3 needs a **W5500 Ethernet module** wired to its SPI pins, which the S3 firmwares already support; its pins come from the board entry in `deviceModels.json`. Because W5500 is 100 Mbit and sits behind SPI, it is the configuration most likely to need the gigabit switch described in [§2](#the-one-hardware-fact-that-decides-everything).
 
 ### 5.2 Flash it
 
@@ -153,47 +138,26 @@ Panel-card support is compiled in per firmware, and it is already on for the boa
 **On powering panels from the same supply as the board.** This works, and plenty of small setups run
 that way. What it costs you is headroom.
 
-HUB75 panels draw far less than a naive count suggests, and the reason is **multiplexing**: the panel
-lights one group of scan rows at a time, cycling fast enough to look continuous, so at 1/16 or 1/32
-scan only a fraction of the LEDs are on at any instant. This is why these panels have a reputation
-for modest consumption. Size the supply from the rating on your panel's own datasheet rather than
-from pixels multiplied by LED current.
+HUB75 panels draw far less than a naive count suggests, and the reason is **multiplexing**: the panel lights one group of scan rows at a time, cycling fast enough to look continuous, so at 1/16 or 1/32 scan only a fraction of the LEDs are on at any instant. This is why these panels have a reputation for modest consumption. Size the supply from the rating on your panel's own datasheet rather than from pixels multiplied by LED current.
 
-The failure when you do run short is not a clean one: the 5 V rail sags, and a sagging rail shows up
-as flicker, color shifts, or the controller resetting mid-frame. None of those look like a power
-problem, which is why they cost an evening. A wall that is stable at 30% brightness and misbehaves at
-100% is telling you this is the problem, not the network.
+The failure when you do run short is not a clean one: the 5 V rail sags, and a sagging rail shows up as flicker, color shifts, or the controller resetting mid-frame. None of those look like a power problem, which is why they cost an evening. A wall that is stable at 30% brightness and misbehaves at 100% is telling you this is the problem, not the network.
 
 Nothing needs an IP address: the panel link is below IP entirely.
 
 **That is also how you reach the UI.** The board's Ethernet port is now carrying panel data, so
-WiFi is what serves the web interface. Leave WiFi configured as normal; it is unrelated to the panel
-link and the two do not interfere. On the P4 this decides which firmware to flash, because the
-`-eth` variant has no WiFi compiled in at all: use `-eth-wifi`. The S31 and S3 firmwares carry both
-already.
+WiFi is what serves the web interface. Leave WiFi configured as normal; it is unrelated to the panel link and the two do not interfere. On the P4 this decides which firmware to flash, because the `-eth` variant has no WiFi compiled in at all: use `-eth-wifi`. The S31 and S3 firmwares carry both already.
 
 ### 5.4 Describe the wall
 
 The driver has **no geometry controls**. The wall's shape lives in the Layout, once, so that everything else (effects, modifiers, the preview) sees the same picture.
 
 **A plain Grid is usually all you need.** Two 128x64 panels stacked is a 128x128 grid, and that is
-the whole configuration. The reason it is that simple is worth knowing: the driver reads only the
-wall's width and height and sends the image row by row. Which physical panel a row lands on, and in
-what order the HUB75 ribbons chain, was already settled on the card in
-[§4](#4-set-the-panels-up-in-led-vision). The card owns panel arrangement; projectMM owns the
-picture.
+the whole configuration. The reason it is that simple is worth knowing: the driver reads only the wall's width and height and sends the image row by row. Which physical panel a row lands on, and in what order the HUB75 ribbons chain, was already settled on the card in [§4](#4-set-the-panels-up-in-led-vision). The card owns panel arrangement; projectMM owns the picture.
 
-That is also why this needs none of the physical detail you may have filled in elsewhere. An output
-page that asks for scan rate, address lines and chain order is describing panels driven *directly*,
-where the software has to generate the HUB75 timing itself. Through a receiving card, none of that is
-the sender's business: the card generates the timing, and the sender hands it an image. That holds
-for any sender, [FPP](https://github.com/FalconChristmas/fpp) included, which reaches these cards
-over Ethernet exactly as projectMM does.
+That is also why this needs none of the physical detail you may have filled in elsewhere. An output page that asks for scan rate, address lines and chain order is describing panels driven *directly*, where the software has to generate the HUB75 timing itself. Through a receiving card, none of that is the sender's business: the card generates the timing, and the sender hands it an image. That holds for any sender, [FPP](https://github.com/FalconChristmas/fpp) included, which reaches these cards over Ethernet exactly as projectMM does.
 
 **When you need the Panels layout instead.** It exists for walls where projectMM, not a card, owns
-the ordering: addressable panels wired as one long pixel strip, where the strip snakes from panel to
-panel and the layout has to undo that. Its controls are about **wiring order**, which a HUB75 ribbon
-does not have.
+the ordering: addressable panels wired as one long pixel strip, where the strip snakes from panel to panel and the layout has to undo that. Its controls are about **wiring order**, which a HUB75 ribbon does not have.
 
 | Control | Meaning |
 |---|---|
@@ -203,10 +167,7 @@ does not have.
 | `wiringOrderP`, `X++P`, `Y++P`, `snakeP` | How the panels themselves are ordered |
 
 **Do HUB75 panels snake?** Not in the sense these controls mean. A HUB75 panel is addressed by row
-and column over the ribbon, so its internal pixel order is fixed by the panel's own driver ICs and
-is not something a layout re-maps. A *chain* of panels can be arranged in any order, including a
-serpentine one, but that is configured on the card, not here. So if you are driving panels through a
-receiving card and every other row looks reversed, the setting to revisit is in LEDVision.
+and column over the ribbon, so its internal pixel order is fixed by the panel's own driver ICs and is not something a layout re-maps. A *chain* of panels can be arranged in any order, including a serpentine one, but that is configured on the card, not here. So if you are driving panels through a receiving card and every other row looks reversed, the setting to revisit is in LEDVision.
 
 ### 5.5 Add the driver
 
@@ -306,16 +267,13 @@ The second row is worth taking seriously, because projectMM sends a full frame e
 ### Reading and changing the version
 
 **Use [LEDUpgrade](https://en.colorlightinside.com/product/download/383) 4.0 and firmware 11.09.**
-That is the proven combination, and the easiest one, because 11.09 ships inside LEDUpgrade 4.0: it is
-in the preset list, so there is no firmware file to find. Treat any other pairing as a detour.
+That is the proven combination, and the easiest one, because 11.09 ships inside LEDUpgrade 4.0: it is in the preset list, so there is no firmware file to find. Treat any other pairing as a detour.
 
 **Why not 5.0.** Version 5.0 ships no pre-v12 firmware at all, so it cannot do this downgrade from
 its preset list however long you fight it.
 
 **Why 11.09 rather than something older.** Anything before v12 clears the flicker, but older is not
-automatically safer: cards on 11.08 were reported strobing white, which 11.09 fixes. 11.09 is the
-newest build on the safe side of the defect, so it carries the most fixes while carrying none of the
-flicker.
+automatically safer: cards on 11.08 were reported strobing white, which 11.09 fixes. 11.09 is the newest build on the safe side of the defect, so it carries the most fixes while carrying none of the flicker.
 
 > **On Windows, if LEDUpgrade cannot find the card.** A built-in Ethernet port can be held by
 > something else in the stack, and Hyper-V's virtual switch is the usual culprit: it binds the
@@ -341,8 +299,7 @@ Set the driver's `firmware` control to match the card:
 | `v12 and older` | **The default**, and a downgraded card. Brightness and sync go out once. |
 | `v13 and newer` | A stock card. Both go out twice, which is the copy this firmware acts on. |
 
-The default is the downgraded generation on purpose: this page's own advice is to move a v13 card
-off it, so the setting is already right when you finish rather than being one last unexplained step.
+The default is the downgraded generation on purpose: this page's own advice is to move a v13 card off it, so the setting is already right when you finish rather than being one last unexplained step.
 
 The mismatch is not subtle in one direction: leave a downgraded card on `v13 and newer` and it receives a second sync, treats it as another latch, aborts the refresh already running, and the wall updates once every few seconds.
 

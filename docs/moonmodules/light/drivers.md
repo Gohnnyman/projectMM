@@ -10,13 +10,14 @@ Several drivers can share one buffer, each driving its own slice. Every driver s
 
 ### Shared 💫 · every driver
 
-Added once by [`DriverBase`](moxygen/DriverBase.md) so no driver re-implements it: a per-driver **output correction** (how this driver's slice looks) and a **source window** (which slice of the shared buffer it reads). Every driver card leads with this block; its own controls follow.
+The block every driver card opens with, shown here on RMT LED. Added once by [`DriverBase`](moxygen/DriverBase.md) so no driver re-implements it: a per-driver **output correction** (how this driver's slice looks) and a **source window** (which slice of the shared buffer it reads). A driver card leads with whichever half applies, and its own controls follow. Hue and Preview correct nothing, since the fixture and the browser do it; HUB75, Preview, NDI and HLS take the whole buffer rather than a window.
 
-<img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="Shared driver controls: localBrightness, lightPreset, whiteMode, start, count">
+<img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="The shared block at the top of a driver card, here on RMT LED">
 
 - `localBrightness`: this driver's dim (0–255), multiplied with the global brightness.
+- `curve`: brightness to output: `CIE 1931`, `gamma 2.2`, `gamma 2.8`, or `linear`.
 - `lightPreset`: the [light preset](supporting.md) applied per light, for order and white.
-- `whiteMode`: how W is derived on an RGBW strip, when the preset carries a W channel.
+- `whiteMode`: how W is derived, shown when the preset carries a W channel.
 - `start`: first light of the shared buffer this driver reads (default `0`).
 - `count`: how many lights from `start`. **Blank drives all of them.**
 
@@ -30,24 +31,46 @@ Detail: [technical](moxygen/DriverBase.md)
 <a id="moonled"></a>
 <a id="parlioled"></a>
 
-### LED driver 💫 · wire
+### RMT LED 💫 · wire
 
-Addressable WS2812B-class LEDs over a wire: **RMT** for a few strands, **ParallelLedDriver** for up to 16 clocked out at once. Which peripheral drives the parallel bus, and what each one buys, is in [the details below](#led-driver-details).
+Addressable WS2812B-class LEDs on a handful of strands, clocked by the chip's RMT peripheral. The classic choice, and the one that needs no DMA peripheral: for more than a few strands see [Parallel LED](#parallel-led) below. What the peripherals buy is in [the details below](#parallel-led-details).
 
-<img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="LED output driver controls">
+<img src="../../assets/light/drivers/RmtLedDriver.png" width="300" alt="RMT LED driver controls">
 
 Plus the [shared controls](#shared-driver-controls) above:
 
 - `pins`: data GPIO list: `18,17,16`, or ranges like `20-23`, mixed freely. Empty idles until set.
 - `ledsPerPin`: lights per strand. Blank splits evenly, one number to all, a list per strand.
-- `timing` (RMT only): the wire bit rate. A 12V WS2811 needs `400kHz`; the default suits the rest.
-- `peripheral`: the DMA peripheral, filtered to what the chip supports. It divides the card.
-- `doubleBuffer`, `pinExpander`, bus pins: shown per peripheral, so the set changes with it.
+- `timing`: the wire bit rate. A 12V WS2811 needs `400kHz`; the default suits the rest.
+- `t0hNs` / `t1hNs` / `periodNs`: the bit timing itself, shown when `timing` is `custom`.
 - 🔧 `loopbackTest`: a TX to RX self-test, verdict in the status field.
+- 🔧 `loopbackTxPin` / `loopbackRxPin` / `loopbackFrame`: its pins, and whether a whole frame is sent.
 
-Tests: [RMT](../../reference/tests/unit-tests.md#rmtleddriver) · [shared + peripherals](../../reference/tests/unit-tests.md#parallelleddriver)
+Tests: [RMT](../../reference/tests/unit-tests.md#rmtleddriver)
 
-Detail: [RMT](moxygen/RmtLedDriver.md) · [Parallel](moxygen/ParallelLedDriver.md) · peripherals: [i80](moxygen/I80Peripheral.md) · [MoonI80](moxygen/MoonI80Peripheral.md) · [Parlio](moxygen/ParlioPeripheral.md)
+Detail: [technical](moxygen/RmtLedDriver.md)
+
+<a id="parallel-led"></a>
+
+### Parallel LED 💫 · wire
+
+The same LEDs, up to 16 strands clocked out at once by a DMA peripheral, which is what makes a large wall possible. Which peripheral drives the bus, and what each buys, is in [the details below](#parallel-led-details).
+
+<img src="../../assets/light/drivers/ParallelLedDriver.png" width="300" alt="Parallel LED driver controls">
+
+Plus the [shared controls](#shared-driver-controls) above:
+
+- `pins`: data GPIO list: `18,17,16`, or ranges like `20-23`, mixed freely. Empty idles until set.
+- `ledsPerPin`: lights per strand. Blank splits evenly, one number to all, a list per strand.
+- `peripheral`: the DMA peripheral, filtered to what the chip supports. It divides the card.
+- `doubleBuffer`, `pinExpander`, `latchPin`, bus pins: shown per peripheral.
+- read-only `frameTime`: what one frame costs on the wire, the headroom the pipeline has left.
+- 🔧 `loopbackTest`: a TX to RX self-test, verdict in the status field.
+- 🔧 `loopbackStrand` / `loopbackIntrusive`: which strand it tests, and whether it may disturb output.
+
+Tests: [shared + peripherals](../../reference/tests/unit-tests.md#parallelleddriver)
+
+Detail: [technical](moxygen/ParallelLedDriver.md) · peripherals: [i80](moxygen/I80Peripheral.md) · [MoonI80](moxygen/MoonI80Peripheral.md) · [Parlio](moxygen/ParlioPeripheral.md)
 
 <a id="hub75"></a>
 
@@ -117,7 +140,7 @@ Detail: [technical](moxygen/PanelCardDriver.md)
 
 <img src="../../assets/light/drivers/HueDriver.png" width="300" alt="A HueDriver in the UI">
 
-Drives **Philips Hue bulbs as pixels**: each color bulb in the driver's window becomes one pixel, pushed to the bridge over its HTTP API. Paced to the bridge's ~10 cmd/s limit, so smooth ambient color, not strobing.
+Drives **Philips Hue bulbs as pixels**: each color bulb in the driver's window becomes one pixel, pushed to the bridge over its HTTP API. Paced to the bridge's ~10 cmd/s limit, so smooth ambient color, not strobing. Up to 32 bulbs, which is a LAN's worth and bounds the driver's memory.
 
 - `bridgeIp`: the bridge's LAN IPv4.
 - `appKey`: the Hue app key; filled by `pair`, persisted.
@@ -140,7 +163,7 @@ Streams a true-shape 3D preview to the web UI as a **point list**, only the real
 
 It streams on its own WebSocket channel so a large frame never delays the control plane, and only while a viewer is watching. Moving heads show their beam. How the rate and detail trade off is in [the details below](#preview-details).
 
-- `targetFps`: the rate to aim for (default 24, 1–60). **Lower for detail, raise for smoothness.**
+- `targetFps`: the rate to aim for (default 24, 1–25). **Lower for detail, raise for smoothness.**
 
 [Tests](../../reference/tests/unit-tests.md#previewdriver)
 
@@ -174,7 +197,7 @@ The grid becomes the frame, output correction applied. Latency is HLS's own, **2
 - `targetFps`: encode-rate ceiling (default 30, 1–120). Also the bandwidth knob: bitrate is derived.
 - `scale`: video pixels per light (0 = auto). Each light is a solid block, never a blur.
 - `encoder`: which ffmpeg encoder (desktop only).
-- read-only: `url` to play, plus a status line for state, drops, or why the encoder stopped.
+- read-only: `url` to play. The card's status line carries state, drops, or why the encoder stopped.
 
 Detail: [technical](moxygen/HlsDriver.md) · [the transport-stream muxer](moxygen/MpegTs.md)
 
@@ -185,9 +208,9 @@ Detail: [technical](moxygen/HlsDriver.md) · [the transport-stream muxer](moxyge
 
 **`start` and `count` are how several drivers share one buffer.** Blank `count` drives every light; a number drives only that slice. An onboard status LED takes `start 0, count 1` while the main strip runs from `start 1`, both reading the same buffer.
 
-<a id="led-driver-details"></a>
+<a id="parallel-led-details"></a>
 
-## LED driver, details
+## Parallel LED, details
 
 **`doubleBuffer`: leave it on.** The driver encodes the next frame into a second DMA buffer while the current one clocks out, so a tick costs `max(encode, wire)` rather than `encode + wire`. Measured on a P4 at 16x256 lights it lifted the whole board from about 48 to 76 fps, moving a 7.7 ms wire into background DMA. It costs one extra DMA buffer and one frame of output latency, roughly 8 to 20 ms, which sits inside the perceptual audio-to-visual window and is small next to the wire itself. There is no setup, audio-reactive included, that should turn it off for latency. A board whose second buffer will not fit degrades to the synchronous path on its own.
 
