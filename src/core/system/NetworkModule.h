@@ -192,10 +192,10 @@ public:
             constexpr bool preview = !platform::hasEthernet;
             const uint8_t firstEthControl = controls_.count();
             buildEthPresetOptions();
-            // First render: on a provisioned board the pins are already the catalog's, so read the preset back off them. A factory board has no type yet and lands on Custom with its chip's pins, which is honest until the catalog names a board.
-            if (!ethPresetSeeded_) { ethPresetSeeded_ = true; seedEthPresetFromPins(); }
-            // The restore path fires no onControlChanged, so writing the map HERE is what makes a saved `ethBoard` reach the pins. Keyed on the selection moving, or a rebuild would undo a Custom edit.
-            else if (ethPresetSel_ != ethPresetApplied_) applyEthPreset();
+            // A selection MOVED, so write its map. The restore path fires no onControlChanged, and this is what makes a saved `ethBoard` reach the pins; keyed on the move, or a rebuild would undo a Custom edit.
+            if (ethPresetSel_ != ethPresetApplied_) applyEthPreset();
+            // Otherwise read the preset back off the pins, while the selection is still the un-chosen Custom: restore overlays pins before `ethBoard` survives a rebuild, so seeding once read defaults instead.
+            else if (ethPresetIsUnset()) seedEthPresetFromPins();
             ethPresetApplied_ = ethPresetSel_;
             controls_.addSelect("ethBoard", ethPresetSel_, ethPresetOptions_, ethPresetCount_);
             // By label: the list is filtered per build, so an index would name a different board.
@@ -544,7 +544,6 @@ private:
     const char* ethPresetOptions_[kEthPresetCount] = {};
     uint8_t ethPresetIndex_[kEthPresetCount] = {};
     uint8_t ethPresetCount_ = 0;
-    bool ethPresetSeeded_ = false;   ///< the preset is matched to the pins once, not every rebuild
     uint8_t ethPresetApplied_ = 0;   ///< the selection whose map is already written, so a rebuild is not a re-apply
 
 
@@ -566,14 +565,23 @@ private:
             ethPresetIndex_[ethPresetCount_] = i;
             ethPresetCount_++;
         }
-        // By LABEL, so a filtered list cannot silently select a different board.
+        // By LABEL, so a filtered list cannot select a different board, falling back to CUSTOM rather than row 0: a real preset whose map would overwrite the chip's defaults.
         uint8_t sel = 0;
+        for (uint8_t k = 0; k < ethPresetCount_; k++) {
+            if (kEthPresets[ethPresetIndex_[k]].editable) { sel = k; break; }
+        }
         if (current) {
             for (uint8_t k = 0; k < ethPresetCount_; k++) {
                 if (std::strcmp(ethPresetOptions_[k], current) == 0) { sel = k; break; }
             }
         }
         ethPresetSel_ = sel;
+    }
+
+    /// Has nothing chosen a preset yet? True while the selection is the editable Custom row.
+    bool ethPresetIsUnset() const {
+        if (ethPresetSel_ >= ethPresetCount_) return true;
+        return kEthPresets[ethPresetIndex_[ethPresetSel_]].editable;
     }
 
     /// Are the pin controls the user's to edit, for the preset currently selected?

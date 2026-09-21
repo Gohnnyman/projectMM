@@ -24,6 +24,7 @@
 #include "platform/platform.h" // setEthConfig / ethStop / ethInit / ethConnected
 #include "core/system/NetworkModule.h"
 #include <cstring>
+#include <string>
 
 // The enum values are a wire contract: the Select index, the ethInit() switch, and every deviceModels.json `ethType` all agree on these. Pin them so a reorder fails here.
 TEST_CASE("EthPhyType enum values match the dropdown/dispatch contract") {
@@ -157,4 +158,53 @@ TEST_CASE("fixedPins never writes past the capacity it is given") {
     CHECK(net.fixedPins(pads, 2) <= 2);
     CHECK(pads[2].gpio == 0xEE);
     CHECK(net.fixedPins(nullptr, 16) == 0);   // a null sink is answered, not written through
+}
+
+// Two bugs an Olimex found: a board whose pins ARE a preset's map opens on it, and one that chose nothing adopts no preset.
+TEST_CASE("ethBoard seeds from the pins after a restore, not once before it") {
+    if constexpr (!mm::platform::hasEthernet && !mm::platform::previewsEthernetControls) return;
+
+    auto boardOf = [](mm::NetworkModule& n) -> const char* {
+        for (uint8_t i = 0; i < n.controls().count(); i++) {
+            const auto& c = n.controls()[i];
+            if (std::strcmp(c.name, "ethBoard") == 0) {
+                auto* opts = reinterpret_cast<const char* const*>(c.aux);
+                const uint8_t sel = *static_cast<const uint8_t*>(c.ptr);
+                return (opts && sel < c.max) ? opts[sel] : "";
+            }
+        }
+        return nullptr;
+    };
+
+    mm::NetworkModule net;
+    net.rebuildControls();
+    REQUIRE(boardOf(net) != nullptr);
+    // Nothing has chosen one and no type is set, so Custom is the honest answer rather than row 0, a real preset whose map would overwrite the chip's own defaults.
+    CHECK(std::strcmp(boardOf(net), "Custom") == 0);
+
+    // What a restore does, overlaying saved values then rebuilding, with the classic pins and no saved `ethBoard` at all: exactly an upgraded board's config.
+    auto setByName = [&](const char* name, int v) {
+        for (uint8_t i = 0; i < net.controls().count(); i++) {
+            const auto& c = net.controls()[i];
+            if (std::strcmp(c.name, name) != 0) continue;
+            if (c.type == mm::ControlType::Int16) *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
+            else if (c.type == mm::ControlType::Pin) *static_cast<int8_t*>(c.ptr) = static_cast<int8_t>(v);
+            else *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
+            return;
+        }
+    };
+    setByName("ethType", 1);          // LAN8720
+    setByName("ethPhyAddr", 0);
+    setByName("ethMdcGpio", 23);
+    setByName("ethMdioGpio", 18);
+    setByName("ethRstGpio", 5);
+    setByName("ethClockGpio", 17);
+
+    net.rebuildControls();
+    // The pins name Classic RMII, so the card opens on it rather than on Custom.
+    CHECK(std::strcmp(boardOf(net), "Classic RMII") == 0);
+
+    // And the seed does NOT fight a chosen preset: rebuilding again keeps it.
+    net.rebuildControls();
+    CHECK(std::strcmp(boardOf(net), "Classic RMII") == 0);
 }

@@ -1,6 +1,6 @@
 # Core system
 
-The device's fixed infrastructure — identity, network, provisioning, firmware, and the inspection tools. These modules are **always present and wired by code**, not user-added; the user does not add or delete them. User-added capability modules (Audio, IR) live in the `Services` container instead — see [core/services.md](services.md). Every row links to its generated technical page (the full API, from the `.h`) and its tests. Cross-cutting rationale that no single `.h` owns lives in the prose sections below the table.
+The device's fixed infrastructure: identity, network, provisioning, firmware, and the inspection tools. These modules are **always present and wired by code**, not user-added; the user does not add or delete them. User-added capability modules (Audio, IR) live in the `Services` container instead, see [core/services.md](services.md). Every row links to its generated technical page (the full API, from the `.h`) and its tests. Cross-cutting rationale that no single `.h` owns lives in the prose sections below the table.
 
 ## System modules
 
@@ -8,15 +8,15 @@ The device's fixed infrastructure — identity, network, provisioning, firmware,
 
 ### System
 
-The device's identity and vitals — name (behind mDNS `<name>.local`, the SoftAP SSID, the DHCP hostname), uptime, heap, and per-module footprint reporting. Its fixed inspection children (Tasks, I2C scan) hang beneath it.
+The device's identity and vitals: name (behind mDNS `<name>.local`, the SoftAP SSID, the DHCP hostname), uptime, heap, and per-module footprint reporting. Its fixed inspection children (Tasks, I2C scan) hang beneath it.
 
 <img src="../../assets/core/SystemModule.png" width="300" alt="System module controls">
 
-- `deviceName` — the identity behind mDNS, the SoftAP SSID and the DHCP hostname.
-- `deviceModel` — the board model (drives the installer catalog entry).
-- `mode` — how much of the UI is shown: `user`, `expert` (🎚️) or `developer` (🔧), cumulative.
-- `logLevel` — serial verbosity, defaulting to Warn. The first 60 s always logs at Info.
-- read-only vitals — `uptime`, `fps`, `heap`, `psram`, `flash`, `chip`, and per-module footprint.
+- `deviceName`: the identity behind mDNS, the SoftAP SSID and the DHCP hostname.
+- `deviceModel`: the board model (drives the installer catalog entry).
+- `mode`: how much of the UI is shown, `user`, `expert` (🎚️) or `developer` (🔧), cumulative.
+- `logLevel`: serial verbosity, defaulting to Warn. The first 60 s always logs at Info.
+- read-only vitals: `uptime`, `fps`, `heap`, `psram`, `flash`, `chip`, and per-module footprint.
 
 Detail: [technical](moxygen/SystemModule.md)
 
@@ -30,12 +30,12 @@ WiFi / Ethernet connectivity, static-IP configuration, RSSI and TX-power reporti
 
 <img src="../../assets/core/NetworkModule.png" width="300" alt="Network module controls">
 
-- `mode` — WiFi / Ethernet / off.
-- `ssid` / `password` — WiFi credentials.
-- `mDNS` — the `<name>.local` hostname.
-- `addressing` — DHCP or static; static exposes IP / gateway / subnet / DNS fields.
-- `ethType` / `ethPhyAddr` / `ethRstGpio` / … — Ethernet PHY configuration.
-- read-only — `rssi` (dBm), `txPower` (dBm).
+- `mode`: WiFi / Ethernet / off.
+- `ssid` / `password`: WiFi credentials.
+- `mDNS`: the `<name>.local` hostname.
+- `addressing`: DHCP or static; static exposes IP / gateway / subnet / DNS fields.
+- `ethType` / `ethPhyAddr` / `ethRstGpio` / …, Ethernet PHY configuration.
+- read-only: `rssi` (dBm), `txPower` (dBm).
 
 Detail: [technical](moxygen/NetworkModule.md)
 
@@ -49,7 +49,7 @@ Serial/BLE Improv Wi-Fi provisioning: the web installer hands credentials to a f
 
 <img src="../../assets/core/ImprovProvisioningModule.png" width="300" alt="Improv provisioning module controls">
 
-- `provision_status` — read-only provisioning state.
+- `provision_status`: read-only provisioning state.
 
 Detail: [technical](moxygen/ImprovProvisioningModule.md) · [frame format](moxygen/ImprovFrame.md) · [chunk reassembly](moxygen/ImprovOpReassembler.md)
 
@@ -59,10 +59,10 @@ Detail: [technical](moxygen/ImprovProvisioningModule.md) · [frame format](moxyg
 
 Discovers other projectMM devices on the LAN and lists them, persisting the last-known list across a reboot. A wired-by-code child of Network.
 
-<img src="../../assets/core/DevicesModule.png" width="300" alt="Devices module — discovered LAN devices">
+<img src="../../assets/core/DevicesModule.png" width="300" alt="Devices module, discovered LAN devices">
 
-- `devices` — a List of discovered devices; each row expands to a detail panel. Persistable.
-- `wledCompatible` — also announce on WLED's broadcast address, off by default.
+- `devices`: a List of discovered devices; each row expands to a detail panel. Persistable.
+- `wledCompatible`: also announce on WLED's broadcast address, off by default.
 
 WLED apps browse on broadcast, so a device appears in them only with this on. Off is the better neighbour, since a broadcast wakes every device on the LAN to parse a packet none of them want. Presence always goes to the projectMM group regardless, so peers find each other either way. See [multicast and IGMP snooping](../../explanation/architecture/moonlight.md#multicast-and-igmp-snooping).
 
@@ -78,13 +78,13 @@ Bridges the light to an MQTT broker so a home-automation hub can control it, as 
 
 <img src="../../assets/core/MqttModule.png" width="300" alt="MQTT module controls">
 
-- `broker` — the broker hostname (e.g. `homeassistant.lan`) or IP. A hostname is resolved via DNS.
-- `port` — broker port (default 1883).
-- `username` / `password` — broker credentials, optional, the password stored obfuscated.
-- `haDiscovery` — announce a Home Assistant discovery light, off by default.
+- `broker`: the broker hostname (e.g. `homeassistant.lan`) or IP. A hostname is resolved via DNS.
+- `port`: broker port (default 1883).
+- `username` / `password`: broker credentials, optional, the password stored obfuscated.
+- `haDiscovery`: announce a Home Assistant discovery light, off by default.
 
 HA already discovers the device over the WLED shim with no broker, so this stays off to avoid a duplicate entity. Turn it on for broker-only or cross-subnet setups. See the [home-automation guide](../../how-to/home-automation.md).
-- read-only — `mqtt_status`, from `disabled` and `idle` through to `connected`, or an error.
+- read-only: `mqtt_status`, from `disabled` and `idle` through to `connected`, or an error.
 
 Detail: [technical](moxygen/MqttModule.md)
 
@@ -94,13 +94,13 @@ Detail: [technical](moxygen/MqttModule.md)
 
 ### Firmware update
 
-Over-the-air firmware flashing — the one operation that swaps the binary and needs a power cycle (every *config* change applies live; a firmware OTA does not).
+Over-the-air firmware flashing, the one operation that swaps the binary and needs a power cycle (every *config* change applies live; a firmware OTA does not).
 
 <img src="../../assets/core/FirmwareUpdateModule.png" width="300" alt="Firmware update module controls">
 
-- `firmware` — the OTA image to flash.
-- read-only: `version`, `build`, `partition`.
-- `image` — on a device carrying two images, which one those describe and an install writes.
+- `firmware`: the OTA image to flash.
+- read-only: `version`, `build` and `partition`.
+- `image`: on a device carrying two images, which one those describe and an install writes.
 
 The choice is the app it runs, or MoonBase in the factory slot. This control's presence is also what tells the UI that installs run through the reboot-into-MoonBase cycle, behind one "updating firmware" overlay, and that a **Restart in MoonBase** button belongs on the card ([MoonBase](../../explanation/architecture/moonbase.md)).
 
@@ -130,9 +130,9 @@ One opt-in report about this install, sent once per install or upgrade, so devel
 
 <img src="../../assets/core/MoonStatsModule.png" width="300" alt="Stats module controls">
 
-- `consent` — a checkbox, off by default. Nothing is sent and no identifier computed while off.
+- `consent`: a checkbox, off by default. Nothing is sent and no identifier computed while off.
 - read-only: `version` and `reportedVersion`, which differ exactly when a report is due.
-- `send update` — reports again now, for a setup that changed without a version change.
+- `send update`: reports again now, for a setup that changed without a version change.
 
 The two versions differing is what makes an upgrade send one report and a reboot send nothing. The button replaces this install's row rather than adding one.
 
@@ -150,10 +150,10 @@ A public message board between projectMM devices, in the shape Meshtastic's chan
 
 <img src="../../assets/core/MoonTalkModule.png" width="300" alt="Talk module controls">
 
-- `consent` — a checkbox, off by default. Nothing is published or read while it is off.
-- `shareName` — whether your device name rides along, **off by default and a separate decision**.
-- `message` — what to say, up to 280 characters. Typing changes nothing on its own.
-- `send` — publishes the message and clears the box, as does Enter in the message field.
+- `consent`: a checkbox, off by default. Nothing is published or read while it is off.
+- `shareName`: whether your device name rides along, **off by default and a separate decision**.
+- `message`: what to say, up to 280 characters. Typing changes nothing on its own.
+- `send`: publishes the message and clears the box, as does Enter in the message field.
 
 A device name identifies a person rather than a machine. Without it your messages carry the first 8 characters of your installation id, which groups them without naming you.
 
@@ -169,18 +169,18 @@ Detail: [technical](moxygen/MoonTalkModule.md)
 
 Browse and manage the device filesystem: a folder tree with an inline text editor. Distinct from Filesystem, the persistence engine. Behaviour: ⌄ details.
 
-<img src="../../assets/core/FileManagerModule.png" width="300" alt="File Manager panel — folder tree + toolbar">
+<img src="../../assets/core/FileManagerModule.png" width="300" alt="File Manager panel, folder tree + toolbar">
 
-- `file browser` — the panel itself: a folder tree, a toolbar and an inline text editor.
+- `file browser`: the panel itself: a folder tree, a toolbar and an inline text editor.
 - **Backup (⤓)**, download the device's files as one `.json` bundle.
 
 **Keep it private: it contains the WiFi password.** Every file is byte-verified against the listing, and an unreadable one is skipped and named.
 - **Restore (⟲)**, upload a backup bundle, pressing twice since it overwrites the device's files.
 
 Known renames from [MIGRATING.md](../../reference/MIGRATING.md) apply before upload, then a report lists what needs an eye. Every file applies as it lands, bar network settings and the web server's `port`, which the dialog names.
-- `show hidden` — reveal dot-prefixed files and folders, such as `.config`.
-- `filesystem` — read-only usage bar (used / total bytes, from the platform).
-- `lastSaved` — read-only; how long ago config was persisted (read from the Filesystem engine).
+- `show hidden`: reveal dot-prefixed files and folders, such as `.config`.
+- `filesystem`: read-only usage bar (used / total bytes, from the platform).
+- `lastSaved`: read-only; how long ago config was persisted (read from the Filesystem engine).
 
 Detail: [technical](moxygen/FileManagerModule.md)
 
@@ -188,15 +188,15 @@ Detail: [technical](moxygen/FileManagerModule.md)
 
 ### I2C scan
 
-A fixed System module (wired-by-code, always present) that probes the I²C bus on a button press and reports the addresses found — a hardware bring-up tool. The bus pins default to unused (−1), so a board without an I²C device claims no GPIO for it; a board with a bus sets its pins via the catalog, or you type them for an ad-hoc scan. Passive until the scan button is pressed.
+A fixed System module (wired-by-code, always present) that probes the I²C bus on a button press and reports the addresses found, a hardware bring-up tool. The bus pins default to unused (−1), so a board without an I²C device claims no GPIO for it; a board with a bus sets its pins via the catalog, or you type them for an ad-hoc scan. Passive until the scan button is pressed.
 
 <img src="../../assets/core/I2cScanModule.png" width="300" alt="I2C scan module controls">
 
-- `sda` / `scl` — the bus GPIOs, defaulting to −1 for unused.
+- `sda` / `scl`: the bus GPIOs, defaulting to −1 for unused.
 
 A board with a fixed bus injects its own through the catalog, or you type the pins for an ad-hoc scan. The classic Arduino-ESP32 pair is 21/22.
-- `scan` — a button; press to probe the bus now.
-- read-only — `result` (addresses found).
+- `scan`: a button; press to probe the bus now.
+- read-only: `result` (addresses found).
 
 Detail: [technical](moxygen/I2cScanModule.md)
 
@@ -206,10 +206,10 @@ Detail: [technical](moxygen/I2cScanModule.md)
 
 A read-only diagnostic showing **what runs where**: you cannot optimise which module runs on which core until you can see it. A fixed System module, wired-by-code, with each task's MoonModules nested beneath it.
 
-<img src="../../assets/core/TasksModule.png" width="300" alt="Tasks module — a row per FreeRTOS task">
+<img src="../../assets/core/TasksModule.png" width="300" alt="Tasks module, a row per FreeRTOS task">
 
-- read-only — `tasks`, a row per FreeRTOS task.
-- read-only — `core0` / `core1`, what executes on each core, empty on a single-core chip.
+- read-only: `tasks`, a row per FreeRTOS task.
+- read-only: `core0` / `core1`, what executes on each core, empty on a single-core chip.
 
 Each row carries `name`, `state`, `core`, `prio` and `stack`, the minimum free stack seen. A `cpu` percentage appears only in a profiling build, off by default because the run-time counter costs about 5% of the tick.
 
@@ -221,13 +221,13 @@ Detail: [technical](moxygen/TasksModule.md)
 
 ### Pins
 
-A read-only diagnostic showing **which module owns each GPIO, for what role, and whether that pin is safe for it** — the device's pin ownership map, keyed by physical GPIO. A fixed System module, wired-by-code.
+A read-only diagnostic showing **which module owns each GPIO, for what role, and whether that pin is safe for it**, the device's pin ownership map, keyed by physical GPIO. A fixed System module, wired-by-code.
 
 It walks the live tree for every claimed pin, holding no state, and flags double claims.
 
-<img src="../../assets/core/PinsModule.png" width="300" alt="Pins module — the GPIO ownership map">
+<img src="../../assets/core/PinsModule.png" width="300" alt="Pins module, the GPIO ownership map">
 
-- read-only — `pins`, a row per claimed GPIO.
+- read-only: `pins`, a row per claimed GPIO.
 
 Each row carries `gpio`, `owner` and `role`, plus live `dir`, `level` and `drive`. A row takes a coloured edge when unsafe: red for a reserved or double-claimed pin, yellow for a driven role on a strap, per [gpio-usage.md](../../reference/hardware/gpio-usage.md).
 
@@ -237,14 +237,14 @@ Detail: [technical](moxygen/PinsModule.md)
 
 ### Control
 
-A grid of preset pads, a row of rotary encoders above them, a row of on/off switches above those, and a bank of faders below — the layout of a Mackie-style control desk ([X-Touch](https://www.behringer.com/product.html?modelCode=0808-AAF), [QCon Pro G2](https://www.iconproaudio.com/product/qcon-pro-g2/)), so a physical surface maps onto it without a translation layer.
+A grid of preset pads, a row of rotary encoders above them, a row of on/off switches above those, and a bank of faders below, the layout of a Mackie-style control desk ([X-Touch](https://www.behringer.com/product.html?modelCode=0808-AAF), [QCon Pro G2](https://www.iconproaudio.com/product/qcon-pro-g2/)), so a physical surface maps onto it without a translation layer.
 
 <img src="../../assets/core/ControlModule.png" width="300" alt="Control module surface: encoders, preset pads, faders">
 
-- `presets` — one pad per preset file. Click applies, right-click names, drag rearranges.
-- `switch1` … `switch8` — the switch row. `switch1` drives `Drivers.on`, the rest unbound.
-- `encoder1` … `encoder8` — rotary encoders. Drag or scroll to turn, right-click to see the binding.
-- `fader1` … `fader8` — faders. `fader1` drives `Drivers.brightness`, the rest unbound.
+- `presets`: one pad per preset file. Click applies, right-click names, drag rearranges.
+- `switch1` … `switch8`, the switch row. `switch1` drives `Drivers.on`, the rest unbound.
+- `encoder1` … `encoder8`, rotary encoders. Drag or scroll to turn, right-click to see the binding.
+- `fader1` … `fader8`, faders. `fader1` drives `Drivers.brightness`, the rest unbound.
 
 Detail: [technical](moxygen/ControlModule.md)
 
@@ -290,9 +290,9 @@ Detail: [technical](moxygen/ControlSurface.md) · [InputMapping](moxygen/InputMa
 
 #### Presets
 
-A preset is a file: `/.config/presets/<name>.json`. Saving writes one, applying reads one, deleting removes one. Nothing else holds preset state, so there is no second copy to keep in step: the list is rebuilt from the folder rather than persisted alongside it. That rescan runs at startup and after every save, rename and delete — a reorder only rewrites the affected files and re-sorts the rows in place, since the folder's contents have not changed. So a preset added or removed through the File Manager appears once the module next rescans (a reboot, or a save, rename or delete on the surface), not the instant the file lands.
+A preset is a file: `/.config/presets/<name>.json`. Saving writes one, applying reads one, deleting removes one. Nothing else holds preset state, so there is no second copy to keep in step: the list is rebuilt from the folder rather than persisted alongside it. That rescan runs at startup and after every save, rename and delete, a reorder only rewrites the affected files and re-sorts the rows in place, since the folder's contents have not changed. So a preset added or removed through the File Manager appears once the module next rescans (a reboot, or a save, rename or delete on the surface), not the instant the file lands.
 
-The name becomes the file name, so it is restricted to printable ASCII without `/`, `\` or `.` — a validator on the control, which every write path runs. `slot` records which pad the preset occupies, so a surface arranged to match a physical desk survives a reboot.
+The name becomes the file name, so it is restricted to printable ASCII without `/`, `\` or `.`, a validator on the control, which every write path runs. `slot` records which pad the preset occupies, so a surface arranged to match a physical desk survives a reboot.
 
 ##### What a preset carries
 
@@ -320,7 +320,7 @@ A pad is tinted by its role: layout blue, effects violet, driver green, service 
 
 ##### Applying is a rebuild
 
-Applying a preset creates, replaces and destroys modules to match what the file describes — it is a restore, not a value overlay: a preset carrying more than the device has adds it, and one describing less removes what it omits.
+Applying a preset creates, replaces and destroys modules to match what the file describes, it is a restore, not a value overlay: a preset carrying more than the device has adds it, and one describing less removes what it omits.
 
 Structural mutation quiesces the render worker, and mutations run inline on the render tick, so a large restore stalls rendering for its duration. The captured subtree is applied and `prepareTree()` runs once at the end. Presets are a cold-path feature; the tick path is untouched.
 
@@ -330,11 +330,11 @@ Looks reach Home Assistant two ways, and only `Effects` presets travel either of
 
 **The WLED integration** (`/presets.json`) is the native path: HA renders looks in its own preset dropdown, shows which one is applied, and applies one when it is chosen. This is what HA calls a preset.
 
-**MQTT discovery** publishes the same looks as the light entity's **effect list**. HA has no preset concept over MQTT, so they arrive as effects — the same result from the user's side, reached through a different mechanism.
+**MQTT discovery** publishes the same looks as the light entity's **effect list**. HA has no preset concept over MQTT, so they arrive as effects, the same result from the user's side, reached through a different mechanism.
 
-HA caches the preset list and re-fetches only when the device's `info.fs.pmt` value changes, so the device reports a revision counter there that bumps on every preset save, rename and delete — a counter rather than a timestamp, so two changes inside one second still read as two. A constant there leaves HA showing the list it read at setup forever; over MQTT the same revision re-announces the effect list mid-session.
+HA caches the preset list and re-fetches only when the device's `info.fs.pmt` value changes, so the device reports a revision counter there that bumps on every preset save, rename and delete, a counter rather than a timestamp, so two changes inside one second still read as two. A constant there leaves HA showing the list it read at setup forever; over MQTT the same revision re-announces the effect list mid-session.
 
-Only looks are exposed, on both paths. A `Drivers` or `Layouts` preset rewires pins or geometry, which must not be reachable from something that believes it is choosing a color scheme — the restriction is enforced at the apply entry point, not merely by omitting them from the list.
+Only looks are exposed, on both paths. A `Drivers` or `Layouts` preset rewires pins or geometry, which must not be reachable from something that believes it is choosing a color scheme, the restriction is enforced at the apply entry point, not merely by omitting them from the list.
 
 Home Assistant's WLED integration connects on **port 80 only**: its host field rejects a port, so a desktop build (which defaults to 8080) needs `--port 80`, and that needs root:
 
@@ -345,7 +345,7 @@ sudo uv run moondeck/run/run_desktop.py --port 80
 The discovery buffers are sized to the looks this device actually has, and grow or shrink as presets are added and removed. There is no cap on the number: a fixed one would either reserve memory a small setup never uses, or silently publish nothing once the list outgrew it.
 
 ## MQTT, details
-The topic prefix is `projectMM/<mac>` — a **stable** identifier (the last 6 hex of the device's MAC), fixed for the device's life. Renaming the device does **not** change its topics, so a hub's config never breaks on a rename (the WLED/Tasmota/Home-Assistant convention). It's derived, not a stored control.
+The topic prefix is `projectMM/<mac>`, a **stable** identifier (the last 6 hex of the device's MAC), fixed for the device's life. Renaming the device does **not** change its topics, so a hub's config never breaks on a rename (the WLED/Tasmota/Home-Assistant convention). It's derived, not a stored control.
 
 **Topics** (for a device whose MAC ends `563cfe`): the device SUBSCRIBEs to the `set` topics and PUBLISHes the `get` topics on change (and on connect, so a controller never reads "No Response"). It also publishes its friendly `deviceName` on the retained `name` topic, so a hub can show the human name while the topics stay MAC-stable:
 
@@ -361,9 +361,9 @@ The topic prefix is `projectMM/<mac>` — a **stable** identifier (the last 6 he
 | device → get | `projectMM/563cfe/update/state` | `{"installed_version":…,"latest_version":…,"release_url":…,"title":…}` (retained; HA update entity) |
 | set → device | `projectMM/563cfe/update/set` | target version string (empty = install latest); triggers OTA against the matching GitHub release asset |
 
-The HomeKit color wheel has no "palette" concept, so `hsv/set`'s hue+saturation pick the **nearest palette** (each built-in palette has a representative color; the closest one is selected) and the value drives brightness — the color wheel becomes a natural palette selector.
+The HomeKit color wheel has no "palette" concept, so `hsv/set`'s hue+saturation pick the **nearest palette** (each built-in palette has a representative color; the closest one is selected) and the value drives brightness, the color wheel becomes a natural palette selector.
 
-**Homebridge** — install [`homebridge-mqttthing`](https://github.com/arachnetech/homebridge-mqttthing) and add a `lightbulb` accessory. Use the device's own MAC suffix (read it from the `mqtt_status`/topics, or `mosquitto_sub -t 'projectMM/#'`) in place of `563cfe`:
+**Homebridge**, install [`homebridge-mqttthing`](https://github.com/arachnetech/homebridge-mqttthing) and add a `lightbulb` accessory. Use the device's own MAC suffix (read it from the `mqtt_status`/topics, or `mosquitto_sub -t 'projectMM/#'`) in place of `563cfe`:
 
 ```json
 {
@@ -387,8 +387,8 @@ The HomeKit color wheel has no "palette" concept, so `hsv/set`'s hue+saturation 
 ```
 
 Home Assistant adopts the device two ways, both zero-config:
-- **MQTT auto-discovery** — with `haDiscovery` on (opt-in; off by default) and a broker set, the device announces itself on `homeassistant/light/projectMM_<mac6>/config` and HA auto-creates a wired entity with **on/off + brightness** (the config declares `brightness` only; color isn't in it, so the entity has no color control). Retained across reboots. Color/palette stays on the separate `hsv/set` topic above, not this entity. Off by default because the WLED `/json` shim already gives HA a richer light (color + palette + sensors) over mDNS with no broker — leaving both on lists the device twice; enable this only for broker-only / cross-subnet setups.
-- **WLED integration** — HA's built-in WLED integration discovers the device over the WLED `/json` API projectMM already serves; on/off + brightness work with no broker.
+- **MQTT auto-discovery**: with `haDiscovery` on (opt-in; off by default) and a broker set, the device announces itself on `homeassistant/light/projectMM_<mac6>/config` and HA auto-creates a wired entity with **on/off + brightness** (the config declares `brightness` only; color isn't in it, so the entity has no color control). Retained across reboots. Color/palette stays on the separate `hsv/set` topic above, not this entity. Off by default because the WLED `/json` shim already gives HA a richer light (color + palette + sensors) over mDNS with no broker, leaving both on lists the device twice; enable this only for broker-only / cross-subnet setups.
+- **WLED integration**: HA's built-in WLED integration discovers the device over the WLED `/json` API projectMM already serves; on/off + brightness work with no broker.
 
 Both can be on at once. Setup walkthrough (including exposing HA to Apple Home via HA's HomeKit Bridge, no Homebridge needed) in the [Home Assistant recipe](../../how-to/home-automation.md#adopt-in-home-assistant).
 
@@ -397,8 +397,8 @@ The panel is a lazy folder **tree** (each folder loads its children on first exp
 
 - Click a folder's row to select it and toggle its expansion (▸/▾); click a selected file to open the editor.
 - The toolbar acts on the selected node: **＋ folder** creates a folder inside it, **＋ file** creates an empty file (click it to edit), **🗑 delete** removes the selected file, or a folder and everything inside it (press-twice to confirm), **⟳** refreshes.
-- **Drag files from the desktop** onto a folder (or the tree) to upload them — the body streams straight to the file (any size, binary-safe; capped only by a sanity limit and the free space, which it reports if short); a per-file **⤓** streams it back to the desktop.
+- **Drag files from the desktop** onto a folder (or the tree) to upload them, the body streams straight to the file (any size, binary-safe; capped only by a sanity limit and the free space, which it reports if short); a per-file **⤓** streams it back to the desktop.
 - The editor loads a file's text, pretty-prints JSON on open, and saves atomically; a binary file (contains a NUL) loads read-only (use ⤓ to fetch it intact). Upload and download both stream, so neither truncates.
-- Create / delete are HTTP calls (`POST` / `DELETE /api/dir?path=`), not controls — the path rides the request, so nothing is stored on the device per op.
+- Create / delete are HTTP calls (`POST` / `DELETE /api/dir?path=`), not controls, the path rides the request, so nothing is stored on the device per op.
 
 Last-modified dates (needs an NTP time source + LittleFS mtime), binary/large + folder upload, folder-as-zip download, and `.ml` syntax highlighting are backlogged ([backlog-core § File Manager follow-ups](../../work/future/backlog-core.md#file-manager-follow-ups)).

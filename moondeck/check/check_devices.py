@@ -123,10 +123,10 @@ def main():
     eth_presets = eth_preset_labels()
     for label, field, was, now in eth_preset_drift():
         errors.append(f"NetworkModule.h kEthPresets {label!r}: {field} is {now}, but "
-                      f"platform_config.h's ethConfigDefault says {was} — the preset restates the "
+                      f"platform_config.h's ethConfigDefault says {was}: the preset restates the "
                       f"chip default, so the two must agree or a provisioned board reseeds to Custom")
     if not eth_presets:
-        errors.append("NetworkModule.h: could not read the kEthPresets table — the ethBoard check cannot run")
+        errors.append("NetworkModule.h: could not read the kEthPresets table, so the ethBoard check cannot run")
 
     try:
         catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
