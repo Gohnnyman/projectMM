@@ -88,7 +88,7 @@ namespace {
 // It must be an exact divide of the bus resolution, since the component silently rounds an inexact rate down into a wrong waveform rather than reporting it.
 constexpr uint32_t kPclkHz = 20'000'000;
 
-// Parlio's hardware ceiling: PER_FRAME is 0x7FFFF bits on every Parlio-capable target, which is 65,535 BYTES whatever the bus width. The same constant platform_esp32_parlio.cpp records, and it is what decides that four 8-bit panels (65,794 bytes) are an LCD_CAM job.
+// Parlio's hardware ceiling: PER_FRAME is 0x7FFFF bits on every Parlio-capable target, which is 65,535 BYTES whatever the bus width. The same constant platform_esp32_parlio.cpp records, and it is what decides that four 8-bit panels (65,792 bytes) are an LCD_CAM job.
 constexpr size_t kParlioMaxTransferBytes = 0x7FFFF / 8;
 
 const char* g_lastError = nullptr;
@@ -314,7 +314,8 @@ bool hub75Init(Hub75Handle& h, Hub75Backend backend, const Hub75Pins& pins,
         cfg.output_clk_freq_hz = kPclkHz;
         cfg.trans_queue_depth = 1;
         cfg.max_transfer_size = frameBytesPre;
-        cfg.shift_edge = PARLIO_SHIFT_EDGE_POS;   // shift on the rising edge, as the LED path does
+        // The edge the panel's chips sample on: rising for most, falling for some, and the wrong one puts every pixel one column over.
+        cfg.shift_edge = pins.clkFalling ? PARLIO_SHIFT_EDGE_NEG : PARLIO_SHIFT_EDGE_POS;
         if (parlio_new_tx_unit(&cfg, &st->parlio) != ESP_OK) {
             g_lastError = "could not claim the Parlio unit: is another driver using it?";
             destroyState(st);
@@ -371,6 +372,8 @@ bool hub75Init(Hub75Handle& h, Hub75Backend backend, const Hub75Pins& pins,
     ioCfg.lcd_cmd_bits = 0;     // LCD_CAM: tx_color(-1) skips the command phase entirely
     ioCfg.lcd_param_bits = 0;
     ioCfg.flags.pclk_idle_low = 1;
+    // Same edge choice as the Parlio branch: the display "writes" (samples) on the falling edge when set.
+    ioCfg.flags.pclk_active_neg = pins.clkFalling ? 1 : 0;
     if (esp_lcd_new_panel_io_i80(st->bus, &ioCfg, &st->io) != ESP_OK) {
         g_lastError = "could not configure the LCD device";
         destroyState(st);

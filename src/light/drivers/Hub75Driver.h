@@ -54,6 +54,8 @@ public:
     int8_t oe = -1;    ///< Output enable, active LOW.
 
     // NOT derivable from the panel's size: two of one size can scan differently.
+    /// Which clock edge the panel's chips sample on; index into kEdgeOptions.
+    uint8_t clockEdgeSel = 0;
     /// The panel's own scan rate; index into kScanOptions.
     uint8_t scanSel = 1;
 
@@ -104,6 +106,8 @@ public:
         controls_.addSelect("peripheral", peripheralSel_, backendOptions_, backendOptionCount_);
         controls_.addSelect("scanRate", scanSel, kScanOptions, kScanCount);
         controls_.addControl("bitDepth", bitDepth, 2, 4);
+        // The one knob a chip family changes. WLED exposes the same flag as its bus "reversed" box.
+        controls_.addSelect("clockEdge", clockEdgeSel, kEdgeOptions, kEdgeCount);
 
         // The MEASURED refresh: what turns "it flickers" into a number someone can act on.
         controls_.addReadOnly("refresh", refreshStr_, sizeof(refreshStr_));
@@ -125,7 +129,7 @@ public:
     bool affectsPrepare(const char* name) const override {
         static const char* const kRebuild[] = {
             "r1", "g1", "b1", "r2", "g2", "b2", "a", "b", "c", "d", "e",
-            "clk", "lat", "oe", "scanRate", "bitDepth", "peripheral", "board",
+            "clk", "lat", "oe", "scanRate", "bitDepth", "peripheral", "board", "clockEdge",
         };
         for (const char* n : kRebuild) {
             if (std::strcmp(name, n) == 0) return true;
@@ -179,6 +183,7 @@ public:
         pins.a = toPin(addrA); pins.b = toPin(addrB); pins.c = toPin(addrC);
         pins.d = toPin(addrD); pins.e = toPin(addrE);
         pins.clk = toPin(clk); pins.lat = toPin(lat); pins.oe = toPin(oe);
+        pins.clkFalling = clockEdgeSel == 1;
 
         const platform::Hub75Backend backend =
             backendIndex_[peripheralSel_ < backendOptionCount_ ? peripheralSel_ : 0];
@@ -429,6 +434,8 @@ private:
     platform::Hub75Backend backendIndex_[kBackendCount + 1] = {};
     uint8_t backendOptionCount_ = 0;
 
+    static constexpr uint8_t kEdgeCount = 2;
+    static constexpr const char* kEdgeOptions[kEdgeCount] = {"rising", "falling"};
     static constexpr uint8_t kScanCount = 3;
     static constexpr const char* kScanOptions[kScanCount] = {"1/8", "1/16", "1/32"};
     static constexpr uint8_t kScanRates[kScanCount] = {8, 16, 32};

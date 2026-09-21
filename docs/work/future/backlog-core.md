@@ -834,6 +834,14 @@ Fix options: (a) make every live mutate scenario clear+rebuild its own canvas (c
 
 ## Housekeeping
 
+### Promote the one-line `//` cap to an error, once the 606 `.cpp` runs are homed (2026-09-21)
+
+`MAX_CODE_COMMENT = 1` is already the rule in both kinds of file, and already an ERROR in a header. It stays a warning in a `.cpp` only because `_blocks()` stages the sweep by file kind, and that function names its own removal: when the implementation side reaches zero it goes and every finding blocks.
+
+What stands between here and there is 606 multi-line blocks, all `.cpp`: 241 in `test/`, 210 in `src/`, 155 under `src/platform/`. By length, 82 are two lines, 321 are three and 125 are four, so 528 of 606 are three lines or fewer; the tail is one 15-line run, two of ten and a handful between.
+
+**The fix is not to split them.** Chopping one long comment into two shorter lines leaves the text identical and satisfies nothing, which is why the run cap exists at all. Each one is depth that belongs in the file lead's `@moreinfo` appendix with an `@xref` back, or in prose that says less. That is a judgement per comment across roughly 150 files, which is a sweep of its own rather than a mechanical pass.
+
 ### Hot path: move blocking work off the render callbacks (architecture)
 
 `-Wfunction-effects` proves the render path really does block — these are not annotation gaps,

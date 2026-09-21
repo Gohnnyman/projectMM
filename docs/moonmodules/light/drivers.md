@@ -64,6 +64,7 @@ Drives **HUB75 LED panels straight from the board's GPIO**, with no receiving ca
 - `peripheral`: `LCD_CAM` or `Parlio`, where the chip has both and the frame fits.
 - `scanRate`: 1/8, 1/16 or 1/32, **read off the panel**, not calculated.
 - `bitDepth` (2 to 4): color precision against refresh and memory.
+- `clockEdge`: `rising` or `falling`. Every pixel one column over means the other one.
 - `refresh`: the **measured** rate. The number to report if a panel flickers.
 
 **New, and not yet run on a wall we own.** Built from the panel's documented behavior with its encoder pinned by [host tests](../../reference/tests/unit-tests.md#hub75driver), which is not hardware verification. Reports welcome: `refresh` plus your geometry is what makes one useful.
@@ -342,4 +343,4 @@ The [MoonHub75 PCB](https://moonmodules.org/projects/hardware/#moonhub75-pcb) is
 
 And brightness is *time*, not amplitude. A HUB75 pixel is a switch, on or off, so intensity comes from binary coded modulation: bit plane `p` is displayed for 2^p time units, and a value lights its planes for a total proportional to itself. That weighting is the peripheral's output-enable window, and it is not built yet, which is why the depth cap below exists. Either way the encoder stores each plane once. Emitting plane `p` 2^p times is the obvious reading and it is wrong: 255 passes at 8-bit is 1,060,800 bytes for a single 64x64 panel, where storing once is 33,280.
 
-**What depth costs, and why it stops at 4.** Every bit plane is a full scan, so depth costs refresh and memory linearly, and each slot on the wire is 2 bytes because the address, latch and output-enable lines sit above bit 7 of a 16-bit word. One 64x64 panel at 1/32 scan is 16,642 bytes a frame at 4-bit. The planes are emitted once each rather than weighted for 2^p time, so bit 3 lights as long as bit 0 and a fifth plane would buy nothing the eye can find. The weighting is [backlogged](https://github.com/MoonModules/projectMM/blob/main/docs/work/future/backlog-light.md), and the cap lifts with it.
+**What depth costs, and why it stops at 4.** Every bit plane is a full scan, so depth costs refresh and memory linearly, and each slot on the wire is 2 bytes because the address, latch and output-enable lines sit above bit 7 of a 16-bit word. One 64x64 panel at 1/32 scan is 16,640 bytes a frame at 4-bit. The planes are emitted once each rather than weighted for 2^p time, so bit 3 lights as long as bit 0 and a fifth plane would buy nothing the eye can find. The weighting is [backlogged](https://github.com/MoonModules/projectMM/blob/main/docs/work/future/backlog-light.md), and the cap lifts with it.

@@ -143,8 +143,9 @@ MAX_RUN_CHARS = MAX_CLASS_DOC * MAX_COMMENT_LINE_CHARS
 MAX_LEAD_LINE_CHARS = 400
 # The prefixes a LINE-length finding carries, so `_blocks` can recognize the one rule that warns
 # even in a header. Matching on the reason keeps the exception in ONE place rather than making
-# every rule pass its own severity. Prefixes rather than the substring "chars >", which also
-# matched `lead N chars > M` and silently demoted the run rule, a differently motivated one.
+# every rule pass its own severity. Prefix AND unit: "chars >" alone also matched the run rule
+# (`lead N chars > M`), and the prefix alone also matched the word budget (`comment line N words`),
+# each a differently motivated rule silently demoted.
 _LINE_LENGTH_RULES = ("doc line ", "comment line ")
 # One line, in every file. Depth is not forbidden, it is HOMED: a header carries it in an
 # `@moreinfo` appendix (212 do) and an implementation file carries it in the same appendix on its
@@ -187,7 +188,7 @@ def _blocks(key: str, why: str = "") -> bool:
     erroring on 820 of them would stop commits over a target rather than a defect. It joins the
     others as an error once the tree meets it, which is the same staging this function is.
     """
-    if why.startswith(_LINE_LENGTH_RULES):
+    if why.startswith(_LINE_LENGTH_RULES) and "chars >" in why:
         return False
     return _generates_a_page(key.partition("::")[0])
 
@@ -405,7 +406,7 @@ _RULE_NAMES = (
 # ("31 public function has no"). The report says what a reader would say out loud. Keys absent
 # here fall through to themselves, so a new rule needs no edit until its wording is awkward.
 _RULE_LABELS = {
-    "code comment": "over-long comment runs",
+    "code comment": "multi-line comment blocks",
     "hard wrap": "hard wraps",
     "public function has no": "undocumented functions",
     "public variable has no": "undocumented variables",
@@ -414,8 +415,8 @@ _RULE_LABELS = {
     "file lead missing": "missing file leads",
     "class comment": "over-long class comments",
     "doc sentence": "over-long sentences",
-    "comment line": "over-long comment lines",
-    "doc line": "over-long doc lines",
+    "comment line": "over-wide comment lines",
+    "doc line": "over-wide doc lines",
     "lead": "over-long leads",
     "appendix section": "over-long appendix sections",
     "@moreinfo on a member": "@moreinfo on a member",

@@ -21,9 +21,18 @@ namespace mm {
 ///   for each bit plane p (0 = least significant)
 ///     for each scan row r
 ///       for each column x          -> one bus word per column: the six color
-///                                     bits for (x, r) and (x, r + rows)
-///       one blanking word           -> OE high (dark) while the row address
-///                                     changes and the shift register latches
+///                                     bits for (x, r) and (x, r + rows), lit,
+///                                     ADDRESSED TO THE PREVIOUS ROW
+///       one blanking word           -> OE high (dark), latch high, addressed
+///                                     to row r: the row that data belongs to
+///
+/// ## The address lags the data by one row
+///
+/// A panel lights where three things meet: output-enable low, the row the address lines select, and the row held in the output LATCH.
+/// The latch holds the row last strobed, which is the previous one. So while row r's color bits clock in, the address must still name row r - 1, or the previous row's data lights on row r's LEDs.
+/// The blanking word is where the address moves to r: dark, and latching r at the same time.
+/// Row 0's data words therefore name the LAST scan row, which is what lets the frame loop through the DMA wrap with every row lit exactly once.
+/// Addressing the data words to their own row displaced the whole picture one scan row down and put the last row on the first. On a wall that reads as one bright line.
 ///
 /// ## Address rides with the data
 ///
@@ -91,9 +100,8 @@ struct Hub75Geometry {
     /// Slots one encoded frame occupies.
     size_t frameSlots() const {
         const uint16_t pairs = rowsPerScan() / 2;   // color passes per address step
-        // Plus ONE per FRAME: the dark tail word that keeps the wrap from lighting row 0 twice.
         return static_cast<size_t>(bitDepth) * scanRows() *
-               (static_cast<size_t>(width) * pairs + 1) + 1;
+               (static_cast<size_t>(width) * pairs + 1);
     }
 
     // The one home for the size: the platform asks rather than recomputing it.
@@ -122,6 +130,8 @@ inline size_t hub75Encode(const uint8_t* rgb, uint8_t* out,
         // Depth < 8 keeps the HIGH bits: dropping those would dim every bright pixel.
         const uint8_t shift = static_cast<uint8_t>(8 - geo.bitDepth + plane);
         for (uint16_t r = 0; r < rows; r++) {
+            // The row in the LATCH while these words clock in: the previous one, and for row 0 the last row of the previous plane or frame.
+            const uint16_t lit = static_cast<uint16_t>((r + rows - 1) % rows);
             for (uint16_t pair = 0; pair < pairs; pair++)
             for (uint16_t x = 0; x < geo.width; x++) {
                 // Pair p of step r is row r + p*scanRate, paired half a panel below.
@@ -135,15 +145,15 @@ inline size_t hub75Encode(const uint8_t* rgb, uint8_t* out,
                 if ((rgb[lo + 0] >> shift) & 1) word |= static_cast<uint16_t>(1u << lay.r2);
                 if ((rgb[lo + 1] >> shift) & 1) word |= static_cast<uint16_t>(1u << lay.g2);
                 if ((rgb[lo + 2] >> shift) & 1) word |= static_cast<uint16_t>(1u << lay.b2);
-                // The address rides EVERY column word: changing it mid-row ghosts the last one.
+                // The address rides EVERY column word, and it names the row in the latch: these words are lit, and what they light is the previous row's data.
                 for (uint8_t bit = 0; bit < addrBits; bit++) {
-                    if ((r >> bit) & 1) word |= static_cast<uint16_t>(1u << addr[bit]);
+                    if ((lit >> bit) & 1) word |= static_cast<uint16_t>(1u << addr[bit]);
                 }
                 // Little-endian, matching how the peripheral latches a 16-bit bus word.
                 out[w++] = static_cast<uint8_t>(word & 0xFF);
                 out[w++] = static_cast<uint8_t>((word >> 8) & 0xFF);
             }
-            // Dark first, then latch: otherwise the next row briefly shows the last row's data.
+            // Dark, latching row r, and the address moves to r here, in the dark: the next row's data words then light row r with row r's data.
             uint16_t blank = static_cast<uint16_t>(1u << lay.oe) |
                              static_cast<uint16_t>(1u << lay.lat);
             for (uint8_t bit = 0; bit < addrBits; bit++) {
@@ -153,10 +163,7 @@ inline size_t hub75Encode(const uint8_t* rgb, uint8_t* out,
             out[w++] = static_cast<uint8_t>((blank >> 8) & 0xFF);
         }
     }
-    // The wrap point: without a dark word here, the re-send lights row 0 for a second window.
-    const uint16_t tail = static_cast<uint16_t>(1u << lay.oe);
-    out[w++] = static_cast<uint8_t>(tail & 0xFF);
-    out[w++] = static_cast<uint8_t>((tail >> 8) & 0xFF);
+    // The frame ends on the last row's blanking word, dark, and row 0's data words name that last row: the loop closes with every row lit once.
     return w;
 }
 

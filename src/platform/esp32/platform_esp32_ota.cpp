@@ -91,6 +91,8 @@ void statusf(char* buf, size_t len, const char* fmt, ...) {
     va_end(args);
 }
 
+// The same format check statusf carries, so a non-literal format is a build error rather than a runtime surprise.
+__attribute__((format(printf, 2, 3)))
 void otaSetStatus(OtaTaskParams* p, const char* fmt, ...) {
     if (!p->statusBuf || p->statusBufLen == 0) return;
     va_list args;
@@ -239,8 +241,8 @@ bool http_fetch_to_ota(const char* url,
 bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
                     char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut) {
     if (!src || !statusBuf || statusBufLen == 0 || !bytesReadOut) return false;
-    // Names the buffer once; the formatting itself is statusf's, which the compiler format-checks.
-    auto setStatus = [&](const char* fmt, auto... a) { statusf(statusBuf, statusBufLen, fmt, a...); };
+    // A macro, not a lambda: the format reaches statusf as a literal. Through a lambda it arrives as a runtime pointer, which defeats the format check.
+    #define setStatus(...) statusf(statusBuf, statusBufLen, __VA_ARGS__)
 
     const esp_partition_t* part = esp_ota_get_next_update_partition(nullptr);
     if (!part) { setStatus("error: no OTA partition"); return false; }
@@ -337,6 +339,7 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
     setStatus("rebooting");
     // Image committed + boot pointer flipped. Return to the caller so it can send its HTTP 200 BEFORE the reboot (the caller closes the socket + reboots, same sequence as /api/reboot), that's what lets the browser see a clean "flashed" response instead of an aborted socket.
     return true;
+    #undef setStatus
 }
 
 // Updating the recovery image itself: @xref{updating-the-recovery-image-itself|why only the application can, and why the checks come first}. Point this at an error page, the wrong chip's image or an application build, and the device still has its recovery image.
@@ -354,8 +357,8 @@ bool moonBaseImageRejected(const uint8_t* buf, size_t n, char* why, size_t whyLe
 bool otaWriteMoonBase(FsWriteSrc src, void* user, size_t contentLen,
                       char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut) {
     if (!src || !statusBuf || statusBufLen == 0 || !bytesReadOut) return false;
-    // Names the buffer once; the formatting itself is statusf's, which the compiler format-checks.
-    auto setStatus = [&](const char* fmt, auto... a) { statusf(statusBuf, statusBufLen, fmt, a...); };
+    // A macro, not a lambda: the format reaches statusf as a literal. Through a lambda it arrives as a runtime pointer, which defeats the format check.
+    #define setStatus(...) statusf(statusBuf, statusBufLen, __VA_ARGS__)
 
     const esp_partition_t* part = moonBasePartition();
     if (!part) { setStatus("error: no MoonBase on this device"); return false; }
@@ -440,6 +443,7 @@ bool otaWriteMoonBase(FsWriteSrc src, void* user, size_t contentLen,
     // No reboot and no boot-partition change: the app keeps running, and the new MoonBase is simply what the device falls back to from now on.
     setStatus("idle");
     return true;
+    #undef setStatus
 }
 
 // Pull a recovery image from a URL into the same writer the upload path uses.
@@ -459,8 +463,8 @@ size_t urlPullChunk(char* out, size_t cap, void* user, bool* abort) {
 
 bool moonBaseFetchUrlSync(const char* url, char* statusBuf, size_t statusBufLen,
                           uint32_t* bytesReadOut, uint32_t* bytesTotalOut) {
-    // Names the buffer once; the formatting itself is statusf's, which the compiler format-checks.
-    auto setStatus = [&](const char* fmt, auto... a) { statusf(statusBuf, statusBufLen, fmt, a...); };
+    // A macro, not a lambda: the format reaches statusf as a literal. Through a lambda it arrives as a runtime pointer, which defeats the format check.
+    #define setStatus(...) statusf(statusBuf, statusBufLen, __VA_ARGS__)
     esp_http_client_config_t cfg = {};
     cfg.url = url;
     // Same TLS and redirect handling the app's OTA fetch needs, and for the same reasons: a release asset 302s to objects.githubusercontent.com, whose headers overflow the 512-byte default buffer.
@@ -497,6 +501,7 @@ bool moonBaseFetchUrlSync(const char* url, char* statusBuf, size_t statusBufLen,
     esp_http_client_cleanup(client);
     if (!ok && pull.failed) setStatus("error: the download was interrupted");
     return ok;
+    #undef setStatus
 }
 
 // The install runs on its own task so the HTTP request can answer 202 immediately, exactly as the app's URL install does. That is not a detail: while the request is open the browser cannot poll for progress, so a synchronous install can only ever report "installing" and then "installed". Same task shape, same status buffer, same byte counters, so ONE progress display serves both.

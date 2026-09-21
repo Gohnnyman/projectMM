@@ -904,6 +904,8 @@ struct Hub75Pins {
     uint16_t d = 0xFFFF;                              ///< and 1/16 scan
     uint16_t e = 0xFFFF;                              ///< and 1/32 scan
     uint16_t clk = 0xFFFF, lat = 0xFFFF, oe = 0xFFFF; ///< shift clock, latch, blank
+    /// The panel's shift registers sample on the falling clock edge rather than the rising one. Some chips do, and driven on the wrong edge every pixel lands one column over.
+    bool clkFalling = false;
 };
 
 /// One running HUB75 port.

@@ -108,8 +108,9 @@ inline bool parse(const uint8_t* pkt, size_t len, Message& out) {
     const uint8_t* arg = tags + tagsLen;
     size_t argAvail = (tagsLen < tagsAvail) ? tagsAvail - tagsLen : 0;
 
-    // A message with no numeric argument is still valid, so the value flag simply stays false.
-    for (size_t t = 1; tags[t] != '\0' && t < tagsLen; t++) {
+    // A message with no numeric argument is still valid, so the value flag stays false. The bound is tested before the byte and clamped: pad4 rounds a tag string up past the end, which is also why argAvail is a guarded subtraction.
+    const size_t tagsBound = (tagsLen < tagsAvail) ? tagsLen : tagsAvail;
+    for (size_t t = 1; t < tagsBound && tags[t] != '\0'; t++) {
         switch (tags[t]) {
             case 'i':
                 if (argAvail < 4) return false;
