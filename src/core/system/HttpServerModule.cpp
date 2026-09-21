@@ -1220,13 +1220,16 @@ void HttpServerModule::writeModuleJson(JsonSink& sink, MoonModule* mod) {
     const char* roleStr = roleName(mod->role());
     const char* type = mod->typeName();
     if (!type) type = "";
+    // `enabled` is published for every module, and the ones that keep running regardless say so here, so the UI can leave out a switch that would do nothing.
     sink.appendf(
         "{\"name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"enabled\":%s,"
+        "\"respectsEnabled\":%s,"
         "\"tickTimeUs\":%u,\"classSize\":%u,\"dynamicBytes\":%u",
         mod->name() ? mod->name() : "",
         type,
         roleStr,
         mod->enabled() ? "true" : "false",
+        mod->respectsEnabled() ? "true" : "false",
         static_cast<unsigned>(mod->tickTimeUs()),
         static_cast<unsigned>(mod->classSize()),
         static_cast<unsigned>(mod->dynamicBytes()));
@@ -1304,7 +1307,7 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
         writeControlMetadata(sink, c);
         // Emit optional flags only when set (common case is false; omit to save bytes).
         if (c.readonly) sink.append(",\"readonly\":true");
-        if (c.advanced) sink.append(",\"advanced\":true");   // UI shows it only in expert mode
+        if (c.minMode) sink.appendf(",\"minMode\":%u", static_cast<unsigned>(c.minMode));   // the mode the UI needs before it shows this
         if (c.numberField) sink.append(",\"numberField\":true");   // render a plain number input, not a slider
         // An editable List (the CRUD primitive) tells the UI to show add/delete/reorder + inline row editors; a plain List stays read-only. The row objects carry a stable "id" the /api/list/* ops address, and each editable row's detail carries its field descriptors.
         if (c.switchRow) sink.append(",\"switchRow\":true");

@@ -14,7 +14,7 @@ The device's identity and vitals — name (behind mDNS `<name>.local`, the SoftA
 
 - `deviceName` — the identity behind mDNS, the SoftAP SSID and the DHCP hostname.
 - `deviceModel` — the board model (drives the installer catalog entry).
-- `expertMode` — reveals advanced controls (marked 🔧) across the UI; off by default.
+- `mode` — how much of the UI is shown: `user`, `expert` (🎚️) or `developer` (🔧), cumulative.
 - `logLevel` — serial verbosity, defaulting to Warn. The first 60 s always logs at Info.
 - read-only vitals — `uptime`, `fps`, `heap`, `psram`, `flash`, `chip`, and per-module footprint.
 

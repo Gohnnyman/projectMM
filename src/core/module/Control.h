@@ -138,6 +138,11 @@ struct ListSource {
                                  const char* /*valueJson*/) { return false; }
 };
 
+// How much a reader wants to see. One number the whole UI composes against, so a control names the audience it is for rather than every card deciding for itself.
+inline constexpr uint8_t kModeUser = 0;       ///< the show: what a light does
+inline constexpr uint8_t kModeExpert = 1;     ///< and the tuning an installation needs: the peripheral, the pin, the rate
+inline constexpr uint8_t kModeDeveloper = 2;  ///< and what diagnoses the firmware, meaning nothing without the source beside it
+
 /// One control's metadata: what it points at, how to render it, and how to persist it.
 ///
 /// The value lives in the module's own variable, and this borrows a pointer to it.
@@ -159,8 +164,8 @@ struct ControlDescriptor {
     bool persistLabel = false;
     /// Whether the UI renders this display-only, for a value tooling pushes rather than a user.
     bool readonly = false;
-    /// Whether this is expert-only, shown by the UI only while expert mode is on.
-    bool advanced = false;
+    /// The mode a reader needs before this control is shown: 0 everyone, 1 expert, 2 developer.
+    uint8_t minMode = 0;
     /// Whether a numeric renders as a number input, for an integer that is an address not a magnitude.
     bool numberField = false;
     // These sit after the other flags, since the text initializers below are positional.
@@ -370,9 +375,14 @@ public:
         if (i < count_) controls_[i].readonly = readonly;
     }
 
-    /// Mark a control expert-only, which the UI shows only while expert mode is on.
+    /// Mark a control expert-only, which the UI shows from expert mode up.
     void setAdvanced(uint8_t i, bool advanced = true) {
-        if (i < count_) controls_[i].advanced = advanced;
+        if (i < count_) controls_[i].minMode = advanced ? kModeExpert : kModeUser;
+    }
+
+    /// Mark a control developer-only: a number that diagnoses the firmware rather than the show.
+    void setDeveloper(uint8_t i) {
+        if (i < count_) controls_[i].minMode = kModeDeveloper;
     }
 
     /// Render a numeric as a number input, for an integer that is an identity not a magnitude.

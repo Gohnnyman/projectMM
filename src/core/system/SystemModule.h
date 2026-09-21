@@ -137,11 +137,11 @@ public:
         controls_.addReadOnly("cpu", const_cast<char*>(platform::cpuInfo()));   ///< the clock and core count
         controls_.addReadOnly("sdk", const_cast<char*>(platform::sdkVersion()));
         controls_.addReadOnly("bootReason", const_cast<char*>(platform::resetReason()));
-        // The UI honors this client-side, so nothing in the firmware reads it.
-        controls_.addControl("expertMode", expertMode_);
+        // The UI honors this client-side, so nothing in the firmware reads it. A LEVEL rather than a switch, because a control names the audience it is for and one number decides which audience is reading.
+        controls_.addSelect("mode", mode_, kModeOptions, 3);
         // Warn keeps the once-a-second line off the wire while warnings still print.
         controls_.addSelect("logLevel", logLevel_, logLevelOptions_, 6);
-        controls_.setAdvanced(controls_.count() - 1);
+        controls_.setDeveloper(controls_.count() - 1);
         // Compiled out where the radio is native, so the control and its query both vanish.
         if constexpr (platform::hasWifiCoprocessor) {
             controls_.addReadOnly("wifiCoproc", const_cast<char*>(platform::coprocessorWifi()));
@@ -217,7 +217,8 @@ private:
     Scheduler* scheduler_ = nullptr;
 
     char deviceName_[24] = {};   ///< the one network identity
-    bool expertMode_ = false;    ///< one flag the whole UI composes against
+    uint8_t mode_ = 0;           ///< one level the whole UI composes against: user, expert, developer
+    static constexpr const char* kModeOptions[3] = {"user", "expert", "developer"};
     /// Push the level to the logger, clamped so a corrupt value cannot index past the end.
     void applyLogLevel() {
         uint8_t lvl = logLevel_ > static_cast<uint8_t>(platform::LogLevel::Verbose)

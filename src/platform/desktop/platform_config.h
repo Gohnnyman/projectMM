@@ -94,6 +94,9 @@ struct EthPinConfig {
 /// False, so shared code compiles its Ethernet controls out and seeds itself from the default below.
 constexpr bool hasEthernet = false;
 
+/// True: the Ethernet CONTROLS are built though no interface exists, so the board presets can be exercised without a device. A preview of a device-only card, tagged developer-mode and never consulted by a bring-up path, which stays keyed on hasEthernet.
+constexpr bool previewsEthernetControls = true;
+
 /// True: a host has several NICs, so a raw sender must name the one it binds.
 constexpr bool hasNamedNetInterfaces = true;
 

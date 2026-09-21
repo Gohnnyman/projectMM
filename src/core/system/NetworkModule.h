@@ -186,9 +186,24 @@ public:
         controls_.addIPv4("dns", staticDns_);
         controls_.setHidden(controls_.count() - 1, hideStatic);
 
-        // Only where a driver is compiled in, the type selecting which pin rows apply.
-        if constexpr (platform::hasEthernet) {
+        // Where a driver is compiled in, the type selecting which pin rows apply; a desktop builds the same rows with no interface behind them, to exercise the presets.
+        if constexpr (platform::hasEthernet || platform::previewsEthernetControls) {
+            // A preview configures nothing, so it is developer-mode only and says so on the card.
+            constexpr bool preview = !platform::hasEthernet;
+            const uint8_t firstEthControl = controls_.count();
+            buildEthPresetOptions();
+            // First render: on a provisioned board the pins are already the catalog's, so read the preset back off them. A factory board has no type yet and lands on Custom with its chip's pins, which is honest until the catalog names a board.
+            if (!ethPresetSeeded_) { ethPresetSeeded_ = true; seedEthPresetFromPins(); }
+            // The restore path fires no onControlChanged, so writing the map HERE is what makes a saved `ethBoard` reach the pins. Keyed on the selection moving, or a rebuild would undo a Custom edit.
+            else if (ethPresetSel_ != ethPresetApplied_) applyEthPreset();
+            ethPresetApplied_ = ethPresetSel_;
+            controls_.addSelect("ethBoard", ethPresetSel_, ethPresetOptions_, ethPresetCount_);
+            // By label: the list is filtered per build, so an index would name a different board.
+            controls_.setPersistLabel(controls_.count() - 1);
+            // Hidden on a known board, and hidden stays BOUND: the values still drive the interface.
+            const bool editable = ethPinsEditable();
             controls_.addSelect("ethType", ethType_, ethTypeOptions_, 5);
+            controls_.setHidden(controls_.count() - 1, !editable);
             const bool isRmii  = (ethType_ == 1 || ethType_ == 2);
             const bool isSpi   = (ethType_ == 3);
             const bool isRgmii = (ethType_ == 4);
@@ -197,29 +212,33 @@ public:
             // An address rather than a GPIO, and signed for the auto-detect sentinel.
             controls_.addControl("ethPhyAddr", ethPhyAddr_, -1, 31);
             controls_.setNumberField(controls_.count() - 1);   // an identity, not a magnitude
-            controls_.setHidden(controls_.count() - 1, !isEth);
+            controls_.setHidden(controls_.count() - 1, !editable || !isEth);
             controls_.addPin("ethRstGpio", ethRstGpio_);
-            controls_.setHidden(controls_.count() - 1, !isEth);
+            controls_.setHidden(controls_.count() - 1, !editable || !isEth);
             // Every wired interface needs them, and showing them is what the pin map counts.
             controls_.addPin("ethMdcGpio", ethMdcGpio_);
-            controls_.setHidden(controls_.count() - 1, !isRmii && !isRgmii);
+            controls_.setHidden(controls_.count() - 1, !editable || (!isRmii && !isRgmii));
             controls_.addPin("ethMdioGpio", ethMdioGpio_);
-            controls_.setHidden(controls_.count() - 1, !isRmii && !isRgmii);
+            controls_.setHidden(controls_.count() - 1, !editable || (!isRmii && !isRgmii));
             controls_.addPin("ethClockGpio", ethClockGpio_);
-            controls_.setHidden(controls_.count() - 1, !isRmii);
+            controls_.setHidden(controls_.count() - 1, !editable || !isRmii);
             // A direction, so a toggle rather than a range.
             controls_.addControl("ethClockExtIn", ethClockExtIn_);
-            controls_.setHidden(controls_.count() - 1, !isRmii);
+            controls_.setHidden(controls_.count() - 1, !editable || !isRmii);
             controls_.addPin("ethSpiMiso", ethSpiMiso_);
-            controls_.setHidden(controls_.count() - 1, !isSpi);
+            controls_.setHidden(controls_.count() - 1, !editable || !isSpi);
             controls_.addPin("ethSpiMosi", ethSpiMosi_);
-            controls_.setHidden(controls_.count() - 1, !isSpi);
+            controls_.setHidden(controls_.count() - 1, !editable || !isSpi);
             controls_.addPin("ethSpiSck", ethSpiSck_);
-            controls_.setHidden(controls_.count() - 1, !isSpi);
+            controls_.setHidden(controls_.count() - 1, !editable || !isSpi);
             controls_.addPin("ethSpiCs", ethSpiCs_);
-            controls_.setHidden(controls_.count() - 1, !isSpi);
+            controls_.setHidden(controls_.count() - 1, !editable || !isSpi);
             controls_.addPin("ethSpiIrq", ethSpiIrq_);
-            controls_.setHidden(controls_.count() - 1, !isSpi);
+            controls_.setHidden(controls_.count() - 1, !editable || !isSpi);
+            // One loop rather than a call beside every row: the whole group carries one tag.
+            if constexpr (preview) {
+                for (uint8_t i = firstEthControl; i < controls_.count(); i++) controls_.setDeveloper(i);
+            }
         }
     }
 
@@ -493,6 +512,116 @@ private:
     // The same guard shape for addressing, so a re-apply follows only a real change.
     uint32_t appliedAddressingSig_ = 0;
     bool addressingSigApplied_ = false;
+
+    // One board's Ethernet wiring, the fields matching EthPinConfig; -1 leaves a line unused.
+    struct EthPreset {
+        const char* label;
+        int8_t type;          // an EthPhyType
+        int8_t phyAddr;
+        int8_t mdc, mdio, rst;
+        int8_t rmiiClock;
+        bool   rmiiClockExtIn;
+        int8_t miso, mosi, sck, cs, irq;
+        bool   editable;      // false on a soldered map: those lines are not the user's to set
+    };
+
+    // The presets this module knows, each a board family rather than one product; Custom keeps whatever is in the fields, for a hand-wired board.
+    static constexpr EthPreset kEthPresets[] = {
+        // The LAN8720 reference wiring most classic boards follow, which is also the chip default.
+        {"Classic RMII",            1,  0, 23, 18,  5, 17, false, -1, -1, -1, -1, -1, false},
+        // The same wiring with no reset, for a board using GPIO 5 as an LED lane: the PHY resets by jumper.
+        {"Classic RMII (no reset)", 1,  0, 23, 18, -1, 17, false, -1, -1, -1, -1, -1, false},
+        // Waveshare P4-NANO and the boards following its shield pinout: IP101, the clock fed in.
+        {"P4-NANO",           2,  1, 31, 52, 51, 50, true,  -1, -1, -1, -1, -1, false},
+        // The S31's 1 Gb PHY, addressed by scan rather than by a fixed address.
+        {"S31 CoreBoard",     4, -1,  5,  6,  7, -1, false, -1, -1, -1, -1, -1, false},
+        {"Custom",            0, -1, -1, -1, -1, -1, false, -1, -1, -1, -1, -1, true},
+    };
+    static constexpr uint8_t kEthPresetCount = sizeof(kEthPresets) / sizeof(kEthPresets[0]);
+
+    // Which board wiring is selected, the pins following from it unless it is Custom.
+    uint8_t ethPresetSel_ = 0;
+    const char* ethPresetOptions_[kEthPresetCount] = {};
+    uint8_t ethPresetIndex_[kEthPresetCount] = {};
+    uint8_t ethPresetCount_ = 0;
+    bool ethPresetSeeded_ = false;   ///< the preset is matched to the pins once, not every rebuild
+    uint8_t ethPresetApplied_ = 0;   ///< the selection whose map is already written, so a rebuild is not a re-apply
+
+
+    // A preset naming a PHY this build cannot drive would offer pins that reach nothing.
+    /// Does this firmware carry a driver for the preset's PHY?
+    static bool presetBuildable(const EthPreset& p) {
+        if (p.type == 0) return true;                       // Custom, which names no PHY
+        if (p.type == 3) return platform::hasEthW5500;      // SPI, a separate driver
+        return !platform::hasEthW5500;                      // the internal EMAC drives the rest
+    }
+
+    /// Offer the presets this build can drive, re-pointing the selection by label.
+    void buildEthPresetOptions() {
+        const char* current = (ethPresetSel_ < ethPresetCount_) ? ethPresetOptions_[ethPresetSel_] : nullptr;
+        ethPresetCount_ = 0;
+        for (uint8_t i = 0; i < kEthPresetCount; i++) {
+            if (!presetBuildable(kEthPresets[i])) continue;
+            ethPresetOptions_[ethPresetCount_] = kEthPresets[i].label;
+            ethPresetIndex_[ethPresetCount_] = i;
+            ethPresetCount_++;
+        }
+        // By LABEL, so a filtered list cannot silently select a different board.
+        uint8_t sel = 0;
+        if (current) {
+            for (uint8_t k = 0; k < ethPresetCount_; k++) {
+                if (std::strcmp(ethPresetOptions_[k], current) == 0) { sel = k; break; }
+            }
+        }
+        ethPresetSel_ = sel;
+    }
+
+    /// Are the pin controls the user's to edit, for the preset currently selected?
+    bool ethPinsEditable() const {
+        if (ethPresetSel_ >= ethPresetCount_) return true;   // nothing resolved: never hide
+        return kEthPresets[ethPresetIndex_[ethPresetSel_]].editable;
+    }
+
+    // Custom writes nothing, so switching to it after an edit keeps the edit.
+    /// Write the chosen preset's map into the pin controls.
+    void applyEthPreset() {
+        if (ethPresetSel_ >= ethPresetCount_) return;
+        const EthPreset& p = kEthPresets[ethPresetIndex_[ethPresetSel_]];
+        if (p.editable) return;
+        ethType_       = static_cast<uint8_t>(p.type);
+        ethPhyAddr_    = p.phyAddr;
+        ethMdcGpio_    = p.mdc;
+        ethMdioGpio_   = p.mdio;
+        ethRstGpio_    = p.rst;
+        ethClockGpio_  = p.rmiiClock;
+        ethClockExtIn_ = p.rmiiClockExtIn;
+        ethSpiMiso_    = p.miso;
+        ethSpiMosi_    = p.mosi;
+        ethSpiSck_     = p.sck;
+        ethSpiCs_      = p.cs;
+        ethSpiIrq_     = p.irq;
+    }
+
+    // The board a set of pins came from, so a provisioned device opens on its own name.
+    /// The preset whose map these pin values already are, or Custom when none matches.
+    void seedEthPresetFromPins() {
+        for (uint8_t k = 0; k < ethPresetCount_; k++) {
+            const EthPreset& p = kEthPresets[ethPresetIndex_[k]];
+            if (p.editable) continue;
+            if (p.type == static_cast<int8_t>(ethType_) && p.phyAddr == ethPhyAddr_ &&
+                p.mdc == ethMdcGpio_ && p.mdio == ethMdioGpio_ && p.rst == ethRstGpio_ &&
+                p.rmiiClock == ethClockGpio_ && p.rmiiClockExtIn == ethClockExtIn_ &&
+                p.miso == ethSpiMiso_ && p.mosi == ethSpiMosi_ && p.sck == ethSpiSck_ &&
+                p.cs == ethSpiCs_ && p.irq == ethSpiIrq_) {
+                ethPresetSel_ = k;
+                return;
+            }
+        }
+        // Custom is the last row, and the only editable one.
+        for (uint8_t k = 0; k < ethPresetCount_; k++) {
+            if (kEthPresets[ethPresetIndex_[k]].editable) { ethPresetSel_ = k; return; }
+        }
+    }
 
     /// A cheap hash over the interface controls, so a live change is detected.
     uint32_t ethSig() const {

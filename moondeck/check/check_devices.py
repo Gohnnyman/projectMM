@@ -29,6 +29,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 CATALOG = ROOT / "mooninstaller" / "deviceModels.json"
 MAIN_CPP = ROOT / "src" / "main.cpp"
+NETWORK_MODULE = ROOT / "src" / "core" / "system" / "NetworkModule.h"
+PLATFORM_CONFIG = ROOT / "src" / "platform" / "esp32" / "platform_config.h"
 DOCS = ROOT / "docs"
 
 # The device stores the injected deviceModel in SystemModule's deviceModel_[32] buffer (31 usable
@@ -56,6 +58,60 @@ FLASH_BAUDS = {115200, 230400, 460800, 921600}
 BOOT_WIRED_TYPES = {"System", "Network", "Drivers"}
 
 
+def eth_preset_labels():
+    """The Ethernet preset labels from NetworkModule.h's kEthPresets table.
+
+    Read from the firmware rather than restated here, so a preset renamed in one place and not the
+    other fails this check instead of silently leaving a catalog entry pointing at nothing.
+    """
+    text = NETWORK_MODULE.read_text(encoding="utf-8")
+    table = re.search(r"kEthPresets\[\]\s*=\s*\{(.*?)\n    \};", text, re.S)
+    if not table:
+        return set()
+    return set(re.findall(r'^\s*\{"([^"]+)"', table.group(1), re.M))
+
+
+def eth_preset_drift():
+    """Preset rows that no longer match the per-chip default they restate, as (label, field, was, now).
+
+    Three presets ARE a chip's `ethConfigDefault`, so the same pin map has two homes in two layers.
+    They cannot simply reference each other: the header's value is a compile-time `constexpr` chosen
+    per chip, while the table must carry every chip's row on every build. So the duplication stands
+    and this check binds it, because the drift is silent where it matters most: `seedEthPresetFromPins`
+    matches on exact equality, so one corrected pin would reseed every provisioned board to Custom.
+    """
+    table = NETWORK_MODULE.read_text(encoding="utf-8")
+    header = PLATFORM_CONFIG.read_text(encoding="utf-8")
+    block = re.search(r"kEthPresets\[\]\s*=\s*\{(.*?)\n    \};", table, re.S)
+    if not block:
+        return [("kEthPresets", "table", "present", "unreadable")]
+
+    rows = {}
+    for m in re.finditer(r'\{"([^"]+)",\s*([^}]+)\}', block.group(1)):
+        rows[m.group(1)] = [f.strip() for f in m.group(2).split(",")]
+
+    # label -> the PHY constant naming that chip's arm of the ethConfigDefault ternary.
+    PAIRS = {"Classic RMII": "ethLan8720", "P4-NANO": "ethIp101", "S31 CoreBoard": "ethYt8531"}
+    FIELDS = ["phyAddr", "mdc", "mdio", "rst", "rmiiClk"]
+    drift = []
+    for label, phy in PAIRS.items():
+        row = rows.get(label)
+        if not row:
+            drift.append((label, "row", "present", "missing"))
+            continue
+        m = re.search(phy + r", /\*addr\*/ (-?\d+), /\*mdc\*/ (-?\d+), /\*mdio\*/ (-?\d+),"
+                      r"\s*/\*rst\*/ (-?\d+), /\*rmiiClk\*/ (-?\d+)", header)
+        if not m:
+            drift.append((label, phy, "an ethConfigDefault arm", "not found"))
+            continue
+        # row is label-less here: [type, phyAddr, mdc, mdio, rst, rmiiClk, ...]
+        for i, field in enumerate(FIELDS):
+            want, got = m.group(i + 1), row[i + 1]
+            if want != got:
+                drift.append((label, field, want, got))
+    return drift
+
+
 def registered_types():
     """The set of factory type names from main.cpp's registerType<T>("Name") calls."""
     text = MAIN_CPP.read_text(encoding="utf-8")
@@ -64,6 +120,13 @@ def registered_types():
 
 def main():
     errors = []
+    eth_presets = eth_preset_labels()
+    for label, field, was, now in eth_preset_drift():
+        errors.append(f"NetworkModule.h kEthPresets {label!r}: {field} is {now}, but "
+                      f"platform_config.h's ethConfigDefault says {was} — the preset restates the "
+                      f"chip default, so the two must agree or a provisioned board reseeds to Custom")
+    if not eth_presets:
+        errors.append("NetworkModule.h: could not read the kEthPresets table — the ethBoard check cannot run")
 
     try:
         catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
@@ -247,6 +310,12 @@ def main():
             # are genuine BOARD WIRING are required — MDC/MDIO may stay at the IDF default (omit or
             # -1) on RMII, since that's a real standard, not a board-specific value.
             if mtype == "NetworkModule" and isinstance(controls, dict):
+                board = controls.get("ethBoard")
+                if board is not None:
+                    if not isinstance(board, str):
+                        errors.append(f"{where}: NetworkModule ethBoard must be the preset LABEL as a string, got {board!r}")
+                    elif board not in eth_presets:
+                        errors.append(f"{where}: NetworkModule ethBoard {board!r} is not a preset in NetworkModule.h (known: {sorted(eth_presets)})")
                 et = controls.get("ethType")
                 # ethType must be an int (a JSON string like "2" would silently skip the rule below and
                 # also isn't what the device deserializes into the Select) — reject a stringified value.
@@ -254,7 +323,9 @@ def main():
                 # would pass as ethType 1 (LAN8720).
                 if et is not None and type(et) is not int:
                     errors.append(f"{where}: NetworkModule ethType must be an integer, got {et!r}")
-                if type(et) is int and et != 0:
+                # A named preset IS the explicit pinning: the map lives in NetworkModule.h, under
+                # the same review as any other firmware constant, rather than repeated per board.
+                if type(et) is int and et != 0 and board in (None, "Custom"):
                     # RMII LAN8720(1)/IP101(2): rst + clock. RGMII YT8531(4): mdc/mdio/rst.
                     # W5500 SPI(3): the four SPI bus pins. -1 is an allowed explicit value ("unused /
                     # IDF default"); what the rule forbids is OMITTING a board-wiring pin.

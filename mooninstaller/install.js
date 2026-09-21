@@ -1150,7 +1150,13 @@ document.addEventListener('DOMContentLoaded', () => {
       // active wherever NetworkModule exists (the radio is always available); a board
       // that lists WiFi as supported but ships no NetworkModule entry stays "supported".
       const ethConfigured = (m) => {
-        const t = m.controls && m.controls.ethType;
+        const c = m.controls;
+        if (!c) return false;
+        // A named board preset IS the configuration: it carries the PHY and the pins, so a
+        // board that picks one lists no ethType of its own. Custom is the escape hatch and
+        // names no PHY, so it falls through to the ethType its entry must then carry.
+        if (c.ethBoard !== undefined && c.ethBoard !== "Custom") return true;
+        const t = c.ethType;
         return t !== undefined && t !== 0 && t !== "0" && t !== "None";
       };
       const CAP_MODULE = {

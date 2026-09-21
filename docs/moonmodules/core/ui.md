@@ -122,11 +122,12 @@ indentation. Nesting depth shows as progressively lighter backgrounds and a left
 - **Help link (?)** at the far right of the title row opens the module's doc page in a new tab. The
   path comes from `docPath` in `/api/types` (engine-provided, relative to `docs/moonmodules/`); omitted
   when the type declares none.
-- **Stats line** — `🕒 <timing>` then `🧠 <static>[ + <dynamic>]`. Timing is fps or µs/ms per the
-  global toggle (µs under 1 ms, ms above), omitted when the module has no measured loop time. Memory is
+- **Stats line** — `🕒 <timing>` then `🧠 <static>[ + <dynamic>]`. Timing is a tick time
+  (µs under 1 ms, ms above), omitted when the module has no measured loop time. Memory is
   the C++ object size (`classSize`); the `+ <dynamic>` part (`dynamicBytes`, heap) shows only when the
-  module allocated heap. Clicking cycles the timing figure fps ↔ ms (persists in
-  `localStorage['mm_timing_mode']`, applies to all cards).
+  module allocated heap. The line shows from expert mode up, and holding it peeks at the rate on every
+  card, the password field's gesture: a tick time inverts to a figure that reads as a frame rate and is
+  not one, so the rate is a press away rather than a mode the cards sit in.
 - **Reorder is drag-and-drop** (HTML5 DnD) on the whole card, desktop and mobile. A drag starting on
   an interactive control is canceled in `dragstart` so the control's own gesture wins; a drag is
   accepted only when source and target share the same `.card-children` container (true siblings).
@@ -265,7 +266,6 @@ The endpoints, the `/ws` frame shape, and the streaming state sink are owned by
 ```text
 mm_selectedRoot     id of the currently-selected root module    (string)
 mm_theme            "dark" | "light"                            (default: "dark")
-mm_timing_mode      "fps" | "ms"                                (default: "fps")
 ```
 
 No other client state persists; reorder, control values, etc. all live on the device.

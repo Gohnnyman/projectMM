@@ -126,7 +126,7 @@ def main():
     # the tree. A zero is only trustworthy once something that should fire, fires.
     probe = subprocess.run(
         ["vale", "--output=JSON", "--no-exit", "--ext=.h", "--path=probe.h"],
-        input="// A color scheme \u2014 an em-dash.\nint x = 1;\n",
+        input="// A colour scheme \u2014 an em-dash.\nint x = 1;\n",
         capture_output=True, text=True)
     try:
         hits = sum(len(v) for v in json.loads(probe.stdout or "{}").values())

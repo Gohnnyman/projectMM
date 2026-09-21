@@ -147,6 +147,10 @@ MAX_LEAD_LINE_CHARS = 400
 # (`lead N chars > M`), and the prefix alone also matched the word budget (`comment line N words`),
 # each a differently motivated rule silently demoted.
 _LINE_LENGTH_RULES = ("doc line ", "comment line ")
+# The one rule staged the OTHER way: an implementation file's hard wrap blocks too. The tree is at
+# zero, so nothing is held hostage, and a split sentence reflows every line it spans on the next
+# word change, which costs a reviewer the same in a `.cpp` as in a header.
+_HARD_WRAP_RULE = "hard wrap"
 # One line, in every file. Depth is not forbidden, it is HOMED: a header carries it in an
 # `@moreinfo` appendix (212 do) and an implementation file carries it in the same appendix on its
 # own file lead. A cap of 8 in a `.cpp` was an attempt to give depth a home inline, which leaves
@@ -182,12 +186,16 @@ def _blocks(key: str, why: str = "") -> bool:
     goes and every finding blocks, the same way `.vale.ini` promotes a page to error once the
     sweep has finished it and loses its per-page section when the last page lands.
 
-    ONE rule is staged separately: the line-length cap warns in a header too. Every other rule
-    describes how this tree is already written, so a finding is a defect against a standard the
-    file was written under. The cap is new, so its findings are lines nobody wrote wrongly, and
-    erroring on 820 of them would stop commits over a target rather than a defect. It joins the
-    others as an error once the tree meets it, which is the same staging this function is.
+    ONE rule is staged in each direction. The line-length cap warns in a header too: every other
+    rule describes how this tree is already written, so a finding is a defect against a standard
+    the file was written under, while the cap is new and erroring on 820 lines nobody wrote
+    wrongly would stop commits over a target. And NO-HARD-WRAP blocks in both kinds of file: the
+    tree meets it, at zero findings, so the staging has nothing left to stage. The reason holds
+    everywhere too, being the diff rather than the page, and a rule met everywhere is a rule that
+    should hold everywhere.
     """
+    if why.startswith(_HARD_WRAP_RULE):
+        return True
     if why.startswith(_LINE_LENGTH_RULES) and "chars >" in why:
         return False
     return _generates_a_page(key.partition("::")[0])
@@ -1570,6 +1578,57 @@ def _report(entries, heading: str) -> None:
             print(f"    {title}: {why}")
 
 
+def _committed_counts():
+    """Every rule's warning count in the COMMITTED report, or None when there is no baseline.
+
+    The report is tracked, so the last commit's copy is the number to beat. Read from git rather
+    than from the working tree, because the run rewrites the file before the comparison happens.
+    """
+    import subprocess
+    rel = REPORT.relative_to(ROOT).as_posix()
+    r = subprocess.run(["git", "show", f"HEAD:{rel}"],
+                       cwd=ROOT, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    counts = {}
+    # Only the `## By rule` table: the area and file tables share its column shape, and a row from
+    # either would enter the baseline as a rule that can never appear in `now`.
+    in_rules = False
+    for line in r.stdout.split("\n"):
+        if line.startswith("## "):
+            in_rules = line.strip() == "## By rule"
+        m = re.match(r"^\| (.+?) \| (\d+) \| (\d+) \|$", line.strip())
+        if in_rules and m and m.group(1) != "Rule":
+            counts[m.group(1)] = int(m.group(3))
+        # The TOTAL as its own entry, because a per-rule comparison alone misses a rule that is
+        # below the baseline and still rising: one under budget can absorb a new finding silently.
+        m = re.match(r"^\*\*\d+ error\(s\)\*\* and \*\*(\d+) warning\(s\)\*\* across", line.strip())
+        if m and "(total)" not in counts:
+            counts["(total)"] = int(m.group(1))
+    return counts or None
+
+
+def _ratchet(found) -> list:
+    """Which rules rose against the committed report. The list only shrinks.
+
+    A warning is staged work, and staged work that grows is not a sweep. Per RULE rather than on
+    the total alone, because a total hides one rule paying for another: splitting a long line
+    lowers the width count and raises the block count, which is the move the run cap exists to
+    refuse.
+    """
+    from collections import Counter
+    base = _committed_counts()
+    if base is None:
+        return []
+    # LABELLED, matching how the report writes them: `_rule_name` returns the internal key
+    # ("code comment") while the table carries the display label ("multi-line comment blocks"),
+    # and comparing the two key spaces silently compares nothing.
+    now = Counter(_rule_label(_rule_name(why)) for key, why in found if not _blocks(key, why))
+    now["(total)"] = sum(1 for key, why in found if not _blocks(key, why))
+    return [(rule, was, now.get(rule, 0))
+            for rule, was in base.items() if now.get(rule, 0) > was]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--noreport", action="store_true",
@@ -1595,7 +1654,13 @@ def main() -> int:
               f"{MAX_DOC_WORDS} words.")
         return 0
 
+    risen = _ratchet(found)
     print(f"Docgen check: {len(errors)} error(s), {len(warnings)} warning(s).\n")
+    if risen:
+        print("WARNINGS ROSE against the committed report. The list only shrinks:")
+        for rule, was, now in risen:
+            print(f"  {rule}: {was} -> {now}")
+        print("  Fix them, or say in the commit why the rule itself changed.\n")
     if errors:
         _report(errors, "ERRORS, in files that generate a page. These fail the gate.")
     if warnings:
@@ -1607,7 +1672,7 @@ def main() -> int:
           "\n(the technical page the card links), cross-module rationale into a"
           "\n`## <Name>, details` section on the same page."
           "\nRules: docs/contributing/documentation-standards.md § The card.")
-    return 1 if errors else 0
+    return 1 if (errors or risen) else 0
 
 
 if __name__ == "__main__":
