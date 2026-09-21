@@ -28,7 +28,7 @@ namespace mm {
 ///      [0x02][count:u32][stride:u16][epoch:u8][drops:u8][(r,g,b) x count]
 /// 0x04 per-frame aim, only for a rig whose fixtures carry pan and tilt:
 ///      [0x04][count:u32][stride:u16][epoch:u8][reserved:u8][(pan,tilt):u8x2 x count]
-/// Client requests: [0x51][stride][fps] standing, [0x52][stride] one-shot table.
+/// Client requests: [0x51][stride][fps] standing, [0x52] one-shot table. The table's own stride is memory-derived, so the request carries none.
 /// ```
 /// --8<-- [end:wire-format]
 ///
@@ -72,6 +72,41 @@ public:
     }
 
 
+
+    /// Does this kept light survive a frame at `fs`? The device's own rule, on its own coordinates.
+    bool keptAtStride(nrOfLightsType k, nrOfLightsType fs) const {
+        const size_t at = static_cast<size_t>(k) * 3;
+        return keptPos_[at] % fs == 0 && keptPos_[at + 1] % fs == 0 && keptPos_[at + 2] % fs == 0;
+    }
+
+    /// The stride a color frame ships at: the link's pacing, never finer than the table's.
+    nrOfLightsType frameStride() const {
+        // Coarsening needs the kept-light cache, or the count and the gather filter differently and the browser rejects every frame.
+        const bool canCoarsen = denseGrid() || (keptPos_ && keptCount_ == coordCount_);
+        if (!canCoarsen) return previewStride_;
+        return downscale_ > previewStride_ ? downscale_ : previewStride_;
+    }
+
+    /// How many lights a frame at `frameStride()` carries, counted the way the table is.
+    nrOfLightsType frameCount() const {
+        const nrOfLightsType fs = frameStride();
+        if (fs == previewStride_) return coordCount_;
+        if (!layer_) return coordCount_;
+        const lengthType ax = layer_->physicalWidth()  > 0 ? layer_->physicalWidth()  : 1;
+        const lengthType ay = layer_->physicalHeight() > 0 ? layer_->physicalHeight() : 1;
+        const lengthType az = layer_->physicalDepth()  > 0 ? layer_->physicalDepth()  : 1;
+        if (denseGrid()) {
+            const nrOfLightsType cx = (ax + fs - 1) / fs, cy = (ay + fs - 1) / fs,
+                                 cz = (az + fs - 1) / fs;
+            return static_cast<nrOfLightsType>(static_cast<uint32_t>(cx) * cy * cz);
+        }
+        // From the CACHE, never a placeLights walk: this runs per frame on a nonblocking tick.
+        if (!keptPos_ || keptCount_ != coordCount_) return coordCount_;
+        nrOfLightsType out = 0;
+        for (nrOfLightsType k = 0; k < keptCount_; k++) if (keptAtStride(k, fs)) out++;
+        return out;
+    }
+
     /// Test-only: the currently served downsample factor, 1 being full resolution.
     nrOfLightsType downscaleForTest() const { return downscale_; }
 
@@ -106,11 +141,17 @@ public:
             ensureStaging(maxPts * 3u);
             if (!denseGrid() && keptIdxCap_ < maxPts) {
                 auto* grown = static_cast<nrOfLightsType*>(platform::alloc(maxPts * sizeof(nrOfLightsType)));
-                if (grown) {
+                auto* steps = static_cast<uint8_t*>(platform::alloc(maxPts * 3));
+                if (grown && steps) {
                     if (keptIdx_) platform::free(keptIdx_);
+                    if (keptPos_) platform::free(keptPos_);
                     keptIdx_ = grown;
+                    keptPos_ = steps;
                     keptIdxCap_ = static_cast<nrOfLightsType>(maxPts);
                     publishHeapBytes();
+                } else {
+                    if (grown) platform::free(grown);
+                    if (steps) platform::free(steps);
                 }
             }
         }
@@ -222,7 +263,7 @@ public:
             };
             while (latticeCount(s) > cap) s++;
         }
-        if (s < downscale_) s = downscale_;   // adaptive: never finer than the link sustains
+        // MEMORY bounds the table, never the link: geometry is sent once, and `downscale_` paces the colors instead.
         previewStride_ = s;
 
         // A dense grid is closed-form; a mapped layout is counted by one placeLights pass.
@@ -241,13 +282,18 @@ public:
             // Sized to EXACTLY this count before the emit fills it, so the cache cannot truncate.
             if (keptIdxCap_ < coordCount_) {
                 auto* grown = static_cast<nrOfLightsType*>(platform::alloc(coordCount_ * sizeof(nrOfLightsType)));
-                if (grown) {
+                auto* steps = static_cast<uint8_t*>(platform::alloc(static_cast<size_t>(coordCount_) * 3));
+                if (grown && steps) {
                     if (keptIdx_) platform::free(keptIdx_);
+                    if (keptPos_) platform::free(keptPos_);
                     keptIdx_ = grown;
+                    keptPos_ = steps;
                     keptIdxCap_ = coordCount_;
                     keptIdxAllocFailed_ = false;
                     publishHeapBytes();   // the index cache grew: refresh the memory readout
                 } else {
+                    if (grown) platform::free(grown);
+                    if (steps) platform::free(steps);
                     keptIdxAllocFailed_ = true;   // degraded: the gather walks placeLights per frame
                 }
             }
@@ -280,8 +326,16 @@ public:
                 auto* p = static_cast<PosCtx*>(c);
                 if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
                 PreviewDriver* self = p->self;
-                if (self->keptIdx_ && self->keptCount_ < self->keptIdxCap_)
+                if (self->keptIdx_ && self->keptCount_ < self->keptIdxCap_) {
+                    // SCALED, as the coord table emits them: past a 255 extent it carries v*255/extent, and the browser runs its modulo over those bytes.
+                    if (self->keptPos_) {
+                        const size_t at = static_cast<size_t>(self->keptCount_) * 3;
+                        self->keptPos_[at + 0] = self->scaleAxis(x);
+                        self->keptPos_[at + 1] = self->scaleAxis(y);
+                        self->keptPos_[at + 2] = self->scaleAxis(z);
+                    }
                     self->keptIdx_[self->keptCount_++] = idx;
+                }
                 p->emit(x, y, z);
             }, nullptr, &pc});
         }
@@ -373,30 +427,32 @@ public:
         const uint8_t* src = sourceBuffer_->data();
         const uint8_t cpl = sourceBuffer_->channelsPerLight();
         const nrOfLightsType n = sourceBuffer_->count();
-        const nrOfLightsType s = previewStride_;
+        // The LINK's stride, coarser than the table's when the link is slow: the browser upsamples the colors back onto the full table it already holds.
+        const nrOfLightsType s = frameStride();
+        const nrOfLightsType sendCount = frameCount();
 
         // The epoch and stride pair is the client's table-cache key; drops is its congestion signal.
         uint8_t header[9];
         header[0] = 0x02;
-        header[1] = static_cast<uint8_t>(coordCount_ & 0xFF);
-        header[2] = static_cast<uint8_t>((coordCount_ >> 8) & 0xFF);
-        header[3] = static_cast<uint8_t>((coordCount_ >> 16) & 0xFF);
-        header[4] = static_cast<uint8_t>((coordCount_ >> 24) & 0xFF);
+        header[1] = static_cast<uint8_t>(sendCount & 0xFF);
+        header[2] = static_cast<uint8_t>((sendCount >> 8) & 0xFF);
+        header[3] = static_cast<uint8_t>((sendCount >> 16) & 0xFF);
+        header[4] = static_cast<uint8_t>((sendCount >> 24) & 0xFF);
         header[5] = static_cast<uint8_t>(s & 0xFF);
         header[6] = static_cast<uint8_t>(s >> 8);
         header[7] = epoch_;
         header[8] = dropsSinceLast_;
 
-        if (s == 1 && cpl == 3 && coordCount_ <= n) {
+        if (s == 1 && cpl == 3 && sendCount <= n) {
             // Full resolution: the producer buffer IS the payload, drained with no copy at all.
             const bool ok = broadcaster_->sendBufferedFrame(header, sizeof(header),
-                                                            src, static_cast<size_t>(coordCount_) * 3);
+                                                            src, static_cast<size_t>(sendCount) * 3);
             if (ok) dropsSinceLast_ = 0;
             return ok;
         }
 
         // Gathered into staging, in the coord table's exact subset and order, or the browser drops it.
-        const size_t bodyBytes = static_cast<size_t>(coordCount_) * 3;
+        const size_t bodyBytes = static_cast<size_t>(sendCount) * 3;
         if (!staging_ || stagingCap_ < bodyBytes) return false;   // alloc miss: skip, lossy channel
         struct ColCtx {
             uint8_t* out; size_t at; const uint8_t* src; nrOfLightsType n; uint8_t cpl;
@@ -418,8 +474,9 @@ public:
                         col.emit(static_cast<nrOfLightsType>(static_cast<size_t>(z) * H * W
                                                              + static_cast<size_t>(y) * W + x));
         } else if (keptIdx_ && keptCount_ == coordCount_) {
-            // The index map cached at coord-table build: a tight gather over the kept lights only.
-            for (nrOfLightsType k = 0; k < keptCount_; k++) col.emit(keptIdx_[k]);
+            // The cached index map, filtered by the frame's stride on the same bytes the browser holds.
+            for (nrOfLightsType k = 0; k < keptCount_; k++)
+                if (!keptPos_ || s == previewStride_ || keptAtStride(k, s)) col.emit(keptIdx_[k]);   // the stride test, on the bytes the browser has
         } else {
             // The alloc-miss fallback: the full lattice walk, at the same stride as the table's.
             struct Skip { ColCtx* col; nrOfLightsType s; } sk{&col, s};
@@ -439,6 +496,7 @@ private:
     void freePreviewBuffers() {
         if (broadcaster_) broadcaster_->cancelBufferedSend();
         if (keptIdx_) { platform::free(keptIdx_); keptIdx_ = nullptr; keptIdxCap_ = 0; keptCount_ = 0; }
+        if (keptPos_) { platform::free(keptPos_); keptPos_ = nullptr; }
         if (staging_) { platform::free(staging_); staging_ = nullptr; stagingCap_ = 0; }
         publishHeapBytes();
     }
@@ -487,12 +545,15 @@ private:
     bool keptIdxAllocFailed_ = false;     // index cache couldn't allocate → gather walks per frame
     nrOfLightsType* keptIdx_ = nullptr;   // sparse layouts: kept lights' buffer indices, coord-table order
     nrOfLightsType keptIdxCap_ = 0, keptCount_ = 0;
+    // Each kept light's (x,y,z): a coarser frame applies the device's own modulo test rather than re-walking placeLights (~8 ms at 12K lights, per frame).
+    uint8_t* keptPos_ = nullptr;
 
 protected:
     /// This driver's heap: the base scratch plus the kept-index cache, for the memory readout.
     size_t driverHeapBytes() const override {
         return DriverBase::driverHeapBytes()
              + static_cast<size_t>(keptIdxCap_) * sizeof(nrOfLightsType)
+             + static_cast<size_t>(keptIdxCap_) * 3   // keptPos_, three bytes per kept light
              + stagingCap_;
     }
 

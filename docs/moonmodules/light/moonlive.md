@@ -6,9 +6,7 @@ The library that ships with projectMM is [moonlive/](https://github.com/MoonModu
 
 ## A script is a class
 
-Each script declares a **class**, and the host calls its functions: `tick()` for an effect,
-`placeLights()` for a layout, `modifyLogical()` for a modifier. A function is called when it is
-present and its moment arrives, so which entry points a class defines is what decides what it does.
+Each script declares a **class**, and the host calls its functions: `tick()` for an effect, `placeLights()` for a layout, `modifyLogical()` for a modifier. A function is called when it is present and its moment arrives, so which entry points a class defines is what decides what it does.
 The class name is independent of the file name, the way a C file and the functions in it are.
 
 A class may also define functions of its own and **call them**, including calling itself:
@@ -24,11 +22,8 @@ class CrosshairEffect {
 }
 ```
 
-These are real calls, not pasted-in text: the callee gets its own frame when it runs, which is what
-lets one helper call another and lets a function recurse. Arguments are passed BY VALUE, so a
-function that writes a parameter changes its own copy and the caller's variable is untouched.
-`effects/crosshair.mle` is the worked example; `layouts/sixteen-rings.mll` is the one where the
-arguments earn their place, calling one helper sixteen times with different coordinates.
+These are real calls, not pasted-in text: the callee gets its own frame when it runs, which is what lets one helper call another and lets a function recurse. Arguments are passed BY VALUE, so a function that writes a parameter changes its own copy and the caller's variable is untouched.
+`effects/crosshair.mle` is the worked example; `layouts/sixteen-rings.mll` is the one where the arguments earn their place, calling one helper sixteen times with different coordinates.
 
 ### A script is C++
 
@@ -36,8 +31,7 @@ Every shipped script compiles under `c++ -std=c++20 -fsyntax-only`, pinned by `t
 The language therefore stays a subset rather than drifting into a dialect one feature at a time.
 An editor highlights a script correctly, and a reader brings their C++ intuition to it.
 
-One shape difference is deliberate, and the test bridges exactly that one: a class here needs no
-`public:` and no trailing semicolon.
+One shape difference is deliberate, and the test bridges exactly that one: a class here needs no `public:` and no trailing semicolon.
 
 Anything else a compiler rejects is a divergence, and the test is where it surfaces.
 
@@ -46,8 +40,7 @@ Anything else a compiler rejects is a divergence, and the test is where it surfa
 A script does this the way the compiled module it stands in for does.
 `void` acts and answers nothing, `int` hands back a number, and `string` hands back one of the script's own literals.
 
-`return` leaves a function, with a value or without one. Inside `tick()` a bare `return;` is an
-early exit, which is what a guard wants:
+`return` leaves a function, with a value or without one. Inside `tick()` a bare `return;` is an early exit, which is what a guard wants:
 
 ```
 void tick() {
@@ -56,30 +49,19 @@ void tick() {
 }
 ```
 
-`string` names what comes back rather than introducing a string type: a script returns a literal,
-and building, joining or comparing text is out of scope.
+`string` names what comes back rather than introducing a string type: a script returns a literal, and building, joining or comparing text is out of scope.
 
 ### Members, and which become controls
 
-`byte bpm = 30;` is
-state the script owns: visible in every function, surviving every tick. Naming it in
-`defineControls()` with `addControl("bpm", bpm, 1, 240)` also puts it on the UI as a slider, which is
-the same call a compiled module makes. A member no `addControl` names stays private to the script,
-which is how a stateful effect holds a value the user should not see.
+`byte bpm = 30;` is state the script owns: visible in every function, surviving every tick. Naming it in `defineControls()` with `addControl("bpm", bpm, 1, 240)` also puts it on the UI as a slider, which is the same call a compiled module makes. A member no `addControl` names stays private to the script, which is how a stateful effect holds a value the user should not see.
 
-The default comes from the declaration, the range from the call, and the quoted name is the UI
-label, free to differ from the member's name.
+The default comes from the declaration, the range from the call, and the quoted name is the UI label, free to differ from the member's name.
 
 ### A member can be written
 
-That is what makes it state. `level = level + 10;` assigns, and the
-value is still there on the next tick, because a member lives in storage that outlives the call. A
-loop variable can be assigned too. A [system variable](#system-variables)
-(`width`, `t`, `xPos`) cannot: the engine rewrites it before every call, so the store would vanish.
+That is what makes it state. `level = level + 10;` assigns, and the value is still there on the next tick, because a member lives in storage that outlives the call. A loop variable can be assigned too. A [system variable](#system-variables) (`width`, `t`, `xPos`) cannot: the engine rewrites it before every call, so the store would vanish.
 
-A control CAN be assigned, and the effect is visible rather than surprising: the value moves under
-the slider until the user drags it again. Whether a member is a control is decided by
-`defineControls()` at run time, so the language does not distinguish the two here.
+A control CAN be assigned, and the effect is visible rather than surprising: the value moves under the slider until the user drags it again. Whether a member is a control is decided by `defineControls()` at run time, so the language does not distinguish the two here.
 
 ### Branching
 
@@ -103,37 +85,25 @@ byte  heat[16];         // sixteen elements, all zero to begin with
 
 ### Every variable is declared
 
-That includes a loop's counter. A member states its type, an assignment
-to a name that was never declared is refused, and a `for` writes `for (int i = 0; ...)`. One rule
-with no exception, and the same line C++ would take.
+That includes a loop's counter. A member states its type, an assignment to a name that was never declared is refused, and a `for` writes `for (int i = 0; ...)`. One rule with no exception, and the same line C++ would take.
 
 An index is an arbitrary expression such as `heat[i * 2 + 1]`, and one outside the array is **clamped to the last element**.
 A script computes indices from live control values, so out of range is an ordinary run-time state.
 The fixture shows a repeated last light rather than crashing.
 
-All of a class's members share a small fixed budget (`kCtrlBytes`), so a class that declares more
-than fits is a compile error naming the arena, not a failed allocation while a fixture runs.
+All of a class's members share a small fixed budget (`kCtrlBytes`), so a class that declares more than fits is a compile error naming the arena, not a failed allocation while a fixture runs.
 
-`effects/ember.mle` is the worked example: a heat array that decays and re-ignites, so what it
-draws this frame depends on the last one. That is the line between an effect that evaluates a
-formula and one that runs a simulation, and it is the reason arrays exist. `plasma.mle` would look
-identical if every frame started from scratch; `ember.mle` would go dark.
+`effects/ember.mle` is the worked example: a heat array that decays and re-ignites, so what it draws this frame depends on the last one. That is the line between an effect that evaluates a formula and one that runs a simulation, and it is the reason arrays exist. `plasma.mle` would look identical if every frame started from scratch; `ember.mle` would go dark.
 
 ### Helpers and recursion
 
-Declare a helper above the function that calls it. Only functions already parsed are visible, so
-a call to one declared further down reports `unknown function`. A function can always call itself.
+Declare a helper above the function that calls it. Only functions already parsed are visible, so a call to one declared further down reports `unknown function`. A function can always call itself.
 
-Recursion is bounded. About 30 calls deep, a further call does nothing and returns. A render
-task has a fixed stack, so the alternative to a limit is a device that resets mid-frame. What you
-see if you hit it is the picture being wrong where the recursion stopped, on a device that keeps
-running. Nothing is reported; the exact depth is `kMaxCallDepth`.
+Recursion is bounded. About 30 calls deep, a further call does nothing and returns. A render task has a fixed stack, so the alternative to a limit is a device that resets mid-frame. What you see if you hit it is the picture being wrong where the recursion stopped, on a device that keeps running. Nothing is reported; the exact depth is `kMaxCallDepth`.
 
 ### A script says what it is
 
-`dimensions()` and `tags()` are both optional, both named after the
-member functions a compiled module declares (`Dim dimensions() const override`,
-`const char* tags() const override`), and both read once when the script compiles.
+`dimensions()` and `tags()` are both optional, both named after the member functions a compiled module declares (`Dim dimensions() const override`, `const char* tags() const override`), and both read once when the script compiles.
 
 ```
 class RainEffect {
@@ -144,20 +114,11 @@ class RainEffect {
 }
 ```
 
-`dimensions()` returns 1, 2 or 3, and it decides how the layer EXTRUDES the script. A script that
-returns 1 paints the x=0 column and the framework fans it across the width; one that returns 2
-paints the z=0 slice and the framework copies it through the depth. So a script fills a rig it never
-indexed, and a wrong answer is visible: declare 1 and paint a picture, and only the first column
-survives. A script that stays silent is treated as 2, which is what every script rendered as before
-this existed.
+`dimensions()` returns 1, 2 or 3, and it decides how the layer EXTRUDES the script. A script that returns 1 paints the x=0 column and the framework fans it across the width; one that returns 2 paints the z=0 slice and the framework copies it through the depth. So a script fills a rig it never indexed, and a wrong answer is visible: declare 1 and paint a picture, and only the first column survives. A script that stays silent is treated as 2, which is what every script rendered as before this existed.
 
-`tags()` returns the emoji shown beside the script, so a row in the picker reads like a compiled
-effect's. The vocabulary is shared with the compiled modules: 📊 audio-reactive, ✨ particles,
-🎯 aims moving heads. A script that declares none shows 📝, the mark of a scripted effect.
+`tags()` returns the emoji shown beside the script, so a row in the picker reads like a compiled effect's. The vocabulary is shared with the compiled modules: 📊 audio-reactive, ✨ particles, 🎯 aims moving heads. A script that declares none shows 📝, the mark of a scripted effect.
 
-Both reach the picker before a factory script is downloaded, because the build extracts them from
-the source into the catalog. That copy is for display only: once a script is on the device, the
-compiled script is what decides.
+Both reach the picker before a factory script is downloaded, because the build extracts them from the source into the catalog. That copy is for display only: once a script is on the device, the compiled script is what decides.
 
 ## The five types
 
@@ -300,9 +261,7 @@ Its time axis must be monotonic, so feeding it a `beat()` sawtooth reads as a hi
 `addLight(print(xx), yy, 0)` places the same light and reports what `xx` was.
 
 **Take it out again when the script works.** A serial write blocks, and a script runs on the render
-tick, so a print costs frame time every frame it survives. Each compile grants a short burst and then
-goes quiet, which bounds the damage and gives every edit a fresh window; it does not make a print
-free. No script in this folder ships with one.
+tick, so a print costs frame time every frame it survives. Each compile grants a short burst and then goes quiet, which bounds the damage and gives every edit a fresh window; it does not make a print free. No script in this folder ships with one.
 
 ## Source
 

@@ -13,7 +13,7 @@
     "Drivers",
     "PreviewDriver"
   ],
-  "description": "Stack TWO modifiers on one Layer (Region then Multiply) and verify the chain composes live end-to-end — the capability the old single-modifier engine couldn't do. Prepares its own canvas: Layout(Grid 32x32) + Layer + NoiseEffect + Region(0..50) + Multiply(2x), measures the composite, then adds a third (Checkerboard mask) and measures again, then removes the middle modifier and measures — exercising add/remove on a multi-modifier chain. A broken fold (null buffer, wrong light count, crash on a disabled/removed stage) shows up as a failed measure. The fold composition + order semantics are pinned by unit_Layer_modifier_chain; this is the live end-to-end gate.",
+  "description": "Stack TWO modifiers on one Layer (Region then Multiply) and verify the chain composes live end-to-end, the capability the old single-modifier engine couldn't do. Prepares its own canvas: Layout(Grid 32x32) + Layer + NoiseEffect + Region(0..50) + Multiply(2x), measures the composite, then adds a third (Checkerboard mask) and measures again, then removes the middle modifier and measures, exercising add/remove on a multi-modifier chain. A broken fold (null buffer, wrong light count, crash on a disabled/removed stage) shows up as a failed measure. The fold composition + order semantics are pinned by unit_Layer_modifier_chain; this is the live end-to-end gate.",
   "fixture": [
     {
       "name": "fix-layouts",
@@ -107,9 +107,9 @@
             "min": 8,
             "max": 27,
             "n": 32,
-            "samples": [8, 10, 10, 8, 8, 10, 10, 9, 10, 8, 10, 9, 11, 9, 10, 10, 10, 9, 10, 8, 10, 27, 9, 10, 10, 8, 10, 10, 10, 8, 8, 10]
+            "samples": [8, 10, 10, 9, 10, 8, 10, 9, 11, 9, 10, 10, 10, 9, 10, 8, 10, 27, 9, 10, 10, 8, 10, 10, 10, 8, 8, 10, 10, 10, 10, 10]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "desktop-windows": {
           "tick_us": {
@@ -153,7 +153,7 @@
     },
     {
       "name": "add-mask",
-      "description": "Add a third modifier (Checkerboard mask) on top of the chain — a 3-deep fold. Measure that the deeper chain still renders.",
+      "description": "Add a third modifier (Checkerboard mask) on top of the chain, a 3-deep fold. Measure that the deeper chain still renders.",
       "op": "add_module",
       "id": "MASK",
       "type": "CheckerboardModifier",
@@ -167,9 +167,9 @@
             "min": 6,
             "max": 11,
             "n": 32,
-            "samples": [7, 9, 8, 9, 7, 9, 7, 9, 9, 6, 9, 9, 9, 9, 9, 9, 9, 8, 9, 7, 9, 11, 9, 9, 9, 9, 8, 9, 10, 7, 9, 8]
+            "samples": [7, 9, 7, 9, 9, 6, 9, 9, 9, 9, 9, 9, 9, 8, 9, 7, 9, 11, 9, 9, 9, 9, 8, 9, 10, 7, 9, 8, 9, 9, 10, 9]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "desktop-windows": {
           "tick_us": {
@@ -213,7 +213,7 @@
     },
     {
       "name": "remove-middle",
-      "description": "Remove the middle modifier (Multiply) — the chain re-folds with Region then Checkerboard, no stale state. Measure.",
+      "description": "Remove the middle modifier (Multiply), the chain re-folds with Region then Checkerboard, no stale state. Measure.",
       "op": "remove_module",
       "id": "MULT",
       "measure": true,
@@ -225,9 +225,9 @@
             "min": 21,
             "max": 25,
             "n": 32,
-            "samples": [24, 25, 22, 24, 22, 24, 21, 25, 25, 21, 24, 25, 24, 24, 24, 24, 24, 24, 24, 21, 24, 24, 25, 25, 25, 24, 24, 24, 25, 21, 23, 24]
+            "samples": [22, 24, 21, 25, 25, 21, 24, 25, 24, 24, 24, 24, 24, 24, 24, 21, 24, 24, 25, 25, 25, 24, 24, 24, 25, 21, 23, 24, 24, 24, 24, 25]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "desktop-windows": {
           "tick_us": {
@@ -244,7 +244,7 @@
     },
     {
       "name": "add-live-rotate",
-      "description": "Add a DYNAMIC Rotate on top of the static chain — its modifyLive runs the per-frame remap pass over the composed buffer. Verifies a static chain + a live modifier coexist (the buffer is remapped each frame on top of the baked Region/Checkerboard mapping) without a crash or null buffer.",
+      "description": "Add a DYNAMIC Rotate on top of the static chain, its modifyLive runs the per-frame remap pass over the composed buffer. Verifies a static chain + a live modifier coexist (the buffer is remapped each frame on top of the baked Region/Checkerboard mapping) without a crash or null buffer.",
       "op": "add_module",
       "id": "ROT",
       "type": "RotateModifier",
@@ -253,14 +253,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 44,
-            "p95": 46,
+            "p50": 43,
+            "p95": 47,
             "min": 35,
             "max": 47,
             "n": 32,
-            "samples": [46, 44, 45, 44, 38, 44, 47, 42, 43, 45, 43, 45, 44, 43, 43, 43, 42, 44, 45, 37, 44, 44, 41, 43, 43, 44, 39, 45, 45, 36, 35, 46]
+            "samples": [38, 44, 47, 42, 43, 45, 43, 45, 44, 43, 43, 43, 42, 44, 45, 37, 44, 44, 41, 43, 43, 44, 39, 45, 45, 36, 35, 46, 44, 42, 44, 47]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "desktop-windows": {
           "tick_us": {

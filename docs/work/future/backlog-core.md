@@ -130,7 +130,6 @@ declared rather than for a buffer to fill, and to time out on stall rather than 
 1.0 ships ESP32 firmware (4 variants) + macOS arm64 + Windows x64. Still to add:
 
 - **ESP32-P4** firmware variant — **`esp32p4rev1-eth` (Ethernet-only) shipped**: in `build_esp32.py`'s `FIRMWARES`, the `deviceModels.json` catalog (Waveshare P4-NANO), and CI builds + publishes it to the web installer + releases. **`esp32p4rev1-eth-wifi` now ships too** (2026-08-19): it boots and associates on IDF v6.1-rc1, so it is out of the experimental set in the installer and carries a normal description. Its open defect is throughput, not shipping — see § ESP32-P4 round 3, open issue 0.
-- **ESP32-S31 web-flash (waiting on esptool-js)** — the `esp32s31` firmware ships (build, catalog, CI matrix, web installer listing), and CLI flashing works (`flash_esp32.py` → esptool.py, which has S31 support since v5.2.0). **Browser flashing does not**: the web installer's `esptool-js` (pinned 0.5.7) has no S31 chip class. Worse than a missing entry — the S31's ROM magic (`15736195`) *collides* with the classic ESP32's; esptool.py disambiguates with secondary register detection (S31 `USES_MAGIC_VALUE=False`), but esptool-js has only the magic table, so it would mis-identify the RISC-V S31 as a classic Xtensa ESP32 and flash the wrong stub/params. `install.js`'s `WEB_FLASH_UNSUPPORTED_CHIPS` guard catches an S31 connect-flash failure and points the user at the CLI. **No upstream timeline**: as of 2026-06 the esptool-js repo has zero S31 issues/PRs/commits and its last release was 2026-03 (it lags esptool.py on new chips by months). **Removal trigger**: when esptool-js ships S31 support *with* the secondary detection (not just a magic-table entry — re-check the chip-detect switch, not the version number), bump the esptool-js pin in `install-orchestrator.js` and drop `ESP32-S31` from `WEB_FLASH_UNSUPPORTED_CHIPS`.
 - **ESP32-P4 v3.x silicon variant (backlog)** — `esp32p4rev1-eth` is built for pre-v3 P4 (`CONFIG_ESP32P4_SELECTS_REV_LESS_V3` + `REV_MIN_0`), because the v6.1 IDF default (v3.1) refused to boot on the bench/field v1.x P4 and rev <3.0 vs >=3.0 are "huge hardware difference" (one binary can't cover both). **DONE (2026-08-19): `esp32p4rev3-eth` and `esp32p4rev3-eth-wifi` ship** (`REV_MIN_300`, which covers v3.0-v3.99), reusing the rev1 board fragment so the partition table and EMAC config stay in one place. **Still open: neither has ever been booted** — both bench boards are v1.3 engineering samples, so the rev3 images are flagged experimental in the installer and need a v3 board to verify. Espressif does not recommend v0.x/v1.x for new designs, so a board bought today is v3.x and needs these.
 - **Teensy 4.1** — toolchain-file build, `.hex` for Teensy Loader.
 - **Raspberry Pi** — ARM64, cross-built or native.
@@ -832,15 +831,56 @@ Run a bare-leaving scenario before a tree-assuming one and the latter fails pre-
 
 Fix options: (a) make every live mutate scenario clear+rebuild its own canvas (consistent with the newer ones) so order never matters; or (b) have the live runner reboot / restore the canonical tree between scenarios. (a) is the cleaner long-term shape. Until then, the in-process suite is the gate; live full-suite runs need a clean boot per scenario, or run scenarios individually.
 
+## An explicit `Custom` Ethernet preset is reseeded to a named one
+
+`ethPresetIsUnset()` returns true for any editable row, and `Custom` is the only editable row, so it cannot tell "nothing has chosen a preset" from "the user chose Custom". A board saved as `Custom` whose pins happen to match a named preset is therefore reseeded to that preset on the next rebuild, and its pin rows are hidden: a hand-wired board silently adopts a board map it was never given.
+
+The seam is what makes this awkward. `defineControls` runs before the config is restored, so the seed cannot simply latch a flag on the first render: that is the legacy path the seed exists for, a board whose file predates `ethBoard` and carries only pins. Distinguishing the two needs to know whether the restore supplied an `ethBoard` value at all, which is not visible where the seed runs. An attempt that latched on the first render broke the legacy path and was reverted.
+
+**What it costs today**: nothing on a board the catalog configures, since those name their preset. It bites a user who deliberately picks `Custom` on a board whose pins match a preset, which is the hand-wired case `Custom` exists for.
+
+**Where to look**: `FilesystemModule::applyNode` overlays values, calls `rebuildControls`, then overlays again. A control that wants to know whether IT was restored needs a signal from that pass, which no control has today. That is the general shape worth solving rather than a special case for one select.
+
+## Ethernet on the QuinLED Dig-Next-2 (W5500 over SPI)
+
+The DN2 is in the catalog with no Ethernet block, so it comes up WiFi-only. Adding it is a `deviceModels.json` entry and nothing else: the preset work landed the seam, and W5500 already applies live.
+
+**RMII is impossible on this board, so the W5500 is the only route.** The DN2 carries an ESP32-PICO-V3-02, whose package leaves GPIO 16, 17, 18 and 23 unbonded, and those are the RMII management and clock pins. This is the same package fact behind the flash-cache wedge recorded in [lessons](../past/lessons.md). QuinLED's own LAN8720 board stacks onto the QuinLED-ESP32 only, not onto a Dig board.
+
+**The wiring, from [Quindor's firmware source](https://github.com/intermittech/WLED-Dig-Next-2_W5500)**, using the QEXT header for the bus and the Stemma QT header for the two control lines. Fitting Ethernet therefore costs the I2C port:
+
+| W5500 | connector | GPIO |
+|---|---|---|
+| SCLK | QEXT green | 25 |
+| MOSI | QEXT blue | 32 |
+| MISO | QEXT yellow | 0 |
+| CS | QEXT white | 33 |
+| INT | Stemma QT SDA | 15 |
+| RST | Stemma QT SCL | 14 |
+
+MISO on GPIO 0 is deliberate and sound: GPIO 0 is a strapping pin, and a W5500 leaves MISO high-Z while CS is inactive, which is what Espressif's rule about not driving strapping pins at reset asks for.
+
+**It stays `Custom`, and that is the finding.** Across the three W5500 boards now known, LightCrafter 16, SE 16 V1 and this one, no two share a single pin on any of the six lines. SPI Ethernet is a module wired to whatever a board left free, so there is no W5500 pattern to make a preset from, and inventing one would be a preset that fits nothing.
+
+**What is unverified.** The pin table is trustworthy as what that firmware does, because it was read out of the code rather than a description. What rests on one source is that it works: a single-author repository created 2026-09-19, self-labelled experimental, tested on one unit, with LED output, buttons, relays and mic explicitly not exercised. No independent build was reported when this was written. So the open question is not the pins but whether SPI Ethernet and the LED output coexist on this board under load, which is a bench answer.
+
 ## Housekeeping
 
-### Promote the one-line `//` cap to an error, once the 606 `.cpp` runs are homed (2026-09-21)
+### Promote the one-line `//` cap to an error, once the 604 `.cpp` blocks are homed (2026-09-21)
 
-`MAX_CODE_COMMENT = 1` is already the rule in both kinds of file, and already an ERROR in a header. It stays a warning in a `.cpp` only because `_blocks()` stages the sweep by file kind, and that function names its own removal: when the implementation side reaches zero it goes and every finding blocks.
+`MAX_CODE_COMMENT = 1` is already the rule in both kinds of file, and already an ERROR in a header. It stays a warning in a `.cpp` only because `_blocks()` stages the sweep by file kind, and that function names its own removal: a rule leaves the staging as the tree meets it, which no-hard-wrap already did.
 
-What stands between here and there is 606 multi-line blocks, all `.cpp`: 241 in `test/`, 210 in `src/`, 155 under `src/platform/`. By length, 82 are two lines, 321 are three and 125 are four, so 528 of 606 are three lines or fewer; the tail is one 15-line run, two of ten and a handful between.
+**The shape of what is left.** 604 blocks across 92 files, 2081 comment lines. By area: 239 in `test/`, 210 in `src/`, 155 under `src/platform/`. By length: 81 are two lines, 321 are three, 124 are four, so 526 of 604 are three lines or fewer and the tail is one 15-line block, two of ten and a handful between.
 
-**The fix is not to split them.** Chopping one long comment into two shorter lines leaves the text identical and satisfies nothing, which is why the run cap exists at all. Each one is depth that belongs in the file lead's `@moreinfo` appendix with an `@xref` back, or in prose that says less. That is a judgement per comment across roughly 150 files, which is a sweep of its own rather than a mechanical pass.
+It concentrates, which is what makes it approachable. `HttpServerModule.cpp` alone holds 100 and the top ten files hold 312, over half; the other 82 files average under four each.
+
+**Where the depth goes is the blocker.** Of the 92 files only 19 already carry an `@moreinfo` appendix. 68 have a `///` lead with no appendix and 5 have neither, so most files need the appendix written before a single block can move.
+
+**The fix is not to split them.** Chopping one comment into two shorter lines leaves the text identical and satisfies nothing, which is why the cap counts a block rather than a line. Each one is depth that belongs in the file lead's appendix with an `@xref` back, or prose that says less.
+
+**Suggested order.** `HttpServerModule.cpp` first: 100 blocks, 444 comment lines, and it already has the appendix. Then the other nine heavy files for 212 more. Then `test/` as its own sweep, because the argument that a test comment explains why a test EXISTS is strongest there and may deserve a different budget rather than an appendix. Promote once at zero.
+
+**Cost.** Not a scripted pass. Each block is a judgement between depth that belongs in an appendix, an explanation that should be shorter, and history git already holds. About 35 done by hand in one session is the measured rate, so the first file is a session of its own and the whole sweep is several days.
 
 ### Hot path: move blocking work off the render callbacks (architecture)
 

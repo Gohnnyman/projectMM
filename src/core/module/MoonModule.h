@@ -143,7 +143,7 @@ public:
             mix(static_cast<uint32_t>(c.type));
             mix(static_cast<uint32_t>(c.min));
             mix(static_cast<uint32_t>(c.max));
-            mix((c.hidden ? 1u : 0u) | (c.readonly ? 2u : 0u) | (c.advanced ? 4u : 0u));
+            mix((c.hidden ? 1u : 0u) | (c.readonly ? 2u : 0u) | (static_cast<unsigned>(c.minMode) << 2));
             if (c.type == ControlType::Select && c.aux) {
                 // Hash the strings, so an in-place rename still changes the signature.
                 const char* const* opts = reinterpret_cast<const char* const*>(c.aux);

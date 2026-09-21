@@ -19,7 +19,7 @@
     },
     {
       "name": "add-grid",
-      "description": "Add a 128x128 GridLayout child to Layouts. Set explicitly (the module default is 16x16x1) so the tick is above the host's microsecond clock resolution — a 16x16 grid renders in <1us on desktop, flooring tick to 0.",
+      "description": "Add a 128x128 GridLayout child to Layouts. Set explicitly (the module default is 16x16x1) so the tick is above the host's microsecond clock resolution, a 16x16 grid renders in <1us on desktop, flooring tick to 0.",
       "op": "add_module",
       "id": "Grid",
       "type": "GridLayout",
@@ -88,9 +88,9 @@
             "min": 63,
             "max": 87,
             "n": 32,
-            "samples": [72, 66, 66, 70, 71, 67, 71, 68, 70, 66, 71, 70, 70, 70, 66, 87, 70, 69, 71, 67, 70, 74, 70, 69, 69, 71, 72, 70, 69, 64, 63, 67]
+            "samples": [71, 67, 71, 68, 70, 66, 71, 70, 70, 70, 66, 87, 70, 69, 71, 67, 70, 74, 70, 69, 69, 71, 72, 70, 69, 64, 63, 67, 71, 68, 69, 72]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "desktop-windows": {
           "tick_us": {

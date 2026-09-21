@@ -14,7 +14,7 @@
     "SpiralEffect",
     "NoiseEffect"
   ],
-  "description": "Comprehensive incremental performance check (the SLOW, on-device companion to scenario_perf_light). Mutate mode + canvas-preparing: clear_children whatever the device already had (pre-wired apparatus like PreviewDriver/Board survives — clear_children only drops user-editable children), rebuild a known minimal tree, then add one subsystem at a time — audio, device discovery, a modifier, then EVERY output driver this board has (each optional + capped to 64 output LEDs so its per-frame cost is comparable, not its transmit-all-16K time), then a network driver — measuring the tick/heap delta after each so each subsystem's cost is isolated. Then sweep the grid 16²→32²→64²→128² (16K) for both a LIGHT effect (Spiral) and a HEAVY one (Noise) to bracket the compute range across sizes. LED drivers are platform-gated (RMT on classic/S3, LCD on S3, Parlio on P4; none on desktop) so each driver step is optional:true and skipped where absent — the all-drivers comparison is assembled across boards (S3 gives RMT vs LCD, P4 gives RMT vs Parlio). Subsumes the old scenario_Layer_buildup (incremental module cost), scenario_GridLayout_grid_sizes (grid sweep), and scenario_AllEffects_grid_sizes (per-effect size sweep, here reduced to a light/heavy bracket). Runs minutes on a device; not a per-commit gate.",
+  "description": "Comprehensive incremental performance check (the SLOW, on-device companion to scenario_perf_light). Mutate mode + canvas-preparing: clear_children whatever the device already had (pre-wired apparatus like PreviewDriver/Board survives, clear_children only drops user-editable children), rebuild a known minimal tree, then add one subsystem at a time, audio, device discovery, a modifier, then EVERY output driver this board has (each optional + capped to 64 output LEDs so its per-frame cost is comparable, not its transmit-all-16K time), then a network driver, measuring the tick/heap delta after each so each subsystem's cost is isolated. Then sweep the grid 16²→32²→64²→128² (16K) for both a LIGHT effect (Spiral) and a HEAVY one (Noise) to bracket the compute range across sizes. LED drivers are platform-gated (RMT on classic/S3, LCD on S3, Parlio on P4; none on desktop) so each driver step is optional:true and skipped where absent, the all-drivers comparison is assembled across boards (S3 gives RMT vs LCD, P4 gives RMT vs Parlio). Subsumes the old scenario_Layer_buildup (incremental module cost), scenario_GridLayout_grid_sizes (grid sweep), and scenario_AllEffects_grid_sizes (per-effect size sweep, here reduced to a light/heavy bracket). Runs minutes on a device; not a per-commit gate.",
   "fixture": [
     {
       "name": "fix-layouts",
@@ -90,9 +90,9 @@
             "min": 1,
             "max": 3,
             "n": 32,
-            "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+            "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -210,9 +210,9 @@
             "min": 1,
             "max": 3,
             "n": 32,
-            "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+            "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -330,9 +330,9 @@
             "min": 1,
             "max": 3,
             "n": 32,
-            "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+            "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -573,9 +573,9 @@
             "min": 1,
             "max": 3,
             "n": 32,
-            "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+            "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -673,7 +673,7 @@
     },
     {
       "name": "add-network-driver",
-      "description": "+NetworkSendDriver (ArtNet/DDP — works on every platform). Diff = the network output cost (capped by the 16² grid here).",
+      "description": "+NetworkSendDriver (ArtNet/DDP, works on every platform). Diff = the network output cost (capped by the 16² grid here).",
       "op": "add_module",
       "id": "Net",
       "type": "NetworkSendDriver",
@@ -693,7 +693,7 @@
             "n": 32,
             "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -796,7 +796,7 @@
     },
     {
       "name": "add-rmt-driver",
-      "description": "+RmtLedDriver capped to 64 output LEDs (one pin, ledsPerPin=64). Optional — classic + S3. Diff = the RMT per-frame cost at a fixed 64-LED output.",
+      "description": "+RmtLedDriver capped to 64 output LEDs (one pin, ledsPerPin=64). Optional, classic + S3. Diff = the RMT per-frame cost at a fixed 64-LED output.",
       "op": "add_module",
       "id": "Rmt",
       "type": "RmtLedDriver",
@@ -822,7 +822,7 @@
             "n": 32,
             "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -926,7 +926,7 @@
     },
     {
       "name": "add-i80-driver",
-      "description": "+ParallelLedDriver (peripheral=i80) capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). S3 ONLY — the pins below are the S3's clean set. The i80 peripheral also runs on the classic ESP32 (I2S backend) and the P4 (LCD_CAM), but NO 8-pin set is safe on all three (only GPIO 21 is common: the classic's 6-11 are the SPI flash bus, the P4 exposes a different range), so one shared step cannot measure them. On a non-S3 target the driver fails to init and the measure below is meaningless — the observed blocks are therefore S3/desktop only. Diff = the i80 per-frame cost.",
+      "description": "+ParallelLedDriver (peripheral=i80) capped to 64 LEDs on lane 0 (i80 needs all 8 data pins; unused lanes get 0 LEDs). S3 ONLY, the pins below are the S3's clean set. The i80 peripheral also runs on the classic ESP32 (I2S backend) and the P4 (LCD_CAM), but NO 8-pin set is safe on all three (only GPIO 21 is common: the classic's 6-11 are the SPI flash bus, the P4 exposes a different range), so one shared step cannot measure them. On a non-S3 target the driver fails to init and the measure below is meaningless, the observed blocks are therefore S3/desktop only. Diff = the i80 per-frame cost.",
       "op": "add_module",
       "id": "MultiPin",
       "type": "ParallelLedDriver",
@@ -955,7 +955,7 @@
             "n": 32,
             "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -1023,7 +1023,7 @@
           "last_updated": "2026-09-01"
         }
       },
-      "description": "The i80 per-frame cost. Only meaningful where add-i80-driver's pins are valid (S3; desktop is inert but exercises the code path) — the classic/P4 blocks were removed: they recorded a driver that had failed to init, so the tiny tick was the bail-out path, not an encode."
+      "description": "The i80 per-frame cost. Only meaningful where add-i80-driver's pins are valid (S3; desktop is inert but exercises the code path), the classic/P4 blocks were removed: they recorded a driver that had failed to init, so the tiny tick was the bail-out path, not an encode."
     },
     {
       "name": "remove-i80-driver",
@@ -1033,7 +1033,7 @@
     },
     {
       "name": "add-parlio-driver",
-      "description": "+ParallelLedDriver (peripheral=Parlio) capped to 64 LEDs on lane 0. Optional — P4 only. Diff = the Parlio per-frame cost.",
+      "description": "+ParallelLedDriver (peripheral=Parlio) capped to 64 LEDs on lane 0. Optional, P4 only. Diff = the Parlio per-frame cost.",
       "op": "add_module",
       "id": "Parlio",
       "type": "ParallelLedDriver",
@@ -1062,7 +1062,7 @@
             "n": 32,
             "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32p4rev1-eth": {
           "tick_us": {
@@ -1175,7 +1175,7 @@
             "n": 32,
             "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -1297,9 +1297,9 @@
             "min": 4,
             "max": 6,
             "n": 32,
-            "samples": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 6, 4, 4, 4, 4]
+            "samples": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 6, 4, 4, 4, 4, 4, 4, 4, 4]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -1421,9 +1421,9 @@
             "min": 17,
             "max": 79,
             "n": 32,
-            "samples": [17, 18, 17, 18, 18, 79, 17, 18, 18, 19, 18, 18, 19, 18, 17, 18, 19, 17, 18, 17, 18, 18, 19, 19, 17, 18, 18, 18, 18, 18, 17, 17]
+            "samples": [18, 79, 17, 18, 18, 19, 18, 18, 19, 18, 17, 18, 19, 17, 18, 17, 18, 18, 19, 19, 17, 18, 18, 18, 18, 18, 17, 17, 17, 17, 18, 18]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -1545,9 +1545,9 @@
             "min": 70,
             "max": 80,
             "n": 32,
-            "samples": [70, 71, 71, 71, 70, 80, 70, 72, 72, 77, 71, 72, 72, 75, 70, 72, 73, 70, 71, 70, 75, 71, 78, 76, 70, 73, 71, 78, 76, 73, 70, 72]
+            "samples": [70, 80, 70, 72, 72, 77, 71, 72, 72, 75, 70, 72, 73, 70, 71, 70, 75, 71, 78, 76, 70, 73, 71, 78, 76, 73, 70, 72, 70, 70, 70, 72]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -1645,7 +1645,7 @@
     },
     {
       "name": "swap-heavy",
-      "description": "Swap to the HEAVY effect (Noise) and repeat the sweep — the upper bracket of per-pixel compute.",
+      "description": "Swap to the HEAVY effect (Noise) and repeat the sweep, the upper bracket of per-pixel compute.",
       "op": "replace_module",
       "id": "FX",
       "type": "NoiseEffect",
@@ -1677,9 +1677,9 @@
             "min": 4,
             "max": 5,
             "n": 32,
-            "samples": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 4, 4, 4, 4]
+            "samples": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 4, 4, 4, 4, 4, 4, 4, 4]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -1801,9 +1801,9 @@
             "min": 15,
             "max": 18,
             "n": 32,
-            "samples": [15, 16, 15, 16, 15, 16, 15, 15, 17, 18, 15, 15, 16, 17, 15, 16, 16, 15, 16, 15, 17, 15, 18, 16, 16, 16, 16, 17, 15, 16, 15, 16]
+            "samples": [15, 16, 15, 15, 17, 18, 15, 15, 16, 17, 15, 16, 16, 15, 16, 15, 17, 15, 18, 16, 16, 16, 16, 17, 15, 16, 15, 16, 16, 15, 16, 16]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -1925,9 +1925,9 @@
             "min": 60,
             "max": 68,
             "n": 32,
-            "samples": [61, 62, 62, 63, 63, 63, 62, 62, 67, 67, 64, 62, 65, 67, 62, 64, 64, 63, 63, 62, 67, 62, 68, 67, 64, 65, 63, 68, 63, 65, 61, 60]
+            "samples": [63, 63, 62, 62, 67, 67, 64, 62, 65, 67, 62, 64, 64, 63, 63, 62, 67, 62, 68, 67, 64, 65, 63, 68, 63, 65, 61, 60, 63, 62, 62, 64]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -2049,9 +2049,9 @@
             "min": 243,
             "max": 297,
             "n": 32,
-            "samples": [243, 252, 250, 252, 251, 251, 250, 252, 265, 297, 250, 250, 266, 295, 249, 257, 261, 251, 251, 251, 265, 251, 269, 272, 252, 262, 251, 263, 248, 265, 251, 243]
+            "samples": [251, 251, 250, 252, 265, 297, 250, 250, 266, 295, 249, 257, 261, 251, 251, 251, 265, 251, 269, 272, 252, 262, 251, 263, 248, 265, 251, 243, 250, 250, 249, 256]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -2149,7 +2149,7 @@
     },
     {
       "name": "add-modifier-for-sweep",
-      "description": "Re-add the MultiplyModifier on the HEAVY effect and sweep grid sizes — the diff vs the matching measure-heavy-N step (no modifier) is the modifier's PER-FRAME cost at each grid, answering whether the ~180µs seen at 16² scales with pixel count or is fixed overhead.",
+      "description": "Re-add the MultiplyModifier on the HEAVY effect and sweep grid sizes, the diff vs the matching measure-heavy-N step (no modifier) is the modifier's PER-FRAME cost at each grid, answering whether the ~180µs seen at 16² scales with pixel count or is fixed overhead.",
       "op": "add_module",
       "id": "Mod",
       "type": "MultiplyModifier",
@@ -2210,7 +2210,7 @@
             "n": 32,
             "samples": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32": {
           "tick_us": {
@@ -2334,7 +2334,7 @@
             "n": 32,
             "samples": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32": {
           "tick_us": {
@@ -2456,9 +2456,9 @@
             "min": 15,
             "max": 22,
             "n": 32,
-            "samples": [15, 16, 15, 16, 17, 15, 15, 15, 17, 18, 15, 15, 16, 17, 15, 16, 16, 15, 15, 15, 16, 15, 16, 22, 17, 17, 15, 15, 15, 16, 17, 15]
+            "samples": [17, 15, 15, 15, 17, 18, 15, 15, 16, 17, 15, 16, 16, 15, 15, 15, 16, 15, 16, 22, 17, 17, 15, 15, 15, 16, 17, 15, 15, 15, 15, 16]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32": {
           "tick_us": {
@@ -2580,9 +2580,9 @@
             "min": 60,
             "max": 82,
             "n": 32,
-            "samples": [61, 62, 62, 63, 62, 62, 62, 63, 68, 71, 62, 62, 82, 75, 62, 64, 66, 62, 63, 62, 65, 64, 63, 70, 63, 65, 62, 62, 62, 65, 64, 60]
+            "samples": [62, 62, 62, 63, 68, 71, 62, 62, 82, 75, 62, 64, 66, 62, 63, 62, 65, 64, 63, 70, 63, 65, 62, 62, 62, 65, 64, 60, 62, 62, 63, 64]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "esp32": {
           "tick_us": {

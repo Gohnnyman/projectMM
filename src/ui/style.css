@@ -725,12 +725,22 @@ body.cards-resizing {
     color: var(--fg-muted);
 }
 
-/* Expert-only controls (ctrl.advanced, shown only in expert mode): a small wrench glyph after the label
-   marks them as a distinct "tuning/dev" tier at a glance — semantically clearer than a bare accent stripe.
-   The same glyph sits on the expertMode toggle itself (see .control-label--expert), tying cause to effect. */
-.control-advanced > .control-label::after,
-.control-label--expert::after {
+/* A control above user mode carries a glyph naming the tier that reveals it, which reads at a glance
+   where an accent stripe would not. The SLIDER is expert, the tuning a working installation needs;
+   the WRENCH is developer, what diagnoses the firmware. The mode select itself carries both, tying
+   cause to effect (see .control-label--mode). */
+.control-expert > .control-label::after {
+    content: "🎚️";
+}
+.control-developer > .control-label::after {
     content: "🔧";
+}
+.control-label--mode::after {
+    content: "🎚️🔧";
+}
+.control-expert > .control-label::after,
+.control-developer > .control-label::after,
+.control-label--mode::after {
     font-size: 10px;
     margin-left: 4px;
     opacity: 0.7;

@@ -55,25 +55,16 @@ The distinction matters because a shipped binary is launched from a download fol
 
 ### Editor setup (clangd)
 
-Diagnostics appear **as you type**, from the same [`.clang-tidy`](../.clang-tidy) config CI
-uses, so a finding shows up while the code is still in your head, not ten minutes later in a
-pipeline.
+Diagnostics appear **as you type**, from the same [`.clang-tidy`](../.clang-tidy) config CI uses, so a finding shows up while the code is still in your head, not ten minutes later in a pipeline.
 
-Once per machine: install the **clangd** extension (`llvm-vs-code-extensions.vscode-clangd`)
-and **disable Microsoft's C/C++ IntelliSense**, running both produces duplicated and
-contradictory diagnostics. Nothing else to configure: [`.clangd`](../.clangd) at the repo root
-points at the compilation database, and `CMAKE_EXPORT_COMPILE_COMMANDS` (set in
-`CMakeLists.txt`) means any normal build refreshes it.
+Once per machine: install the **clangd** extension (`llvm-vs-code-extensions.vscode-clangd`) and **disable Microsoft's C/C++ IntelliSense**, running both produces duplicated and contradictory diagnostics. Nothing else to configure: [`.clangd`](../.clangd) at the repo root points at the compilation database, and `CMAKE_EXPORT_COMPILE_COMMANDS` (set in `CMakeLists.txt`) means any normal build refreshes it.
 
 Two things worth knowing:
 
 - **If every file reports `'cstdint' file not found`**: the build directory was configured
-  with a different compiler than clangd is. `.clangd`'s `--query-driver` handles the usual
-  cases; if a new toolchain appears, add it there. This failure is loud and total, real
-  diagnostics disappear behind it, so it is worth recognizing on sight.
+  with a different compiler than clangd is. `.clangd`'s `--query-driver` handles the usual cases; if a new toolchain appears, add it there. This failure is loud and total, real diagnostics disappear behind it, so it is worth recognizing on sight.
 - **clangd runs a subset of the CI check set**: skipping checks it considers slow (>10%
-  AST-build cost). That is deliberate and means the same config file is safe to share: CI
-  remains the authority.
+  AST-build cost). That is deliberate and means the same config file is safe to share: CI remains the authority.
 
 ### Packaging
 
@@ -100,8 +91,7 @@ Every host needs [uv](https://docs.astral.sh/uv/), CMake 3.20+, and a C++20 comp
 
 ### Docker
 
-The desktop build runs in a container, which is the whole system without an ESP32: same effect
-pipeline, same web UI, same driver stack, driving real fixtures over Art-Net, DDP and E1.31.
+The desktop build runs in a container, which is the whole system without an ESP32: same effect pipeline, same web UI, same driver stack, driving real fixtures over Art-Net, DDP and E1.31.
 
 ```sh
 docker compose up -d      # then open http://localhost:8081/
@@ -116,20 +106,12 @@ docker run -d --name projectmm -p 8081:8080 -v projectmm:/data \
   ghcr.io/moonmodules/projectmm:latest --no-browser
 ```
 
-`--no-browser` because a container has no browser to open: without it the start prints a line
-saying it could not open one, which is noise rather than a failure. The Compose service passes it
-already.
+`--no-browser` because a container has no browser to open: without it the start prints a line saying it could not open one, which is noise rather than a failure. The Compose service passes it already.
 
-`:latest` follows the rolling prerelease, the same build the installer page offers; a version tag
-like `:4.0.0` pins one. Images are published by the release workflow from the same `.deb` that
-release ships, so the image and the binary are the same build.
+`:latest` follows the rolling prerelease, the same build the installer page offers; a version tag like `:4.0.0` pins one. Images are published by the release workflow from the same `.deb` that release ships, so the image and the binary are the same build.
 
 **Upgrading preserves everything.** The image holds only the binary and all state lives in the
-volume, so an upgrade keeps settings, presets, scripts and the device's identity. Which command
-depends on which source the compose file names: `docker compose pull && docker compose up -d` for
-a published `image:`, and `docker compose build --pull && docker compose up -d` for the shipped
-`build: .`, where `pull` alone would fetch nothing and `up` would rebuild from the checkout. Only `docker compose down -v` wipes it, and only a mounted volume is preserved
-at all: a bare `docker run` with no `-v` loses its state when the container goes.
+volume, so an upgrade keeps settings, presets, scripts and the device's identity. Which command depends on which source the compose file names: `docker compose pull && docker compose up -d` for a published `image:`, and `docker compose build --pull && docker compose up -d` for the shipped `build: .`, where `pull` alone would fetch nothing and `up` would rebuild from the checkout. Only `docker compose down -v` wipes it, and only a mounted volume is preserved at all: a bare `docker run` with no `-v` loses its state when the container goes.
 
 | | |
 |---|---|
@@ -141,19 +123,13 @@ at all: a bare `docker run` with no `-v` loses its state when the container goes
 | **Capabilities** | none; it binds its port as an ordinary process |
 
 **When host networking is needed.** Unicast output to a fixture works over ordinary bridge
-networking. Discovery and the broadcast or multicast output modes do not cross a bridge, so those
-want `network_mode: host` (or an L2 CNI on Kubernetes). With host networking there is no port
-mapping, so pass `--port 8081` in `command:` to stay clear of anything already on 8080.
+networking. Discovery and the broadcast or multicast output modes do not cross a bridge, so those want `network_mode: host` (or an L2 CNI on Kubernetes). With host networking there is no port mapping, so pass `--port 8081` in `command:` to stay clear of anything already on 8080.
 
 **Several instances** run side by side with no conflict: each container has its own port space, so
-they all listen on 8080 internally with different published ports, and each generates its own
-identity so they are distinguishable on the network. CPU is the practical limit rather than memory
-(measured at ~5 MB and about one core each, since the desktop build renders as fast as it is
-allowed); cap it with `cpus:` in compose when running a fleet.
+they all listen on 8080 internally with different published ports, and each generates its own identity so they are distinguishable on the network. CPU is the practical limit rather than memory (measured at ~5 MB and about one core each, since the desktop build renders as fast as it is allowed); cap it with `cpus:` in compose when running a fleet.
 
 **amd64 only** for now: the release ships no arm64 Linux binary. On an Apple-silicon Mac or an ARM
-server the compose file's `platform: linux/amd64` runs it under emulation, which works but is
-slower than native.
+server the compose file's `platform: linux/amd64` runs it under emulation, which works but is slower than native.
 
 ## ESP32
 
@@ -189,13 +165,9 @@ uv run moondeck/build/flash_esp32.py --firmware esp32 --port /dev/tty.usbserial-
 uv run moondeck/run/monitor_esp32.py --port /dev/tty.usbserial-XXXX
 ```
 
-On the variants that opt into it (`esp32`, `esp32-16mb`, `esp32-wrover`, `esp32-eth`,
-`esp32s3-zero`, and `qemu`, which is emulated rather than installable) the build also produces
+On the variants that opt into it (`esp32`, `esp32-16mb`, `esp32-wrover`, `esp32-eth`, `esp32s3-zero`, and `qemu`, which is emulated rather than installable) the build also produces
 **MoonBase**, the second boot image ([MoonBase](../explanation/architecture/moonbase.md)),
-and `flash_esp32.py` writes the corrected layout in one pass: app in the big `ota_0` slot,
-MoonBase in `factory`, and an otadata that boots the app directly. A device on the older
-dual-OTA table adopts this layout only through such a full serial flash, OTA never rewrites
-the partition table.
+and `flash_esp32.py` writes the corrected layout in one pass: app in the big `ota_0` slot, MoonBase in `factory`, and an otadata that boots the app directly. A device on the older dual-OTA table adopts this layout only through such a full serial flash, OTA never rewrites the partition table.
 
 `setup_esp_idf.py` runs the upstream installer for the host: `install.sh` on macOS/Linux, `install.bat` on Windows. Both create the same `~/.espressif/python_env/...` venv and download the same toolchains (~1.5 GB more) — only the wrapper differs. The Windows installer needs roughly 5 minutes on a fast link. It also offers to move a drifted checkout onto the pinned commit (see [ESP-IDF version](#esp-idf-version)); pass `--no-checkout` to keep it warn-only.
 
@@ -205,7 +177,7 @@ the partition table.
 (cd ~/esp/esp-idf && ./install.sh esp32s31)   # one-time, adds the S31 RISC-V toolchain
 ```
 
-Flash the S31 over USB with the CLI (`flash_esp32.py --firmware esp32s31 --port <port>`), **not** the web installer: the browser flasher (`esptool-js`) has no S31 chip definition, so a browser flash fails, but the CLI's `esptool.py` supports it. The web installer surfaces the same guidance if you try. (Status + the condition to enable web flashing: [backlog](../work/future/index.md).)
+Flash the S31 from the web installer or with the CLI (`flash_esp32.py --firmware esp32s31 --port <port>`), whichever suits. Browser flashing works from esptool-js 0.7.0, which identifies the chip by its id rather than by a ROM magic value the S31 shares with the classic ESP32.
 
 On Windows, the `--port` argument is a `COM*` name (e.g. `COM3`) instead of `/dev/tty.usbserial-XXXX`. MoonDeck's port picker enumerates `COM*` automatically.
 
@@ -320,10 +292,7 @@ The Ethernet PHY type and pin map are runtime config, not baked into the build: 
 
 ### Flashing a running device over the network
 
-A board already on the network is updated over HTTP, with no cable. Which route to use depends on
-whether the variant carries [MoonBase](../explanation/architecture/moonbase.md): a board
-cannot rewrite the partition it is executing from, so on a MoonBase variant the app hands over to
-MoonBase and MoonBase does the writing.
+A board already on the network is updated over HTTP, with no cable. Which route to use depends on whether the variant carries [MoonBase](../explanation/architecture/moonbase.md): a board cannot rewrite the partition it is executing from, so on a MoonBase variant the app hands over to MoonBase and MoonBase does the writing.
 
 **On a MoonBase variant** (`esp32`, `esp32-16mb`, `esp32s3-zero`, and any variant `build_esp32.py`
 builds MoonBase alongside), it is two requests:
@@ -337,37 +306,26 @@ curl --http1.1 -H "Expect:" --data-binary @build/esp32-<firmware>/projectMM.bin 
      http://<device>/api/firmware/upload
 ```
 
-The second request ends with **no HTTP status** (curl reports 000): the device reboots into the new
-image as the write completes, so the socket closes before a response arrives. That is success, not
-failure. Confirm by reading the build back:
+The second request ends with **no HTTP status** (curl reports 000): the device reboots into the new image as the write completes, so the socket closes before a response arrives. That is success, not failure. Confirm by reading the build back:
 
 ```sh
 curl -s http://<device>/api/modules/Firmware   # the `build` control names the commit and date
 ```
 
-MoonBase serves the same route names as the application, so a page driving an update keeps calling
-the same paths after the handover. It also installs unattended from a URL, which is what the UI's
-update button uses: `POST /api/firmware/url` with the URL as the body. `POST /api/firmware/boot-app`
-returns to the application without installing anything, and only boots an image that validates.
+MoonBase serves the same route names as the application, so a page driving an update keeps calling the same paths after the handover. It also installs unattended from a URL, which is what the UI's update button uses: `POST /api/firmware/url` with the URL as the body. `POST /api/firmware/boot-app` returns to the application without installing anything, and only boots an image that validates.
 
 **Without MoonBase**, the application takes the image directly on the same route,
-`POST /api/firmware/upload`. It is one of only two streaming routes (`/api/file` is the other), so
-the body may exceed the request buffer; every other route rejects an oversized body with 413.
+`POST /api/firmware/upload`. It is one of only two streaming routes (`/api/file` is the other), so the body may exceed the request buffer; every other route rejects an oversized body with 413.
 
 Two failure modes are worth recognizing, because both look like something else:
 
 - **413 from `/api/firmware/upload`** on a MoonBase variant means the request reached the
-  APPLICATION rather than MoonBase, and the app rejected an oversized body on a route it does not
-  stream. The device did not reboot into MoonBase, or booted back before the upload. Check with
-  `GET /moonbase`, which MoonBase answers and the app 404s.
+  APPLICATION rather than MoonBase, and the app rejected an oversized body on a route it does not stream. The device did not reboot into MoonBase, or booted back before the upload. Check with `GET /moonbase`, which MoonBase answers and the app 404s.
 - **`{"error":"incomplete request body"}`** from `/api/firmware/upload` means the body did not
-  arrive within the read window. Send with `--http1.1 -H "Expect:"` so the transfer starts
-  immediately instead of waiting for a `100 Continue` the device does not send.
+  arrive within the read window. Send with `--http1.1 -H "Expect:"` so the transfer starts immediately instead of waiting for a `100 Continue` the device does not send.
 
 **A partition-table change needs a cable.** OTA writes the app, never the table, so a device on an
-older layout adopts a new one only through a full serial flash (see the note under
-[Firmware variants](#firmware-variants)). On the 4 MB classic that migration also moves the
-filesystem, so the device comes back unprovisioned.
+older layout adopts a new one only through a full serial flash (see the note under [Firmware variants](#firmware-variants)). On the 4 MB classic that migration also moves the filesystem, so the device comes back unprovisioned.
 
 
 ## Teensy

@@ -144,6 +144,9 @@ nav:
       # Two pages, two audiences: the device card deep-links this one from its consent prompt
       # (app.js, mooncloud.html#why-you-might-like-this), so its URL is a shipped contract.
       - MoonCloud: explanation/mooncloud.md
+      # Answers to what people hit on a first run, each from someone's bench. Under Getting
+      # started rather than How-to, because the reader asking is on their first hour.
+      - FAQ: how-to/faq.md
       - Log an issue: how-to/logging-an-issue.md
   # The FOLDER under docs/ is the Diataxis type: tutorials/, how-to/, explanation/,
   # reference/. The nav labels stay reader-facing, so the path tells a writer where a page

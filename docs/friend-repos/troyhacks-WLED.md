@@ -1,10 +1,10 @@
-# troyhacks/WLED — monthly activity digest
+# troyhacks/WLED: monthly activity digest
 
-What landed on [troyhacks/WLED](https://github.com/troyhacks/WLED)'s `mdev` branch, month by month. External-context reference — a factual log of a friend repo's activity, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](index.md).
+What landed on [troyhacks/WLED](https://github.com/troyhacks/WLED)'s `mdev` branch, month by month. External-context reference, a factual log of a friend repo's activity, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](index.md).
 
 This is a personal fork of [MoonModules/WLED-MM](https://github.com/MoonModules/WLED-MM) (the `mdev` branch), so much of the `mdev` traffic is merges from and alignments with the MM and upstream WLED lines; the bullets below pick out what a *user* of this fork would notice. Summarised via the GitHub commits API (all commits on `mdev`, not first-parent merges), filtering out build-number bumps, merge commits, typo/comment churn, and pure refactors. No versioned release is cut from this branch (it tracks `mdev` and ships nightly `mdev` builds), so months are kept whole.
 
-**Branch note — the experiments live off `mdev`.** troyhacks branches heavily: `mdev` is the merge/alignment stream, but the distinctive work happens in named experimental branches (HDMI output, ESP32-P4, W5500 Ethernet, hardware-panel ports, voice control, a pure-IDFv5 port, a new settings subsystem). Those are *experiments*, not necessarily destined for `mdev`, so each month below carries a separate **Experimental branches** line for what moved on them — the frontier of what this fork is probing.
+**Branch note, the experiments live off `mdev`.** troyhacks branches heavily: `mdev` is the merge/alignment stream, but the distinctive work happens in named experimental branches (HDMI output, ESP32-P4, W5500 Ethernet, hardware-panel ports, voice control, a pure-IDFv5 port, a new settings subsystem). Those are *experiments*, not necessarily destined for `mdev`, so each month below carries a separate **Experimental branches** line for what moved on them, the frontier of what this fork is probing.
 
 ## August 2026
 
@@ -18,22 +18,22 @@ _Checked: commits on `mdev` for author-date 2026-08-01..2026-08-31 (2: b537e0c9 
 
 No user-facing activity: no commits were merged to `mdev` in July 2026 (the branch's most recent commit is still dated 2026-05-20), and no versioned release was published. The repository's issue tracker is disabled, so no issues were opened or closed.
 
-- **Experimental branches:** nothing moved in July either — the most-recently-touched branch, `P4_experimental` (ESP32-P4), had no July commit either, and neither did any other branch.
+- **Experimental branches:** nothing moved in July either, the most-recently-touched branch, `P4_experimental` (ESP32-P4), had no July commit either, and neither did any other branch.
 
-_Checked: merged commits on `mdev` for author-date 2026-07-01..2026-08-01 (0 commits); commits on `P4_experimental` for the same window (0); releases published in July 2026 (none); issue search `repo:troyhacks/WLED is:issue created:2026-07-01..2026-07-31` and `closed:2026-07-01..2026-07-31` (0 results — issues disabled on this fork)._
+_Checked: merged commits on `mdev` for author-date 2026-07-01..2026-08-01 (0 commits); commits on `P4_experimental` for the same window (0); releases published in July 2026 (none); issue search `repo:troyhacks/WLED is:issue created:2026-07-01..2026-07-31` and `closed:2026-07-01..2026-07-31` (0 results, issues disabled on this fork)._
 
 ## June 2026
 
 No user-facing activity: no commits were merged to `mdev` in June 2026 (the branch's most recent commit is dated 2026-05-20), and no versioned release was published. The repository's issue tracker is disabled, so no issues were opened or closed.
 
-_Checked: merged commits on `mdev` for author-date 2026-06-01..2026-06-30 (0 commits); releases published in June 2026 (none); issue search `repo:troyhacks/WLED is:issue created:2026-06-01..2026-06-30` and `closed:2026-06-01..2026-06-30` (0 results — issues disabled on this fork)._
+_Checked: merged commits on `mdev` for author-date 2026-06-01..2026-06-30 (0 commits); releases published in June 2026 (none); issue search `repo:troyhacks/WLED is:issue created:2026-06-01..2026-06-30` and `closed:2026-06-01..2026-06-30` (0 results, issues disabled on this fork)._
 
 ## May 2026
 
 *~18 commits on `mdev`, 2026-05-01 … 2026-05-31.*
 
-- Quieter month on `mdev` — alignment with upstream/MM, smaller effect and build-flag fixes; the heavy lifting was in the Nov–Jan window.
-- **Experimental branches:** `P4_experimental` (ESP32-P4) and `M5Stack_Core_S3_Display` both saw work — the two most-recently-touched branches in the repo.
+- Quieter month on `mdev`, alignment with upstream/MM, smaller effect and build-flag fixes; the heavy lifting was in the Nov–Jan window.
+- **Experimental branches:** `P4_experimental` (ESP32-P4) and `M5Stack_Core_S3_Display` both saw work, the two most-recently-touched branches in the repo.
 
 ## April 2026
 
@@ -49,7 +49,7 @@ _Checked: merged commits on `mdev` for author-date 2026-06-01..2026-06-30 (0 com
 
 - Effect and 2D-matrix fixes; build-target and partition adjustments.
 - More upstream-compatibility alignment in the segment / bus drawing code.
-- **Experimental branches:** `Pure_IDFv5_Port` (a from-scratch ESP-IDF v5 port — no Arduino) and `New-Settings-Subsystem` (settings rework with usermod auto-detection) both started.
+- **Experimental branches:** `Pure_IDFv5_Port` (a from-scratch ESP-IDF v5 port, no Arduino) and `New-Settings-Subsystem` (settings rework with usermod auto-detection) both started.
 
 ## February 2026
 
@@ -86,14 +86,14 @@ _Checked: merged commits on `mdev` for author-date 2026-06-01..2026-06-30 (0 com
 
 **New**
 
-- **WLEDPixelForge** — a new image and scrolling-text interface (`pxmagic`), with 1D GIF support, blur option, and version-14.x adaptations.
+- **WLEDPixelForge**: a new image and scrolling-text interface (`pxmagic`), with 1D GIF support, blur option, and version-14.x adaptations.
 - Effect math sped up (up to ~3× faster); inlined hot-path color/segment functions; more segment/effect data allowed on PSRAM boards.
 - DDP-over-websockets / DDP-over-WS stability; E1.31 kill switch; `dnrgbw` realtime mode.
 
 **Fixed / hardened**
 
 - Large **preset/ledmap robustness pass**: fixed `presets.json` corruption (mutex protection on the write path), ledmap-parser robustness, reduced UI freeze when updating presets.
-- Extensive **mutex / critical-section redesign** across segment and `bus.show` paths — fixes for semaphore leaks, "giving a semaphore never taken", and realtime-lock race conditions.
+- Extensive **mutex / critical-section redesign** across segment and `bus.show` paths, fixes for semaphore leaks, "giving a semaphore never taken", and realtime-lock race conditions.
 
 ## November 2025
 

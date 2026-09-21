@@ -64,9 +64,7 @@ Binary sizes:
 | Tunnel (fbm8) | 16,385 | 21,304 | 16,649 | 1.02 |
 | PolarNoise (warp8) | 20,356 | 29,199 | 20,490 | 1.01 |
 
-The two noise effects have since merged: `Noise` is `Dim::D3` and renders what `Noise2D` did, so the
-two rows above are one effect's 2D and 3D paths under the names they carried when the swap was
-measured.
+The two noise effects have since merged: `Noise` is `Dim::D3` and renders what `Noise2D` did, so the two rows above are one effect's 2D and 3D paths under the names they carried when the swap was measured.
 
 The 3D path is the closest to the bound and the reason: 3D gradient noise does eight dot products the value form never did, and the S3 instruction count for a 3D sample is 1.3x the old one. Method worth keeping: compile the kernel with the target's own compiler (`xtensa-esp32s3-elf-g++ -O2 -S`) and count instructions, branches and stack spills BEFORE flashing; three restructurings were compared that way in seconds, and the one flash went to the winner. The P4 and S31 numbers are open until those boards are back on the bench.
 
@@ -95,9 +93,7 @@ That reading held: the 8-bit tier improved most (2D by 4x on the host), because 
 
 ### Fluid solver cost (host)
 
-`scenario_Fluid_solver`, desktop macOS arm64, tick in µs. The solver is Stam's stable fluid: several
-passes over the grid per frame, plus `iterations` Gauss-Seidel sweeps for the pressure projection
-that keeps the flow divergence-free.
+`scenario_Fluid_solver`, desktop macOS arm64, tick in µs. The solver is Stam's stable fluid: several passes over the grid per frame, plus `iterations` Gauss-Seidel sweeps for the pressure projection that keeps the flow divergence-free.
 
 | Grid | iterations | tick µs |
 |---|---:|---:|
@@ -108,16 +104,11 @@ that keeps the flow divergence-free.
 | 20×20×20 cube | 5 | 249 |
 | 16×16 | 5 | 7 |
 
-Two properties an author picks a setting from. **`iterations` is near-linear**: 1 to 20 is 20 to
-69 µs, since each is another sweep over the whole grid. **The forcing is free next to the solver**:
+Two properties an author picks a setting from. **`iterations` is near-linear**: 1 to 20 is 20 to 69 µs, since each is another sweep over the whole grid. **The forcing is free next to the solver**:
 going from 2 jets to 4, and persistence from 150 to 255, moved 135 µs to 134 µs, inside the noise.
-So the grid and the iteration count are the two knobs that matter, and the jets are a look rather
-than a cost. **A cube is depth times one panel**: twenty 20×20 slices, each its own medium, cost
-249 µs against 133 for one 64×64 panel with about half the lights, which is the per-slice solve
-paying its boundary and projection twenty times over.
+So the grid and the iteration count are the two knobs that matter, and the jets are a look rather than a cost. **A cube is depth times one panel**: twenty 20×20 slices, each its own medium, cost 249 µs against 133 for one 64×64 panel with about half the lights, which is the per-slice solve paying its boundary and projection twenty times over.
 
-Device rows are open: the P4 and S3 numbers need a board and have not been measured, so what
-this effect can carry on either is an open question rather than a claim.
+Device rows are open: the P4 and S3 numbers need a board and have not been measured, so what this effect can carry on either is an open question rather than a claim.
 
 ### Memory at 128×128 with mirror
 
@@ -261,8 +252,7 @@ The exec block is the emitted machine code, so it varies by ISA (the RISC-V rows
 The **depth guard** is one arena byte, incremented on entry and decremented in the epilogue. A refused call returns rather than the caller branching around it, which is why the cost sits in the callee and not at every call site. Unbounded recursion therefore degrades instead of resetting: the classic ran a deliberately non-terminating script for 110 s at 109 fps, with the deepest calls doing nothing.
 
 **Two cost models** (2026-08-22, shiffy's 80x48 = 3,840 lights). A shader is a function of position
-and time, so it pays per LIGHT; a particle script pays per OBJECT, with the per-particle work inside
-one C++ loop per call. This is the first script vocabulary where that distinction shows.
+and time, so it pays per LIGHT; a particle script pays per OBJECT, with the per-particle work inside one C++ loop per call. This is the first script vocabulary where that distinction shows.
 
 | Script | Shape | shiffy 80x48 | desktop 128x96 |
 |---|---|---:|---:|
@@ -271,35 +261,18 @@ one C++ loop per call. This is the first script vocabulary where that distinctio
 | `fountain.mle` | ~9 per FRAME, 300 particles | 1,093 us | 9 us |
 | `ballpit.mle` | as above plus `collide` over 64 | 5,127 us | |
 
-`metal.mle` against `fountain.mle` is 54x on the same fixture. `polarR` is what makes the shader
-expensive: it wraps a real square root, measured at ~3.5 us per pixel for that one builtin, and
-`metal` calls it three times per pixel. `ballpit` shows `collide`'s N-body cost, which is the one
-call here that is not linear in pool size: 3.2 us at 48 particles against 0.1 us without, 53.6 us at
-200 (host figures; an S3 is 20-40x slower).
+`metal.mle` against `fountain.mle` is 54x on the same fixture. `polarR` is what makes the shader expensive: it wraps a real square root, measured at ~3.5 us per pixel for that one builtin, and `metal` calls it three times per pixel. `ballpit` shows `collide`'s N-body cost, which is the one call here that is not linear in pool size: 3.2 us at 48 particles against 0.1 us without, 53.6 us at 200 (host figures; an S3 is 20-40x slower).
 
 **A 1 Hz filesystem scan was stuttering every device.** `FileManagerModule::tick1s()` called
-`esp_littlefs_info`, which walks every block of the partition (~80 ms on an S3), inline on the render
-thread, to feed one progress bar. Frame deltas per second on shiffy went from
-`83 78 80 79 82 66 72` to `83 85 85 83 84 87 85` once it was throttled to once a minute: the dip is
-gone and average throughput rose from ~77 to ~85 fps. It is pre-existing, and particles are what made
-it visible, because a particle INTEGRATES a stall into its trajectory where a shader redraws past it.
+`esp_littlefs_info`, which walks every block of the partition (~80 ms on an S3), inline on the render thread, to feed one progress bar. Frame deltas per second on shiffy went from `83 78 80 79 82 66 72` to `83 85 85 83 84 87 85` once it was throttled to once a minute: the dip is gone and average throughput rose from ~77 to ~85 fps. It is pre-existing, and particles are what made it visible, because a particle INTEGRATES a stall into its trajectory where a shader redraws past it.
 One frame after an 80 ms gap moves every particle 6.7x its usual distance.
 
 **Desktop tick across this cycle:** 150 → 133 µs (6666 → 7518 fps), measured by `collect_kpi.py --commit` at each commit. The gain is not from MoonLive — it tracks the two heap-overrun fixes and the register-reuse work landing earlier in the branch. No scenario `contract` was renegotiated on this branch: all 20 scenarios pass inside their existing budgets, which is the assertion surface this page defers to.
 
 **The compile-time staging buffer is sized from the script's tokens**, at 48 bytes per token plus a
-256-byte floor, and freed when the compile returns. The constant is the worst case rather than the
-average, because the buffer is allocated before a byte is emitted: measured across every shipped
-script on all three backends, the densest is `random-pixel.mlv` at 28.5 B/token on RISC-V (one
-statement, four nested `random16()` calls, each saving the whole register pool), so 48 is a ~1.7x
-margin. Density FALLS as a script grows, so a short call-dense script sets the bound: `gradient.mlv`
-is 5.9 and the longest shipped script is 15.3.
+256-byte floor, and freed when the compile returns. The constant is the worst case rather than the average, because the buffer is allocated before a byte is emitted: measured across every shipped script on all three backends, the densest is `random-pixel.mlv` at 28.5 B/token on RISC-V (one statement, four nested `random16()` calls, each saving the whole register pool), so 48 is a ~1.7x margin. Density FALLS as a script grows, so a short call-dense script sets the bound: `gradient.mlv` is 5.9 and the longest shipped script is 15.3.
 
-It was 64, measured before host arguments moved into frame slots shrank what a call saves. At that
-figure the two longest scripts asked for more than the 16 KB sanity bound and were served by the
-clamp, so a script's buffer had stopped tracking its size. Re-measuring took 25% off the transient
-allocation, which matters on a classic ESP32 where the compile shares a 12 KB task. A per-ISA test
-pins that every shipped script still emits under two-thirds of its budget.
+It was 64, measured before host arguments moved into frame slots shrank what a call saves. At that figure the two longest scripts asked for more than the 16 KB sanity bound and were served by the clamp, so a script's buffer had stopped tracking its size. Re-measuring took 25% off the transient allocation, which matters on a classic ESP32 where the compile shares a 12 KB task. A per-ISA test pins that every shipped script still emits under two-thirds of its budget.
 
 **Flash**, measured by building the classic at the branch point and again with the local-call work: 1723295 → 1726027 bytes, +2732 (+0.16%). High per line of source (about 20 bytes for ~137 net lines of code) because nearly all of it is emitter code instantiated once per backend, so one line of the shared lowering becomes three copies of emitted-instruction sequences in the image.
 
@@ -332,8 +305,7 @@ The **acceptance floors** these establish for the parallel backends: RMT **8×25
 
 ## Panel cards over raw Ethernet (`PanelCardDriver`, ESP32-S31)
 
-Measured on an S31 driving two 128x64 HUB75 panels through a ColorLight 5A-75 receiver card over a
-gigabit RGMII link, 2026-07-31.
+Measured on an S31 driving two 128x64 HUB75 panels through a ColorLight 5A-75 receiver card over a gigabit RGMII link, 2026-07-31.
 
 | | us/tick | note |
 |---|---:|---|
@@ -341,31 +313,20 @@ gigabit RGMII link, 2026-07-31.
 | PreviewDriver | 5 687 | the browser preview, same buffer |
 | a heavy effect (GameOfLife) | 17 592 | the render, and the largest single cost |
 
-The panel driver is the cheapest active module despite pushing 132 packets per frame (2 brightness +
-128 rows + 2 sync, at 497 pixels per row packet). The wall's frame rate is set by the render, not by
-the output: a heavy effect at 17.6 ms dominates a 26 ms tick, giving ~32 FPS, while a lighter effect
-mix measures ~56 FPS on the same wall.
+The panel driver is the cheapest active module despite pushing 132 packets per frame (2 brightness + 128 rows + 2 sync, at 497 pixels per row packet). The wall's frame rate is set by the render, not by the output: a heavy effect at 17.6 ms dominates a 26 ms tick, giving ~32 FPS, while a lighter effect mix measures ~56 FPS on the same wall.
 
 **The ceiling is packets, not pixels.** Each frame is sent synchronously from `tick()`, so a taller
-wall costs proportionally more rows; a 256-row wall would double the packet count. The card format's
-1 Gbit requirement is a wire-time constraint rather than a bandwidth one: at 100 Mbit the same bytes
-take ten times as long and overrun the inter-frame window the sync depends on
-([drivers.md](../moonmodules/light/drivers.md#panelcard)).
+wall costs proportionally more rows; a 256-row wall would double the packet count. The card format's 1 Gbit requirement is a wire-time constraint rather than a bandwidth one: at 100 Mbit the same bytes take ten times as long and overrun the inter-frame window the sync depends on ([drivers.md](../moonmodules/light/drivers.md#panelcard)).
 
 **The DMA ring is what makes it stable.** `CONFIG_ETH_DMA_BUFFER_SIZE` defaults to 512 B, so a
-1512 B frame spanned three descriptors and a 10-descriptor ring held ~3.3 frames while the driver
-fires 132 back-to-back. At that depth the S31 refused ~19 000 frames and wedged twice inside 20
-minutes; at 1536 B per buffer (one descriptor per frame) plus `CONFIG_ETH_TRANSMIT_MUTEX`, it runs
-clean. Both are bench-isolated, and ring COUNT is not the lever: 30 descriptors ran no cleaner than
+1512 B frame spanned three descriptors and a 10-descriptor ring held ~3.3 frames while the driver fires 132 back-to-back. At that depth the S31 refused ~19 000 frames and wedged twice inside 20 minutes; at 1536 B per buffer (one descriptor per frame) plus `CONFIG_ETH_TRANSMIT_MUTEX`, it runs clean. Both are bench-isolated, and ring COUNT is not the lever: 30 descriptors ran no cleaner than
 10. Cost: ~20 KB of internal DMA RAM, since the size applies to both rings
 ([lessons.md](../work/past/lessons.md)).
 
 **Static RAM: 0 B.** The driver's 1 512 B packet buffer is a class member, so it costs nothing on a
-board that never adds the driver; `check_footprint --module PanelCardDriver --firmware esp32s31`
-reports ~3 500 B of flash and no static RAM.
+board that never adds the driver; `check_footprint --module PanelCardDriver --firmware esp32s31` reports ~3 500 B of flash and no static RAM.
 
-No scenario contract yet: the driver needs a receiver card on the wire, so the numbers above are a
-bench record rather than an asserted ceiling.
+No scenario contract yet: the driver needs a receiver card on the wire, so the numbers above are a bench record rather than an asserted ceiling.
 
 ## HTTP cost of the P4's WiFi co-processor (`esp32p4rev1-eth-wifi`)
 

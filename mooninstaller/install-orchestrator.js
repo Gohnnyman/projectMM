@@ -31,33 +31,29 @@
 // flash failure can be tied to the exact flasher build. The version constants
 // below MUST match the import URLs (a check script could pin this later).
 //
-// esptool-js is pinned 0.5.7 — the version ESP Web Tools (the flasher ESPHome
-// and WLED embed) ships. 0.6.0 (the newest, tagged 2026-03-26) has a DETERMINISTIC
-// compressed-flash bug: a P4 web-flash aborts at a FIXED block — "Failed to write
-// compressed data to flash after seq NN failed with status 201,0" — where 0.4.7,
-// 0.5.7, and the CLI (esptool.py) all flash the same P4 cleanly. Failing at a fixed
-// seq (not a random one) rules out a transient USB hiccup; it's a real 0.6.0
-// regression in the deflate write path (cf. upstream esptool-js#233/#245). 0.5.x
-// also moved hardReset off ESPLoader into a reset-strategy class — handled by
-// hardResetChip() below (transport DTR/RTS), version-agnostic, so 0.6.x would
-// reboot fine IF its flash worked. Re-test the flash + reset path on any bump;
-// 0.6.x is only viable once that deflate regression is fixed.
-//   Re-verified on the bench 2026-07-27: 0.6.0 is still the newest tag (no 0.6.1+),
-//   and a real P4 web-flash STILL aborts — "seq 50 failed with status 201,0". So the
-//   regression persists in 0.6.0-as-tagged; keep 0.5.7. (0.6.0 also brings no ESP32-S31
-//   support — misdetection is tracked upstream in esptool-js#248 — so the bump has no
-//   upside for us either.) Pinned 2026-06-28, re-verified 2026-07-27.
-//   Re-checked 2026-08-19: **0.6.1 shipped (2026-08-06) and its notes name the fix we
-//   are waiting on** — upstream #245 "Add retries to FLASH_DATA and FLASH_DEFL_DATA",
-//   plus #244 (uncompressed data in writeFlash) and #249 (connection reliability). That
-//   is the deflate write path this pin exists to avoid, so 0.6.1 is the first bump worth
-//   a real P4 bench flash. NOT yet tested here — the pin stays 0.5.7 until a P4
-//   web-flash completes on 0.6.1. Still no ESP32-S31 support in 0.6.1 (that is separate,
-//   see WEB_FLASH_UNSUPPORTED_CHIPS in install.js), so the S31 CLI path is unaffected
-//   either way.
-export const ESPTOOL_JS_VERSION = "0.5.7";
+// esptool-js is pinned 0.7.0 (2026-09-21), the first release that flashes an ESP32-S31 from a
+// browser. Detection now asks the chip its id (GET_SECURITY_INFO, upstream #197) before falling
+// back to the magic register, which is what makes the S31 safe: its ROM magic COLLIDES with the
+// classic ESP32's, so a magic-only table mis-identified the RISC-V part as an Xtensa one and would
+// have flashed the wrong stub. `esp32s31.ts` sets USES_MAGIC_VALUE=false with IMAGE_CHIP_ID 32, the
+// same way esptool.py disambiguates, and ships its own stub_flasher/esp32s31.json.
+//
+// 0.6.0 was skipped for a DETERMINISTIC compressed-flash bug: a P4 web-flash aborted at a fixed
+// block ("failed with status 201,0") where 0.5.7 and the CLI flashed the same board cleanly.
+// 0.6.1 named the fix (#245, retries on FLASH_DATA/FLASH_DEFL_DATA) and 0.7.0 adds #268, which
+// calls powerOnFlash() from postConnect(): on ECO6/ECO7 P4 silicon the flash is powered off by
+// default, so the flash-ID read returned garbage and the first flash command hung the stub.
+//
+// Two breaking changes came with it, both handled here: writeFlash THROWS unless each part's
+// `data` is a Uint8Array (a binary string silently corrupted the image, #266), and
+// detectFlashSize() returns undefined rather than defaulting to "4MB" — unused here, since the
+// flash call passes flashSize "keep".
+//
+// Re-test the flash + reset path on any bump; hardResetChip() below drives DTR/RTS through the
+// transport, so it stays version-agnostic.
+export const ESPTOOL_JS_VERSION = "0.7.0";
 export const IMPROV_SDK_VERSION = "2.5.0";
-import { ESPLoader, Transport } from "https://unpkg.com/esptool-js@0.5.7/bundle.js?module";
+import { ESPLoader, Transport } from "https://unpkg.com/esptool-js@0.7.0/bundle.js?module";
 import { ImprovSerial } from "https://unpkg.com/improv-wifi-serial-sdk@2.5.0/dist/serial.js?module";
 
 // ---------------------------------------------------------------------------
@@ -114,24 +110,6 @@ async function fetchManifest(manifestUrl) {
             offset: p.offset,
         })),
     };
-}
-
-// Convert an ArrayBuffer to a "binary string" — one JS character per byte,
-// codes 0x00-0xFF. esptool-js's writeFlash expects each fileArray entry's
-// `data` in this shape (it iterates via .charCodeAt()). Chunked at 16 KB
-// because `String.fromCharCode(...big_array)` blows the call stack on
-// large inputs (a 1.2 MB app image would otherwise spread ~1.2M arguments).
-function bufferToBinaryString(buffer) {
-    const bytes = new Uint8Array(buffer);
-    const CHUNK = 16384;
-    let out = "";
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-        out += String.fromCharCode.apply(
-            null,
-            bytes.subarray(i, Math.min(i + CHUNK, bytes.length))
-        );
-    }
-    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -747,13 +725,11 @@ export const installer = {
                     throw new Error(`part fetch HTTP ${res.status}: ${part.url}`);
                 }
                 const buf = await res.arrayBuffer();
-                // esptool-js 0.4.7's writeFlash expects each part's `data`
-                // as a binary string (one char per byte) — it iterates with
-                // .charCodeAt() inside. Uint8Array fails with "charCodeAt is
-                // not a function". Convert in 16 KB chunks to avoid blowing
-                // the call-stack on a 1.2 MB app image.
+                // esptool-js 0.7.0 THROWS unless `data` is a Uint8Array: a binary string used to
+                // be the required shape (it iterated with .charCodeAt()), and passing one now
+                // corrupts the image instead of flashing it (upstream #266).
                 fileArray.push({
-                    data: bufferToBinaryString(buf),
+                    data: new Uint8Array(buf),
                     address: part.offset,
                 });
             }

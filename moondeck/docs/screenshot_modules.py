@@ -135,6 +135,10 @@ MODULES = [
     # silicon or the runtime is absent: HUB75 wants LCD_CAM or Parlio, NDI wants a
     # runtime the user installs. The card and its controls are what a screenshot is
     # for, and those are real on any host.
+    # The two LED drivers, each its own card: they share only `pins` and `ledsPerPin`, and a
+    # screenshot of one describes the other's controls wrongly.
+    ("RmtLedDriver",        "Drivers",  {}, False),
+    ("ParallelLedDriver",   "Drivers",  {}, False),
     ("Hub75Driver",         "Drivers",  {}, False),
     ("NdiDriver",           "Drivers",  {}, False),
     ("HlsDriver",           "Drivers",  {}, False),

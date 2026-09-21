@@ -49,7 +49,7 @@
     },
     {
       "name": "add-mirror",
-      "description": "Add MultiplyModifier — triggers LUT and driver-buffer allocation.",
+      "description": "Add MultiplyModifier, triggers LUT and driver-buffer allocation.",
       "op": "add_module",
       "id": "Multiply",
       "type": "MultiplyModifier",
@@ -90,13 +90,13 @@
         "desktop-macos": {
           "tick_us": {
             "p50": 3,
-            "p95": 4,
+            "p95": 3,
             "min": 2,
             "max": 4,
             "n": 32,
-            "samples": [3, 4, 3, 3, 3, 4, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 2, 2, 3, 3, 3, 3, 2, 3, 3, 3, 3, 2, 3, 3, 2]
+            "samples": [3, 4, 3, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 2, 2, 3, 3, 3, 3, 2, 3, 3, 3, 3, 2, 3, 3, 2, 3, 3, 3, 3]
           },
-          "last_updated": "2026-09-20"
+          "last_updated": "2026-09-21"
         },
         "desktop-windows": {
           "tick_us": {

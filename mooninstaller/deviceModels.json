@@ -35,11 +35,7 @@
         "type": "NetworkModule",
         "id": "Network",
         "controls": {
-          "ethType": 1,
-          "ethPhyAddr": 0,
-          "ethRstGpio": 5,
-          "ethClockGpio": 17,
-          "ethClockExtIn": false
+          "ethBoard": "Classic RMII"
         }
       }
     ]
@@ -329,13 +325,7 @@
         "type": "NetworkModule",
         "id": "Network",
         "controls": {
-          "ethType": 1,
-          "ethPhyAddr": 0,
-          "ethClockGpio": 17,
-          "ethClockExtIn": false,
-          "ethMdcGpio": 23,
-          "ethMdioGpio": 18,
-          "ethRstGpio": -1
+          "ethBoard": "Classic RMII (no reset)"
         }
       },
       {
@@ -782,13 +772,7 @@
         "type": "NetworkModule",
         "id": "Network",
         "controls": {
-          "ethType": 2,
-          "ethPhyAddr": 1,
-          "ethMdcGpio": 31,
-          "ethMdioGpio": 52,
-          "ethRstGpio": 51,
-          "ethClockGpio": 50,
-          "ethClockExtIn": true
+          "ethBoard": "P4-NANO"
         }
       }
     ]
@@ -840,11 +824,7 @@
         "type": "NetworkModule",
         "id": "Network",
         "controls": {
-          "ethType": 1,
-          "ethPhyAddr": 0,
-          "ethRstGpio": 5,
-          "ethClockGpio": 17,
-          "ethClockExtIn": false
+          "ethBoard": "Classic RMII"
         }
       },
       {
@@ -898,6 +878,7 @@
         "type": "NetworkModule",
         "id": "Network",
         "controls": {
+          "ethBoard": "Custom",
           "ethType": 3,
           "ethSpiMiso": 13,
           "ethSpiMosi": 11,
@@ -957,6 +938,7 @@
         "type": "NetworkModule",
         "id": "Network",
         "controls": {
+          "ethBoard": "Custom",
           "ethType": 3,
           "ethSpiMiso": 5,
           "ethSpiMosi": 6,
@@ -1026,13 +1008,7 @@
         "type": "NetworkModule",
         "id": "Network",
         "controls": {
-          "ethType": 2,
-          "ethPhyAddr": 1,
-          "ethMdcGpio": 31,
-          "ethMdioGpio": 52,
-          "ethRstGpio": 51,
-          "ethClockGpio": 50,
-          "ethClockExtIn": true
+          "ethBoard": "P4-NANO"
         }
       },
       {
@@ -1098,13 +1074,7 @@
         "type": "NetworkModule",
         "id": "Network",
         "controls": {
-          "ethType": 2,
-          "ethPhyAddr": 1,
-          "ethMdcGpio": 31,
-          "ethMdioGpio": 52,
-          "ethRstGpio": 51,
-          "ethClockGpio": 50,
-          "ethClockExtIn": true
+          "ethBoard": "P4-NANO"
         }
       }
     ]
@@ -1153,11 +1123,7 @@
         "type": "NetworkModule",
         "id": "Network",
         "controls": {
-          "ethType": 4,
-          "ethPhyAddr": -1,
-          "ethMdcGpio": 5,
-          "ethMdioGpio": 6,
-          "ethRstGpio": 7
+          "ethBoard": "S31 CoreBoard"
         }
       },
       {

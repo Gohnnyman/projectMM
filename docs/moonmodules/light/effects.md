@@ -19,17 +19,20 @@ Effects are built from the shared [power functions](power-functions.md): the dra
 Emitters pouring color into a flow that carries and folds it. There is no velocity field: one noise value shifts each row sideways, one shifts each column, and the two shears compose into a swirling current. A large grid is steered by a few hundred numbers, which is why it runs where a solver does not.
 
 - `speed`: how fast the emitters travel.
-- `flow`: how far a row or column is pushed: the current's strength.
+- `flow`: how far a row or column is pushed: the shear amount.
 - `flowSpeed`: how fast the flow itself drifts and reverses.
-- `scale`: the flow's spatial frequency: a few broad bands or many fine ones.
+- `scale`: the profiles' spatial frequency: a few broad bands or many fine ones.
 - `persistence`: how long color survives, as a half-life.
 - `colorSpeed`: how fast the emitters walk the palette.
 - `size`: the orbit's radius and the Lissajous figure's reach.
 - `mode`: all three emitters, or one at a time to see what each contributes.
+- `flowType`: the field carrying them: `Noise`, `Radial out`, `Radial in`.
 
 Compare with [Fluid](#fluid): the solver when the medium is the subject, this when the color is.
 
 Origin: MoonLight · concept by [Stefan Petrick](https://github.com/StefanPetrick), composition by Jeff (mindful_stone / [4wheeljive](https://github.com/4wheeljive)) in [FlowFields](https://github.com/4wheeljive/FlowFields/blob/main/src/flows/flow_noise.h) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_FastLED.h)
+
+Detail: [technical](moxygen/ColorTrailsEffect.md)
 
 <a id="distortionwaves"></a>
 
@@ -115,8 +118,10 @@ Detail: [technical](moxygen/LavaLampEffect.md)
 
 Sweeps axis-aligned planes in sync; red/green/blue name the X/Y/Z axis: a preview-orientation test pattern.
 
-- `speed`: sweep BPM.
-- `axis`: which plane sweeps (`all`, `x (red)`, `y (green)`, `z (blue)`).
+- `mode`: `lines` sweeps a plane, `panel dots` walks a dot per panel.
+- `speed`: sweep BPM, in `lines`.
+- `axis`: which plane sweeps: `all`, `x`, `y` or `z`, in `lines`.
+- `panelW` / `panelH`: the panel the dot walks, in `panel dots`.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h)
 
@@ -162,7 +167,7 @@ Detail: [technical](moxygen/ParticlesEffect.md)
 
 <a id="plasma"></a>
 
-### Plasma 💫🦅 · 2D/3D
+### Plasma 💫🦅 · 3D
 
 <img src="../../assets/light/effects/PlasmaEffect.gif" width="300" alt="Plasma effect preview">
 
@@ -186,6 +191,7 @@ Detail: [technical](moxygen/PlasmaEffect.md)
 
 An algorithmic palette pattern driven by two beat oscillators (a macro and a micro mutator) whose frequencies and ranges reshape the hue field over time.
 
+- `speed`: how fast the pattern advances.
 - `macroMutatorFreq` / `Min` / `Max`: the coarse mutator's beat rate and range.
 - `microMutatorFreq` / `Min` / `Max`: the fine mutator's beat rate and range.
 
@@ -272,7 +278,7 @@ Detail: [technical](moxygen/RipplesEffect.md)
 A 3D Rubik's Cube projected onto the volume: it scrambles, then plays its solution back one turn at a time, the six faces in their standard colors.
 
 - `turnsPerSecond`: how fast the cube turns.
-- `cubeSize`: the cube order (2×2 up to 8×8).
+- `cubeSize`: the cube order (1×1 up to 8×8).
 - `randomTurning`: turn endlessly at random instead of scramble-then-solve.
 - `usePalette`: color the faces from the palette, not the classic colors.
 
@@ -302,9 +308,9 @@ Physics runs on elapsed time, so the same settings behave identically at any fra
 
 Origin: projectMM original, on the WLED Particle System's firework family by Damian Schneider / [@DedeHai](https://github.com/DedeHai)
 
-<a id="fishtank"></a>
-
 Detail: [technical](moxygen/FireworksEffect.md)
+
+<a id="fishtank"></a>
 
 ### Fish Tank 💫🎶✨👾 · 2D
 
@@ -323,6 +329,8 @@ Uses the global palette, each fish's band a paler version of its own body color.
 
 Origin: projectMM original; inspired by the aquarium screensavers of the After Dark era, the pixel art drawn fresh for this effect
 
+Detail: [technical](moxygen/FishTankEffect.md)
+
 <a id="flyingtoasters"></a>
 
 ### Flying Toasters 💫🎶✨👾 · 2D
@@ -340,6 +348,8 @@ The classic screensaver on a light wall: chrome toasters with flapping wings and
 The sprites carry their own colors (chrome, wing, crust), so the global palette does not apply. Needs a grid at least the toaster's size (12×9).
 
 Origin: projectMM original; inspired by After Dark's Flying Toasters (Berkeley Systems, 1989), suggested by Frank ([softhack007](https://github.com/softhack007)): the pixel art here is drawn fresh for this effect
+
+Detail: [technical](moxygen/FlyingToastersEffect.md)
 
 <a id="fixedpoint"></a>
 
@@ -387,9 +397,9 @@ A fixture chain is one-dimensional, so lay the rig out as a **1 x N** grid.
 
 Origin: projectMM original
 
-<a id="pacman"></a>
-
 Detail: [technical](moxygen/MovingHeadEffect.md)
+
+<a id="pacman"></a>
 
 ### Pacman 💫🎶✨👾 · 2D
 
@@ -397,7 +407,7 @@ Detail: [technical](moxygen/MovingHeadEffect.md)
 
 The arcade cast crossing a light wall: Pacman chomps his way along while the four ghosts drift past, each in its own color, wrapping around the edges forever.
 
-In this first iteration the characters travel independently and do not notice each other. The maze, the pellets and the chase are the next step.
+The characters travel independently, each on its own path.
 
 - `pacmen`: how many Pacmen (0-4).
 - `ghosts`: how many ghosts (0-8); the arcade cast is four.
@@ -408,6 +418,8 @@ In this first iteration the characters travel independently and do not notice ea
 Pacman keeps his yellow; the ghosts take their colors from the active palette.
 
 Origin: projectMM original; inspired by Namco's Pac-Man (1980), the pixel art drawn fresh for this effect
+
+Detail: [technical](moxygen/PacmanEffect.md)
 
 <a id="spaceinvaders"></a>
 
@@ -426,6 +438,8 @@ The 1978 formation marching down the wall: five ranks stepping sideways in the t
 The invaders take their body color from the active palette.
 
 Origin: projectMM original, after Taito's Space Invaders (1978)
+
+Detail: [technical](moxygen/SpaceInvadersEffect.md)
 
 <a id="spritefountain"></a>
 
@@ -467,9 +481,9 @@ Uses the global palette.
 
 Origin: projectMM original, after Atari's Pong (1972)
 
-<a id="aurora"></a>
-
 Detail: [technical](moxygen/PongEffect.md)
+
+<a id="aurora"></a>
 
 ### Aurora 💫🖌️🌫️🎡 · 3D
 
@@ -490,9 +504,9 @@ Several noise fields, each on its own clock, read in polar coordinates and compo
 
 Origin: projectMM original, in the shader vocabulary Stefan Petrick made recognizable in the LED world
 
-<a id="ballpit"></a>
-
 Detail: [technical](moxygen/AuroraEffect.md)
+
+<a id="ballpit"></a>
 
 ### Ballpit 💫✨ · 2D
 
@@ -511,9 +525,9 @@ Collisions are the one non-linear part of the particle kernel, so the pool is sm
 
 Origin: projectMM original, on the WLED Particle System's ballpit family by Damian Schneider / [@DedeHai](https://github.com/DedeHai)
 
-<a id="dissolve"></a>
-
 Detail: [technical](moxygen/BallpitEffect.md)
+
+<a id="dissolve"></a>
 
 ### Dissolve 💫 · 2D
 
@@ -528,9 +542,9 @@ Two color fields trade places pixel by pixel in an order that looks random but i
 
 Origin: projectMM original, on the classic dissolve transition in its position-addressed (shader) form
 
-<a id="echo"></a>
-
 Detail: [technical](moxygen/DissolveEffect.md)
+
+<a id="echo"></a>
 
 ### Echo 💫✨ · 2D
 
@@ -548,9 +562,9 @@ Shows that feedback is not a primitive: once the grid can be read as a texture (
 
 Origin: projectMM original, on video feedback and the standard texture-feedback shader shape
 
-<a id="spectrum"></a>
-
 Detail: [technical](moxygen/EchoEffect.md)
+
+<a id="spectrum"></a>
 
 ### Spectrum 💫🎶 · 2D
 
@@ -568,9 +582,9 @@ The asymmetry is the whole point; a symmetric follower either misses the hit or 
 
 Origin: projectMM original, on standard VU/PPM meter ballistics and WLED's GEQ band mapping
 
-<a id="truchet"></a>
-
 Detail: [technical](moxygen/SpectrumEffect.md)
+
+<a id="truchet"></a>
 
 ### Truchet 💫🖌️ · 2D
 
@@ -589,9 +603,9 @@ A maze of interlocking arcs that never repeats, drawn without storing a single t
 
 Origin: projectMM original, on Sébastien Truchet's 1704 tiling and the standard shader fract/hash/smoothstep idiom
 
-<a id="fluid"></a>
-
 Detail: [technical](moxygen/TruchetEffect.md)
+
+<a id="fluid"></a>
 
 ### Fluid 💫🖌️🌊💨 · 3D
 
@@ -610,9 +624,9 @@ On a cube every depth slice is its own medium, so the slices differ. Sized for t
 
 Origin: projectMM original, after Stam 1999 "Stable Fluids"
 
-<a id="nebula"></a>
-
 Detail: [technical](moxygen/FluidEffect.md)
+
+<a id="nebula"></a>
 
 ### Nebula 💫🖌️💨🌫️ · 3D
 
@@ -632,9 +646,9 @@ Held at 16 bits and dithered on the way out, which keeps a slow fade smooth.
 
 Origin: projectMM original, composing the noise-field and curl-flow kernels: the contrast window is Aurora's, in the shader vocabulary Stefan Petrick made recognizable in the LED world, and the flow is Bridson's curl noise (SIGGRAPH 2007)
 
-<a id="trails"></a>
-
 Detail: [technical](moxygen/NebulaEffect.md)
+
+<a id="trails"></a>
 
 ### Trails 💫🖌️💨🌫️ · 3D
 
@@ -652,9 +666,9 @@ The trail plane is 16-bit, which is what lets a tail fade smoothly rather than s
 
 Origin: projectMM original, in the flow-field idiom (4wheeljive's FlowFields, from a Stefan Petrick concept), with Stam's backward advection for the transport
 
-<a id="tunnel"></a>
-
 Detail: [technical](moxygen/TrailsEffect.md)
+
+<a id="tunnel"></a>
 
 ### Tunnel 💫🖌️🌫️🎡 · 3D
 
@@ -671,9 +685,9 @@ A texture mapped onto the inside of an infinite tube, so the viewer appears to f
 
 Origin: projectMM original, on the standard demoscene tunnel
 
-<a id="vectorballs"></a>
-
 Detail: [technical](moxygen/TunnelEffect.md)
+
+<a id="vectorballs"></a>
 
 ### VectorBalls 💫🖌️ · 2D
 
@@ -691,9 +705,9 @@ Without painter's ordering a far ball paints over a near one and the object turn
 
 Origin: projectMM original, on the Amiga-era demoscene vector-ball effect
 
-<a id="waterripple"></a>
-
 Detail: [technical](moxygen/VectorBallsEffect.md)
+
+<a id="waterripple"></a>
 
 ### WaterRipple 💫🧬 · 2D
 
@@ -712,9 +726,9 @@ Distinct from [Ripples](#ripples), which draws clean concentric circles; this be
 
 Origin: projectMM original, on Hugo Elias's water surface algorithm
 
-<a id="raymarch"></a>
-
 Detail: [technical](moxygen/WaterRippleEffect.md)
+
+<a id="raymarch"></a>
 
 ### Raymarch 💫🖌️ · 2D
 
@@ -731,6 +745,8 @@ A lit 3D scene rendered by marching a ray through a distance field, one ray per 
 Compiled only where the chip has a hardware FPU. Cost is per pixel, so `steps` trades quality against it.
 
 Origin: projectMM original, on Iñigo Quilez's raymarching and distance-function articles
+
+Detail: [technical](moxygen/RaymarchEffect.md)
 
 <a id="polarnoise"></a>
 
@@ -753,9 +769,9 @@ Cost scales with `octaves` and `warp`: at `warp` > 0 and `octaves` 2 it is rough
 
 Origin: projectMM original, after Stefan Petrick's polar/noise vocabulary and Iñigo Quilez's domain warping
 
-<a id="sdfshapes"></a>
-
 Detail: [technical](moxygen/PolarNoiseEffect.md)
+
+<a id="sdfshapes"></a>
 
 ### SdfShapes 💫🖌️ · 2D
 
@@ -774,9 +790,9 @@ Measured on an ESP32-S3 at 128×128: 20 fps, 728 cycles/pixel using the true-dis
 
 Origin: projectMM original, after Iñigo Quilez's distance-function catalogue and polynomial smooth-minimum (iquilezles.org)
 
-<a id="solid"></a>
-
 Detail: [technical](moxygen/SdfShapesEffect.md)
+
+<a id="solid"></a>
 
 ### Solid 💫 · 3D
 
@@ -1150,7 +1166,7 @@ A gradient-noise field indexed straight into the palette: the plainest way to tu
 - `scale`: spatial frequency: low is broad blobs, high is fine detail.
 - `bpm`: how fast it moves.
 
-Origin: FastLED · inoise field (Mark Kriegsman); the `morph` form from WLED via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h), which shipped it as a separate Noise2D effect until the two were merged
+Origin: FastLED · inoise field (Mark Kriegsman); the `morph` form from WLED via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
 
 Detail: [technical](moxygen/NoiseEffect.md)
 
@@ -1206,9 +1222,9 @@ Every beat is a stone dropped in water. A real wave simulation, which gives what
 
 Origin: projectMM original, the two-buffer water simulation (Gomez 2000) driven by the onset detector
 
-<a id="vumeters"></a>
-
 Detail: [technical](moxygen/BeatRipplesEffect.md)
+
+<a id="vumeters"></a>
 
 ### VuMeters 💫🎶🖌️ · 3D
 
@@ -1225,9 +1241,9 @@ The bass needles are heavier than the treble ones, so the low end swings and the
 
 Origin: projectMM original, on the VU ballistics of IEC 60268-17
 
-<a id="radialspectrum"></a>
-
 Detail: [technical](moxygen/VuMetersEffect.md)
+
+<a id="radialspectrum"></a>
 
 ### RadialSpectrum 💫🎶🖌️🎡 · 3D
 
@@ -1243,9 +1259,9 @@ The spectrum as ripples. Each band owns a sector around the center, mirrored lef
 
 Origin: projectMM original, the radial spectrogram on `PolarLut` and the onset detector
 
-<a id="demoreel"></a>
-
 Detail: [technical](moxygen/RadialSpectrumEffect.md)
+
+<a id="demoreel"></a>
 
 ### DemoReel 💫 · 3D
 

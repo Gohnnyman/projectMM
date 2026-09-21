@@ -2,13 +2,6 @@
 #pragma once
 
 
-/// @defgroup MoonCloud The container for everything projectMM does with a server we run
-/// @{
-///
-/// It holds no controls and does no work of its own.
-/// Each thing MoonCloud does is a child with its own consent: Stats, Talk, and Sync to come.
-/// A user who wants a joint lightshow has not agreed to usage reporting.
-
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -20,6 +13,11 @@
 
 namespace mm {
 
+/// The container for everything projectMM does with a server we run.
+///
+/// It holds no controls and does no work of its own.
+/// Each thing MoonCloud does is a child with its own consent: Stats, Talk, and Sync to come.
+/// A user who wants a joint lightshow has not agreed to usage reporting.
 class MoonCloudModule : public MoonModule {
 public:
     /// Always runs: the children carry the real consent, so disabling the container is ambiguous.
@@ -43,7 +41,10 @@ private:
 };
 
 
-// A salted hash of the MAC: pseudonymous, and salted apart from the MQTT and Home Assistant ids.
+/// @defgroup MoonCloudIdentity The installation id, a salted hash of the MAC
+/// @{
+///
+/// Pseudonymous, and salted apart from the MQTT and Home Assistant ids.
 
 /// Characters written by `installationId`, excluding the terminator.
 inline constexpr size_t kInstallationIdChars = 32;

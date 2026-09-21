@@ -15,6 +15,7 @@ namespace mm {
 ///
 /// The whole frame is encoded up front and shipped as one autonomous transfer. So there is no CPU deadline while it is on the wire. The encode is a fused correct and transpose, per row (ParallelSlots.h). Vocabulary: strand, lane, slot, row, under
 /// @xref{terminology|More info → Terminology}.
+/// @card ParallelLedDriver.png
 ///
 /// @moreinfo
 ///

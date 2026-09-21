@@ -1,16 +1,16 @@
 # Light supporting modules
 
-The light-domain machinery the catalog modules (effects, modifiers, layouts, drivers) lean on — not directly user-facing. Every row links to its generated technical page (the full API, from the `.h`) and its tests. Cross-cutting rationale that no single `.h` owns lives in the prose sections below the table.
+The light-domain machinery the catalog modules (effects, modifiers, layouts, drivers) lean on, not directly user-facing. Every row links to its generated technical page (the full API, from the `.h`) and its tests. Cross-cutting rationale that no single `.h` owns lives in the prose sections below the table.
 
 <a id="layer"></a>
 
 ### Layer
 
-One rendering layer — an effect writes into its buffer, modifiers transform the coordinate mapping, and the layer composites onto the shared output. The unit the render loop iterates.
+One rendering layer, an effect writes into its buffer, modifiers transform the coordinate mapping, and the layer composites onto the shared output. The unit the render loop iterates.
 
 <img src="../../assets/light/Layer.png" width="300" alt="Layer container with a child effect">
 
-- `blendMode` — how this layer composites onto the ones below (overwrite / alpha / additive).
+- `blendMode`: how this layer composites onto the ones below (overwrite / alpha / additive).
 
 Detail: [technical](moxygen/Layer.md)
 
@@ -20,7 +20,7 @@ Detail: [technical](moxygen/Layer.md)
 
 ### Effects
 
-The container of layers — composites them (blend mode + opacity per layer) into the final light buffer.
+The container of layers, composites them (blend mode + opacity per layer) into the final light buffer.
 
 <img src="../../assets/light/Effects.png" width="300" alt="Effects container">
 
@@ -32,7 +32,7 @@ Detail: [technical](moxygen/Effects.md)
 
 ### Layouts
 
-The container of layout modules — walks each layout's coordinates to build the physical light set the mapping consumes.
+The container of layout modules, walks each layout's coordinates to build the physical light set the mapping consumes.
 
 <img src="../../assets/light/Layouts.png" width="300" alt="Layouts container">
 
@@ -48,15 +48,15 @@ The container of driver modules, owning the shared buffer and the per-light outp
 
 <img src="../../assets/light/Drivers.png" width="300" alt="Drivers container with the on/off + brightness controls">
 
-- `on` — master power, on by default.
+- `on`: master power, on by default.
 
   Off scales the output to black while preserving `brightness`, so switching on restores the level. Every consumer drives it: the UI, infrared, the WLED app, Home Assistant and MQTT.
-- `brightness` — global output brightness, multiplied with each driver's `localBrightness`.
-- `palette` — the active palette effects sample from, built in or [scripted](moonlive.md).
-- `multicore` — run the output stage on the second core.
+- `brightness`: global output brightness, multiplied with each driver's `localBrightness`.
+- `palette`: the active palette effects sample from, built in or [scripted](moonlive.md).
+- `multicore`: run the output stage on the second core.
 
   On by default, and it falls back to single-core by itself when the extra frame buffer will not fit. The switch exists to compare the two.
-- `renderWait` — read-only: how long core 0 waited for core 1 at the frame boundary.
+- `renderWait`: read-only: how long core 0 waited for core 1 at the frame boundary.
 
   Near zero means render and output overlap well, and a large value means core 0 idles on a slow output stage. Shown only while `multicore` is on.
 
@@ -68,9 +68,9 @@ Detail: [technical](moxygen/Drivers.md)
 
 ### LightPresets
 
-The named channel wirings drivers reference — which channel carries Red, Green, Blue, White, or a fixture role like Pan/Tilt. Real fixtures ship read-only (the color orders, multi-channel pars, moving heads); add your own alongside them. A driver stores a preset's stable id, not its name, so renaming or reordering never breaks a reference.
+The named channel wirings drivers reference, which channel carries Red, Green, Blue, White, or a fixture role like Pan/Tilt. Real fixtures ship read-only (the color orders, multi-channel pars, moving heads); add your own alongside them. A driver stores a preset's stable id, not its name, so renaming or reordering never breaks a reference.
 
-- `presets` — the editable list of preset definitions, one row per preset.
+- `presets`: the editable list of preset definitions, one row per preset.
 
   A row carries a name, a channel count, and one role picker per channel. Built-in rows are read-only, and custom rows persist across a reboot.
 
@@ -78,7 +78,7 @@ Detail: [technical](moxygen/LightPresetsModule.md)
 
 ### Buffer
 
-Contiguous light-data buffer, shared between the layers that write it (effects) and the driver groups that read it. A raw `uint8_t*` so any channel layout fits — RGB, RGBW, multi-channel DMX.
+Contiguous light-data buffer, shared between the layers that write it (effects) and the driver groups that read it. A raw `uint8_t*` so any channel layout fits, RGB, RGBW, multi-channel DMX.
 
 Detail: [technical](moxygen/Buffer.md)
 
@@ -86,7 +86,7 @@ Detail: [technical](moxygen/Buffer.md)
 
 ### MappingLUT
 
-Maps the virtual grid to the physical sparse light set — a radius-4 sphere becomes its 210 real lights, not the 729-cell box. The lookup effects and the preview both consume.
+Maps the virtual grid to the physical sparse light set, a radius-4 sphere becomes its 210 real lights, not the 729-cell box. The lookup effects and the preview both consume.
 
 Detail: [technical](moxygen/MappingLUT.md)
 
@@ -116,31 +116,31 @@ Detail: [technical](moxygen/MoonLiveScript.md)
 
 ### Effect base
 
-The `EffectBase` class every effect derives from — the shared surface (buffer access, dimensions, the palette) an effect renders against.
+The `EffectBase` class every effect derives from, the shared surface (buffer access, dimensions, the palette) an effect renders against.
 
 Detail: [technical](moxygen/EffectBase.md)
 
 ### Modifier base
 
-The `ModifierBase` class every modifier derives from — transforms the coordinate mapping (mirror, rotate, multiply, …) a layer applies before rendering.
+The `ModifierBase` class every modifier derives from, transforms the coordinate mapping (mirror, rotate, multiply, …) a layer applies before rendering.
 
 Detail: [technical](moxygen/ModifierBase.md)
 
 ### Driver base
 
-The `DriverBase` class every driver derives from — the shared surface (the driver window, the source buffer, the output correction) a driver reads before sending its slice.
+The `DriverBase` class every driver derives from, the shared surface (the driver window, the source buffer, the output correction) a driver reads before sending its slice.
 
 Detail: [technical](moxygen/DriverBase.md)
 
 ### Layout base
 
-The `LayoutBase` class every layout derives from — the shared surface a layout implements to walk its coordinates into the physical light set the mapping consumes.
+The `LayoutBase` class every layout derives from, the shared surface a layout implements to walk its coordinates into the physical light set the mapping consumes.
 
 Detail: [technical](moxygen/LayoutBase.md)
 
 ### Slot encoder
 
-Turns lights into WS2812 bus words: each data bit becomes three bus slots (pulse start / data / tail), and the data slot is an 8×8 bit transpose — lanes in, bit-planes out. Shared by every parallel driver, and the render loop's measured hot spot.
+Turns lights into WS2812 bus words: each data bit becomes three bus slots (pulse start / data / tail), and the data slot is an 8×8 bit transpose, lanes in, bit-planes out. Shared by every parallel driver, and the render loop's measured hot spot.
 
 Detail: [technical](moxygen/ParallelSlots.md)
 

@@ -36,7 +36,7 @@ public:
     uint8_t bpm    = 30;
     /// How much the feedback grows each pass, where 0 leaves it still.
     uint8_t zoom   = 12;
-    /// Rotation per pass, which turns the trail into a spiral.
+    /// Rotation per frame, which turns the trail into a spiral.
     uint8_t rotate = 8;
     /// How fast the echo fades, so higher gives a shorter trail.
     uint8_t decay  = 24;

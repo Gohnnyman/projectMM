@@ -917,6 +917,80 @@ def test_a_lead_is_measured_as_a_block_so_chopping_does_not_satisfy_it():
         "no single line is over the cap, which is the point of measuring the block"
 
 
+def test_the_ratchet_refuses_a_rule_that_rose_against_the_committed_report(monkeypatch):
+    """A warning is staged work, and staged work that grows is not a sweep. The committed report
+    is the number to beat, per RULE and on the total: per rule alone misses a rule still under
+    its own baseline while the total rises, and the total alone hides one rule paying for
+    another, which is what splitting a long line does to the width and block counts.
+
+    Drives `_ratchet` itself. An earlier version of this test asserted against a local copy of the
+    comparison and passed while the real function compared internal keys against display labels,
+    so it matched nothing and the per-rule half never fired."""
+    import check_docgen
+    base = {"(total)": 10, "multi-line comment blocks": 4, "hard wraps": 2}
+    monkeypatch.setattr(check_docgen, "_committed_counts", lambda: base)
+
+    # A `.cpp` key, because the ratchet guards the WARNING column and a header's finding blocks.
+    cpp = "src/core/x.cpp"
+    block = "code comment 3 lines > 1"
+
+    assert check_docgen._ratchet([(cpp, block)] * 3) == [], "under every baseline: silent"
+
+    rose = check_docgen._ratchet([(cpp, block)] * 5)
+    assert rose == [("multi-line comment blocks", 4, 5)], \
+        f"one rule paying for another is caught, and the total (5) stays under 10: {rose}"
+
+    # The labels the report writes ARE the keys the comparison uses, in both directions.
+    assert check_docgen._rule_label(check_docgen._rule_name(block)) in base
+
+    # And the real parser finds the tracked report's numbers, or the comparison reads nothing.
+    monkeypatch.undo()
+    counts = check_docgen._committed_counts()
+    assert counts is None or "(total)" in counts, counts
+    # Only the `## By rule` table feeds the baseline: an area row would be a rule that never appears.
+    assert counts is None or not any(k.startswith("`") for k in counts), counts
+
+
+def test_the_ratchet_catches_a_rule_the_baseline_never_had(monkeypatch):
+    """A rule at zero is ABSENT from the report, so the baseline has no row for it. Iterating the
+    baseline alone let such a rule rise silently while the total fell, which is the same hole the
+    per-rule half exists to close. The comparison is over the union, a missing baseline reading
+    as zero."""
+    import check_docgen
+    base = {"(total)": 10, "multi-line comment blocks": 4}
+    monkeypatch.setattr(check_docgen, "_committed_counts", lambda: base)
+
+    cpp = "src/core/x.cpp"
+    # A warning-side rule with no baseline row. (A hard wrap cannot serve here: it blocks
+    # everywhere by design, so it is an error and never enters the warning column.)
+    fresh = "file opens with // rather than ///"
+    assert check_docgen._rule_label(check_docgen._rule_name(fresh)) not in base
+
+    rose = check_docgen._ratchet([(cpp, fresh)] * 5)
+    assert rose == [("files opening with //", 0, 5)], \
+        f"a rule absent from the baseline must still only shrink: {rose}"
+
+
+def test_a_hard_wrap_blocks_in_an_implementation_file_too():
+    """The one rule staged the OTHER way. Every other `.cpp` finding warns while the sweep runs,
+    but the tree is at ZERO hard wraps, so there is nothing left to stage and the exemption only
+    protects a regression. The reason holds everywhere too: a split sentence reflows every line
+    it spans on the next word change, which costs a reviewer the same in either file."""
+    import check_docgen
+    src = ("#include <x.h>\n\nvoid g();\n\n"
+           "// A sentence that carries on\n"
+           "// onto the following line.\n"
+           "void f();\n")
+    for rel in ("src/core/x.h", "src/core/x.cpp"):
+        hits = [(k, w) for k, w in check_docgen._header_rules(rel, src) if "hard wrap" in w]
+        assert hits, rel
+        assert all(check_docgen._blocks(k, w) for k, w in hits), (rel, "must BLOCK")
+    # And the rules still being swept keep warning in a `.cpp`, or the staging is gone entirely.
+    runs = [(k, w) for k, w in check_docgen._header_rules("src/core/x.cpp", src)
+            if "code comment" in w]
+    assert runs and not any(check_docgen._blocks(k, w) for k, w in runs), runs
+
+
 def test_the_line_length_cap_warns_even_in_a_header():
     """The one staged exception. Every other rule describes how the tree is already written, so
     a finding is a defect against a standard the file was written under. This cap is new, so its

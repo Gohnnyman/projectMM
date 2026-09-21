@@ -55,12 +55,10 @@ const dragTs = {};               // per-control last-touched timestamp (ms): a s
 const EDITABLE_CONTROL_TYPES = new Set(
     ["uint8", "uint16", "int16", "int32", "pin", "bool", "text", "textarea", "filepath", "password", "select",
      "palette", "ipv4"]);
-const TIMING_MODES = ["fps", "ms"];
 
 // localStorage keys per ui.md
 const LS_SELECTED  = "mm_selectedRoot";
 const LS_THEME     = "mm_theme";
-const LS_TIMING    = "mm_timing_mode";
 const LS_TABS      = "mm_selectedTabs";   // { [containerName]: childName }: the open tab per container
 const LS_EXPANDED  = "mm_expanded";       // [moduleName, …]: modules whose "controls" <details> is open
 const LS_TA_SIZE   = "mm_textareaSizes";  // { "<module>:<control>": heightPx }: user-dragged textarea heights
@@ -149,7 +147,7 @@ function lsRead(key, defaultVal) {
 // this module were the only thing running. On a card that is a claim about the whole pipeline made
 // from one part of it, so the honest default is the microseconds. The toggle still cycles to fps
 // for anyone comparing against a target rate.
-let timingMode = lsRead(LS_TIMING, "ms");
+let timingMode = "ms";   // the RESTING state; a press peeks at fps and release restores it
 let theme      = lsRead(LS_THEME, "dark");
 
 // ---------------------------------------------------------------------------
@@ -534,7 +532,7 @@ async function sendControl(moduleName, controlName, value) {
     }
     // Toggling expert mode changes which controls RENDER (the `advanced` ones), not just a value: so
     // re-render the cards. Structural change, same as an add/remove; the value write above already landed.
-    if (moduleName === "System" && controlName === "expertMode") renderCards();
+    if (moduleName === "System" && controlName === "mode") renderCards();
     // Best-effort by design: failures are not retried here. Non-ok responses +
     // network errors are logged to console so a user with devtools open can see
     // what went wrong (e.g. a control value the device-side validator rejected).
@@ -550,7 +548,7 @@ async function sendControl(moduleName, controlName, value) {
         // The Firmware card's `image` picks WHICH PARTITION every other control describes, so the
         // device rebinds version/build/firmware/partition to the other image and the card has to
         // be redrawn from the new values. Refetched AFTER the POST rather than re-rendered before
-        // it (the expertMode case above), because the new values only exist once the device has
+        // it (the mode case above), because the new values only exist once the device has
         // switched. The routine WS push cannot carry it: renderCards is suppressed while the user
         // is interacting, and operating this select is exactly that.
         else if (moduleName === "Firmware" && controlName === "image") refetchState();
@@ -981,18 +979,21 @@ function findModule(name, modules) {
     return null;
 }
 
-// Global "expert mode": the System module's expertMode control. Controls tagged `advanced` (dev/tuning
-// readouts + knobs) render only when this is on. Read live from state so a toggle takes effect on the
-// next render with no reload; default off if System or the control isn't present yet.
-function isExpertMode() {
+// How much the reader wants to see: the System module's `mode` control, 0 user, 1 expert, 2
+// developer. A control carries the mode it needs (`minMode`) and renders when the reader is at
+// least there. Read live from state so a change takes effect on the next render with no reload;
+// 0 when System or the control isn't present yet, so a device mid-boot shows the show and nothing
+// that needs explaining.
+function uiMode() {
     const sys = state ? findModule("System") : null;
-    const c = sys && sys.controls && sys.controls.find(c => c.name === "expertMode");
-    return !!(c && c.value);
+    const c = sys && sys.controls && sys.controls.find(c => c.name === "mode");
+    return c ? (c.value | 0) : 0;
 }
 
 function renderCards() {
     const main = document.getElementById("main");
     if (!main || !state) return;
+    renderedMode_ = uiMode();   // what these cards are being built for
     main.innerHTML = "";
 
     // One root visible at a time: render only the selected root's subtree.
@@ -1751,37 +1752,45 @@ function createCard(mod, depth) {
     // showing ✓ when on, blank when off. Stores its checked state in
     // data-checked so updateValues can sync from WS pushes. A native <input>
     // would not match the other buttons' frame and corner radius.
-    const enabled = document.createElement("button");
-    enabled.type = "button";
-    enabled.className = "module-enabled";
-    enabled.dataset.mid = mod.name;
-    enabled.dataset.key = "enabled";
-    enabled.setAttribute("aria-pressed", "true");
-    enabled.title = "Enable / disable";
-    const setEnabledUi = (on) => {
-        enabled.dataset.checked = on ? "true" : "false";
-        enabled.textContent = "⏻";
-        enabled.classList.toggle("module-enabled--off", !on);
-        enabled.setAttribute("aria-pressed", on ? "true" : "false");
-        card.classList.toggle("card--disabled", !on);
-        // Grey this module's TAB in the same click, alongside its card: so the tab title dims INSTANTLY
-        // instead of waiting ~1s for the server's full-state round-trip. (updateTabDot still syncs it on the
-        // patch path, idempotently, so this just makes the on/off button the immediate driver.) The tab
-        // lives in the parent's strip, found by the same data-tab-mid updateTabDot uses.
-        const tabEl = queryByName(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`, "data-tab-mid", mod.name);
-        if (tabEl) tabEl.classList.toggle("tab--disabled", !on);
-    };
-    setEnabledUi(mod.enabled === undefined ? true : !!mod.enabled);
-    enabled.addEventListener("click", () => {
-        const next = enabled.dataset.checked !== "true";
-        setEnabledUi(next);
-        // Stamp dragTs so a WS state push older than this click can't revert
-        // the toggle before the server has acknowledged. updateValues reads
-        // dragTs[mod.name + ":enabled"] on line ~952 and suppresses stale
-        // patches within the 1s cooldown.
-        dragTs[mod.name + ":enabled"] = Date.now();
-        sendControl(mod.name, "enabled", next);
-    });
+    // Only where it DOES something. A module that keeps running regardless says so
+    // (`respectsEnabled`), and on Network, System or Firmware the switch was a control that
+    // changed nothing: the scheduler ticks them whatever the flag says, so the device can be
+    // reached to re-enable whatever else was turned off.
+    // Built only where it does something; the name, tags and stats below are every card's.
+    let enabled = null;
+    if (mod.respectsEnabled !== false) {
+        enabled = document.createElement("button");
+        enabled.type = "button";
+        enabled.className = "module-enabled";
+        enabled.dataset.mid = mod.name;
+        enabled.dataset.key = "enabled";
+        enabled.setAttribute("aria-pressed", "true");
+        enabled.title = "Enable / disable";
+        const setEnabledUi = (on) => {
+            enabled.dataset.checked = on ? "true" : "false";
+            enabled.textContent = "⏻";
+            enabled.classList.toggle("module-enabled--off", !on);
+            enabled.setAttribute("aria-pressed", on ? "true" : "false");
+            card.classList.toggle("card--disabled", !on);
+            // Grey this module's TAB in the same click, alongside its card: so the tab title dims INSTANTLY
+            // instead of waiting ~1s for the server's full-state round-trip. (updateTabDot still syncs it on the
+            // patch path, idempotently, so this just makes the on/off button the immediate driver.) The tab
+            // lives in the parent's strip, found by the same data-tab-mid updateTabDot uses.
+            const tabEl = queryByName(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`, "data-tab-mid", mod.name);
+            if (tabEl) tabEl.classList.toggle("tab--disabled", !on);
+        };
+        setEnabledUi(mod.enabled === undefined ? true : !!mod.enabled);
+        enabled.addEventListener("click", () => {
+            const next = enabled.dataset.checked !== "true";
+            setEnabledUi(next);
+            // Stamp dragTs so a WS state push older than this click can't revert
+            // the toggle before the server has acknowledged. updateValues reads
+            // dragTs[mod.name + ":enabled"] on line ~952 and suppresses stale
+            // patches within the 1s cooldown.
+            dragTs[mod.name + ":enabled"] = Date.now();
+            sendControl(mod.name, "enabled", next);
+        });
+    }
 
     const name = document.createElement("span");
     name.className = "card-name";
@@ -1803,27 +1812,41 @@ function createCard(mod, depth) {
     spacer.className = "card-spacer";
     title.appendChild(spacer);
 
-    // fps/ms toggle on the stats line: global mode, single click cycles all cards
-    const stats = document.createElement("span");
-    stats.className = "card-stats";
-    stats.dataset.mid = mod.name;
-    stats.dataset.key = "stats";
-    stats.title = formatStatsTitle(mod);
-    stats.textContent = formatStats(mod);
-    stats.addEventListener("click", () => {
-        const idx = TIMING_MODES.indexOf(timingMode);
-        timingMode = TIMING_MODES[(idx + 1) % TIMING_MODES.length];
-        localStorage.setItem(LS_TIMING, timingMode);
-        // Refresh every card's stats line in place: no full re-render needed
-        document.querySelectorAll(".card-stats[data-mid]").forEach(s => {
-            const m = findModule(s.dataset.mid);
-            if (m) { s.textContent = formatStats(m); s.title = formatStatsTitle(m); }
-        });
-    });
-    title.appendChild(stats);
+    // Built from expert up: in user mode the line is empty and there is nothing to hold.
+    //
+    // HOLD TO PEEK, the password field's gesture. Time is what the line says, because a tick time
+    // is the honest per-module figure: fps inverts it, so a module ticking in 22 us reads as 45K
+    // fps and invites being read as a frame rate it is not. The rate is one press away for anyone
+    // who wants it, and it goes back on release rather than leaving every card in a mode.
+    if (uiMode() >= 1) {
+        const stats = document.createElement("span");
+        stats.className = "card-stats";
+        stats.dataset.mid = mod.name;
+        stats.dataset.key = "stats";
+        stats.title = formatStatsTitle(mod);
+        stats.textContent = formatStats(mod);
+        const peekAll = (mode) => {
+            timingMode = mode;
+            document.querySelectorAll(".card-stats[data-mid]").forEach(el => {
+                const m = findModule(el.dataset.mid);
+                if (m) { el.textContent = formatStats(m); el.title = formatStatsTitle(m); }
+            });
+        };
+        const show = () => peekAll("fps");
+        const hide = () => peekAll("ms");
+        stats.addEventListener("mousedown", show);
+        stats.addEventListener("mouseup", hide);
+        stats.addEventListener("mouseleave", hide);
+        stats.addEventListener("touchstart", (e) => { e.preventDefault(); show(); });
+        stats.addEventListener("touchend", hide);
+        // A cancelled touch (a scroll takes over, a call arrives) fires no touchend, which left
+        // the peek latched until the next gesture.
+        stats.addEventListener("touchcancel", hide);
+        title.appendChild(stats);
+    }
 
     // Enable checkbox joins the right-hand action cluster, before ✎/×.
-    title.appendChild(enabled);
+    if (enabled) title.appendChild(enabled);
 
     // Delete / replace buttons for user-managed children (any role a container
     // accepts, minus modules that opted out via userEditable=false). Top-level
@@ -2317,7 +2340,12 @@ function fmtBytes(n) {
 // Stats line: timing (🕒, fps or µs/ms per the global toggle) + memory
 // (🧠 static, plus "+ dynamic" only when the module allocated heap).
 // Timing is omitted entirely when the module has no measured loop time.
+//
+// EXPERT AND UP. A tick time and a byte count diagnose the firmware rather than the show: they
+// say which module is spending the frame, which is a question a reader in user mode is not
+// asking and cannot act on. The same gate the controls use, so one mode decides the whole card.
 function formatStats(mod) {
+    if (uiMode() < 1) return "";
     const us = (mod.tickTimeUs !== undefined) ? mod.tickTimeUs : 0;
     let timing = "";
     if (us > 0) {
@@ -2341,7 +2369,7 @@ function formatStats(mod) {
     return head + statusChip;
 }
 function formatStatsTitle(mod) {
-    // The tooltip carries the OTHER unit, so both readings are available without clicking: the
+    // The tooltip carries the OTHER unit, so both readings are available without the gesture: the
     // card shows one, hovering says what it is in the other. A per-module fps is named as what it
     // is, a rate this module alone could sustain, because read as a frame rate it is a claim about
     // the whole pipeline made from one part of it.
@@ -2351,9 +2379,9 @@ function formatStatsTitle(mod) {
         const other = timingMode === "fps"
             ? (us < 1000 ? us + " µs" : (us / 1000).toFixed(2) + " ms") + " per tick"
             : fps.toLocaleString() + " fps if this module ran alone";
-        return other + "  ·  click to toggle";
+        return other + (timingMode === "fps" ? "  ·  release for time" : "  ·  hold for fps");
     }
-    return "Click to toggle fps/ms";
+    return "Hold to view fps";
 }
 
 function createActionButtons(mod) {
@@ -2528,7 +2556,7 @@ function renderEmojiTags(el, list) {
 // paths (renderCards's initial build + updateModuleControls's WS live-patch) so they agree.
 function controlRendersGenerically(mod, ctrl) {
     if (ctrl.hidden) return false;
-    if (ctrl.advanced && !isExpertMode()) return false;   // expert-only control, expert mode is off
+    if ((ctrl.minMode | 0) > uiMode()) return false;   // above the reader's mode
     return true;
 }
 
@@ -2537,7 +2565,17 @@ function createControl(moduleName, moduleType, ctrl) {
     row.className = "control-row";
     // Expert-only controls (only reachable here when expert mode is on: see controlRendersGenerically)
     // get a distinct treatment so they read as a different tier: a left accent stripe + muted label.
-    if (ctrl.advanced) row.classList.add("control-advanced");
+    // One class per tier, because the glyph says WHICH mode reveals it: a reader in expert mode
+    // meets both marks and the developer one tells them what they are still not seeing.
+    // The glyph is CSS ::after content, which a screen reader does not reliably announce, so the
+    // tier also rides a title: the same fact reaches a reader who cannot see the mark.
+    if ((ctrl.minMode | 0) === 1) {
+        row.classList.add("control-expert");
+        row.title = "Expert mode control";
+    } else if ((ctrl.minMode | 0) >= 2) {
+        row.classList.add("control-developer");
+        row.title = "Developer mode control";
+    }
     // A switch-row control renders as a strip like an encoder or fader, so switch N sits in the
     // same column as encoder N and fader N: a surface reads down a channel, not across a list.
     if (ctrl.switchRow) row.classList.add("control-switch");
@@ -2545,10 +2583,10 @@ function createControl(moduleName, moduleType, ctrl) {
 
     const label = document.createElement("label");
     label.className = "control-label";
-    // The expertMode toggle itself carries the wrench glyph (via CSS ::before), so it reads as the switch
+    // The mode select itself carries both glyphs (via CSS ::after), so it reads as the switch
     // that governs the 🔧 controls: the toggle is never `advanced` (it must always be reachable), so key
     // it by name rather than the flag.
-    if (moduleName === "System" && ctrl.name === "expertMode") label.classList.add("control-label--expert");
+    if (moduleName === "System" && ctrl.name === "mode") label.classList.add("control-label--mode");
     label.textContent = displayName(ctrl.name);
     // The display strip carries no label: it spans the card and shows whatever was last touched, so
     // a label naming one control would be wrong the moment another moved.
@@ -2929,6 +2967,7 @@ function createControl(moduleName, moduleType, ctrl) {
             peek.addEventListener("mouseleave", hide);
             peek.addEventListener("touchstart", (e) => { e.preventDefault(); show(); });
             peek.addEventListener("touchend", hide);
+            peek.addEventListener("touchcancel", hide);   // a cancelled touch fires no touchend
             row.appendChild(peek);
             break;
         }
@@ -4434,8 +4473,21 @@ function setText(el, text) {
     if (el && el.textContent !== text) el.textContent = text;
 }
 
+// The mode the cards were BUILT at. `uiMode()` decides which controls and which stats line a card
+// gets, so a change to it reshapes the DOM rather than a value in it: the one case the no-rebuild
+// contract cannot patch. Tracked here because the change can come from another client entirely.
+let renderedMode_ = null;
+
 function updateValues() {
     if (!state || !state.modules) return;
+    // A mode change adds or removes rows, so patching values cannot express it: rebuild once.
+    const mode = uiMode();
+    if (renderedMode_ !== null && renderedMode_ !== mode) {
+        renderedMode_ = mode;
+        renderCards();
+        return;
+    }
+    renderedMode_ = mode;
     // Patch each visible card's controls and stats line; never rebuild the DOM here.
     for (const mod of allModules()) {
         updateTabDot(mod);   // a fault on a BACKGROUND tab must surface without opening it

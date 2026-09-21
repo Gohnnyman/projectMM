@@ -1,6 +1,6 @@
 # Modifiers
 
-Every modifier, one block each: its preview, what it does, and what each control means — together. A modifier sits between an [effect](effects.md) and the output: it reshapes *where* pixels land (or masks them) without changing the effect's drawing. Modifiers compose — a [Layer](moxygen/Layer.md) folds its whole modifier stack each rebuild; a *dynamic* modifier (one that overrides `modifyLive`) also runs a per-frame pass. See [ModifierBase](moxygen/ModifierBase.md) for the static-vs-dynamic split. Each block's emoji are its `tags()` (see the [tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend)); **Kind** is static (baked into the mapping at rebuild) or dynamic (per-frame remap). Modifiers are grouped into sections, and each block carries that modifier's preview, behavior, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../contributing/documentation-standards.md#module-pages).)
+Every modifier, one block each: its preview, what it does, and what each control means, together. A modifier sits between an [effect](effects.md) and the output: it reshapes *where* pixels land (or masks them) without changing the effect's drawing. Modifiers compose: a [Layer](moxygen/Layer.md) folds its whole modifier stack each rebuild; a *dynamic* modifier (one that overrides `modifyLive`) also runs a per-frame pass, and an *animated* one keeps a static fold but rebuilds it on its own clock. See [ModifierBase](moxygen/ModifierBase.md) for the static-vs-dynamic split. Each block's emoji are its `tags()` (see the [tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend)); **Kind** is static (baked into the mapping at rebuild) or dynamic (per-frame remap). Modifiers are grouped into sections, and each block carries that modifier's preview, behavior, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../contributing/documentation-standards.md#module-pages).)
 
 A modifier folds coordinates rather than drawing, so it reaches for very little of the shared [power function](power-functions.md) toolbox — that page states the split and lists which modifiers use what.
 
@@ -28,7 +28,7 @@ Detail: [technical](moxygen/BlockModifier.md)
 
 Masks the layer in a checkerboard: "off" squares are dropped, "on" squares pass through unchanged.
 
-- `size` — checker square edge in lights (≥1).
+- `size` — checker square edge in lights (1–64).
 - `invert` — flip which squares pass through vs are masked.
 
 Origin: MoonLight · by WildCats08 / [@Brandon502](https://github.com/Brandon502) · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h)
@@ -142,7 +142,7 @@ Detail: [technical](moxygen/TransposeModifier.md)
 
 <a id="moonlive"></a>
 
-### MoonLive · dynamic
+### MoonLive · static
 
 <img src="../../assets/light/modifiers/MoonLiveModifier.gif" width="300" alt="MoonLive scripted modifier preview">
 
@@ -159,7 +159,7 @@ Detail: [technical](moxygen/MoonLiveModifier.md) · [what a script transforms](#
 
 <a id="randommap"></a>
 
-### RandomMap · dynamic
+### RandomMap 💫 · animated
 
 <img src="../../assets/light/modifiers/RandomMapModifier.gif" width="300" alt="RandomMap modifier preview">
 
@@ -175,7 +175,7 @@ Detail: [technical](moxygen/RandomMapModifier.md)
 
 <a id="region"></a>
 
-### Region · static
+### Region 💫 · static
 
 <img src="../../assets/light/modifiers/RegionModifier.gif" width="300" alt="Region modifier preview">
 
@@ -191,7 +191,7 @@ Detail: [technical](moxygen/RegionModifier.md)
 
 <a id="rotate"></a>
 
-### Rotate · dynamic
+### Rotate 💫 · dynamic
 
 <img src="../../assets/light/modifiers/RotateModifier.gif" width="300" alt="Rotate modifier preview">
 
