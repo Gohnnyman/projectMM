@@ -24,6 +24,14 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### System: `expertMode` became `mode`, with three levels
+
+**Action: re-set a control, and only if you had expert mode on.**
+
+The switch that revealed advanced controls is now a three-way select: `user`, `expert` (🎚️) and `developer` (🔧), each level showing what the one below it shows. A saved `expertMode` no longer matches a control and is dropped, so a device comes up in `user` mode whatever it held before. Pick the level you want again on the System card.
+
+The old flag could only say "show more" or "show less", which left diagnostics that mean nothing without the source sitting beside the controls a light show is built from.
+
 ### Documentation: every page moved to its Diátaxis folder
 
 **Action: nothing on a device. Update a bookmark to a documentation page.**

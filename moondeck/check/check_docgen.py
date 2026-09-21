@@ -1358,7 +1358,8 @@ def _duplicate_group_ids():
 # forbid it for the same reason the header rule does: the editor soft-wraps, so a one-word edit
 # is a one-word diff rather than a reflowed paragraph. Checked over AUTHORED pages only, since a
 # generated one carries its source's shape and is fixed at the generator.
-_MD_SKIP_PREFIX = ("#", "|", "-", "*", ">", "<", "```", "    ", "\t", "!", "=", ":")
+# Indentation is tested on the RAW line above, since these are matched after stripping.
+_MD_SKIP_PREFIX = ("#", "|", "-", "*", ">", "<", "```", "!", "=", ":")
 _MD_NUMBERED = re.compile(r"^\d+[.)]\s")
 
 
@@ -1387,10 +1388,13 @@ def _md_hard_wraps(rel: str, text: str):
             continue
         if fenced or not stripped:
             continue
-        if stripped.startswith(_MD_SKIP_PREFIX) or _MD_NUMBERED.match(stripped):
+        # INDENTATION is read before stripping: an indented block is a listing or a fenceless code
+        # sample, not prose, and the stripped line can never carry the leading whitespace that says so.
+        if line.startswith(("    ", "\t")) or stripped.startswith(_MD_SKIP_PREFIX) or _MD_NUMBERED.match(stripped):
             continue
         nxt = lines[i + 1].strip()
-        if not nxt or nxt.startswith(_MD_SKIP_PREFIX) or _MD_NUMBERED.match(nxt):
+        if (not nxt or lines[i + 1].startswith(("    ", "\t"))
+                or nxt.startswith(_MD_SKIP_PREFIX) or _MD_NUMBERED.match(nxt)):
             continue
         # A line ending mid-sentence is the wrap; one ending a sentence is a deliberate break.
         if stripped[-1] not in ".!?:":

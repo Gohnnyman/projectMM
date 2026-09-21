@@ -650,9 +650,12 @@ function parsePreviewCoords(view, buf) {
 // asks the device for it: the pull model).
 function activateTable(epoch, stride) {
     // Any cached table for this epoch serves every stride: the colors are mapped onto it below.
+    // The FINEST one when several are cached, since a coarser base cannot express a finer frame:
+    // insertion order would have handed back whichever arrived first.
     const t = tableCache_.get(epoch + ":" + stride)
            || [...tableCache_.keys()].filter(k => k.startsWith(epoch + ":"))
-                .map(k => tableCache_.get(k))[0];
+                .map(k => tableCache_.get(k))
+                .sort((a, b) => (a.stride ?? 1) - (b.stride ?? 1))[0];
     if (!t) return false;
     previewCoords_ = t.coords;
     previewCoordCount_ = t.count;
@@ -1041,7 +1044,10 @@ function drawBeams(mvp) {
     if (!previewAim_ || !previewCoords_ || !beamProgram) return;
     // Stale aim: gathered against a table that is no longer active, so its indices name other
     // fixtures now. Skip until the next aim frame rather than draw beams from the wrong heads.
-    if (previewAimEpoch_ !== lastEpoch_ || previewAimStride_ !== previewStride_) return;
+    // Against the TABLE's stride, which is what the aim frame is gathered at: the color frame's
+    // own stride is the link's and moves independently, so comparing it dropped every beam on a
+    // slow link.
+    if (previewAimEpoch_ !== lastEpoch_ || previewAimStride_ !== previewTableStride_) return;
     const n = Math.min(previewAim_.length >> 1, previewCoords_.length / 3);
     if (n === 0) return;
 

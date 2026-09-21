@@ -28,7 +28,7 @@ namespace mm {
 ///      [0x02][count:u32][stride:u16][epoch:u8][drops:u8][(r,g,b) x count]
 /// 0x04 per-frame aim, only for a rig whose fixtures carry pan and tilt:
 ///      [0x04][count:u32][stride:u16][epoch:u8][reserved:u8][(pan,tilt):u8x2 x count]
-/// Client requests: [0x51][stride][fps] standing, [0x52][stride] one-shot table.
+/// Client requests: [0x51][stride][fps] standing, [0x52] one-shot table. The table's own stride is memory-derived, so the request carries none.
 /// ```
 /// --8<-- [end:wire-format]
 ///
@@ -81,6 +81,9 @@ public:
 
     /// The stride a color frame ships at: the link's pacing, never finer than the table's.
     nrOfLightsType frameStride() const {
+        // Coarsening needs the kept-light cache, or the count and the gather filter differently and the browser rejects every frame.
+        const bool canCoarsen = denseGrid() || (keptPos_ && keptCount_ == coordCount_);
+        if (!canCoarsen) return previewStride_;
         return downscale_ > previewStride_ ? downscale_ : previewStride_;
     }
 
@@ -324,12 +327,12 @@ public:
                 if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
                 PreviewDriver* self = p->self;
                 if (self->keptIdx_ && self->keptCount_ < self->keptIdxCap_) {
-                    // Bytes, like the coord table: a stride is at most 64.
+                    // SCALED, as the coord table emits them: past a 255 extent it carries v*255/extent, and the browser runs its modulo over those bytes.
                     if (self->keptPos_) {
                         const size_t at = static_cast<size_t>(self->keptCount_) * 3;
-                        self->keptPos_[at + 0] = static_cast<uint8_t>(x);
-                        self->keptPos_[at + 1] = static_cast<uint8_t>(y);
-                        self->keptPos_[at + 2] = static_cast<uint8_t>(z);
+                        self->keptPos_[at + 0] = self->scaleAxis(x);
+                        self->keptPos_[at + 1] = self->scaleAxis(y);
+                        self->keptPos_[at + 2] = self->scaleAxis(z);
                     }
                     self->keptIdx_[self->keptCount_++] = idx;
                 }
@@ -471,9 +474,9 @@ public:
                         col.emit(static_cast<nrOfLightsType>(static_cast<size_t>(z) * H * W
                                                              + static_cast<size_t>(y) * W + x));
         } else if (keptIdx_ && keptCount_ == coordCount_) {
-            // The cached index map, filtered by the frame's stride: a light survives when that stride divides the coarsest lattice it sits on.
+            // The cached index map, filtered by the frame's stride on the same bytes the browser holds.
             for (nrOfLightsType k = 0; k < keptCount_; k++)
-                if (!keptPos_ || s == previewStride_ || keptAtStride(k, s)) col.emit(keptIdx_[k]);
+                if (!keptPos_ || s == previewStride_ || keptAtStride(k, s)) col.emit(keptIdx_[k]);   // the stride test, on the bytes the browser has
         } else {
             // The alloc-miss fallback: the full lattice walk, at the same stride as the table's.
             struct Skip { ColCtx* col; nrOfLightsType s; } sk{&col, s};
