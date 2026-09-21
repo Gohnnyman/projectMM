@@ -251,7 +251,7 @@ The `peripheral` dropdown no longer says `i80` / `MoonI80`. "i80" is the Intel 8
 | Old | New (classic ESP32) | New (S3 / P4 / S31) |
 |---|---|---|
 | `i80` | `I2S-IDF` | `LCD-IDF` |
-| `MoonI80` |, (not available) | `LCD-MM` |
+| `MoonI80` | (not available) | `LCD-MM` |
 | `Parlio` | — | `Parlio` (unchanged, it *is* the peripheral's name) |
 
 `-IDF` = driven through ESP-IDF's `esp_lcd`; `-MM` = driven by our own GDMA layer below it, which is what buys the streaming ring and the 74HCT595 pin expander.

@@ -2369,7 +2369,7 @@ function formatStats(mod) {
     return head + statusChip;
 }
 function formatStatsTitle(mod) {
-    // The tooltip carries the OTHER unit, so both readings are available without clicking: the
+    // The tooltip carries the OTHER unit, so both readings are available without the gesture: the
     // card shows one, hovering says what it is in the other. A per-module fps is named as what it
     // is, a rate this module alone could sustain, because read as a frame rate it is a claim about
     // the whole pipeline made from one part of it.
@@ -2379,9 +2379,9 @@ function formatStatsTitle(mod) {
         const other = timingMode === "fps"
             ? (us < 1000 ? us + " µs" : (us / 1000).toFixed(2) + " ms") + " per tick"
             : fps.toLocaleString() + " fps if this module ran alone";
-        return other + "  ·  click to toggle";
+        return other + (timingMode === "fps" ? "  ·  release for time" : "  ·  hold for fps");
     }
-    return "Click to toggle fps/ms";
+    return "Hold to view fps";
 }
 
 function createActionButtons(mod) {

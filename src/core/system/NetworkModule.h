@@ -544,7 +544,7 @@ private:
     const char* ethPresetOptions_[kEthPresetCount] = {};
     uint8_t ethPresetIndex_[kEthPresetCount] = {};
     uint8_t ethPresetCount_ = 0;
-    uint8_t ethPresetApplied_ = 0;   ///< the selection whose map is already written, so a rebuild is not a re-apply
+    uint8_t ethPresetApplied_ = 0;
 
 
     // A preset naming a PHY this build cannot drive would offer pins that reach nothing.

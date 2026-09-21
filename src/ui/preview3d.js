@@ -692,12 +692,16 @@ function upsampleMap(stride) {
         const i = kept[k];
         slot.set(previewPos_[i * 3] + "," + previewPos_[i * 3 + 1] + "," + previewPos_[i * 3 + 2], k);
     }
+    // A block with no kept light is normal on a sparse layout: the lattice point its leader would
+    // occupy simply holds no light. Such a point draws DARK rather than borrowing colour 0, which
+    // is a real light elsewhere in the frame and would paint the wrong pixel.
+    const UNMAPPED = 0xffffffff;
     for (let i = 0; i < n; i++) {
         const bxq = previewPos_[i * 3] - (previewPos_[i * 3] % stride);
         const byq = previewPos_[i * 3 + 1] - (previewPos_[i * 3 + 1] % stride);
         const bzq = previewPos_[i * 3 + 2] - (previewPos_[i * 3 + 2] % stride);
         const k = slot.get(bxq + "," + byq + "," + bzq);
-        map[i] = k === undefined ? 0 : k;
+        map[i] = k === undefined ? UNMAPPED : k;
     }
     upsampleCache_ = new Map([[key, map]]);   // one epoch, one stride in flight: keep the last
     return map;
@@ -747,7 +751,11 @@ function renderPreviewFrame(view, buf) {
     if (up) {
         const full = new Uint8Array(previewCoordCount_ * 3);
         for (let i = 0; i < previewCoordCount_; i++) {
-            const src = up[i] * 3;
+            const k = up[i];
+            // Out of range means the frame and the map disagree (a mid-rebuild frame): draw dark
+            // rather than read past the body, which would repeat a stale colour.
+            if (k >= count) continue;
+            const src = k * 3;
             full[i * 3] = rgb[src]; full[i * 3 + 1] = rgb[src + 1]; full[i * 3 + 2] = rgb[src + 2];
         }
         previewRgb_ = full;

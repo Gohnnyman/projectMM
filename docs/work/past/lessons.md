@@ -516,3 +516,11 @@ frame when the previous one has not drained, report the skip to the receiver (it
 congestion signal), and close only on a real error or FIN. The receiver steers quality from the
 drop reports. Every give-up budget that remains must bound *lack of progress*, never elapsed
 total, or slow-but-healthy transfers get truncated.
+
+## A control test must fail against the bug it claims to catch
+
+A reviewer flagged that caching one "coarsest divisor" per light could not answer a stride test, and the finding was right. The reasoning offered with it was not: it named (70,70,0) at stride 2, but 70's gcd is 70 and the divisor loop stops at 64, so that coordinate is unaffected. The real condition is narrower, a gcd ABOVE the loop's cap, which no coordinate under 65 can reach.
+
+Two tests were written and both passed against the unfixed code before one finally fired. The first used a dense grid, which walks the lattice closed-form and never reads the cache. The second used a sphere whose coordinates all sat under the cap, so both predicates agreed on every light it contained. Only a radius-64 shell, which reaches coordinates whose axes share a factor above 64, separated them.
+
+**The rule: reproduce the failure before fixing it, and prove the test fails against the old code.** A finding's headline can be sound while its example is wrong, so the example is the first thing to verify, not the claim. And a test that passes against the bug is not a weaker test, it is not a test of that bug at all. The control run, old code plus new test, is what tells the difference, and it costs one build.

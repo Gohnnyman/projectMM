@@ -228,7 +228,7 @@ Detail: [technical](moxygen/MoonLiveLayout.md) · [how the count is known](#moon
 
 A dense 3D grid, row-major (x fastest, then y, then z); every position maps to a light.
 
-- `width` / `height` / `depth` — lights per axis (to 3840, 2160 and 512).
+- `width` / `height` / `depth`: lights per axis (to 3840, 2160 and 512).
 - `serpentine` — every other row runs in reverse, matching a snaked strip.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)

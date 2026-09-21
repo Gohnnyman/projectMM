@@ -163,7 +163,7 @@ One picker serves **add** (`+ add child`) and **replace** (the ✎ button), rend
 
 ## Domain preview channel
 
-The UI dedicates a binary slot on its WebSocket, separate from the JSON state updates, for a domain-specific preview frame; the engine pushes one per render and the UI hands it to a domain renderer. Generic shape: `[type-byte] [domain header] [payload]`, the first byte selects the renderer, everything after is the domain's choice; the UI ignores types it doesn't recognise.
+The UI dedicates a binary slot on its WebSocket, separate from the JSON state updates, for a domain-specific preview frame; the engine pushes one per render and the UI hands it to a domain renderer. Generic shape: `[type-byte] [domain header] [payload]`, the first byte selects the renderer, everything after is the domain's choice; the UI ignores types it doesn't recognize.
 
 - The canvas is sticky just below the status bar, scroll-shrinks 0→50 % over 300 px.
 - `width: 100%` + `aspect-ratio: 1 / 1` derives the height from the column width; `max-height: 50vh`

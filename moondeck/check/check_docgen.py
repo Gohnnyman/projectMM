@@ -1417,7 +1417,9 @@ def _violations():
         # moxygen writes generated pages; docs/work/ is the exemption the standards name.
         if "moxygen" in parts or parts[0] == "work":
             continue
-        out.extend(_md_hard_wraps(rel.relative_to(ROOT).as_posix(), rel.read_text()))
+        # DOCS-relative, the key catalog findings use: a repo-relative one listed the same
+        # page twice in the report, once per spelling.
+        out.extend(_md_hard_wraps(rel.relative_to(ROOT / "docs").as_posix(), rel.read_text()))
 
     for rel in _headers():
         out.extend(_header_rules(str(rel), (ROOT / rel).read_text()))

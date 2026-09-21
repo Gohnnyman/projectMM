@@ -13,15 +13,15 @@
 #include <vector>
 #include <cstring>
 
-// PreviewDriver streams a true-shape point list: a one-time 0x03 coordinate table (positions of the real lights) + per-frame 0x02 RGB indexed by light. These tests pin: the table carries exactly lightCount positions (sphere → its shell count, NOT the bounding box), the per-frame RGB count matches, and a large layout is index-downsampled (stride > 1) to fit the send-buffer cap.
+// PreviewDriver streams a 0x03 table of the real lights' positions, then per-frame 0x02 RGB indexed by light. Pinned here: the table carries exactly lightCount positions (a sphere's shell, not its box), the frame agrees, and a large layout downsamples.
 
 namespace {
 
-// Captures the two preview message types so tests can inspect them. Every message arrives through the ONE resumable send (sendBufferedFrame) as header ++ body, classified by the type byte: 0x03 tables (11-byte header, epoch at [10]) into lastCoord, 0x02 frames (9-byte header, epoch at [7], drops at [8]) into lastFrame. dropCoord/acceptNext make a send report "slot busy" (false) to drive the request-retry and drop-counting paths.
+// Captures both message types. Each rides the one resumable send as header ++ body, by type byte: 0x03 tables (11-byte header, epoch [10]) to lastCoord, 0x02 frames (9-byte, epoch [7], drops [8]) to lastFrame. dropCoord/acceptNext report "slot busy" to drive the retry and drop paths.
 // -Wnon-virtual-dtor: BinaryBroadcaster's own destructor is protected and non-virtual on
 // purpose ("not owned through this interface"), so no code can delete through a base pointer.
-// This double is a stack local in every test, never owned polymorphically, and it cannot copy the base's protected-destructor trick, because that would forbid the stack construction the tests rely on. Scoped to this one type.
-// #ifndef _MSC_VER: `#pragma GCC` is an unknown pragma to MSVC (C4068), and the Windows build runs /WX, so an unguarded one fails it. MSVC has no -Wnon-virtual-dtor equivalent to silence, so excluding it there is complete, not a workaround. Clang understands `#pragma GCC`.
+// This double is a stack local in every test, never owned polymorphically, and cannot copy the base's protected-destructor trick: that would forbid the stack construction the tests rely on.
+// #ifndef _MSC_VER: `#pragma GCC` is unknown to MSVC (C4068) and /WX fails an unguarded one. MSVC has no -Wnon-virtual-dtor to silence, so excluding it there is complete. Clang understands it.
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
@@ -552,4 +552,28 @@ TEST_CASE("PreviewDriver strides a mapped layout's colors without re-walking the
     // The header's count IS the body's: a mismatch is the bug this pins.
     CHECK(rig.cap.frameCount() < rig.cap.coordCount());
     CHECK(rig.cap.frameBodyLights() == rig.cap.frameCount());
+}
+
+// Caching one "coarsest divisor" per light answers the stride test only while it IS the gcd: a loop capped at 64 truncated (65,65,65) to 13, so stride 5 dropped it.
+TEST_CASE("PreviewDriver keeps a sparse light whose axes share a factor above the cache's cap") {
+    mm::SphereLayout sph;
+    sph.radius = 64;                                  // its shell reaches coordinates gcd > 64
+    PreviewRig rig(&sph);
+    rig.cap.ask(5);
+    mm::platform::setTestNowMs(2000); rig.preview->tick();
+    mm::platform::setTestNowMs(0);
+    rig.produce();
+    CHECK(rig.cap.frameStride() == 5);
+    CHECK(rig.cap.frameBodyLights() == rig.cap.frameCount());
+
+    // The truth, counted independently: every shell light whose axes are all divisible by 5.
+    mm::SphereLayout ref;
+    ref.radius = 64;
+    struct Ctx { int keep; } cx{0};
+    ref.placeLights(mm::CoordSink{[](void* c, mm::nrOfLightsType, mm::lengthType x,
+                                     mm::lengthType y, mm::lengthType z) {
+        if (x % 5 == 0 && y % 5 == 0 && z % 5 == 0) static_cast<Ctx*>(c)->keep++;
+    }, nullptr, &cx});
+    REQUIRE(cx.keep > 0);
+    CHECK(rig.cap.frameCount() == cx.keep);
 }

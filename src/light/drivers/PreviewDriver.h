@@ -73,6 +73,12 @@ public:
 
 
 
+    /// Does this kept light survive a frame at `fs`? The device's own rule, on its own coordinates.
+    bool keptAtStride(nrOfLightsType k, nrOfLightsType fs) const {
+        const size_t at = static_cast<size_t>(k) * 3;
+        return keptPos_[at] % fs == 0 && keptPos_[at + 1] % fs == 0 && keptPos_[at + 2] % fs == 0;
+    }
+
     /// The stride a color frame ships at: the link's pacing, never finer than the table's.
     nrOfLightsType frameStride() const {
         return downscale_ > previewStride_ ? downscale_ : previewStride_;
@@ -92,9 +98,9 @@ public:
             return static_cast<nrOfLightsType>(static_cast<uint32_t>(cx) * cy * cz);
         }
         // From the CACHE, never a placeLights walk: this runs per frame on a nonblocking tick.
-        if (!keptStep_ || keptCount_ != coordCount_) return coordCount_;
+        if (!keptPos_ || keptCount_ != coordCount_) return coordCount_;
         nrOfLightsType out = 0;
-        for (nrOfLightsType k = 0; k < keptCount_; k++) if (keptStep_[k] % fs == 0) out++;
+        for (nrOfLightsType k = 0; k < keptCount_; k++) if (keptAtStride(k, fs)) out++;
         return out;
     }
 
@@ -132,12 +138,12 @@ public:
             ensureStaging(maxPts * 3u);
             if (!denseGrid() && keptIdxCap_ < maxPts) {
                 auto* grown = static_cast<nrOfLightsType*>(platform::alloc(maxPts * sizeof(nrOfLightsType)));
-                auto* steps = static_cast<uint8_t*>(platform::alloc(maxPts));
+                auto* steps = static_cast<uint8_t*>(platform::alloc(maxPts * 3));
                 if (grown && steps) {
                     if (keptIdx_) platform::free(keptIdx_);
-                    if (keptStep_) platform::free(keptStep_);
+                    if (keptPos_) platform::free(keptPos_);
                     keptIdx_ = grown;
-                    keptStep_ = steps;
+                    keptPos_ = steps;
                     keptIdxCap_ = static_cast<nrOfLightsType>(maxPts);
                     publishHeapBytes();
                 } else {
@@ -273,12 +279,12 @@ public:
             // Sized to EXACTLY this count before the emit fills it, so the cache cannot truncate.
             if (keptIdxCap_ < coordCount_) {
                 auto* grown = static_cast<nrOfLightsType*>(platform::alloc(coordCount_ * sizeof(nrOfLightsType)));
-                auto* steps = static_cast<uint8_t*>(platform::alloc(coordCount_));
+                auto* steps = static_cast<uint8_t*>(platform::alloc(static_cast<size_t>(coordCount_) * 3));
                 if (grown && steps) {
                     if (keptIdx_) platform::free(keptIdx_);
-                    if (keptStep_) platform::free(keptStep_);
+                    if (keptPos_) platform::free(keptPos_);
                     keptIdx_ = grown;
-                    keptStep_ = steps;
+                    keptPos_ = steps;
                     keptIdxCap_ = coordCount_;
                     keptIdxAllocFailed_ = false;
                     publishHeapBytes();   // the index cache grew: refresh the memory readout
@@ -318,11 +324,13 @@ public:
                 if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
                 PreviewDriver* self = p->self;
                 if (self->keptIdx_ && self->keptCount_ < self->keptIdxCap_) {
-                    // The coarsest lattice this light sits on: every axis divisible by the step.
-                    uint8_t step = 1;
-                    for (uint8_t t = 2; t <= 64; t++)
-                        if (x % t == 0 && y % t == 0 && z % t == 0) step = t;
-                    if (self->keptStep_) self->keptStep_[self->keptCount_] = step;
+                    // Bytes, like the coord table: a stride is at most 64.
+                    if (self->keptPos_) {
+                        const size_t at = static_cast<size_t>(self->keptCount_) * 3;
+                        self->keptPos_[at + 0] = static_cast<uint8_t>(x);
+                        self->keptPos_[at + 1] = static_cast<uint8_t>(y);
+                        self->keptPos_[at + 2] = static_cast<uint8_t>(z);
+                    }
                     self->keptIdx_[self->keptCount_++] = idx;
                 }
                 p->emit(x, y, z);
@@ -465,7 +473,7 @@ public:
         } else if (keptIdx_ && keptCount_ == coordCount_) {
             // The cached index map, filtered by the frame's stride: a light survives when that stride divides the coarsest lattice it sits on.
             for (nrOfLightsType k = 0; k < keptCount_; k++)
-                if (!keptStep_ || s == previewStride_ || keptStep_[k] % s == 0) col.emit(keptIdx_[k]);
+                if (!keptPos_ || s == previewStride_ || keptAtStride(k, s)) col.emit(keptIdx_[k]);
         } else {
             // The alloc-miss fallback: the full lattice walk, at the same stride as the table's.
             struct Skip { ColCtx* col; nrOfLightsType s; } sk{&col, s};
@@ -485,7 +493,7 @@ private:
     void freePreviewBuffers() {
         if (broadcaster_) broadcaster_->cancelBufferedSend();
         if (keptIdx_) { platform::free(keptIdx_); keptIdx_ = nullptr; keptIdxCap_ = 0; keptCount_ = 0; }
-        if (keptStep_) { platform::free(keptStep_); keptStep_ = nullptr; }
+        if (keptPos_) { platform::free(keptPos_); keptPos_ = nullptr; }
         if (staging_) { platform::free(staging_); staging_ = nullptr; stagingCap_ = 0; }
         publishHeapBytes();
     }
@@ -534,14 +542,15 @@ private:
     bool keptIdxAllocFailed_ = false;     // index cache couldn't allocate → gather walks per frame
     nrOfLightsType* keptIdx_ = nullptr;   // sparse layouts: kept lights' buffer indices, coord-table order
     nrOfLightsType keptIdxCap_ = 0, keptCount_ = 0;
-    // The coarsest stride each kept light survives, so a coarser frame filters the cache rather than re-walking placeLights (~8 ms at 12K lights, per frame).
-    uint8_t* keptStep_ = nullptr;
+    // Each kept light's (x,y,z): a coarser frame applies the device's own modulo test rather than re-walking placeLights (~8 ms at 12K lights, per frame).
+    uint8_t* keptPos_ = nullptr;
 
 protected:
     /// This driver's heap: the base scratch plus the kept-index cache, for the memory readout.
     size_t driverHeapBytes() const override {
         return DriverBase::driverHeapBytes()
              + static_cast<size_t>(keptIdxCap_) * sizeof(nrOfLightsType)
+             + static_cast<size_t>(keptIdxCap_) * 3   // keptPos_, three bytes per kept light
              + stagingCap_;
     }
 

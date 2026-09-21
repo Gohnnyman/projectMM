@@ -177,7 +177,7 @@ and `flash_esp32.py` writes the corrected layout in one pass: app in the big `ot
 (cd ~/esp/esp-idf && ./install.sh esp32s31)   # one-time, adds the S31 RISC-V toolchain
 ```
 
-Flash the S31 over USB with the CLI (`flash_esp32.py --firmware esp32s31 --port <port>`), **not** the web installer: the browser flasher (`esptool-js`) has no S31 chip definition, so a browser flash fails, but the CLI's `esptool.py` supports it. The web installer surfaces the same guidance if you try. (Status + the condition to enable web flashing: [backlog](../work/future/index.md).)
+Flash the S31 from the web installer or with the CLI (`flash_esp32.py --firmware esp32s31 --port <port>`), whichever suits. Browser flashing works from esptool-js 0.7.0, which identifies the chip by its id rather than by a ROM magic value the S31 shares with the classic ESP32.
 
 On Windows, the `--port` argument is a `COM*` name (e.g. `COM3`) instead of `/dev/tty.usbserial-XXXX`. MoonDeck's port picker enumerates `COM*` automatically.
 
