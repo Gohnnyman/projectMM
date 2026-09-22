@@ -133,6 +133,7 @@
 
 #include "platform/platform.h"
 #include "core/util/FirmwareImage.h"  // identify/moonBaseRejection: shared image vetting
+#include "core/util/H264Bitstream.h"  // where the encoder's frames begin and end
 
 #include <algorithm>
 #include <chrono>
@@ -1640,7 +1641,8 @@ void mdnsShutdown() {}
 // No update partition here, and the route guards on the capability, so this stub exists for compile coverage only.
 bool http_fetch_to_ota(const char* /*url*/,
                        char* statusBuf, size_t statusBufLen,
-                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut) {
+                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut,
+                       const char* /*fallbackUrl*/) {
     if (statusBuf && statusBufLen > 0) {
         std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
     }
@@ -1919,6 +1921,25 @@ int TcpConnection::read(uint8_t* buf, size_t maxLen) {
     if (n == 0) return 0; // peer closed
     if (sockWouldBlock()) return -1; // read timed out, nothing available
     return 0; // error → treat as closed
+}
+
+// getpeername rather than a field captured at accept: an earlier copy outlives a reconnect.
+bool TcpConnection::peerIPv4(uint8_t out[4]) const {
+    if (fd_ < 0 || !out) return false;
+    sockaddr_in addr{};
+    socklen_t len = sizeof(addr);
+#ifdef _WIN32
+    if (::getpeername(sock(fd_), reinterpret_cast<sockaddr*>(&addr), &len) != 0) return false;
+#else
+    if (::getpeername(fd_, reinterpret_cast<sockaddr*>(&addr), &len) != 0) return false;
+#endif
+    if (addr.sin_family != AF_INET) return false;
+    const uint32_t ip = ntohl(addr.sin_addr.s_addr);
+    out[0] = static_cast<uint8_t>(ip >> 24);
+    out[1] = static_cast<uint8_t>(ip >> 16);
+    out[2] = static_cast<uint8_t>(ip >> 8);
+    out[3] = static_cast<uint8_t>(ip);
+    return true;
 }
 
 bool TcpConnection::write(const uint8_t* data, size_t len) {
@@ -2609,10 +2630,26 @@ std::string encCapturedArgs_;
 #ifdef _WIN32
 HANDLE encProcess_ = nullptr;
 HANDLE encStdin_ = nullptr;
+HANDLE encStdout_ = nullptr;
 #else
 pid_t encPid_ = -1;
 int encStdin_ = -1;
+int encStdout_ = -1;
+int esWake_[2] = {-1, -1};   // the reader waits on this beside the encoder's output
 #endif
+
+// --- The elementary stream, which RTSP ships and HLS has no use for -------------------------
+// ffmpeg writes Annex B to stdout when the encoder runs without an output directory, and this thread cuts it into whole access units.
+std::thread esReader_;
+std::atomic<bool> esStop_{false};   // written by the render thread, read by the reader
+std::mutex esMutex_;
+std::vector<uint8_t> esFrame_;      // the published access unit, read under esMutex_
+uint32_t esFrameSeq_ = 0;           // rises per published frame, so a taker can tell one from the next
+uint32_t esTakenSeq_ = 0;
+uint32_t esPts90_ = 0;
+bool esKeyframe_ = false;
+uint8_t esFps_ = 30;                // the rate the pts is advanced at, from the running config
+constexpr uint32_t kRtpVideoClockHz = 90000;   // the RTP video clock the timestamps count in
 }  // namespace
 
 
@@ -2625,14 +2662,25 @@ static void stopEncoderProcess() {
         // The ring counters are NOT reset here: the writer may be mid-write on the head slot, and a producer racing this stop must keep seeing that slot as occupied. encoderStart resets the ring under the lock after the join, when nothing can touch it.
         encCv_.notify_all();
     }
+    esStop_ = true;
 #ifdef _WIN32
     if (encProcess_) TerminateProcess(encProcess_, 0);
     if (encWriter_.joinable()) encWriter_.join();
+    // CancelIoEx, never a close, while the reader is parked in ReadFile: closing a handle under a blocked read is undefined, and the value can be recycled onto another object.
+    if (encStdout_ && esReader_.joinable()) CancelIoEx(encStdout_, nullptr);
+    if (esReader_.joinable()) esReader_.join();
+    if (encStdout_) { CloseHandle(encStdout_); encStdout_ = nullptr; }
     if (encStdin_) { CloseHandle(encStdin_); encStdin_ = nullptr; }
     if (encProcess_) { WaitForSingleObject(encProcess_, 500); CloseHandle(encProcess_); encProcess_ = nullptr; }
 #else
     if (encPid_ >= 0) ::kill(encPid_, SIGTERM);
     if (encWriter_.joinable()) encWriter_.join();
+    // Wake the reader through its OWN pipe: a signalled child holds the write end until reaped, so waiting for EOF deadlocks the render thread.
+    if (esWake_[1] >= 0) { const char b = 1; (void)!::write(esWake_[1], &b, 1); }
+    if (esReader_.joinable()) esReader_.join();
+    if (esWake_[0] >= 0) { ::close(esWake_[0]); esWake_[0] = -1; }
+    if (esWake_[1] >= 0) { ::close(esWake_[1]); esWake_[1] = -1; }
+    if (encStdout_ >= 0) { ::close(encStdout_); encStdout_ = -1; }
     if (encStdin_ >= 0) { ::close(encStdin_); encStdin_ = -1; }
     if (encPid_ >= 0) {
         for (int i = 0; i < 20; i++) {                   // ~200 ms of graceful exit
@@ -2644,8 +2692,28 @@ static void stopEncoderProcess() {
 #endif
 }
 
-// Spawn `argv` (argv[0] resolved via PATH) with its stdin piped from us. The ffmpeg command line is assembled by encoderStart below; this half is pure process plumbing.
-static bool spawnEncoderProcess(const char* const argv[]) {
+// Cut `pending` into whole access units, keeping the tail still arriving: core owns where a frame begins, this owns the buffering.
+static void publishAccessUnits(std::vector<uint8_t>& pending, uint32_t& frames) {
+    std::vector<size_t> starts;
+    mm::h264::findAccessUnits(pending.data(), pending.size(), &starts);
+    if (starts.size() < 2) return;      // a frame is whole only once the next one has begun
+
+    for (size_t i = 0; i + 1 < starts.size(); i++) {
+        const size_t from = starts[i], to = starts[i + 1];
+        std::lock_guard<std::mutex> lk(esMutex_);
+        esFrame_.assign(pending.begin() + static_cast<long>(from),
+                        pending.begin() + static_cast<long>(to));
+        esPts90_ = static_cast<uint32_t>(static_cast<uint64_t>(frames) *
+                                         kRtpVideoClockHz / (esFps_ ? esFps_ : 30));
+        esKeyframe_ = mm::h264::hasKeyframe(pending.data() + from, to - from);
+        esFrameSeq_++;
+        frames++;
+    }
+    pending.erase(pending.begin(), pending.begin() + static_cast<long>(starts.back()));
+}
+
+// Spawn `argv` with its stdin piped from us, and its stdout too where `captureStdout` asks: that is the elementary stream RTSP ships. This half is pure process plumbing.
+static bool spawnEncoderProcess(const char* const argv[], bool captureStdout = false) {
     stopEncoderProcess();
     if (encTestMode_ != EncoderTestMode::Off) {
         encCapturedArgs_.clear();
@@ -2661,32 +2729,58 @@ static bool spawnEncoderProcess(const char* const argv[]) {
     HANDLE readEnd = nullptr, writeEnd = nullptr;
     if (!CreatePipe(&readEnd, &writeEnd, &sa, 4 * 1024 * 1024)) return false;
     SetHandleInformation(writeEnd, HANDLE_FLAG_INHERIT, 0);
+    HANDLE outRead = nullptr, outWrite = nullptr;
+    if (captureStdout) {
+        if (!CreatePipe(&outRead, &outWrite, &sa, 4 * 1024 * 1024)) {
+            CloseHandle(readEnd); CloseHandle(writeEnd); return false;
+        }
+        SetHandleInformation(outRead, HANDLE_FLAG_INHERIT, 0);
+    }
+    // Quoted only where it needs to be: a bare `-` names ffmpeg's stdin and stdout, and quoting it hands the child a literal `"-"` it rejects. POSIX passes an array and never sees this.
     std::string cmd;
     for (const char* const* a = argv; *a; a++) {
         if (!cmd.empty()) cmd += ' ';
-        cmd += '"'; cmd += *a; cmd += '"';
+        const std::string arg(*a);
+        const bool needsQuotes = arg.empty() ||
+                                 arg.find_first_of(" \t\"") != std::string::npos;
+        if (!needsQuotes) { cmd += arg; continue; }
+        cmd += '"';
+        for (const char c : arg) {
+            if (c == '"') cmd += '\\';
+            cmd += c;
+        }
+        cmd += '"';
     }
     STARTUPINFOA si{};
     si.cb = sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdInput = readEnd;
-    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdOutput = captureStdout ? outWrite : GetStdHandle(STD_OUTPUT_HANDLE);
     si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     PROCESS_INFORMATION pi{};
     const BOOL ok = CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, TRUE,
                                    CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
     CloseHandle(readEnd);
-    if (!ok) { CloseHandle(writeEnd); return false; }
+    if (outWrite) CloseHandle(outWrite);       // the child holds it; ours would keep EOF away
+    if (!ok) {
+        CloseHandle(writeEnd);
+        if (outRead) CloseHandle(outRead);
+        return false;
+    }
     CloseHandle(pi.hThread);
     encProcess_ = pi.hProcess;
     encStdin_ = writeEnd;
+    encStdout_ = outRead;
 #else
     // posix_spawn, not fork/exec: fork in a threaded process can deadlock on the allocator lock before exec, and a plain exec would leak every parent fd (the HTTP listen socket, the Art-Net/DDP ports) into a child that outlives a restart. Everything except the dup2'd stdin is closed in the child: CLOEXEC_DEFAULT on macOS, closefrom on glibc.
     int fds[2];
     if (::pipe(fds) != 0) return false;
+    int outFds[2] = {-1, -1};
+    if (captureStdout && ::pipe(outFds) != 0) { ::close(fds[0]); ::close(fds[1]); return false; }
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
     posix_spawn_file_actions_adddup2(&fa, fds[0], 0);
+    if (captureStdout) posix_spawn_file_actions_adddup2(&fa, outFds[1], 1);
     pid_t pid = -1;
     int rc;
 #ifdef __APPLE__
@@ -2701,10 +2795,16 @@ static bool spawnEncoderProcess(const char* const argv[]) {
 #endif
     posix_spawn_file_actions_destroy(&fa);
     ::close(fds[0]);
-    if (rc != 0) { ::close(fds[1]); return false; }
+    if (outFds[1] >= 0) ::close(outFds[1]);   // the child holds the write end; ours would keep EOF away
+    if (rc != 0) {
+        ::close(fds[1]);
+        if (outFds[0] >= 0) ::close(outFds[0]);
+        return false;
+    }
     ::signal(SIGPIPE, SIG_IGN);             // a dead ffmpeg surfaces as EPIPE, not a signal
     encPid_ = pid;
     encStdin_ = fds[1];
+    encStdout_ = outFds[0];
 #endif
     // The writer thread does the BLOCKING writes: the render tick only ever enqueues, so an encoder that stops reading for a while (scheduler starvation under a free-running render loop stalled it >250 ms on the bench) costs queued-then-dropped frames, never a stalled tick, never a torn frame, and never a false death.
     {
@@ -2753,6 +2853,63 @@ static bool spawnEncoderProcess(const char* const argv[]) {
             }
         }
     });
+
+    // The elementary-stream reader, started only where the caller asked for stdout. It owns the splitting, so `rtspTakeFrame` is a copy under a lock and nothing more.
+    if (captureStdout) {
+        // A joinable thread assigned over terminates the process, and a run without stdout capture leaves this one unjoined.
+        if (esReader_.joinable()) { esStop_ = true; esReader_.join(); }
+        esStop_ = false;
+#ifndef _WIN32
+        if (esWake_[0] >= 0) { ::close(esWake_[0]); esWake_[0] = -1; }
+        if (esWake_[1] >= 0) { ::close(esWake_[1]); esWake_[1] = -1; }
+        // Without this pipe the stop path cannot reach a reader parked on a silent encoder, and the join would hold the render thread forever.
+        if (::pipe(esWake_) != 0) {
+            esWake_[0] = esWake_[1] = -1;
+            return true;   // the encoder runs; only the frames this thread would publish are absent
+        }
+#endif
+        {
+            std::lock_guard<std::mutex> lk(esMutex_);
+            esFrame_.clear();
+            esFrameSeq_ = 0;
+            esTakenSeq_ = 0;
+            esPts90_ = 0;
+        }
+        // Captured BY VALUE: the stop path clears the globals while this thread runs, and reading them here would race that write.
+        esReader_ = std::thread([out = encStdout_, wake = esWake_[0]] {
+            std::vector<uint8_t> pending;     // bytes read but not yet a whole access unit
+            uint8_t buf[16384];
+            uint32_t frames = 0;
+            for (;;) {
+#ifdef _WIN32
+                DWORD got = 0;
+                // A canceled read reports ERROR_OPERATION_ABORTED, which is the stop path asking.
+                if (!out || !ReadFile(out, buf, static_cast<DWORD>(sizeof(buf)), &got, nullptr) ||
+                    got == 0) return;
+                const size_t n = got;
+#else
+                // Both descriptors, so a stop is noticed even while the encoder sends nothing.
+                if (out < 0) return;
+                fd_set rd;
+                FD_ZERO(&rd);
+                FD_SET(out, &rd);
+                if (wake >= 0) FD_SET(wake, &rd);
+                const int maxFd = (wake > out ? wake : out) + 1;
+                const int ready = ::select(maxFd, &rd, nullptr, nullptr, nullptr);
+                if (ready < 0 && errno == EINTR) continue;
+                if (ready < 0) return;
+                if (wake >= 0 && FD_ISSET(wake, &rd)) return;   // asked to stop
+                const ssize_t r = ::read(out, buf, sizeof(buf));
+                if (r < 0 && errno == EINTR) continue;
+                if (r <= 0) return;           // the child closed its stdout: the encoder is gone
+                const size_t n = static_cast<size_t>(r);
+#endif
+                if (esStop_) return;
+                pending.insert(pending.end(), buf, buf + n);
+                publishAccessUnits(pending, frames);
+            }
+        });
+    }
     return true;
 }
 
@@ -2764,7 +2921,10 @@ bool encoderStart(const EncoderConfig& cfg) {
     std::snprintf(rate, sizeof(rate), "%u", static_cast<unsigned>(cfg.fps));
     std::snprintf(gop, sizeof(gop), "%u", static_cast<unsigned>(cfg.fps));
     std::snprintf(bv, sizeof(bv), "%uk", static_cast<unsigned>(cfg.bitrateKbit));
-    std::snprintf(out, sizeof(out), "%s/stream.m3u8", cfg.outDir);
+    // A null outDir asks for the elementary stream rather than a playlist: that is RTSP, which takes the frames itself.
+    const bool elementary = (cfg.outDir == nullptr);
+    if (!elementary) std::snprintf(out, sizeof(out), "%s/stream.m3u8", cfg.outDir);
+    esFps_ = cfg.fps ? cfg.fps : 30;
 
     // Assembled by index so the software encoder's tuning flags stay off the hardware ones, which reject them, without duplicated slots.
     // The frame slots are sized HERE, off the render tick, since the write path would otherwise allocate on its first lap and must not allocate at all.
@@ -2789,17 +2949,43 @@ bool encoderStart(const EncoderConfig& cfg) {
              "-r", rate, "-i", "-",
              "-c:v", encoder }) add(a);
     if (x264) { add("-preset"); add("veryfast"); add("-tune"); add("zerolatency"); }
-    for (const char* a : std::initializer_list<const char*>{
-             "-g", gop, "-b:v", bv,
-             "-f", "hls", "-hls_time", "1", "-hls_list_size", "6",
-             "-hls_flags", "delete_segments+temp_file", out }) add(a);   // temp_file: the playlist lands by RENAME, never served half-written
+    add("-g"); add(gop); add("-b:v"); add(bv);
+    if (elementary) {
+        // Annex B to stdout; `dump_extra` repeats the parameter sets per keyframe, so a client joining mid-stream decodes at once.
+        for (const char* a : std::initializer_list<const char*>{
+                 "-bsf:v", "dump_extra", "-f", "h264", "-" }) add(a);
+    } else {
+        for (const char* a : std::initializer_list<const char*>{
+                 "-f", "hls", "-hls_time", "1", "-hls_list_size", "6",
+                 "-hls_flags", "delete_segments+temp_file", out }) add(a);   // temp_file: the playlist lands by RENAME, never served half-written
+    }
     argv[i] = nullptr;
-    return spawnEncoderProcess(argv);
+    return spawnEncoderProcess(argv, elementary);
 }
 
 // ffmpeg writes the playlist and segments to disk itself, so there is nothing in RAM to serve and the HTTP server uses its normal file path.
 bool hlsSegment(const char*, const uint8_t**, size_t*) { return false; }
 void hlsSegmentRelease() {}
+// The frame the reader published, copied out under the lock into a buffer that outlives the next read. The sequence is what says whether this caller has seen it.
+bool rtspTakeFrame(EncodedFrame* out) {
+    if (!out) return false;
+    static std::vector<uint8_t> taken;        // the caller reads this after the lock drops
+    std::lock_guard<std::mutex> lk(esMutex_);
+    if (esFrameSeq_ == esTakenSeq_ || esFrame_.empty()) return false;
+    esTakenSeq_ = esFrameSeq_;
+    taken = esFrame_;
+    out->nal      = taken.data();
+    out->len      = taken.size();
+    out->pts90    = esPts90_;
+    out->keyframe = esKeyframe_;
+    return true;
+}
+
+// The taker already owns its copy here, so there is nothing to hand back.
+void rtspReleaseFrame() {}
+
+// `dump_extra` above repeats the parameter sets on every keyframe, so a client joining at one decodes from it.
+bool rtspParameterSets(EncodedFrame*, EncodedFrame*) { return false; }
 
 int encoderWrite(const uint8_t* data, size_t len) {
     std::lock_guard<std::mutex> lock(encMutex_);

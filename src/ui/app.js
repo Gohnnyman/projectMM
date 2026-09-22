@@ -4392,17 +4392,22 @@ function fmtProgressLabel(ctrl) {
 // updateModuleControls) have to agree on which values become links: a rule applied in only one
 // of them shows a link that the next state push replaces with plain text.
 function isUrlValue(v) {
-    return typeof v === "string" && (v.startsWith("/") || /^https?:\/\//.test(v));
+    return typeof v === "string" &&
+           (v.startsWith("/") || /^https?:\/\//.test(v) || v.startsWith("rtsp://"));
 }
 
 // Point a link at `value` and show it ABSOLUTE. The stored value is device-relative, but a user
 // reading the card wants the address they could paste into a player, and `a.href` resolves that
 // against the current origin for us.
+// A non-http scheme resolves against nothing, so `rtsp://:554/` names its port and leaves the host
+// to us: the device has several addresses and cannot know which one this reader used, while the
+// page was loaded from exactly that one.
 function setUrlDisplay(a, value) {
-    const v = value ?? "";
+    let v = value ?? "";
+    if (v.startsWith("rtsp://:")) v = "rtsp://" + location.hostname + v.slice("rtsp://".length);
     if (a.getAttribute("href") === v) return;   // unchanged: leave the DOM alone
     a.setAttribute("href", v);
-    a.textContent = a.href;
+    a.textContent = v;   // an unknown scheme leaves a.href untouched, so show what we built
 }
 
 function fmtDisplayInt(ctrl) {

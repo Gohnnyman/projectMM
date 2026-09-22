@@ -40,7 +40,7 @@ one button and wrong for everything else:
   unrelated.
 - The surface already exists, is already persisted, and is already what OSC drives. A second wiring
   model beside it is the split brain
-  [the OSC plan](../present/Plan-20260829%20-%20OSC%20control%20ingest.md) forbids.
+  [the OSC plan](../past/plans/Plan-20260829%20-%20OSC%20control%20ingest%20(shipped).md) forbids.
 - Feedback needs it. A motorised fader or an LED-ringed encoder has to be *told* the current value;
   that lives on the surface, and an input mapped straight to a module control has nowhere to read it
   back from.

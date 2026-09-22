@@ -1,12 +1,14 @@
 # Effect improvements over MoonLight
 
+> **Superseded on 2026-09-22** by [Plan-20260922 - MoonLight, from v5.0.0 to the rename](../../present/Plan-20260922%20-%20MoonLight,%20from%20v5.0.0%20to%20the%20rename.md), which consolidates the five MoonLight files into one. Kept for the reasoning behind decisions already taken.
+
 Where a migrated projectMM effect **deliberately behaves differently from the MoonLight original** — a
 change that *improves* the effect (more correct, smoother, works at more grid sizes, a control that
 matches its label) rather than a straight port. The migration mandate is fidelity ("effects look like
 MoonLight"), so every intentional divergence is registered here with its reason, so it's a decision on
 record, not accidental drift.
 
-Distinct from [moonlight-fidelity-tensions.md](moonlight-fidelity-tensions.md): that log
+Distinct from [moonlight-fidelity-tensions.md](moonlight-fidelity-tensions (superseded).md): that log
 holds *undecided* fidelity-vs-principle conflicts awaiting a call; this doc holds *decided* improvements
 the product owner approved (correctness/UX wins that ship).
 

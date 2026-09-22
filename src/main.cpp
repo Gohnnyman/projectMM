@@ -101,6 +101,7 @@
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/NdiDriver.h"
 #include "light/drivers/HlsDriver.h"
+#include "light/drivers/RtspDriver.h"
 #include "light/drivers/PreviewDriver.h"
 /// LED drivers are compiled in per chip, gated on the peripheral each one needs, so a board carries only the drivers its silicon can run.
 /// The preprocessor rather than `if constexpr`, because the goal is excluding the code and a constexpr branch still compiles every arm.
@@ -283,6 +284,8 @@ static void registerModuleTypes() {
         mm::ModuleFactory::registerType<mm::NdiDriver>("NdiDriver", "light/drivers.md#ndi");
     if constexpr (mm::platform::hasHls)
         mm::ModuleFactory::registerType<mm::HlsDriver>("HlsDriver", "light/drivers.md#hls");
+    if constexpr (mm::platform::hasRtsp)
+        mm::ModuleFactory::registerType<mm::RtspDriver>("RtspDriver", "light/drivers.md#rtsp");
     // Same firmware gate as the include above.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::PanelCardDriver>("PanelCardDriver", "light/drivers.md#panelcard");

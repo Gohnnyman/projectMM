@@ -42,6 +42,7 @@ add_executable(mm_tests
     unit/core/unit_FilesystemModule_subtree.cpp
     unit/core/unit_FirmwareUpdateModule.cpp
     unit/core/unit_FirmwareImage.cpp
+    unit/core/unit_H264Bitstream.cpp
     unit/core/unit_AllocTracking.cpp
     unit/core/unit_HttpServerModule_apply.cpp
     unit/core/unit_ImprovFrame.cpp
@@ -92,6 +93,8 @@ add_executable(mm_tests
     unit/light/unit_NdiDriver.cpp
     unit/light/unit_HlsDriver.cpp
     unit/light/unit_MpegTs.cpp
+    unit/light/unit_RtpH264.cpp
+    unit/light/unit_RtspSession.cpp
     unit/light/unit_PanelCardDriver.cpp
     unit/light/unit_PanelCardDriver_packet.cpp
     unit/light/unit_WledAudioSyncPacket.cpp

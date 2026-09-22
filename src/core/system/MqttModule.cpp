@@ -280,11 +280,12 @@ void MqttModule::publishUpdateState() {
     char topic[128];
     buildTopic(topic, sizeof(topic), "update/state");
     char payload[256];
+    // RETAINED on the broker and read by a person, so it names where releases will live: a card left behind by a rename is a dead link.
     const int pn = std::snprintf(payload, sizeof(payload),
         "{\"installed_version\":\"%s\",\"latest_version\":\"%s\","
-        "\"release_url\":\"https://github.com/MoonModules/projectMM/releases\","
-        "\"title\":\"projectMM firmware\"}",
-        kVersion, kVersion);
+        "\"release_url\":\"https://github.com/%s/releases\","
+        "\"title\":\"%s firmware\"}",
+        kVersion, kVersion, kReleaseRepo, kProjectImageName);
     if (pn <= 0 || static_cast<size_t>(pn) >= sizeof(payload)) return;
     uint8_t buf[kSendBufLen];
     const size_t n = buildMqttPublish(topic, reinterpret_cast<const uint8_t*>(payload),
@@ -303,7 +304,7 @@ void MqttModule::subscribeUpdateSet() {
 
 // HA's install command.
 // The payload is the target version string (via HA's payload_install_template, defaults to `{{ latest_version }}`); an empty payload means "install latest".
-// The device builds the download URL from the projectMM release-artifact convention: https://github.com/MoonModules/projectMM/releases/download/v<version>/firmware-<kFirmwareName>-v<version>.bin and hands it to platform::http_fetch_to_ota, the same OTA path POST /api/firmware/url takes.
+// The device builds the download URL from the release-artifact convention (`kReleaseAssetUrlFormat`) and hands it to platform::http_fetch_to_ota, the same OTA path POST /api/firmware/url takes, naming both repositories so a rename cannot strand it.
 // Guarded by otaInFlight() so a second install command mid-flash returns silently rather than corrupting the running OTA task.
 // On desktop platform::http_fetch_to_ota is a stub returning false; the install command safely reports failure via g_otaStatus.
 void MqttModule::handleUpdateInstall(const char* payload, size_t payloadLen) {
@@ -320,10 +321,14 @@ void MqttModule::handleUpdateInstall(const char* payload, size_t payloadLen) {
     if (v[0] == '\0') v = (kVersion[0] == 'v') ? kVersion + 1 : kVersion;
 
     char url[256];
-    const int un = std::snprintf(url, sizeof(url),
-        "https://github.com/MoonModules/projectMM/releases/download/v%s/firmware-%s-v%s.bin",
-        v, kFirmwareName, v);
+    const int un = std::snprintf(url, sizeof(url), kReleaseAssetUrlFormat,
+                                 kReleaseRepo, v, kFirmwareName, v);
     if (un <= 0 || static_cast<size_t>(un) >= sizeof(url)) return;
+    // Today's repository, tried where the address above does not answer (FirmwareUpdateModule names why both).
+    char altUrl[256];
+    const int an = std::snprintf(altUrl, sizeof(altUrl), kReleaseAssetUrlFormat,
+                                 kFallbackRepo, v, kFirmwareName, v);
+    const bool haveAlt = an > 0 && static_cast<size_t>(an) < sizeof(altUrl);
 
     // Seed the shared globals so the first WS push shows "starting" rather than a stale string from a prior URL-triggered OTA, same seed the HTTP path does.
     std::snprintf(g_otaStatus, sizeof(g_otaStatus), "starting");
@@ -331,7 +336,8 @@ void MqttModule::handleUpdateInstall(const char* payload, size_t payloadLen) {
     g_otaBytesTotal = 0;
 
     (void)platform::http_fetch_to_ota(url, g_otaStatus, sizeof(g_otaStatus),
-                                      &g_otaBytesRead, &g_otaBytesTotal);
+                                      &g_otaBytesRead, &g_otaBytesTotal,
+                                      haveAlt ? altUrl : nullptr);
     // No response to publish, HA polls the retained update/state (which the OTA success path implicitly renegotiates on reboot, or a future release-check refreshes).
 }
 
