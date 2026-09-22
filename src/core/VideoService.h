@@ -8,6 +8,7 @@
 #include "core/VideoFrame.h"
 #include "platform/platform.h" // fsSize / fsReadAt / millis
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -49,6 +50,16 @@ public:
     char file[64] = "/frame.ppm";
     uint8_t usbFormat = 0;   // index into the device's advertised list; the only USB setting persisted
     uint16_t staleMs = 2000; // gap tolerated before the lights go dark
+
+    // The source's transfer curve. MJPEG carries no HDR metadata, so this is declared, not
+    // detected.
+    static constexpr uint8_t kHdrOff = 0, kHdrPq = 1, kHdrHlg = 2;
+    static constexpr const char* kHdrOptions[] = {"off", "HDR10 (PQ)", "HLG"};
+    static constexpr uint8_t kHdrCount = 3;
+    uint8_t hdr = kHdrOff;
+    // PQ is absolute luminance, so it needs a reference white. Too low and bright channels clamp,
+    // dragging saturated hues toward their neighbors; too high and the picture reads dim.
+    uint16_t hdrNits = 2000;
     // Sweep rate of the test pattern's white block, in PIXELS PER SECOND. 0 parks it, which makes
     // the pattern a still reference for checking a border light against a known color. 17 is the
     // rate it used to be hard-coded to: a sweep every ~4 s.
@@ -70,6 +81,9 @@ public:
         VideoService* v = ActiveInstance<VideoService>::active();
         return v ? &v->frame_ : &kNoVideoFrame;
     }
+
+    /// Test seam: the curve as built.
+    const uint8_t* toneForTest() const { return tone_; }
 
     VideoService() { seat_.claim(); }
 
@@ -97,6 +111,12 @@ public:
         // would otherwise read as loss and strobe the room.
         controls_.addControl("staleMs", staleMs, 100, 10000);
         controls_.setHidden(controls_.count() - 1, source != kSourceUsb);
+        // Live: changes how the buffer is read, not its size. Capture-only; other sources are
+        // authored display-encoded.
+        controls_.addSelect("hdr", hdr, kHdrOptions, kHdrCount);
+        controls_.setHidden(controls_.count() - 1, source != kSourceUsb);
+        controls_.addControl("hdrNits", hdrNits, 100, 10000);
+        controls_.setHidden(controls_.count() - 1, source != kSourceUsb || hdr != kHdrPq);
         MoonModule::defineControls();
     }
 
@@ -110,6 +130,7 @@ public:
     void onControlChanged(const char* name) override {
         if (std::strcmp(name, "reload") == 0) loadFile();
         if (std::strcmp(name, "offered") == 0) applyFormat();
+        if (std::strcmp(name, "hdr") == 0 || std::strcmp(name, "hdrNits") == 0) rebuildTone();
         MoonModule::onControlChanged(name);
     }
 
@@ -124,6 +145,7 @@ public:
             // arrives after the first prepare would otherwise never reach them, so the check would
             // keep reporting the stale request as current and never reopen.
             applyFormat();
+            rebuildTone(); // a restored `hdr` lands as a VALUE, never through onControlChanged
             // Every tree-wide rebuild lands here too (a layout resized, a module added), and the
             // device stays open through those: a reopen drops the published frame and blocks on
             // negotiation. It happens only for what actually changed the request.
@@ -321,6 +343,7 @@ private:
     ScratchBuffer<uint8_t> buf_{*this}; // width*height*3, accounted in dynamicBytes()
     VideoFrame frame_;
     uint32_t seq_ = 0;
+    uint8_t tone_[256] = {}; // the published curve; only read while hdr != off
     // Sweep position in 1/1000 px and the millis() it was last advanced at. Milli-pixels because a
     // per-second rate sampled per tick rounds to zero motion in whole pixels at 1 px/s.
     uint32_t sweepMilliPx_ = 0;
@@ -352,7 +375,43 @@ private:
 
     /// Publish the buffer as a NEW frame: the sequence bump is what tells a consumer the pixels
     /// changed, so every producer path ends here (see VideoFrame::seq).
-    void publish() { frame_.seq = ++seq_; }
+    void publish() {
+        // Per frame, so a curve change lands on the next one with nothing to remember.
+        frame_.tone = (source == kSourceUsb && hdr != kHdrOff) ? tone_ : nullptr;
+        frame_.seq = ++seq_;
+    }
+
+    /// Fill `tone_`: transfer curve -> linear, scale to the reference white, re-encode sRGB. Cold
+    /// path: 256 float evaluations per edit or prepare, never per frame.
+    void rebuildTone() {
+        if (hdr == kHdrOff) return;
+        for (int i = 0; i < 256; i++) {
+            const float e = static_cast<float>(i) / 255.0f;
+            float lin;
+            if (hdr == kHdrHlg) {
+                // ARIB STD-B67 inverse OETF. Relative, so hdrNits does not apply. No OOTF: a
+                // second-order tilt that border averages do not need.
+                constexpr float a = 0.17883277f, b = 0.28466892f, c = 0.55991073f;
+                lin = e <= 0.5f ? (e * e) / 3.0f : (std::exp((e - c) / a) + b) / 12.0f;
+            } else {
+                // SMPTE ST 2084 (PQ) EOTF: absolute nits, referred to hdrNits.
+                constexpr float m1 = 2610.0f / 16384.0f;
+                constexpr float m2 = 2523.0f / 4096.0f * 128.0f;
+                constexpr float c1 = 3424.0f / 4096.0f;
+                constexpr float c2 = 2413.0f / 4096.0f * 32.0f;
+                constexpr float c3 = 2392.0f / 4096.0f * 32.0f;
+                const float p = std::pow(e, 1.0f / m2);
+                const float num = p > c1 ? p - c1 : 0.0f;
+                const float den = c2 - c3 * p; // > 0 across the whole domain
+                const float nits = 10000.0f * std::pow(num / den, 1.0f / m1);
+                lin = nits / static_cast<float>(hdrNits ? hdrNits : 1);
+            }
+            if (lin < 0.0f) lin = 0.0f;
+            if (lin > 1.0f) lin = 1.0f;
+            const float v = lin <= 0.0031308f ? 12.92f * lin : 1.055f * std::pow(lin, 1.0f / 2.4f) - 0.055f;
+            tone_[i] = static_cast<uint8_t>(v * 255.0f + 0.5f);
+        }
+    }
 
     // Four colored border bands and a sweeping white block. Integer-only and allocation-free: it
     // runs on the render tick.

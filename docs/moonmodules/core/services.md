@@ -47,6 +47,8 @@ A Service (added by the user, not auto-wired): the video source that feeds scree
 - `reload`: (file) re-read the file in place, without rebuilding the pipeline.
 - `offered`: (usb) the resolution and frame rate to request, chosen from what the attached device advertises. Read-only until one enumerates, since the device decides what is on the list.
 - `staleMs`: (usb) how long a gap in frames is tolerated before the lights go dark. A UVC device streams continuously whatever is on the wire, so a gap means the grabber stopped, not that the content paused.
+- `hdr`: (usb) the source's transfer curve: `off`, `HDR10 (PQ)` or `HLG`. MJPEG carries no HDR metadata, so it is declared, not detected. With an HDR source left at `off`, the lights read washed out and hue-shifted (green lifted against red is the usual sign), because the bytes are averaged on the HDR curve rather than the display's.
+- `hdrNits`: (usb, PQ only) the reference white PQ's absolute luminance is scaled to. Too low and bright channels clamp, dragging saturated hues toward their neighbors; too high and the picture reads dim. HLG is relative and does not use it.
 - status: the live frame's dimensions (`640x480`), or the reason there is no frame.
 
 **The test pattern is a diagnostic, not decoration.** Four colored border bands (red top, green right, blue bottom, yellow left) and a white block sweeping along the top edge. On a border-mounted strip that makes orientation self-evident: a mis-set `startCorner` or `clockwise` on the [Rectangle](../light/layouts.md#rectangle) layout shows as the wrong physical edge lighting, rather than a subtly wrong picture. The sweeping block shows liveness and which way "forward" runs.

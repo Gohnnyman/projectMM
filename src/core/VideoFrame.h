@@ -17,6 +17,14 @@ struct VideoFrame {
     // Bumped per PUBLISHED frame; compare for INEQUALITY, never ordering. A still PPM bumps it
     // every tick, the way a camera aimed at a still object sends one every period.
     uint32_t seq = 0;
+    // 256-entry per-channel curve to display encoding; null = the bytes already are. Same one-tick
+    // lifetime as `rgb`. Read pixels through channel(): a consumer that indexes `rgb` directly
+    // averages an HDR source on its own curve and gets a hue shift.
+    const uint8_t* tone = nullptr;
+
+    /// One channel byte of the pixel at `px`, display-encoded. One cached lookup when `tone` is set:
+    /// applied on the read a consumer already makes, so no extra pass over the frame.
+    uint8_t channel(const uint8_t* px, int c) const { return tone ? tone[px[c]] : px[c]; }
 };
 
 // The "no source" frame consumers fall back to.

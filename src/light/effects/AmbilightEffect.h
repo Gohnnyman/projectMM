@@ -308,9 +308,9 @@ private:
         for (int py = rows.begin; py < rows.end; py++) {
             const uint8_t* px = frame.rgb + (static_cast<size_t>(py) * frame.width + cols.begin) * 3;
             for (int pxX = cols.begin; pxX < cols.end; pxX++, px += 3) {
-                sr += px[0];
-                sg += px[1];
-                sb += px[2];
+                sr += frame.channel(px, 0);
+                sg += frame.channel(px, 1);
+                sb += frame.channel(px, 2);
             }
         }
         const uint32_t pixels =

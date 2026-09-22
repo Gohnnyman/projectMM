@@ -182,3 +182,48 @@ TEST_CASE("VideoService: the test pattern sweeps at patternSpeed pixels per seco
     v.tick();
     CHECK(sweepX() == (start + 5) % VideoService::kPatternW); // parked, however long passes
 }
+
+// Pinned to a measured case: a source showing (255,127,0) captured under PQ as (206,171,0), green
+// 35% high against red. Checked as a RATIO - hdrNits sets the level, hue is what this fixes.
+TEST_CASE("VideoService: the PQ tone table corrects an HDR capture's green lift") {
+    VideoService v;
+    v.source = VideoService::kSourceUsb;
+    v.hdr = VideoService::kHdrPq;
+    v.hdrNits = 2000;
+    v.onControlChanged("hdr"); // the path a UI edit takes
+    const uint8_t* t = v.toneForTest();
+    REQUIRE(t != nullptr);
+
+    const double rawRatio = 171.0 / 206.0; // as captured
+    const double fixed = static_cast<double>(t[171]) / t[206];
+    CHECK(rawRatio > 0.80); // the defect
+    CHECK(fixed < 0.62);    // corrected toward 0.50
+    CHECK(fixed > 0.40);    // not overshot
+
+    // Monotonic: a curve that reorders levels would posterize.
+    CHECK(t[0] == 0);
+    for (int i = 1; i < 256; i++) CHECK(t[i] >= t[i - 1]);
+}
+
+// Off must publish nothing: a stale table would silently re-map an SDR source.
+TEST_CASE("VideoService: no tone table is published unless an HDR curve is selected") {
+    VideoService v;
+    v.source = VideoService::kSourcePattern;
+    v.applyState();
+    CHECK(VideoService::latestFrame()->tone == nullptr);
+}
+
+// The frame carries its curve and consumers read through channel(), so every reader corrects the
+// same way and none has to know which curve it is. Null means the bytes are taken as they are.
+TEST_CASE("VideoFrame: channel() reads through the tone curve when one is published") {
+    uint8_t px[3] = {10, 20, 30};
+    uint8_t tone[256];
+    for (int i = 0; i < 256; i++) tone[i] = static_cast<uint8_t>(255 - i);
+    mm::VideoFrame f;
+    f.rgb = px;
+    CHECK(f.channel(px, 0) == 10);
+    CHECK(f.channel(px, 2) == 30);
+    f.tone = tone;
+    CHECK(f.channel(px, 0) == 245);
+    CHECK(f.channel(px, 1) == 235);
+}
