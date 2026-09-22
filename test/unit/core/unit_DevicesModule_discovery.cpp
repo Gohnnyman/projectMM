@@ -1,16 +1,12 @@
-// @module DevicesModule
-// @also DevicePlugin
+/// @module DevicesModule
+/// @also DevicePlugin
 
-// Drives the full UDP discovery pipeline on the host — feed synthetic presence packets
-// through injectPacketForTest() (the same entry the live recvFrom loop uses) and assert
-// the resulting device list: classification, projectMM vs WLED typing, that one device's
-// packet never contaminates another's name/type, and live rename. Pure host logic, no
-// network — the test seam makes the private upsert path testable.
+/// Drives the full UDP discovery pipeline on the host, feed synthetic presence packets through injectPacketForTest() (the same entry the live recvFrom loop uses) and assert the resulting device list: classification, projectMM vs WLED typing, that one device's packet never contaminates another's name/type, and live rename. Pure host logic, no network, the test seam makes the private upsert path testable.
 
 #include "doctest.h"
-#include "core/DevicesModule.h"
-#include "core/WledPacket.h"
-#include "core/JsonSink.h"
+#include "core/system/DevicesModule.h"
+#include "core/system/WledPacket.h"
+#include "core/util/JsonSink.h"
 
 #include <cstdint>
 #include <cstring>
@@ -66,8 +62,7 @@ TEST_CASE("DevicesModule: a short / garbage datagram is ignored, never listed") 
     CHECK(dev.listRowCount() == 0);
 }
 
-// The P4-bench bug: two DIFFERENT devices (a WLED and a projectMM peer) must each keep
-// their OWN name + type — no cross-contamination between packets.
+// The P4-bench bug: two DIFFERENT devices (a WLED and a projectMM peer) must each keep their OWN name + type, no cross-contamination between packets.
 TEST_CASE("DevicesModule: distinct devices don't cross-contaminate name or type") {
     DevicesModule dev;
     inject(dev, "wled-desk", /*mm=*/false, 192, 168, 1, 186);  // a WLED
@@ -82,8 +77,7 @@ TEST_CASE("DevicesModule: distinct devices don't cross-contaminate name or type"
     CHECK(std::strstr(mm.c_str(), "\"type\":\"projectMM\"") != nullptr);
 }
 
-// A peer RENAME must propagate: a later packet from the same IP with a new name updates
-// the row in place — the live-update requirement (the name rides the presence packet).
+// A peer RENAME must propagate: a later packet from the same IP with a new name updates the row in place, the live-update requirement (the name rides the presence packet).
 TEST_CASE("DevicesModule: a peer rename updates the existing row's name") {
     DevicesModule dev;
     inject(dev, "MM-OldName", /*mm=*/true, 192, 168, 1, 100);
@@ -94,9 +88,7 @@ TEST_CASE("DevicesModule: a peer rename updates the existing row's name") {
     CHECK(std::strstr(row.c_str(), "MM-OldName") == nullptr);
 }
 
-// A projectMM device stays projectMM even when a later plain-WLED packet arrives from the
-// same address — the type only RAISES toward projectMM, never downgrades. (A projectMM peer
-// could be seen via an unmarked packet too; that must not relabel it WLED.)
+// A projectMM device stays projectMM even when a later plain-WLED packet arrives from the same address, the type only RAISES toward projectMM, never downgrades. (A projectMM peer could be seen via an unmarked packet too; that must not relabel it WLED.)
 TEST_CASE("DevicesModule: a projectMM device is not downgraded by a later WLED packet") {
     DevicesModule dev;
     inject(dev, "MM-Peer", /*mm=*/true,  192, 168, 1, 90);   // first: a projectMM-marked packet
@@ -107,11 +99,7 @@ TEST_CASE("DevicesModule: a projectMM device is not downgraded by a later WLED p
 }
 
 TEST_CASE("DevicesModule: a DISABLED module does not claim the active_ seat at boot") {
-    // Core's applyState() calls prepare() (which claims the seat) only when effectively-enabled,
-    // and release() otherwise. A persisted DISABLED DevicesModule must NOT claim the singleton active_
-    // seat at boot — else the presence pipeline (and Hue-bridge routing) points at a module the user
-    // turned off. active_ is a process-wide static, so each case brackets applyState()/release() to
-    // leave it clean (the same discipline as the AudioService cases).
+    // Core's applyState() calls prepare() (which claims the seat) only when effectively-enabled, and release() otherwise. A persisted DISABLED DevicesModule must NOT claim the singleton active_ seat at boot, else the presence pipeline (and Hue-bridge routing) points at a module the user turned off. active_ is a process-wide static, so each case brackets applyState()/release() to leave it clean (the same discipline as the AudioService cases).
     DevicesModule dis;
     dis.setEnabled(false);
     dis.setup();                           // Phase 3: pure wiring

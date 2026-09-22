@@ -41,7 +41,7 @@ STATE_FILE = SCRIPTS_DIR / "moondeck.json"
 
 # Shared test-metadata parsers live next to the doc generator. Both this server
 # and moondeck/docs/generate_test_docs.py import from there so the two views of
-# the same source files (HTML in MoonDeck, markdown in docs/tests/) can't drift.
+# the same source files (HTML in MoonDeck, markdown in docs/reference/tests/) can't drift.
 sys.path.insert(0, str(SCRIPTS_DIR / "docs"))
 import _test_metadata as test_meta  # noqa: E402
 # Re-use the doc generator's perf-table formatter so the MoonDeck step view
@@ -190,7 +190,7 @@ def _walk_modules(modules):
 
 def _device_sort_key(d):
     """Sort devices by name (case-insensitive), IP as tiebreaker — the same order the on-device
-    DevicesModule uses (src/core/DevicesModule.h sortByName / ciLess), so MoonDeck's list and the
+    DevicesModule uses (src/core/system/DevicesModule.h sortByName / ciLess), so MoonDeck's list and the
     device's own list read the same. Used everywhere a device list is stored, so the persisted
     moondeck.json is already in display order."""
     return (d.get("deviceName", "").lower(), d.get("ip", ""))
@@ -217,7 +217,7 @@ def _probe_device(ip, port=8080, timeout=0.4):
     - `firmware` is the variant flashed (value of the `firmware` control on
       SystemModule, set from kFirmwareName in build_info.h). Used to deduce
       `deviceModel` when the device hasn't been told its model yet. See
-      docs/architecture.md § Firmware vs board.
+      docs/explanation/architecture/index.md § Firmware vs board.
     - `deviceModel` is the physical-hardware identity (a catalog entry). Preferred source: the device's
       own `deviceModel` control on SystemModule (the value MoonDeck pushed earlier
       and the device persisted). Fall back to firmware-based deduction
@@ -275,7 +275,7 @@ def _deduce_device_model(firmware: str) -> str:
     """Firmware → deviceModel name when exactly one catalog entry claims this
     firmware. Returns "" when zero (unknown firmware) or multiple device models
     claim it (ambiguous — user picks). Catalog lives at
-    mooninstaller/deviceModels.json; see docs/architecture.md § Firmware vs board.
+    mooninstaller/deviceModels.json; see docs/explanation/architecture/index.md § Firmware vs board.
     """
     if not firmware:
         return ""
@@ -423,7 +423,7 @@ def discover_devices(subnet=""):
     _link_last_flash(devices)
 
     # Sort by device name, case-insensitive — matching the on-device DevicesModule list
-    # (src/core/DevicesModule.h sortByName / ciLess) so both lists read the same. IP is the
+    # (src/core/system/DevicesModule.h sortByName / ciLess) so both lists read the same. IP is the
     # tiebreaker so un-named / duplicate-named devices still have a stable order.
     devices.sort(key=_device_sort_key)
     return devices, subnet
@@ -669,7 +669,7 @@ def mutate_state(mutator):
 
     Slow work (subnet scans, device probes) should happen BEFORE calling
     mutate_state — pass already-gathered data in by closure. Holding the
-    lock across network I/O would serialise everything behind the slowest
+    lock across network I/O would serialize everything behind the slowest
     scan."""
     with _state_write_lock:
         state = load_state()
@@ -784,7 +784,7 @@ def _device_model_for_port(port: str) -> str:
 
 
 def _subnet_from_host_subnet(host_subnet: str) -> str:
-    """Normalise `_get_local_subnet()` output (e.g. "192.168.1") to the
+    """Normalize `_get_local_subnet()` output (e.g. "192.168.1") to the
     network record's `subnet` field shape ("192.168.1.0/24")."""
     if not host_subnet:
         return ""
@@ -1128,9 +1128,17 @@ def _read_usb_ports() -> dict:
         return {}
     import re
     try:
-        out = subprocess.run(
+        # BYTES, then a lenient decode. `ioreg -l` dumps every property in the registry, including
+        # raw device data that is not text at all, so a strict UTF-8 decode raises
+        # UnicodeDecodeError on whatever happens to be attached: on the bench it fired on every
+        # /api/ports request while boards were connected, and since UnicodeDecodeError is neither
+        # OSError nor SubprocessError it escaped this handler and 500'd the request, leaving
+        # MoonDeck's port dropdown empty with boards plugged in. The parse below only ever reads
+        # ASCII keys, so replacing the undecodable bytes costs nothing and keeps the listing.
+        raw = subprocess.run(
             ["ioreg", "-l", "-w0"],
-            capture_output=True, text=True, timeout=5).stdout
+            capture_output=True, timeout=5).stdout
+        out = raw.decode("utf-8", "replace")
     except (OSError, subprocess.SubprocessError):
         return {}
     # The IORegistry is a tree: a USB device node holds the descriptor
@@ -1258,7 +1266,7 @@ def _apply_probe_results(devices: list, probed: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Perf-table HTML (shared shape with docs/tests/scenario-tests.md)
+# Perf-table HTML (shared shape with docs/reference/tests/scenario-tests.md)
 # ---------------------------------------------------------------------------
 
 def _render_perf_table_html(step: dict) -> str:
@@ -1382,6 +1390,12 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
         elif self.path == "/api/scenarios":
             self._send_json({"scenarios": self._list_scenarios()})
+
+        elif self.path == "/api/uiclips":
+            self._send_json({"uiclips": self._list_ui_runs("clips")})
+
+        elif self.path == "/api/uiprojects":
+            self._send_json({"uiprojects": self._list_ui_runs("projects")})
 
         elif self.path.startswith("/api/scenarios/"):
             self._serve_scenario_steps()
@@ -1562,7 +1576,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             params = json.loads(body) if body else {}
             subnet = params.get("subnet", "")
             # Slow part — subnet scan — happens OUTSIDE the state lock so
-            # parallel discovers on different subnets don't serialise behind
+            # parallel discovers on different subnets don't serialize behind
             # each other. The merge into the active network record happens
             # under the lock via mutate_state.
             devices, scanned_subnet = discover_devices(subnet)
@@ -1647,7 +1661,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             network_name = params.get("network", "")
             # Read the device list snapshot under the lock, release, do the
             # slow probes outside, then re-enter mutate_state for the merge.
-            # Holding the lock across the probes would serialise every refresh.
+            # Holding the lock across the probes would serialize every refresh.
             with _state_write_lock:
                 state = load_state()
                 net = next((n for n in (state.get("networks") or [])
@@ -1756,6 +1770,22 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                     cmd.extend(["--device-model", model])
         if script_def.get("needs_scenario") and params.get("scenario"):
             cmd.extend(["--name", params["scenario"]])
+        # The UI video tools take a PATH, not a name: the dropdown carries the stem and
+        # the folder is implied by which selector it is, so the card cannot point at the
+        # wrong kind of run file.
+        # Checked against the listing, not trusted: the value arrives from a client and
+        # is spliced into a path, so a name that is not one of the run files this server
+        # just offered has no business reaching the filesystem.
+        for flag, key, kind, arg in (("needs_uiclip", "uiclip", "clips", "--run"),
+                                     ("needs_uiproject", "uiproject", "projects",
+                                      "--project")):
+            if not (script_def.get(flag) and params.get(key)):
+                continue
+            name = params[key]
+            if name not in {r["name"] for r in self._list_ui_runs(kind)}:
+                self._send_json({"error": f"unknown {kind[:-1]}: {name}"}, 400)
+                return
+            cmd.extend([arg, f"test/uiscenarios/{kind}/{name}.json"])
         if script_def.get("needs_module") and params.get("module"):
             cmd.extend(["--module", params["module"]])
         # pass_device_model: forward the deviceModel picked in the UI's provisioning
@@ -1926,7 +1956,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
     def _serve_doc(self):
         """Serve any docs/**/*.md file as styled HTML with deep-link anchor support.
-        URL: /api/docs/<path>[?#anchor] — e.g. /api/docs/testing.md, /api/docs/tests/unit-tests.md"""
+        URL: /api/docs/<path>[?#anchor] — e.g. /api/docs/reference/testing.md, /api/docs/reference/tests/unit-tests.md"""
         import re as _re
         raw_path = self.path[len("/api/docs/"):]
         parts = raw_path.split("?", 1)
@@ -1960,6 +1990,27 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             {"name": s["path"].stem, "module": s["module"] or "", "also": s["also"]}
             for s in test_meta.collect_scenario_files()
         ]
+
+    def _list_ui_runs(self, kind: str):
+        """Return [{name, description}] for every UI clip or project.
+
+        Both live under test/uiscenarios/, the same split the tooling uses: a CLIP is
+        performed against a device and recorded, a PROJECT cuts clips together. The
+        description rides along so the dropdown can say what each one does rather than
+        only naming a file.
+        """
+        folder = SCRIPTS_DIR.parent / "test" / "uiscenarios" / kind
+        out = []
+        for path in sorted(folder.glob("*.json")):
+            try:
+                data = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue          # a malformed run must not empty the whole dropdown
+            if not isinstance(data, dict):
+                continue          # a JSON list or string has no description to read
+            out.append({"name": path.stem,
+                        "description": data.get("description", "")})
+        return out
 
     def _serve_unit_tests_for_module(self):
         """Render a per-module list of unit-test cases as an HTML view.
@@ -2066,7 +2117,7 @@ code {{ background: transparent; color: #8aa6ba; padding: 0; }}
             step_desc = html_mod.escape(str(step.get("description", "")))
             # `contract` and `observed` are the per-target performance data
             # and render as a single shared table (same shape as
-            # docs/tests/scenario-tests.md — see test_doc_gen._format_perf_table).
+            # docs/reference/tests/scenario-tests.md — see test_doc_gen._format_perf_table).
             # Everything else stays in the JSON-dump key/value list below.
             perf_html = _render_perf_table_html(step)
             other = {k: v for k, v in step.items()
@@ -2112,7 +2163,7 @@ h1 {{ color: #e94560; font-size: 18px; margin: 0 0 4px 0; }}
 .also {{ color: #6a7a99; font-size: 11px; margin: 0 0 12px 0; }}
 code {{ background: transparent; color: #c0c0c0; padding: 0; }}
 .step-kv code:first-child {{ color: #8aa6ba; }}
-/* Perf table — same shape as docs/tests/scenario-tests.md per-step table */
+/* Perf table — same shape as docs/reference/tests/scenario-tests.md per-step table */
 .perf {{ margin-top: 6px; }}
 .perf-head {{ font-size: 12px; color: #9aa6ba; margin: 4px 0 2px 0; }}
 .perf-table {{ border-collapse: collapse; font-size: 12px; margin: 2px 0; }}

@@ -1,14 +1,13 @@
-// @module noise
-// @also math16
+/// @module noise
+/// @also math16
 
-// Field composition: fbm, turbulence, warp and the kaleidoscope fold. One noise sample is a smooth
-// blur — these are the compositions that turn it into cloud, flame, flowing liquid and symmetry.
-// The tests pin the PROPERTY each one exists for (structure, creases, displacement, n-fold
-// symmetry) rather than specific values, because the value is only meaningful as a field.
+/// Field composition: fbm, turbulence, warp and the kaleidoscope fold.
+/// One noise sample is a smooth blur, these are the compositions that turn it into cloud, flame, flowing liquid and symmetry.
+/// The tests pin the PROPERTY each one exists for (structure, creases, displacement, n-fold symmetry) rather than specific values, because the value is only meaningful as a field.
 
 #include "doctest.h"
-#include "core/noise.h"
-#include "core/math16.h"
+#include "core/util/noise.h"
+#include "core/util/math16.h"
 
 #include <algorithm>
 #include <cmath>
@@ -16,10 +15,9 @@
 using namespace mm;
 
 namespace {
-/// How much detail a field carries at the FINEST scale — the second difference along a row, sampled
-/// at a small step. A single octave is smooth at this scale (it only varies over whole cells, 256
-/// units wide), so the added octaves are exactly what shows up here. Measured at a step of 16, a
-/// sixteenth of a cell, where octave 3 varies and octave 1 barely does.
+/// How much detail a field carries at the FINEST scale, the second difference along a row, sampled at a small step.
+/// A single octave is smooth at this scale (it only varies over whole cells, 256 units wide), so the added octaves are exactly what shows up here.
+/// Measured at a step of 16, a sixteenth of a cell, where octave 3 varies and octave 1 barely does.
 double fineDetail(uint8_t octaves) {
     double sum = 0.0;
     int n = 0;
@@ -34,10 +32,7 @@ double fineDetail(uint8_t octaves) {
 }
 }  // namespace
 
-// Summing octaves must NORMALISE, not accumulate: without dividing by the total amplitude the sum
-// would run past the field's range and clip. `v <= 255` cannot show this — a uint8_t satisfies it by
-// construction — so the check is that adding octaves never pushes the result outside the span its
-// own samples occupy.
+// Summing octaves must NORMALIZE, not accumulate: without dividing by the total amplitude the sum would run past the field's range and clip. `v <= 255` cannot show this, a uint8_t satisfies it by construction, so the check is that adding octaves never pushes the result outside the span its own samples occupy.
 TEST_CASE("fbm normalises its octave sum rather than accumulating") {
     for (uint32_t x = 0; x < 3000; x += 137) {
         int lo = 255, hi = 0;
@@ -47,8 +42,7 @@ TEST_CASE("fbm normalises its octave sum rather than accumulating") {
             if (v > hi) hi = v;
         }
         CAPTURE(x);
-        // Every octave count lands in the same neighbourhood; an unnormalised sum would climb
-        // toward saturation as octaves were added.
+        // Every octave count lands in the same neighborhood; an unnormalized sum would climb toward saturation as octaves were added.
         CHECK(hi - lo < 120);
     }
 }
@@ -58,9 +52,7 @@ TEST_CASE("one octave of fbm is plain noise") {
         CHECK(fbm8(x, 500, 1) == inoise8(x, 500));
 }
 
-// The reason fbm exists: successive octaves add structure at scales the base field has none at. A
-// single octave only varies over whole 256-unit cells, so at a sixteenth-cell step it is nearly a
-// straight ramp; three octaves visibly bend between the same points.
+// The reason fbm exists: successive octaves add structure at scales the base field has none at. A single octave only varies over whole 256-unit cells, so at a sixteenth-cell step it is nearly a straight ramp; three octaves visibly bend between the same points.
 TEST_CASE("each octave of fbm adds finer detail") {
     CHECK(fineDetail(3) > fineDetail(1));
 }
@@ -70,9 +62,8 @@ TEST_CASE("fbm with no octaves is a flat field") {
     CHECK(fbm8(999, 111, 0) == 128);
 }
 
-// A field must be a FIELD: neighbouring points are similar, distant points are not. This is what
-// separates noise from a raw hash, and it must survive the octave sum.
-TEST_CASE("fbm is smooth: neighbours resemble each other more than distant points") {
+// A field must be a FIELD: neighboring points are similar, distant points are not. This is what separates noise from a raw hash, and it must survive the octave sum.
+TEST_CASE("fbm is smooth: neighbors resemble each other more than distant points") {
     const int here = fbm8(5000, 5000, 3);
     const int near = fbm8(5000 + 8, 5000, 3);       // a fraction of a cell away
     const int far  = fbm8(5000 + 4096, 5000, 3);    // many cells away
@@ -85,8 +76,7 @@ TEST_CASE("3D fbm varies along z, so z can drive time") {
     CHECK(t0 != t1);                                // the field evolves rather than standing still
 }
 
-// Turbulence creases the field at the midpoint; the creases are the billowing look. Folding around
-// 128 means the result is built from magnitudes, so it sits low rather than centred.
+// Turbulence creases the field at the midpoint; the creases are the billowing look. Folding around 128 means the result is built from magnitudes, so it sits low rather than centered.
 TEST_CASE("turbulence folds the field at its midpoint") {
     CHECK(turbulence8(100, 100, 0) == 0);           // no octaves, nothing to fold
     uint32_t sum = 0;
@@ -96,8 +86,7 @@ TEST_CASE("turbulence folds the field at its midpoint") {
     CHECK(mean < 160.0);                            // magnitudes, not a field centred on 128
 }
 
-// Warp is the domain displacement: sampling through it must NOT give the same field back, or the
-// displacement did nothing.
+// Warp is the domain displacement: sampling through it must NOT give the same field back, or the displacement did nothing.
 TEST_CASE("warp displaces the field it samples") {
     int differences = 0;
     for (uint32_t x = 0; x < 3000; x += 173)
@@ -129,8 +118,7 @@ TEST_CASE("kaleido with fewer than two segments changes nothing") {
     CHECK(kaleido(12345, 0) == 12345);
 }
 
-// The property that makes a kaleidoscope: rotating by one full wedge gives the same output, which
-// is what makes the pattern repeat around the circle.
+// The property that makes a kaleidoscope: rotating by one full wedge gives the same output, which is what makes the pattern repeat around the circle.
 TEST_CASE("kaleido repeats every wedge") {
     const uint8_t segments = 6;
     const uint16_t wedge = static_cast<uint16_t>(65536u / segments);
@@ -141,9 +129,7 @@ TEST_CASE("kaleido repeats every wedge") {
     }
 }
 
-// The seam is where an off-by-one shows: `wedge - within` maps 0 to `wedge`, one past the end, so
-// every boundary carried a one-unit jump. Stepping across each seam must move by ONE unit, the same
-// as stepping anywhere else — a reviewer found the original off-by-one here.
+// The seam is where an off-by-one shows: `wedge - within` maps 0 to `wedge`, one past the end, so every boundary carried a one-unit jump. Stepping across each seam must move by ONE unit, the same as stepping anywhere else, a reviewer found the original off-by-one here.
 TEST_CASE("kaleido steps by one across every seam") {
     const uint8_t segments = 4;
     const uint16_t wedge = static_cast<uint16_t>(65536u / segments);
@@ -156,8 +142,7 @@ TEST_CASE("kaleido steps by one across every seam") {
     }
 }
 
-// Mirroring (rather than repeating) alternate wedges is what makes the seams join instead of
-// showing a hard edge at every boundary.
+// Mirroring (rather than repeating) alternate wedges is what makes the seams join instead of showing a hard edge at every boundary.
 TEST_CASE("kaleido mirrors alternate wedges so the seams join") {
     const uint8_t segments = 4;
     const uint16_t wedge = static_cast<uint16_t>(65536u / segments);

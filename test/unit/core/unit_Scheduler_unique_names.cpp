@@ -1,20 +1,12 @@
-// @module Scheduler
+/// @module Scheduler
 
 #include "doctest.h"
-#include "core/Scheduler.h"
-#include "core/MoonModule.h"
+#include "core/module/Scheduler.h"
+#include "core/module/MoonModule.h"
 
-// Pins Scheduler::ensureUniqueName and deduplicateNamesInTree. These prevent
-// the "second Layer (or any same-named module) is unreachable via parent_id"
-// bug — the HTTP API uses module names as identifiers, and findModuleByName
-// returns the first DFS match, so a second module with the same name from
-// ModuleFactory::create (which strips role-noun suffixes and can produce
-// duplicates like "Layer") could never be addressed.
+// Pins Scheduler::ensureUniqueName and deduplicateNamesInTree. These prevent the "second Layer (or any same-named module) is unreachable via parent_id" bug, the HTTP API uses module names as identifiers, and findModuleByName returns the first DFS match, so a second module with the same name from ModuleFactory::create (which strips role-noun suffixes and can produce duplicates like "Layer") could never be addressed.
 //
-// Both code paths that introduce modules — HttpServerModule::handleAddModule
-// (live add via /api/modules) and the persistence load in Scheduler::setup
-// (positional rebuild from /.config/<TypeName>.json) — call into the same
-// Scheduler helpers, so a single test covers both.
+// Both code paths that introduce modules, HttpServerModule::handleAddModule (live add via /api/modules) and the persistence load in Scheduler::setup (positional rebuild from /.config/<TypeName>.json), call into the same Scheduler helpers, so a single test covers both.
 
 namespace {
 
@@ -39,8 +31,7 @@ TEST_CASE("Scheduler::ensureUniqueName leaves unique names alone") {
 
 // The second module with a duplicate name gets " 2" suffixed; the first keeps its original name.
 TEST_CASE("Scheduler::ensureUniqueName suffixes the second occurrence") {
-    // Build: Container → child A ("Layer"), child B ("Layer"). The second one
-    // must be renamed; the first stays.
+    // Build: Container → child A ("Layer"), child B ("Layer"). The second one must be renamed; the first stays.
     mm::Scheduler s;
     auto* parent = new Stub();
     parent->setName("Effects");
@@ -83,9 +74,7 @@ TEST_CASE("Scheduler::ensureUniqueName keeps suffixing past 'Foo-2'") {
 
 // deduplicateNamesInTree() walks the entire module tree in one pass and disambiguates every duplicate (used after persistence load).
 TEST_CASE("Scheduler::deduplicateNamesInTree walks the whole tree") {
-    // Simulates the persistence-load case: positional rebuild produced two
-    // Layer modules with the same factory default name; one whole-tree pass
-    // must disambiguate every duplicate.
+    // Simulates the persistence-load case: positional rebuild produced two Layer modules with the same factory default name; one whole-tree pass must disambiguate every duplicate.
     mm::Scheduler s;
     auto* layers = new Stub();
     layers->setName("Effects");
@@ -135,18 +124,13 @@ TEST_CASE("Scheduler::firstByName returns the first match in tree-walk order") {
 
 // If the disambiguating suffix would overflow the 16-byte name buffer, ensureUniqueName refuses to truncate and keeps the colliding name (sharp edge, documented).
 TEST_CASE("Scheduler::ensureUniqueName leaves the colliding name alone when the suffixed result wouldn't fit") {
-    // MoonModule::name_ is 16 bytes (15 chars + NUL). A 13-char base name like
-    // "GlowParticles" reaches the buffer ceiling at suffix "10" — "GlowParticles-10"
-    // is 16 chars, doesn't fit. ensureUniqueName must refuse to truncate
-    // (keep the duplicate, return) rather than silently produce a different
-    // result than the caller asked for. This test pins that refusal.
+    // MoonModule::name_ is 16 bytes (15 chars + NUL). A 13-char base name like "GlowParticles" reaches the buffer ceiling at suffix "10", "GlowParticles-10" is 16 chars, doesn't fit. ensureUniqueName must refuse to truncate (keep the duplicate, return) rather than silently produce a different result than the caller asked for. This test pins that refusal.
     mm::Scheduler s;
     auto* parent = new Stub();
     parent->setName("Effects");
     s.addModule(parent);
 
-    // Create one base "GlowParticles" plus eight "GlowParticles-2".."GlowParticles-9".
-    // The next ensureUniqueName needs "GlowParticles-10" which doesn't fit.
+    // Create one base "GlowParticles" plus eight "GlowParticles-2".."GlowParticles-9". The next ensureUniqueName needs "GlowParticles-10" which doesn't fit.
     auto* first = new Stub();
     first->setName("GlowParticles");
     parent->addChild(first);
@@ -159,16 +143,14 @@ TEST_CASE("Scheduler::ensureUniqueName leaves the colliding name alone when the 
         parent->addChild(m);
     }
 
-    // The 10th sibling — ensureUniqueName cannot produce a fitting unique name.
+    // The 10th sibling, ensureUniqueName cannot produce a fitting unique name.
     auto* victim = new Stub();
     victim->setName("GlowParticles");
     parent->addChild(victim);
 
     s.ensureUniqueName(victim);
 
-    // Refused: keeps "GlowParticles" rather than producing a truncated/colliding name.
-    // (Note: this leaves two children both named "GlowParticles". The framework
-    // ships with this as a known sharp edge — see ensureUniqueName comment.)
+    // Refused: keeps "GlowParticles" rather than producing a truncated/colliding name. (Note: this leaves two children both named "GlowParticles". The framework ships with this as a known sharp edge, see ensureUniqueName comment.)
     CHECK(std::strcmp(victim->name(), "GlowParticles") == 0);
 
     s.deleteTree(parent);

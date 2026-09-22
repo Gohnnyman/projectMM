@@ -1,18 +1,13 @@
-// S31 web-flash guard contract — the installer special-cases chips esptool-js
-// (the browser flasher) can't handle, so a connect-flash failure shows "flash via
-// the CLI" guidance instead of a bare timeout. The guard keys on a chip-family
-// string (install.js `WEB_FLASH_UNSUPPORTED_CHIPS`); that string must match the
-// `chip` a board in deviceModels.json actually reports, or the guidance never fires.
+// Web-flash guard contract — the installer special-cases chips esptool-js (the browser flasher)
+// cannot handle, so a connect-flash failure shows "flash via the CLI" guidance instead of a bare
+// timeout. The guard keys on a chip-family string (install.js `WEB_FLASH_UNSUPPORTED_CHIPS`); that
+// string must match the `chip` a board in deviceModels.json actually reports, or it never fires.
 //
-// Background: the ESP32-S31's ROM magic collides with the classic ESP32's, and
-// esptool-js has only a magic table (no S31 secondary detection), so a browser
-// flash can't work safely — CLI flashing (esptool.py) is the path. See
-// install.js's WEB_FLASH_UNSUPPORTED_CHIPS comment + docs/backlog/backlog-core.md.
-//
-// This test pins two things so the guard can't silently break:
-//   1. install.js declares ESP32-S31 in WEB_FLASH_UNSUPPORTED_CHIPS, and
-//   2. a deviceModels.json board reports chip "ESP32-S31" (the exact guard string),
-// so the connect-flash message logic actually triggers for the S31 board.
+// The set is EMPTY today: esptool-js 0.7.0 added the ESP32-S31 target and chip-id detection
+// (GET_SECURITY_INFO), so every chip projectMM ships is browser-flashable. The guard stays because
+// a new chip lands here before esptool-js knows it, and these tests pin the MECHANISM rather than
+// any one entry: whatever the set holds must be a chip a catalog board reports, and the guidance
+// must stay scoped to the connect-flash stage.
 //
 // Run: `node --test test/js`.
 
@@ -32,16 +27,30 @@ const boards = JSON.parse(
 // The chip families install.js flags as not-browser-flashable. Parsed from the
 // source so the test reads the real declaration (no hard-coded copy that could drift).
 function unsupportedChips() {
-    const m = installJs.match(/WEB_FLASH_UNSUPPORTED_CHIPS\s*=\s*new Set\(\[([^\]]*)\]\)/);
+    // `new Set()` (empty) and `new Set([...])` are both valid declarations: the set is expected to
+    // be empty whenever esptool-js covers every chip we ship.
+    const m = installJs.match(/WEB_FLASH_UNSUPPORTED_CHIPS\s*=\s*new Set\((?:\[([^\]]*)\])?\)/);
     assert.ok(m, "install.js must declare WEB_FLASH_UNSUPPORTED_CHIPS as a Set literal");
-    return m[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+    return (m[1] || "").split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
 }
 
-test("install.js flags ESP32-S31 as not browser-flashable", () => {
+test("the S31 is browser-flashable: esptool-js 0.7.0 knows the chip", () => {
     assert.ok(
-        unsupportedChips().includes("ESP32-S31"),
-        "WEB_FLASH_UNSUPPORTED_CHIPS must include ESP32-S31 (esptool-js has no safe S31 support)"
+        !unsupportedChips().includes("ESP32-S31"),
+        "esptool-js 0.7.0 ships the ESP32-S31 target and chip-id detection, so the S31 no longer " +
+        "needs the CLI-only guard"
     );
+    // The pin is what makes that true: an older esptool-js has no S31 target, and its magic table
+    // would mis-identify the S31 as a classic ESP32 and flash the wrong stub.
+    const orchestrator = readFileSync(join(ROOT, "mooninstaller", "install-orchestrator.js"), "utf8");
+    const pin = orchestrator.match(/ESPTOOL_JS_VERSION\s*=\s*"(\d+)\.(\d+)\.(\d+)"/);
+    assert.ok(pin, "install-orchestrator.js must pin ESPTOOL_JS_VERSION");
+    const [maj, min] = [Number(pin[1]), Number(pin[2])];
+    assert.ok(maj > 0 || min >= 7,
+        `esptool-js must be >= 0.7.0 for S31 support, pinned ${pin[0]}`);
+    // The import must load the SAME version the footer credit shows.
+    assert.ok(orchestrator.includes(`esptool-js@${pin[1]}.${pin[2]}.${pin[3]}/bundle.js`),
+        "the unpkg import must match ESPTOOL_JS_VERSION");
 });
 
 test("the guard only fires on the connect-flash stage", () => {

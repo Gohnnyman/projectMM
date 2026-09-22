@@ -593,30 +593,12 @@ document.addEventListener('DOMContentLoaded', () => {
       myDevices.addProvisionedDevice(url, defaultsApplied ? board : "");
     }
 
-    // esptool-js (the browser flasher) has no chip definition for these targets
-    // yet, so a browser flash can't begin — the CLI (esptool.py, which does know
-    // them) is the working path. Drop a chip from this set once esptool-js ships
-    // support for it (then also bump the esptool-js pin in install-orchestrator.js).
-    //
-    // The S31 is doubly unsafe in the browser, not just unsupported: its chip
-    // magic (0xF01D2E07 / 15736195) COLLIDES with the classic ESP32's. esptool.py
-    // disambiguates them with secondary register detection (it sets the S31's
-    // USES_MAGIC_VALUE=False); esptool-js 0.6.0 has only the magic table, where
-    // that value maps to ESP32ROM. So even if the S31's ROM-bootloader sync ever
-    // succeeded, esptool-js would mis-identify the RISC-V S31 as a classic Xtensa
-    // ESP32 and try to flash it with the wrong stub + flash params — corruption,
-    // not a lucky success. esptool-js needs the S31 secondary-detection logic
-    // before browser flashing is safe; a version bump alone is not enough.
-    //
-    // Re-verified 2026-08-19 against esptool-js main and the 0.6.1 release (2026-08-06):
-    // still NO S31. src/targets/ has no esp32s31.ts (esp32{,c2,c3,c5,c6,c61,h2,p4,s2,s3}.ts
-    // + esp8266/rom only), esploader.ts's magic2Chip has no ESP32S31ROM entry, and a repo
-    // code search for "S31" returns nothing. Support exists only as OPEN PR
-    // esptool-js#250, which adds ESP32S31ROM and — confirming the collision analysis above
-    // — identifies the chip via GET_SECURITY_INFO rather than the magic table; it is
-    // blocked on overlapping unreviewed work in #197. esp-web-tools depends on
-    // esptool-js ^0.6.0, so it inherits the same gap. Watch #250 landing in a 0.6.2/0.7.0.
-    const WEB_FLASH_UNSUPPORTED_CHIPS = new Set(["ESP32-S31"]);
+    // Every chip projectMM ships is browser-flashable as of esptool-js 0.7.0, which added the
+    // ESP32-S31 target and chip-id detection (GET_SECURITY_INFO) so the S31's magic collision with
+    // the classic ESP32 can no longer mis-identify it. The set stays because a NEW chip lands here
+    // before esptool-js knows it, and an empty set is the honest way to say "none, today".
+    // The CLI (esptool.py) remains the fallback the error path points at.
+    const WEB_FLASH_UNSUPPORTED_CHIPS = new Set();
 
     // Map a firmware key to its chip family ("esp32s31" → "ESP32-S31", "esp32s3-n16r8"
     // → "ESP32-S3", "esp32p4rev1-eth" → "ESP32-P4", "esp32*" → "ESP32") — the same prefix
@@ -1150,7 +1132,13 @@ document.addEventListener('DOMContentLoaded', () => {
       // active wherever NetworkModule exists (the radio is always available); a board
       // that lists WiFi as supported but ships no NetworkModule entry stays "supported".
       const ethConfigured = (m) => {
-        const t = m.controls && m.controls.ethType;
+        const c = m.controls;
+        if (!c) return false;
+        // A named board preset IS the configuration: it carries the PHY and the pins, so a
+        // board that picks one lists no ethType of its own. Custom is the escape hatch and
+        // names no PHY, so it falls through to the ethType its entry must then carry.
+        if (c.ethBoard !== undefined && c.ethBoard !== "Custom") return true;
+        const t = c.ethType;
         return t !== undefined && t !== 0 && t !== "0" && t !== "None";
       };
       const CAP_MODULE = {

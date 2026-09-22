@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Measure the repo's current state into `docs/metrics/` — the lean-o-meter.
+"""Measure the repo's current state into `docs/reference/metrics/` — the lean-o-meter.
 
 The v4 goal is a system that stays small as it gains features, and the honest way to know
 whether that is happening is to measure it every commit rather than to assert it. This
 writes ONE small file holding only the CURRENT numbers: flash per firmware variant, tick
 and FPS per target, lines of code by area, comment density, test counts, docs inventory.
 
-**The file never grows, because the history is git's.** `git log -p docs/metrics/repo-health.json`
+**The file never grows, because the history is git's.** `git log -p docs/reference/metrics/repo-health.json`
 is the trend; the file itself is a snapshot. That is the whole design: no accumulating
 log, no rolling window, no second source of truth to prune later.
 
@@ -21,10 +21,12 @@ so two machines agree and a number never moves for a reason nobody can explain.
 
 Usage:
   uv run moondeck/check/repo_health.py            # print the snapshot + delta, write nothing
-  uv run moondeck/check/repo_health.py --write    # write docs/metrics/repo-health.* (KPI gate does this)
+  uv run moondeck/check/repo_health.py --write    # write docs/reference/metrics/repo-health.* (KPI gate does this)
 """
 
 import argparse
+import datetime as _dt
+import time as _time
 import json
 import subprocess
 import sys
@@ -37,11 +39,11 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "moondeck" / "build"))
 from build_esp32 import FIRMWARES  # noqa: E402
 from build_desktop import desktop_binary  # noqa: E402 (one definition of where it lands)
-HEALTH_FILE = ROOT / "docs" / "metrics" / "repo-health.json"
+HEALTH_FILE = ROOT / "docs" / "reference" / "metrics" / "repo-health.json"
 # The same snapshot as a table a human reads: units applied, ratios as percentages, areas
 # grouped. The JSON stays the source the delta is computed from; this is the view. Both
 # are generated from one measurement, so they cannot disagree.
-HEALTH_MD = ROOT / "docs" / "metrics" / "repo-health.md"
+HEALTH_MD = ROOT / "docs" / "reference" / "metrics" / "repo-health.md"
 
 # Source areas measured separately: the core/light split is the one the architecture cares
 # about (core is meant to grow slower than the domain), and the rest are the other places
@@ -122,6 +124,25 @@ def measure_comments():
 # to prevent, moved one step later.
 MEASURED_THIS_RUN = set()
 
+# How long a carried number may go unmeasured before the report calls it stale. A carry is correct
+# (the alternative, dropping the row, loses the only number there is), but an UNBOUNDED carry is
+# not: esp32p4rev1-eth and esp32s31 both held a byte-identical value across eight commits while the
+# code moved under them, and when they were finally rebuilt the accumulated growth landed as a
+# single +274 KB / +238 KB jump that read as though one commit had caused it. Seven days is long
+# enough that an untouched target stays quiet, short enough that a drifting one is caught while the
+# cause is still findable.
+STALE_AFTER_DAYS = 7
+
+# When each firmware's size was last actually measured, ISO dates keyed by firmware. Stored in its
+# own section rather than inside `flash`, which is a plain name->bytes map the report renders row
+# by row: a non-firmware key there becomes a phantom target in the table.
+MEASURED_DATES = {}
+
+# How recently a binary must have been built to count as measured rather than carried. A window
+# rather than a source-timestamp comparison: what matters is that this target was built during the
+# work being reported, not whether a file was touched afterwards.
+MEASURED_WITHIN_HOURS = 12
+
 
 def app_partition_bytes(firmware):
     """The app slot's size for `firmware`, from the partition CSV its build actually used.
@@ -176,11 +197,9 @@ def measure_flash():
     holding five old firmwares that produced "−230 KB ✓", "−193 KB ✓", "−279 KB ✓" in one run,
     for firmwares nobody had rebuilt, because the baseline had been recorded on a different
     machine. A metric that moves when nothing was built is worse than a missing one: it is
-    read as a result. Same predicate as check_esp32_built.py, imported rather than restated.
+    read as a result. A binary built within MEASURED_WITHIN_HOURS counts; anything older is
+    carried and aged, so a number nobody has refreshed says so rather than passing as current.
     """
-    sys.path.insert(0, str(ROOT / "moondeck" / "check"))
-    from check_esp32_built import newest_source, compiled_sources
-
     flash = {}
     build = ROOT / "build"
     if not build.exists():
@@ -190,39 +209,42 @@ def measure_flash():
         if not binary.exists():
             continue                       # never built here: carry the previous number forward
         firmware = d.name.replace("esp32-", "", 1)
-        # One stat, so the size recorded and the timestamp judged describe the same file even if
-        # a build lands mid-loop. STRICTLY newer: equal mtimes mean a source was written in the
-        # same filesystem tick as the binary, and which came first is unknowable, so the honest
-        # reading is "might be stale" rather than "fresh".
+        # Measured means BUILT DURING THIS WORK, not "newer than every source". The stricter rule
+        # (binary newer than its newest source) rejected a binary whose source was merely touched
+        # afterwards, which is a real measurement of essentially this code, and it cost a full
+        # rebuild of every target to say a number the build had already produced. What the report
+        # needs to know is whether somebody built this target while working, and the next commit
+        # measures again regardless. One stat, so the size recorded and the age judged describe the
+        # same file even if a build lands mid-loop.
         st = binary.stat()
-        _, newest = newest_source(compiled_sources(firmware))
-        if st.st_mtime <= newest:
-            continue
+        if (_time.time() - st.st_mtime) > MEASURED_WITHIN_HOURS * 3600:
+            continue                       # from an older session: carry it, and let it age
         flash[firmware] = st.st_size
         MEASURED_THIS_RUN.add(firmware)
+        MEASURED_DATES[firmware] = _dt.date.today().isoformat()
     # The desktop binary, located by build_desktop.desktop_binary() so this and collect_kpi.py
     # cannot name different files in the same run. A bare build/projectMM matched nothing off
     # macOS, so this metric silently carried a foreign machine's number forward while reading as
     # a measurement: the same defect the firmware freshness rule above exists to prevent.
     #
-    # Held to the SAME freshness rule as the firmwares rather than trusting the build gate to have
-    # just built it. That gate does, but `collect_kpi.py --commit` is also run standalone, where
-    # nothing builds first, and a rule that holds only inside one caller is not a rule.
+    # Held to the SAME rule as the firmwares rather than trusting the build gate to have just
+    # built it. That gate does, but `collect_kpi.py --commit` is also run standalone, where nothing
+    # builds first, and a rule that holds only inside one caller is not a rule.
     desktop = desktop_binary()
     if desktop:
         st = desktop.stat()
-        _, newest = newest_source()
-        if st.st_mtime > newest:
+        if (_time.time() - st.st_mtime) <= MEASURED_WITHIN_HOURS * 3600:
             flash["desktop"] = st.st_size
-            MEASURED_THIS_RUN.add("desktop")   # same rule as the firmwares: measured, so say so
+            MEASURED_THIS_RUN.add("desktop")
+            MEASURED_DATES["desktop"] = _dt.date.today().isoformat()
     return flash
 
 
 def measure_docs():
     """Documentation inventory — the counts the docs-bloat conversation actually turns on."""
     md = [f for f in _git_files("docs") if f.suffix == ".md"]
-    plans = [f for f in md if "history/plans" in f.as_posix()]
-    lessons = ROOT / "docs" / "history" / "lessons.md"
+    plans = [f for f in md if "work/present" in f.as_posix() or "work/past/plans" in f.as_posix()]
+    lessons = ROOT / "docs" / "work" / "past" / "lessons.md"
     claude = ROOT / "CLAUDE.md"
     backlog = [f for f in md if "backlog" in f.as_posix()]
     return {
@@ -247,7 +269,7 @@ def measure_tests():
 
 
 def measure_complexity():
-    """Complexity, the number lizard owns (docs/testing.md § Static analysis).
+    """Complexity, the number lizard owns (docs/reference/testing.md § Static analysis).
 
     Deliberately the RAW count, not the baselined one: the gate (check_lizard.py) subtracts
     whitelizard.txt so it fails only on new violations, but the TREND has to see the whole
@@ -279,13 +301,41 @@ def _head():
                           capture_output=True, text=True).stdout.strip()
 
 
+def _built_label(firmware, measured_on):
+    """The Built cell: measured now, carried recently, or carried too long to trust.
+
+    A carry is correct and must stay (dropping the row loses the only number there is), but an
+    unbounded one is how a metric goes quietly wrong: the report keeps printing a value nobody has
+    checked, and the growth surfaces later as one large jump attributed to whatever commit happened
+    to rebuild that target. Aging the carry is what turns that silence into a visible number.
+    """
+    if firmware in MEASURED_THIS_RUN:
+        return "yes"
+    if not measured_on:
+        return "carried (age?)"       # pre-dates this record: unknown, and honest about it
+    try:
+        age = (_dt.date.today() - _dt.date.fromisoformat(measured_on)).days
+    except ValueError:
+        return "carried (age?)"
+    if age >= STALE_AFTER_DAYS:
+        return f"**STALE {age}d**"
+    return f"carried {age}d"
+
+
 def snapshot(perf=None):
     """The full current-state measurement. `perf` is the tick/FPS block the KPI collector
     already gathered — passed in rather than re-measured, since it needs a running device."""
     head = _head()
+    # Both are module-level and describe THIS run, so a second snapshot() in one process must not
+    # inherit the first's claims: a target that could not be measured the second time would
+    # otherwise still report "yes" and carry a stale date.
+    MEASURED_THIS_RUN.clear()
+    MEASURED_DATES.clear()
+    flash = measure_flash()          # populates MEASURED_DATES as a side effect, so call it first
     return {
         "commit": head,
-        "flash": measure_flash(),
+        "flash": flash,
+        "measured": dict(MEASURED_DATES),
         "perf": perf or {},
         "loc": measure_loc(),
         "comments": measure_comments(),
@@ -307,7 +357,7 @@ def _valid_snapshot(data, source):
         print(f"repo-health: ignoring {source}: expected an object, got {type(data).__name__}",
               file=sys.stderr)
         return {}
-    for key in ("flash", "perf", "complexity"):
+    for key in ("flash", "perf", "complexity", "measured"):
         if key in data and not isinstance(data[key], dict):
             print(f"repo-health: ignoring {source}: section '{key}' is "
                   f"{type(data[key]).__name__}, expected an object", file=sys.stderr)
@@ -380,7 +430,10 @@ def merge_carry_forward(new, old):
     # filtered out. So the rule is "an esp32* key that is not a known firmware is a ghost",
     # which is exactly what a rename leaves behind and nothing else.
     known = set(FIRMWARES)
-    for key in ("flash", "perf", "complexity"):
+    # The measurement dates carry exactly like the values they describe: a target not built this
+    # run keeps both its number and the date that number was taken, which is what lets the report
+    # age a carry instead of presenting it as current.
+    for key in ("flash", "perf", "complexity", "measured"):
         merged = dict(old.get(key, {}))
         if key == "flash":
             merged = {k: v for k, v in merged.items()
@@ -442,7 +495,13 @@ def _arrow(new, old, key, fmt=str, lower_is_better=True):
     diff = new - old[key]
     sign = "+" if diff > 0 else "−"
     mark = "" if lower_is_better is None else (" ⚠" if (diff > 0) == lower_is_better else " ✓")
-    return f"{fmt(new)} ({sign}{fmt(abs(diff))}){mark}"
+    # The VALUE's unit is not always the DELTA's: a 224-byte move formatted in KB reads "+0 KB",
+    # a change the mark flags and the number then denies. So a delta too small for the value's
+    # unit falls back to the raw one, and the reader sees what actually moved.
+    shown = fmt(abs(diff))
+    if fmt is _kb and abs(diff) < 1024:
+        shown = f"{abs(diff):,} B"
+    return f"{fmt(new)} ({sign}{shown}){mark}"
 
 
 # Columns of the scenario matrix, in fleet order. A fixed list rather than whatever the data
@@ -459,10 +518,10 @@ def render_markdown(new, old):
     # count GitHub's raw view uses, so the link resolves in both places.
     L = [f"# Repo health", "",
          f"Measured at `{new.get('commit', '?')}`. Generated by "
-         f"[`moondeck/check/repo_health.py`](../../moondeck/check/repo_health.py) on every "
+         f"[`moondeck/check/repo_health.py`](../../../moondeck/check/repo_health.py) on every "
          f"KPI-gate run. **Do not edit by hand.**", "",
          "Current state only; the trend is this file's git history "
-         "(`git log -p docs/metrics/repo-health.md`). Nothing here fails a build: the numbers make "
+         "(`git log -p docs/reference/metrics/repo-health.md`). Nothing here fails a build: the numbers make "
          "growth visible, the judgment stays human.", ""]
 
     if new.get("flash"):
@@ -476,12 +535,17 @@ def render_markdown(new, old):
             cap = app_partition_bytes(k) if k.startswith("esp32") else 0
             cap_s = _kb(cap) if cap else "-"
             used = f"{(100.0 * v / cap):.0f}%" if cap else "-"
-            built = "yes" if k in MEASURED_THIS_RUN else "carried"
+            built = _built_label(k, new.get("measured", {}).get(k))
             L.append(f"| {k} | {_arrow(v, o.get('flash'), k, _kb)} | {cap_s} | {used} | {built} |")
         L += ["",
-              ("`Built: carried` means that firmware was NOT rebuilt this run and its number is "
-               "the previous one, so an absent delta says nothing about the change. `Used` is "
-               "against the app slot in the firmware's own partition table."), ""]
+              ("`Built: yes` was measured this run. `carried (age?)` was not rebuilt either and "
+               "predates this record, so its age is unknown: it dates itself on the next build. "
+               "`carried Nd` was NOT rebuilt and its number is "
+               f"N days old, so an absent delta says nothing about the change. **STALE** marks a "
+               f"carry older than {STALE_AFTER_DAYS} days: the number has gone unchecked long "
+               "enough that growth will surface later as one jump, blamed on whichever commit "
+               "happens to rebuild that target. `Used` is against the app slot in the firmware's "
+               "own partition table."), ""]
 
     if new.get("perf"):
         L += ["## Render performance", "", "| Target | Tick | FPS |", "|---|---:|---:|"]
@@ -535,8 +599,9 @@ def render_markdown(new, old):
                        "milliseconds. `-` means that target has never run that scenario."), "",
                   (f"**Coverage: {have}/{cells} cells measured ({100 * have // cells}%), "
                    f"{solid} of them with 4+ samples ({100 * solid // cells}%).** The blanks are "
-                   "the point: a target that has never run a scenario cannot regress in it, and "
-                   "cannot be compared against the others. Filling the matrix means running the "
+                   "the point: a regression on a target that has never run a scenario cannot be "
+                   "DETECTED in it, and the target cannot be compared against the others. "
+                   "Filling the matrix means running the "
                    "scenario suite on each bench board, which is a standing task rather than a "
                    "one-off."), ""]
 

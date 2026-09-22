@@ -49,7 +49,7 @@ MAX_ROWS = 40
 #                  (no symbol at all), so `.flash.rodata` is ~427 KB while barely any of it is
 #                  attributable — which is why RODATA is reported but usually near zero, and why
 #                  `--strings` measures that section wholesale instead.
-#   D/d .data    — initialised globals: RAM at runtime AND a flash copy to initialise from
+#   D/d .data    — initialized globals: RAM at runtime AND a flash copy to initialize from
 #   B/b .bss     — zero-init globals: RAM only
 _AREA = {"T": "code", "t": "code", "W": "code", "V": "code",
          "R": "rodata", "r": "rodata",

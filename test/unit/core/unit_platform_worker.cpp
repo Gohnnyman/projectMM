@@ -1,15 +1,10 @@
-// @module platform
+/// @module platform
 
-// Pins the platform worker-task seam (spawnPinnedTask / notifyTask / waitNotify / stopPinnedTask)
-// that the multicore render↔encode split is built on. On the host the seam is a std::thread +
-// condition_variable, so these tests run the REAL producer/consumer handoff on a second thread —
-// the same invariants the ESP32 core-1 encode task relies on, exercised where CI can catch a race
-// (run the suite under TSan/ASan). No RTOS on the host, so the `core` pin is a no-op; the wake,
-// the single-slot latch, the timeout, and the clean stop-drain are what's under test.
+/// Pins the platform worker-task seam (spawnPinnedTask / notifyTask / waitNotify / stopPinnedTask) that the multicore render↔encode split is built on. On the host the seam is a std::thread + condition_variable, so these tests run the REAL producer/consumer handoff on a second thread, the same invariants the ESP32 core-1 encode task relies on, exercised where CI can catch a race (run the suite under TSan/ASan). No RTOS on the host, so the `core` pin is a no-op; the wake, the single-slot latch, the timeout, and the clean stop-drain are what's under test.
 
 #include "doctest.h"
 #include "platform/platform.h"
-#include "core/TryLock.h"
+#include "core/util/TryLock.h"
 
 #include <atomic>
 #include <chrono>
@@ -18,9 +13,7 @@
 using namespace std::chrono_literals;
 
 namespace {
-// A worker body that counts wakes until stopped. `wakes` is the consumer-visible proof each notify
-// was delivered exactly once; `running` proves the fn actually started; the loop exits when a woken
-// waitNotify returns while `stop` is set (the production shape: wake, re-check stop, drain, return).
+// A worker body that counts wakes until stopped. `wakes` is the consumer-visible proof each notify was delivered exactly once; `running` proves the fn actually started; the loop exits when a woken waitNotify returns while `stop` is set (the production shape: wake, re-check stop, drain, return).
 struct Counter {
     mm::platform::WorkerTask task;
     std::atomic<int> wakes{0};
@@ -51,7 +44,7 @@ TEST_CASE("worker seam: each notify wakes the task exactly once") {
         mm::platform::notifyTask(c.task);
         std::this_thread::sleep_for(5ms);   // let the consumer drain this notify
     }
-    // Exactly 5 wakes — no lost notify, no double-count.
+    // Exactly 5 wakes, no lost notify, no double-count.
     CHECK(c.wakes.load() == 5);
 
     c.stop.store(true);
@@ -60,8 +53,7 @@ TEST_CASE("worker seam: each notify wakes the task exactly once") {
 }
 
 TEST_CASE("worker seam: waitNotify times out and returns false when not notified") {
-    // A worker that records whether its wait timed out. No notify is ever sent, so the first wait
-    // must return false (timeout), proving the WDT-service path (false → the fn re-checks its flags).
+    // A worker that records whether its wait timed out. No notify is ever sent, so the first wait must return false (timeout), proving the WDT-service path (false → the fn re-checks its flags).
     struct TimeoutProbe {
         mm::platform::WorkerTask task;
         std::atomic<bool> sawTimeout{false};
@@ -82,9 +74,7 @@ TEST_CASE("worker seam: waitNotify times out and returns false when not notified
 }
 
 TEST_CASE("worker seam: stopPinnedTask joins — the fn has returned before it returns") {
-    // The stop must be a real join: after stopPinnedTask returns, the worker body is guaranteed done
-    // (so its buffers are safe to free — the render-split drain contract). A flag the body sets last
-    // proves it ran to completion before stop returned.
+    // The stop must be a real join: after stopPinnedTask returns, the worker body is guaranteed done (so its buffers are safe to free, the render-split drain contract). A flag the body sets last proves it ran to completion before stop returned.
     struct Joiner {
         mm::platform::WorkerTask task;
         std::atomic<bool> exited{false};
@@ -102,9 +92,7 @@ TEST_CASE("worker seam: stopPinnedTask joins — the fn has returned before it r
 }
 
 // --- TryLock: the cross-core sender latch ---------------------------------------------------------
-// The WS sender has two producers on two cores once the split engages (core 0's drain + state push,
-// core 1's offloaded PreviewDriver). TryLock is what excludes them. Try-only BY DESIGN: a caller on
-// the render/encode thread must never block on a peer (hot-path rule), so the loser SKIPS its slot.
+// The WS sender has two producers on two cores once the split engages (core 0's drain + state push, core 1's offloaded PreviewDriver). TryLock is what excludes them. Try-only BY DESIGN: a caller on the render/encode thread must never block on a peer (hot-path rule), so the loser SKIPS its slot.
 // That constraint is what lets it be a plain atomic_flag test-and-set rather than an OS mutex.
 
 TEST_CASE("TryLock: acquiring excludes a second acquirer, release re-opens it") {
@@ -120,8 +108,7 @@ TEST_CASE("TryLock: a second THREAD is refused while held, and never blocks") {
     mm::TryLock lk;
     REQUIRE(lk.tryAcquire());          // this thread holds it
 
-    // The peer must come back promptly with "busy" rather than waiting for us — the whole point of
-    // try-only: on the device that peer is the encode thread, which must not stall on the transport.
+    // The peer must come back promptly with "busy" rather than waiting for us, the whole point of try-only: on the device that peer is the encode thread, which must not stall on the transport.
     std::atomic<bool> peerGotIt{true}, peerReturned{false};
     std::thread peer([&] {
         peerGotIt.store(lk.tryAcquire());

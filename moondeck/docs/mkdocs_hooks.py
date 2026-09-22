@@ -1,6 +1,6 @@
 """MkDocs build hooks. Wired via `hooks:` in mkdocs.yml. Three jobs:
 
-1. on_files — synthesise `tests/unit-tests.md` + `tests/scenario-tests.md` into
+1. on_files — synthesise `reference/tests/unit-tests.md` + `reference/tests/scenario-tests.md` into
    MkDocs' virtual file tree from the test files (via `_test_metadata.py`, the
    same parser the CLI generator + MoonDeck use). So the inventory pages are NOT
    committed to the repo and can't drift — rebuilt from source every build. The
@@ -58,7 +58,7 @@ _OUT_OF_DOCS = ("src/", "moondeck/", "test/", "esp32/", "mooninstaller/",
                 ".clang-tidy", ".clangd")
 
 # A markdown link into a repo file the site doesn't host. Two authored shapes, both
-# common in the transient history/plans + backlog notes:
+# common in the transient docs/work/ notes:
 #   ../../src/foo   — climbs out of docs/ with `../`
 #   src/foo         — repo-ROOT-relative, no `../` (resolves to a nonexistent docs/src/foo)
 # The pattern accepts an optional `../` run, then the href; _sub sorts out which case.
@@ -108,10 +108,10 @@ def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
         if target.startswith(_OUT_OF_DOCS) and not target.startswith("docs/"):
             return f"]({_BLOB_BASE}/{target}{frag})"
         # Fallback for links authored relative to the REPO ROOT (common in the
-        # transient history/plans + backlog notes, written before their file sat
+        # transient docs/work/ notes, written before their file sat
         # this deep under docs/): strip leading `../` and see if the remainder is
         # itself an out-of-docs repo path. Catches `../../moondeck/x.py` from a
-        # docs/history/plans/ page, which resolves to a nonexistent docs/moondeck/x.py,
+        # docs/work/past/plans/ page, which resolves to a nonexistent docs/moondeck/x.py,
         # AND a bare `src/x.js` / `docs/plan.md` with no `../` at all (same intent,
         # written root-relative) — both 404 in-site, so send them to the GitHub blob.
         stripped = re.sub(r'^(?:\.\./)+', '', rel)
@@ -128,6 +128,11 @@ def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
 
 # The consolidated catalog pages whose ### effect/modifier/layout blocks are rendered
 # as a table (source stays authored as readable prose blocks; the table is build-time).
+# The ONE list of pages rendered as card tables, and the one home for it: this is the code
+# that renders them, so a page is a catalog page exactly when the build treats it as one.
+# check_specs and check_docgen import this rather than keeping their own (check_specs kept a
+# four-entry copy whose paths stopped existing at the docs restructure, so its catalog branch
+# quietly never ran).
 _CATALOG_PAGES = {
     "moonmodules/light/effects.md",
     "moonmodules/light/modifiers.md",
@@ -142,7 +147,33 @@ _CATALOG_PAGES = {
     "moonmodules/light/supporting.md",
 }
 
+# The module types whose preview is MOTION, so their image is a .gif rather than a .png:
+# a still frame of a moving effect says almost nothing about it. One home, because three
+# places act on it: check_docgen enforces the format, screenshot_modules captures it, and
+# the catalog pages carry the result.
+ANIMATED_TYPES = ("effects", "modifiers", "layouts")
+ANIMATED_PAGES = frozenset(f"moonmodules/light/{t}.md" for t in ANIMATED_TYPES)
+
+# The summary pages, whose rows carry no preview. A catalog card leads with its image
+# because a reader picks an effect by looking at it, where these rows describe a base
+# class, a binding type or an init-order sequencer: there is no card in the UI to capture.
+# The other card rules still apply, since a summary row is read across like any other.
+PREVIEWLESS_PAGES = frozenset({
+    "moonmodules/core/supporting.md",
+    "moonmodules/light/supporting.md",
+})
+
 _H3_RE = re.compile(r'^###\s+(?P<title>.+?)\s*$')
+# A card title is `Name <emoji> · qualifier`: the name runs until the first word that does
+# not start with a letter, digit or "(". Written as a class rather than a list of the emoji
+# in use, because every new emoji silently broke the previous form (a name kept its emoji,
+# so its `## <Name>, details` section stopped resolving) and nothing failed loudly.
+_CARD_NAME_RE = re.compile(r"\s+[^\w(]")
+
+
+def card_name(title: str) -> str:
+    """The card's name: its title up to the first emoji or separator."""
+    return _CARD_NAME_RE.split(title)[0].strip()
 _H2_RE = re.compile(r'^##\s+')                         # any level-2 heading = section boundary
 _ANCHOR_RE = re.compile(r'^<a id="(?P<id>[^"]+)"></a>\s*$')
 _IMG_RE = re.compile(r'^<img\b.*?>\s*$')
@@ -154,7 +185,42 @@ _ORIGIN_RE = re.compile(r'^Origin:\s*(?P<body>.+?)\s*$')
 _TESTS_RE = re.compile(r'^\[Tests\]\((?P<href>[^)]+)\)\s*$')
 _TESTS_MULTI_RE = re.compile(r'^Tests:\s*(?P<body>.+?)\s*$')
 _DETAIL_RE = re.compile(r'^Detail:\s*(?P<body>.+?)\s*$')   # `Detail: [Foo.md](..) · …` → Links column
-_DETAILS_RE = re.compile(r'^##\s+(?P<name>.+?)\s+—\s+details\s*$')
+# `## <Name>, details`. A COMMA, not an em-dash: em-dashes are banned repo-wide
+# (documentation-standards.md), and a heading form the build requires must not be the
+# one character the prose rules forbid.
+_DETAILS_RE = re.compile(r'^##\s+(?P<name>.+?),\s+details\s*$')
+
+
+def _split_control(text: str):
+    """A control line as (name, separator, description).
+
+    Written `- `name`: what it does`. The em-dash form is read too, because the tree still
+    holds 143 of them, but it is not the form to write: see documentation-standards.md.
+    """
+    for sep in (": ", " — "):
+        head, found, tail = text.partition(sep)
+        if found:
+            return head, found, tail
+    return text, "", ""
+
+
+def split_blocks(markdown: str):
+    """Every `### ` block on a catalog page, as (title, start, end) line indices.
+
+    Where a card begins and ends is ONE rule, and three readers need it: this renderer,
+    check_specs looking for the block that documents a module, and check_docgen measuring
+    a card against the standards. Each had its own copy, and check_specs' drifted far
+    enough that its block-finding accepted four different link shapes to compensate.
+
+    A `### ` opens a block; the next `### ` or `## ` closes it, which is what keeps a
+    `## <Name>, details` section out of the card it follows.
+    """
+    lines = markdown.split("\n")
+    starts = [i for i, ln in enumerate(lines) if _H3_RE.match(ln)]
+    for n, i in enumerate(starts):
+        end = next((j for j in range(i + 1, len(lines))
+                    if _H3_RE.match(lines[j]) or _H2_RE.match(lines[j])), len(lines))
+        yield _H3_RE.match(lines[i]).group("title"), i, end
 
 
 def _cell(s: str) -> str:
@@ -175,77 +241,82 @@ def _slug(text: str) -> str:
 
 
 def _emit_row(b: dict, details_names: set) -> str:
-    """One 4-column table row for a parsed ### block."""
+    """One 2-column table row for a parsed ### block: module (preview, name,
+    description) and details (controls, then the labelled links)."""
     # Col 1: anchored name (so a help #anchor lands on the row) + description. A
     # merged card (e.g. the LED-output drivers) carries several ids so each old
     # per-driver anchor still resolves onto the one row.
     anchor_spans = "".join(f'<span id="{a}"></span>' for a in b.get("anchors", []))
-    # Name in a distinct styled span, description below in a muted span — so the two
+    # The NAME leads the cell and the preview sits under it: a reader scanning the
+    # table is looking for a name, and a picture above it pushes the thing they are
+    # scanning for down the row. The image stays in this column rather than its own,
+    # which is what kept a 900-character description from rendering as a ribbon.
+    img_html = ""
+    if b["img"]:
+        img = re.sub(r'\s+(width|height)="[^"]*"', "", b["img"])
+        img_html = "<br>" + img.replace("<img ", '<img class="mm-preview" ', 1)
+    # Name in a distinct styled span, description below in a muted span, so the two
     # read as title + subtitle rather than one run-on line (styled in extra.css).
     name = f'{anchor_spans}<span class="mm-name">{b["title"]}</span>'
     desc = " ".join(b["desc"])
-    col1 = _cell(f'{name}<br><span class="mm-desc">{desc}</span>' if desc else name)
+    col1 = _cell(f'{name}{img_html}<br><span class="mm-desc">{desc}</span>'
+                 if desc else f'{name}{img_html}')
 
-    # Col 2: GIF/image (strip the hand-authored width/height so CSS sizes it to
-    # fill the column), or a placeholder.
-    if b["img"]:
-        img = re.sub(r'\s+(width|height)="[^"]*"', "", b["img"])
-        col2 = img.replace("<img ", '<img class="mm-preview" ', 1)
-    else:
-        # No image: a neutral dash reads correctly both for a catalog module still
-        # awaiting a gif and a supporting module that has no visual by nature.
-        col2 = "—"
-
-    # Col 3: controls, one per line. Split each at the em-dash into the name part
-    # (before — keeps its `code` chips, styled accent) and the description (after —
-    # greyed via .mm-pdesc, matching the muted module description). Controls without a
-    # dash render whole in the name part.
-    col3_parts = []
+    # Col 2: controls, one per line, split into the name part (keeps its `code` chips,
+    # styled accent) and the description (greyed via .mm-pdesc).
+    #
+    # The separator is a COLON or an em-dash. Only the colon should be written: em-dashes
+    # are banned repo-wide, so a format that required one made the renderer and the prose
+    # rules contradict each other. The em-dash stays readable because 143 lines in the tree
+    # still use it, and a card is not the place to fail over punctuation. A control with
+    # neither renders whole in the name part.
+    col2_parts = []
     for p in b["params"]:
         p = re.sub(r'^-\s+', '', p)
-        head, sep, tail = p.partition(" — ")
+        head, sep, tail = _split_control(p)
         if sep:
-            col3_parts.append(f'<span class="mm-param">{head}'
+            col2_parts.append(f'<span class="mm-param">{head}'
                               f' — <span class="mm-pdesc">{tail}</span></span>')
         else:
-            col3_parts.append(f'<span class="mm-param">{p}</span>')
-    col3 = "".join(col3_parts) if col3_parts else "—"
+            col2_parts.append(f'<span class="mm-param">{p}</span>')
+    col2 = "".join(col2_parts) if col2_parts else "—"
 
-    # Col 4: everything a reader clicks OUT to — so the description column is pure
-    # prose. Tests + technical page + source/attribution + a ⌄ details anchor. Each
-    # link is prefixed with a Material icon (rendered as SVG by pymdownx.emoji, same as
-    # the tag emoji in the Name column) so the link TYPE is scannable, not a wall of
-    # small text — the recognizable docs-site convention. Labels are Title Case.
-    links = []
-    if b.get("testsMulti"):
-        links.append(f":material-test-tube: {b['testsMulti']}")
-    elif b["tests"]:
-        links.append(f":material-test-tube: [Tests]({b['tests']})")
-    if b["detail"]:
-        # Title-case a lone `[technical]` label so it reads "Technical"; leave a named
-        # multi-link group (e.g. the LED-output `[RMT] · [LCD] · [Parlio]`) as authored.
-        detail = re.sub(r'^\[technical\]', '[Technical]', b["detail"])
-        links.append(f":material-file-document-outline: {detail}")
-    if b["origin"]:
-        links.append(b["origin"])            # carries `source [Foo.h](...)` + attribution
-    # The module's display name without the trailing ` 💫 · dim` decoration, e.g.
-    # "LED output 💫 · wire" -> "LED output". A `## <that name> — details` section
-    # below the table (if present) is linked as `⌄ details`, anchored to MkDocs'
-    # own slug for that heading (`<name> — details` -> `<name>-details`).
-    name = re.split(r'\s+[💫🦅🐙📊🌙⚡️·]', b["title"])[0].strip()
-    if name in details_names:
-        links.append(f"[⌄ details](#{_slug(name + ' — details')})")
-    # Wrap so the plain attribution text greys (.mm-links); the actual links keep
-    # their accent link color (Material's `a` styling wins over the grey).
-    col4 = f'<span class="mm-links">{_cell("<br>".join(links))}</span>' if links else "—"
+    # THREE links, and always all three: Tests, API and Details. A card offers the same
+    # doors on every row, so a reader learns their position once instead of re-reading a
+    # list whose length changes per card. Everything else was prose wearing a link's clothes: attribution
+    # belongs in the header's /// (it travels with the code it credits), and the details
+    # section is already named in the card's own description, so a `More:` row restated a
+    # sentence the reader had just read.
+    #
+    # A missing target still renders its label, greyed, rather than vanishing: a card with
+    # no tests is a gap worth seeing, and a row that silently loses a link hides it.
+    tests = (b["testsMulti"] if b.get("testsMulti")
+             else f'[{b["testsName"]}]({b["tests"]})' if b["tests"]
+             else '<span class="mm-missing">none yet</span>')
+    detail = (re.sub(r'^\[technical\]', '[reference]', b["detail"]) if b["detail"]
+              else '<span class="mm-missing">none yet</span>')
+    links = [f":material-test-tube: **Tests:** {tests}",
+             f":material-api: **API:** {detail}"]
+    # Details is a fixed row, not a per-card extra: most cards have one and a reader
+    # follows it often, so it earns a standing position. Any other link a card wants is
+    # made in the description, in the sentence that needs it.
+    name = card_name(b["title"])
+    details = (f"[{name}, details](#{_slug(name + ', details')})" if name in details_names
+               else '<span class="mm-missing">none yet</span>')
+    links.append(f":material-text-long: **Details:** {details}")
+    # Controls and links share ONE cell: the links column was 18% of the page, which made
+    # a three-link card taller than its own controls. Stacked under the controls they read
+    # as what the card offers and where it continues.
+    col2_links = (f'<br><span class="mm-links">{_cell("<br>".join(links))}</span>'
+                  if links else "")
 
-    return f"| {col1} | {col2} | {col3} | {col4} |"
+    return f"| {col1} | {col2}{col2_links} |"
 
 
 def _render_catalog_table(markdown: str) -> str:
-    """Render each run of consecutive `### ` blocks as a 4-column table, section by
+    """Render each run of consecutive `### ` blocks as a 2-column table, section by
     section. Everything else — the page H1/lead, `## Group` headers, the trailing
-    `## Source` list, `## <Name> — details` sections, stray prose between blocks —
+    `## Source` list, `## <Name>, details` sections, stray prose between blocks,
     passes through verbatim, so a table only ever contains genuine module blocks
     (a `##` heading closes the current table). Source .md stays authored as prose."""
     lines = markdown.split("\n")
@@ -267,8 +338,8 @@ def _render_catalog_table(markdown: str) -> str:
         if rows:
             out.append('<div class="mm-catalog-wrap" markdown="1">')
             out.append("")
-            out.append("| Name | Preview | Controls | Links |")
-            out.append("|------|---------|------------|-------|")
+            out.append("| Module | Details |")
+            out.append("|--------|---------|")
             out.extend(rows)
             out.append("")
             out.append("</div>")
@@ -283,7 +354,8 @@ def _render_catalog_table(markdown: str) -> str:
             flush_block()
             cur = {"anchors": pending_anchors, "title": _H3_RE.match(ln).group("title"),
                    "desc": [], "img": None, "params": [], "origin": None,
-                   "tests": None, "testsMulti": None, "detail": None}
+                   "tests": None, "testsMulti": None, "detail": None,
+                   "testsName": card_name(_H3_RE.match(ln).group("title"))}
             pending_anchors = []
             continue
         if _H2_RE.match(ln):                       # section boundary: close block + table
@@ -334,22 +406,8 @@ def on_files(files, config):
             files.remove(existing)
         files.append(f)
 
-    _add("tests/unit-tests.md", render_unit_tests(collect_unit_files()))
-    _add("tests/scenario-tests.md", render_scenarios(collect_scenario_files()))
-
-    # The MoonLive SCRIPT-LANGUAGE reference. It lives at moonlive/README.md — beside the
-    # scripts it documents, where someone browsing that folder finds it — so it is staged
-    # here rather than duplicated into docs/. Distinct from the MoonLive* module pages: this
-    # is the LANGUAGE (classes, entry points, members, the role extensions), those are the
-    # cards that run it, and they cross-link.
-    #
-    # Its links are authored relative to moonlive/ (`../docs/moonmodules/light/X.md`). Staged
-    # under moonmodules/light/ they become plain siblings, so the prefix is dropped — without
-    # this the three module links 404 and mkdocs warns on every one.
-    _readme = _HERE.parent.parent / "moonlive" / "README.md"
-    if _readme.is_file():
-        _add("moonmodules/light/writing-scripts.md",
-             _readme.read_text(encoding="utf-8").replace("(../docs/moonmodules/light/", "("))
+    _add("reference/tests/unit-tests.md", render_unit_tests(collect_unit_files()))
+    _add("reference/tests/scenario-tests.md", render_scenarios(collect_scenario_files()))
 
     # Source-generated technical pages. gen_api.generate() writes each to disk under
     # docs/moonmodules/<domain>/moxygen/<Module>.md (gitignored, so a human can preview
@@ -374,10 +432,10 @@ def on_files(files, config):
 
 
 # Pages that embed a file living at the REPO ROOT via a pymdownx snippet. Their
-# borrowed text spells doc links `docs/architecture.md` — correct from the root (that
+# borrowed text spells doc links `docs/explanation/architecture/index.md` — correct from the root (that
 # is where CLAUDE.md is read by agents and on GitHub), but one level too deep once the
 # text is rendered from inside docs/, where it resolves to docs/docs/… and 404s.
-_EMBEDS_REPO_ROOT_FILE = {"principles-and-process.md"}
+_EMBEDS_REPO_ROOT_FILE = {"contributing/principles-and-process.md"}
 
 # `href="docs/<rest>"` → `href="<rest>"`, and the same for the `.md` → `.html` form MkDocs
 # has already applied by this stage. Only the `docs/` prefix is dropped; anchor and path
@@ -424,7 +482,7 @@ def _rebase_repo_root_doc_links(html):
 class _MuteRebasedLinkWarnings(logging.Filter):
     """Drop the link warnings for the page whose links this hook rebases after validation.
 
-    `principles-and-process.md` embeds CLAUDE.md, whose links (`docs/architecture.md`,
+    `principles-and-process.md` embeds CLAUDE.md, whose links (`docs/explanation/architecture/index.md`,
     `moondeck/MoonDeck.md`) are correct where that file is actually read — the repo root and
     GitHub — and `_rebase_repo_root_doc_links` turns them into working site links. But
     validation is a markdown treeprocessor inside `Page.render()`, so it judges the
@@ -463,7 +521,7 @@ def on_page_content(html, page, config, files):
 
 def on_page_markdown(markdown, page, config, files):
     """Repoint out-of-docs source links to GitHub blob URLs, then (on the catalog
-    pages) render the prose ### blocks as a MoonLight-style 4-column table. Source
+    pages) render the prose ### blocks as a MoonLight-style 2-column table. Source
     .md stays authored as readable blocks; the table is build-time only."""
     markdown = _rewrite_out_of_docs_links(markdown, page.file.src_uri)
     if page.file.src_uri in _CATALOG_PAGES:

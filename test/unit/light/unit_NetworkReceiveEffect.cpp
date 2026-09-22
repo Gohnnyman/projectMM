@@ -1,27 +1,20 @@
-// @module NetworkReceiveEffect
-// @also NetworkSendDriver
+/// @module NetworkReceiveEffect
+/// @also NetworkSendDriver
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
-#include "light/ArtNetPacket.h"
+#include "light/util/ArtNetPacket.h"
 #include "light/effects/NetworkReceiveEffect.h"
 #include "light/layouts/GridLayout.h"
 #include "platform/platform.h"
 
 #include <cstring>
 
-// These tests pin the receive side of the shared OpDmx wire format: parser
-// accept/reject, universe→buffer placement and clamping (via the public
-// applyDmx test surface — no sockets needed), the staging-buffer lifecycle
-// (sized off the hot path, never reallocated by loop, freed on release), and
-// one real localhost UDP round-trip that exercises the platform bind/recvFrom
-// path end to end on desktop CI.
+// These tests pin the receive side of the shared OpDmx wire format: parser accept/reject, universe→buffer placement and clamping (via the public applyDmx test surface, no sockets needed), the staging-buffer lifecycle (sized off the hot path, never reallocated by loop, freed on release), and one real localhost UDP round-trip that exercises the platform bind/recvFrom path end to end on desktop CI.
 
 namespace {
 
-// The standard rig from the effect tests (unit_NoiseEffect.cpp shape): a grid
-// layout + layer with the effect as child. 16×16 RGB = 768 bytes = universes
-// {0: bytes 0..509, 1: bytes 510..767} at universe_start 0.
+// The standard rig from the effect tests (unit_NoiseEffect.cpp shape): a grid layout + layer with the effect as child. 16×16 RGB = 768 bytes = universes {0: bytes 0..509, 1: bytes 510..767} at universe_start 0.
 struct Rig {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -45,7 +38,7 @@ struct Rig {
 
 // --- wire format (shared header) ---------------------------------------------
 
-// A packet built by the sender's builder parses back to the same universe and payload — the two sides can't drift.
+// A packet built by the sender's builder parses back to the same universe and payload, the two sides can't drift.
 TEST_CASE("ArtNet OpDmx build→parse round-trip") {
     uint8_t payload[6] = {1, 2, 3, 4, 5, 6};
     uint8_t pkt[mm::ARTNET_HEADER_SIZE + 6];
@@ -59,7 +52,7 @@ TEST_CASE("ArtNet OpDmx build→parse round-trip") {
     CHECK(std::memcmp(data, payload, 6) == 0);
 }
 
-// Bad magic, non-OpDmx opcodes, truncated headers, and lying length fields are all rejected — the receiver drops them.
+// Bad magic, non-OpDmx opcodes, truncated headers, and lying length fields are all rejected, the receiver drops them.
 TEST_CASE("ArtNet OpDmx parse rejects malformed packets") {
     uint8_t payload[3] = {9, 9, 9};
     uint8_t pkt[mm::ARTNET_HEADER_SIZE + 3];
@@ -90,7 +83,7 @@ TEST_CASE("ArtNet OpDmx parse rejects malformed packets") {
 
 // --- universe placement (applyDmx, no sockets) --------------------------------
 
-// Universe universe_start lands at byte 0; the next universe lands at byte 510 — the same split the sender uses.
+// Universe universe_start lands at byte 0; the next universe lands at byte 510, the same split the sender uses.
 TEST_CASE("NetworkReceiveEffect places universes at consecutive 510-byte offsets") {
     Rig r;
     uint8_t u0[510], u1[258];
@@ -122,9 +115,7 @@ TEST_CASE("NetworkReceiveEffect holds the last frame across ticks without new pa
     CHECK(buf[2] == 30);
 }
 
-// A tick with no new packet must not re-copy staging over the layer buffer: the Layer does not clear
-// between frames, so the copy would be identical bytes at real cost (3.5 ms per tick at 12288 lights
-// on an S3). Another effect writing the shared buffer after us proves the copy was skipped.
+// A tick with no new packet must not re-copy staging over the layer buffer: the Layer does not clear between frames, so the copy would be identical bytes at real cost (3.5 ms per tick at 12288 lights on an S3). Another effect writing the shared buffer after us proves the copy was skipped.
 TEST_CASE("NetworkReceiveEffect does not touch the layer buffer on a tick with no packet") {
     Rig r;
     uint8_t u0[3] = {10, 20, 30};
@@ -141,11 +132,7 @@ TEST_CASE("NetworkReceiveEffect does not touch the layer buffer on a tick with n
     CHECK(buf[0] == 10);
 }
 
-// Hold-last-frame must survive a sibling effect fading the shared layer buffer. The Layer runs the
-// collected fade BEFORE the effect pass, so a fading sibling darkens the held frame every tick; if
-// the receiver only re-copies when a packet arrived, an idle stream fades to black instead of
-// holding. This is the contract the module documents, and it is what a real installation looks
-// like: a receiver on the same layer as any of the 30 effects that call fadeToBlackBy.
+// Hold-last-frame must survive a sibling effect fading the shared layer buffer. The Layer runs the collected fade BEFORE the effect pass, so a fading sibling darkens the held frame every tick; if the receiver only re-copies when a packet arrived, an idle stream fades to black instead of holding. This is the contract the module documents, and it is what a real installation looks like: a receiver on the same layer as any of the 30 effects that call fadeToBlackBy.
 TEST_CASE("a held frame survives a sibling effect fading the layer") {
     Rig r;
     uint8_t u0[3] = {200, 200, 200};
@@ -194,7 +181,7 @@ TEST_CASE("NetworkReceiveEffect clamps payloads to the buffer") {
     CHECK(buf[767] == 0xCC);
 }
 
-// A 0×0×0 grid accepts packets as a clean no-op — degraded, not crashed.
+// A 0×0×0 grid accepts packets as a clean no-op, degraded, not crashed.
 TEST_CASE("NetworkReceiveEffect tolerates a zero-light grid") {
     Rig r(0, 0);
     uint8_t u0[3] = {1, 2, 3};
@@ -222,12 +209,10 @@ TEST_CASE("NetworkReceiveEffect staging buffer lifecycle") {
 
 // --- localhost round-trip (real UDP through the platform bind/recvFrom path) ---
 
-// A real packet sent over localhost UDP lands in the layer buffer — the end-to-end proof of the platform receive path.
+// A real packet sent over localhost UDP lands in the layer buffer, the end-to-end proof of the platform receive path.
 TEST_CASE("NetworkReceiveEffect receives over localhost UDP") {
     Rig r;
-    // The effect binds the three well-known protocol ports (constants by
-    // design). A running projectMM desktop app would hold them — don't run the
-    // app and ctest at once; CI runners have the ports free.
+    // The effect binds the three well-known protocol ports (constants by design). A running projectMM desktop app would hold them, don't run the app and ctest at once; CI runners have the ports free.
     r.fx.setup();
     REQUIRE(r.fx.status() == nullptr);   // binds succeeded
 
@@ -239,8 +224,7 @@ TEST_CASE("NetworkReceiveEffect receives over localhost UDP") {
     const size_t len = mm::buildArtDmxPacket(pkt, 0, 0, payload, 3);
     REQUIRE(tx.sendTo(pkt, len));
 
-    // UDP on loopback is reliable but asynchronous — poll the frame loop with a
-    // bounded retry (≤100 ms) so CI stays deterministic.
+    // UDP on loopback is reliable but asynchronous, poll the frame loop with a bounded retry (≤100 ms) so CI stays deterministic.
     bool landed = false;
     for (int i = 0; i < 100 && !landed; i++) {
         r.layer.tick();

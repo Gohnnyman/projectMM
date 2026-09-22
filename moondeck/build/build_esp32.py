@@ -3,7 +3,7 @@
 
 "Firmware" here is the compiled binary variant (chip + radios/peripherals +
 sdkconfig fragments) — separate from "board" (physical hardware: PCB, PHY,
-USB-serial, PSRAM). See docs/architecture.md § Firmware vs board.
+USB-serial, PSRAM). See docs/explanation/architecture/index.md § Firmware vs board.
 """
 
 import argparse
@@ -13,6 +13,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import compute_version   # sibling: the one place a version string is derived
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 ESP32_DIR = ROOT / "esp32"
@@ -72,7 +74,7 @@ def check_idf_pin(idf_path: Path) -> None:
           file=sys.stderr)
     print("Fix: re-run `uv run moondeck/build/setup_esp_idf.py` (it will offer "
           "to check out the pinned commit + resync submodules + reinstall "
-          "toolchains). See docs/building.md § ESP-IDF version for the "
+          "toolchains). See docs/how-to/building.md § ESP-IDF version for the "
           "manual command if you'd rather do it by hand.", file=sys.stderr)
     print("Or pass --skip-idf-pin-check to build anyway (deliberate migration "
           "to a newer IDF release; re-tests then update PINNED_IDF_COMMIT).",
@@ -99,7 +101,7 @@ def check_idf_pin(idf_path: Path) -> None:
 # *build-time* cost only: the linker dead-strips the unused code, so they add ~0
 # bytes of flash to esp32p4rev1-eth (our coprocessorWifi() is the empty stub there, so
 # no esp_hosted symbol is referenced — confirmed: their .text size is 0x0 in the
-# .map). Left as-is rather than fought; see docs/backlog/.
+# .map). Left as-is rather than fought; see docs/work/future/.
 ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 
 # Firmware catalogue. Each entry describes one shipping firmware variant.
@@ -182,6 +184,18 @@ FIRMWARES: dict[str, dict] = {
         "description": "ESP32-WROVER (classic ESP32, 4 MB flash + 4 MB quad PSRAM) — WiFi + "
                        "Ethernet. Same silicon as `esp32`; this variant enables PSRAM for "
                        "the larger buffers (big grids, preview) the WROVER's extra RAM allows.",
+        "ships": True,
+    },
+    "esp32-pico": {
+        "chip": "esp32",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth",
+                      "sdkconfig.defaults.esp32-pico"],
+        "moonbase": True,   # 8 MB: factory MoonBase + one app slot (see moonbase/)
+        "eth_only": False,
+        "description": "ESP32-PICO-V3-02 (classic ESP32 SiP: 8 MB embedded flash + 2 MB "
+                       "embedded quad PSRAM). WiFi + Ethernet, same silicon as `esp32`; its "
+                       "own variant because the flash is 8 MB where the base assumes 4 and "
+                       "PSRAM is on (QuinLED Dig-Next-2).",
         "ships": True,
     },
     "esp32-eth": {
@@ -318,7 +332,7 @@ FIRMWARES: dict[str, dict] = {
 # IDF target → chip-family label. ONE source for the family vocabulary, shared by:
 #   * the ESP Web Tools manifest (`chipFamily`, generate_manifest.py),
 #   * the installer's detect-vs-board comparison (deviceModels.json `chip` uses these
-#     same strings; install-orchestrator.js normalises detected silicon to them).
+#     same strings; install-orchestrator.js normalizes detected silicon to them).
 # (firmwares.json does NOT store a per-variant family — it's derivable from `chip`;
 # see generate_firmwares.py.)
 # projectMM aims to support every ESP32-family chip, so new SoCs are added HERE
@@ -527,6 +541,12 @@ def firmware_cmake_args(firmware: str, release: str = "", version: str = "",
     # Same for the computed version — empty leaves build_info.h's library.json default.
     if version:
         args.append(f'-DMM_VERSION="{version}"')
+    # And into the IMAGE's app descriptor, the struct IDF puts in every binary. Without it the
+    # descriptor keeps IDF's `git describe` fallback, which drifts from what the device reports
+    # (a stale tag read "container-test-1-g73e52cb9-dirt" long after that tag was gone). MoonBase
+    # carries the same string, so the app can compare the two images by equality and say when its
+    # recovery image was built apart from it.
+    args.append(f"-DPROJECT_VER={version or compute_version.compute('local', '')}")
     if spec["eth_only"]:
         # Drop the WiFi components from the link, and tell our code to compile
         # out the WiFi paths (MM_ETH_ONLY → esp32/main/CMakeLists.txt).
@@ -585,7 +605,7 @@ def resolve_firmware(args: argparse.Namespace) -> str:
         print(f"--profile is deprecated; use --firmware {alias} instead.")
         return alias
 
-    # No flag → keep the prior default behaviour (WiFi-only ESP32 classic).
+    # No flag → keep the prior default behavior (WiFi-only ESP32 classic).
     return "esp32"
 
 
@@ -812,7 +832,7 @@ def main():
     subprocess.run(cmd + b_arg + ["size"], cwd=ESP32_DIR, env=env)
 
     if FIRMWARES[firmware].get("moonbase"):
-        build_moonbase(cmd, env, chip)
+        build_moonbase(cmd, env, chip, args.version)
 
 
 # ---- MoonBase flash layout, shared by every consumer of the build output ----
@@ -897,19 +917,32 @@ def moonbase_flash_files(firmware: str, build_dir: Path) -> list[tuple[str, Path
     return writes
 
 
-def build_moonbase(cmd: list[str], env: dict, chip: str) -> None:
+def build_moonbase(cmd: list[str], env: dict, chip: str, version: str = "") -> None:
     """Build the MoonBase image for `chip` into build/moonbase-<chip>.
 
-    MoonBase (moonbase/) is the second boot image the 4 MB variants carry in their factory
+    MoonBase (moonbase/) is the second boot image the MoonBase variants carry in their factory
     partition: a small firmware whose job is installing the application, since a board with one
     app slot cannot rewrite the partition it is executing from. It is chip-specific but variant-
-    agnostic, so the four classic variants share one build. Its size budget lives in
+    agnostic, so every classic variant shares one build. Its size budget lives in
     moonbase/sdkconfig.defaults; the shared partition table keeps the two images provably agreed
     on where everything lives.
+
+    `version` becomes PROJECT_VER, which IDF writes into the image's app descriptor. The app
+    reads it back from the factory partition to report which MoonBase a device carries, so
+    without it a device cannot say what it is running: a bench board that could not install
+    firmware took a bisect of the git log to identify, because every MoonBase looked alike.
+    A version is variant-independent, so passing it keeps one image per chip valid. Empty for a
+    local build, where IDF falls back to `git describe`.
     """
     moonbase_dir = ROOT / "moonbase"
     build_dir = ROOT / "build" / f"moonbase-{chip}"
     b_arg = ["-B", str(build_dir), f"-DSDKCONFIG={build_dir}/sdkconfig"]
+    if not version:
+        # The app resolves this through build_info.h's #ifndef; MoonBase has no build_info.h, so
+        # it resolves the same library.json default here rather than reporting a git-describe
+        # string the app has no way to compare against.
+        version = compute_version.compute("local", "")
+    b_arg.append(f"-DPROJECT_VER={version}")
     # Same trap as stale_feature_cache: IDF generates sdkconfig from the defaults only when it is
     # absent, so an edited moonbase/sdkconfig.defaults silently changes nothing. One defaults file
     # here, so mtime is a sufficient staleness signal.

@@ -1,11 +1,9 @@
-// @module WledPacket
+/// @module WledPacket
 
-// Pins the WLED presence packet wire format — the 44-byte header projectMM and WLED both
-// broadcast on UDP 65506. A wire format breaks silently, so build → parse is pinned here
-// directly (the discovery tests exercise it indirectly; this is the focused contract).
+/// Pins the WLED presence packet wire format, the 44-byte header projectMM and WLED both broadcast on UDP 65506. A wire format breaks silently, so build → parse is pinned here directly (the discovery tests exercise it indirectly; this is the focused contract).
 
 #include "doctest.h"
-#include "core/WledPacket.h"
+#include "core/system/WledPacket.h"
 
 #include <cstdint>
 #include <cstring>

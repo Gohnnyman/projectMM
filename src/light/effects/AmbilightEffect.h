@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/VideoService.h"
+#include "core/services/VideoService.h"
 #include "light/effects/EffectBase.h"
 
 #include <algorithm> // std::max / std::min

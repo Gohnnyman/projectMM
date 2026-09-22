@@ -31,33 +31,29 @@
 // flash failure can be tied to the exact flasher build. The version constants
 // below MUST match the import URLs (a check script could pin this later).
 //
-// esptool-js is pinned 0.5.7 — the version ESP Web Tools (the flasher ESPHome
-// and WLED embed) ships. 0.6.0 (the newest, tagged 2026-03-26) has a DETERMINISTIC
-// compressed-flash bug: a P4 web-flash aborts at a FIXED block — "Failed to write
-// compressed data to flash after seq NN failed with status 201,0" — where 0.4.7,
-// 0.5.7, and the CLI (esptool.py) all flash the same P4 cleanly. Failing at a fixed
-// seq (not a random one) rules out a transient USB hiccup; it's a real 0.6.0
-// regression in the deflate write path (cf. upstream esptool-js#233/#245). 0.5.x
-// also moved hardReset off ESPLoader into a reset-strategy class — handled by
-// hardResetChip() below (transport DTR/RTS), version-agnostic, so 0.6.x would
-// reboot fine IF its flash worked. Re-test the flash + reset path on any bump;
-// 0.6.x is only viable once that deflate regression is fixed.
-//   Re-verified on the bench 2026-07-27: 0.6.0 is still the newest tag (no 0.6.1+),
-//   and a real P4 web-flash STILL aborts — "seq 50 failed with status 201,0". So the
-//   regression persists in 0.6.0-as-tagged; keep 0.5.7. (0.6.0 also brings no ESP32-S31
-//   support — misdetection is tracked upstream in esptool-js#248 — so the bump has no
-//   upside for us either.) Pinned 2026-06-28, re-verified 2026-07-27.
-//   Re-checked 2026-08-19: **0.6.1 shipped (2026-08-06) and its notes name the fix we
-//   are waiting on** — upstream #245 "Add retries to FLASH_DATA and FLASH_DEFL_DATA",
-//   plus #244 (uncompressed data in writeFlash) and #249 (connection reliability). That
-//   is the deflate write path this pin exists to avoid, so 0.6.1 is the first bump worth
-//   a real P4 bench flash. NOT yet tested here — the pin stays 0.5.7 until a P4
-//   web-flash completes on 0.6.1. Still no ESP32-S31 support in 0.6.1 (that is separate,
-//   see WEB_FLASH_UNSUPPORTED_CHIPS in install.js), so the S31 CLI path is unaffected
-//   either way.
-export const ESPTOOL_JS_VERSION = "0.5.7";
+// esptool-js is pinned 0.7.0 (2026-09-21), the first release that flashes an ESP32-S31 from a
+// browser. Detection now asks the chip its id (GET_SECURITY_INFO, upstream #197) before falling
+// back to the magic register, which is what makes the S31 safe: its ROM magic COLLIDES with the
+// classic ESP32's, so a magic-only table mis-identified the RISC-V part as an Xtensa one and would
+// have flashed the wrong stub. `esp32s31.ts` sets USES_MAGIC_VALUE=false with IMAGE_CHIP_ID 32, the
+// same way esptool.py disambiguates, and ships its own stub_flasher/esp32s31.json.
+//
+// 0.6.0 was skipped for a DETERMINISTIC compressed-flash bug: a P4 web-flash aborted at a fixed
+// block ("failed with status 201,0") where 0.5.7 and the CLI flashed the same board cleanly.
+// 0.6.1 named the fix (#245, retries on FLASH_DATA/FLASH_DEFL_DATA) and 0.7.0 adds #268, which
+// calls powerOnFlash() from postConnect(): on ECO6/ECO7 P4 silicon the flash is powered off by
+// default, so the flash-ID read returned garbage and the first flash command hung the stub.
+//
+// Two breaking changes came with it, both handled here: writeFlash THROWS unless each part's
+// `data` is a Uint8Array (a binary string silently corrupted the image, #266), and
+// detectFlashSize() returns undefined rather than defaulting to "4MB" — unused here, since the
+// flash call passes flashSize "keep".
+//
+// Re-test the flash + reset path on any bump; hardResetChip() below drives DTR/RTS through the
+// transport, so it stays version-agnostic.
+export const ESPTOOL_JS_VERSION = "0.7.0";
 export const IMPROV_SDK_VERSION = "2.5.0";
-import { ESPLoader, Transport } from "https://unpkg.com/esptool-js@0.5.7/bundle.js?module";
+import { ESPLoader, Transport } from "https://unpkg.com/esptool-js@0.7.0/bundle.js?module";
 import { ImprovSerial } from "https://unpkg.com/improv-wifi-serial-sdk@2.5.0/dist/serial.js?module";
 
 // ---------------------------------------------------------------------------
@@ -114,24 +110,6 @@ async function fetchManifest(manifestUrl) {
             offset: p.offset,
         })),
     };
-}
-
-// Convert an ArrayBuffer to a "binary string" — one JS character per byte,
-// codes 0x00-0xFF. esptool-js's writeFlash expects each fileArray entry's
-// `data` in this shape (it iterates via .charCodeAt()). Chunked at 16 KB
-// because `String.fromCharCode(...big_array)` blows the call stack on
-// large inputs (a 1.2 MB app image would otherwise spread ~1.2M arguments).
-function bufferToBinaryString(buffer) {
-    const bytes = new Uint8Array(buffer);
-    const CHUNK = 16384;
-    let out = "";
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-        out += String.fromCharCode.apply(
-            null,
-            bytes.subarray(i, Math.min(i + CHUNK, bytes.length))
-        );
-    }
-    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -448,6 +426,27 @@ async function releaseDetected() {
     try { await port.close(); } catch (_) { /* already closed */ }
 }
 
+/// Overall flash progress across ALL images, 0-100.
+///
+/// esptool-js reports per FILE: `written`/`total` restart at zero for each image, and an install
+/// writes several (bootloader, partition table, ota data, app, and MoonBase where the layout has
+/// one). Plotting that raw ran the bar 0-100% once per image, so a user watched it reach 100% and
+/// start again (bench 2026-09-08, a Shelly on the public installer). Weighting each file by its
+/// size against the whole write makes the bar cross the modal exactly once.
+///
+/// `sizes` is the byte length of each image, in the order esptool-js writes them.
+export function flashPercent(sizes, idx, written, total) {
+    const all = Array.isArray(sizes) ? sizes.map(n => (typeof n === "number" && n > 0 ? n : 0)) : [];
+    const grand = all.reduce((a, b) => a + b, 0);
+    if (grand <= 0) return 0;
+    const done = all.slice(0, Math.max(0, idx)).reduce((a, b) => a + b, 0);
+    // `written`/`total` are this file's own bytes; fall back to zero for this file when total is
+    // missing, so a bad tick can never push the bar backwards past what is already written.
+    const here = total > 0 ? (written / total) * (all[idx] || 0) : 0;
+    const pct = Math.round(100 * (done + here) / grand);
+    return pct < 0 ? 0 : pct > 100 ? 100 : pct;
+}
+
 export const installer = {
     /**
      * Drive the full install flow: request port, flash via esptool-js,
@@ -726,13 +725,11 @@ export const installer = {
                     throw new Error(`part fetch HTTP ${res.status}: ${part.url}`);
                 }
                 const buf = await res.arrayBuffer();
-                // esptool-js 0.4.7's writeFlash expects each part's `data`
-                // as a binary string (one char per byte) — it iterates with
-                // .charCodeAt() inside. Uint8Array fails with "charCodeAt is
-                // not a function". Convert in 16 KB chunks to avoid blowing
-                // the call-stack on a 1.2 MB app image.
+                // esptool-js 0.7.0 THROWS unless `data` is a Uint8Array: a binary string used to
+                // be the required shape (it iterated with .charCodeAt()), and passing one now
+                // corrupts the image instead of flashing it (upstream #266).
                 fileArray.push({
-                    data: bufferToBinaryString(buf),
+                    data: new Uint8Array(buf),
                     address: part.offset,
                 });
             }
@@ -759,7 +756,8 @@ export const installer = {
                 flashSize: "keep",
                 compress: true,
                 reportProgress: (idx, written, total) => {
-                    const pct = total > 0 ? Math.round(100 * written / total) : 0;
+                    const pct = flashPercent(fileArray.map(f => (f.data && f.data.length) || 0),
+                                             idx, written, total);
                     // Don't bump lastStage on every progress tick — keep it as
                     // "flash" set just above; intermediate ticks are detail only.
                     onProgress("flash", { pct, fileIdx: idx });
@@ -805,16 +803,31 @@ export const installer = {
             //
             // Some USB-serial chips (rare CH340 silicon revisions, mis-driven
             // adapters) don't survive the close+reopen cleanly — the OS handle
-            // ends up stale and port.open() throws. Catch that and prompt for
-            // a fresh requestPort(); the browser's permission grant from the
-            // earlier requestPort means it surfaces a picker but no auth
-            // dialog. User picks the same physical port; we get a fresh
-            // SerialPort handle. Slightly worse UX (extra click) than the
-            // transparent reopen, but never silently fails.
+            // ends up stale and port.open() throws. Catch that and get a fresh
+            // SerialPort handle.
+            //
+            // requestPort() needs a USER GESTURE, and by this point there is none: the
+            // flash took tens of seconds, so the click that opened the modal is long
+            // expired and Chrome refuses with "Must be handling a user gesture to show a
+            // permission request" (bench 2026-09-08, a Shelly on the public installer).
+            // The browser's earlier permission grant does not help: it covers ACCESS to
+            // the port, not the right to show the picker. So ask the user to click first,
+            // exactly as the wrong-port path above does, and call requestPort() inside
+            // that click. Without the callback (an older host page) there is nothing to
+            // click, so report the real reason rather than throwing a browser message
+            // that reads like a bug in the installer.
             try {
                 await port.open({ baudRate: 115200 });
             } catch (openErr) {
-                if (onLog) onLog(`[orchestrator] port.open() failed (${openErr.message}); falling back to requestPort()`);
+                if (onLog) onLog(`[orchestrator] port.open() failed (${openErr.message}); asking for a fresh port`);
+                if (!uiWaitForPortRetry) {
+                    throw new Error(
+                        "the serial port did not survive the flash and the page cannot re-prompt for it; " +
+                        "unplug and replug the device, then install again");
+                }
+                trackProgress("wrong-port-retry");
+                await uiWaitForPortRetry();
+                trackProgress("request-port");
                 port = await navigator.serial.requestPort({});
                 await port.open({ baudRate: 115200 });
             }

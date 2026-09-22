@@ -1,11 +1,9 @@
-// @module Sort
+/// @module Sort
 
-// Pins the generic core sort primitive (mm::insertionSort) used for the small bounded
-// collections the system holds (device lists, UI rows). Verifies it orders correctly,
-// is stable (equal elements keep input order), and handles the trivial sizes (0/1).
+/// Pins the generic core sort primitive (mm::insertionSort) used for the small bounded collections the system holds (device lists, UI rows). Verifies it orders correctly, is stable (equal elements keep input order), and handles the trivial sizes (0/1).
 
 #include "doctest.h"
-#include "core/Sort.h"
+#include "core/util/Sort.h"
 
 #include <cstring>
 

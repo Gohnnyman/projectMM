@@ -4,47 +4,53 @@
 
 namespace mm {
 
-// A serpentine 2D LED matrix (panel), emitting each light's (x, y, 0) coordinate
-// in physical wiring order. The general matrix layout: GridLayout is the simple
-// row-major/serpentine case; this adds a configurable axis order (walk X-major or
-// Y-major), a per-axis increment direction, and a snake toggle.
-//
-// Prior art: MoonLight PanelLayout (Node "Panel", tags 🚥), which drives the panel
-// off a `Wiring{size, count, inc[], snake[]}` helper and an `iterate()` walk. We
-// reproduce the geometry (axis-order table, snake-on-odd-outer serpentine) and the
-// control set, but drop MoonLight's pin/wiring plumbing (the Wiring struct's pin
-// count, nextPin()) — a projectMM layout emits coordinates only; the driver owns
-// pins. tags 💫 marks the MoonLight lineage.
-//
-// The MoonLight `Wiring`/`iterate` implementation is not in the ported source (only
-// the Panel usage site is), so the iteration is reconstructed from that usage plus
-// the control labels/defaults; the reconstructed logic is marked // RECONSTRUCTED
-// and cross-checks against GridLayout's serpentine on the defaults.
-// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 /// Layout of a single 2D LED panel.
+/// Author: MoonLight, https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+///
+/// @moreinfo
+///
+/// A serpentine 2D LED matrix (panel), emitting each light's (x, y, 0) coordinate in physical wiring order.
+/// The general matrix layout: GridLayout is the simple row-major/serpentine case; this adds a configurable axis order (walk X-major or Y-major), a per-axis increment direction, and a snake toggle.
+///
+/// Prior art: MoonLight PanelLayout (Node "Panel", tags 🚥), which drives the panel off a `Wiring{size, count, inc[], snake[]}` helper and an `iterate()` walk.
+/// We reproduce the geometry (axis-order table, snake-on-odd-outer serpentine) and the control set, but drop MoonLight's pin/wiring plumbing (the Wiring struct's pin count, nextPin()), a projectMM layout emits coordinates only.
+/// The driver owns pins. tags 💫 marks the MoonLight lineage.
+///
+/// The MoonLight `Wiring`/`iterate` implementation is not in the ported source (only the Panel usage site is), so the iteration is reconstructed from that usage plus the control labels/defaults.
+/// The reconstructed logic is marked // RECONSTRUCTED and cross-checks against GridLayout's serpentine on the defaults.
+///
+/// ## The wiring walk is reconstructed
+///
+/// MoonLight's iterate helper is not in the ported source, so the semantics here come from how the panel used it, plus the control labels and defaults.
+///
+/// The outer loop walks its axis across that axis's extent, and the direction is the per-axis increment flag, which matches the axis-named labels the cube uses too.
+/// The outer loop never snakes, its parent index being a constant and so always even.
+/// The inner loop reverses when the snake toggle is on and the emitted outer index is odd.
+///
+/// MoonLight's exact snake-array indexing, whether keyed by physical axis or by loop slot, is not recoverable from what was ported.
+/// Both that reading and the default comment about snaking on one axis yield the same geometry, the standard boustrophedon panel, so this is the faithful behavior.
+///
+/// On the defaults this emits one row ascending, the next descending, identical to a grid's serpentine.
 class PanelLayout : public LayoutBase {
 public:
-    // Geometry (verbatim MoonLight defaults): a 16×16 panel.
+    /// Geometry (verbatim MoonLight defaults): a 16×16 panel.
     lengthType panelWidth  = 16;   // extent along X (MoonLight panel.size[0])
     lengthType panelHeight = 16;   // extent along Y (MoonLight panel.size[1])
 
-    // Wiring order: which axis is the outer loop. 0 = "XY" (Y outer, X inner —
-    // the classic row-major panel), 1 = "YX" (X outer, Y inner — column-major).
-    // Verbatim from MoonLight's two-value select (index 0 "XY", 1 "YX").
+    /// Which axis is the outer loop: row-major by default, or column-major.
     uint8_t wiringOrder = 0;
 
-    // Per-axis increment direction (MoonLight panel.inc[0]="X++", inc[1]="Y++"):
-    // true walks that coordinate 0→max, false walks it max→0. Default both true.
-    bool incX = true;   // "X++"
-    bool incY = true;   // "Y++"
+    /// Per-axis direction: set walks that coordinate up, clear walks it down.
+    bool incX = true;
+    /// Whether y counts up.
+    bool incY = true;
 
-    // Snake the inner loop on odd outer steps (boustrophedon). MoonLight exposes a
-    // single "snake" control = panel.snake[1] (the inner loop in 2D); default true.
+    /// Snake the inner loop on odd outer steps, which is one exposed toggle in 2D.
     bool snake = true;
 
+    /// The controls a user sets on the card.
     void defineControls() override {
-        // Geometry only — MoonLight's pin controls (ledPin selects, nextPin) are dropped.
-        // Ranges from MoonLight (1..65536), clamped to lengthType's int16_t max (512-safe).
+        // Geometry only, its ranges clamped to what the coordinate type holds.
         controls_.addControl("panelWidth",  panelWidth,  1, 512);
         controls_.addControl("panelHeight", panelHeight, 1, 512);
         controls_.addSelect("wiringOrder", wiringOrder, kWiringOptions, kWiringCount);
@@ -53,19 +59,22 @@ public:
         controls_.addControl("snake", snake);
     }
 
+    /// The catalog tags this layout carries.
     const char* tags() const override { return "💫"; }
+    /// How many axes this layout places lights on.
     Dim dimensions() const override { return Dim::D2; }
 
+    /// How many lights the current settings place.
     nrOfLightsType lightCount() const override {
-        // Multiply in uint32_t to detect overflow before casting, per GridLayout.
+        /// Multiply in uint32_t to detect overflow before casting, per GridLayout.
         uint32_t n = static_cast<uint32_t>(panelWidth) * static_cast<uint32_t>(panelHeight);
         constexpr uint32_t kMax = std::numeric_limits<nrOfLightsType>::max();
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
+    /// Emit every light's coordinate, in wiring order.
     void placeLights(const CoordSink& sink) const override {
-        // MoonLight: axes = axisOrders[wiringOrder]; XY(0) = {1,0} (Y outer, X inner),
-        // YX(1) = {0,1} (X outer, Y inner). axes[0] is the outer axis, axes[1] the inner.
+        // axes[0] is the outer axis and axes[1] the inner, per the selected order.
         const uint8_t axisOrders[2][2] = {
             {1, 0},  // "XY": Y(1) outer loop, X(0) inner loop
             {0, 1},  // "YX": X(0) outer loop, Y(1) inner loop
@@ -80,22 +89,7 @@ public:
         const uint32_t limit = lightCount();
         uint32_t idx = 0;
 
-        // RECONSTRUCTED: MoonLight's Wiring::iterate is not in the ported source. From the
-        // Panel usage — iterate(0,0,i){ iterate(1,i,j){ coords[axes[0]]=i; coords[axes[1]]=j } }
-        // — plus the control labels/defaults, the semantics are:
-        //   • the outer loop walks axis `outerAxis`, index i in 0..extent[outerAxis]-1;
-        //   • direction is inc[axis] (axis-keyed — matches the "X++"/"Y++" labels and Cube's
-        //     "X++"/"Y++"/"Z++");
-        //   • the outer loop never snakes (its parent index is a constant 0, always even);
-        //   • the inner loop reverses (snakes) when `snake` is on and the emitted outer index
-        //     is odd. `snake` is the single exposed inner-loop toggle (MoonLight panel.snake[1]);
-        //     MoonLight's exact snake-array indexing (physical-axis vs loop-slot) is not
-        //     recoverable from the ported source, but both the "snake on the Y-axis" default
-        //     comment and this inner-loop reading yield the SAME geometry, the standard
-        //     boustrophedon panel, so this is the faithful behaviour.
-        // On the defaults (XY, inc all true, snake on) this emits Y=0→X 0..15, Y=1→X 15..0,
-        // … identical to GridLayout's serpentine (verified: idx0=(0,0) idx15=(15,0)
-        // idx16=(15,1) idx31=(0,1)).
+        // The outer loop never snakes and the inner one reverses on an odd outer index.
         const lengthType outerN = extent[outerAxis];
         const lengthType innerN = extent[innerAxis];
         const bool outerAsc = inc[outerAxis];
@@ -116,8 +110,7 @@ public:
                     ? ii
                     : static_cast<lengthType>(innerN - 1 - ii);
 
-                // Scatter the two loop values back to (x, y) via the chosen axis order,
-                // exactly as MoonLight's coords[axes[0]]=i; coords[axes[1]]=j.
+                /// Scatter the two loop values onto their axes via the chosen order.
                 lengthType coord[2] = {0, 0};  // coord[0]=x, coord[1]=y
                 coord[outerAxis] = outerVal;
                 coord[innerAxis] = innerVal;

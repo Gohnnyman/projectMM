@@ -1,7 +1,7 @@
 // @module VideoService
 
 #include "doctest.h"
-#include "core/VideoService.h"
+#include "core/services/VideoService.h"
 
 #include <cstdint>
 #include <cstring>

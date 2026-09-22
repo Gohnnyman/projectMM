@@ -1,12 +1,11 @@
-// @module PraxisEffect
+/// @module PraxisEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/PraxisEffect.h"
 #include "light/layouts/GridLayout.h"
 
-// Praxis overwrites EVERY pixel each frame (a full-grid palette field, no black
-// background) — with a non-black palette active, no light is left at (0,0,0).
+// Praxis overwrites EVERY pixel each frame (a full-grid palette field, no black background), with a non-black palette active, no light is left at (0,0,0).
 TEST_CASE("PraxisEffect fills every pixel from the palette") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -23,8 +22,7 @@ TEST_CASE("PraxisEffect fills every pixel from the palette") {
     layer.addChild(&praxis);
 
     layer.applyState();
-    // Rainbow palette (0) is generated at full saturation/value, so every wheel index
-    // maps to a lit color — makes "every pixel lit" order-independent of prior tests.
+    // Rainbow palette (0) is generated at full saturation/value, so every wheel index maps to a lit color, makes "every pixel lit" order-independent of prior tests.
     mm::Palettes::setActive(0);
     layer.tick();
 
@@ -42,8 +40,7 @@ TEST_CASE("PraxisEffect fills every pixel from the palette") {
     CHECK(everyPixelLit);
 }
 
-// The hue is a function of (x, y): pixels far apart in the grid carry different colors,
-// so the field is spatial, not a uniform fill.
+// The hue is a function of (x, y): pixels far apart in the grid carry different colors, so the field is spatial, not a uniform fill.
 TEST_CASE("PraxisEffect varies color across the grid") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -64,16 +61,14 @@ TEST_CASE("PraxisEffect varies color across the grid") {
     layer.tick();
 
     auto* data = layer.buffer().data();
-    // The y·macro·x cross term makes far-apart pixels land on different hues. Compare the
-    // origin with the far corner (15,15), where the spatial term is at its largest.
+    // The y·macro·x cross term makes far-apart pixels land on different hues. Compare the origin with the far corner (15,15), where the spatial term is at its largest.
     uint8_t r0 = data[0], g0 = data[1], b0 = data[2];
     size_t idx = (15 * 16 + 15) * 3;
     uint8_t r1 = data[idx], g1 = data[idx + 1], b1 = data[idx + 2];
     CHECK((r0 != r1 || g0 != g1 || b0 != b1));
 }
 
-// Hard rule: the effect runs at a degenerate grid without crashing. width/height <= 0
-// is guarded, and a 1×1 grid exercises the render loop at its smallest.
+// Hard rule: the effect runs at a degenerate grid without crashing. width/height <= 0 is guarded, and a 1×1 grid exercises the render loop at its smallest.
 TEST_CASE("PraxisEffect survives degenerate grid sizes") {
     for (int dim : {0, 1}) {
         mm::Layouts layouts;

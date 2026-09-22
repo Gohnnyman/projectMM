@@ -1,8 +1,6 @@
-// @module Drivers
+/// @module Drivers
 
-// Pins Drivers::firstOutputRgb — the domain-neutral seam the WLED-compatibility shim uses to
-// tint the app's device card with the live first-LED color. It reads pixel 0 of whichever
-// buffer Drivers is driving (the single-layer fast path here: the layer's own buffer).
+/// Pins Drivers::firstOutputRgb, the domain-neutral seam the WLED-compatibility shim uses to tint the app's device card with the live first-LED color. It reads pixel 0 of whichever buffer Drivers is driving (the single-layer fast path here: the layer's own buffer).
 
 #include "doctest.h"
 #include "light/drivers/Drivers.h"
@@ -14,8 +12,7 @@
 
 namespace {
 
-// A 4×4 grid, one layer, pinned directly to a Drivers (the test-rig path). Returns the
-// layer so the caller can write pixel 0.
+// A 4×4 grid, one layer, pinned directly to a Drivers (the test-rig path). Returns the layer so the caller can write pixel 0.
 struct Rig {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -59,8 +56,7 @@ TEST_CASE("Drivers::firstOutputRgb reports black pixel 0 as-is (caller substitut
     CHECK(rgb[0] == 0);
     CHECK(rgb[1] == 0);
     CHECK(rgb[2] == 0);
-    // (The WLED shim is what maps an all-black read to projectMM purple — pinned in the
-    // HTTP shim's own logic, not here; this seam just reports the raw pixel.)
+    // (The WLED shim is what maps an all-black read to projectMM purple, pinned in the HTTP shim's own logic, not here; this seam just reports the raw pixel.)
 }
 
 TEST_CASE("Drivers::firstOutputRgb returns false when there is no driven buffer") {
@@ -70,8 +66,7 @@ TEST_CASE("Drivers::firstOutputRgb returns false when there is no driven buffer"
 }
 
 TEST_CASE("MoonModule::firstOutputRgb defaults to false (no output module)") {
-    // A plain module that doesn't drive output never claims a first LED — the seam's
-    // safe default, so the shim falls back to purple for a device with no Drivers.
+    // A plain module that doesn't drive output never claims a first LED, the seam's safe default, so the shim falls back to purple for a device with no Drivers.
     mm::MoonModule m;
     uint8_t rgb[3] = {};
     CHECK_FALSE(m.firstOutputRgb(rgb));

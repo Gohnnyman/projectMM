@@ -1,19 +1,12 @@
-// @module FirmwareUpdateModule
+/// @module FirmwareUpdateModule
 
 #include "doctest.h"
-#include "core/FirmwareUpdateModule.h"
+#include "core/system/FirmwareUpdateModule.h"
 #include <cstring>
 
-// The `firmware` control is always present and non-empty (either a real firmware key from
-// build_info.h or the fallback "unknown"). The firmware card owns firmware identity
-// (version/build/firmware) + the partition usage.
+// The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown"). The firmware card owns firmware identity (version/build/firmware) + the partition usage.
 TEST_CASE("FirmwareUpdateModule firmware control populated") {
-    // The firmware control is wired in setup() from kFirmwareName (build_info.h).
-    // Local desktop builds fall through to "unknown" because CMake doesn't
-    // pass -DMM_FIRMWARE_NAME; release builds get the real key. Either way,
-    // the control must exist and be non-empty so the OTA / install-picker path
-    // has something to read. (See docs/architecture.md § Firmware vs board —
-    // "firmware" is the compiled-binary variant; the physical board is separate.)
+    // The firmware control is wired in setup() from kFirmwareName (build_info.h). Local desktop builds fall through to "unknown" because CMake doesn't pass -DMM_FIRMWARE_NAME; release builds get the real key. Either way, the control must exist and be non-empty so the OTA / install-picker path has something to read. (See docs/explanation/architecture/index.md § Firmware vs board, "firmware" is the compiled-binary variant; the physical board is separate.)
     mm::FirmwareUpdateModule fw;
     fw.setup();
     fw.defineControls();
@@ -30,26 +23,25 @@ TEST_CASE("FirmwareUpdateModule firmware control populated") {
     }
     CHECK(found);
 
-    // version + build are part of this module's firmware-identity controls, so they're present too.
-    // firmwarePartition is gated on platform::firmwarePartition() > 0 (the app-partition size), so it
-    // appears on a real device but NOT on desktop/test where firmwarePartition() returns 0 — assert
-    // its TYPE only when present (a Progress control), rather than its presence, so this stays valid
-    // on both.
-    bool hasVersion = false, hasBuild = false;
+    // version + build are part of this module's firmware-identity controls, so they're present too. firmwarePartition is gated on platform::firmwarePartition() > 0 (the app-partition size), so it appears on a real device but NOT on desktop/test where firmwarePartition() returns 0, assert its TYPE only when present (a Progress control), rather than its presence, so this stays valid on both.
+    bool hasVersion = false, hasBuild = false, hasPartition = false;
     for (uint8_t i = 0; i < fw.controls().count(); i++) {
         const auto& c = fw.controls()[i];
         if (std::strcmp(c.name, "version") == 0) hasVersion = true;
         if (std::strcmp(c.name, "build") == 0) hasBuild = true;
-        if (std::strcmp(c.name, "firmwarePartition") == 0) CHECK(c.type == mm::ControlType::Progress);
+        // `partition`, renamed from `firmwarePartition` when one control set began describing either image. The old name left this CHECK inside a condition that is never true, so it asserted nothing while looking like it did.
+        if (std::strcmp(c.name, "partition") == 0) {
+            hasPartition = true;
+            CHECK(c.type == mm::ControlType::Progress);
+        }
     }
     CHECK(hasVersion);
     CHECK(hasBuild);
+    // Not asserted present: the control is added only when the platform reports a partition size, and desktop reports 0. What is asserted is its TYPE when it does exist, which is what the old `firmwarePartition` spelling silently stopped checking.
+    (void)hasPartition;
 }
 
-// OTA phase is surfaced through the shared status slot (MoonModule::setStatus()),
-// not a control. publishStatus() runs in setup()/tick1s() and maps the platform
-// OTA status string to a severity: "idle" clears the banner, an "error: " prefix
-// is Severity::Error, anything else is neutral Severity::Status.
+// OTA phase is surfaced through the shared status slot (MoonModule::setStatus()), not a control. publishStatus() runs in setup()/tick1s() and maps the platform OTA status string to a severity: "idle" clears the banner, an "error: " prefix is Severity::Error, anything else is neutral Severity::Status.
 TEST_CASE("FirmwareUpdateModule OTA status routes through the status slot") {
     mm::FirmwareUpdateModule fw;
 

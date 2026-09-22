@@ -1,45 +1,46 @@
 #pragma once
 
-#include "core/math16.h"              // peakHold, smoothFollow, map32
+#include "core/util/math16.h"              // peakHold, smoothFollow, map32
 #include "light/effects/EffectBase.h"
 
 namespace mm {
 
-// Spectrum: an audio analyser with real meter ballistics.
-//
-// Every VU meter ever built has the same two behaviours, and they are the reason a meter reads as
-// an instrument rather than a bar chart:
-//
-//   - **Asymmetric response.** The bar rises fast enough to catch a transient and falls slowly
-//     enough to be readable. A symmetric follower either misses the hit or flickers.
-//   - **A held peak.** A dot marks the highest recent level and drifts down, so a glance shows both
-//     what is happening now and what just happened.
-//
-// Both live in the toolbox as `smoothFollow` and `peakHold` rather than in this effect, which is
-// what separates it from the existing GEQ: that one hand-rolls its peak tracker into a heap buffer
-// sized to the column count. Here the ballistics are two named function calls, and any effect that
-// wants a meter gets the same feel.
-//
-// `bar` draws the columns, so the effect owns no drawing loop either. What remains is the mapping
-// from bands to columns and the choice of colors — which is genuinely this effect's own.
-//
-// Cost: trivial. One follower and one peak per column, and the bars are direct writes.
-//
-// Prior art: the standard VU/PPM meter ballistics (BBC/EBU peak-programme-meter behaviour) and
-// WLED's GEQ family for the band-to-column mapping.
-// @card SpectrumEffect.png
-/// Audio effect: a spectrum analyser with asymmetric ballistics and falling peak dots.
+/// Audio effect: a spectrum analyzer with asymmetric ballistics and falling peak dots.
+/// @card SpectrumEffect.gif
+///
+/// Two behaviors are what make a meter read as an instrument rather than a bar chart.
+/// A bar rises fast enough to catch a transient and falls slowly enough to be readable.
+/// A dot then marks the highest recent level and drifts down, showing what has passed.
+///
+/// Prior art: the standard VU and PPM meter ballistics, and WLED's GEQ for the band mapping.
+///
+/// @moreinfo
+///
+/// ## The ballistics live in the toolbox
+///
+/// `smoothFollow` and `peakHold` are shared, so any effect wanting a meter gets the same feel.
+/// GEQEffect hand-rolls its own peak tracker into a buffer sized to the column count instead.
+/// `draw::bar` draws the columns too, so this effect owns no drawing loop.
+/// What remains is the band-to-column mapping and the choice of colors, which is its own.
 class SpectrumEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🎶"; }  // showcase + audio-reactive
-    Dim dimensions() const override { return Dim::D2; }   // writes the z=0 slice; extrude fills z
+    /// Catalog tags: a showcase, and audio-reactive.
+    const char* tags() const override { return "💫🎶"; }
+    /// Writes the z=0 slice, which extrude fills through a volume.
+    Dim dimensions() const override { return Dim::D2; }
 
-    uint8_t attack   = 200;  // how fast a bar rises toward a new level (255 = instant)
-    uint8_t release  = 30;   // how fast it falls back
-    uint8_t peakDecay = 2;   // how fast the peak dot drifts down
+    /// How fast a bar rises toward a new level, where 255 is instant.
+    uint8_t attack   = 200;
+    /// How fast it falls back, which is deliberately slower.
+    uint8_t release  = 30;
+    /// How fast the peak dot drifts down.
+    uint8_t peakDecay = 2;
+    /// Draw the held peak above each bar.
     bool    showPeaks = true;
-    bool    colorByColumn = false;  // color per band instead of by height
+    /// Color each bar by its column rather than by height.
+    bool    colorByColumn = false;
 
+    /// Publish the ballistics, the peak's decay and the coloring.
     void defineControls() override {
         controls_.addControl("attack", attack, 1, 255);
         controls_.addControl("release", release, 1, 128);
@@ -48,34 +49,35 @@ public:
         controls_.addControl("colorByColumn", colorByColumn);
     }
 
+    /// Size one follower and one peak per column.
     void prepare() override {
         const size_t cols = static_cast<size_t>(width() > 0 ? width() : 0);
         levels_.resize(cols);
         peaks_.resize(cols);
     }
 
+    /// Follow each band with its own ballistics, then draw its bar and peak.
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
         const lengthType w = width(), h = height();
-        if (!levels_ || !peaks_) return;   // this effect's own buffers; the grid is the Layer's
+        if (!levels_ || !peaks_) return;   // this effect's own buffers, where the grid is the Layer's
 
         draw::fill(cv, RGB{0, 0, 0});
 
         const AudioFrame* f = AudioService::latestFrame();
-        if (!f) return;   // no audio: a dark panel, not a crash
+        if (!f) return;   // no audio leaves a dark panel rather than a crash
 
         for (lengthType x = 0; x < w; x++) {
-            // Map the column onto one of the 16 bands, so the analyser fits any width.
+            // The column mapped onto one of the bands, so the analyzer fits any width.
             const uint8_t band = static_cast<uint8_t>(
                 static_cast<uint32_t>(x) * kBands / static_cast<uint32_t>(w > 0 ? w : 1));
             const uint8_t mag = f->bands[band];
 
-            // The ballistics: rise with `attack`, fall with `release`. Asymmetry is the whole point,
-            // so the two directions use different rates rather than one shared smoothing.
+            // The asymmetry is the point, so rise and fall take separate rates.
             const uint8_t rate = mag > levels_[x] ? attack : release;
             levels_[x] = smoothFollow(levels_[x], mag, rate);
 
-            // The peak dot rises instantly and drifts down — the other half of a real meter.
+            // The peak rises instantly and drifts down, which is a real meter's other half.
             peaks_[x] = peakHold(peaks_[x], levels_[x], peakDecay);
 
             const lengthType lit = static_cast<lengthType>(
@@ -83,8 +85,7 @@ public:
             const uint8_t columnHue = static_cast<uint8_t>(
                 map32(x, 0, w > 1 ? w - 1 : 1, 0, 255));
 
-            // One bar per column, growing up from the floor. The color rides the height unless the
-            // caller asked for per-column hues.
+            // One bar a column from the floor up, colored by height unless asked otherwise.
             draw::bar(cv, x, static_cast<lengthType>(h - 1), lit, draw::Grow::Up,
                       [&](lengthType row) {
                           const uint8_t idx = colorByColumn
@@ -93,7 +94,7 @@ public:
                           return colorFromPalette(*Palettes::active(), idx, 255);
                       });
 
-            // The floating peak, drawn one row above where the bar currently reaches.
+            // The held peak, drawn above where the bar reaches.
             if (showPeaks && peaks_[x] > 0) {
                 const lengthType py = static_cast<lengthType>(
                     h - 1 - (static_cast<uint32_t>(peaks_[x]) * h) / 255u);
@@ -104,10 +105,11 @@ public:
     }
 
 private:
+    /// The spectrum's width, which the columns map onto.
     static constexpr uint32_t kBands = 16;
 
-    ScratchBuffer<uint8_t> levels_{*this};   // the smoothed bar height per column
-    ScratchBuffer<uint8_t> peaks_{*this};    // and the held peak above it
+    ScratchBuffer<uint8_t> levels_{*this};   ///< each column's followed bar height
+    ScratchBuffer<uint8_t> peaks_{*this};    ///< and its held peak
 };
 
 }  // namespace mm

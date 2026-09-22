@@ -4,56 +4,55 @@
 
 namespace mm {
 
-// The Toronto Bar "gourds" installation: 24 gourd fixtures placed at fixed
-// positions in a 3D grid, each gourd rendered at one of three granularities.
-// A gourd is a small five-sided body (front/back/left/right/bottom + a middle
-// point); the granularity control trades physical fidelity for light count:
-//
-//   0 "One Gourd One Light"  — nrOfLightsPerGourd lights, all stacked on the
-//                              gourd's raw grid position (a whole gourd = one
-//                              logical point, replicated).
-//   1 "One Side One Light"   — gourdLength 3: five sides, each 12 LEDs mapped to
-//                              the same virtual pixel, + 1 middle LED = 61/gourd.
-//   2 "One LED One Light"    — gourdLength 7: five cube faces, each a 12-pixel
-//                              perimeter ring, + 1 middle LED = 61/gourd.
-//
-// Prior art: MoonLight's TorontoBarGourdsLayout (Node "Toronto Bar Gourds",
-// tags 🚥). The gourd grid, all three per-mode Coord3D tables, the gourdLength
-// constants (3 and 7), and every +offset are reproduced verbatim; the geometry
-// IS the spec. MoonLight's pin plumbing (nextPin() every 10 gourds) is dropped —
-// a projectMM layout emits coordinates only; the driver owns pins. tags 💫 marks
-// the MoonLight lineage.
-//
-// A single walk() is the one source of truth for the geometry: lightCount()
-// runs it with a no-op callback to tally, placeLights() runs it to emit, so the
-// count and the emitted set can never disagree (the RingLayout/SphereLayout
-// pattern). Integer math throughout; this is the cold build path.
-// Author: troyhacks — custom Toronto bar decorative-gourd installation, reconstructed for projectMM — https://github.com/troyhacks/WLED
 /// Layout for the Toronto bar decorative-gourd installation.
 /// @card TorontoBarGourdsLayout.gif
+/// Author: troyhacks, reconstructed for projectMM, https://github.com/troyhacks/WLED
+///
+/// @moreinfo
+///
+/// The Toronto Bar "gourds" installation: 24 gourd fixtures placed at fixed positions in a 3D grid, each gourd rendered at one of three granularities.
+/// A gourd is a small five-sided body (front/back/left/right/bottom + a middle point); the granularity control trades physical fidelity for light count:
+///
+/// 0 "One Gourd One Light", nrOfLightsPerGourd lights, all stacked on the                              gourd's raw grid position (a whole gourd = one                              logical point, replicated).   1 "One Side One Light", gourdLength 3.
+/// Five sides, each 12 LEDs mapped to                              the same virtual pixel, + 1 middle LED = 61/gourd.   2 "One LED One Light", gourdLength 7.
+/// Five cube faces, each a 12-pixel                              perimeter ring, + 1 middle LED = 61/gourd.
+///
+/// ## Prior art
+///
+/// Prior art: MoonLight's TorontoBarGourdsLayout (Node "Toronto Bar Gourds", tags 🚥).
+/// The gourd grid, all three per-mode Coord3D tables, the gourdLength constants (3 and 7), and every +offset are reproduced verbatim; the geometry IS the spec.
+/// MoonLight's pin plumbing (nextPin() every 10 gourds) is dropped, a projectMM layout emits coordinates only; the driver owns pins. tags 💫 marks the MoonLight lineage.
+///
+/// A single walk() is the one source of truth for the geometry: lightCount() runs it with a no-op callback to tally, placeLights() runs it to emit.
+/// The count and the emitted set can never disagree (the RingLayout/SphereLayout pattern).
+/// Integer math throughout; this is the cold build path.
 class TorontoBarGourdsLayout : public LayoutBase {
 public:
-    // Mode 0 only: how many stacked lights one gourd contributes. MoonLight
-    // default 61 (= 5*12+1, matching the 61 lights modes 1 and 2 emit).
+    /// How many stacked lights one gourd contributes, in the coarsest mode.
     uint8_t nrOfLightsPerGourd = 61;
-    // Granularity select (0/1/2). MoonLight default 2 ("One LED One Light").
+    /// Granularity select (0/1/2). MoonLight default 2 ("One LED One Light").
     uint8_t granularity = 2;
 
+    /// The controls a user sets on the card.
     void defineControls() override {
         controls_.addSelect("granularity", granularity, kGranularityOptions, kGranularityCount);
         // Mode 0 only; MoonLight range 1..128.
         controls_.addControl("nrOfLightsPerGourd", nrOfLightsPerGourd, 1, 128);
     }
 
+    /// The catalog tags this layout carries.
     const char* tags() const override { return "💫"; }
+    /// How many axes this layout places lights on.
     Dim dimensions() const override { return Dim::D3; }
 
+    /// How many lights the current settings place.
     nrOfLightsType lightCount() const override {
         nrOfLightsType n = 0;
         walk([](void*, nrOfLightsType, lengthType, lengthType, lengthType) {}, nullptr, &n);
         return n;
     }
 
+    /// Emit every light's coordinate, in wiring order.
     void placeLights(const CoordSink& sink) const override {
         walk(sink.cb, sink.ctx, nullptr);
     }
@@ -63,9 +62,7 @@ private:
         "One Gourd One Light", "One Side One Light", "One LED One Light"};
     static constexpr uint8_t kGranularityCount = 3;
 
-    // Small emitter that either invokes cb with a running index or just tallies,
-    // so every mode below writes one line per light regardless of which path
-    // (emit vs count) is active. Mirrors MoonLight's addLight(Coord3D).
+    // Either emits or tallies, so every mode below writes one line per light.
     struct Emit {
         CoordCallback cb;
         void* ctx;
@@ -82,8 +79,7 @@ private:
             e.add(pos.x, pos.y, pos.z);  // all gourd lights on the same position
     }
 
-    // One Side One Light: each side can be mapped in a 3*3*3 grid (27 LEDs),
-    // 5 sides + 1 middle LED; each side's 12 LEDs share one virtual pixel.
+    // The coarsest granularity: each side's twelve lights share one virtual pixel.
     void addGourdSides(Emit& e, Coord3D pos) const {
         const int gourdLength = 3;
         const Coord3D sides[] = {
@@ -104,12 +100,7 @@ private:
               static_cast<lengthType>(pos.z * gourdLength + side.z));
     }
 
-    // One LED One Light: gourd is a 7-wide cube shell; each of 5 faces is a
-    // 12-pixel perimeter ring (the pixels[] table, a clockwise walk of a 4x4
-    // border), + 1 middle LED. In the MoonLight source the pixel table uses
-    // two-arg Coord3D (z defaults to 0); the .z is never read here — each face
-    // loop scatters pixel.x/pixel.y into the two varying axes and sets the
-    // constant axis directly, exactly as the source does.
+    // The finest granularity: a cube shell whose five faces are each a perimeter ring.
     void addGourdPixels(Emit& e, Coord3D pos) const {
         const int gourdLength = 7;
         const Coord3D pixels[] = {  // 12 pixels each
@@ -150,9 +141,7 @@ private:
               static_cast<lengthType>(pos.z * gourdLength + middle.z));
     }
 
-    // Single source of truth for the layout: place all 24 gourds in the fixed
-    // grid order, emitting each gourd via the selected granularity. cb non-null
-    // emits; count non-null tallies (reusing the exact same walk).
+    // The one home for the layout: every gourd in grid order, at the chosen granularity.
     void walk(CoordCallback cb, void* ctx, nrOfLightsType* count) const {
         // The gourd order and positions in a 3D grid space (MoonLight, verbatim).
         const Coord3D gourds[] = {

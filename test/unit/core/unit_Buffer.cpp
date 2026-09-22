@@ -1,4 +1,4 @@
-// @module Buffer
+/// @module Buffer
 
 #include "doctest.h"
 #include "light/layers/Buffer.h"
@@ -37,9 +37,7 @@ TEST_CASE("Buffer move constructor") {
     CHECK(b.data() == ptr);
     CHECK(b.count() == 100);
     CHECK(b.channelsPerLight() == 3);
-    // Asserting the moved-from state IS the test: Buffer's move must leave the source empty,
-    // not merely valid-but-unspecified.
-    // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+    // Asserting the moved-from state IS the test: Buffer's move must leave the source empty, not merely valid-but-unspecified. NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
     CHECK(a.data() == nullptr);
     CHECK(a.count() == 0);
 }
@@ -54,9 +52,7 @@ TEST_CASE("Buffer move assignment") {
     b = std::move(a);
     CHECK(b.data() == ptr);
     CHECK(b.count() == 100);
-    // Asserting the moved-from state IS the test: Buffer's move must leave the source empty,
-    // not merely valid-but-unspecified.
-    // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+    // Asserting the moved-from state IS the test: Buffer's move must leave the source empty, not merely valid-but-unspecified. NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
     CHECK(a.data() == nullptr);
 }
 
@@ -70,8 +66,7 @@ TEST_CASE("Buffer double free is safe") {
     CHECK(buf.count() == 0);
 }
 
-// allocate() refuses zero-count or zero-channels (returns false, no allocation,
-// buffer left empty so a caller that ignores the bool doesn't get a partial state).
+// allocate() refuses zero-count or zero-channels (returns false, no allocation, buffer left empty so a caller that ignores the bool doesn't get a partial state).
 TEST_CASE("Buffer allocate with zero returns false") {
     mm::Buffer buf;
     CHECK_FALSE(buf.allocate(0, 3));

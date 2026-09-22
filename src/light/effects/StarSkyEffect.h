@@ -4,51 +4,53 @@
 
 namespace mm {
 
-// Star Sky: a field of independently twinkling stars over a 3D grid. A fixed pool of stars
-// (sized from the light count) each pick a random cell, a random initial brightness, and a random
-// fade direction; every frame the whole buffer dims a little and each star steps its brightness
-// toward full (then reverses) or toward zero (then respawns at a fresh random cell). A small per-
-// frame chance (random8() < 10) flips a star's direction early, scattering the twinkle so it never
-// pulses in sync. Stars are white (b,b,b) unless usePalette, in which case each carries its own
-// palette index. The color drawn each frame is taken from the brightness BEFORE this frame's step
-// (MoonLight computes `color` once from the current brightness, then steps, then setRGB(color)).
-//
-// Prior art: MoonLight's StarSky (E_MoonModules / MoonModules) — the star-pool model (fill-ratio
-// sizing, fade-up/fade-down/respawn, the random early-reverse, the optional palette color) is
-// reproduced here, written fresh on projectMM's EffectBase + shared primitives (Random8,
-// colorFromPalette, draw::). The per-star arrays live on the heap (ScratchBuffers), never as inline
-// members, so sizeof(StarSkyEffect) stays tiny.
-// Author: limpkin (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Night-sky effect: twinkling stars over a dark field.
 /// @card StarSkyEffect.gif
+/// Author: limpkin (MoonLight), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+///
+/// A pool of stars, sized from the light count, each taking a random cell and brightness.
+/// Every frame a star steps toward full and reverses, or toward zero and respawns elsewhere.
+/// A small per-frame chance flips its direction early, so the field never pulses in sync.
+///
+/// Prior art: MoonLight's StarSky, whose pool model and early reverse this reproduces.
+///
+/// @moreinfo
+///
+/// ## The color leads the step
+///
+/// Each frame reads a star's brightness, makes its color, then steps that brightness.
+/// So the color drawn is the one from before this frame's step, as the source does it.
+/// Stars are white unless `usePalette`, where each carries a palette index of its own.
 class StarSkyEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫"; }  // MoonLight origin
+    /// Catalog tags: MoonLight origin.
+    const char* tags() const override { return "💫"; }
+    /// A star takes any cell of the volume.
     Dim dimensions() const override { return Dim::D3; }
 
-    // Defaults match MoonLight's StarSky exactly.
-    uint8_t speed           = 1;     // fade step per frame (0..42)
-    uint8_t star_fill_ratio = 42;    // stars per 10000 lights (the pool-size lever)
-    bool    usePalette      = false; // false → white stars; true → per-star palette color
+    // Defaults match MoonLight's own StarSky.
+    /// How far a star's brightness steps each frame.
+    uint8_t speed           = 1;
+    /// Stars per ten thousand lights, which sizes the pool.
+    uint8_t star_fill_ratio = 42;
+    /// Give each star its own palette color rather than white.
+    bool    usePalette      = false;
 
+    /// Publish the twinkle rate, the star density and the coloring.
     void defineControls() override {
         controls_.addControl("speed", speed, 0, 42);
         controls_.addControl("star_fill_ratio", star_fill_ratio, 0, 255);
         controls_.addControl("usePalette", usePalette);
     }
 
-    // Per-star state on the heap, sized to nb_stars = star_fill_ratio*nrOfLights/10000 + 1. Reallocated
-    // whenever the light count or fill ratio changes (so it tracks a live grid/control edit). Off the
-    // hot path; never an inline member (a large inline array overflows the registerType<T> probe stack).
+    /// Size the per-star arrays on the heap, since an inline one overflows the probe's stack.
     void prepare() override {
         const nrOfLightsType count = nrOfLights();
         const size_t wanted = count > 0
             ? (static_cast<size_t>(star_fill_ratio) * count) / 10000u + 1u
             : 0u;
         if (wanted != nbStars_ || count != lightCount_) {
-            // Four parallel buffers, each self-sizing/zero-filling and self-reporting (their deltas
-            // sum to nbStars*(sizeof(nrOfLightsType)+3), the old setDynamicBytes value). Resize all
-            // four FIRST, then AND — so all resize even if an earlier one fails (alloc-all-then-check).
+            // Resize all four, then test: every buffer is sized even if an earlier one fails.
             const bool a = indexes_.resize(wanted);
             const bool b = fadeDir_.resize(wanted);
             const bool c = brightness_.resize(wanted);
@@ -64,6 +66,7 @@ public:
         }
     }
 
+    /// Dim the sky, then step and draw every star.
     void tick() MM_NONBLOCKING override {
         if (!indexes_ || !fadeDir_ || !brightness_ || !colors_ || nbStars_ == 0) return;
         const lengthType w = width(), h = height();
@@ -75,30 +78,27 @@ public:
 
         for (size_t i = 0; i < nbStars_; i++) {
             const nrOfLightsType index = indexes_[i];
-            // Decode the linear index back to a grid cell (index < nrOfLights → always in bounds).
+            // The linear index back to a cell, which is in bounds by construction.
             const lengthType x = static_cast<lengthType>(index % w);
             const lengthType y = static_cast<lengthType>((index / w) % h);
             const lengthType z = static_cast<lengthType>(index / (static_cast<size_t>(w) * h));
             const Coord3D p{x, y, z};
 
-            // Color is computed ONCE from the CURRENT (pre-step) brightness, then the brightness is
-            // stepped, then the pre-step color is drawn — matching MoonLight's
-            //   color = usePalette ? ColorFromPalette(pal, colors[i], brightness[i]) : CRGB(b,b,b);
-            //   brightness[i] += speed; setRGB(pos, color);
+            // The color comes from the brightness before this frame's step, as the source does it.
             const uint8_t b = brightness_[i];
             const RGB color = usePalette
                 ? colorFromPalette(*Palettes::active(), colors_[i], b)
                 : RGB{b, b, b};
 
             if (fadeDir_[i]) {
-                // Fading up toward full brightness.
+                // Rising toward full.
                 const uint16_t nb = static_cast<uint16_t>(b) + speed;
                 brightness_[i] = nb > 255 ? 255 : static_cast<uint8_t>(nb);
                 draw::pixel(cv, p, color);
                 if (brightness_[i] == 255) fadeDir_[i] = 0;
                 if (rng_.next8() < 10) fadeDir_[i] = 0;
             } else {
-                // Fading down toward black; respawn at a fresh cell when it reaches zero.
+                // Falling toward black, respawning elsewhere once it lands.
                 brightness_[i] = b > speed ? static_cast<uint8_t>(b - speed) : 0;
                 draw::pixel(cv, p, color);
                 if (brightness_[i] == 0) {
@@ -111,20 +111,15 @@ public:
     }
 
 private:
-    // Four parallel per-star arrays (SoA). Each self-sizes/frees/reports; access via [i]. nbStars_ /
-    // lightCount_ are kept as semantics (star total / the grid they were sized for), not mirrors.
-    ScratchBuffer<nrOfLightsType> indexes_{*this};     // linear cell index per star (< nrOfLights)
-    ScratchBuffer<uint8_t>        fadeDir_{*this};      // 0 = fading down, 1 = fading up
-    ScratchBuffer<uint8_t>        brightness_{*this};   // current 0..255 brightness per star
-    ScratchBuffer<uint8_t>        colors_{*this};       // per-star palette index (used only when usePalette)
-    size_t         nbStars_    = 0;
-    nrOfLightsType lightCount_ = 0;
-    Random8   rng_{0x57A55C1Eu};
+    ScratchBuffer<nrOfLightsType> indexes_{*this};      ///< each star's cell
+    ScratchBuffer<uint8_t>        fadeDir_{*this};      ///< whether it is rising or falling
+    ScratchBuffer<uint8_t>        brightness_{*this};   ///< its current brightness
+    ScratchBuffer<uint8_t>        colors_{*this};       ///< its palette entry, under `usePalette`
+    size_t         nbStars_    = 0;                     ///< how many stars the pool holds
+    nrOfLightsType lightCount_ = 0;                     ///< the light count it was sized for
+    Random8   rng_{0x57A55C1Eu};                        ///< the twinkle's randomness
 
-    // A uniform cell pick over 0..count-1. nrOfLightsType is uint32_t on PSRAM builds (>65535 lights),
-    // so a single next16() draw can't reach the top of a large grid — compose a full-width draw from
-    // two 16-bit draws when the index type is wider than 16 bits, then take it modulo count. On the
-    // no-PSRAM (uint16_t) build this collapses to the plain next16() pick.
+    /// A uniform cell pick, composed from two draws since the index type outgrows one on a large grid.
     nrOfLightsType randomIndex(nrOfLightsType count) {
         if (count == 0) return 0;
         if constexpr (sizeof(nrOfLightsType) > sizeof(uint16_t)) {
@@ -135,7 +130,7 @@ private:
         }
     }
 
-    // Seed every star: random cell, random fade direction, random mid brightness, random color.
+    /// Seed every star at a random cell, direction, brightness and color.
     void initStars(nrOfLightsType count) {
         for (size_t i = 0; i < nbStars_; i++) {
             indexes_[i]    = randomIndex(count);

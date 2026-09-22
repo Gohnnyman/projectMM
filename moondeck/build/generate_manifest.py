@@ -15,7 +15,7 @@ its own manifest because:
     offset on flash (0x1000 vs 0x0 — wrong offset bricks visibly).
 
 "Firmware" here is the compiled binary variant — separate from "board" (the
-physical hardware). See docs/architecture.md § Firmware vs board.
+physical hardware). See docs/explanation/architecture/index.md § Firmware vs board.
 
 We don't hardcode the offsets. ESP-IDF writes them into
 `build/flasher_args.json` for the exact chip it just built. The CI stage
@@ -128,7 +128,7 @@ def main() -> int:
 
     parts = parts_from_flasher_args(flasher_args, prefix, size)
     if not parts:
-        print(f"generate_manifest: no recognised parts in {args.flasher_args}")
+        print(f"generate_manifest: no recognized parts in {args.flasher_args}")
         return 1
 
     # MoonBase firmwares: flasher_args stages the app at the first app partition: the factory

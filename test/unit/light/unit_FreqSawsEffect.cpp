@@ -1,11 +1,11 @@
-// @module FreqSawsEffect
-// @also AudioService
+/// @module FreqSawsEffect
+/// @also AudioService
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/FreqSawsEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioService.h"
+#include "core/services/AudioService.h"
 
 // Helper: any non-zero byte in the layer buffer (a lit pixel somewhere).
 static bool anyLit(mm::Layer& layer) {
@@ -15,8 +15,7 @@ static bool anyLit(mm::Layer& layer) {
     return false;
 }
 
-// With no audio (silence) and keepOn off, every band decays to rest so the effect draws nothing —
-// the whole buffer stays black. (No mic is active here, so latestFrame() is the static silence.)
+// With no audio (silence) and keepOn off, every band decays to rest so the effect draws nothing, the whole buffer stays black. (No mic is active here, so latestFrame() is the static silence.)
 TEST_CASE("FreqSawsEffect silence with keepOn off leaves the buffer dark") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -38,8 +37,7 @@ TEST_CASE("FreqSawsEffect silence with keepOn off leaves the buffer dark") {
     CHECK_FALSE(anyLit(layer));   // silence in, dark out
 }
 
-// keepOn keeps every band drawing even when its speed has fully decayed, so on a rested (silent)
-// panel the columns are still lit rather than fully dark between hits.
+// keepOn keeps every band drawing even when its speed has fully decayed, so on a rested (silent) panel the columns are still lit rather than fully dark between hits.
 TEST_CASE("FreqSawsEffect keepOn draws bands even with no audio") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -62,12 +60,9 @@ TEST_CASE("FreqSawsEffect keepOn draws bands even with no audio") {
     CHECK(anyLit(layer));         // keepOn lights the panel with no audio at all
 }
 
-// Fed a live (simulated) audio frame, the effect reacts: loud bands rise and paint their columns,
-// leaving the buffer non-black even with keepOn off (so the light comes from the audio, not keepOn).
+// Fed a live (simulated) audio frame, the effect reacts: loud bands rise and paint their columns, leaving the buffer non-black even with keepOn off (so the light comes from the audio, not keepOn).
 TEST_CASE("FreqSawsEffect reacts to a fed audio frame") {
-    // Claim the active-mic seat with a module synthesizing loud "music" every tick (desktop has no
-    // I2S mic, so simulate is the only source; music-always fills every band). latestFrame() then
-    // hands this module's frame to the effect.
+    // Claim the active-mic seat with a module synthesizing loud "music" every tick (desktop has no I2S mic, so simulate is the only source; music-always fills every band). latestFrame() then hands this module's frame to the effect.
     mm::AudioService mic;
     mic.defineControls();
     mic.mode = mm::AudioService::kSimMode;   // simulate mode
@@ -90,8 +85,7 @@ TEST_CASE("FreqSawsEffect reacts to a fed audio frame") {
     layer.addChild(&saws);
     layer.applyState();
 
-    // A few ticks: each refreshes the synthesized loud frame, then the effect renders it. Loud bands
-    // rise instantly (max with target), so a lit column appears within these frames.
+    // A few ticks: each refreshes the synthesized loud frame, then the effect renders it. Loud bands rise instantly (max with target), so a lit column appears within these frames.
     bool lit = false;
     for (int tick = 0; tick < 8 && !lit; tick++) {
         mic.tick();               // (re)synthesize a loud music frame into the active mic
@@ -103,8 +97,7 @@ TEST_CASE("FreqSawsEffect reacts to a fed audio frame") {
     mic.release();               // vacate the seat so later tests read silence again
 }
 
-// The "runs at every grid size" hard rule: a degenerate 0×0×0 grid and a 1×1 grid both render
-// without crashing (the imap zero-span guard and the sizeX/sizeY<=0 early-out cover them).
+// The "runs at every grid size" hard rule: a degenerate 0×0×0 grid and a 1×1 grid both render without crashing (the imap zero-span guard and the sizeX/sizeY<=0 early-out cover them).
 TEST_CASE("FreqSawsEffect runs at degenerate grid sizes without crashing") {
     for (auto dims : {mm::Coord3D{0, 0, 0}, mm::Coord3D{1, 1, 1}}) {
         mm::Layouts layouts;

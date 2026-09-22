@@ -1,11 +1,11 @@
 #pragma once
 
-#include "core/MoonModule.h"
-#include "core/ActiveInstance.h"     // the singleton seat drivers resolve the library through
-#include "core/ScratchBuffer.h"      // the dynamic (no-cap) role pool
-#include "core/JsonSink.h"
-#include "core/JsonUtil.h"           // restoreList: recursive reader for the persisted array
-#include "light/ChannelRole.h"
+#include "core/module/MoonModule.h"
+#include "core/util/ActiveInstance.h"     // the singleton seat drivers resolve the library through
+#include "core/util/ScratchBuffer.h"      // the dynamic (no-cap) role pool
+#include "core/util/JsonSink.h"
+#include "core/util/JsonUtil.h"           // restoreList: recursive reader for the persisted array
+#include "light/drivers/ChannelRole.h"
 #include "light/drivers/Correction.h"  // LightPreset + fillRolesFromPreset + the derived offsets
 
 #include <cstdint>
@@ -16,81 +16,56 @@
 
 namespace mm {
 
-/// The reusable light-preset library — a Drivers submodule (child role `preset`) that owns a set
-/// of NAMED channel-role wirings, each editable in its own row and referenced by many drivers.
+/// The reusable light-preset library, a Drivers submodule owning NAMED channel-role wirings, each editable in its own row and referenced by many drivers. A driver stores a preset's STABLE id and resolves it here into its own Correction, so a wiring is built once and reordering other presets disturbs no reference.
 ///
-/// A "light preset" is a channel-role layout: role `r` at channel `i` says channel `i` of a light
-/// carries role `r` (Red/Green/Blue/White/WarmWhite/Yellow/UV, and the fixture roles Pan/Tilt/…).
-/// A curated set of real fixtures is SEEDED as read-only (`locked`) rows on first boot: the color
-/// orders (RGB, GRB, BGR, RGBW, GRBW, WRGB), the multi-channel LED/par fixtures (Curtain GRB6,
-/// Lightbar RGBWYP, RGBCCT, IRGB), and moving heads (MH BeeEyes 15, MH BeTopper 32, MH 19x15W-24).
-/// A user adds custom named wirings alongside them. A
-/// driver stores only a preset's STABLE id; it resolves that id here at cold-path rebuild time into
-/// its own `Correction` (see `deriveCorrection`) and holds nothing else. So building a wiring once
-/// makes it reusable across every driver, and reordering / deleting other presets never disturbs a
-/// reference (the id is invariant; the row index is not).
+/// A curated set of real fixtures is seeded read-only on first boot. A user adds custom named wirings alongside them. The render loop never reads this module.
 ///
-/// **Storage is uncapped.** A preset is exactly as wide as its fixture — role bytes live in one
-/// dynamic pool (`rolePool_`, a ScratchBuffer), each preset a `{poolOffset, channelCount}` slice.
-/// No fixed channel ceiling: a moving head can declare as many channels as it has. The pool is
-/// touched only on the cold path (edit / restore); nothing binds a control to it, so it is free to
-/// reallocate — the control-bind stable-address rule that pins DriverBase's arrays does not apply.
+/// @moreinfo
 ///
-/// It's the first consumer of the editable-list primitive (`EditableListSource`): the whole
-/// add / delete / reorder / per-field-edit UI comes from that, reused rather than re-built (custom
-/// palettes reuse the same primitive later). The per-row fields are the preset's name, its channel
-/// count, and one role picker per channel.
+/// ## What a preset is
 ///
-/// **Hot-path guarantee.** The render loop never reads this module. A driver resolves its preset id
-/// into its own `Correction` offset cache ONCE per config change (`deriveCorrection`); per-light
-/// `apply()` reads only that cache. A library preset costs exactly what an inline one did per light.
+/// A channel-role layout: role `r` at channel `i` says channel `i` of a light carries role `r`.
+/// The color roles cover the strip orders, and the fixture roles cover pan, tilt and the rest.
+///
+/// ## Storage is uncapped
+///
+/// A preset is exactly as wide as its fixture. Role bytes live in one dynamic pool, each preset a slice, so a moving head declares as many channels as it has. The pool is touched on the cold path only, leaving it free to reallocate.
+///
+/// ## The editable-list primitive
+///
+/// The first consumer of `EditableListSource`. The whole add, delete, reorder and edit surface is reused rather than rebuilt. The per-row fields are the name, the channel count, and one role picker per channel.
+///
 /// @card lightpresets.png
 class LightPresetsModule : public MoonModule, public ListSource {
 public:
     ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Generic; }
 
-    // A boot-wired singleton (exactly one, added under Drivers at boot): not user-deletable, the same
-    // as the boot-wired PreviewDriver. Drivers accepts only `driver` children, so a deleted preset
-    // library could never be re-added — and every driver resolves its preset through this one, so
-    // losing it would break them all. The one library is permanent; the presets INSIDE it are editable.
+    // A deleted library could never be re-added, and every driver resolves its preset through it.
+    /// Not user-editable: every driver resolves its preset through this one boot-wired library.
     bool userEditable() const override { return false; }
 
+    /// How many preset rows a device can hold.
     static constexpr uint8_t kMaxPresets = 32;   // bounded row count; a device won't wire more light types
 
-    /// The boot library (exactly one under Drivers). A driver resolves its preset reference through
-    /// this static seam — no compile-time dependency on the module's address, same shape as
-    /// DevicesModule::active() / AudioService::latestFrame().
+    /// The boot library, which a driver resolves its preset reference through.
     static LightPresetsModule* active() { return ActiveInstance<LightPresetsModule>::active(); }
 
-    /// The id of the first preset (a safe default reference for a fresh driver / a dangling id).
-    /// Always valid once the built-ins are seeded.
+    /// The first preset's id: a safe default for a fresh driver or a dangling reference.
     uint32_t defaultId() const { return count_ ? presets_[0].id : 0; }
 
-    /// Row count / name / id accessors so a driver can build its `preset` Select (names for the
-    /// options, ids for the stable reference it stores). The Select's chosen INDEX maps to a preset
-    /// id via idAt(index); a driver keeps the id, not the index — so reorder/delete never re-points
-    /// it. indexOfId() is the inverse, for rendering the Select at the currently-referenced preset.
+    /// How many presets the library holds, for a driver building its preset selector.
     uint8_t presetCount() const { return count_; }
+    /// The name of preset row `i`, for a driver building its selector.
     const char* nameAt(uint8_t i) const { return i < count_ ? presets_[i].name : ""; }
+    /// The stable id of preset row `i`, which is what a driver stores.
     uint32_t idAt(uint8_t i) const { return i < count_ ? presets_[i].id : 0; }
+    /// The row currently holding `id`, for rendering a selector at its referenced preset.
     uint8_t indexOfId(uint32_t id) const {
         for (uint8_t i = 0; i < count_; i++) if (presets_[i].id == id) return i;
         return 0;   // a dangling id renders at the first preset; rebuildCorrection falls back to it too
     }
 
-    /// Resolve `id` into `out` — fill its brightness LUT + channel-role offsets from the preset's
-    /// wiring. Returns true if the id resolved; on a missing id (a deleted preset) returns false and
-    /// leaves `out` untouched, so the caller keeps its safe default (never crashes). COLD PATH: a
-    /// driver calls this from rebuildCorrection, never from the render loop. This is the single point
-    /// a preset's roles become a driver's flat `Correction` cache — the render path never sees a role.
-    /// Does the preset carry a White channel? A driver uses this to hide its whiteMode control when
-    /// the referenced preset has no white to synthesise (an RGB/GRB strip). Missing id → false.
-    // True when the preset carries any channel apply() SYNTHESISES from RGB via whiteMode —
-    // White, WarmWhite, Yellow, or UV. Drives the whiteMode control's visibility: the control
-    // governs all four, so it shows whenever any is present (not just White). A motion/fixture
-    // role (Pan/Tilt/…) is not synthesised, so it doesn't count.
-    /// Does this preset carry `role` at all? The narrower question presetHasSynthChannel answers
-    /// as a group, for a caller that needs one emitter rather than any of them.
+    /// Whether the preset carries `role`, for a caller that needs one emitter rather than any.
     bool presetHasRole(uint32_t id, ChannelRole role) const {
         const Preset* p = find(id);
         if (!p) return false;
@@ -100,6 +75,8 @@ public:
         return false;
     }
 
+    // Any channel apply() synthesises from RGB counts, since one control governs them all.
+    /// Whether the preset carries a channel the white mode would synthesise.
     bool presetHasSynthChannel(uint32_t id) const {
         const Preset* p = find(id);
         if (!p) return false;
@@ -117,55 +94,49 @@ public:
         return false;
     }
 
+    /// Resolve a preset id into a driver's flat Correction; false leaves `out` untouched.
     bool deriveCorrection(uint32_t id, uint8_t brightness, Correction& out) const {
         const Preset* p = find(id);
         if (!p) return false;
-        // The pool stores role bytes as indices into kChannelRoleOptions, which are index-aligned
-        // with the ChannelRole enum (enum : uint8_t) — so a role byte IS a ChannelRole value. The
-        // reinterpret is a view of the same bytes, no copy (the array can be wide — a moving head).
+        // The option indices are aligned with the enum, so a role byte IS a ChannelRole value.
         out.rebuild(brightness, reinterpret_cast<const ChannelRole*>(roleAt(*p)), p->channelCount);
         return true;
     }
 
-    // The singleton seat is claimed at CONSTRUCTION, not in prepare() — a driver resolves the library
-    // via active() while building its `preset` Select in defineControls() (phase 1) and rebuildControls
-    // (phase 2b), both BEFORE the module's own prepare() (phase 4). Claiming later left active() null
-    // then, so every driver's preset dropdown showed "(none)". Exactly one instance exists (boot-wired
-    // singleton), so claim-at-construction is unambiguous; the RAII vacate on destruct still guards
-    // the dangling-static case.
+    // Claimed at CONSTRUCTION: a driver resolves the library while building its own controls.
+    /// Claim the singleton seat at construction, before any driver builds its selector.
     LightPresetsModule() { seat_.claim(); }
 
+    /// Seed the curated built-ins when the set is empty.
     void setup() override {
         MoonModule::setup();
         if (count_ == 0) seedBuiltins();   // belt-and-braces; defineControls already seeds if empty
         refreshStatus();
     }
 
-    void prepare() override { seat_.claim(); }   // idempotent — no-op while we already hold the seat
+    /// Re-claim the singleton seat, which is a no-op while we already hold it.
+    void prepare() override { seat_.claim(); }   // idempotent: no-op while we already hold the seat
+    /// Vacate the singleton seat, then release the base.
     void release() override { seat_.vacate(); MoonModule::release(); }
 
+    /// Bind the presets list, which the editable-list primitive renders.
     void defineControls() override {
         MoonModule::defineControls();
-        // Seed the curated built-ins if the set is empty, so a driver building its preset Select in
-        // this same phase-1 pass sees real names (not "(none)"). restoreList (phase 2) replaces the
-        // set with the persisted rows — which INCLUDE the built-ins — so this never double-seeds.
+        // The persisted rows INCLUDE the built-ins, so restoring replaces rather than duplicates.
         if (count_ == 0) seedBuiltins();
         controls_.addList("presets", *this);   // this module is the (editable) ListSource
     }
 
     // --- ListSource (editable) ---------------------------------------------------------
+    /// How many preset rows the list holds.
     uint8_t listRowCount() const override { return count_; }
 
-    // The row SUMMARY is also the PERSISTED form (only the List value round-trips to the saved file,
-    // not the detail), so it must be complete: id, name, channel count, the roles array, and locked.
-    // restoreList reads exactly these fields back — a custom preset's full wiring survives a reboot.
+    // This row IS the persisted form, so it must carry the preset's full wiring.
+    /// Write one row, which is also the persisted form, so it carries the full wiring.
     void writeListRow(JsonSink& sink, uint8_t row) const override {
         const Preset& p = presets_[row];
         const uint8_t* roles = roleAt(p);
-        // name via writeJsonString (escapes `"` / `\` / control bytes), NOT raw %s: this row IS the
-        // persisted form, so a name with a quote emitted raw would produce malformed JSON that fails to
-        // parse on the next boot — silently wiping every custom preset. (DevicesModule::writeListRow
-        // writes its name the same way for the same reason.)
+        // Escaped, not raw: a quote in a name would produce JSON that wipes every custom preset.
         sink.appendf("{\"id\":%lu,\"name\":", static_cast<unsigned long>(p.id));
         sink.writeJsonString(p.name);
         sink.appendf(",\"channels\":%u,\"roles\":[", static_cast<unsigned>(p.channelCount));
@@ -176,15 +147,8 @@ public:
         sink.append("}");
     }
 
-    /// The row's editable field descriptors: name (text), channels (the fixture width), and one role
-    /// Select per channel — rendered generically by the editable-list primitive. Every channel is
-    /// shown (including unmapped "—" ones), so the editor mirrors the fixture's full width. A locked
-    /// (built-in) row still emits its fields; the row's `locked` flag makes the UI render them
-    /// read-only. (A sparse editor — showing only mapped channels + an add-channel affordance — is a
-    /// future refinement; kept dense here so it's straightforward and reliable.)
-    // The 14 channel-role option strings, emitted ONCE per list (referenced by every ch<N> select via
-    // "optionsRef" below) instead of inlined per channel per row — a 32-channel fixture × 13 rows would
-    // otherwise repeat this identical array 400+ times, the bulk of the periodic state push.
+    // Emitted ONCE per list: inlining would repeat the same array hundreds of times per push.
+    /// Emit the shared channel-role option set every row's selectors reference.
     void writeListOptionSets(JsonSink& sink) const override {
         sink.append("\"channelRole\":[");
         for (uint8_t o = 0; o < kChannelRoleCount; o++)
@@ -192,6 +156,7 @@ public:
         sink.append("]");
     }
 
+    /// Write one row's editable fields: the name, the channel count, and a role per channel.
     void writeListRowDetail(JsonSink& sink, uint8_t row) const override {
         const Preset& p = presets_[row];
         const uint8_t* roles = roleAt(p);
@@ -202,25 +167,24 @@ public:
         sink.appendf("{\"name\":\"channels\",\"type\":\"uint8\",\"value\":%u,\"min\":1,\"max\":255}",
                      static_cast<unsigned>(p.channelCount));
         for (uint8_t c = 0; c < p.channelCount; c++) {
-            // Reference the shared "channelRole" option set (writeListOptionSets) instead of inlining
-            // the 14 strings — the whole point of the hoist.
+            // Reference the shared option set rather than inlining its strings.
             sink.appendf(",{\"name\":\"ch%u\",\"type\":\"select\",\"value\":%u,\"optionsRef\":\"channelRole\"}",
                          static_cast<unsigned>(c), static_cast<unsigned>(roles[c]));
         }
         sink.append("]}");
     }
 
+    /// The list is editable, so the UI offers add, delete and reorder.
     bool isEditableList() const override { return true; }
 
+    /// Add a preset, returning its new stable id.
     bool addListRow(uint32_t& outId) override {
         if (count_ >= kMaxPresets) return false;
         Preset& p = presets_[count_];
         p = Preset{};
         p.id = nextId_++;
         p.channelCount = 3;
-        // %u on a uint32 could in principle print 10 digits, which "preset " + name[16] cannot hold —
-        // GCC flags the truncation even though nextId_ never gets near it. Print the id modulo 10^5:
-        // the default name is a placeholder the user renames, and 5 digits provably fits.
+        // Modulo 10^5 so the name provably fits: it is a placeholder the user renames anyway.
         std::snprintf(p.name, sizeof(p.name), "preset %u",
                       static_cast<unsigned>(p.id % 100000u));
         count_++;
@@ -234,6 +198,7 @@ public:
         return true;
     }
 
+    /// Delete a preset, refusing a locked built-in.
     bool deleteListRow(uint32_t id) override {
         int i = indexOf(id);
         if (i < 0 || presets_[i].locked) return false;   // a seeded built-in is protected
@@ -244,13 +209,11 @@ public:
         return true;
     }
 
+    /// Move a custom preset, which may not cross into the locked built-in block.
     bool moveListRow(uint32_t id, uint8_t to) override {
         int i = indexOf(id);
         if (i < 0) return false;
-        // The seeded built-ins are a FIXED block at the top: a locked row can't be moved, and a
-        // custom row can't be moved up INTO the locked block (customs reorder freely among
-        // themselves, below the built-ins). This keeps "RGB is always first" stable, matching the
-        // built-in-vs-user grouping of a normal preset library.
+        // The built-ins are a FIXED block at the top, so customs reorder only among themselves.
         if (presets_[i].locked) return false;
         const uint8_t firstCustom = lockedCount();
         if (to < firstCustom) to = firstCustom;      // clamp a custom above the built-ins back down
@@ -263,6 +226,7 @@ public:
         return true;
     }
 
+    /// Edit one field of a preset: its name, its channel count, or one channel's role.
     bool setListRowField(uint32_t id, const char* field, const char* valueJson) override {
         int i = indexOf(id);
         if (i < 0 || presets_[i].locked) return false;   // built-ins are read-only
@@ -278,10 +242,7 @@ public:
             return true;
         }
         if (field[0] == 'c' && field[1] == 'h' && field[2] >= '0' && field[2] <= '9') {
-            // Parse the channel index from the "ch<N>" suffix with strtol, not atoi: reject a
-            // malformed suffix ("ch3x") or an out-of-range value instead of atoi silently coercing it
-            // to 0 and writing the role to channel 0. Require the suffix to be fully numeric (end
-            // points at the terminating NUL) and in range.
+            // strtol, not atoi: a malformed suffix must be rejected, not coerced to channel 0.
             char* end = nullptr;
             errno = 0;
             const long c = std::strtol(field + 2, &end, 10);
@@ -294,9 +255,7 @@ public:
         return false;
     }
 
-    /// Persist: the presets List round-trips as a JSON array (each row carries its roles array).
-    /// Restore repopulates presets_ + the role pool; custom presets survive a reboot, and setup()
-    /// re-seeds the built-ins only when the restore left the list empty.
+    /// Restore the presets and the role pool, so custom wirings survive a reboot.
     bool restoreList(const char* json, const char* key) override {
         mm::json::JsonDoc doc;
         if (!mm::json::parse(json, doc)) return false;
@@ -317,12 +276,7 @@ public:
             count_++;
         }
         rebuildPool();
-        // The role pool is heap-backed; on an out-of-memory boot (fragmented / exhausted heap on ESP32)
-        // rolePool_.resize() leaves data() null. Writing roles through a null base would be a hard fault,
-        // so degrade to an empty list instead — the device runs, setup()'s count_==0 gate re-seeds the
-        // built-ins, and the customs are simply not restored this boot. (Desktop malloc effectively never
-        // fails at these sizes, so this only trips on a memory-tight device — exactly where a crash is
-        // least acceptable.)
+        // Degrade to an empty list rather than writing roles through a null pool base.
         if (!rolePool_.data() && count_ > 0) { count_ = 0; return true; }
         // Second pass: fill each preset's roles now that the pool is sized.
         for (int r = 0, idx = 0; r < n && idx < count_; r++, idx++) {
@@ -331,9 +285,7 @@ public:
             uint8_t* dst = roleAtMut(presets_[idx]);
             const int rn = (roles && roles->type == mm::json::JsonType::Array)
                                ? mm::json::arraySize(doc, roles) : 0;
-            // Clamp each persisted role to the valid ChannelRole range, matching setListRowField's
-            // validation — a hand-edited / corrupt file can carry an out-of-range byte, and an unclamped
-            // cast would store a value the UI mis-renders and the Correction silently drops.
+            // Clamped: a corrupt file can carry a byte the UI mis-renders and the Correction drops.
             for (uint8_t c = 0; c < presets_[idx].channelCount; c++) {
                 const long rv = (c < rn) ? mm::json::readInt(mm::json::element(doc, roles, c), 0) : 0;
                 dst[c] = (rv < 0 || rv >= kChannelRoleCount) ? 0 : static_cast<uint8_t>(rv);
@@ -343,16 +295,13 @@ public:
     }
 
 private:
-    // A preset row: identity + a slice into the shared role pool. The roles themselves live in
-    // rolePool_ (packed in preset order), so a Preset is a fixed small struct with no per-row array.
+    // A fixed small struct: the roles live in the shared pool, packed in preset order.
     struct Preset {
         uint32_t id = 0;
         char     name[16] = {};
         uint8_t  channelCount = 3;
         uint32_t poolOffset = 0;   // start of this preset's roles in rolePool_ (set by rebuildPool)
-        uint32_t poolLen = 0;      // bytes currently allocated to it in rolePool_ (the OLD slice size
-                                   // rebuildPool copies from; distinct from channelCount, which may
-                                   // already hold a new value mid-change). 0 for a fresh preset.
+        uint32_t poolLen = 0;      // the OLD slice size, distinct from channelCount mid-change
         bool     locked = false;
     };
 
@@ -371,8 +320,7 @@ private:
         for (uint8_t i = 0; i < count_; i++) if (presets_[i].id == id) return i;
         return -1;
     }
-    // The seeded built-ins occupy the top of the list (they're added first and never move), so the
-    // number of locked rows is also the index of the first custom row.
+    // The built-ins never move, so the locked count is also the first custom row's index.
     uint8_t lockedCount() const {
         uint8_t n = 0;
         while (n < count_ && presets_[n].locked) n++;
@@ -381,24 +329,14 @@ private:
     const uint8_t* roleAt(const Preset& p) const { return rolePool_.data() + p.poolOffset; }
     uint8_t*       roleAtMut(const Preset& p)     { return rolePool_.data() + p.poolOffset; }
 
-    // Re-pack the role pool so it holds Σ channelCount bytes with each preset's slice at its new
-    // poolOffset, PRESERVING existing role bytes across the re-pack. resize() reallocates + zero-
-    // fills, so the old bytes are copied into a transient buffer first, then back at the new offsets.
-    // Cold path only (add / delete / move / channel-count change / restore); a transient alloc here
-    // is fine. No channel cap — the pool grows to whatever the presets need.
+    // Preserves the role bytes across the re-pack, since resize reallocates and zero-fills.
     void rebuildPool() {
         const uint32_t oldPoolLen = static_cast<uint32_t>(rolePool_.count());
         uint32_t newOff[kMaxPresets] = {};
         uint32_t total = 0;
         for (uint8_t i = 0; i < count_; i++) { newOff[i] = total; total += presets_[i].channelCount; }
 
-        // Copy each preset's currently-allocated bytes (its `poolLen` at `poolOffset`, both from the
-        // PREVIOUS layout) into a temp laid out at the NEW offsets, then resize + copy back. The copy
-        // length is min(poolLen, channelCount): a grow keeps the old bytes + leaves the tail zeroed
-        // for the caller to fill, a shrink keeps the surviving head. poolLen (the real old slice size,
-        // tracked explicitly) is what makes this robust — never inferred from neighbours or from
-        // channelCount, which may already hold the new value. A fresh preset has poolLen 0 (nothing
-        // to keep). After the repack, poolOffset/poolLen are updated to the new layout.
+        // Tracked explicitly rather than inferred: channelCount may already hold the new value.
         uint8_t* keep = total ? static_cast<uint8_t*>(platform::alloc(total)) : nullptr;
         if (keep) {
             std::memset(keep, 0, total);
@@ -424,8 +362,7 @@ private:
         }
     }
 
-    // Change a preset's channel count, preserving existing role picks; new channels default to
-    // R,G,B,W then None. Re-packs the pool (offsets shift), then fills the new tail.
+    // Preserves the existing role picks; new channels default to R, G, B, W then None.
     void setChannelCount(Preset& p, uint8_t n) {
         const uint8_t was = p.channelCount;
         p.channelCount = n;
@@ -435,15 +372,7 @@ private:
             r[c] = c < 4 ? static_cast<uint8_t>(c + 1) : 0;   // 1=R,2=G,3=B,4=W, then None
     }
 
-    // The curated built-in wirings, each a dense role array of exactly its fixture's width. Data,
-    // not code: a preset of any width seeds directly (the old LightPreset-enum path capped at 4
-    // channels via a roles[4] — a wide moving head couldn't be expressed). The color orders are the
-    // real ones (WS2812 GRB, ws2814 WRGB, sk6812 GRBW, …); RBG/GBR/BRG are deliberately omitted — no
-    // real fixture ships them, so they'd be permutation noise in the built-in list (a user adds a
-    // custom preset if ever needed). The moving-head maps are migrated from MoonLight's DriverNode
-    // offset tables; a channel whose role this project doesn't drive yet (RGBW sub-cells, and any
-    // fixture function past Pan/Tilt/Zoom/Gobo/Dimmer) stays None — a correct DMX map whose extra
-    // channels are inert until the moving-head effect writers land.
+    // Data, not code, so a preset of any width seeds directly: only real orders are listed.
     void seedBuiltins() {
         using R = ChannelRole;
         static constexpr R kRGB[]    = {R::Red, R::Green, R::Blue};
@@ -458,9 +387,7 @@ private:
         static constexpr R kIRGB[]   = {R::Dimmer, R::Red, R::Green, R::Blue};                     // CH1 master intensity
         // Moving heads (MoonLight offset maps → dense arrays). N = None.
         static constexpr R N = R::None;
-        // NOTE: two Dimmer roles (CH4 and CH9), probably a master/fine or per-section pair. The
-        // derivation keeps the LAST, so CH9 is driven and CH4 is left at 0. Unverified: no BeeEyes
-        // on the bench. If it comes up dim, CH4 is the first thing to check.
+        // Two Dimmer roles: the derivation keeps the last, so CH4 is the first thing to check.
         static constexpr R kMHBeeEyes15[] = {   // 15ch: Pan,Tilt,-,Dim,-,Gobo,-,Zoom,Dim,-,R,G,B,-,-
             R::Pan, R::Tilt, N, R::Dimmer, N, R::Gobo, N, R::Zoom, R::Dimmer, N, R::Red, R::Green, R::Blue, N, N};
         static constexpr R kMHBeTopper32[] = {  // 32ch: Pan,-,Tilt,-,-,Zoom,Dim,-,-,R,G,B,… (RGBW cells → None)
@@ -469,11 +396,7 @@ private:
         static constexpr R kMH19x15W24[] = {    // 24ch: Pan,Tilt,-,Dim,R,G,B,W,…,Zoom@17 (RGBW cells → None)
             R::Pan, R::Tilt, N, R::Dimmer, R::Red, R::Green, R::Blue, R::White,
             N, N, N, N, N, N, N, N, N, R::Zoom, N, N, N, N, N, N};
-        // Mini 10W RGBW moving head, its 11-channel mode (it also has a 13ch mode adding auto/sound
-        // programs). Pan and tilt each carry a fine channel, CH6 is a plain linear dimmer and CH7 a
-        // separate strobe: leaving strobe unmapped holds it at 0, which is what a light driver
-        // wants. CH5 (axis speed) is None too, so movement runs at full speed.
-        // See docs/reference/light-fixtures.md for the full channel table.
+        // Leaving strobe and axis speed unmapped holds them at 0, which a light driver wants.
         static constexpr R kMHMini11[] = {      // 11ch: Pan,-,Tilt,-,-,Dim,-,R,G,B,W
             R::Pan, N, R::Tilt, N, N, R::Dimmer, N, R::Red, R::Green, R::Blue, R::White};
 
@@ -488,10 +411,7 @@ private:
             {"MH 19x15W-24", kMH19x15W24, 24},
             {"MH Mini 10W 11", kMHMini11, 11},
         };
-        // A built-in name that overflows Preset::name would truncate silently (and break a lookup by
-        // name), so fail LOUD at BUILD time if one is too long — the fix is a shorter name, not a
-        // wider buffer (the buffer is ×kMaxPresets standing DRAM on classic ESP32). constexpr scan
-        // over the table, checked by static_assert; a bad name never reaches a boot.
+        // Fails LOUD at build time: the fix is a shorter name, not a wider standing buffer.
         constexpr auto namesFit = [](const Builtin* t, size_t n) {
             for (size_t i = 0; i < n; i++) {
                 size_t len = 0; while (t[i].name[len]) len++;

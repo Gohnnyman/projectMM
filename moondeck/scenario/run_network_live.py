@@ -62,9 +62,8 @@ def corrected(rgb, brightness, preset):
     """Mirror src/light/drivers/Correction.h so a listener's expected color matches the
     sender's corrected bytes. Keep in sync.
 
-    The DEFAULT correction only: with gamma at 1.0 and the white-balance trims at 255,
-    briLut collapses to the plain brightness scale below. A scenario that sets either
-    would have to model them here too.
+    Models the plain brightness scale only: `curve` Linear and white-balance trims at 255.
+    A sender on another curve or with a trim set would have to be modeled here too.
     """
     scaled = [(v * int(brightness)) // 255 for v in rgb]
     order = PRESET_ORDER[preset]

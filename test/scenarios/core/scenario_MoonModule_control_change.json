@@ -6,7 +6,7 @@
     "MultiplyModifier",
     "NoiseEffect"
   ],
-  "description": "Measure the cost of control changes on a running pipeline. Toggles MultiplyModifier's mirrorX/Y at different points and verifies each change is applied without freezing the render loop. Companion to the MoonModule control-change gate unit tests (unit_MoonModule_control_change_gate.cpp) — this is the live equivalent.",
+  "description": "Measure the cost of control changes on a running pipeline. Toggles MultiplyModifier's mirrorX/Y at different points and verifies each change is applied without freezing the render loop. Companion to the MoonModule control-change gate unit tests (unit_MoonModule_control_change_gate.cpp), this is the live equivalent.",
   "fixture": [
     {
       "name": "fix-layouts",
@@ -94,7 +94,7 @@
     },
     {
       "name": "baseline",
-      "description": "Set NoiseEffect.scale=4 and measure baseline FPS (mirror on). Effect controls don't rebuild the pipeline — slider stutter check.",
+      "description": "Set NoiseEffect.scale=4 and measure baseline FPS (mirror on). Effect controls don't rebuild the pipeline, slider stutter check.",
       "op": "set_control",
       "id": "Noise",
       "key": "scale",
@@ -117,14 +117,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 131,
-            "p95": 261,
-            "min": 123,
-            "max": 305,
+            "p50": 124,
+            "p95": 196,
+            "min": 115,
+            "max": 198,
             "n": 32,
-            "samples": [148, 140, 261, 305, 257, 157, 168, 198, 130, 131, 131, 140, 129, 124, 129, 127, 124, 125, 126, 167, 130, 125, 123, 123, 129, 134, 203, 129, 133, 243, 248, 246]
+            "samples": [194, 186, 133, 122, 196, 123, 194, 119, 121, 126, 126, 121, 123, 117, 194, 117, 123, 121, 124, 194, 124, 193, 191, 192, 198, 194, 142, 119, 115, 120, 119, 122]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-21"
         },
         "esp32-eth-wifi": {
           "tick_us": {
@@ -276,7 +276,7 @@
     },
     {
       "name": "disable-mirrorX",
-      "description": "Disable mirrorX. Modifier control triggers a pipeline rebuild — measures the rebuilt path.",
+      "description": "Disable mirrorX. Modifier control triggers a pipeline rebuild, measures the rebuilt path.",
       "op": "set_control",
       "id": "Multiply",
       "key": "mirrorX",
@@ -299,14 +299,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 131,
-            "p95": 247,
-            "min": 125,
-            "max": 273,
+            "p50": 127,
+            "p95": 139,
+            "min": 119,
+            "max": 139,
             "n": 32,
-            "samples": [147, 148, 207, 273, 238, 157, 169, 182, 130, 131, 130, 125, 127, 129, 129, 129, 127, 127, 127, 169, 131, 131, 128, 127, 127, 142, 205, 130, 134, 238, 247, 238]
+            "samples": [131, 129, 131, 123, 132, 124, 130, 119, 122, 127, 139, 120, 122, 119, 130, 119, 128, 124, 121, 131, 139, 130, 131, 129, 132, 131, 127, 122, 120, 120, 119, 124]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-21"
         },
         "esp32-eth-wifi": {
           "tick_us": {
@@ -458,7 +458,7 @@
     },
     {
       "name": "disable-mirrorY",
-      "description": "Disable mirrorY. Mirror is now fully off — should land on the no-LUT path.",
+      "description": "Disable mirrorY. Mirror is now fully off, should land on the no-LUT path.",
       "op": "set_control",
       "id": "Multiply",
       "key": "mirrorY",
@@ -481,14 +481,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 132,
-            "p95": 239,
-            "min": 127,
-            "max": 240,
+            "p50": 120,
+            "p95": 125,
+            "min": 115,
+            "max": 126,
             "n": 32,
-            "samples": [149, 148, 205, 238, 234, 156, 168, 183, 131, 130, 128, 129, 128, 128, 129, 129, 128, 128, 128, 168, 132, 132, 127, 127, 129, 135, 204, 130, 133, 240, 239, 238]
+            "samples": [118, 117, 120, 121, 120, 121, 115, 119, 125, 125, 118, 121, 121, 120, 117, 119, 123, 126, 120, 117, 123, 118, 116, 115, 117, 116, 116, 122, 121, 121, 120, 123]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-21"
         },
         "esp32-eth-wifi": {
           "tick_us": {
@@ -648,7 +648,7 @@
     },
     {
       "name": "re-enable-mirrorY",
-      "description": "Re-enable mirrorY and measure — the heavy LUT path must recover (FPS within 50% of baseline) without staying degraded.",
+      "description": "Re-enable mirrorY and measure, the heavy LUT path must recover (FPS within 50% of baseline) without staying degraded.",
       "op": "set_control",
       "id": "Multiply",
       "key": "mirrorY",
@@ -671,14 +671,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 131,
-            "p95": 251,
-            "min": 125,
-            "max": 261,
+            "p50": 120,
+            "p95": 125,
+            "min": 118,
+            "max": 128,
             "n": 32,
-            "samples": [156, 147, 232, 251, 206, 157, 169, 182, 132, 132, 125, 129, 127, 128, 129, 128, 131, 128, 128, 168, 130, 131, 128, 127, 127, 139, 205, 129, 131, 261, 247, 241]
+            "samples": [119, 119, 120, 121, 121, 119, 118, 119, 122, 125, 120, 120, 121, 120, 119, 119, 128, 125, 120, 119, 124, 118, 119, 118, 119, 120, 119, 119, 119, 120, 120, 123]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-21"
         },
         "esp32-eth-wifi": {
           "tick_us": {

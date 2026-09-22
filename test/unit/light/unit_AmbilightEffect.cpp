@@ -1,7 +1,7 @@
 // @module AmbilightEffect
 
 #include "doctest.h"
-#include "core/VideoService.h"
+#include "core/services/VideoService.h"
 #include "light/effects/AmbilightEffect.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/RectangleLayout.h"

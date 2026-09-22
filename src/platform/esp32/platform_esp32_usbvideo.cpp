@@ -1,4 +1,4 @@
-// USB video capture: the peripheral half of VideoService (src/core/VideoService.h). An HDMI
+// USB video capture: the peripheral half of VideoService (src/core/services/VideoService.h). An HDMI
 // grabber presents itself as a UVC webcam; this file owns the UVC stream and the JPEG decode.
 //
 // MJPEG, because uncompressed does not fit: 640x480 YUY2 at 60 fps is 37 MB/s against a USB 2.0

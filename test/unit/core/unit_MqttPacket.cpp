@@ -1,13 +1,9 @@
-// @module MqttPacket
+/// @module MqttPacket
 
-// Pins the MQTT 3.1.1 wire framing (src/core/MqttPacket.h) with golden byte vectors + round-trips —
-// the compatibility contract with any broker (mosquitto / homebridge-mqttthing), same rigor as the
-// Improv frame golden vectors. Covers: the remaining-length varint at its boundaries; byte-exact
-// CONNECT / PUBLISH / SUBSCRIBE / PINGREQ; CONNACK / SUBACK parse; and the byte-at-a-time inbound
-// parser reassembling a PUBLISH across arbitrary read() boundaries (fragmentation).
+/// Pins the MQTT 3.1.1 wire framing (src/core/MqttPacket.h) with golden byte vectors + round-trips, the compatibility contract with any broker (mosquitto / homebridge-mqttthing), same rigor as the Improv frame golden vectors. Covers: the remaining-length varint at its boundaries; byte-exact CONNECT / PUBLISH / SUBSCRIBE / PINGREQ; CONNACK / SUBACK parse; and the byte-at-a-time inbound parser reassembling a PUBLISH across arbitrary read() boundaries (fragmentation).
 
 #include "doctest.h"
-#include "core/MqttPacket.h"
+#include "core/system/MqttPacket.h"
 
 #include <cstdint>
 #include <cstring>
@@ -15,7 +11,7 @@
 
 using namespace mm;
 
-// --- Remaining-length varint (§2.2.3) — the fiddly bit, boundary-tested ---
+// --- Remaining-length varint (§2.2.3), the fiddly bit, boundary-tested ---
 TEST_CASE("MqttPacket: remaining-length varint encodes/decodes at the boundaries") {
     struct Case { uint32_t value; std::vector<uint8_t> bytes; };
     const Case cases[] = {
@@ -49,13 +45,10 @@ TEST_CASE("MqttPacket: remaining-length varint encodes/decodes at the boundaries
     CHECK_FALSE(decodeRemainingLength(trunc, sizeof(trunc), &v, &c));
 }
 
-// mqttWriteFixedHeader must validate space for the WHOLE header (type byte + varint) before it
-// writes any of it — a bodyLen needing a 2-byte varint into a 2-byte buffer must return 0 without
-// touching out[2] (the byte past the buffer). Regression guard for a fixed-header overrun.
+// mqttWriteFixedHeader must validate space for the WHOLE header (type byte + varint) before it writes any of it, a bodyLen needing a 2-byte varint into a 2-byte buffer must return 0 without touching out[2] (the byte past the buffer). Regression guard for a fixed-header overrun.
 TEST_CASE("MqttPacket: fixed-header write refuses a buffer too small for its varint") {
     uint8_t guarded[3] = {0xAA, 0xAA, 0xAA};   // sentinel; only [0..1] are "the buffer"
-    // bodyLen 128 → remaining-length is 2 bytes (0x80 0x01), so the full header is 3 bytes and
-    // does not fit in 2. Must reject, and must NOT have written the type byte or scribbled past.
+    // bodyLen 128 → remaining-length is 2 bytes (0x80 0x01), so the full header is 3 bytes and does not fit in 2. Must reject, and must NOT have written the type byte or scribbled past.
     CHECK(mqttWriteFixedHeader(guarded, 2, MqttPacketType::Publish, 0, 128) == 0);
     CHECK(guarded[2] == 0xAA);   // the out-of-bounds byte is untouched
     // A 3-byte buffer fits exactly: type + 2 varint bytes.
@@ -69,12 +62,7 @@ TEST_CASE("MqttPacket: fixed-header write refuses a buffer too small for its var
 TEST_CASE("MqttPacket: CONNECT is byte-exact (clean session, no auth)") {
     uint8_t out[64] = {};
     const size_t n = buildMqttConnect("mm", nullptr, nullptr, 60, out, sizeof(out));
-    // Expected: fixed header 0x10, remaining-length 14, then:
-    //   proto: 00 04 'M' 'Q' 'T' 'T'
-    //   level: 04
-    //   flags: 02 (clean session, no user/pass)
-    //   keepalive: 00 3C (60)
-    //   clientId: 00 02 'm' 'm'
+    // Expected: fixed header 0x10, remaining-length 14, then: proto: 00 04 'M' 'Q' 'T' 'T' level: 04 flags: 02 (clean session, no user/pass) keepalive: 00 3C (60) clientId: 00 02 'm' 'm'
     const uint8_t expected[] = {
         0x10, 0x0E,
         0x00, 0x04, 'M', 'Q', 'T', 'T',
@@ -94,19 +82,17 @@ TEST_CASE("MqttPacket: CONNECT with username + password sets the flags + payload
     CHECK(out[0] == 0x10);                        // CONNECT
     // connect flags byte is at offset 9 (after fixed header[2] + proto[6] + level[1]).
     CHECK(out[9] == (kMqttConnectCleanSession | kMqttConnectUsernameFlag | kMqttConnectPasswordFlag));
-    // The username "u" and password "p" appear length-prefixed after the clientId "c".
-    // Tail: ...00 01 'c'  00 01 'u'  00 01 'p'
+    // The username "u" and password "p" appear length-prefixed after the clientId "c". Tail: ...00 01 'c'  00 01 'u'  00 01 'p'
     const uint8_t tail[] = {0x00, 0x01, 'c', 0x00, 0x01, 'u', 0x00, 0x01, 'p'};
     CHECK(std::memcmp(out + n - sizeof(tail), tail, sizeof(tail)) == 0);
 }
 
-// Regression (reviewer #10 / MQTT-3.1.2-22): a password without a username must NOT set the password
-// flag — a compliant broker rejects that CONNECT. The builder drops the password when username empty.
+// Regression (reviewer #10 / MQTT-3.1.2-22): a password without a username must NOT set the password flag, a compliant broker rejects that CONNECT. The builder drops the password when username empty.
 TEST_CASE("MqttPacket: CONNECT drops a password when there is no username") {
     uint8_t out[64] = {};
     const size_t n = buildMqttConnect("c", nullptr, "secret", 15, out, sizeof(out));
     REQUIRE(n > 0);
-    // Flags byte at offset 9: clean-session only — neither username nor password flag set.
+    // Flags byte at offset 9: clean-session only, neither username nor password flag set.
     CHECK(out[9] == kMqttConnectCleanSession);
     // The payload is just the clientId (no username/password fields appended).
     const uint8_t tail[] = {0x00, 0x01, 'c'};
@@ -117,9 +103,7 @@ TEST_CASE("MqttPacket: CONNECT drops a password when there is no username") {
     CHECK(out[9] == kMqttConnectCleanSession);
 }
 
-// A Last Will (§3.1.2.5-.7 + §3.1.3) makes the broker publish the will payload if the client drops —
-// the availability seam HA greys the entity out on. Will Topic + Will Message go in the payload AFTER
-// the clientId and BEFORE username/password; the flags byte carries the Will + Will-Retain bits.
+// A Last Will (§3.1.2.5-.7 + §3.1.3) makes the broker publish the will payload if the client drops, the availability seam HA greys the entity out on. Will Topic + Will Message go in the payload AFTER the clientId and BEFORE username/password; the flags byte carries the Will + Will-Retain bits.
 TEST_CASE("MqttPacket: CONNECT with a retained Last Will is byte-exact") {
     uint8_t out[96] = {};
     const size_t n = buildMqttConnect("c", nullptr, nullptr, 15, out, sizeof(out),
@@ -153,8 +137,7 @@ TEST_CASE("MqttPacket: PUBLISH is byte-exact (QoS0)") {
     CHECK(std::memcmp(out, expected, n) == 0);
 }
 
-// The retain flag (§3.3.1.3) sets bit 0 of the fixed-header type nibble — used for the friendly
-// `name` topic so a late-subscribing hub still receives it.
+// The retain flag (§3.3.1.3) sets bit 0 of the fixed-header type nibble, used for the friendly `name` topic so a late-subscribing hub still receives it.
 TEST_CASE("MqttPacket: PUBLISH retain flag sets the fixed-header bit") {
     uint8_t out[32] = {};
     const uint8_t payload[] = {'x'};
@@ -171,8 +154,7 @@ TEST_CASE("MqttPacket: PUBLISH retain flag sets the fixed-header bit") {
 TEST_CASE("MqttPacket: SUBSCRIBE is byte-exact (one filter, QoS0)") {
     uint8_t out[64] = {};
     const size_t n = buildMqttSubscribe(1, "a/b", out, sizeof(out));
-    // 0x82 (SUBSCRIBE + reserved flag 0x2), remaining-length 8, packetId 00 01,
-    // filter 00 03 'a' '/' 'b', requested QoS 00.
+    // 0x82 (SUBSCRIBE + reserved flag 0x2), remaining-length 8, packetId 00 01, filter 00 03 'a' '/' 'b', requested QoS 00.
     const uint8_t expected[] = {
         0x82, 0x08,
         0x00, 0x01,
@@ -229,15 +211,14 @@ TEST_CASE("MqttPacket: inbound parser reassembles a PUBLISH (build→parse round
     CHECK(pl[1] == 'i');
 }
 
-// --- Inbound parser: fragmentation — a packet split across feeds still reassembles ---
+// --- Inbound parser: fragmentation, a packet split across feeds still reassembles ---
 TEST_CASE("MqttPacket: inbound parser reassembles across read() boundaries") {
     uint8_t pkt[64] = {};
     const uint8_t payload[] = {'x'};
     const size_t n = buildMqttPublish("t", payload, sizeof(payload), pkt, sizeof(pkt));
     REQUIRE(n > 0);
 
-    // Feed one byte at a time — every byte but the last returns NeedMore, proving the state machine
-    // holds partial state across calls (the socket hands over arbitrary runs).
+    // Feed one byte at a time, every byte but the last returns NeedMore, proving the state machine holds partial state across calls (the socket hands over arbitrary runs).
     MqttInboundParser parser;
     for (size_t i = 0; i + 1 < n; i++) {
         CHECK(parser.feed(pkt[i]) == MqttFeedResult::NeedMore);

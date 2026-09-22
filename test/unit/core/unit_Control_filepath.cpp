@@ -1,24 +1,18 @@
-// @module Control
+/// @module Control
 
-// Pins ControlType::FilePath: a control whose VALUE is the name of a file, while the file's
-// CONTENTS are edited in the UI and travel over /api/file.
-//
-// Why the type exists as its own type: a file body cannot ride /api/control at all (every route but
-// /api/file and the firmware upload returns 413 once the request exceeds the server's buffer), so a
-// control that means "this file" has to store a reference and leave the bytes to the streaming
-// route. TextArea is its opposite: there the value IS the body. That is a difference in what the
-// value MEANS, which no rendering flag expresses.
+/// Pins ControlType::FilePath: a control whose VALUE is the name of a file, while the file's CONTENTS are edited in the UI and travel over /api/file.
+///
+/// Why the type exists as its own type: a file body cannot ride /api/control at all (every route but /api/file and the firmware upload returns 413 once the request exceeds the server's buffer), so a control that means "this file" has to store a reference and leave the bytes to the streaming route. TextArea is its opposite: there the value IS the body. That is a difference in what the value MEANS, which no rendering flag expresses.
 
 #include "doctest.h"
-#include "core/Control.h"
-#include "core/JsonSink.h"
+#include "core/module/Control.h"
+#include "core/util/JsonSink.h"
 
 #include <cstring>
 #include <string>
 
 namespace {
-// What a module declares: where its files live and which of them to offer. Borrowed by the
-// descriptor, so it has to outlive the control, exactly like addSelect's options array.
+// What a module declares: where its files live and which of them to offer. Borrowed by the descriptor, so it has to outlive the control, exactly like addSelect's options array.
 const mm::FilePathPick kScriptPick = {"/moonlive", ".mle", nullptr};
 }  // namespace
 
@@ -30,8 +24,7 @@ TEST_CASE("a file-path control carries the directory and extension the module de
     CHECK(controls[0].type == mm::ControlType::FilePath);
     CHECK(std::strcmp(mm::controlTypeName(controls[0].type), "filepath") == 0);
 
-    // The UI lists a directory and filters it without knowing what a script is: the module supplies
-    // both facts, which is what keeps the control domain-neutral.
+    // The UI lists a directory and filters it without knowing what a script is: the module supplies both facts, which is what keeps the control domain-neutral.
     mm::JsonSink sink;
     mm::writeControlMetadata(sink, controls[0]);
     const std::string meta = sink.data();
@@ -61,9 +54,7 @@ TEST_CASE("a file-path control listing every file omits the extension filter") {
     CHECK(meta.find("\"ext\"") == std::string::npos);
 }
 
-// The value is a NAME, never a body. A control write that tried to carry a file's contents would
-// arrive here, and it must fill the buffer and stop rather than run off the end of it: any input,
-// any size, degrade visibly (the robustness rule).
+// The value is a NAME, never a body. A control write that tried to carry a file's contents would arrive here, and it must fill the buffer and stop rather than run off the end of it: any input, any size, degrade visibly (the robustness rule).
 TEST_CASE("a file-path control stores a name, never a file body") {
     char script[41] = "";
     mm::ControlList controls;
@@ -77,8 +68,7 @@ TEST_CASE("a file-path control stores a name, never a file body") {
     CHECK(script[sizeof(script) - 1] == '\0');          // still a valid C string
 }
 
-// It persists like the text control it is: a device that reboots comes back pointing at the same
-// file, which is what makes "the script survives a power cycle" true.
+// It persists like the text control it is: a device that reboots comes back pointing at the same file, which is what makes "the script survives a power cycle" true.
 TEST_CASE("a file-path control persists and reloads its name") {
     char script[41] = "ember.mle";
     mm::ControlList controls;

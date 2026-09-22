@@ -74,7 +74,7 @@ _RUNNER_SKIP_PARTS = {"build", "__pycache__", ".git"}
 # run writes scenario baselines and repo-health metrics, which dirties the tree, which flips the
 # suffix, which makes every binary look stale on the NEXT run. A build id is not code, so it cannot
 # make the runner "report on code that is no longer there", which is what this guard is for.
-_RUNNER_GENERATED = {"src/ui/ui_embedded.h", "src/core/build_info.h"}
+_RUNNER_GENERATED = {"src/ui/ui_embedded.h", "src/core/util/build_info.h"}
 
 
 def _stale_runner_reason() -> str:
@@ -273,12 +273,7 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None,
         return 0
 
     if touched_observed or touched_contract:
-        # Serialize, then put each sample window back on one line: a 32-element array
-        # spread over 32 lines hides the statistics it belongs to (_observed.py).
-        text = _observed.compact_samples(
-            json.dumps(scenario, indent=2, ensure_ascii=False))
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text + "\n")
+        _observed.save_scenario(path, scenario)
         what = []
         if touched_observed:
             what.append(f"observed[{target}] × {touched_observed}")
@@ -312,7 +307,7 @@ def main():
 
     if args.update_contract and not args.reason:
         parser.error("--update-contract requires --reason "
-                     "(e.g. --reason 'tightened after Layer optimisation')")
+                     "(e.g. --reason 'tightened after Layer optimization')")
 
     # Missing OR stale: both mean the results would not describe the code on disk.
     _require_fresh_runner()

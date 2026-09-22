@@ -33,7 +33,7 @@
     },
     {
       "name": "add-layers-group",
-      "description": "Top-level Effects container — the multi-layer composition host.",
+      "description": "Top-level Effects container, the multi-layer composition host.",
       "op": "add_module",
       "id": "Effects",
       "type": "Effects",
@@ -43,7 +43,7 @@
     },
     {
       "name": "add-bottom-layer",
-      "description": "Bottom Layer (composited first — clears + overwrites the output buffer). RGB.",
+      "description": "Bottom Layer (composited first, clears + overwrites the output buffer). RGB.",
       "op": "add_module",
       "id": "LayerBottom",
       "type": "Layer",
@@ -62,7 +62,7 @@
     },
     {
       "name": "add-top-layer",
-      "description": "Top Layer (composited second — blends onto the bottom with its default blend). RGB.",
+      "description": "Top Layer (composited second, blends onto the bottom with its default blend). RGB.",
       "op": "add_module",
       "id": "LayerTop",
       "type": "Layer",
@@ -73,7 +73,7 @@
     },
     {
       "name": "add-top-effect",
-      "description": "Rainbow as the top layer's effect — composited over the Spiral base.",
+      "description": "Rainbow as the top layer's effect, composited over the Spiral base.",
       "op": "add_module",
       "id": "Rainbow",
       "type": "RainbowEffect",
@@ -106,14 +106,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 298,
-            "p95": 2259,
-            "min": 248,
-            "max": 11415,
+            "p50": 144,
+            "p95": 160,
+            "min": 141,
+            "max": 656,
             "n": 32,
-            "samples": [255, 254, 265, 248, 254, 329, 257, 250, 298, 288, 252, 412, 257, 261, 255, 326, 255, 306, 11415, 2259, 507, 742, 252, 253, 499, 1335, 697, 573, 781, 604, 1253, 646]
+            "samples": [144, 144, 144, 145, 147, 143, 158, 656, 144, 144, 144, 143, 148, 150, 144, 142, 147, 146, 152, 143, 149, 160, 145, 142, 144, 145, 142, 141, 143, 143, 144, 148]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-21"
         },
         "desktop-windows": {
           "tick_us": {

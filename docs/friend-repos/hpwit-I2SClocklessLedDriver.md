@@ -1,14 +1,22 @@
-# hpwit/I2SClocklessLedDriver — monthly activity digest
+# hpwit/I2SClocklessLedDriver: monthly activity digest
 
-What landed on [hpwit/I2SClocklessLedDriver](https://github.com/hpwit/I2SClocklessLedDriver)'s `main` branch, month by month. External-context reference — a factual log of a friend repo's activity, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](README.md).
+What landed on [hpwit/I2SClocklessLedDriver](https://github.com/hpwit/I2SClocklessLedDriver)'s `main` branch, month by month. External-context reference, a factual log of a friend repo's activity, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](index.md).
 
-The library: Yves Bazin's (hpwit) clockless-LED driver that clocks WS2812-class strips out over the ESP32's I2S/LCD peripheral with DMA — the parallel-output technique projectMM's LED-driver analysis studies. Summarised via the GitHub commits API (all commits on `main`), filtering out merge commits, lint/format churn, and 🐰-review fixups. No versioned release is cut from `main` in this window (latest tag is 1.4), so months are kept whole.
+The library: Yves Bazin's (hpwit) clockless-LED driver that clocks WS2812-class strips out over the ESP32's I2S/LCD peripheral with DMA, the parallel-output technique projectMM's LED-driver analysis studies. Summarised via the GitHub commits API (all commits on `main`), filtering out merge commits, lint/format churn, and 🐰-review fixups. No versioned release is cut from `main` in this window (latest tag is 1.4), so months are kept whole.
 
-> **Authorship note.** Most of the activity in this window is projectMM's own — `ewowi` authored ~53 of the in-window commits, with the rest from the maintainer (Yves Bazin / hpwit) and a couple of others. The IDF 5.5 / arduino-less ESP-IDF / RGBCCT / >65K-LED work below is largely projectMM upstreaming its driver needs into hpwit's library, then tracking the result here.
+> **Authorship note.** Most of the activity in this window is projectMM's own, `ewowi` authored ~53 of the in-window commits, with the rest from the maintainer (Yves Bazin / hpwit) and a couple of others. The IDF 5.5 / arduino-less ESP-IDF / RGBCCT / >65K-LED work below is largely projectMM upstreaming its driver needs into hpwit's library, then tracking the result here.
+
+## August 2026
+
+No activity. No commits on `main` in August 2026, and none on any other branch. The driver last changed on 2026-04-06, and the `esp32-p4-support` branch, which is the one carrying new hardware work, last moved on 2026-04-11.
+
+No issues were opened or closed. No release; the most recent is v1.4 from April 2026.
+
+_Checked: `repos/hpwit/I2SClocklessLedDriver/commits?sha=main` for 2026-08-01..2026-09-01 (0), and the same window on all 6 branches (0); releases published (none); issue search `repo:hpwit/I2SClocklessLedDriver is:issue created:2026-08-01..2026-08-31` and the same with `closed:` (0 results each)._
 
 ## July 2026
 
-No user-facing activity: no commits merged to `main` (latest activity is April 6, 2026) and no notable issues. No branch saw commits either — the newest work anywhere is the `esp32-p4-support` branch, last touched April 11, 2026.
+No user-facing activity: no commits merged to `main` (latest activity is April 6, 2026) and no notable issues. No branch saw commits either, the newest work anywhere is the `esp32-p4-support` branch, last touched April 11, 2026.
 
 _Auditability: commits on `main` author-dated 2026-07-01..2026-07-31 = 0 (0 merged), and 0 on every other branch; issues created/closed/updated in July 2026 = 0; PRs created = 0. No versioned release published in July (latest tag `1.4`, 2026-04-06)._
 
@@ -36,7 +44,7 @@ _Auditability: commits on `main` author-dated 2026-06-01..2026-06-30 = 0 (0 merg
 
 *~4 commits on `main`, 2026-01-01 … 2026-01-31.*
 
-- **>65K-LED support** — `total_leds` widened to 32 bits; added `extractWhiteFromRGB`.
+- **>65K-LED support**: `total_leds` widened to 32 bits; added `extractWhiteFromRGB`.
 - ESP32-D0: removed `ESP_INTR_FLAG_IRAM` from `esp_intr_alloc`; `deleteDriver` checks on the DMA tampon buffers.
 
 ## December 2025
@@ -57,7 +65,7 @@ _Auditability: commits on `main` author-dated 2026-06-01..2026-06-30 = 0 (0 merg
 
 **New**
 
-- **IDF 5.5 support** — version checks, dynamic DMA-buffer allocation (PSRAM-preferred), `NUM_STRIPS` as a global, `IRAM_ATTR` removed from forwards to compile warning-free.
+- **IDF 5.5 support**: version checks, dynamic DMA-buffer allocation (PSRAM-preferred), `NUM_STRIPS` as a global, `IRAM_ATTR` removed from forwards to compile warning-free.
 - `updateDriver` / `deleteDriver` gained length/size and per-strip offset parameters; `initled` with custom color arrangement; `isVirtualDriver` flag; `setDelay()`.
 - Split a `Driver.cpp` out of the header; added clang-format and removed the `COLOR_ORDER_` compiler directives.
 

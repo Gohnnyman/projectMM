@@ -55,12 +55,10 @@ const dragTs = {};               // per-control last-touched timestamp (ms): a s
 const EDITABLE_CONTROL_TYPES = new Set(
     ["uint8", "uint16", "int16", "int32", "pin", "bool", "text", "textarea", "filepath", "password", "select",
      "palette", "ipv4"]);
-const TIMING_MODES = ["fps", "ms"];
 
 // localStorage keys per ui.md
 const LS_SELECTED  = "mm_selectedRoot";
 const LS_THEME     = "mm_theme";
-const LS_TIMING    = "mm_timing_mode";
 const LS_TABS      = "mm_selectedTabs";   // { [containerName]: childName }: the open tab per container
 const LS_EXPANDED  = "mm_expanded";       // [moduleName, …]: modules whose "controls" <details> is open
 const LS_TA_SIZE   = "mm_textareaSizes";  // { "<module>:<control>": heightPx }: user-dragged textarea heights
@@ -144,7 +142,12 @@ function lsRead(key, defaultVal) {
     return v !== null ? v : defaultVal;
 }
 
-let timingMode = lsRead(LS_TIMING, "fps");
+// MEASURED time by default, not derived rate. A module's tickTimeUs is what it actually cost;
+// the fps beside it is that number inverted, which reads as a frame rate the device could hit if
+// this module were the only thing running. On a card that is a claim about the whole pipeline made
+// from one part of it, so the honest default is the microseconds. The toggle still cycles to fps
+// for anyone comparing against a target rate.
+let timingMode = "ms";   // the RESTING state; a press peeks at fps and release restores it
 let theme      = lsRead(LS_THEME, "dark");
 
 // ---------------------------------------------------------------------------
@@ -513,14 +516,23 @@ async function sendControl(moduleName, controlName, value) {
     // it writes the stale `state` value straight back into the field the user just changed (the value
     // "reverses"; a manual refresh shows the correct value because it refetches). The client knows what
     // it sent, so update `state` now; any later echo just confirms it.
-    if (state && Array.isArray(state.modules)) {
-        const mod = allModules().find(m => m.name === moduleName);
-        const ctrl = mod && Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
+    const mod = (state && Array.isArray(state.modules))
+        ? allModules().find(m => m.name === moduleName) : null;
+    if (mod) {
+        const ctrl = Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
         if (ctrl) ctrl.value = value;
+        // Siblings on the same target move with it. The device already does this (followTargets runs
+        // on every surface write), but the browser would not see it until the next 1 Hz push, so a
+        // second fader bound to the same control lagged a second behind the one being dragged.
+        if (ctrl && ctrl.target) {
+            for (const c of mod.controls)
+                if (c !== ctrl && c.target === ctrl.target) c.value = value;
+            updateModuleControls(mod);
+        }
     }
     // Toggling expert mode changes which controls RENDER (the `advanced` ones), not just a value: so
     // re-render the cards. Structural change, same as an add/remove; the value write above already landed.
-    if (moduleName === "System" && controlName === "expertMode") renderCards();
+    if (moduleName === "System" && controlName === "mode") renderCards();
     // Best-effort by design: failures are not retried here. Non-ok responses +
     // network errors are logged to console so a user with devtools open can see
     // what went wrong (e.g. a control value the device-side validator rejected).
@@ -532,6 +544,41 @@ async function sendControl(moduleName, controlName, value) {
         });
         if (!res.ok) {
             console.warn(`[control] POST ${moduleName}.${controlName} failed (status=${res.status})`);
+        }
+        // The Firmware card's `image` picks WHICH PARTITION every other control describes, so the
+        // device rebinds version/build/firmware/partition to the other image and the card has to
+        // be redrawn from the new values. Refetched AFTER the POST rather than re-rendered before
+        // it (the mode case above), because the new values only exist once the device has
+        // switched. The routine WS push cannot carry it: renderCards is suppressed while the user
+        // is interacting, and operating this select is exactly that.
+        else if (moduleName === "Firmware" && controlName === "image") refetchState();
+        // Four writes change what a MoonCloud card shows: pressing `send` publishes a message,
+        // pressing `send update` re-sends this device's report, and either member's `consent` decides
+        // whether that member reads at all. Typing in `message` or toggling `shareName` changes only
+        // the device, and re-reading after those showed exactly what was already on screen.
+        else if (mod?.type === "MoonTalkModule" ? (controlName === "send" || controlName === "consent")
+               : mod?.type === "MoonStatsModule" ? (controlName === "consent" || controlName === "send update")
+               : false) {
+            // Switching consent OFF changes nothing on the server (a report already sent stays
+            // sent), so the card rebuilds from what it has and nothing is re-read. The rebuild is
+            // what hides the data.
+            const turnedOn = Boolean(value);
+            if (!turnedOn) { moonCloudGeneration++; refetchState(); return; }
+
+            // Switching ON: ONE read, once. A Stats report leaves from tick1s rather than during
+            // this write, so reading immediately would show the totals without this device's own
+            // install, the one row the reader is looking for. A Talk message is sent inside the
+            // write, so its read needs no delay. An earlier shape read three times to cover the
+            // uncertainty and rebuilt the card three times with it.
+            moonCloudGeneration++;
+            setTimeout(() => {
+                moonCloudStatsCache.clear();
+                moonTalkCache = null;
+                refetchState();
+            // The wait is for `consent` alone: that report leaves from tick1s, so an immediate read
+            // would show the totals without the very row the reader is looking for. `send update`
+            // sends inside this write, like MoonTalk's `send`, so it re-reads with no delay.
+            }, mod?.type === "MoonStatsModule" && controlName === "consent" ? 2000 : 0);
         }
     } catch (e) {
         console.warn(`[control] POST ${moduleName}.${controlName} failed (error=${e && e.message ? e.message : e})`);
@@ -652,7 +699,7 @@ async function addModule(type, parentName, id) {
 
 // Bring a module's card into view and focus its first control (added via the "+" flow).
 function focusModule(name) {
-    const card = document.querySelector(`.card[data-module="${cssEscape(name)}"]`);
+    const card = queryByName(`.card[data-module="${cssEscape(name)}"]`, "data-module", name);
     if (!card) return;
     // A child card can wrap its controls in a collapsed <details> (.card-controls-collapse): open it
     // FIRST so the card is at its expanded height, THEN scroll: scrolling a still-collapsed card lands
@@ -932,18 +979,21 @@ function findModule(name, modules) {
     return null;
 }
 
-// Global "expert mode": the System module's expertMode control. Controls tagged `advanced` (dev/tuning
-// readouts + knobs) render only when this is on. Read live from state so a toggle takes effect on the
-// next render with no reload; default off if System or the control isn't present yet.
-function isExpertMode() {
+// How much the reader wants to see: the System module's `mode` control, 0 user, 1 expert, 2
+// developer. A control carries the mode it needs (`minMode`) and renders when the reader is at
+// least there. Read live from state so a change takes effect on the next render with no reload;
+// 0 when System or the control isn't present yet, so a device mid-boot shows the show and nothing
+// that needs explaining.
+function uiMode() {
     const sys = state ? findModule("System") : null;
-    const c = sys && sys.controls && sys.controls.find(c => c.name === "expertMode");
-    return !!(c && c.value);
+    const c = sys && sys.controls && sys.controls.find(c => c.name === "mode");
+    return c ? (c.value | 0) : 0;
 }
 
 function renderCards() {
     const main = document.getElementById("main");
     if (!main || !state) return;
+    renderedMode_ = uiMode();   // what these cards are being built for
     main.innerHTML = "";
 
     // One root visible at a time: render only the selected root's subtree.
@@ -1131,7 +1181,7 @@ function applyTabDot(tab, mod) {
 // WS value patch deliberately never re-runs: so without this, a fault (or an enable/disable) on a background
 // tab would stay invisible until the next full render. (The UI has two render paths; a rule must live in both.)
 function updateTabDot(mod) {
-    const tab = document.querySelector(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`);
+    const tab = queryByName(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`, "data-tab-mid", mod.name);
     if (!tab) return;
     applyTabDot(tab, mod);
     tab.classList.toggle("tab--disabled", mod.enabled === false);   // grey a disabled module's tab title
@@ -1181,6 +1231,7 @@ function renderChildTabs(mod, childrenEl, depth) {
         addTab.type = "button";
         addTab.textContent = "+";
         addTab.title = "add " + rolesAcceptedBy(mod).join(" / ");
+        addTab.setAttribute("aria-label", addTab.title);
         addTab.addEventListener("click", () => {
             // THIS card's own footer: a plain querySelector would match the first .card-footer in the
             // subtree, which belongs to a nested child's card (Effects would then offer the Layer's
@@ -1205,14 +1256,205 @@ function renderChildTabs(mod, childrenEl, depth) {
 }
 
 // ---- MoonBase update flow ----
-// On a MoonBase device (FirmwareUpdate exposes a `moonbase` control) the app cannot flash itself:
-// one app slot, and it is running from it. Instead it reboots into the MoonBase factory image,
-// which installs into the app slot and reboots back: same IP throughout (same MAC, same DHCP
-// lease). The whole cycle runs behind one full-screen overlay, shown BEFORE the reboot so there
-// is no dead gap. GET /moonbase is the identity probe: MoonBase answers it with its live install
-// status; the app 404s it: so "404 again after an install ran" means the new firmware is up.
+// On a MoonBase device the app cannot flash itself: one app slot, and it is running from it.
+// Instead it reboots into the MoonBase factory image, which installs into the app slot and reboots
+// back: same IP throughout (same MAC, same DHCP lease). The whole cycle runs behind one
+// full-screen overlay, shown BEFORE the reboot so there is no dead gap. GET /moonbase is the
+// identity probe: MoonBase answers it with its live install status; the app 404s it: so "404 again
+// after an install ran" means the new firmware is up.
+//
+// The marker is the `image` control, which the module publishes only where there are two images to
+// choose between. It was the `moonbase` control until that one was folded into the generic set as
+// `version`, which left this testing for a name nothing emits: the card silently lost its tab
+// strip AND its way into MoonBase, on a device that has one.
 function deviceHasMoonBase(mod) {
-    return (mod.controls || []).some(c => c.name === "moonbase");
+    return (mod.controls || []).some(c => c.name === "image");
+}
+
+// Ask before installing a MoonBase, in the app's own chrome rather than the browser's.
+//
+// A native confirm() is the one box in this UI that cannot be styled, and it looked it: a white
+// system panel over a dark card. This is the same native <dialog> the file editor uses, so Esc and
+// the backdrop close it for free. Resolves true to install, false to abandon.
+function askMoonBaseInstall() {
+    return new Promise((resolve) => {
+        const dlg = document.createElement("dialog");
+        dlg.className = "mb-ask";
+        const h = document.createElement("h3");
+        h.textContent = "Install a new MoonBase?";
+        const p1 = document.createElement("p");
+        // What is actually at stake, rather than a bare "are you sure": the device has no recovery
+        // image for the few seconds this takes.
+        p1.textContent = "MoonBase is the recovery image. While it is being written the device "
+                       + "has no recovery image, so do not power it off until this finishes.";
+        const p2 = document.createElement("p");
+        p2.className = "mb-ask-calm";
+        p2.textContent = "The device checks the image first and refuses anything that is not a "
+                       + "MoonBase image for this board, so a wrong file costs nothing.";
+        const row = document.createElement("div");
+        row.className = "mb-ask-row";
+        const cancel = document.createElement("button");
+        cancel.className = "fm-tool";
+        cancel.textContent = "Cancel";
+        const go = document.createElement("button");
+        go.className = "fm-tool mb-ask-go";
+        go.textContent = "Install";
+
+        const close = (value) => { dlg.close(); dlg.remove(); resolve(value); };
+        cancel.addEventListener("click", () => close(false));
+        go.addEventListener("click", () => close(true));
+        // Esc and the backdrop both reach here, so a dismissed dialog never leaves the promise
+        // pending and never installs anything.
+        dlg.addEventListener("close", () => { dlg.remove(); resolve(false); }, { once: true });
+
+        row.append(cancel, go);
+        dlg.append(h, p1, p2, row);
+        document.body.appendChild(dlg);
+        dlg.showModal();
+        go.focus();
+    });
+}
+
+// Byte counts out of a device status line, or null when it carries none.
+//
+// ONE PARSER for one wire shape. Every image writer reports progress as "<phase>: N of M bytes",
+// and the phase word differs by writer (`flashing`, `writing MoonBase`, MoonBase's own
+// `downloading`), so matching the numbers rather than the phrase is what lets one reader serve
+// them all. Two hand-written regexes had already drifted apart on whether `bytes` was required.
+//
+// An ERROR line can carry the same shape ("upload ended early (12 of 34 bytes)"), so it is
+// rejected here rather than left to the caller's check order.
+function installProgress(text) {
+    if (!text || text.startsWith("error")) return null;
+    const m = /(\d+) of (\d+) bytes/.exec(text);
+    if (!m) return null;
+    const read = parseInt(m[1], 10), total = parseInt(m[2], 10);
+    return total > 0 ? { read, total } : null;
+}
+
+// Raise the overlay over an install the DEVICE is performing, and follow it to the end.
+//
+// Every in-place install (a URL or a release, either image) answers 202 and then works on its own
+// task, so the only way to know how far it has got is to ask. The device puts its byte counts in
+// its status line, which is where both the text and the bar come from: one watcher, whichever
+// image is being written.
+//
+// TWO ENDINGS, because the two installs end differently and getting this wrong is what made an
+// overlay hang on a board where the install had actually succeeded:
+//   MoonBase   leaves the app running, so the status falls back to rest and the card is redrawn.
+//   the app    reboots into the image just written, so the device goes SILENT and comes back on
+//              the same address. Silence after work is therefore success, not a stall.
+//
+// Polls the device rather than the cached `state`: across a reboot the WebSocket is down and the
+// cache is frozen at the last frame before it went, which reads as an install that stopped.
+//
+// Not to be confused with moonbaseUpdateFlow, which carries an install across TWO reboots (into
+// MoonBase and back) and has its own retry and handoff handling.
+function watchInstall(kind) {
+    const ui = showUpdateOverlay();
+    ui.status(`Installing ${kind.label.toLowerCase()}\u2026`);
+    const deadline = Date.now() + 300000;
+    // Only treat an ending as SUCCESS once work was actually seen: the first poll can land before
+    // the install task has written anything, and rest or silence then means "not started yet".
+    let sawWork = false;
+    let silent = 0;
+
+    // The device's own Firmware status, or null when it is not answering.
+    const probe = async () => {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 2500);
+        try {
+            const r = await fetch("/api/modules/Firmware", { cache: "no-store", signal: ctl.signal });
+            if (!r.ok) return null;
+            const mod = await r.json();
+            return (mod && mod.status) || "";
+        } catch (_) {
+            return null;
+        } finally {
+            clearTimeout(timer);
+        }
+    };
+
+    const tick = async () => {
+        if (Date.now() > deadline) { ui.fail("Install timed out."); return; }
+        const text = await probe();
+
+        if (text === null) {
+            // Not answering. During a rebooting install that is the reboot itself.
+            silent++;
+            if (kind.reboots && sawWork) {
+                ui.status("Rebooting\u2026");
+                if (silent > 90) { ui.fail(MOONBASE_SILENT_MSG); return; }
+            } else if (silent >= 4) {
+                ui.status("The device is not answering\u2026");
+            }
+        } else {
+            if (text.startsWith("error")) { ui.fail(text); return; }
+            const p = installProgress(text);
+            if (p) {
+                ui.status(`Installing ${fmSize(p.total)}\u2026`);
+                ui.progress(p.read, p.total);
+                sawWork = true;
+            } else if (text && text !== "idle") {
+                // A WORKING PHASE counts as work even with no byte counts. The device reports
+                // counts only when it knows the content length, and a chunked response (any
+                // proxy, or a server that does not send Content-Length) leaves it with none: the
+                // status then walks checking -> erasing -> writing -> idle without ever matching,
+                // so an install that SUCCEEDED sat behind the overlay until the five-minute
+                // timeout. The bar stays indeterminate there, which is honest: the total is
+                // genuinely unknown.
+                ui.status(`Installing ${kind.label.toLowerCase()}\u2026`);
+                sawWork = true;
+            }
+            // ANSWERING AGAIN AFTER SILENCE is the rebooting install's success: the image it
+            // wrote is the one now running.
+            if (kind.reboots && sawWork && silent > 0) {
+                ui.status(`${kind.label} installed`);
+                await fwSleep(1200);
+                location.reload();
+                return;
+            }
+            // Back to rest with no error is the non-rebooting install's success.
+            if (!kind.reboots && sawWork && (text === "" || text === "idle")) {
+                ui.status(`${kind.label} installed`);
+                await fwSleep(1200);
+                location.reload();
+                return;
+            }
+            silent = 0;
+        }
+        await fwSleep(1000);
+        tick();
+    };
+    tick();
+}
+
+// POST a file and paint a REAL progress bar while it uploads.
+//
+// fetch() cannot report upload progress at all (its streaming request bodies are not available
+// here), so this is the one place an XMLHttpRequest earns its keep: xhr.upload.onprogress is the
+// only way to know how far a browser-pushed install has got. The device-fetched installs report
+// through the byte counts in their status line instead, so every install has a bar.
+function uploadWithProgress(route, file, ui) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", route);
+        xhr.setRequestHeader("Content-Type", "application/octet-stream");
+        xhr.upload.addEventListener("progress", (e) => {
+            if (e.lengthComputable) ui.progress(e.loaded, e.total);
+        });
+        xhr.addEventListener("load", () => {
+            // The device answers before it reboots, so a 2xx is the real success signal. Anything
+            // else carries the device's own reason in the JSON body.
+            if (xhr.status >= 200 && xhr.status < 300) { resolve(); return; }
+            let msg = `HTTP ${xhr.status}`;
+            try { msg = JSON.parse(xhr.responseText).error || msg; } catch (_) {}
+            reject(new Error(msg));
+        });
+        xhr.addEventListener("error", () => reject(new Error("the connection dropped")));
+        xhr.addEventListener("abort", () => reject(new Error("canceled")));
+        xhr.send(file);
+    });
 }
 
 function showUpdateOverlay() {
@@ -1236,7 +1478,7 @@ function showUpdateOverlay() {
         // A URL install hears POST /cancel; a file upload cancels by dropping its connection
         // (MoonBase's single-connection server is busy receiving it), so abort the fetch.
         if (uploadCtl) uploadCtl.abort();
-        fetch("/cancel", { method: "POST" }).catch(() => {});
+        fetch("/api/firmware/cancel", { method: "POST" }).catch(() => {});
     });
     box.append(h, msg, bar, cancel, dismiss);
     ov.appendChild(box);
@@ -1320,7 +1562,7 @@ async function moonbaseUpdateFlow(opts) {
             const uploadCtl = new AbortController();
             ui.setUpload(uploadCtl);
             try {
-                const r = await fetch("/install", {
+                const r = await fetch("/api/firmware/upload", {
                     method: "POST", headers: { "Content-Type": "application/octet-stream" },
                     body: opts.file, signal: uploadCtl.signal });
                 if (!r.ok) throw new Error(await r.text());
@@ -1372,9 +1614,9 @@ async function moonbaseUpdateFlow(opts) {
                 ui.status("The install was interrupted \u2014 retrying\u2026");
                 try {
                     if (opts.url) {
-                        await fetch("/install-url", { method: "POST", body: opts.url });
+                        await fetch("/api/firmware/url", { method: "POST", body: opts.url });
                     } else {
-                        await fetch("/install", {
+                        await fetch("/api/firmware/upload", {
                             method: "POST", headers: { "Content-Type": "application/octet-stream" },
                             body: opts.file });
                     }
@@ -1390,11 +1632,10 @@ async function moonbaseUpdateFlow(opts) {
                 if (probe.text.startsWith("error")) throw new Error(probe.text);
                 // The unattended install reports "downloading: N of M bytes"; render it the
                 // way the file path reads, with a real bar.
-                const dl = probe.text.match(/downloading: (\d+) of (\d+) bytes/);
+                const dl = installProgress(probe.text);
                 if (dl) {
-                    const read = parseInt(dl[1], 10), total = parseInt(dl[2], 10);
-                    ui.status(`Installing ${fmSize(total || read)}\u2026`);
-                    ui.progress(read, total);
+                    ui.status(`Installing ${fmSize(dl.total || dl.read)}\u2026`);
+                    ui.progress(dl.read, dl.total);
                 } else {
                     // "idle" is MoonBase's quiescent state; mid-cycle it means the install
                     // has not started yet, which deserves better words than "Idle".
@@ -1511,37 +1752,45 @@ function createCard(mod, depth) {
     // showing ✓ when on, blank when off. Stores its checked state in
     // data-checked so updateValues can sync from WS pushes. A native <input>
     // would not match the other buttons' frame and corner radius.
-    const enabled = document.createElement("button");
-    enabled.type = "button";
-    enabled.className = "module-enabled";
-    enabled.dataset.mid = mod.name;
-    enabled.dataset.key = "enabled";
-    enabled.setAttribute("aria-pressed", "true");
-    enabled.title = "Enable / disable";
-    const setEnabledUi = (on) => {
-        enabled.dataset.checked = on ? "true" : "false";
-        enabled.textContent = "⏻";
-        enabled.classList.toggle("module-enabled--off", !on);
-        enabled.setAttribute("aria-pressed", on ? "true" : "false");
-        card.classList.toggle("card--disabled", !on);
-        // Grey this module's TAB in the same click, alongside its card: so the tab title dims INSTANTLY
-        // instead of waiting ~1s for the server's full-state round-trip. (updateTabDot still syncs it on the
-        // patch path, idempotently, so this just makes the on/off button the immediate driver.) The tab
-        // lives in the parent's strip, found by the same data-tab-mid updateTabDot uses.
-        const tabEl = document.querySelector(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`);
-        if (tabEl) tabEl.classList.toggle("tab--disabled", !on);
-    };
-    setEnabledUi(mod.enabled === undefined ? true : !!mod.enabled);
-    enabled.addEventListener("click", () => {
-        const next = enabled.dataset.checked !== "true";
-        setEnabledUi(next);
-        // Stamp dragTs so a WS state push older than this click can't revert
-        // the toggle before the server has acknowledged. updateValues reads
-        // dragTs[mod.name + ":enabled"] on line ~952 and suppresses stale
-        // patches within the 1s cooldown.
-        dragTs[mod.name + ":enabled"] = Date.now();
-        sendControl(mod.name, "enabled", next);
-    });
+    // Only where it DOES something. A module that keeps running regardless says so
+    // (`respectsEnabled`), and on Network, System or Firmware the switch was a control that
+    // changed nothing: the scheduler ticks them whatever the flag says, so the device can be
+    // reached to re-enable whatever else was turned off.
+    // Built only where it does something; the name, tags and stats below are every card's.
+    let enabled = null;
+    if (mod.respectsEnabled !== false) {
+        enabled = document.createElement("button");
+        enabled.type = "button";
+        enabled.className = "module-enabled";
+        enabled.dataset.mid = mod.name;
+        enabled.dataset.key = "enabled";
+        enabled.setAttribute("aria-pressed", "true");
+        enabled.title = "Enable / disable";
+        const setEnabledUi = (on) => {
+            enabled.dataset.checked = on ? "true" : "false";
+            enabled.textContent = "⏻";
+            enabled.classList.toggle("module-enabled--off", !on);
+            enabled.setAttribute("aria-pressed", on ? "true" : "false");
+            card.classList.toggle("card--disabled", !on);
+            // Grey this module's TAB in the same click, alongside its card: so the tab title dims INSTANTLY
+            // instead of waiting ~1s for the server's full-state round-trip. (updateTabDot still syncs it on the
+            // patch path, idempotently, so this just makes the on/off button the immediate driver.) The tab
+            // lives in the parent's strip, found by the same data-tab-mid updateTabDot uses.
+            const tabEl = queryByName(`.tab[data-tab-mid="${cssEscape(mod.name)}"]`, "data-tab-mid", mod.name);
+            if (tabEl) tabEl.classList.toggle("tab--disabled", !on);
+        };
+        setEnabledUi(mod.enabled === undefined ? true : !!mod.enabled);
+        enabled.addEventListener("click", () => {
+            const next = enabled.dataset.checked !== "true";
+            setEnabledUi(next);
+            // Stamp dragTs so a WS state push older than this click can't revert
+            // the toggle before the server has acknowledged. updateValues reads
+            // dragTs[mod.name + ":enabled"] on line ~952 and suppresses stale
+            // patches within the 1s cooldown.
+            dragTs[mod.name + ":enabled"] = Date.now();
+            sendControl(mod.name, "enabled", next);
+        });
+    }
 
     const name = document.createElement("span");
     name.className = "card-name";
@@ -1550,11 +1799,11 @@ function createCard(mod, depth) {
 
     // Emoji tags (role + curated) shown after the name: same set used by the
     // type picker's chip filter, so visual identity is consistent across views.
-    const emoji = emojiTagsForMod(mod);
-    if (emoji) {
+    const emojiList = emojiListForMod(mod);
+    if (emojiList.length) {
         const emojiEl = document.createElement("span");
         emojiEl.className = "card-name-emoji";
-        emojiEl.textContent = emoji;
+        renderEmojiTags(emojiEl, emojiList);
         title.appendChild(emojiEl);
     }
 
@@ -1563,27 +1812,41 @@ function createCard(mod, depth) {
     spacer.className = "card-spacer";
     title.appendChild(spacer);
 
-    // fps/ms toggle on the stats line: global mode, single click cycles all cards
-    const stats = document.createElement("span");
-    stats.className = "card-stats";
-    stats.dataset.mid = mod.name;
-    stats.dataset.key = "stats";
-    stats.title = formatStatsTitle(mod);
-    stats.textContent = formatStats(mod);
-    stats.addEventListener("click", () => {
-        const idx = TIMING_MODES.indexOf(timingMode);
-        timingMode = TIMING_MODES[(idx + 1) % TIMING_MODES.length];
-        localStorage.setItem(LS_TIMING, timingMode);
-        // Refresh every card's stats line in place: no full re-render needed
-        document.querySelectorAll(".card-stats[data-mid]").forEach(s => {
-            const m = findModule(s.dataset.mid);
-            if (m) { s.textContent = formatStats(m); s.title = formatStatsTitle(m); }
-        });
-    });
-    title.appendChild(stats);
+    // Built from expert up: in user mode the line is empty and there is nothing to hold.
+    //
+    // HOLD TO PEEK, the password field's gesture. Time is what the line says, because a tick time
+    // is the honest per-module figure: fps inverts it, so a module ticking in 22 us reads as 45K
+    // fps and invites being read as a frame rate it is not. The rate is one press away for anyone
+    // who wants it, and it goes back on release rather than leaving every card in a mode.
+    if (uiMode() >= 1) {
+        const stats = document.createElement("span");
+        stats.className = "card-stats";
+        stats.dataset.mid = mod.name;
+        stats.dataset.key = "stats";
+        stats.title = formatStatsTitle(mod);
+        stats.textContent = formatStats(mod);
+        const peekAll = (mode) => {
+            timingMode = mode;
+            document.querySelectorAll(".card-stats[data-mid]").forEach(el => {
+                const m = findModule(el.dataset.mid);
+                if (m) { el.textContent = formatStats(m); el.title = formatStatsTitle(m); }
+            });
+        };
+        const show = () => peekAll("fps");
+        const hide = () => peekAll("ms");
+        stats.addEventListener("mousedown", show);
+        stats.addEventListener("mouseup", hide);
+        stats.addEventListener("mouseleave", hide);
+        stats.addEventListener("touchstart", (e) => { e.preventDefault(); show(); });
+        stats.addEventListener("touchend", hide);
+        // A cancelled touch (a scroll takes over, a call arrives) fires no touchend, which left
+        // the peek latched until the next gesture.
+        stats.addEventListener("touchcancel", hide);
+        title.appendChild(stats);
+    }
 
     // Enable checkbox joins the right-hand action cluster, before ✎/×.
-    title.appendChild(enabled);
+    if (enabled) title.appendChild(enabled);
 
     // Delete / replace buttons for user-managed children (any role a container
     // accepts, minus modules that opted out via userEditable=false). Top-level
@@ -1592,6 +1855,25 @@ function createCard(mod, depth) {
     if (isUserEditableChild(mod, depth)) {
         const actions = createActionButtons(mod);
         title.appendChild(actions);
+    }
+
+    // The ASSIGN toggle, on the control surface's own card. Entering the mode is a property of the
+    // whole desk, so it belongs here rather than on each of its 24 controls. Added directly to the
+    // title row because the surface is a TOP-LEVEL module and never reaches createActionButtons,
+    // which exists for cards a user can delete or replace.
+    if (mod.type === "ControlModule") {
+        const assignBtn = document.createElement("button");
+        assignBtn.className = "card-btn assign-toggle" + (assignMode ? " active" : "");
+        // 🔗 for "link a control to what it drives", ✓ while the mode is on. Single glyph like the
+        // ✎ and × beside it, so the action row stays one row of 26px boxes.
+        assignBtn.textContent = assignMode ? "✓" : "🔗";
+        assignBtn.title = assignMode ? "Done assigning"
+                                     : "Choose what each fader, knob and switch drives";
+        assignBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            setAssignMode(!assignMode);
+        });
+        title.appendChild(assignBtn);
     }
 
     // Help link → the module's spec page on the rendered docs site, far right of
@@ -1702,36 +1984,238 @@ function createCard(mod, depth) {
         renderFileManager(mod, controlsHost);
     }
 
+    // Contributing earns the answer back on the card that asked for consent, so the charts render
+    // here rather than anywhere else. They are drawn empty until consent is on.
+    if (mod.type === "MoonStatsModule") {
+        renderMoonCloudStats(controlsHost, mod);
+    }
+
+    // The board itself, under the controls that post to it: a message box with no way to read the
+    // replies is half a chat.
+    if (mod.type === "MoonTalkModule") {
+        renderMoonTalk(controlsHost, mod);
+    }
+
     // FirmwareUpdate card hosts the shared install picker. Mount once per
     // card-build. The picker reads SystemModule.firmware (already in
     // /api/state) to filter to OTA-compatible releases. On install, the
     // device fetches the binary via /api/firmware/url: no browser CORS in
-    // the data path. See docs/architecture.md § Firmware vs board.
+    // the data path. See docs/explanation/architecture/mooninstaller.md § Firmware vs board.
     if (mod.type === "FirmwareUpdateModule") {
-        // Opening the Firmware card forces a fresh update check (the badge otherwise refreshes
-        // only on the 1 h cache cadence): so the badge agrees with the picker the user is about
-        // to use. Fire-and-forget; best-effort.
+        // A nudge where someone has just thought about versions, which is the moment the aggregate
+        // is worth something to them. Shown only while Stats consent is off, so it disappears the
+        // moment it is acted on. Both halves are named: reading it should not be how someone
+        // discovers that consenting also shares.
+        const statsConsent = allModules()
+            .find(m => m.type === "MoonStatsModule")?.controls
+            ?.find(c => c.name === "consent")?.value;
+        if (statsConsent === false) {
+            const nudge = document.createElement("div");
+            nudge.className = "mooncloud-nudge";
+            nudge.textContent = "Turn on MoonCloud stats to share and see what everyone else is running. ";
+            // The reasons live in one place, and it is a page rather than a paragraph here: a nudge
+            // long enough to make the case stops being a nudge.
+            const why = document.createElement("a");
+            why.href = "https://moonmodules.org/projectMM/mooncloud.html#why-you-might-like-this";
+            why.target = "_blank";
+            why.rel = "noopener";
+            why.textContent = "Why you might like this";
+            nudge.appendChild(why);
+            host.appendChild(nudge);
+        }
+
+        // TWO IMAGES, ONE PANEL. A device installs the app it runs and MoonBase the recovery
+        // image, described by the same four controls and installed the same three ways (a
+        // release, a URL, a file). The device's `image` control says which, and everything here
+        // reads it: one implementation, so the two cannot drift apart.
+        //
+        // The release row is install-picker's, the SAME component the web installer renders, so
+        // the release list, the compatible-firmware filtering, the remembered selection and the
+        // "2 weeks ago" labels have one home. The URL, File and image rows ride its
+        // installRowExtras seam, which exists for exactly this.
         checkFirmwareUpdate(true);
-        const ownFirmwareKey = (() => {
-            // The `firmware` variant key is this module's own control now (moved here from
-            // SystemModule), so read it straight off mod: no cross-module lookup.
-            const fwCtrl = (mod.controls || []).find(c => c.name === "firmware");
-            return fwCtrl && fwCtrl.value ? fwCtrl.value : null;
-        })();
+        const ctrlValue = (name) => {
+            const c = (mod.controls || []).find(x => x.name === name);
+            return c ? c.value : null;
+        };
+        const hasMoonBase = deviceHasMoonBase(mod);
+        const kind = (hasMoonBase && ctrlValue("image") === 1) ? "moonbase" : "app";
+        const KINDS = {
+            app: {
+                label: "App",
+                urlRoute: "/api/firmware/url",
+                uploadRoute: "/api/firmware/upload",
+                confirm: null,
+                reboots: true,
+            },
+            moonbase: {
+                label: "MoonBase",
+                urlRoute: "/api/firmware/moonbase-update-url",
+                uploadRoute: "/api/firmware/moonbase-update",
+                confirm: askMoonBaseInstall,
+                reboots: false,
+            },
+        };
+        const k = KINDS[kind];
+
+        // WHICH IMAGE, as a tab strip: the control chooses what every row is about, which reads
+        // as a tab rather than as one setting among the settings it governs. The device holds the
+        // selection (the control is marked hidden there), so this renders a fact rather than
+        // owning one. Inserted after the card's title, ahead of the rows it governs.
+        if (hasMoonBase) {
+            const strip = document.createElement("div");
+            strip.className = "tab-strip";
+            strip.setAttribute("role", "tablist");
+            ["app", "moonbase"].forEach((tabKind, i) => {
+                const tab = document.createElement("button");
+                tab.type = "button";
+                tab.className = tabKind === kind ? "tab tab-active" : "tab";
+                tab.setAttribute("role", "tab");
+                tab.setAttribute("aria-selected", tabKind === kind ? "true" : "false");
+                tab.textContent = KINDS[tabKind].label;
+                tab.addEventListener("click", () => {
+                    if (tabKind !== kind) sendControl(mod.name, "image", i);
+                });
+                strip.appendChild(tab);
+            });
+            const titleRow = controlsHost.querySelector(":scope > .card-title");
+            controlsHost.insertBefore(strip, titleRow ? titleRow.nextSibling : controlsHost.firstChild);
+        }
+
+        const status = document.createElement("span");
+        status.className = "fw-upload-status";
+        const say = (t) => { status.textContent = t; };
+
+        // Hand a URL to the device. Every install route answers 202 and works on its own task, so
+        // the overlay reports progress rather than this response.
+        const installUrl = async (url) => {
+            if (kind === "app" && hasMoonBase) {
+                // The app is written FROM MoonBase, so this reboots twice and moonbaseUpdateFlow
+                // carries it across the handover.
+                moonbaseUpdateFlow({ url });
+                return;
+            }
+            const res = await fetch(k.urlRoute, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url }),
+            });
+            if (!res.ok) throw new Error(await errorMessage(res));
+            watchInstall(k);
+        };
+
+        // -- the rows that ride the picker's seam ---------------------------------------
+        const extras = document.createElement("div");
+
+        const urlRow = document.createElement("div");
+        urlRow.className = "control-row fw-upload-row";
+        const urlLabel = document.createElement("span");
+        urlLabel.className = "control-label";
+        urlLabel.textContent = "URL";
+        const urlField = document.createElement("input");
+        urlField.type = "url";
+        urlField.className = "fw-url-field";
+        urlField.placeholder = kind === "moonbase"
+            ? "http://…/shared-moonbase-<chip>.bin" : "http://…/firmware.bin";
+        const urlBtn = document.createElement("button");
+        urlBtn.className = "fm-tool";
+        urlBtn.textContent = "Install";
+        urlBtn.addEventListener("click", async () => {
+            const url = urlField.value.trim();
+            if (!url) return;
+            if (k.confirm && !await k.confirm()) return;
+            urlBtn.disabled = true;
+            say("installing…");
+            try {
+                await installUrl(url);
+            } catch (err) {
+                say("install failed: " + err.message);
+            } finally {
+                urlBtn.disabled = false;
+            }
+        });
+        urlRow.append(urlLabel, urlField, urlBtn);
+        extras.appendChild(urlRow);
+
+        const fileRow = document.createElement("div");
+        fileRow.className = "control-row fw-upload-row";
+        const fileLabel = document.createElement("span");
+        fileLabel.className = "control-label";
+        fileLabel.textContent = "File";
+        const upBtn = document.createElement("button");
+        upBtn.className = "fm-tool fm-tool--icon";
+        upBtn.textContent = "↥";
+        upBtn.title = `Install ${k.label.toLowerCase()} from a file on your computer`;
+        const upInput = document.createElement("input");
+        upInput.type = "file";
+        upInput.accept = ".bin,application/octet-stream";
+        upInput.style.display = "none";
+        upInput.addEventListener("change", async () => {
+            const file = (upInput.files || [])[0];
+            upInput.value = "";                   // re-picking the same file re-fires change
+            if (!file) return;
+            if (k.confirm && !await k.confirm()) return;
+            if (kind === "app" && hasMoonBase) {
+                // The app cannot flash itself: the browser pushes this file to MoonBase.
+                moonbaseUpdateFlow({ file });
+                return;
+            }
+            upBtn.disabled = true;
+            // The overlay, like every other install. This is the one whose progress the DEVICE
+            // cannot report (the request stays open for the transfer), so the bar is driven from
+            // the upload itself, but a user should not have to know which install they picked to
+            // know where the progress appears.
+            const ui = showUpdateOverlay();
+            ui.status(`Installing ${fmSize(file.size)}…`);
+            try {
+                await uploadWithProgress(k.uploadRoute, file, ui);
+                if (k.reboots) {
+                    ui.status("Rebooting…");
+                    await fwSleep(4000);
+                } else {
+                    ui.status(`${k.label} installed`);
+                    await fwSleep(1200);
+                }
+                location.reload();
+            } catch (err) {
+                ui.fail("Install failed: " + err.message);
+            } finally {
+                upBtn.disabled = false;
+            }
+        });
+        upBtn.addEventListener("click", () => upInput.click());
+        fileRow.append(fileLabel, upBtn, upInput);
+        extras.appendChild(fileRow);
+        extras.appendChild(status);
+
+        // -- the shared picker ----------------------------------------------------------
         const mount = document.createElement("div");
         mount.className = "install-picker-host";
         controlsHost.appendChild(mount);
         installPicker.init({
             container: mount,
-            ownFirmwareKey,
-            // Device already knows its deviceModel (SystemModule): picker is for
-            // releases + firmware compatibility only. Showing a board picker
-            // here would invite the user to mis-narrow the firmware list.
+            // MoonBase ships ONE image per chip rather than one per variant, so on that tab the
+            // picker offers the shared-moonbase assets and matches on the CHIP the device
+            // reports. Same component, same release list, a different asset family.
+            moonbaseOnly: kind === "moonbase",
+            // Both tabs read the SAME control: the device sets `firmware` to the variant on the
+            // app tab and to the chip on the MoonBase tab, precisely because that is what names
+            // the release asset in each case. Re-deriving the chip from SystemModule here was a
+            // second mechanism for a job the device had already done, with a JS transform
+            // ("ESP32-S3" -> "esp32s3") that merely coincided with the build system's naming.
+            ownFirmwareKey: moonbaseAssetKeyFrom(ctrlValue("firmware")),
+            // Device already knows its deviceModel (SystemModule): picker is for releases +
+            // firmware compatibility only. A board picker here would invite the user to
+            // mis-narrow the firmware list.
             enableBoardPicker: false,
+            installRowExtras: extras,
+            // After the Install button, not before: these are other ways to install, so putting
+            // them above would separate that button from the two dropdowns it acts on.
+            extrasAfterInstall: true,
             onInstall: async (_firmware, _manifestUrl, binaryUrl, entry) => {
                 // A desktop build has no OTA: it updates by downloading a new release and being
-                // replaced by hand. So hand the browser the file and let it do what it does with a
-                // download, rather than POSTing to a route that would 501 here.
+                // replaced by hand. So hand the browser the file rather than POSTing to a route
+                // that would 501 here.
                 if (entry && entry.isDesktop) {
                     const a = document.createElement("a");
                     a.href = binaryUrl;
@@ -1742,86 +2226,30 @@ function createCard(mod, depth) {
                     a.remove();
                     return;
                 }
-                if (deviceHasMoonBase(mod)) {
-                    // MoonBase device: the whole install runs unattended behind the overlay.
-                    moonbaseUpdateFlow({ url: binaryUrl });
-                    return;
-                }
-                const res = await fetch("/api/firmware/url", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ url: binaryUrl }),
-                });
-                if (!res.ok) throw new Error(await errorMessage(res));
+                if (k.confirm && !await k.confirm()) return;
+                await installUrl(binaryUrl);
             },
         });
 
-        // Install-from-file: pick a locally-built .bin and stream its bytes to /api/firmware/upload,
-        // which feeds platform::otaWriteStream (esp_ota_write). Complements the release picker above -
-        // the release path has the device fetch a URL; this path has the browser push the body, so a
-        // dev build that isn't a published release can be flashed straight over the network. The device
-        // reboots on success (no response body), so a completed POST that closes mid-flight is success.
-        const fileRow = document.createElement("div");
-        fileRow.className = "fw-upload-row";
-        const upBtn = document.createElement("button");
-        upBtn.className = "fm-tool fm-tool--icon";
-        upBtn.textContent = "↥";   // same upload glyph as the file-manager toolbar
-        upBtn.title = "Install from file: flash a firmware .bin from your computer over the network (OTA)";
-        const upStatus = document.createElement("span");
-        upStatus.className = "fw-upload-status";
-        const upInput = document.createElement("input");
-        upInput.type = "file";
-        upInput.accept = ".bin,application/octet-stream";
-        upInput.style.display = "none";
-        upInput.addEventListener("change", async () => {
-            const file = (upInput.files || [])[0];
-            upInput.value = "";                   // reset so re-picking the same file re-fires change
-            if (!file) return;
-            if (deviceHasMoonBase(mod)) {
-                // MoonBase device: reboot into MoonBase, then the browser pushes this file to it.
-                moonbaseUpdateFlow({ file });
-                return;
-            }
-            upBtn.disabled = true;
-            upStatus.textContent = `uploading ${fmSize(file.size)}…`;
-            try {
-                const res = await fetch("/api/firmware/upload", {
-                    method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
-                });
-                // The device sends a 200 once the image is committed, THEN reboots: so res.ok is the
-                // real success signal. A 4xx/5xx carries the device's ota error in the JSON body.
-                if (res.ok) upStatus.textContent = "flashed: device rebooting";
-                else throw new Error(await errorMessage(res));
-            } catch (err) {
-                // A network error mid-upload is a genuine failure now (the device answers before it
-                // reboots), so surface it as such rather than assuming a reboot.
-                upStatus.textContent = "upload failed: " + err.message;
-            } finally {
-                upBtn.disabled = false;
-            }
-        });
-        upBtn.addEventListener("click", () => upInput.click());
-        fileRow.appendChild(upBtn);
-        fileRow.appendChild(upStatus);
-        fileRow.appendChild(upInput);
-        // MoonBase devices: open the maintenance image directly: reboot into MoonBase and land
-        // on its page (same address, so a reload gets there once it answers). The way back is
-        // MoonBase's own "Boot the app" button.
-        if (deviceHasMoonBase(mod)) {
+        // BELOW everything, because it belongs to neither image: rebooting into MoonBase is not
+        // an install, it is how a user reaches the recovery image to work there by hand.
+        if (hasMoonBase) {
+            const mbRow = document.createElement("div");
+            mbRow.className = "control-row fw-upload-row";
             const mbBtn = document.createElement("button");
             mbBtn.className = "fm-tool";
-            mbBtn.textContent = "MoonBase";
-            mbBtn.title = "Reboot into MoonBase, the maintenance image, install firmware, then boot back";
+            mbBtn.textContent = "Restart in MoonBase";
+            mbBtn.title = "Reboot into MoonBase, the maintenance image; its own page has the way back";
             mbBtn.addEventListener("click", async () => {
                 const ui = showUpdateOverlay();
-                ui.status("Restarting into MoonBase\u2026");
+                ui.status("Restarting into MoonBase…");
                 try { await fetch("/api/firmware/moonbase", { method: "POST" }); } catch (_) {}
                 if (await waitForMoonBase(Date.now() + 120000)) { location.reload(); return; }
                 ui.fail(MOONBASE_SILENT_MSG);
             });
-            fileRow.appendChild(mbBtn);
+            mbRow.appendChild(mbBtn);
+            controlsHost.appendChild(mbRow);
         }
-        controlsHost.appendChild(fileRow);
     }
 
     // -- Children block + footer --
@@ -1912,7 +2340,12 @@ function fmtBytes(n) {
 // Stats line: timing (🕒, fps or µs/ms per the global toggle) + memory
 // (🧠 static, plus "+ dynamic" only when the module allocated heap).
 // Timing is omitted entirely when the module has no measured loop time.
+//
+// EXPERT AND UP. A tick time and a byte count diagnose the firmware rather than the show: they
+// say which module is spending the frame, which is a question a reader in user mode is not
+// asking and cannot act on. The same gate the controls use, so one mode decides the whole card.
 function formatStats(mod) {
+    if (uiMode() < 1) return "";
     const us = (mod.tickTimeUs !== undefined) ? mod.tickTimeUs : 0;
     let timing = "";
     if (us > 0) {
@@ -1936,7 +2369,19 @@ function formatStats(mod) {
     return head + statusChip;
 }
 function formatStatsTitle(mod) {
-    return "Click to toggle fps/ms";
+    // The tooltip carries the OTHER unit, so both readings are available without the gesture: the
+    // card shows one, hovering says what it is in the other. A per-module fps is named as what it
+    // is, a rate this module alone could sustain, because read as a frame rate it is a claim about
+    // the whole pipeline made from one part of it.
+    const us = (mod.tickTimeUs !== undefined) ? mod.tickTimeUs : 0;
+    if (us > 0) {
+        const fps = Math.round(1_000_000 / us);
+        const other = timingMode === "fps"
+            ? (us < 1000 ? us + " µs" : (us / 1000).toFixed(2) + " ms") + " per tick"
+            : fps.toLocaleString() + " fps if this module ran alone";
+        return other + (timingMode === "fps" ? "  ·  release for time" : "  ·  hold for fps");
+    }
+    return "Hold to view fps";
 }
 
 function createActionButtons(mod) {
@@ -1952,6 +2397,9 @@ function createActionButtons(mod) {
     replaceBtn.className = "card-btn";
     replaceBtn.textContent = "✎";
     replaceBtn.title = "Replace with another type";
+    // The glyph is the button's accessible name unless one is given: "✎" tells a
+    // screen reader (and a role-based locator) nothing about what the button does.
+    replaceBtn.setAttribute("aria-label", "Replace with another type");
     replaceBtn.addEventListener("click", () => {
         // Anchored to the button: the picker is a modal that opens under whatever was clicked,
         // not inside the cramped 26px action-button row.
@@ -1964,6 +2412,7 @@ function createActionButtons(mod) {
     delBtn.className = "card-btn card-btn-del";
     delBtn.textContent = "×";
     delBtn.title = "Delete";
+    delBtn.setAttribute("aria-label", "Delete");
     armPressTwice(delBtn, () => deleteModule(mod.name),
                   {armedText: "✓", armedTitle: "Click again to delete"});
     wrap.appendChild(delBtn);
@@ -2079,10 +2528,25 @@ function docPathForType(moduleType) {
 // loaded, so two MoonLive effects running different scripts read differently while sharing one
 // entry in /api/types: the audio one shows 🎶, the moving-head one 🎯. A compiled module sends
 // nothing here and keeps its type's answer.
-function emojiTagsForMod(mod) {
-    if (!mod) return "";
+/// The same set as an array, for the callers that render one span per emoji.
+function emojiListForMod(mod) {
+    if (!mod) return [];
     const t = availableTypes.find(t => t.name === mod.type) || {role: mod.role, tags: ""};
-    return emojiTagsFor(mod.tags ? {...t, tags: mod.tags} : t).join("");
+    return emojiTagsFor(mod.tags ? {...t, tags: mod.tags} : t);
+}
+
+/// Fill `el` with one span per emoji, each carrying its own tooltip. A tooltip belongs to a single
+/// character, so the emoji cannot be one joined string. Both the card header and the picker rows
+/// render through here, which is what keeps a chip explained the same way wherever it appears.
+function renderEmojiTags(el, list) {
+    el.textContent = "";
+    for (const ch of list) {
+        const one = document.createElement("span");
+        one.textContent = ch;
+        const label = EMOJI_LABEL[ch];
+        if (label) one.title = label;
+        el.appendChild(one);
+    }
 }
 
 // Whether a control appears in the generic control list: false for controls the module marked
@@ -2092,7 +2556,7 @@ function emojiTagsForMod(mod) {
 // paths (renderCards's initial build + updateModuleControls's WS live-patch) so they agree.
 function controlRendersGenerically(mod, ctrl) {
     if (ctrl.hidden) return false;
-    if (ctrl.advanced && !isExpertMode()) return false;   // expert-only control, expert mode is off
+    if ((ctrl.minMode | 0) > uiMode()) return false;   // above the reader's mode
     return true;
 }
 
@@ -2101,7 +2565,17 @@ function createControl(moduleName, moduleType, ctrl) {
     row.className = "control-row";
     // Expert-only controls (only reachable here when expert mode is on: see controlRendersGenerically)
     // get a distinct treatment so they read as a different tier: a left accent stripe + muted label.
-    if (ctrl.advanced) row.classList.add("control-advanced");
+    // One class per tier, because the glyph says WHICH mode reveals it: a reader in expert mode
+    // meets both marks and the developer one tells them what they are still not seeing.
+    // The glyph is CSS ::after content, which a screen reader does not reliably announce, so the
+    // tier also rides a title: the same fact reaches a reader who cannot see the mark.
+    if ((ctrl.minMode | 0) === 1) {
+        row.classList.add("control-expert");
+        row.title = "Expert mode control";
+    } else if ((ctrl.minMode | 0) >= 2) {
+        row.classList.add("control-developer");
+        row.title = "Developer mode control";
+    }
     // A switch-row control renders as a strip like an encoder or fader, so switch N sits in the
     // same column as encoder N and fader N: a surface reads down a channel, not across a list.
     if (ctrl.switchRow) row.classList.add("control-switch");
@@ -2109,12 +2583,15 @@ function createControl(moduleName, moduleType, ctrl) {
 
     const label = document.createElement("label");
     label.className = "control-label";
-    // The expertMode toggle itself carries the wrench glyph (via CSS ::before), so it reads as the switch
+    // The mode select itself carries both glyphs (via CSS ::after), so it reads as the switch
     // that governs the 🔧 controls: the toggle is never `advanced` (it must always be reachable), so key
     // it by name rather than the flag.
-    if (moduleName === "System" && ctrl.name === "expertMode") label.classList.add("control-label--expert");
+    if (moduleName === "System" && ctrl.name === "mode") label.classList.add("control-label--mode");
     label.textContent = displayName(ctrl.name);
-    row.appendChild(label);
+    // The display strip carries no label: it spans the card and shows whatever was last touched, so
+    // a label naming one control would be wrong the moment another moved.
+    if (ctrl.displayStrip) row.classList.add("control-display-strip");
+    else row.appendChild(label);
 
     const key = moduleName + ":" + ctrl.name;
     const def = defaultFor(moduleType, ctrl.name, ctrl);
@@ -2170,13 +2647,13 @@ function createControl(moduleName, moduleType, ctrl) {
                 input.classList.add("encoder-input");
                 row.classList.add("control-encoder");
                 row.appendChild(buildKnob(input, ctrl));
-                row.appendChild(buildSevenSeg(input));
+                row.appendChild(buildSegReadout(input));
                 attachTargetPopup(row, input, ctrl);
             }
             if (ctrl.fader) {
                 input.classList.add("fader-input");
                 row.classList.add("control-fader");
-                row.appendChild(buildSevenSeg(input));
+                row.appendChild(buildSegReadout(input));
                 // Right-click a fader to see (and later choose) what it drives: the same
                 // configure-on-the-control rule the pads follow.
                 attachTargetPopup(row, input, ctrl);
@@ -2189,7 +2666,14 @@ function createControl(moduleName, moduleType, ctrl) {
             // The knob and the readout were built above, before these three lines ran, so they drew
             // against an empty input (the source of the 880 readouts). Refresh now that the value and
             // the bounds exist.
+            //
+            // And again once the ROW is complete: redrawRangeDecorations walks the input's siblings,
+            // and the decorations are appended after this point, so the call above finds a
+            // half-built row and every readout keeps whatever it first drew. That is the "all the
+            // numbers read 50 while the faders sit at different heights" the UI showed until a
+            // manual refresh rebuilt the card at a moment when the order happened to work out.
             redrawRangeDecorations(input);
+            queueMicrotask(() => redrawRangeDecorations(input));
             const numInput = document.createElement("input");
             numInput.type = "number";
             numInput.className = "control-value-input";
@@ -2369,6 +2853,9 @@ function createControl(moduleName, moduleType, ctrl) {
             sw.appendChild(track);
             row.appendChild(sw);
             appendResetButton(row, moduleName, ctrl, def, () => { input.checked = !!def; });
+            // A surface SWITCH is assignable like a fader or a knob: it drives a control, and
+            // switch1 driving Drivers.on is the same kind of binding fader1 has to brightness.
+            if (ctrl.switchRow) attachTargetPopup(row, input, ctrl);
             break;
         }
         case "text": {
@@ -2388,6 +2875,26 @@ function createControl(moduleName, moduleType, ctrl) {
                 input.addEventListener("input", () => {
                     dragTs[key] = Date.now();
                     debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, input.value));
+                });
+                // Enter presses the card's `send` button, where the module has one. Generic rather
+                // than a MoonTalk rule: any module pairing a text field with a send button gets it,
+                // and a module without one is unaffected.
+                //
+                // The write is FLUSHED first and awaited. Typing is debounced 500 ms, so Enter
+                // straight after the last keystroke would otherwise press send while the device
+                // still held the previous text, publishing the message a keystroke short.
+                input.addEventListener("keydown", async (e) => {
+                    if (e.key !== "Enter") return;
+                    // allModules() walks children: Talk is a MoonCloud child, so a flat lookup on
+                    // state.modules never finds it.
+                    const mod = allModules().find(m => m.name === moduleName);
+                    const send = (mod?.controls || [])
+                        .find(c => c.type === "button" && c.name === "send");
+                    if (!send) return;
+                    e.preventDefault();
+                    clearTimeout(dragTimers[key]);
+                    await sendControl(moduleName, ctrl.name, input.value);
+                    await sendControl(moduleName, "send", 1);
                 });
             }
             row.appendChild(input);
@@ -2431,497 +2938,7 @@ function createControl(moduleName, moduleType, ctrl) {
             row.appendChild(input);
             break;
         }
-        case "filepath": {
-            // A file NAME plus an editor for that file's contents. The value travels through
-            // /api/control like any text control; the BODY never does (it cannot: only /api/file
-            // may exceed the request buffer), so the pane below reads and writes it directly.
-            //
-            // `dir` and `ext` come from the module that declared the control, so nothing here knows
-            // what kind of file this is.
-            const dir = ctrl.dir || "";
-            const ext = ctrl.ext || "";
-            // No `dir` means the name IS the path: joinFsPath("", n) would return "/n" and point
-            // at the filesystem root instead of the file the module named.
-            const pathOf = (n) => (n ? (dir ? joinFsPath(dir, n) : n) : "");
-            // Where a script actually IS, which is not always `dir`: a factory script sits in the
-            // catalog's directory until an edit forks it into the user's. The device resolves the
-            // same way (user copy first), so the editor has to look in both or it would open an
-            // empty box for a script that is plainly listed.
-            const scriptPathOf = async (n) => {
-                if (!n || !dir) return pathOf(n);
-                const local = joinFsPath(dir, n);
-                if (!mlGroupForExt(ext)) return local;
-                try {
-                    const here = await fmFetchDir(dir).catch(() => []);
-                    if (here.some(e => !e.isDir && e.name === n)) return local;
-                    const cat = await mlFetchCatalog();
-                    return joinFsPath(cat.dir, n);
-                } catch (_) { return local; }
-            };
-
-            const stack = document.createElement("div");
-            stack.className = "control-fileedit-stack";
-            row.appendChild(stack);
-
-            const bar = document.createElement("div");
-            bar.className = "fileedit-bar";
-
-            // A select-SHAPED button, opening the shared picker. It reads as a select (the current
-            // name, then the ⌄ affordance) and behaves as one, but the list it opens is the same
-            // widget the module picker uses: search, emoji chips, keyboard, one row per script.
-            // A native <select> can only render plain text, so a script's emoji and dimension had
-            // nowhere to go.
-            //
-            // It presents the SAME surface a <select> does (`value`, `options`, `disabled`, and a
-            // `change` event), so everything around it (the fork/share/delete labels, the editor
-            // load, the download-on-pick) is unchanged and unaware.
-            const picker = document.createElement("button");
-            picker.type = "button";
-            picker.className = "control-select fileedit-pick";
-            picker.dataset.mid = moduleName;
-            picker.dataset.key = ctrl.name;
-            // The options, as data. `fillPicker` appends option elements exactly as it did to the
-            // <select>; they are never rendered, they are the list the modal is built from.
-            picker.options = [];
-            picker.appendChild = (o) => { picker.options.push(o); return o; };
-            const paintPicker = () => {
-                const cur = picker.options.find(o => o.value === picker._value);
-                picker.textContent = cur ? cur.textContent : "(none)";
-                const caret = document.createElement("span");
-                caret.className = "fileedit-pick-caret";
-                caret.textContent = "\u2304";        // ⌄, the select affordance
-                picker.append(caret);
-            };
-            Object.defineProperty(picker, "value", {
-                get: () => picker._value ?? "",
-                set: (v) => { picker._value = String(v ?? ""); paintPicker(); },
-            });
-            picker._value = "";
-            // innerHTML = "" is how fillPicker clears the list; keep that meaning.
-            Object.defineProperty(picker, "innerHTML", {
-                set: (v) => { if (v === "") { picker.options = []; picker.replaceChildren(); } },
-                get: () => "",
-            });
-            // Which scripts this picker can offer that are not on the device yet. Names only:
-            // picking one downloads it. Empty for a filepath control that is not a script picker.
-            let remote = [];
-            // Local names that also exist in the catalog: a user edit shadowing a factory script.
-            let forks = new Set();
-            // Every name the catalog ships for this role, whether or not it is on the device.
-            let catalogNames = new Set();
-            // Names in the USER's directory: written or edited here, so worth proposing upstream.
-            let localNames = new Set();
-            const fillPicker = async () => {
-                picker.innerHTML = "";
-                const none = document.createElement("option");
-                none.value = ""; none.textContent = "(none)";
-                picker.appendChild(none);
-                let names = [];
-                if (dir) {
-                    try {
-                        const entries = await fmFetchDir(dir);
-                        names = entries.filter(e => !e.isDir && (!ext || e.name.endsWith(ext)))
-                                       .map(e => e.name);
-                    } catch (_) { /* an unreachable directory leaves just "none" */ }
-                }
-                // The user's OWN files, before the factory listing is merged in below: a name here
-                // is something they wrote or edited, which is what the share button offers.
-                localNames = new Set(names);
-                // A script picker also lists the FACTORY directory, where downloads land. A name in
-                // both is the user's edit shadowing the factory copy, which is what the device
-                // resolves too, so it appears once.
-                const group = mlGroupForExt(ext);
-                let cat = null;
-                if (group) {
-                    try {
-                        cat = await mlFetchCatalog();
-                        const factory = await fmFetchDir(cat.dir, true).catch(() => []);
-                        for (const e of factory)
-                            if (!e.isDir && e.name.endsWith(ext) && !names.includes(e.name))
-                                names.push(e.name);
-                    } catch (_) { /* no catalog: the picker still lists what is here */ }
-                }
-                names.sort();
-                // A local name that ALSO exists in the catalog is a fork: the user edited a factory
-                // script, so their copy shadows one that can be restored. Deleting it is a revert,
-                // not a loss, and the delete button says so.
-                // localNames, NOT names: by here `names` also carries the factory listing, so a
-                // script that was downloaded and never touched counted as a fork. It showed the
-                // revert arrow for an edit that does not exist, and reverting it deleted a
-                // /moonlive path with nothing at it.
-                forks = cat ? new Set(((cat[group] || {}).names || []).filter(n => localNames.has(n)))
-                            : new Set();
-                // Everything the catalog offers that is not here yet, listed after the local ones
-                // so a user's own scripts stay at the top of the list.
-                remote = cat ? ((cat[group] || {}).names || []).filter(n => !names.includes(n)) : [];
-                // Every name the library ships for this role, downloaded or not: what the share
-                // button uses to tell a user's own script from one of ours.
-                catalogNames = new Set(cat ? ((cat[group] || {}).names || []) : []);
-
-                // The current value may name a file the listing does not have (deleted underneath,
-                // or a directory that could not be read). Keep it selectable so the card still
-                // shows what the module is pointing at, rather than silently appearing unset.
-                const cur = String(ctrl.value ?? "");
-                if (cur && !names.includes(cur) && !remote.includes(cur)) names.unshift(cur);
-                // What the catalog says each factory script is: its dimension and its own emoji,
-                // read from the script's `int dimensions()` / `string tags()` at build time. So a
-                // row reads like the module picker's rows do, BEFORE the script is downloaded. A
-                // script the catalog does not carry (the user's own) simply has no prefix.
-                const decl = (n) => {
-                    const g = cat && cat[group];
-                    if (!g || !g.names) return "";
-                    const i = g.names.indexOf(n);
-                    if (i < 0) return "";
-                    const marks = [];
-                    if (g.tags && g.tags[i]) marks.push(g.tags[i]);
-                    if (g.dim && DIM_EMOJI[g.dim[i]]) marks.push(DIM_EMOJI[g.dim[i]]);
-                    return marks.length ? marks.join("") + " " : "";
-                };
-                for (const n of names) {
-                    const o = document.createElement("option");
-                    o.value = n; o.textContent = decl(n) + n;
-                    picker.appendChild(o);
-                }
-                // Marked, because picking one costs a download and can fail. One list rather than
-                // two groups: to the user it is one library, and where a script happens to live is
-                // the device's business.
-                for (const n of remote) {
-                    const o = document.createElement("option");
-                    o.value = n;
-                    o.textContent = "\u2601 " + decl(n) + n;   // cloud: not on this device yet
-                    picker.appendChild(o);
-                }
-                picker.value = cur;
-                refreshDelLabel();
-            };
-
-            // Save sits with the other file actions rather than in a row of its own: the card is
-            // already narrow, and the dot on it is what marks unsaved work.
-            const saveBtn = document.createElement("button");
-            saveBtn.className = "card-btn fm-editor-save fileedit-glyph-lg";
-            // U+2398, the ISO "store" symbol. Not an arrow: ↥ and ↧ already mean upload and
-            // download here, and ⤓ downloads a file in the tree, so an arrow would read as
-            // "fetch this" on a button that writes. Not ✓ either, which is the ARMED DELETE
-            // state one button along.
-            saveBtn.textContent = "⎘";
-            saveBtn.title = "Save (or click away, or Ctrl/Cmd+S)";
-
-            // The same modal the File Manager opens from a file row: one editor, reached two ways,
-            // so a script that needs room gets the full-size box without a second implementation.
-            const popBtn = document.createElement("button");
-            popBtn.className = "card-btn fileedit-glyph-lg";
-            popBtn.textContent = "⤢";                  // expand, the usual glyph for a bigger view
-            popBtn.title = "Open in a larger window";
-
-            // No second status line: the module's own `status` control already reports what the
-            // save produced ("2036 B", or the parse error), and it is the authoritative one because
-            // the DEVICE writes it. A browser-side copy said the same thing in different words and
-            // could only ever disagree. What the browser knows and the device cannot (unsaved work,
-            // a save in flight, a failed write) rides the Save button instead: its dot, its
-            // disabled state, and its tooltip.
-            const statusEl = document.createElement("span");
-            statusEl.hidden = true;
-
-            const newBtn = document.createElement("button");
-            newBtn.className = "card-btn";
-            newBtn.textContent = "+";                  // the same + the module tree adds with
-            newBtn.title = "New script";
-            const delBtn = document.createElement("button");
-            delBtn.className = "card-btn card-btn-del";
-            delBtn.textContent = "×";                  // the card's own delete, red on the symbol
-            delBtn.title = "Delete this script";
-            // The SAME button reverts a factory script, because it is the same operation: the
-            // editor only ever saves to the user directory, so an edited factory script is a second
-            // file shadowing the first, and removing it brings the original back. Saying "delete"
-            // there would misdescribe it, and a second button would make one act look like two.
-            const shareBtn = document.createElement("button");
-            shareBtn.className = "card-btn";
-            shareBtn.textContent = "\u2197";           // north-east arrow: it leaves for somewhere else
-            shareBtn.title = "Propose this script for the shared library";
-
-            function refreshDelLabel() {
-                const isFork = forks.has(picker.value);
-                delBtn.textContent = isFork ? "\u21ba" : "\u00d7";   // undo arrow, or the delete cross
-                delBtn.title = isFork
-                    ? "Revert to the shipped version (discards your changes)"
-                    : "Delete this script";
-                delBtn.classList.toggle("card-btn-del", !isFork);
-                // Offered for anything the user WROTE, which is a script of their own or a fork of
-                // a shipped one: both are a change worth sending back, and the flow differs only in
-                // which GitHub URL it opens. NOT offered for an untouched factory copy, where the
-                // file on the device is byte-identical to the one in the repo and a pull request
-                // would propose no change at all.
-                const known = catalogNames.has(picker.value);
-                const edited = localNames.has(picker.value);   // it sits in the USER directory
-                shareBtn.hidden = !picker.value || !mlGroupForExt(ext) || !edited;
-                shareBtn.title = known
-                    ? "Propose your changes to the shared library"
-                    : "Propose this script for the shared library";
-            }
-            // Share: open a pull request adding this script to the library.
-            //
-            // GitHub's "new file" URL takes the path and the contents as query parameters and opens
-            // its editor pre-filled, forking the repo on the user's behalf when they propose it. So
-            // a script someone wrote on their own device reaches the library with one click and no
-            // API, no token and nothing stored here.
-            //
-            // Only for scripts a user WROTE: a factory script is already in the library, and a fork
-            // of one would open a PR that recreates a file that exists.
-            shareBtn.addEventListener("click", async () => {
-                const name = picker.value;
-                const group = mlGroupForExt(ext);
-                if (!name || !group) return;
-                await editor.save();                  // propose what is on screen, not the last save
-                // A save that failed leaves the pane dirty, and the read below would then fetch the
-                // PREVIOUS text from the device: the user would be proposing something other than
-                // what they are looking at, which is the one outcome worth refusing outright.
-                if (editor.isDirty()) {
-                    alert("Save the script first: it still has unsaved changes.");
-                    return;
-                }
-                let text = "";
-                try {
-                    const res = await fetch("/api/file?path=" + encodeURIComponent(await scriptPathOf(name)));
-                    if (!res.ok) throw new Error(await errorMessage(res));
-                    text = await res.text();
-                } catch (err) { alert("could not read the script: " + err.message); return; }
-
-                const cat = await mlFetchCatalog().catch(() => null);
-                const folder = cat && cat[group] ? cat[group].folder : group;
-                // A name the library already ships is an EDIT of that file; anything else is a new
-                // one. GitHub has a flow for each, and both fork on the user's behalf when they
-                // propose the change, so neither needs write access to this repo.
-                const repoPath = "moonlive/" + folder + "/" + name;
-                const url = catalogNames.has(name)
-                    ? "https://github.com/MoonModules/projectMM/edit/main/" + repoPath
-                      + "?value=" + encodeURIComponent(text)
-                    : "https://github.com/MoonModules/projectMM/new/main"
-                      + "?filename=" + encodeURIComponent(repoPath)
-                      + "&value=" + encodeURIComponent(text);
-                // The script rides in the query string, and browsers stop honoring a URL somewhere
-                // past ~8 KB. Every shipped script is under 2.5 KB so this is headroom rather than a
-                // real limit, but a long one would otherwise open a truncated editor and look fine.
-                if (url.length > 7000) {
-                    await navigator.clipboard.writeText(text).catch(() => {});
-                    alert("This script is too long to send through a link.\n\n"
-                        + "It has been copied to your clipboard: open\n"
-                        + "github.com/MoonModules/projectMM, add a file under moonlive/" + folder
-                        + "/ and paste it there.");
-                    return;
-                }
-                window.open(url, "_blank", "noopener");
-            });
-
-            bar.appendChild(picker);
-            const tools = document.createElement("div");
-            tools.className = "fileedit-tools";
-            tools.appendChild(saveBtn);
-            tools.appendChild(popBtn);
-            if (dir) { tools.appendChild(newBtn); tools.appendChild(shareBtn); tools.appendChild(delBtn); }
-            bar.appendChild(tools);
-            stack.appendChild(bar);
-
-            const pane = document.createElement("div");
-            pane.className = "control-fileedit";
-            stack.appendChild(pane);
-
-            // Saving re-derives on the device: a written file asks the tree to re-prepare, so the
-            // module recompiles or reloads on its own. The browser sends nothing extra.
-            const editor = fmMountEditor(pane, pathOf(ctrl.value), {
-                sizeKey: key,
-                // The status this module is ALREADY reporting, so a card built while its script is
-                // broken shows the marked line straight away rather than waiting for a recompile.
-                // The EDITOR applies it once the file has loaded: marking at construction would
-                // convert the offset against an empty textarea and put every error on line 1.
-                initialStatus: (findModule(moduleName) || {}).status || "",
-                saveButton: saveBtn,
-                statusEl,
-                // Editing a factory script FORKS it: the read came from the library directory, but
-                // the write goes to the user's, so the shipped copy stays untouched and the new one
-                // shadows it. Without this an edit overwrote the library copy and there was nothing
-                // left to revert to.
-                savePath: (readPath) => {
-                    if (!dir) return readPath;
-                    const base = readPath.slice(readPath.lastIndexOf("/") + 1);
-                    return base ? joinFsPath(dir, base) : readPath;
-                },
-                // A save may have just created the fork, so what the picker thinks is local is out
-                // of date: re-read it, which is also what turns the delete button into revert.
-                onSaved: (written) => {
-                    if (!mlGroupForExt(ext)) return;
-                    if (!written.startsWith(dir + "/")) return;
-                    const sel = picker.value;
-                    fillPicker().then(() => { picker.value = sel; refreshDelLabel(); });
-                },
-            });
-            mlEditorAdd(moduleName, editor);
-            // Apply the status the card is ALREADY showing: registration only catches the next one,
-            // so a card rendered while its script is broken would report the error with no line
-            // marked until something recompiled. The modal does the same on open.
-            {
-                const row = document.querySelector(
-                    `[data-status-mid="${cssEscape(moduleName)}"] .status-value`);
-                if (row) editor.markError(row.textContent);
-            }
-
-            // Re-read after the modal closes: it edits the same file through the same endpoints, so
-            // whatever it saved is what this pane should now show.
-            // One row per script, shaped like a type so the shared picker can render it: the name is
-            // what the control stores, the dimension and emoji come from the catalog, and the role
-            // is what the picker prints on the right.
-            const openScriptPicker = async () => {
-                if (picker.disabled) return;
-                const group = mlGroupForExt(ext);
-                const cat = group ? await mlFetchCatalog().catch(() => null) : null;
-                const g = (cat && cat[group]) || {};
-                const roleWord = group ? group.replace(/s$/, "") : "file";
-                const seen = new Set();
-                const items = [];
-                const add = (n, remoteFlag) => {
-                    if (seen.has(n)) return;
-                    seen.add(n);
-                    const i = (g.names || []).indexOf(n);
-                    items.push({
-                        name: n,
-                        // The cloud marks a script the device does not hold yet: picking it costs a
-                        // download, which is worth knowing before choosing.
-                        displayName: (remoteFlag ? "\u2601 " : "") + n,
-                        role: roleWord,
-                        tags: i >= 0 && g.tags ? (g.tags[i] || "") : "",
-                        dim: i >= 0 && g.dim ? g.dim[i] : 0,
-                    });
-                };
-                for (const o of picker.options) if (o.value) add(o.value, remote.includes(o.value));
-                for (const n of (g.names || [])) add(n, !localNames.has(n) && remote.includes(n));
-                if (!items.length) return;
-                // Anchored to the field itself: the picker opens under it as a modal, sized and
-                // placed by openPicker rather than by whatever element it hangs from.
-                openPicker(picker, {
-                    items,
-                    actionLabel: "use",
-                    currentType: picker.value,
-                    // Route through the <select>'s own change handler, which already downloads a
-                    // remote script, updates the delete label and loads the editor. One path for
-                    // both ways of choosing.
-                    commit: (name) => {
-                        picker.value = name;
-                        picker.dispatchEvent(new Event("change"));
-                    },
-                });
-            };
-            picker.addEventListener("click", openScriptPicker);
-
-            popBtn.addEventListener("click", async () => {
-                if (!picker.value) return;
-                // Flush unsaved edits first: the modal loads the file from the device, so opening
-                // it on a dirty pane would show stale bytes and then save them back over the edit.
-                // save() RESOLVES on a failed write (it reports, it does not throw), so the flush is
-                // only trustworthy if the pane came clean: opening anyway would discard the edit.
-                await editor.save();
-                if (editor.isDirty()) { alert("Not opening: this script still has unsaved changes."); return; }
-                const p = await scriptPathOf(picker.value);
-                await openFileEditor(p, undefined, moduleName);
-                await editor.load(p);
-            });
-
-            picker.addEventListener("change", async () => {
-                // Same reason as the modal above: switching files discards the edit otherwise, and
-                // a save that failed leaves the pane dirty while resolving normally.
-                await editor.save();
-                if (editor.isDirty()) {
-                    alert("Not switching: this script still has unsaved changes.");
-                    picker.value = String(ctrl.value ?? "");
-                    return;
-                }
-                const chosen = picker.value;
-                // A factory script the device does not hold yet: download it BEFORE selecting it,
-                // so the module never points at a file that is not there. A failure reports and
-                // puts the picker back, rather than leaving the card pointing at nothing.
-                if (remote.includes(chosen)) {
-                    const previous = String(ctrl.value ?? "");
-                    picker.disabled = true;
-                    try {
-                        await mlDownloadScript(chosen, mlGroupForExt(ext));
-                    } catch (e) {
-                        picker.disabled = false;
-                        alert("could not download " + chosen + ": " + (e && e.message ? e.message : e));
-                        picker.value = previous;
-                        return;
-                    }
-                    picker.disabled = false;
-                    await fillPicker();          // it is local now, so it loses its marker
-                    picker.value = chosen;
-                }
-                refreshDelLabel();
-                dragTs[key] = Date.now();
-                sendControl(moduleName, ctrl.name, chosen);
-                editor.load(await scriptPathOf(chosen));
-            });
-
-            newBtn.addEventListener("click", async () => {
-                let name = (prompt("New file name in " + dir + ":") || "").trim();
-                if (!name) return;
-                if (ext && !name.endsWith(ext)) name += ext;    // a name without its extension is a typo
-                const r = await fmCreateFile(dir, name, ctrl.tmpl || "");
-                if (!r.ok) { alert("create file failed: " + r.message); return; }
-                await fillPicker();
-                picker.value = name;
-                dragTs[key] = Date.now();
-                sendControl(moduleName, ctrl.name, name);
-                await editor.load(pathOf(name));
-                editor.textarea.focus();
-            });
-
-            // Two clicks to delete, the same arm-then-confirm the File Manager uses for its own
-            // delete: destructive next to frequent is how people lose work.
-            armPressTwice(delBtn, async () => {
-                const victim = picker.value;
-                if (!victim) return;
-                const wasFork = forks.has(victim);
-                try {
-                    // A fork is deleted from the USER directory, which is the whole revert: the
-                    // factory copy underneath is what resolves afterwards. Anything else is deleted
-                    // where it actually sits, because a downloaded factory script has no user copy
-                    // and a DELETE on /moonlive/<name> would report a failure for a file that was
-                    // never there.
-                    const target = wasFork ? pathOf(victim) : await scriptPathOf(victim);
-                    const res = await fetch("/api/dir?path=" + encodeURIComponent(target),
-                                            { method: "DELETE" });
-                    if (!res.ok) throw new Error(await errorMessage(res));
-                } catch (err) {
-                    alert((wasFork ? "revert failed: " : "delete failed: ") + err.message);
-                    return;
-                }
-                await fillPicker();
-                if (wasFork) {
-                    // The factory script is what resolves now, so the module keeps running: stay on
-                    // it rather than unsetting the control, which is the whole point of a revert.
-                    picker.value = victim;
-                    refreshDelLabel();
-                    dragTs[key] = Date.now();
-                    sendControl(moduleName, ctrl.name, victim);
-                    await editor.load(await scriptPathOf(victim));
-                    return;
-                }
-                picker.value = "";
-                refreshDelLabel();
-                dragTs[key] = Date.now();
-                sendControl(moduleName, ctrl.name, "");
-                await editor.load("");
-            }, { armedText: "✓", armedTitle: "Click again to confirm" });
-
-            // The editor mounted on the USER path above, which is right for a script the user
-            // wrote and wrong for a factory one that has never been edited. Resolving needs the
-            // catalog, so it cannot happen during the synchronous mount: re-point it once the
-            // listing is in, and only when it actually resolves elsewhere.
-            fillPicker().then(async () => {
-                const cur = String(ctrl.value ?? "");
-                if (!cur || !mlGroupForExt(ext)) return;
-                const real = await scriptPathOf(cur);
-                if (real !== pathOf(cur)) await editor.load(real);
-            });
-            break;
-        }
+        case "filepath": return buildFilePathControl(row, label, key, moduleName, ctrl);
         case "password": {
             // ctrl.value arrives XOR-obfuscated + base64-encoded (see
             // HttpServerModule PASSWORD_XOR_KEY). Decode it so the input holds
@@ -2950,6 +2967,7 @@ function createControl(moduleName, moduleType, ctrl) {
             peek.addEventListener("mouseleave", hide);
             peek.addEventListener("touchstart", (e) => { e.preventDefault(); show(); });
             peek.addEventListener("touchend", hide);
+            peek.addEventListener("touchcancel", hide);   // a cancelled touch fires no touchend
             row.appendChild(peek);
             break;
         }
@@ -2993,109 +3011,7 @@ function createControl(moduleName, moduleType, ctrl) {
             appendResetButton(row, moduleName, ctrl, def, () => { sel.value = def; });
             break;
         }
-        case "palette": {
-            // A color-palette dropdown where EVERY option shows its own gradient: so the colors
-            // are visible before selecting, not just after. A native <select> can't do this
-            // (browsers ignore a gradient background on <option>, and the macOS popup is OS-drawn),
-            // so this is a custom dropdown: a trigger button (selected swatch + name + caret) that
-            // toggles a list of styled rows, each a gradient swatch + name. The value still rides as
-            // the option index. Prior art: MoonLight's palette control (same native-select limit).
-            const opts = ctrl.options || [];
-            const gradientFor = (i) => {
-                const cols = (opts[i] || {}).colors || "";
-                const stops = cols.split(/\s+/).filter(Boolean).map(h => "#" + h);
-                return stops.length ? `linear-gradient(to right, ${stops.join(",")})` : "none";
-            };
-            const wrap = document.createElement("div");
-            wrap.className = "palette-control";
-            wrap.dataset.mid = moduleName;
-            wrap.dataset.key = ctrl.name;
-            wrap.dataset.value = ctrl.value;
-
-            // Trigger: shows the currently-selected palette (swatch + name) and opens the list.
-            const trigger = document.createElement("button");
-            trigger.type = "button";
-            trigger.className = "palette-trigger";
-            const triSwatch = document.createElement("span");
-            triSwatch.className = "palette-swatch";
-            const triName = document.createElement("span");
-            triName.className = "palette-name";
-            const caret = document.createElement("span");
-            caret.className = "palette-caret";
-            caret.textContent = "▾";
-            const paintTrigger = (i) => {
-                triSwatch.style.background = gradientFor(i);
-                triName.textContent = (opts[i] || {}).name || String(i);
-            };
-            paintTrigger(ctrl.value);
-            trigger.append(triSwatch, triName, caret);
-
-            // The list of gradient rows, hidden until the trigger is clicked.
-            const list = document.createElement("div");
-            list.className = "palette-list";
-            list.hidden = true;
-            opts.forEach((opt, i) => {
-                const item = document.createElement("button");
-                item.type = "button";
-                item.className = "palette-item" + (i === ctrl.value ? " selected" : "");
-                item.dataset.idx = i;
-                const sw = document.createElement("span");
-                sw.className = "palette-swatch";
-                sw.style.background = gradientFor(i);
-                const nm = document.createElement("span");
-                nm.className = "palette-name";
-                nm.textContent = opt.name || String(i);
-                item.append(sw, nm);
-                item.addEventListener("click", () => {
-                    wrap.dataset.value = i;
-                    paintTrigger(i);
-                    list.querySelectorAll(".selected").forEach(x => x.classList.remove("selected"));
-                    item.classList.add("selected");
-                    closeList();
-                    dragTs[key] = Date.now();
-                    sendControl(moduleName, ctrl.name, i);
-                });
-                list.appendChild(item);
-            });
-
-            // Open/close, dismissing on outside-click or Escape (the type-picker pattern).
-            let onDocClick = null;
-            const onKey = (e) => { if (e.key === "Escape") closeList(); };
-            const closeList = () => {
-                list.hidden = true;
-                wrap.dataset.open = "false";
-                if (onDocClick) {
-                    document.removeEventListener("pointerdown", onDocClick);
-                    document.removeEventListener("keydown", onKey);
-                    onDocClick = null;
-                }
-            };
-            const openList = () => {
-                list.hidden = false;
-                wrap.dataset.open = "true";
-                dragTs[key] = Date.now();
-                // Bring the selected row into view (a long palette list may overflow the popup).
-                const sel = list.querySelector(".palette-item.selected");
-                if (sel) sel.scrollIntoView({ block: "nearest" });
-                onDocClick = (e) => { if (!wrap.contains(e.target)) closeList(); };
-                document.addEventListener("pointerdown", onDocClick);
-                document.addEventListener("keydown", onKey);
-            };
-            trigger.addEventListener("click", () => { list.hidden ? openList() : closeList(); });
-
-            wrap.append(trigger, list);
-            row.appendChild(wrap);
-            // Reset to the default palette like every other persisted control: re-paint the trigger
-            // and the selected row to `def` (sendControl is handled by appendResetButton).
-            appendResetButton(row, moduleName, ctrl, def, () => {
-                wrap.dataset.value = def;
-                paintTrigger(def);
-                list.querySelectorAll(".selected").forEach(x => x.classList.remove("selected"));
-                const r = list.querySelector(`.palette-item[data-idx="${def}"]`);
-                if (r) r.classList.add("selected");
-            });
-            break;
-        }
+        case "palette": return buildPaletteControl(row, key, def, moduleName, ctrl);
         case "display": {
             // Read-only string. Updates via WS push. A value that IS a url renders as a LINK:
             // the only reason to show one is to open or copy it. Device-relative ("/hls/...") on
@@ -3111,6 +3027,16 @@ function createControl(moduleName, moduleType, ctrl) {
                 a.rel = "noopener";
                 setUrlDisplay(a, ctrl.value);
                 row.appendChild(a);
+                break;
+            }
+            // The surface's display strip: sixteen-segment cells across the full card width,
+            // matching the seven-segment readouts under the encoders and faders.
+            if (ctrl.displayStrip) {
+                const strip = buildSeg16Strip(SEG16_CHARS, /*stretch=*/true);
+                strip.dataset.mid = moduleName;
+                strip.dataset.key = ctrl.name;
+                strip._setText(ctrl.value ?? "");
+                row.appendChild(strip);
                 break;
             }
             const span = document.createElement("span");
@@ -3191,7 +3117,13 @@ function createControl(moduleName, moduleType, ctrl) {
             const btn = document.createElement("button");
             btn.className = "action-btn";
             btn.textContent = ctrl.label || ctrl.name;
-            btn.addEventListener("click", () => sendControl(moduleName, ctrl.name, 1));
+            // Flush any pending debounced text write first, then act. Typing is debounced 500 ms,
+            // so a click inside that window sent the button while the device still held the text as
+            // it stood one keystroke ago: the Enter path already does this, and the two must agree.
+            btn.addEventListener("click", async () => {
+                await flushPendingControlWrites(moduleName);
+                sendControl(moduleName, ctrl.name, 1);
+            });
             row.appendChild(btn);
             break;
         }
@@ -3426,15 +3358,164 @@ function openPadEditor(anchorEl, moduleName, ctrlName, item, slot) {
 // value and turns drags into value changes.
 /// "What does this strip drive?": the same popup for an encoder and a fader, since the question and
 /// the answer are identical for both. Right-click on a pointer, long-press on touch.
-function attachTargetPopup(row, input, ctrl) {
-    const show = () => openSurfacePopup(input, ctrl.name, (body) => {
-        const line = document.createElement("div");
-        line.className = "surface-popup-row";
-        line.textContent = ctrl.target ? `drives ${ctrl.target}` : "unassigned: no target yet";
-        body.appendChild(line);
+// Every control in the live tree that a surface control can drive, as {module, control} pairs.
+//
+// Generated from the state the device already sends, so the picker can only ever offer something
+// that exists: a typed "Drivers.palette" is invisible when misspelled until the fader silently does
+// nothing. Text, file paths, passwords and buttons are left out, because a fader cannot meaningfully
+// move a filename and offering it produces a control that looks assigned and is not.
+const ASSIGNABLE_TYPES = new Set(["uint8", "uint16", "int16", "int32", "bool", "select", "palette", "pin"]);
+function assignableTargets() {
+    const out = [];
+    const walk = (mods) => {
+        for (const m of mods || []) {
+            for (const c of m.controls || []) {
+                // Not the surface's OWN controls: a fader driving another fader is a loop, and the
+                // hidden "...Target" strings are the assignments themselves.
+                if (m.type === "ControlModule") continue;
+                if (ASSIGNABLE_TYPES.has(c.type)) out.push({module: m.name, control: c.name});
+            }
+            walk(m.children);
+        }
+    };
+    walk(state && state.modules);
+    return out;
+}
+
+// ASSIGN MODE. While it is on, a tap on any surface control opens its target picker instead of
+// moving it. One flag rather than per-control state, because the mode is a property of the whole
+// surface: a desk is either being played or being wired.
+let assignMode = false;
+function setAssignMode(on) {
+    assignMode = on;
+    document.body.classList.toggle("assign-mode", on);
+    document.querySelectorAll(".assign-toggle").forEach(b => {
+        b.classList.toggle("active", on);
+        // The same two glyphs the builder uses: a word here and an emoji there made the button
+        // change shape as well as state.
+        b.textContent = on ? "✓" : "🔗";
+        b.title = on ? "Done assigning" : "Choose what each fader, knob and switch drives";
     });
-    row.addEventListener("contextmenu", (e) => { e.preventDefault(); show(); });
-    attachLongPress(row, show);
+    if (!on) document.querySelectorAll(".surface-popup").forEach(p => p.remove());
+}
+
+function attachTargetPopup(row, input, ctrl) {
+    const show = () => openSurfacePopup(input, ctrl.name, (body, close) => {
+        const pairs = assignableTargets();
+        const [curMod, curCtl] = (ctrl.target || "").split(".");
+
+        const mkRow = (label, el) => {
+            const r = document.createElement("div");
+            r.className = "surface-popup-row";
+            const s = document.createElement("span");
+            s.textContent = label;
+            r.append(s, el);
+            body.appendChild(r);
+            return r;
+        };
+
+        const modSel = document.createElement("select");
+        const ctlSel = document.createElement("select");
+        const mods = [...new Set(pairs.map(p => p.module))];
+
+        const fillControls = () => {
+            ctlSel.replaceChildren();
+            for (const p of pairs.filter(p => p.module === modSel.value)) {
+                const o = document.createElement("option");
+                o.value = p.control; o.textContent = p.control;
+                if (p.control === curCtl) o.selected = true;
+                ctlSel.appendChild(o);
+            }
+        };
+        for (const m of mods) {
+            const o = document.createElement("option");
+            o.value = m; o.textContent = m;
+            if (m === curMod) o.selected = true;
+            modSel.appendChild(o);
+        }
+        fillControls();
+        modSel.addEventListener("change", fillControls);
+
+        mkRow("module", modSel);
+        mkRow("control", ctlSel);
+
+        const buttons = document.createElement("div");
+        buttons.className = "surface-popup-row";
+        const assign = document.createElement("button");
+        assign.textContent = "assign";
+        const applyTarget = (value) => {
+            sendControl("Control", ctrl.name + "Target", value);
+            // Reflect it NOW. `target` is metadata beside the control, not its value, so
+            // sendControl's eager state update does not touch it and the card showed the old
+            // binding until the next 1 Hz push: a full second of looking like nothing happened.
+            const mod = allModules().find(m => m.name === "Control");
+            const c = mod && mod.controls.find(x => x.name === ctrl.name);
+            if (c) c.target = value;
+            ctrl.target = value;
+            renderCards();
+            close();
+        };
+        assign.addEventListener("click", () => {
+            if (!modSel.value || !ctlSel.value) return;
+            applyTarget(`${modSel.value}.${ctlSel.value}`);
+        });
+        const clear = document.createElement("button");
+        clear.textContent = "clear";
+        // Unassigning has to be as easy as assigning, or a mistake is only fixable through the API.
+        clear.addEventListener("click", () => applyTarget(""));
+        buttons.append(assign, clear);
+        body.appendChild(buttons);
+
+        const now = document.createElement("div");
+        now.className = "surface-popup-row";
+        now.textContent = ctrl.target ? `now drives ${ctrl.target}` : "unassigned";
+        body.appendChild(now);
+    });
+    // ONE mechanism: assign mode, then a plain tap. That is what Ableton, Bitwig, Reaper, TouchOSC
+    // and Open Stage Control all do, and it is the only shape that works identically on a mouse and
+    // a touch screen. The alternatives each fail somewhere: right-click has no touch equivalent,
+    // long-press has no mouse equivalent, and double-click COLLIDES with the control itself (a
+    // double-click on a fader also moves it, so the assignment and the value fight over one
+    // gesture). A mode has no such conflict, because a tap means only one thing while it is on.
+    row.addEventListener("click", (e) => {
+        if (!assignMode) return;                  // off: a click is an ordinary control interaction
+        e.preventDefault();
+        e.stopPropagation();
+        show();
+    }, /*capture=*/true);
+    // A fader is a range input, which changes on pointerdown before any click fires: captured and
+    // swallowed here, or the tap that opens the picker also moves the fader it is opening.
+    row.addEventListener("pointerdown", (e) => {
+        if (!assignMode) return;
+        e.preventDefault();
+        e.stopPropagation();
+    }, /*capture=*/true);
+    // The same door for the keyboard. Without this, assign mode was reachable only by pointer: a
+    // keyboard user landing on a fader and pressing Enter or Space moved the control instead of
+    // opening its picker, so the assignment could not be made at all. Captured like the two above,
+    // for the same reason: a range input acts on the key before any click would fire.
+    row.addEventListener("keydown", (e) => {
+        if (!assignMode) return;
+        // EVERY key is swallowed while assigning, not just the two that open the picker: an arrow
+        // key on a focused fader still moves it, so a user tabbing through the surface in assign
+        // mode would change the values they are trying to re-target. In this mode the row is a
+        // button, and a button does not respond to arrows.
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === "Enter" || e.key === " ") show();
+    }, /*capture=*/true);
+    row.title = ctrl.target ? `drives ${ctrl.target}` : "unassigned";
+
+    // The LABEL says what it drives, so an assigned control is recognizable without opening
+    // anything: "fad1" is a position, "brightness" is what a user is looking for. The CONTROL half
+    // only, because the module is usually obvious from the control (a palette is Drivers') and a
+    // surface column is 26px wide. CSS ellipsis caps what does not fit.
+    const label = row.querySelector(".control-label");
+    if (label && ctrl.target) {
+        const dot = ctrl.target.indexOf(".");
+        label.textContent = dot >= 0 ? ctrl.target.slice(dot + 1) : ctrl.target;
+        label.title = `${displayName(ctrl.name)} drives ${ctrl.target}`;
+    }
 }
 
 function buildKnob(input, ctrl) {
@@ -3468,7 +3549,12 @@ function buildKnob(input, ctrl) {
     // a different origin and drew a quarter arc instead of the intended 270°.
     track.setAttribute("transform", "rotate(135 20 20)");
     fill.setAttribute("transform", "rotate(135 20 20)");
-    track.setAttribute("stroke-dasharray", `${CIRC * SWEEP} ${CIRC}`);
+    // An ENDLESS encoder's track is a full circle: the knob turns forever, so a track with a gap at
+    // the bottom draws end stops it does not have. Only the track changes; the fill and the pointer
+    // still sweep the same 270° against the value, exactly as a fader's do.
+    const endlessTrack = !!(ctrl && ctrl.encoder);
+    track.setAttribute("stroke-dasharray",
+                       endlessTrack ? `${CIRC} ${CIRC}` : `${CIRC * SWEEP} ${CIRC}`);
     const draw = () => {
         const [min, max] = bounds();
         const v = Number(input.value);
@@ -3493,6 +3579,9 @@ function buildKnob(input, ctrl) {
     // range input underneath makes the browser offer a resize cursor that suggests the wrong action.
     wrap.title = "drag up/down or scroll to turn";
     wrap.addEventListener("pointerdown", (e) => {
+        // In assign mode a tap picks a target, so the knob must not also turn: without this the
+        // value moved under the finger on the way to opening the picker.
+        if (assignMode) return;
         e.preventDefault();
         wrap.setPointerCapture(e.pointerId);
         wrap.classList.add("knob-turning");
@@ -3529,6 +3618,7 @@ function buildKnob(input, ctrl) {
     // Scroll to turn: the gesture people try first on anything round, and the one that works without
     // knowing the drag exists. `passive:false` so the page does not scroll underneath it.
     wrap.addEventListener("wheel", (e) => {
+        if (assignMode) return;
         e.preventDefault();
         const [min, max] = bounds();
         const step = Math.max(1, Math.round((max - min) / 100));
@@ -3542,54 +3632,142 @@ function buildKnob(input, ctrl) {
     return wrap;
 }
 
-// A seven-segment readout, the way the hardware shows a value: three digits, lit segments over an
-// unlit ghost so the display reads like a real LED module rather than plain text.
-const SEG7 = {
-    "0": "abcdef", "1": "bc", "2": "abdeg", "3": "abcdg", "4": "bcfg",
-    "5": "acdfg", "6": "acdefg", "7": "abc", "8": "abcdefg", "9": "abcdfg", " ": "",
-};
-function buildSevenSeg(input) {
-    const NS = "http://www.w3.org/2000/svg";
-    const wrap = document.createElement("div");
-    wrap.className = "seg7";
-    const svg = document.createElementNS(NS, "svg");
-    svg.setAttribute("viewBox", "0 0 42 20");
-    // Segment geometry per digit, in the standard a..g naming.
-    const seg = (x, y, horiz) => {
-        const p = document.createElementNS(NS, "rect");
-        p.setAttribute("x", String(x)); p.setAttribute("y", String(y));
-        p.setAttribute("width", horiz ? "7" : "2");
-        p.setAttribute("height", horiz ? "2" : "7");
-        p.setAttribute("rx", "1");
-        return p;
+// A SIXTEEN-SEGMENT readout: the ONE segmented display in the UI, used both for the numeric
+// readouts under the encoders and faders and for the surface's full-width display strip.
+//
+// It replaced a separate seven-segment renderer, which could only draw digits: two renderers meant
+// two geometries to keep visually matched (they drifted, and matching them again took several
+// passes), and it left the numeric readouts unable to ever show a word. Sixteen segments (the seven
+// segment bars with top, bottom and middle split in two, plus two verticals and four diagonals) is
+// what an alphanumeric LED module uses, and it renders M, W, N and K legibly where fourteen cannot.
+//
+// Segment names follow the usual convention:
+//   a1 a2   top left / right      f  h  j  k  b   upper verticals + diagonals
+//   g1 g2   middle left / right   e  n  m  l  c   lower verticals + diagonals
+//   d1 d2   bottom left / right
+// Space-separated so a segment name is a whole token: "a1" and "a" are different segments, and
+// substring matching would light both.
+const SEG16 = Object.fromEntries(Object.entries({
+    // Plain, not barred: a sixteen-segment module usually bars its zero to tell it from O, but these
+    // readouts are numeric and the strip shows words, so context settles it and a clean rectangle is
+    // what the readouts have always shown.
+    "0": "a1 a2 b c d1 d2 e f",       "1": "b c",
+    "2": "a1 a2 b g1 g2 e d1 d2",    "3": "a1 a2 b c d1 d2 g1 g2",
+    "4": "f b g1 g2 c",              "5": "a1 a2 f g1 g2 c d1 d2",
+    "6": "a1 a2 f g1 g2 e c d1 d2",  "7": "a1 a2 b c",
+    "8": "a1 a2 b c d1 d2 e f g1 g2","9": "a1 a2 b c d1 d2 f g1 g2",
+    "A": "a1 a2 b c e f g1 g2",      "B": "a1 a2 b c d1 d2 g2 j m",
+    "C": "a1 a2 f e d1 d2",          "D": "a1 a2 b c d1 d2 j m",
+    "E": "a1 a2 f e d1 d2 g1 g2",    "F": "a1 a2 f e g1 g2",
+    "G": "a1 a2 f e d1 d2 c g2",     "H": "b c e f g1 g2",
+    "I": "a1 a2 d1 d2 j m",          "J": "b c d1 d2 e",
+    "K": "e f g1 k l",               "L": "f e d1 d2",
+    "M": "b c e f h k",              "N": "b c e f h l",
+    "O": "a1 a2 b c d1 d2 e f",      "P": "a1 a2 b e f g1 g2",
+    "Q": "a1 a2 b c d1 d2 e f l",    "R": "a1 a2 b e f g1 g2 l",
+    "S": "a1 a2 f g1 g2 c d1 d2",    "T": "a1 a2 j m",
+    "U": "b c d1 d2 e f",            "V": "e f k n",
+    "W": "b c e f n l",              "X": "h k n l",
+    "Y": "h k m",                    "Z": "a1 a2 k n d1 d2",
+    "-": "g1 g2", "+": "g1 g2 j m", ".": "d1", ":": "j m", "/": "k n", " ": "",
+}).map(([ch, segs]) => [ch, new Set(segs.split(" ").filter(Boolean))]));
+
+// One character cell on the SEVEN-SEGMENT's own grid: 14 units wide, 20 tall, 2-unit strokes. The
+// readouts render 14 units at 14px (three cells in 42px), so the strip drawn on the identical grid
+// reads as the same instrument. The strip is then stretched horizontally to span the eight surface
+// columns, which is a small widening of the cells and leaves the stroke height untouched.
+function seg16Cell(NS, ox) {
+    const bar = (x, y, w, h) => {
+        const r = document.createElementNS(NS, "rect");
+        r.setAttribute("x", String(x)); r.setAttribute("y", String(y));
+        r.setAttribute("width", String(w)); r.setAttribute("height", String(h));
+        r.setAttribute("rx", "0.75");
+        return r;
     };
-    const digits = [];
-    for (let d = 0; d < 3; d++) {
-        const ox = d * 14 + 1;
-        const map = {
-            a: seg(ox + 2, 1, true),  b: seg(ox + 9, 2, false), c: seg(ox + 9, 11, false),
-            d: seg(ox + 2, 17, true), e: seg(ox, 11, false),    f: seg(ox, 2, false),
-            g: seg(ox + 2, 9, true),
-        };
-        for (const el of Object.values(map)) { el.setAttribute("class", "seg7-off"); svg.appendChild(el); }
-        digits.push(map);
-    }
-    wrap.appendChild(svg);
-    const draw = () => {
-        // Right-aligned, blank-padded: "  7", " 42", "255": how a 3-digit module displays.
-        const txt = String(Math.round(Number(input.value))).padStart(3, " ").slice(-3);
-        digits.forEach((map, i) => {
-            const on = SEG7[txt[i]] ?? "";
-            for (const [name, el] of Object.entries(map))
-                el.setAttribute("class", on.includes(name) ? "seg7-on" : "seg7-off");
-        });
+    // A diagonal is a 2-unit line with a round cap, matching the bars' weight and their rx rounding.
+    const diag = (x1, y1, x2, y2) => {
+        const l = document.createElementNS(NS, "line");
+        l.setAttribute("x1", String(x1)); l.setAttribute("y1", String(y1));
+        l.setAttribute("x2", String(x2)); l.setAttribute("y2", String(y2));
+        l.setAttribute("stroke-width", "1.5"); l.setAttribute("stroke-linecap", "round");
+        return l;
     };
+    // The seven-segment's own coordinates and cell size, but a 1.5-unit stroke against its 2.
+    //
+    // DELIBERATELY thinner, not a mismatch: a sixteen-segment glyph lights up to sixteen segments in
+    // the cell where a digit lights seven, and the two center verticals plus four diagonals crowd
+    // the middle. At an identical stroke width the strip reads noticeably bolder than the numbers
+    // below it, so matching the WEIGHT means drawing thinner than them.
+    const S = 1.5;
+    return {
+        a1: bar(ox + 2, 1, 3, S),        a2: bar(ox + 6, 1, 3, S),
+        d1: bar(ox + 2, 17.5, 3, S),     d2: bar(ox + 6, 17.5, 3, S),
+        g1: bar(ox + 2, 9.25, 3, S),     g2: bar(ox + 6, 9.25, 3, S),
+        f:  bar(ox + 0.25, 2, S, 7),     b:  bar(ox + 9.25, 2, S, 7),
+        e:  bar(ox + 0.25, 11, S, 7),    c:  bar(ox + 9.25, 11, S, 7),
+        j:  bar(ox + 4.75, 2, S, 7),     m:  bar(ox + 4.75, 11, S, 7),
+        h:  diag(ox + 2.7, 3.5, ox + 4.3, 7.9),   k: diag(ox + 8.3, 3.5, ox + 6.7, 7.9),
+        n:  diag(ox + 2.7, 16.9, ox + 4.3, 12.4), l: diag(ox + 8.3, 16.9, ox + 6.7, 12.4),
+    };
+}
+
+const EMPTY_SEGS = new Set();
+
+// Cells in the display strip: 28 at the seven-segment's 14-unit pitch, which is exactly the width
+// of the eight surface columns at one unit per pixel. Long enough for any built-in palette name.
+const SEG16_CHARS = 28;
+
+// The numeric readout under an encoder or fader: three cells bound to a range input, right-aligned
+// and blank-padded the way a three-digit module displays ("  7", " 42", "255"). Text-capable like
+// every cell here, so a readout that wants to show a word later needs no new renderer.
+function buildSegReadout(input) {
+    const wrap = buildSeg16Strip(3);
+    wrap.classList.add("seg-readout");
+    const draw = () => wrap._setText(
+        String(Math.round(Number(input.value))).padStart(3, " ").slice(-3));
     draw();
     input.addEventListener("input", draw);
     input.addEventListener("change", draw);
     // Same hook the knob exposes, so redrawRangeDecorations refreshes both without knowing what
     // either one is.
     wrap._redraw = draw;
+    return wrap;
+}
+
+// The display strip: `chars` cells of sixteen segments, driven by a string rather than a range
+// input. Returns the wrapper with a `_setText` hook the update path calls.
+function buildSeg16Strip(chars, stretch = false) {
+    const NS = "http://www.w3.org/2000/svg";
+    const wrap = document.createElement("div");
+    wrap.className = "seg16";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${chars * 14} 20`);
+    // `stretch` fills the box in BOTH axes, which the display strip needs: it is set to the width of
+    // the eight surface columns, and preserving the ratio of a 28-cell box would shrink it to fit
+    // its 20px height and stop it reaching the eighth column. The three-cell readouts must NOT get
+    // this: their box is already the natural 42x20, and stretching blew the glyphs up to a solid
+    // bar.
+    if (stretch) svg.setAttribute("preserveAspectRatio", "none");
+    const cells = [];
+    for (let i = 0; i < chars; i++) {
+        const map = seg16Cell(NS, i * 14 + 1);
+        for (const el of Object.values(map)) {
+            el.setAttribute("class", "seg16-off");
+            svg.appendChild(el);
+        }
+        cells.push(map);
+    }
+    wrap.appendChild(svg);
+    wrap._setText = (text) => {
+        // Uppercased and left-aligned: the map is uppercase-only, and a name reads from the left the
+        // way a scribble strip does. An unmappable character shows as blank rather than as garbage.
+        const s = String(text ?? "").toUpperCase();
+        cells.forEach((map, i) => {
+            const on = SEG16[s[i]] ?? EMPTY_SEGS;
+            for (const [name, el] of Object.entries(map))
+                el.setAttribute("class", on.has(name) ? "seg16-on" : "seg16-off");
+        });
+    };
     return wrap;
 }
 
@@ -3903,15 +4081,21 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
             // A row ACTION rather than a value: the click PATCHes the field like any edit, and the
             // source reads the arrival as "do this to this row" (ControlModule's preset `apply`).
             // Generic on purpose: a row button is a primitive the list has lacked, not a
-            // preset-specific affordance. Refetches, because an action typically changes the row set
-            // or the wider tree, unlike a field edit which the WS push reconciles.
+            // preset-specific affordance.
+            //
+            // `refetch` is opt-IN because a full refetch rebuilds every card, which collapses the
+            // expanded row the button lives in. That is right for an action that reshapes the tree
+            // (applying a preset) and wrong for one that arms a mode the user is about to use: the
+            // infrared learn button closed its own row and left nowhere to watch the result. Without
+            // it the WS push reconciles the row in place, which is what a field edit already relies
+            // on.
             const btn = document.createElement("button");
             btn.className = "list-field-btn";
             btn.textContent = f.label || f.name;
             btn.addEventListener("click", async () => {
                 btn.disabled = true;
                 await listSetField(moduleName, ctrlName, id, f.name, "");
-                refetchState();
+                if (f.refetch) refetchState();
                 btn.disabled = false;
             });
             vEl.appendChild(btn);
@@ -4100,8 +4284,36 @@ function relativeAge(sec) {
     return `${Math.floor(sec / 86400)}d ago`;
 }
 
+/// Send any text control of this module whose debounced write is still pending, and wait for it.
+///
+/// Typing is debounced, so anything that ACTS on the typed value (Enter, a send button) has to land
+/// the text first or it acts on what the device held a keystroke ago.
+async function flushPendingControlWrites(moduleName) {
+    const mod = allModules().find(m => m.name === moduleName);
+    for (const ctrl of mod?.controls || []) {
+        const key = moduleName + ":" + ctrl.name;
+        if (!dragTimers[key]) continue;
+        clearTimeout(dragTimers[key]);
+        delete dragTimers[key];
+        // queryByName, not a bare querySelector: a CSS attribute match is case-insensitive, so
+        // `data-mid="talk"` would resolve to a module named `Talk`. See queryByName for the bench
+        // case that found it.
+        const input = queryByName(
+            `input[data-key="${cssEscape(ctrl.name)}"]`, "data-mid", moduleName);
+        if (input) await sendControl(moduleName, ctrl.name, input.value);
+    }
+}
+
 function appendResetButton(row, moduleName, ctrl, def, applyVisually) {
     if (def === undefined || def === null) return;  // type not loaded yet or no default
+    // A SURFACE control has no default worth restoring: its value belongs to whatever it drives, so
+    // "reset" would drive that target to zero, which is a change rather than a reset. The row is
+    // also 26px wide, and the button was taking space from the thing being operated.
+    //
+    // A CONSENT control is the same shape for a different reason: off is where it starts, so the
+    // button's only possible action is to withdraw consent, which is a decision rather than a
+    // reset. The checkbox already expresses both answers.
+    if (ctrl.fader || ctrl.encoder || ctrl.switchRow || ctrl.name === "consent") return;
     const btn = document.createElement("button");
     btn.className = "reset-btn";
     btn.type = "button";
@@ -4261,25 +4473,38 @@ function setText(el, text) {
     if (el && el.textContent !== text) el.textContent = text;
 }
 
+// The mode the cards were BUILT at. `uiMode()` decides which controls and which stats line a card
+// gets, so a change to it reshapes the DOM rather than a value in it: the one case the no-rebuild
+// contract cannot patch. Tracked here because the change can come from another client entirely.
+let renderedMode_ = null;
+
 function updateValues() {
     if (!state || !state.modules) return;
+    // A mode change adds or removes rows, so patching values cannot express it: rebuild once.
+    const mode = uiMode();
+    if (renderedMode_ !== null && renderedMode_ !== mode) {
+        renderedMode_ = mode;
+        renderCards();
+        return;
+    }
+    renderedMode_ = mode;
     // Patch each visible card's controls and stats line; never rebuild the DOM here.
     for (const mod of allModules()) {
         updateTabDot(mod);   // a fault on a BACKGROUND tab must surface without opening it
         updateModuleControls(mod);
         // refresh the stats line for this module if visible
-        const statsEl = document.querySelector(`.card-stats[data-mid="${cssEscape(mod.name)}"]`);
+        const statsEl = queryByName(`.card-stats[data-mid="${cssEscape(mod.name)}"]`, "data-mid", mod.name);
         if (statsEl) {
             setText(statsEl, formatStats(mod));
             const t = formatStatsTitle(mod);
             if (statsEl.title !== t) statsEl.title = t;
         }
         // refresh status row: insert it if status appeared after card build
-        let statusRow = document.querySelector(`[data-status-mid="${cssEscape(mod.name)}"]`);
+        let statusRow = queryByName(`[data-status-mid="${cssEscape(mod.name)}"]`, "data-status-mid", mod.name);
         if (mod.status) {
             if (!statusRow) {
                 // Card exists but had no status at build time: insert now before first control.
-                const card = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
+                const card = queryByName(`.card[data-module="${cssEscape(mod.name)}"]`, "data-module", mod.name);
                 const host = card && (card.querySelector(".card-controls-collapse") || card);
                 if (host) {
                     statusRow = document.createElement("div");
@@ -4311,7 +4536,7 @@ function updateValues() {
             statusRow.style.display = "none";
         }
         // refresh enabled toggle (now a styled <button>, not an <input>)
-        const enabledEl = document.querySelector(`button.module-enabled[data-mid="${cssEscape(mod.name)}"]`);
+        const enabledEl = queryByName(`button.module-enabled[data-mid="${cssEscape(mod.name)}"]`, "data-mid", mod.name);
         if (enabledEl) {
             const ts = dragTs[mod.name + ":enabled"] || 0;
             if (Date.now() - ts > 1000) {
@@ -4320,7 +4545,7 @@ function updateValues() {
                 setText(enabledEl, "\u23FB");
                 enabledEl.classList.toggle("module-enabled--off", !on);
                 enabledEl.setAttribute("aria-pressed", on ? "true" : "false");
-                const cardEl = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
+                const cardEl = queryByName(`.card[data-module="${cssEscape(mod.name)}"]`, "data-module", mod.name);
                 if (cardEl) cardEl.classList.toggle("card--disabled", !on);
             }
         }
@@ -4352,7 +4577,7 @@ function allModules() {
 // card's child-module block / install-picker mount, never converge, and re-fire
 // every WS tick: a render loop that wedges the UI).
 function syncVisibleControls(mod) {
-    const card = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
+    const card = queryByName(`.card[data-module="${cssEscape(mod.name)}"]`, "data-module", mod.name);
     if (!card) return false;
     // The controls host is THIS card's own collapse wrapper: must be a DIRECT
     // child (`:scope >`), not any descendant: a container card (e.g. Effects) nests
@@ -4362,6 +4587,21 @@ function syncVisibleControls(mod) {
     // so both cards saw a control-set mismatch every WS frame and rebuilt each
     // other's rows in a loop: tearing down (and closing) any open <select>.
     const host = card.querySelector(":scope > .card-controls-collapse") || card;
+
+    // THE FIRMWARE CARD'S IMAGE TABS, which this patch path would otherwise never touch. The strip
+    // is built in createCard, and so are the install routes it implies: `kind` is captured in the
+    // handlers' closures. So a stale strip is not merely a wrong highlight, it is a card whose
+    // buttons write the OTHER partition than the one it names. Rebuild rather than repaint the
+    // highlight: the closures cannot be patched.
+    //
+    // The UI has two render paths and a rule must live in both (see renderChildTabs' updateTabDot,
+    // written for the other tab strip for exactly this reason).
+    const strip = card.querySelector(":scope > .tab-strip");
+    if (strip) {
+        const sel = (mod.controls.find(c => c.name === "image") || {}).value;
+        const shown = [...strip.children].findIndex(t => t.classList.contains("tab-active"));
+        if (sel !== undefined && shown >= 0 && shown !== sel) { renderCards(); return true; }
+    }
 
     const wantNames = mod.controls.filter(c => controlRendersGenerically(mod, c)).map(c => c.name);
     const haveRows = [...host.querySelectorAll(":scope > .control-row[data-key]")];
@@ -4432,7 +4672,11 @@ function updateModuleControls(mod) {
     if (syncVisibleControls(mod)) return;  // re-rendered: values are fresh, skip patch
 
     for (const ctrl of mod.controls) {
-        const mid = cssEscape(mod.name);
+        // RAW, not escaped: every selector below escapes it itself, and queryByName compares this
+        // against the data-mid ATTRIBUTE, which the DOM returns unescaped. Escaping here made the
+        // comparison fail for any module name that needs escaping (a quote or a backslash), so the
+        // live patch silently found nothing and that card stopped updating.
+        const mid = mod.name;
         const k = cssEscape(ctrl.name);
         const dragKey = mod.name + ":" + ctrl.name;
         const ts = dragTs[dragKey] || 0;
@@ -4451,7 +4695,7 @@ function updateModuleControls(mod) {
             case "int16":
             case "int32":
             case "pin": {   // pin is a plain number input (no slider sibling); patches the same way
-                const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
+                const input = queryByName(`input[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 // While the demo sweep animates a control, leave it alone: the sweep restores the
                 // real value when it ends, and the next patch after that lands normally.
                 if (input && surfaceDemoRunning() &&
@@ -4465,23 +4709,27 @@ function updateModuleControls(mod) {
                 break;
             }
             case "bool": {
-                const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
+                const input = queryByName(`input[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 if (input && input.checked !== !!ctrl.value) input.checked = !!ctrl.value;
                 break;
             }
             case "text": {
-                const input = document.querySelector(`input[type="text"][data-mid="${mid}"][data-key="${k}"]`);
+                const input = queryByName(`input[type="text"][data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 if (input && input.value !== (ctrl.value ?? "")) input.value = ctrl.value ?? "";
                 break;
             }
             case "textarea": {
-                const input = document.querySelector(`textarea[data-mid="${mid}"][data-key="${k}"]`);
+                const input = queryByName(`textarea[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 // Don't clobber the box while the user is typing in it.
                 if (input && document.activeElement !== input && input.value !== (ctrl.value ?? "")) input.value = ctrl.value ?? "";
                 break;
             }
             case "filepath": {
-                const sel = document.querySelector(`select.fileedit-pick[data-mid="${mid}"][data-key="${k}"]`);
+                // A BUTTON, not a select: buildFilePathControl replaced the native select with a
+                // painted picker that keeps its value in `_value` behind a `value` property, so the
+                // assignment below still works. Matching `select` here found nothing, and a script
+                // changed from another client (or by a preset) never repainted this picker.
+                const sel = queryByName(`button.fileedit-pick[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 // Don't clobber the choice while it is focused, and don't reload the pane under
                 // someone who is typing in it: the value is only pushed back when it really moved.
                 if (sel && document.activeElement !== sel && sel.value !== (ctrl.value ?? "")) {
@@ -4491,13 +4739,13 @@ function updateModuleControls(mod) {
             }
             case "password": {
                 // The peek button flips the input to type="text", so match either.
-                const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
+                const input = queryByName(`input[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 const decoded = decodePassword(ctrl.value);
                 if (input && input.value !== decoded) input.value = decoded;
                 break;
             }
             case "select": {
-                const sel = document.querySelector(`select[data-mid="${mid}"][data-key="${k}"]`);
+                const sel = queryByName(`select[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 // Never overwrite a select the user currently has OPEN (popup
                 // showing) or focused. data-open is set on pointerdown/focus and
                 // cleared on change/blur: more reliable than document.activeElement,
@@ -4528,12 +4776,11 @@ function updateModuleControls(mod) {
             case "palette": {
                 // Custom dropdown: patch the trigger (swatch + name) and the selected row, but not
                 // while the user has the list open (data-open === "true").
-                const wrap = document.querySelector(`.palette-control[data-mid="${mid}"][data-key="${k}"]`);
+                const wrap = queryByName(`.palette-control[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 if (wrap && wrap.dataset.open !== "true" && Number(wrap.dataset.value) !== Number(ctrl.value)) {
                     wrap.dataset.value = ctrl.value;
                     const cols = ((ctrl.options || [])[ctrl.value] || {}).colors || "";
-                    const stops = cols.split(/\s+/).filter(Boolean).map(h => "#" + h);
-                    const grad = stops.length ? `linear-gradient(to right, ${stops.join(",")})` : "none";
+                    const grad = paletteGradientCss(cols);
                     const triSwatch = wrap.querySelector(".palette-trigger .palette-swatch");
                     if (triSwatch) triSwatch.style.background = grad;
                     const triName = wrap.querySelector(".palette-trigger .palette-name");
@@ -4547,14 +4794,18 @@ function updateModuleControls(mod) {
             case "display": {
                 // A url-valued display is an <a>, not a <span> (see renderControl), so this path
                 // has to know both shapes or the link goes stale on the next push.
-                const link = document.querySelector(`a.control-url[data-mid="${mid}"][data-key="${k}"]`);
+                const link = queryByName(`a.control-url[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 if (link) { setUrlDisplay(link, ctrl.value); break; }
-                const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
+                // The display strip is a segment renderer, not a span: it has to be patched through
+                // its own hook or the surface would freeze at whatever it showed on first render.
+                const strip = queryByName(`.seg16[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
+                if (strip && strip._setText) { strip._setText(ctrl.value ?? ""); break; }
+                const span = queryByName(`span.display[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 if (span) setText(span, String(ctrl.value ?? ""));
                 break;
             }
             case "display-int": {
-                const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
+                const span = queryByName(`span.display[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 if (span) {
                     // Re-cache the unit in case the device changed it (it
                     // shouldn't, but the WS path is the authority).
@@ -4565,27 +4816,27 @@ function updateModuleControls(mod) {
             }
             case "ipv4": {
                 // Guarded by the shared userActive check above (same as text).
-                const input = document.querySelector(`input.ipv4-input[data-mid="${mid}"][data-key="${k}"]`);
+                const input = queryByName(`input.ipv4-input[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 if (input && input.value !== (ctrl.value ?? "")) input.value = ctrl.value ?? "";
                 break;
             }
             case "time": {
-                const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
+                const span = queryByName(`span.display[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 if (span) setText(span, fmtTime(ctrl.value ?? 0));
                 break;
             }
             case "progress": {
-                const bar = document.querySelector(`progress[data-mid="${mid}"][data-key="${k}"]`);
+                const bar = queryByName(`progress[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 if (bar) {
                     bar.value = ctrl.value ?? 0;
                     bar.max = ctrl.total ?? 100;
                 }
-                const lbl = document.querySelector(`span.control-value[data-mid="${mid}"][data-key="${k}.label"]`);
+                const lbl = queryByName(`span.control-value[data-mid="${cssEscape(mid)}"][data-key="${k}.label"]`, "data-mid", mid);
                 if (lbl) setText(lbl, fmtProgressLabel(ctrl));
                 break;
             }
             case "list": {
-                const list = document.querySelector(`div.list-control[data-mid="${mid}"][data-key="${k}"]`);
+                const list = queryByName(`div.list-control[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 if (!list) break;
                 const rows = Array.isArray(ctrl.value) ? ctrl.value : [];
                 const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
@@ -4599,6 +4850,21 @@ function updateModuleControls(mod) {
                 // rebuild on a real change is momentary and a direct consequence of that change.
                 const sig = JSON.stringify([rows, details]);
                 if (list.dataset.sig === sig) break;   // unchanged: leave the DOM (and any open edit) alone
+
+                // A field the user is STILL EDITING survives the rebuild. Committing one field
+                // changes the list, which rebuilds every row from the device's state, and any other
+                // field typed but not yet committed went back to what the device still had: every
+                // field had to be entered twice, the second time sticking only because the first
+                // had committed by then. The row fields already stamp dragTs on each keystroke, so
+                // the same one-second cooldown every other control uses applies here too.
+                const held = new Map();
+                for (const el of list.querySelectorAll("[data-dragkey]")) {
+                    const ts = dragTs[el.dataset.dragkey] || 0;
+                    if (Date.now() - ts < 1000) held.set(el.dataset.dragkey, el.value);
+                }
+                // Which field had focus, so typing can continue into the rebuilt one rather than
+                // into nothing: the rebuild replaces the node, and focus goes with it.
+                const focusedKey = document.activeElement?.dataset?.dragkey;
                 list.dataset.sig = sig;
                 // Preserve which detail panels are open across the rebuild. Capture the SAME key
                 // listRowKey emits: the row's stable `id` (on entry.dataset.rowId for editable
@@ -4618,6 +4884,18 @@ function updateModuleControls(mod) {
                      moduleName: mod.name, ctrlName: ctrl.name, optionSets: ctrl.optionSets || {}});
                 const newScroll = list.querySelector(".list-scroll");
                 if (newScroll) newScroll.scrollTop = prevScroll;
+                // Put the in-progress values back, and the caret with them where the field is the
+                // one being typed in: restoring the text alone would send the cursor to the start.
+                for (const el of list.querySelectorAll("[data-dragkey]")) {
+                    if (!held.has(el.dataset.dragkey)) continue;
+                    const wasFocused = el.dataset.dragkey === focusedKey;
+                    el.value = held.get(el.dataset.dragkey);
+                    if (wasFocused) el.focus();
+                    if (wasFocused && typeof el.setSelectionRange === "function") {
+                        const end = el.value.length;
+                        try { el.setSelectionRange(end, end); } catch { /* not a text input */ }
+                    }
+                }
                 break;
             }
         }
@@ -4625,7 +4903,7 @@ function updateModuleControls(mod) {
         // control itself wins over the type-level ones from /api/types; see defaultFor.
         const def = defaultFor(mod.type, ctrl.name, ctrl);
         if (def !== undefined && def !== null) {
-            const btn = document.querySelector(`button.reset-btn[data-mid="${mid}"][data-key="${k}.reset"]`);
+            const btn = queryByName(`button.reset-btn[data-mid="${cssEscape(mid)}"][data-key="${k}.reset"]`, "data-mid", mid);
             if (btn) {
                 const eq = controlValuesEqual(ctrl, def);
                 btn.classList.toggle("active", !eq);
@@ -4635,7 +4913,7 @@ function updateModuleControls(mod) {
 }
 
 // Per-type equality for reset-button highlighting. bool→boolish, ipv4/text→
-// string compare, everything else → numeric. Centralised so the rules can't
+// string compare, everything else → numeric. Centralized so the rules cannot
 // drift between createControl and updateModuleControls.
 function controlValuesEqual(ctrl, def) {
     if (ctrl.type === "bool") return !!ctrl.value === !!def;
@@ -4652,9 +4930,35 @@ function cssEscape(s) {
     return String(s).replace(/(["\\])/g, "\\$1");
 }
 
+// Find the one element whose `attr` EQUALS `value`, case included.
+//
+// CSS attribute selectors match values case-INSENSITIVELY in an HTML document, while the firmware
+// compares module names with strcmp. So `lines` (a MoonLive effect) and `Lines` (a LinesEffect) are
+// two different modules that every `[data-module="..."]` lookup confuses: querySelector returns
+// whichever sits first in the DOM, and on the bench (2026-09-08) a Layer holding both rendered no
+// effect cards at all. Selectors Level 4 has a case-sensitivity flag for exactly this
+// (`[data-module="x" s]`) and Chrome does not support it: it throws SyntaxError, which takes out
+// every card on the page. So the match is narrowed here instead, which works everywhere.
+function queryByName(selector, attr, value) {
+    const want = String(value);
+    for (const el of document.querySelectorAll(selector)) {
+        if (el.getAttribute(attr) === want) return el;
+    }
+    return null;
+}
+
 // ---------------------------------------------------------------------------
 // 6. Type picker
 // ---------------------------------------------------------------------------
+
+/// The CSS gradient for a palette's swatch, from the space-separated hex list the device sends.
+///
+/// One definition: the palette control, the swatch strip and the picker row all paint the same
+/// gradient, and three copies of this had already started to drift in their empty-list handling.
+function paletteGradientCss(colors) {
+    const stops = String(colors || "").split(/\s+/).filter(Boolean).map(h => "#" + h);
+    return stops.length ? `linear-gradient(to right, ${stops.join(",")})` : "none";
+}
 
 // Role → emoji, derived here rather than duplicated in every module's tags(): one home in the UI
 // saves repeating the same character in ~90 module headers and a few bytes per type in /api/types.
@@ -4722,14 +5026,74 @@ const SCRIPTED_EMOJI = "\u{1F4DD}";      // 📝 the module runs a MoonLive scri
 // Not the gear: that is already the `generic` role's emoji, and reusing it drew the chip twice.
 const COMPILED_EMOJI = "\u{1F4E6}";      // 📦 chip only: never a tag any module carries
 
+// The POWER-FUNCTION tags: which kernels an effect is built on, rather than where it came from or
+// what it listens to. They are ordered LAST and kept together so they read as one group on a card
+// and sit adjacent in the picker's chip row, which is what makes "show me the fluid effects" a
+// glanceable filter rather than a hunt through a mixed string. A separator character is not used:
+// every chip is one grapheme, so a separator would become a chip of its own.
+// What an effect LISTENS to. Their own group in the picker: "show me the effects that react to
+// music" is the question a chip row is for, and the two notes answer it together.
+const AUDIO_EMOJI = ["\u{1F3B5}", "\u{1F3B6}"];   // volume, frequency
+
+const KERNEL_EMOJI = ["🖌️", "✨", "🌊", "💨", "🌫️", "🎡"];   // same order the legend lists them in
+
+// What each chip MEANS, as a tooltip. The chips are a filter, so a reader who does not yet know the
+// vocabulary has to guess what narrows the list; the title makes each one self-describing without
+// spending any screen space. Wording follows the legend that documents them for people reading a
+// card: docs/tutorials/how-projectmm-works.md, "The emoji on every card".
+const EMOJI_LABEL = {
+    // what the module IS
+    "\u{1F525}": "effect",
+    "\u2638\uFE0F": "driver",
+    "\u{1F48E}": "modifier",
+    "\u{1F6A5}": "layout",
+    "\u{1F95E}": "layer",
+    "\u{1F6F0}\uFE0F": "service",
+    "\u2699\uFE0F": "generic",
+    [SCRIPTED_EMOJI]: "runs a MoonLive script",
+    [COMPILED_EMOJI]: "compiled into the firmware",
+    // the shape it works in
+    "\u{1F4CF}": "1D: a line",
+    "\u{1F7E6}": "2D: a picture",
+    "\u{1F9CA}": "3D: a volume",
+    // where it came from
+    "\u{1F4AB}": "projectMM / MoonLight",
+    "\u{1F319}": "MoonModules",
+    "\u{1F419}": "WLED",
+    "\u26A1\uFE0F": "FastLED",
+    "\u{1F985}": "a named contributor",
+    // what it listens to and what it does
+    "\u{1F3B5}": "reacts to volume: how loud the room is",
+    "\u{1F3B6}": "reacts to frequency: which notes are playing",
+    "\u{1F4E1}": "takes its picture from the network",
+    "\u{1F3AF}": "aims moving heads",
+    "\u{1F47E}": "pixel art: games and sprites",
+    "\u{1F9EC}": "a simulation: cells evolving off their own last frame",
+    "\u{1F4F9}": "motion-tracking aware",
+    // the power functions, shown together at the end of a row
+    "\u{1F58C}\uFE0F": "power function: a shader, every pixel computed from its position",
+    "\u2728": "power function: particles, born, moved by forces, and dying",
+    "\u{1F30A}": "power function: a fluid working out its own motion",
+    "\u{1F4A8}": "power function: transport, light carried and fading rather than redrawn",
+    "\u{1F32B}\uFE0F": "power function: a noise field, the cloud and smoke family",
+    "\u{1F3A1}": "power function: polar, composed around a center",
+};
+
 function emojiTagsFor(t) {
     const out = [];
+    const kernels = [];
     const seen = new Set();
-    const push = (ch) => { if (ch && !seen.has(ch)) { seen.add(ch); out.push(ch); } };
+    const push = (ch) => {
+        if (!ch || seen.has(ch)) return;
+        seen.add(ch);
+        (KERNEL_EMOJI.includes(ch) ? kernels : out).push(ch);
+    };
     push(ROLE_EMOJI[t.role]);
     push(DIM_EMOJI[t.dim]);
     for (const ch of graphemes(t.tags || "")) push(ch);
-    return out;
+    // Kernel chips in a fixed order, so two effects on the same kernels show the same run.
+    kernels.sort((a, b) => KERNEL_EMOJI.indexOf(a) - KERNEL_EMOJI.indexOf(b));
+    return out.concat(kernels);
 }
 
 // The type picker serves two modes:
@@ -4744,7 +5108,8 @@ function emojiTagsFor(t) {
 function mlTypeForRole(role) {
     return role === "effect" ? "MoonLiveEffect"
          : role === "layout" ? "MoonLiveLayout"
-         : role === "modifier" ? "MoonLiveModifier" : null;
+         : role === "modifier" ? "MoonLiveModifier"
+         : role === "service" ? "MoonLiveService" : null;
 }
 
 /// Every shipped script, as picker rows, for the roles a parent accepts.
@@ -4771,7 +5136,7 @@ async function mlScriptItems(roles) {
                 remote: isRemote,
                 // Without the extension: it is the file's business, not the reader's, and it keeps
                 // the row sorting next to the compiled modules rather than in a block of ".mle".
-                displayName: (isRemote ? "\u2601 " : "") + n.replace(/\.ml[elm]$/i, ""),
+                displayName: (isRemote ? "\u2601 " : "") + n.replace(/\.ml[elmsp]$/i, ""),
                 role,
                 // The scripted marker is what makes the row's kind visible, so it is added rather
                 // than assumed: a script whose own tags happen to omit it still reads correctly.
@@ -4934,7 +5299,14 @@ function openPicker(anchorEl, opts) {
     // still that script alphabetically, and prefixed rows would otherwise collect in a block of
     // their own instead of sitting where the reader looks for them.
     const sortKey = (t) => (t.displayName || t.name).replace(/^[^\p{L}\p{N}]+/u, "");
-    const filtered = [...source].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+    // `keepOrder` leaves the caller's order alone. A PALETTE is chosen by INDEX, and that index is
+    // what the control surface's knob steps through and what Home Assistant shows, so an
+    // alphabetical picker would disagree with both: turning the knob would jump around the list a
+    // user is reading. Where the order carries no meaning (module types, scripts) the alphabetical
+    // sort stands, because there a name is the only thing to look something up by.
+    const filtered = opts.keepOrder
+        ? [...source]
+        : [...source].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
 
     const picker = document.createElement("div");
     picker.className = "type-picker";
@@ -4979,6 +5351,8 @@ function openPicker(anchorEl, opts) {
         Object.values(ROLE_EMOJI),                       // type
         Object.values(DIM_EMOJI),                        // dimension
         ["\u{1F4AB}", "\u{1F319}", "\u{1F419}", "\u26A1\uFE0F"],   // origin
+        AUDIO_EMOJI,                                     // what it listens to
+        KERNEL_EMOJI,                                    // which power functions it is built on
     ];
     const groups = CHIP_GROUPS.map(g => present.filter(e => g.includes(e)));
     const classified = new Set(CHIP_GROUPS.flat());
@@ -5000,6 +5374,8 @@ function openPicker(anchorEl, opts) {
             const chip = document.createElement("button");
             chip.className = "type-picker-chip";
             chip.textContent = emoji;
+            const label = EMOJI_LABEL[emoji];
+            if (label) { chip.title = label; chip.setAttribute("aria-label", label); }
             chip.addEventListener("click", () => {
                 if (activeChips.has(emoji)) { activeChips.delete(emoji); chip.classList.remove("active"); }
                 else { activeChips.add(emoji); chip.classList.add("active"); }
@@ -5064,9 +5440,23 @@ function openPicker(anchorEl, opts) {
         matches.forEach((t, i) => {
             const item = document.createElement("div");
             item.className = "type-picker-item" + (i === selIdx ? " selected" : "");
+            // An optional COLOR SWATCH, for a list whose rows are colors rather than modules. Only
+            // palettes carry `colors`, so every other picker is untouched: the column simply is not
+            // built. Same gradient the native palette dropdown paints, so a palette looks the same
+            // whichever way it is chosen.
+            // `role: "palette"` builds the column, not `colors`: a scripted palette that is not
+            // downloaded yet HAS no gradient (it produces one only once it runs), and skipping the
+            // swatch for those rows would leave their names hanging in the emoji column.
+            if (t.colors || t.role === "palette") {
+                const sw = document.createElement("span");
+                sw.className = "type-picker-item-swatch"
+                             + (t.colors ? "" : " type-picker-item-swatch-empty");
+                if (t.colors) sw.style.background = paletteGradientCss(t.colors);
+                item.appendChild(sw);
+            }
             const emoji = document.createElement("span");
             emoji.className = "type-picker-item-emoji";
-            emoji.textContent = emojiTagsFor(t).join("");
+            renderEmojiTags(emoji, emojiTagsFor(t));
             item.appendChild(emoji);
             // Show the factory-stripped name ("Rainbow") not the typeName
             // ("RainbowEffect"); the role text on the right already conveys
@@ -5356,10 +5746,18 @@ function updateStatusBar() {
     const uptimeCtrl = ctrls.find(c => c.name === "uptime");
     const heapCtrl = ctrls.find(c => c.name === "heap");
     const blockCtrl = ctrls.find(c => c.name === "maxBlock");
+    const fpsCtrl = ctrls.find(c => c.name === "fps");
     const statsEl = document.getElementById("sys-stats");
     if (statsEl) {
         const parts = [];
         if (uptimeCtrl) parts.push(uptimeCtrl.value);
+        // The WHOLE pipeline's rate, which is the one place fps is the honest unit: the device
+        // really does complete this many frames a second, where a per-module fps is one part's
+        // cost inverted. Before the memory badges because it is the number that moves.
+        if (fpsCtrl && fpsCtrl.value) {
+            const f = Number(fpsCtrl.value);
+            parts.push("🕒 " + (f >= 1000 ? Math.round(f / 1000) + "K fps" : f + " fps"));
+        }
         if (heapCtrl && heapCtrl.value !== undefined && heapCtrl.total) {
             const freeKb = Math.round((heapCtrl.total - heapCtrl.value) / 1024);
             parts.push("🧠 " + freeKb + "K");
@@ -5377,8 +5775,17 @@ function updateStatusBar() {
     // which is not useful from the UI and can be mistaken for a crash.
     const chipCtrl = ctrls.find(c => c.name === "chip");
     const rebootBtn = document.getElementById("reboot-btn");
-    if (rebootBtn && chipCtrl) {
-        rebootBtn.hidden = chipCtrl.value === "desktop";
+    if (rebootBtn) {
+        // Hidden on a desktop, where `reboot()` EXITS THE PROCESS and nothing restarts it. Keyed on
+        // `deviceModel`, which the desktop platform seeds with its own name (macos-arm64,
+        // linux-x64, windows-x64, docker) and a board leaves for tooling to fill from the catalog.
+        //
+        // NOT on `chip`: that used to read "desktop" and now reads the real architecture (arm64,
+        // x64), so the old test silently stopped matching and put a process-killing button on every
+        // desktop card.
+        const modelCtrl = ctrls.find(c => c.name === "deviceModel");
+        const model = String(modelCtrl?.value ?? "");
+        rebootBtn.hidden = /^(macos|linux|windows)-|^docker$/.test(model);
     }
 
     // bootReason → crashed-state styling on reboot button
@@ -5500,6 +5907,13 @@ function deviceFirmwareInfo() {
     const fw = findModule("Firmware") || (state.modules.find(m => m.type === "FirmwareUpdateModule"));
     if (!fw) return null;
     const ctrls = fw.controls || [];
+    // ONLY WHILE THE CARD DESCRIBES THE APP. `image` rebinds version/build/firmware/partition to
+    // whichever partition is selected, so on the MoonBase tab these read MoonBase: the badge would
+    // then compare a recovery image's version against app releases and look for a firmware asset
+    // named after a chip. The badge is global chrome, so it would stay wrong for as long as the
+    // user left that tab selected.
+    const image = (ctrls.find(c => c.name === "image") || {}).value;
+    if (image === 1) return null;
     const version = (ctrls.find(c => c.name === "version") || {}).value;
     const firmware = (ctrls.find(c => c.name === "firmware") || {}).value;
     // "unknown" is what a desktop build reports: no ESP32 variant to name.
@@ -5523,6 +5937,18 @@ function showUpdateBadge(badge, tag, label, isDesktop) {
     badge.dataset.desktop = isDesktop ? "1" : "";
     badge.hidden = false;
 }
+
+// The key that names a release asset, from the device's own `firmware` control. On the app tab
+// that is already the variant ("esp32s3-n16r8"); on the MoonBase tab the device reports the chip
+// ("ESP32-S3"), which the asset spells "esp32s3" after the build directory's IDF target.
+//
+// Null when the control has not arrived: the picker treats that as "offer everything" rather than
+// as a key nothing matches, which is the difference between a full list and a silently empty one.
+function moonbaseAssetKeyFrom(fw) {
+    if (!fw) return null;
+    return /^ESP32/.test(fw) ? fw.toLowerCase().replace(/-/g, "") : fw;
+}
+
 
 // Is there a newer STABLE release than the device's version, with a compatible .bin?
 // Returns the stable tag (e.g. "v2.1.0") or null. /latest excludes prereleases.
@@ -5632,7 +6058,9 @@ async function mlFetchCatalog() {
 
 /// Which catalog group a picker's extension belongs to, so a script picker offers only its own role.
 function mlGroupForExt(ext) {
-    return ext === ".mle" ? "effects" : ext === ".mll" ? "layouts" : ext === ".mlm" ? "modifiers" : null;
+    return ext === ".mle" ? "effects" : ext === ".mll" ? "layouts"
+         : ext === ".mlm" ? "modifiers" : ext === ".mls" ? "services"
+         : ext === ".mlp" ? "palettes" : null;
 }
 
 // Download one factory script and save it to the device.
@@ -5688,6 +6116,416 @@ async function fmFetchDir(absPath, hidden) {
 // shape: an expanded folder's children are loaded from /api/dir), plus a toolbar (show
 // hidden, new folder, delete on the selected node). Filesystem ops go through the module's controls
 // (path/new folder/delete); browsing is pure UI over /api/dir, so the module stays minimal.
+// MoonCloud Stats: what everyone else reported, rendered on the card that asked for consent.
+//
+// Reads only: no id, no report and no configuration leave the browser here. The charts are drawn
+// EMPTY until this member's consent is on, so what saying yes gets you is visible before you say
+// it, and a server that cannot be reached says so rather than rendering as an empty one.
+// Where the aggregates come from: the SAME `server` / `serverPort` controls the firmware posts
+// its report to, read off the module rather than hardcoded here. One setting drives both
+// directions, so pointing a device at a local or self-hosted MoonCloud moves the fetch with it
+// instead of leaving the card looking at somewhere else.
+// THE MoonCloud address, the same constant the firmware compiles in. Not read from a control:
+// there is one MoonCloud, and moving it is a release rather than a setting somebody can mistype.
+// Whether this member's own consent is on. The data a MoonCloud card shows is what contributing
+// earns back, so an unconsented card renders the same charts with nothing in them.
+function consented(mod) {
+    return Boolean((mod?.controls || []).find(c => c.name === "consent")?.value);
+}
+
+const kMoonCloudUrl = "https://mooncloud-stats.moonmodules.workers.dev";
+
+let moonCloudStatsCache = new Map();   // filter query -> stats, so switching back is free
+let moonCloudFilter = {};              // dimension -> value the reader chose
+let moonCloudGeneration = 0;           // bumped on a control write; older answers are dropped
+let moonTalkCache = null;
+
+const kMoonCloudColors = ["#4a9eff", "#ff8c42", "#3ecf8e", "#e8618c", "#a78bfa",
+                          "#f6c445", "#4dd0e1", "#9aa5b1"];
+
+// An SVG arc from one angle to another. The whole-circle case is separate because an arc whose
+// start and end coincide draws NOTHING, so a single-slice pie would come out blank.
+function moonCloudArc(cx, cy, r, a0, a1) {
+    if (a1 - a0 >= Math.PI * 2 - 1e-9) {
+        return `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - 0.001} ${cy - r} Z`;
+    }
+    const x0 = cx + r * Math.sin(a0), y0 = cy - r * Math.cos(a0);
+    const x1 = cx + r * Math.sin(a1), y1 = cy - r * Math.cos(a1);
+    return `M ${cx} ${cy} L ${x0} ${y0} ` +
+           `A ${r} ${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1} ${y1} Z`;
+}
+
+// Past the 7th slice everything becomes one "other" wedge: a pie with twenty slivers reads as
+// noise, and the exact tail is a question for the raw API rather than a card.
+function moonCloudTopSlices(rows, keep = 7) {
+    if (!rows || rows.length <= keep) return rows || [];
+    const head = rows.slice(0, keep);
+    const tail = rows.slice(keep).reduce((sum, r) => sum + r.count, 0);
+    return tail ? head.concat([{ name: "other", count: tail }]) : head;
+}
+
+function moonCloudPie(rows, onPick) {
+    const NS = "http://www.w3.org/2000/svg";
+    const total = rows.reduce((sum, r) => sum + r.count, 0) || 1;
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 200 200");
+    svg.setAttribute("class", "mooncloud-pie");
+
+    // No rows: one filled circle, so a placeholder reads as a pie waiting for data rather than as
+    // the blank sliver a zero-angle slice produces.
+    if (!rows.length) {
+        const disc = document.createElementNS(NS, "circle");
+        disc.setAttribute("cx", "100");
+        disc.setAttribute("cy", "100");
+        disc.setAttribute("r", "92");
+        disc.setAttribute("class", "mooncloud-pie-placeholder");
+        svg.appendChild(disc);
+        return svg;
+    }
+
+    let angle = 0;
+    rows.forEach((r, i) => {
+        const next = angle + (r.count / total) * Math.PI * 2;
+        const path = document.createElementNS(NS, "path");
+        path.setAttribute("d", moonCloudArc(100, 100, 92, angle, next));
+        path.setAttribute("fill", kMoonCloudColors[i % kMoonCloudColors.length]);
+        const pickable = onPick && r.name && r.name !== "other";
+        path.setAttribute("class", pickable ? "mooncloud-slice mooncloud-pickable" : "mooncloud-slice");
+        const title = document.createElementNS(NS, "title");
+        title.textContent = `${r.name}: ${r.count} (${Math.round((r.count / total) * 100)}%)`
+            + (pickable ? ", click to filter" : "");
+        path.appendChild(title);
+        if (pickable) {
+            path.addEventListener("click", () => onPick(r.name));
+            // Reachable without a mouse, the same way a collapsible card header is: a filter nobody
+            // can operate from the keyboard is a control only some people have.
+            path.setAttribute("tabindex", "0");
+            path.setAttribute("role", "button");
+            path.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(r.name); }
+            });
+        }
+        svg.appendChild(path);
+        angle = next;
+    });
+    return svg;
+}
+
+function moonCloudLegend(rows, onPick) {
+    const box = document.createElement("div");
+    box.className = "mooncloud-legend";
+    rows.forEach((r, i) => {
+        const line = document.createElement("div");
+        const swatch = document.createElement("span");
+        swatch.className = "mooncloud-swatch";
+        swatch.style.background = kMoonCloudColors[i % kMoonCloudColors.length];
+        const name = document.createElement("span");
+        name.className = "mooncloud-legend-name";
+        name.textContent = r.name || "unknown";
+        const count = document.createElement("span");
+        count.className = "mooncloud-legend-count";
+        count.textContent = String(r.count);
+        line.append(swatch, name, count);
+        // `other` is a bucket of everything past the top slices, so it names no value to filter by.
+        if (onPick && r.name && r.name !== "other") {
+            line.className = "mooncloud-pickable";
+            line.addEventListener("click", () => onPick(r.name));
+            line.tabIndex = 0;
+            line.setAttribute("role", "button");
+            line.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(r.name); }
+            });
+        }
+        box.appendChild(line);
+    });
+    return box;
+}
+
+function renderMoonCloudStats(host, mod) {
+    const section = document.createElement("div");
+    section.className = "mooncloud-stats";
+    host.appendChild(section);
+
+    // As in MoonTalk: `reached` separates "the server said there is nothing" from "the server never
+    // answered". Only the first may render as no statistics; the second says so.
+    const draw = (stats, reached = true) => {
+        section.textContent = "";
+        if (!reached) {
+            const failed = document.createElement("div");
+            failed.className = "mooncloud-stats-title mooncloud-unreachable";
+            failed.textContent = "Cannot reach the MoonCloud server.";
+            section.appendChild(failed);
+            return;
+        }
+        const head = document.createElement("div");
+        head.className = "mooncloud-stats-head";
+        const title = document.createElement("div");
+        title.className = "mooncloud-stats-title";
+        title.textContent = stats
+            ? `What everyone else is running: ${stats.installations} installations`
+            : "What everyone else is running";
+        head.appendChild(title);
+        // Fetched once per card build, so this is how to ask again without reloading. Only with
+        // consent: without it there is nothing to refresh, because nothing is fetched.
+        if (consented(mod)) {
+            const refresh = document.createElement("button");
+            refresh.className = "mooncloud-refresh";
+            refresh.textContent = "\u21bb";
+            refresh.title = "Refresh";
+            refresh.addEventListener("click", () => { moonCloudStatsCache.clear(); load(); });
+            head.appendChild(refresh);
+        }
+
+        section.appendChild(head);
+
+        // A filter is always something the reader chose, so it is stated plainly with a way back.
+        const active = stats ? Object.entries(moonCloudFilter) : [];
+        if (active.length) {
+            const bar = document.createElement("div");
+            bar.className = "mooncloud-filter";
+            const what = document.createElement("span");
+            // A bounds pair reads as one range, not two numbers: `lightCountMin` + `lightCountMax`
+            // came from a single slice and a reader thinks of it that way.
+            const seen = new Set();
+            const parts = [];
+            for (const [k, v] of active) {
+                if (k.endsWith("Label")) continue;   // display text for a bounds pair, not a filter
+                const base = k.replace(/(Min|Max)$/, "");
+                if (base !== k) {
+                    if (seen.has(base)) continue;
+                    seen.add(base);
+                    // The slice's own label, not the bounds: the reader clicked "64-128 KB" and
+                    // "65537 to 131072" is the same fact in a form nobody chose.
+                    parts.push(moonCloudFilter[`${base}Label`] ?? moonCloudFilter[`${base}Min`]);
+                    continue;
+                }
+                parts.push(k === "dev" ? (v === "1" ? "development" : "released") : v);
+            }
+            what.textContent = "Filtered to " + parts.join(", ");
+            const clear = document.createElement("button");
+            clear.className = "mooncloud-filter-clear";
+            clear.textContent = "Clear";
+            clear.addEventListener("click", () => { moonCloudFilter = {}; load(); });
+            bar.append(what, clear);
+            section.appendChild(bar);
+        }
+
+        const grid = document.createElement("div");
+        grid.className = "mooncloud-charts";
+
+        // The four the server aggregates. Country is included even though a device never reports
+        // it (the edge derives it from the connection): withholding it here while serving it to
+        // anyone who calls /api/stats would be a distinction without a difference, and a
+        // country-level count is the same coarse figure every comparable dashboard shows.
+        // Each chart names the query parameter its slices filter by, so clicking one re-counts
+        // every other chart within it. `Build` maps to `dev`, whose values are 0 and 1 rather than
+        // the labels shown.
+        // The list names a KEY, not a value: reading `stats.versions` here dereferenced a null
+        // answer while the array was built, which threw before any per-chart guard could run and
+        // took the whole card down with it.
+        for (const [label, key, param] of [["Version", "versions", "version"],
+                                           ["Chip", "chips", "chip"],
+                                           ["Board", "deviceModels", "deviceModel"],
+                                           ["Flash", "flash", "flash"],
+                                           ["PSRAM", "psram", "psram"],
+                                           ["SDK", "sdk", "sdk"],
+                                           ["Event", "events", "event"],
+                                           ["Upgraded from", "previousVersions", "previousVersion"],
+                                           ["Drivers", "drivers", "driver"],
+                                           ["Services", "services", "service"],
+                                           ["Layouts", "layouts", "layout"],
+                                           ["Effects", "effects", "effect"],
+                                           ["Modifiers", "modifiers", "modifier"],
+                                           ["Lights", "lightCounts", "lightCount"],
+                                           ["Free memory", "freeMemory", "freeHeap"],
+                                           ["Total memory", "totalMemory", "totalHeap"],
+                                           ["FPS", "fps", "fps"],
+                                           ["Build", "builds", "dev"],
+                                           ["Country", "countries", "country"]]) {
+            // No stats: the heading over an empty circle, so the card shows what consent unlocks
+            // without naming a single value somebody else reported.
+            const shown = stats ? moonCloudTopSlices(stats[key]) : [];
+            if (stats && !shown.length) continue;
+            const chart = document.createElement("div");
+            chart.className = "mooncloud-chart";
+            const heading = document.createElement("div");
+            heading.className = "mooncloud-chart-title";
+            heading.textContent = label;
+            // A bucketed slice carries `min`/`max` rather than a value the column could equal, so
+            // it filters by BOUNDS: the label is a range, the column holds the raw number.
+            const bounded = shown.some(r => r.min !== undefined);
+            const pick = (name) => {
+                if (bounded) {
+                    const row = shown.find(r => r.name === name);
+                    if (!row) return;
+                    delete moonCloudFilter[`${param}Min`];
+                    delete moonCloudFilter[`${param}Max`];
+                    delete moonCloudFilter[`${param}Label`];
+                    if (row.min !== undefined) moonCloudFilter[`${param}Min`] = String(row.min);
+                    if (row.max !== undefined) moonCloudFilter[`${param}Max`] = String(row.max);
+                    moonCloudFilter[`${param}Label`] = name;   // what the reader actually clicked
+                } else {
+                    moonCloudFilter[param] = param === "dev"
+                        ? (name === "development" ? "1" : "0")
+                        : name;
+                }
+                load();
+            };
+            chart.append(heading, moonCloudPie(shown, pick), moonCloudLegend(shown, pick));
+            grid.appendChild(chart);
+        }
+        section.appendChild(grid);
+    };
+
+    // Cached per filter for the session: these numbers move on the scale of days, a card rebuild
+    // happens on every unrelated state push, and clicking back to a filter already read is free.
+    const load = () => {
+        // Without consent NOTHING is fetched: the headings are a constant in this file, so the card
+        // draws its own shape. A request would carry no identifier and still be a call to our server
+        // from a device whose owner said no.
+        if (!consented(mod)) { draw(null, true); return; }
+        // `*Label` is what the filter bar shows, not something the server knows: the bounds are the
+        // filter, and sending a label would be an unknown parameter.
+        const sent = Object.fromEntries(
+            Object.entries(moonCloudFilter).filter(([k]) => !k.endsWith("Label")));
+        const query = new URLSearchParams(sent).toString();
+        if (moonCloudStatsCache.has(query)) { draw(moonCloudStatsCache.get(query), true); return; }
+        const generation = moonCloudGeneration;
+        fetch(kMoonCloudUrl + "/api/stats" + (query ? `?${query}` : ""), { cache: "no-store" })
+            .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+            .then(stats => {
+                if (generation !== moonCloudGeneration) return;   // a newer write superseded this
+                moonCloudStatsCache.set(query, stats);
+                draw(stats, true);
+            })
+            // Not cached: a failure is a fact about right now, so the next card build retries.
+            .catch(() => draw(null, false));
+    };
+    load();
+}
+
+// MoonTalk: the public board, read straight onto the card that posts to it.
+//
+// Reading sends no identifier: no id, no name, nothing about this device. It still happens only
+// while consent is on, because a request from a device whose owner said no is still a request to
+// our server.
+//
+// Polled on card build rather than streamed. A chat wants to feel live, but a device UI rebuilds
+// this card on every unrelated state push, so a socket per card would be a connection per render.
+// The refresh button is the honest version until MoonCloud Sync brings a real transport.
+function renderMoonTalk(host, mod) {
+    const section = document.createElement("div");
+    section.className = "moontalk";
+    host.appendChild(section);
+
+    const header = document.createElement("div");
+    header.className = "moontalk-header";
+    const title = document.createElement("span");
+    title.textContent = "Messages";
+    header.appendChild(title);
+
+    const list = document.createElement("div");
+    list.className = "moontalk-list";
+    section.append(header, list);
+
+    // `reached` says whether the server answered at all. An unreachable server and an empty board
+    // are different facts and lead to different actions (check the network, versus wait for
+    // someone to post), so they must not render as the same nothing.
+    const draw = (messages, reached = true, asked = true) => {
+        list.textContent = "";
+        if (!reached) {
+            const failed = document.createElement("div");
+            failed.className = "moontalk-empty moontalk-unreachable";
+            failed.textContent = "Cannot reach the MoonCloud server.";
+            list.appendChild(failed);
+            return;
+        }
+        if (!messages || !messages.length) {
+            const empty = document.createElement("div");
+            empty.className = "moontalk-empty";
+            // "No messages yet." is a claim about the board. Without consent it was never read, so
+            // the card says what is true instead: nothing was asked.
+            empty.textContent = asked ? "No messages yet."
+                                      : "Turn on consent to read the board.";
+            list.appendChild(empty);
+            return;
+        }
+        // Oldest at the top, like every chat: the API returns newest first for paging.
+        for (const m of messages.slice().reverse()) {
+            const row = document.createElement("div");
+            row.className = "moontalk-message";
+
+            const who = document.createElement("span");
+            // `named` says whether the sender consented to share a device name. Without it the
+            // server sends the first 8 characters of the installation id, shown in a monospace
+            // face so it reads as an identifier rather than as somebody's name.
+            who.className = m.named ? "moontalk-from" : "moontalk-from moontalk-from-id";
+            who.textContent = m.from;
+            // A named sender keeps its id in brackets: a device name is whatever someone typed, so
+            // two devices can share one, and the id is what tells them apart.
+            if (m.named && m.senderId) {
+                const id = document.createElement("span");
+                id.className = "moontalk-from-id";
+                id.textContent = `(${m.senderId})`;
+                who.appendChild(document.createTextNode(" "));
+                who.appendChild(id);
+            }
+
+            const text = document.createElement("span");
+            text.className = "moontalk-text";
+            text.textContent = m.text;   // textContent, never innerHTML: this is a stranger's text
+
+            const when = document.createElement("span");
+            when.className = "moontalk-when";
+            when.textContent = new Date(m.sentAt).toLocaleTimeString([], {
+                hour: "2-digit", minute: "2-digit",
+            });
+            when.title = new Date(m.sentAt).toLocaleString();
+
+            row.append(who, text, when);
+            list.appendChild(row);
+        }
+        // Oldest first means the newest is at the BOTTOM of a scrolling box, so a refresh that did
+        // not scroll left the message someone just sent out of sight.
+        list.scrollTop = list.scrollHeight;
+    };
+
+    // A card is rebuilt on every unrelated state push, so a fetch per build is a request storm
+    // against a device serving its own UI. Cached for the session like the stats are, and the
+    // refresh button forces a re-read: `force` is what tells the two apart.
+    const load = (force) => {
+        // Same rule as Stats: without consent the board is not fetched at all. The cache is CLEARED
+        // rather than left holding the empty draw, because a cached `[]` from an unconsented card is
+        // not an answer: consenting rebuilt the card, the cache hit below returned that empty array,
+        // and the board stayed blank until a manual refresh.
+        if (!consented(mod)) { moonTalkCache = null; draw([], true, false); return; }
+        if (!force && moonTalkCache) { draw(moonTalkCache, true); return; }
+        const generation = moonCloudGeneration;
+        fetch(kMoonCloudUrl + "/api/talk", { cache: "no-store" })
+            .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+            .then(d => {
+                if (generation !== moonCloudGeneration) return;   // a newer write superseded this
+                moonTalkCache = d?.messages ?? [];
+                draw(moonTalkCache, true);
+            })
+            // Not cached: a failure is a fact about right now, so the next build retries.
+            .catch(() => draw(null, false));
+    };
+    // Created AFTER `load`, which is a const arrow: a listener attached above its declaration
+    // throws on click rather than hoisting. Only with consent, since without it nothing is fetched
+    // and a button that does nothing is worse than none.
+    if (consented(mod)) {
+        const refresh = document.createElement("button");
+        refresh.className = "mooncloud-refresh";
+        refresh.textContent = "\u21bb";
+        refresh.title = "Refresh";
+        refresh.addEventListener("click", () => load(true));
+        header.appendChild(refresh);
+    }
+
+    load(false);
+}
+
 function renderFileManager(mod, host) {
     const ctrl = (n) => (mod.controls || []).find(c => c.name === n);
     const st = fmState(mod);
@@ -6422,9 +7260,9 @@ function fmMountEditor(host, relPath, opts = {}) {
     // The footer carries Save and the status line, UNLESS the host supplies both: a card already has
     // a toolbar of file actions, so they belong there, and an empty strip under the box is a gap
     // rather than a layout.
-    // Highlighting is for SCRIPTS: a .mle/.mll/.mlm is MoonLive, which is C++, so Prism's own C++
+    // Highlighting is for SCRIPTS: a .mle/.mll/.mlm/.mls/.mlp is MoonLive, which is C++, so Prism's own C++
     // grammar paints it with nothing of ours to maintain. A .json or a .txt edits as plain text.
-    const hlOn = /\.(mle|mll|mlm)$/i.test(relPath || "");
+    const hlOn = /\.(mle|mll|mlm|mls|mlp)$/i.test(relPath || "");
 
     // The highlight layer sits BEHIND a transparent textarea, both sharing one box and one set of
     // font metrics: a textarea cannot color its own text, and this is the standard way around that.
@@ -6581,6 +7419,8 @@ function fmMountEditor(host, relPath, opts = {}) {
     // the check while the first request is still in flight. Saves are serialized rather than
     // dropped, because the second trigger may carry newer keystrokes than the first.
     let saving = null;
+    /// The file's text as it was LOADED, for the no-op fork check in save().
+    let loadedText = null;
     const save = () => {
         if (body.readOnly || !dirty || !path) return Promise.resolve();
         saving = (saving || Promise.resolve()).then(async () => {
@@ -6588,6 +7428,17 @@ function fmMountEditor(host, relPath, opts = {}) {
             const saved = body.value;                       // what THIS request writes
             status.textContent = "saving…";
             const dest = savePath ? savePath(path) : path;
+            // A FORK THAT CHANGES NOTHING IS NOT A FORK. When the destination differs from the file
+            // that was read, saving creates a user copy that shadows the shipped one forever: every
+            // later library update becomes invisible behind it. If the text is byte-identical to
+            // what was read, there is nothing to shadow it WITH, so write nothing and let the
+            // shipped copy keep winning. Opening a script and pressing Save is otherwise enough to
+            // pin it at today's version, which is the trap this whole mechanism exists to avoid.
+            if (dest !== path && loadedText !== null && saved === loadedText) {
+                status.textContent = "unchanged";
+                setDirty(false);
+                return;
+            }
             const r = await fmSaveFrom(body, dest);
             status.textContent = r.message;
             // A failed write (no space, a vanished path) must not be silent. The modal shows it on
@@ -6598,9 +7449,15 @@ function fmMountEditor(host, relPath, opts = {}) {
             // request means there are newer bytes on screen that nobody has saved yet.
             if (r.ok && body.value === saved) {
                 setDirty(false);
+                // The fork EXISTS now, so this pane is editing it rather than the file it came
+                // from. Without this the no-op guard above keeps comparing against the shipped
+                // copy: editing back to the original text would report "unchanged" and skip the
+                // write, leaving the user's file holding the previous edit.
+                path = dest;
+                loadedText = saved;
                 // Report where it LANDED, not where it came from: a caller that refreshes a listing
                 // needs to know a new file now exists in the user's directory.
-                if (onSaved) onSaved(savePath ? savePath(path) : path);
+                if (onSaved) onSaved(dest);
             }
         });
         return saving;
@@ -6648,6 +7505,9 @@ function fmMountEditor(host, relPath, opts = {}) {
         }
         const r = await fmLoadInto(body, path, size, ac.signal);
         if (r.aborted || ac !== loadAbort) return;   // a newer load started: that one owns the pane
+        // What arrived, so save() can tell a real edit from an untouched file. Only used when the
+        // save destination differs from the read path (a factory script being forked).
+        loadedText = body.value;
         body.readOnly = r.readOnly;
         saveBtn.disabled = r.readOnly;
         paintHighlight();          // the file just arrived: paint what it says
@@ -6702,7 +7562,8 @@ async function openFileEditor(relPath, expectedSize, moduleName) {
     // and a compile failure that happened before the modal opened would otherwise show unmarked
     // until the module recompiles. The row is the card's, so it holds the same text either way.
     if (moduleName) {
-        const row = document.querySelector(`[data-status-mid="${cssEscape(moduleName)}"] .status-value`);
+        const row = (queryByName(`[data-status-mid="${cssEscape(moduleName)}"]`, "data-status-mid", moduleName)
+            || {}).querySelector?.(".status-value");
         if (row) ed.markError(row.textContent);
     }
     dlg.showModal();
@@ -6724,3 +7585,690 @@ async function openFileEditor(relPath, expectedSize, moduleName) {
 // ---------------------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", init);
+
+
+/// The palette editor: a gradient strip whose stops are dragged, added and removed, plus the
+/// pickers behind them. Lifted out of createControl's switch, where its 180 lines and the
+/// filepath case's 496 made a dispatch table read as an implementation.
+///
+/// Same shape as buildKnob / buildListEntries / buildListPads above: one control type, one
+/// function, taking exactly what it needs from the row createControl already built.
+function buildPaletteControl(row, key, def, moduleName, ctrl) {
+    // A color-palette dropdown where EVERY option shows its own gradient: so the colors
+    // are visible before selecting, not just after. A native <select> can't do this
+    // (browsers ignore a gradient background on <option>, and the macOS popup is OS-drawn),
+    // so this is a custom dropdown: a trigger button (selected swatch + name + caret) that
+    // toggles a list of styled rows, each a gradient swatch + name. The value still rides as
+    // the option index. Prior art: MoonLight's palette control (same native-select limit).
+    const opts = ctrl.options || [];
+    const gradientFor = (i) => paletteGradientCss((opts[i] || {}).colors);
+    const wrap = document.createElement("div");
+    wrap.className = "palette-control";
+    wrap.dataset.mid = moduleName;
+    wrap.dataset.key = ctrl.name;
+    wrap.dataset.value = ctrl.value;
+
+    // Trigger: shows the currently-selected palette (swatch + name) and opens the list.
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "palette-trigger";
+    const triSwatch = document.createElement("span");
+    triSwatch.className = "palette-swatch";
+    // The selected palette's emoji, beside the swatch, exactly as a module card shows its
+    // type's emoji: the closed control should say what KIND of palette is running (scripted
+    // or built-in, warm or cold) without opening the list to find out.
+    const triEmoji = document.createElement("span");
+    triEmoji.className = "palette-emoji";
+    const triName = document.createElement("span");
+    triName.className = "palette-name";
+    const caret = document.createElement("span");
+    caret.className = "palette-caret";
+    caret.textContent = "▾";
+    const paintTrigger = (i) => {
+        const o = opts[i] || {};
+        triSwatch.style.background = gradientFor(i);
+        triEmoji.textContent = (o.live ? SCRIPTED_EMOJI : "") + (o.tags || "");
+        triName.textContent = o.name || String(i);
+    };
+    paintTrigger(ctrl.value);
+    trigger.append(triSwatch, triEmoji, triName, caret);
+
+    // The LIST is the shared picker, the same widget the module and script pickers use, so a
+    // palette gets search and emoji-chip filtering for free rather than through a second
+    // hand-rolled dropdown that would have to grow both. The trigger above stays: it is what
+    // makes a palette control recognizable at a glance, and a picker row cannot show the
+    // current selection while it is closed.
+    //
+    // Rows carry `colors`, which is what makes the picker paint a gradient beside each name;
+    // every other list passes none and is unchanged.
+    // Factory palettes the device does NOT hold yet, offered alongside the ones it does:
+    // without this a scripted palette can only be chosen once it is already downloaded, so
+    // there is nothing to select in order TO download it. Same contract the script pickers
+    // give every other MoonLive role.
+    //
+    // They sit LAST, after the local live palettes, because a palette is chosen by INDEX and
+    // that index is what the knob and Home Assistant step through. Renumbering is confined
+    // to the live section, which moves only when someone adds or removes a script.
+    const remotePalettes = () => {
+        const names = ((mlCatalog || {}).palettes || {}).names || [];
+        const tags = ((mlCatalog || {}).palettes || {}).tags || [];
+        // BOTH sides stripped of the extension before comparing: the device publishes a
+        // live palette by its full filename ("drift.mlp") and so does the catalog, but
+        // stripping only one side matched nothing, so every already-downloaded palette
+        // showed a second time as a "download me" row.
+        const bare = (s) => String(s).replace(/\.mlp$/, "");
+        const have = new Set(opts.filter(o => o.live).map(o => bare(o.name)));
+        return names.map((n, i) => ({ name: n, tags: tags[i] || "" }))
+                    .filter(r => !have.has(bare(r.name)));
+    };
+    const openList = async () => {
+        // The catalog is fetched lazily and cached, so ask for it BEFORE building the list:
+        // on the first open mlCatalog is still null and every remote row would be missing.
+        // A failure (offline device) is not fatal: the list falls back to what is local.
+        await mlFetchCatalog().catch(() => {});
+        const remote = remotePalettes();
+        const local = opts.map((o, i) => ({
+            name: String(i),                 // the VALUE: a palette is chosen by index
+            displayName: o.name || String(i),
+            // The SCRIPTED marker is the same 📝 a scripted effect carries, prepended
+            // here rather than baked into the device's tag string: it is a UI fact
+            // ("this row runs a script"), and the scripted/compiled chips must filter
+            // palettes by the same rule they filter every other list by.
+            tags: (o.live ? SCRIPTED_EMOJI : "") + (o.tags || ""),
+            colors: o.colors || "",
+            role: "palette",
+        }));
+        // `colors: ""` is what marks a row as not-yet-downloaded: its swatch renders as a
+        // placeholder, because a scripted palette has no gradient until it has run once.
+        const items = local.concat(remote.map(r => ({
+            name: "\u0000" + r.name,        // not an index: a NAME, to download then select
+            displayName: r.name.replace(/\.mlp$/, ""),
+            tags: SCRIPTED_EMOJI + (r.tags || ""),
+            colors: "",
+            role: "palette",
+        })));
+        openPicker(trigger, {
+            items,
+            actionLabel: "use",
+            keepOrder: true,          // index order: the knob and HA step through it
+            currentType: String(ctrl.value),
+            commit: async (name) => {
+                // A remote row carries a filename, not an index: fetch it, then let the
+                // rebuilt control (the device re-lists its .mlp files) select it by index.
+                if (name.charCodeAt(0) === 0) {
+                    const file = name.slice(1);
+                    try {
+                        await mlDownloadScript(file, "palettes");
+                    } catch (e) {
+                        alert("could not download " + file + ": " + (e && e.message ? e.message : e));
+                        return;
+                    }
+                    // The write itself republishes the option list: POST /api/file ends in
+                    // applyFileChanged() -> requestPrepareTree() -> Drivers::prepare(), which
+                    // re-lists the `.mlp` files. So one fetch after the download sees the new
+                    // palette and it selects in a single click, like every other script role.
+                    mlCatalog = null;               // it is local now: drop the cached list
+                    // Match on the FILENAME, extension included: the device publishes each
+                    // scripted palette under its file name (`spectrum.mlp`), and only the
+                    // picker's displayName drops the extension. Comparing the stripped form
+                    // never matched, so a download that worked ended in an error.
+                    const findCtrl = () => {
+                        const mod = allModules().find(m => m.name === moduleName);
+                        return mod && Array.isArray(mod.controls)
+                             && mod.controls.find(x => x.name === ctrl.name);
+                    };
+                    await refetchState();
+                    const idx = ((findCtrl() || {}).options || [])
+                                  .findIndex(o => o.name === file);
+                    if (idx < 0) {
+                        // Only reachable if the device accepted the write and then did not
+                        // list the file, which is a device-side fault rather than a wait.
+                        alert("could not select " + file + ": the device saved it but does not list it");
+                        return;
+                    }
+                    const fresh = queryByName(`.palette-control[data-mid="${cssEscape(moduleName)}"][data-key="${ctrl.name}"]`, "data-mid", moduleName);
+                    if (fresh) fresh.dataset.value = idx;
+                    // Repaint the trigger from findCtrl(), NOT paintTrigger()/opts: opts is
+                    // the array captured when this control was first rendered, and the palette
+                    // just downloaded is not in it (refetchState() updated state, not this
+                    // closure). Reading the wrong array would paint a stray row or a blank one,
+                    // so this mirrors updateModuleControls' own "palette" case: the same three
+                    // fields, keyed off the freshly-fetched control.
+                    const freshCtrl = ((findCtrl() || {}).options || [])[idx];
+                    if (fresh && freshCtrl) {
+                        const triSwatch = fresh.querySelector(".palette-trigger .palette-swatch");
+                        if (triSwatch) triSwatch.style.background = paletteGradientCss(freshCtrl.colors || "");
+                        const triEmoji = fresh.querySelector(".palette-trigger .palette-emoji");
+                        if (triEmoji) triEmoji.textContent = (freshCtrl.live ? SCRIPTED_EMOJI : "") + (freshCtrl.tags || "");
+                        const triName = fresh.querySelector(".palette-trigger .palette-name");
+                        if (triName) setText(triName, freshCtrl.name || String(idx));
+                    }
+                    // Stamped the same as the normal (already-local) branch below: without it a
+                    // WS state push landing in this window could overwrite the selection before
+                    // the next render even reads it.
+                    dragTs[key] = Date.now();
+                    sendControl(moduleName, ctrl.name, idx);
+                    return;
+                }
+                const i = Number(name);
+                wrap.dataset.value = i;
+                paintTrigger(i);
+                dragTs[key] = Date.now();
+                sendControl(moduleName, ctrl.name, i);
+            },
+        });
+    };
+
+    trigger.addEventListener("click", openList);
+
+    wrap.append(trigger);
+    row.appendChild(wrap);
+    // Reset to the default palette like every other persisted control: re-paint the trigger
+    // (sendControl is handled by appendResetButton). No list to re-mark: the picker builds
+    // its rows fresh each time it opens, from the current value.
+    appendResetButton(row, moduleName, ctrl, def, () => {
+        wrap.dataset.value = def;
+        paintTrigger(def);
+    });
+    return row;
+}
+
+/// The script picker: the file list, the inline editor, and the fork handling that decides
+/// whether a save shadows a shipped script. The largest single control by far, and the reason
+/// createControl had grown to 1252 lines.
+function buildFilePathControl(row, label, key, moduleName, ctrl) {
+    // A file NAME plus an editor for that file's contents. The value travels through
+    // /api/control like any text control; the BODY never does (it cannot: only /api/file
+    // may exceed the request buffer), so the pane below reads and writes it directly.
+    //
+    // `dir` and `ext` come from the module that declared the control, so nothing here knows
+    // what kind of file this is.
+    const dir = ctrl.dir || "";
+    const ext = ctrl.ext || "";
+    // No `dir` means the name IS the path: joinFsPath("", n) would return "/n" and point
+    // at the filesystem root instead of the file the module named.
+    const pathOf = (n) => (n ? (dir ? joinFsPath(dir, n) : n) : "");
+    // Where a script actually IS, which is not always `dir`: a factory script sits in the
+    // catalog's directory until an edit forks it into the user's. The device resolves the
+    // same way (user copy first), so the editor has to look in both or it would open an
+    // empty box for a script that is plainly listed.
+    const scriptPathOf = async (n) => {
+        if (!n || !dir) return pathOf(n);
+        const local = joinFsPath(dir, n);
+        if (!mlGroupForExt(ext)) return local;
+        try {
+            const here = await fmFetchDir(dir).catch(() => []);
+            if (here.some(e => !e.isDir && e.name === n)) return local;
+            const cat = await mlFetchCatalog();
+            return joinFsPath(cat.dir, n);
+        } catch (_) { return local; }
+    };
+
+    const stack = document.createElement("div");
+    stack.className = "control-fileedit-stack";
+    row.appendChild(stack);
+
+    const bar = document.createElement("div");
+    bar.className = "fileedit-bar";
+
+    // A select-SHAPED button, opening the shared picker. It reads as a select (the current
+    // name, then the ⌄ affordance) and behaves as one, but the list it opens is the same
+    // widget the module picker uses: search, emoji chips, keyboard, one row per script.
+    // A native <select> can only render plain text, so a script's emoji and dimension had
+    // nowhere to go.
+    //
+    // It presents the SAME surface a <select> does (`value`, `options`, `disabled`, and a
+    // `change` event), so everything around it (the fork/share/delete labels, the editor
+    // load, the download-on-pick) is unchanged and unaware.
+    const picker = document.createElement("button");
+    picker.type = "button";
+    picker.className = "control-select fileedit-pick";
+    picker.dataset.mid = moduleName;
+    picker.dataset.key = ctrl.name;
+    // A READ-ONLY filepath names the file something else chose, so it must not offer a
+    // second way to choose: the Drivers palette editor is the case, where `palette` owns the
+    // selection and this pane only edits what that selection resolved to. Two selectors for
+    // one value is how they end up disagreeing.
+    if (ctrl.readonly) { picker.disabled = true; picker.classList.add("is-readonly"); }
+    // The options, as data. `fillPicker` appends option elements exactly as it did to the
+    // <select>; they are never rendered, they are the list the modal is built from.
+    picker.options = [];
+    picker.appendChild = (o) => { picker.options.push(o); return o; };
+    const paintPicker = () => {
+        const cur = picker.options.find(o => o.value === picker._value);
+        picker.textContent = cur ? cur.textContent : "(none)";
+        const caret = document.createElement("span");
+        caret.className = "fileedit-pick-caret";
+        caret.textContent = "\u2304";        // ⌄, the select affordance
+        picker.append(caret);
+    };
+    Object.defineProperty(picker, "value", {
+        get: () => picker._value ?? "",
+        set: (v) => { picker._value = String(v ?? ""); paintPicker(); },
+    });
+    picker._value = "";
+    // innerHTML = "" is how fillPicker clears the list; keep that meaning.
+    Object.defineProperty(picker, "innerHTML", {
+        set: (v) => { if (v === "") { picker.options = []; picker.replaceChildren(); } },
+        get: () => "",
+    });
+    // Which scripts this picker can offer that are not on the device yet. Names only:
+    // picking one downloads it. Empty for a filepath control that is not a script picker.
+    let remote = [];
+    // Local names that also exist in the catalog: a user edit shadowing a factory script.
+    let forks = new Set();
+    // Every name the catalog ships for this role, whether or not it is on the device.
+    let catalogNames = new Set();
+    // Names in the USER's directory: written or edited here, so worth proposing upstream.
+    let localNames = new Set();
+    const fillPicker = async () => {
+        picker.innerHTML = "";
+        const none = document.createElement("option");
+        none.value = ""; none.textContent = "(none)";
+        picker.appendChild(none);
+        let names = [];
+        if (dir) {
+            try {
+                const entries = await fmFetchDir(dir);
+                names = entries.filter(e => !e.isDir && (!ext || e.name.endsWith(ext)))
+                               .map(e => e.name);
+            } catch (_) { /* an unreachable directory leaves just "none" */ }
+        }
+        // The user's OWN files, before the factory listing is merged in below: a name here
+        // is something they wrote or edited, which is what the share button offers.
+        localNames = new Set(names);
+        // A script picker also lists the FACTORY directory, where downloads land. A name in
+        // both is the user's edit shadowing the factory copy, which is what the device
+        // resolves too, so it appears once.
+        const group = mlGroupForExt(ext);
+        let cat = null;
+        if (group) {
+            try {
+                cat = await mlFetchCatalog();
+                const factory = await fmFetchDir(cat.dir, true).catch(() => []);
+                for (const e of factory)
+                    if (!e.isDir && e.name.endsWith(ext) && !names.includes(e.name))
+                        names.push(e.name);
+            } catch (_) { /* no catalog: the picker still lists what is here */ }
+        }
+        names.sort();
+        // A local name that ALSO exists in the catalog is a fork: the user edited a factory
+        // script, so their copy shadows one that can be restored. Deleting it is a revert,
+        // not a loss, and the delete button says so.
+        // localNames, NOT names: by here `names` also carries the factory listing, so a
+        // script that was downloaded and never touched counted as a fork. It showed the
+        // revert arrow for an edit that does not exist, and reverting it deleted a
+        // /moonlive path with nothing at it.
+        forks = cat ? new Set(((cat[group] || {}).names || []).filter(n => localNames.has(n)))
+                    : new Set();
+        // Everything the catalog offers that is not here yet, listed after the local ones
+        // so a user's own scripts stay at the top of the list.
+        remote = cat ? ((cat[group] || {}).names || []).filter(n => !names.includes(n)) : [];
+        // Every name the library ships for this role, downloaded or not: what the share
+        // button uses to tell a user's own script from one of ours.
+        catalogNames = new Set(cat ? ((cat[group] || {}).names || []) : []);
+
+        // The current value may name a file the listing does not have (deleted underneath,
+        // or a directory that could not be read). Keep it selectable so the card still
+        // shows what the module is pointing at, rather than silently appearing unset.
+        const cur = String(ctrl.value ?? "");
+        if (cur && !names.includes(cur) && !remote.includes(cur)) names.unshift(cur);
+        // What the catalog says each factory script is: its dimension and its own emoji,
+        // read from the script's `int dimensions()` / `string tags()` at build time. So a
+        // row reads like the module picker's rows do, BEFORE the script is downloaded. A
+        // script the catalog does not carry (the user's own) simply has no prefix.
+        const decl = (n) => {
+            const g = cat && cat[group];
+            if (!g || !g.names) return "";
+            const i = g.names.indexOf(n);
+            if (i < 0) return "";
+            const marks = [];
+            if (g.tags && g.tags[i]) marks.push(g.tags[i]);
+            if (g.dim && DIM_EMOJI[g.dim[i]]) marks.push(DIM_EMOJI[g.dim[i]]);
+            return marks.length ? marks.join("") + " " : "";
+        };
+        for (const n of names) {
+            const o = document.createElement("option");
+            o.value = n; o.textContent = decl(n) + n;
+            picker.appendChild(o);
+        }
+        // Marked, because picking one costs a download and can fail. One list rather than
+        // two groups: to the user it is one library, and where a script happens to live is
+        // the device's business.
+        for (const n of remote) {
+            const o = document.createElement("option");
+            o.value = n;
+            o.textContent = "\u2601 " + decl(n) + n;   // cloud: not on this device yet
+            picker.appendChild(o);
+        }
+        picker.value = cur;
+        refreshDelLabel();
+    };
+
+    // Save sits with the other file actions rather than in a row of its own: the card is
+    // already narrow, and the dot on it is what marks unsaved work.
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "card-btn fm-editor-save fileedit-glyph-lg";
+    // U+2398, the ISO "store" symbol. Not an arrow: ↥ and ↧ already mean upload and
+    // download here, and ⤓ downloads a file in the tree, so an arrow would read as
+    // "fetch this" on a button that writes. Not ✓ either, which is the ARMED DELETE
+    // state one button along.
+    saveBtn.textContent = "⎘";
+    saveBtn.title = "Save (or click away, or Ctrl/Cmd+S)";
+
+    // The same modal the File Manager opens from a file row: one editor, reached two ways,
+    // so a script that needs room gets the full-size box without a second implementation.
+    const popBtn = document.createElement("button");
+    popBtn.className = "card-btn fileedit-glyph-lg";
+    popBtn.textContent = "⤢";                  // expand, the usual glyph for a bigger view
+    popBtn.title = "Open in a larger window";
+
+    // No second status line: the module's own `status` control already reports what the
+    // save produced ("2036 B", or the parse error), and it is the authoritative one because
+    // the DEVICE writes it. A browser-side copy said the same thing in different words and
+    // could only ever disagree. What the browser knows and the device cannot (unsaved work,
+    // a save in flight, a failed write) rides the Save button instead: its dot, its
+    // disabled state, and its tooltip.
+    const statusEl = document.createElement("span");
+    statusEl.hidden = true;
+
+    const newBtn = document.createElement("button");
+    newBtn.className = "card-btn";
+    newBtn.textContent = "+";                  // the same + the module tree adds with
+    newBtn.title = "New script";
+    const delBtn = document.createElement("button");
+    delBtn.className = "card-btn card-btn-del";
+    delBtn.textContent = "×";                  // the card's own delete, red on the symbol
+    delBtn.title = "Delete this script";
+    // The SAME button reverts a factory script, because it is the same operation: the
+    // editor only ever saves to the user directory, so an edited factory script is a second
+    // file shadowing the first, and removing it brings the original back. Saying "delete"
+    // there would misdescribe it, and a second button would make one act look like two.
+    const shareBtn = document.createElement("button");
+    shareBtn.className = "card-btn";
+    shareBtn.textContent = "\u2197";           // north-east arrow: it leaves for somewhere else
+    shareBtn.title = "Propose this script for the shared library";
+
+    function refreshDelLabel() {
+        const isFork = forks.has(picker.value);
+        delBtn.textContent = isFork ? "\u21ba" : "\u00d7";   // undo arrow, or the delete cross
+        delBtn.title = isFork
+            ? "Revert to the shipped version (discards your changes)"
+            : "Delete this script";
+        delBtn.classList.toggle("card-btn-del", !isFork);
+        // Offered for anything the user WROTE, which is a script of their own or a fork of
+        // a shipped one: both are a change worth sending back, and the flow differs only in
+        // which GitHub URL it opens. NOT offered for an untouched factory copy, where the
+        // file on the device is byte-identical to the one in the repo and a pull request
+        // would propose no change at all.
+        const known = catalogNames.has(picker.value);
+        const edited = localNames.has(picker.value);   // it sits in the USER directory
+        shareBtn.hidden = !picker.value || !mlGroupForExt(ext) || !edited;
+        shareBtn.title = known
+            ? "Propose your changes to the shared library"
+            : "Propose this script for the shared library";
+    }
+    // Share: open a pull request adding this script to the library.
+    //
+    // GitHub's "new file" URL takes the path and the contents as query parameters and opens
+    // its editor pre-filled, forking the repo on the user's behalf when they propose it. So
+    // a script someone wrote on their own device reaches the library with one click and no
+    // API, no token and nothing stored here.
+    //
+    // Only for scripts a user WROTE: a factory script is already in the library, and a fork
+    // of one would open a PR that recreates a file that exists.
+    shareBtn.addEventListener("click", async () => {
+        const name = picker.value;
+        const group = mlGroupForExt(ext);
+        if (!name || !group) return;
+        await editor.save();                  // propose what is on screen, not the last save
+        // A save that failed leaves the pane dirty, and the read below would then fetch the
+        // PREVIOUS text from the device: the user would be proposing something other than
+        // what they are looking at, which is the one outcome worth refusing outright.
+        if (editor.isDirty()) {
+            alert("Save the script first: it still has unsaved changes.");
+            return;
+        }
+        let text = "";
+        try {
+            const res = await fetch("/api/file?path=" + encodeURIComponent(await scriptPathOf(name)));
+            if (!res.ok) throw new Error(await errorMessage(res));
+            text = await res.text();
+        } catch (err) { alert("could not read the script: " + err.message); return; }
+
+        const cat = await mlFetchCatalog().catch(() => null);
+        const folder = cat && cat[group] ? cat[group].folder : group;
+        // A name the library already ships is an EDIT of that file; anything else is a new
+        // one. GitHub has a flow for each, and both fork on the user's behalf when they
+        // propose the change, so neither needs write access to this repo.
+        const repoPath = "moonlive/" + folder + "/" + name;
+        const url = catalogNames.has(name)
+            ? "https://github.com/MoonModules/projectMM/edit/main/" + repoPath
+              + "?value=" + encodeURIComponent(text)
+            : "https://github.com/MoonModules/projectMM/new/main"
+              + "?filename=" + encodeURIComponent(repoPath)
+              + "&value=" + encodeURIComponent(text);
+        // The script rides in the query string, and browsers stop honoring a URL somewhere
+        // past ~8 KB. Every shipped script is under 2.5 KB so this is headroom rather than a
+        // real limit, but a long one would otherwise open a truncated editor and look fine.
+        if (url.length > 7000) {
+            await navigator.clipboard.writeText(text).catch(() => {});
+            alert("This script is too long to send through a link.\n\n"
+                + "It has been copied to your clipboard: open\n"
+                + "github.com/MoonModules/projectMM, add a file under moonlive/" + folder
+                + "/ and paste it there.");
+            return;
+        }
+        window.open(url, "_blank", "noopener");
+    });
+
+    bar.appendChild(picker);
+    const tools = document.createElement("div");
+    tools.className = "fileedit-tools";
+    tools.appendChild(saveBtn);
+    tools.appendChild(popBtn);
+    if (dir) { tools.appendChild(newBtn); tools.appendChild(shareBtn); tools.appendChild(delBtn); }
+    bar.appendChild(tools);
+    stack.appendChild(bar);
+
+    const pane = document.createElement("div");
+    pane.className = "control-fileedit";
+    stack.appendChild(pane);
+
+    // Saving re-derives on the device: a written file asks the tree to re-prepare, so the
+    // module recompiles or reloads on its own. The browser sends nothing extra.
+    const editor = fmMountEditor(pane, pathOf(ctrl.value), {
+        sizeKey: key,
+        // The status this module is ALREADY reporting, so a card built while its script is
+        // broken shows the marked line straight away rather than waiting for a recompile.
+        // The EDITOR applies it once the file has loaded: marking at construction would
+        // convert the offset against an empty textarea and put every error on line 1.
+        initialStatus: (findModule(moduleName) || {}).status || "",
+        saveButton: saveBtn,
+        statusEl,
+        // Editing a factory script FORKS it: the read came from the library directory, but
+        // the write goes to the user's, so the shipped copy stays untouched and the new one
+        // shadows it. Without this an edit overwrote the library copy and there was nothing
+        // left to revert to.
+        savePath: (readPath) => {
+            if (!dir) return readPath;
+            const base = readPath.slice(readPath.lastIndexOf("/") + 1);
+            return base ? joinFsPath(dir, base) : readPath;
+        },
+        // A save may have just created the fork, so what the picker thinks is local is out
+        // of date: re-read it, which is also what turns the delete button into revert.
+        onSaved: (written) => {
+            if (!mlGroupForExt(ext)) return;
+            if (!written.startsWith(dir + "/")) return;
+            const sel = picker.value;
+            fillPicker().then(() => { picker.value = sel; refreshDelLabel(); });
+        },
+    });
+    mlEditorAdd(moduleName, editor);
+    // Apply the status the card is ALREADY showing: registration only catches the next one,
+    // so a card rendered while its script is broken would report the error with no line
+    // marked until something recompiled. The modal does the same on open.
+    {
+        const row = (queryByName(`[data-status-mid="${cssEscape(moduleName)}"]`, "data-status-mid", moduleName)
+            || {}).querySelector?.(".status-value");
+        if (row) editor.markError(row.textContent);
+    }
+
+    // Re-read after the modal closes: it edits the same file through the same endpoints, so
+    // whatever it saved is what this pane should now show.
+    // One row per script, shaped like a type so the shared picker can render it: the name is
+    // what the control stores, the dimension and emoji come from the catalog, and the role
+    // is what the picker prints on the right.
+    const openScriptPicker = async () => {
+        if (picker.disabled) return;
+        const group = mlGroupForExt(ext);
+        const cat = group ? await mlFetchCatalog().catch(() => null) : null;
+        const g = (cat && cat[group]) || {};
+        const roleWord = group ? group.replace(/s$/, "") : "file";
+        const seen = new Set();
+        const items = [];
+        const add = (n, remoteFlag) => {
+            if (seen.has(n)) return;
+            seen.add(n);
+            const i = (g.names || []).indexOf(n);
+            items.push({
+                name: n,
+                // The cloud marks a script the device does not hold yet: picking it costs a
+                // download, which is worth knowing before choosing.
+                displayName: (remoteFlag ? "\u2601 " : "") + n,
+                role: roleWord,
+                tags: i >= 0 && g.tags ? (g.tags[i] || "") : "",
+                dim: i >= 0 && g.dim ? g.dim[i] : 0,
+            });
+        };
+        for (const o of picker.options) if (o.value) add(o.value, remote.includes(o.value));
+        for (const n of (g.names || [])) add(n, !localNames.has(n) && remote.includes(n));
+        if (!items.length) return;
+        // Anchored to the field itself: the picker opens under it as a modal, sized and
+        // placed by openPicker rather than by whatever element it hangs from.
+        openPicker(picker, {
+            items,
+            actionLabel: "use",
+            currentType: picker.value,
+            // Route through the <select>'s own change handler, which already downloads a
+            // remote script, updates the delete label and loads the editor. One path for
+            // both ways of choosing.
+            commit: (name) => {
+                picker.value = name;
+                picker.dispatchEvent(new Event("change"));
+            },
+        });
+    };
+    picker.addEventListener("click", openScriptPicker);
+
+    popBtn.addEventListener("click", async () => {
+        if (!picker.value) return;
+        // Flush unsaved edits first: the modal loads the file from the device, so opening
+        // it on a dirty pane would show stale bytes and then save them back over the edit.
+        // save() RESOLVES on a failed write (it reports, it does not throw), so the flush is
+        // only trustworthy if the pane came clean: opening anyway would discard the edit.
+        await editor.save();
+        if (editor.isDirty()) { alert("Not opening: this script still has unsaved changes."); return; }
+        const p = await scriptPathOf(picker.value);
+        await openFileEditor(p, undefined, moduleName);
+        await editor.load(p);
+    });
+
+    picker.addEventListener("change", async () => {
+        // Same reason as the modal above: switching files discards the edit otherwise, and
+        // a save that failed leaves the pane dirty while resolving normally.
+        await editor.save();
+        if (editor.isDirty()) {
+            alert("Not switching: this script still has unsaved changes.");
+            picker.value = String(ctrl.value ?? "");
+            return;
+        }
+        const chosen = picker.value;
+        // A factory script the device does not hold yet: download it BEFORE selecting it,
+        // so the module never points at a file that is not there. A failure reports and
+        // puts the picker back, rather than leaving the card pointing at nothing.
+        if (remote.includes(chosen)) {
+            const previous = String(ctrl.value ?? "");
+            picker.disabled = true;
+            try {
+                await mlDownloadScript(chosen, mlGroupForExt(ext));
+            } catch (e) {
+                picker.disabled = false;
+                alert("could not download " + chosen + ": " + (e && e.message ? e.message : e));
+                picker.value = previous;
+                return;
+            }
+            picker.disabled = false;
+            await fillPicker();          // it is local now, so it loses its marker
+            picker.value = chosen;
+        }
+        refreshDelLabel();
+        dragTs[key] = Date.now();
+        sendControl(moduleName, ctrl.name, chosen);
+        editor.load(await scriptPathOf(chosen));
+    });
+
+    newBtn.addEventListener("click", async () => {
+        let name = (prompt("New file name in " + dir + ":") || "").trim();
+        if (!name) return;
+        if (ext && !name.endsWith(ext)) name += ext;    // a name without its extension is a typo
+        const r = await fmCreateFile(dir, name, ctrl.tmpl || "");
+        if (!r.ok) { alert("create file failed: " + r.message); return; }
+        await fillPicker();
+        picker.value = name;
+        dragTs[key] = Date.now();
+        sendControl(moduleName, ctrl.name, name);
+        await editor.load(pathOf(name));
+        editor.textarea.focus();
+    });
+
+    // Two clicks to delete, the same arm-then-confirm the File Manager uses for its own
+    // delete: destructive next to frequent is how people lose work.
+    armPressTwice(delBtn, async () => {
+        const victim = picker.value;
+        if (!victim) return;
+        const wasFork = forks.has(victim);
+        try {
+            // A fork is deleted from the USER directory, which is the whole revert: the
+            // factory copy underneath is what resolves afterwards. Anything else is deleted
+            // where it actually sits, because a downloaded factory script has no user copy
+            // and a DELETE on /moonlive/<name> would report a failure for a file that was
+            // never there.
+            const target = wasFork ? pathOf(victim) : await scriptPathOf(victim);
+            const res = await fetch("/api/dir?path=" + encodeURIComponent(target),
+                                    { method: "DELETE" });
+            if (!res.ok) throw new Error(await errorMessage(res));
+        } catch (err) {
+            alert((wasFork ? "revert failed: " : "delete failed: ") + err.message);
+            return;
+        }
+        await fillPicker();
+        if (wasFork) {
+            // The factory script is what resolves now, so the module keeps running: stay on
+            // it rather than unsetting the control, which is the whole point of a revert.
+            picker.value = victim;
+            refreshDelLabel();
+            dragTs[key] = Date.now();
+            sendControl(moduleName, ctrl.name, victim);
+            await editor.load(await scriptPathOf(victim));
+            return;
+        }
+        picker.value = "";
+        refreshDelLabel();
+        dragTs[key] = Date.now();
+        sendControl(moduleName, ctrl.name, "");
+        await editor.load("");
+    }, { armedText: "✓", armedTitle: "Click again to confirm" });
+
+    // The editor mounted on the USER path above, which is right for a script the user
+    // wrote and wrong for a factory one that has never been edited. Resolving needs the
+    // catalog, so it cannot happen during the synchronous mount: re-point it once the
+    // listing is in, and only when it actually resolves elsewhere.
+    fillPicker().then(async () => {
+        const cur = String(ctrl.value ?? "");
+        if (!cur || !mlGroupForExt(ext)) return;
+        const real = await scriptPathOf(cur);
+        if (real !== pathOf(cur)) await editor.load(real);
+    });
+    return row;
+}
