@@ -476,6 +476,16 @@ encode-worker-stalled latch. A page refresh reportedly did NOT revive it; toggli
 wake-up re-request, or per-driver lease state that only prepare() resets. Needs a reproduction
 with the WS uplink logged before it can be fixed.
 
+### One encode, two readers: HLS and RTSP sharing the encoder (2026-09-22)
+
+Both video drivers call `platform::encoderStart`, and the encoder is a single instance on every target: one ffmpeg child on the desktop, one hardware session on the P4. The second caller used to reconfigure the first's stream silently, so HLS kept serving at RTSP's geometry and bitrate without saying so. **Shipped instead: a claim**, so the second driver is refused with a visible status, the way a driver already reports a port another module holds. That makes the conflict impossible rather than unlikely, and it costs a guard.
+
+The better end state is the one the RTSP plan describes and the P4 already half-implements: **one encode, two readers**. `rtspTakeFrame` and `hlsSegment` read the same encoded frame today, so a device serving both would encode once and each reader would take what it needs, which is cheaper than either driver running alone twice over.
+
+What makes it a design task rather than a patch: the two drivers must **agree** on geometry, fps and bitrate, and nothing makes them agree now. HLS derives its bitrate from the grid and picks an encoder by name; RTSP takes the frames raw and names no encoder. The open questions are whose configuration wins when both are enabled, what happens when one changes `targetFps` mid-stream, and whether a reader that stops should relax the shared settings. A refcount alone answers none of those, which is why the claim ships first.
+
+Build trigger: someone wanting both streams from one device at once. Until then the claim is the honest behavior, and the refusal message names the other driver.
+
 ### HLS upscaling is cache-hostile on large walls (measured, 2026-08-28)
 
 `HlsDriver`'s `scale` control replicates each light into a scale x scale block. Measured on the

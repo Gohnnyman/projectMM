@@ -80,7 +80,7 @@ TEST_CASE("RtspSession refuses PLAY before SETUP") {
     CHECK(s.state() == mm::rtsp::State::Init);
 }
 
-// The whole conversation in order, which is what a player actually sends.
+// The whole conversation in order, which is what a player sends.
 TEST_CASE("RtspSession walks OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN") {
     mm::rtsp::Session s(7);
     answer(s, "OPTIONS rtsp://d/ RTSP/1.0\r\nCSeq: 1\r\n\r\n");
@@ -107,11 +107,15 @@ TEST_CASE("RtspSession reads CSeq whatever its casing") {
     CHECK(has(r, "CSeq: 12"));
 }
 
-// A verb this server has no answer for is refused by code, which a client reports rather than hanging on.
-TEST_CASE("RtspSession refuses a verb it does not implement") {
-    mm::rtsp::Request req;
-    CHECK_FALSE(mm::rtsp::parseRequest("PAUSE rtsp://d/ RTSP/1.0\r\nCSeq: 9\r\n\r\n",
-                                       40, &req));
+// A verb this server has no answer for is refused BY CODE, since a silent drop leaves a client waiting on a response that never comes.
+TEST_CASE("RtspSession answers a verb it does not implement with 501") {
+    mm::rtsp::Session s(1);
+    mm::rtsp::Request req;                       // an unparsed verb stays Unknown, which respond() answers
+    const char* pause = "PAUSE rtsp://d/ RTSP/1.0\r\nCSeq: 9\r\n\r\n";
+    CHECK_FALSE(mm::rtsp::parseRequest(pause, std::strlen(pause), &req));
+    char out[512] = {};
+    const size_t n = s.respond(req, nullptr, "rtsp://d/", out, sizeof(out));
+    CHECK(has(std::string(out, n), "501 Not Implemented"));
 }
 
 // The SDP names H.264 at the payload type the packets carry, and the geometry the encoder produces: a player reads the codec here before a single packet arrives.

@@ -387,10 +387,38 @@ bool encoderRunning();
 /// Stop the encoder, letting it finalize the playlist first; safe with none running.
 void encoderStop();
 
+/// The one claim slot, since there is one encoder. Shared by every caller through the accessors below.
+inline const void*& encoderOwnerSlot() {
+    static const void* owner = nullptr;
+    return owner;
+}
+
+/// Which module holds the encoder, null where none does. For a status line, never for a decision.
+inline const void* encoderOwner() { return encoderOwnerSlot(); }
+
+/// Claim the one encoder for `owner`, false where another module already holds it.
+inline bool encoderClaim(const void* owner) {
+    if (!owner) return false;
+    const void* held = encoderOwnerSlot();
+    if (held && held != owner) return false;   // another module is streaming: refused, not stolen
+    encoderOwnerSlot() = owner;
+    return true;
+}
+
+/// Release the claim where `owner` holds it, and stop the encoder; a non-holder is ignored.
+inline void encoderRelease(const void* owner) {
+    if (!owner || encoderOwnerSlot() != owner) return;   // never release another module's claim
+    encoderOwnerSlot() = nullptr;
+    encoderStop();
+}
+
 /// Serve an HLS file the platform holds in RAM; false where this platform writes segments to disk.
 bool hlsSegment(const char* name, const uint8_t** data, size_t* len);
 /// Release what hlsSegment handed out, required after every call that answered true.
 void hlsSegmentRelease();
+
+// --- The encoder is claimed, never shared ------------------------------------------------------
+// One instance per target (one ffmpeg child, one hardware session), so a second encoderStart would silently reconfigure the first driver's stream: the claim below makes that conflict visible instead.
 
 // --- RTSP output, gated by `hasRtsp`: the encoded frame itself, before any muxing ---------------
 
@@ -509,10 +537,11 @@ void mdnsShutdown();
 /// Store the DHCP hostname the next bring-up advertises; call it before ethInit or wifiStaInit.
 void setHostname(const char* name);
 
-/// Fetch a firmware image from `url` and flash it to the next OTA partition, returning at once.
+/// Fetch a firmware image from `url` and flash it to the next OTA partition, returning at once; `fallbackUrl` is tried where the first cannot be opened.
 bool http_fetch_to_ota(const char* url,
                        char* statusBuf, size_t statusBufLen,
-                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
+                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut,
+                       const char* fallbackUrl = nullptr);
 
 /// Flash a firmware image streamed from `src`, on fsWriteStream's producer shape; true once the boot pointer flipped.
 bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,

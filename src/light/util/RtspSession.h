@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>   // strtoul: parsing CSeq and the client's port out of a header
 #include <cstring>
 
 namespace mm::rtsp {
@@ -38,6 +37,22 @@ inline bool ieq(const char* a, const char* b, size_t n) {
     return true;
 }
 
+/// Compare `n` bytes at `at` against a literal, false where the buffer holds fewer: a plain strncmp would read past a client's unterminated bytes.
+inline bool matchAt(const char* buf, size_t len, size_t at, const char* lit, size_t n) {
+    return at + n <= len && std::memcmp(buf + at, lit, n) == 0;
+}
+
+/// A decimal number at `at`, bounded by the buffer and by `limit`; `limit + 1` where it overflows or holds no digit.
+inline uint32_t boundedDecimal(const char* buf, size_t len, size_t at, uint32_t limit) {
+    uint32_t v = 0;
+    size_t digits = 0;
+    for (; at < len && buf[at] >= '0' && buf[at] <= '9'; at++, digits++) {
+        v = v * 10 + static_cast<uint32_t>(buf[at] - '0');
+        if (v > limit) return limit + 1;          // refused rather than wrapped
+    }
+    return digits ? v : limit + 1;
+}
+
 /// Parse a request, false where the buffer holds no complete first line. A client orders its headers as it likes, so each is searched for by name rather than counted to.
 inline bool parseRequest(const char* buf, size_t len, Request* out) {
     if (!buf || !out || len == 0) return false;
@@ -57,24 +72,29 @@ inline bool parseRequest(const char* buf, size_t len, Request* out) {
     }
     if (out->verb == Request::Verb::Unknown) return false;
 
-    // CSeq, matched a letter at a time: RFC 2326 headers are case-insensitive throughout, and a client that sends `cseq` is as correct as one that sends `CSeq`.
-    for (size_t i = 0; i + 5 < len; i++) {
+    // CSeq, matched a letter at a time and bounded by `len`: RFC 2326 headers are case-insensitive, and these bytes arrive with no terminator to stop a scan.
+    for (size_t i = 0; i + 5 <= len; i++) {
         if (ieq(buf + i, "CSeq:", 5)) {
-            out->cseq = static_cast<uint32_t>(std::strtoul(buf + i + 5, nullptr, 10));
+            size_t at = i + 5;
+            while (at < len && (buf[at] == ' ' || buf[at] == '\t')) at++;
+            const uint32_t v = boundedDecimal(buf, len, at, 0xFFFFFFFEu);
+            if (v <= 0xFFFFFFFEu) out->cseq = v;
             break;
         }
     }
     // Transport: a unicast UDP pair, whose first port is where RTP goes.
-    for (size_t i = 0; i + 10 < len; i++) {
-        if (std::strncmp(buf + i, "client_port=", 12) == 0) {
-            out->rtpPort = static_cast<uint16_t>(std::strtoul(buf + i + 12, nullptr, 10));
+    for (size_t i = 0; i + 12 <= len; i++) {
+        if (matchAt(buf, len, i, "client_port=", 12)) {
+            // 0 stays refused (SETUP reads it as "no port"), and 65535 has no pair for RTCP.
+            const uint32_t v = boundedDecimal(buf, len, i + 12, 65534u);
+            if (v >= 1 && v <= 65534u) out->rtpPort = static_cast<uint16_t>(v);
             break;
         }
     }
-    for (size_t i = 0; i + 11 < len; i++) {
-        if (std::strncmp(buf + i, "RTP/AVP", 7) == 0) {
+    for (size_t i = 0; i + 7 <= len; i++) {
+        if (matchAt(buf, len, i, "RTP/AVP", 7)) {
             // "RTP/AVP" alone means UDP; "RTP/AVP/TCP" names the interleaved transport instead.
-            out->unicastUdp = std::strncmp(buf + i, "RTP/AVP/TCP", 11) != 0;
+            out->unicastUdp = !matchAt(buf, len, i, "RTP/AVP/TCP", 11);
             break;
         }
     }

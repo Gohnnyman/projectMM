@@ -60,7 +60,7 @@ A card on the drivers page saying which boards carry it and what to point at it,
 1. Host tests for the packetiser and the verb sequence.
 2. `ffplay rtsp://<device>/` on the bench P4, showing the wall.
 3. **The number that justifies this**: glass-to-glass delay measured the same way for HLS and RTSP, on the same P4 and the same content, photographed side by side. The claim is about five times faster, and this plan is realized when that number is measured.
-4. A second viewer connecting receives a clean refusal while the first keeps its stream.
+4. A second viewer connecting takes the session over, and the displaced one sees its connection close. This replaces the refusal the plan first called for: a player that vanishes without TEARDOWN leaves a socket open and silent, so refusing new arrivals strands the stream for as long as TCP takes to notice.
 5. The render tick holds while streaming: the encode already happens for HLS, and packetisation stays off the render thread.
 
 ## Risks

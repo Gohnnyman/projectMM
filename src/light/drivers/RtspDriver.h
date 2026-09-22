@@ -37,6 +37,9 @@ namespace mm {
 /// @card RtspDriver.png
 class RtspDriver : public DriverBase {
 public:
+    /// A destroyed driver releases the encoder, since nothing else can: a claim outliving its owner would refuse every later driver, and the next one can even land on this address.
+    ~RtspDriver() override { platform::encoderRelease(this); }
+
     /// The catalog tag this driver carries.
     static constexpr const char* kTags = "🖥️";
 
@@ -100,17 +103,26 @@ public:
         cfg.bitrateKbit = bitrateFor(pixels, targetFps);
         cfg.encoderName = nullptr;
         cfg.outDir      = nullptr;      // RTSP takes the frames rather than a directory of them
+        // Claimed before it is configured, since the other video driver's stream would otherwise continue at this one's geometry.
+        if (!platform::encoderClaim(this)) {
+            setStatus("the video encoder is in use by another driver", Severity::Error);
+            return;
+        }
         if (!platform::encoderStart(cfg)) {
+            platform::encoderRelease(this);
             setStatus("the encoder refused to start", Severity::Error);
             return;
         }
         open_ = true;
 
+        // release() first: the encoder is already running here, and a driver left so holds an encode task nothing reads.
         if (!control_.open(mm::rtsp::kPort)) {
+            release();
             setStatus("port 554 is already in use", Severity::Error);
             return;
         }
         if (!rtpOut_.open()) {
+            release();
             setStatus("no socket for the video stream", Severity::Error);
             return;
         }
@@ -128,7 +140,7 @@ public:
     /// Stop the encoder, drop the session and stop listening.
     void release() override {
         if (open_) {
-            platform::encoderStop();
+            platform::encoderRelease(this);   // stops it, and only where this driver holds the claim
             open_ = false;
         }
         client_.close();
@@ -171,16 +183,30 @@ private:
             client_  = std::move(fresh);
             session_ = mm::rtsp::Session(platform::millis());
             playing_ = false;                 // the new arrival negotiates from the start
+            reqLen_  = 0;                     // and its bytes never mix with the last viewer's
         }
         if (!client_.valid()) return;
-        char req[512];
-        const int n = client_.read(reinterpret_cast<uint8_t*>(req), sizeof(req) - 1);
+        // TCP is a STREAM: bytes accumulate until a blank line marks a whole request, and the surplus waits for the next tick.
+        const size_t room = sizeof(req_) - reqLen_ - 1;
+        if (room == 0) { dropClient(); return; }     // no request is this long: the peer is confused
+        const int n = client_.read(reinterpret_cast<uint8_t*>(req_) + reqLen_, room);
         if (n == 0) { dropClient(); return; }        // the viewer closed
         if (n < 0) return;                           // nothing pending this tick
-        req[n] = '\0';
+        reqLen_ += static_cast<size_t>(n);
+        req_[reqLen_] = '\0';
+
+        // RFC 2326 ends a request's headers with a blank line; this server takes no bodied requests.
+        const char* end = std::strstr(req_, "\r\n\r\n");
+        if (!end) return;                            // still arriving
+        const size_t used = static_cast<size_t>(end - req_) + 4;
 
         mm::rtsp::Request parsed;
-        if (!mm::rtsp::parseRequest(req, static_cast<size_t>(n), &parsed)) return;
+        const bool ok = mm::rtsp::parseRequest(req_, used, &parsed);
+        // Consume it either way: a request this server cannot parse must not be re-parsed forever.
+        std::memmove(req_, req_ + used, reqLen_ - used);
+        reqLen_ -= used;
+        req_[reqLen_] = '\0';
+        if (!ok) return;
         // 0.0.0.0 in the origin line: a client reads the address it connected to, which is what makes one SDP correct on every interface.
         char sdp[512];
         mm::rtsp::buildSdp(sdp, sizeof(sdp), "0.0.0.0", static_cast<uint16_t>(width_),
@@ -208,6 +234,7 @@ private:
     void dropClient() MM_NONBLOCKING {
         client_.close();
         playing_ = false;
+        reqLen_  = 0;
         std::snprintf(statusBuf_, sizeof(statusBuf_), "ready at %ux%u, waiting for a viewer",
                       static_cast<unsigned>(width_), static_cast<unsigned>(height_));
         setStatus(statusBuf_, Severity::Status);
@@ -220,6 +247,8 @@ private:
         const size_t n      = lights < have ? lights : have;
         const size_t frameBytes = static_cast<size_t>(width_) * height_ * 3;
         if (n == 0 || rgb_.count() < frameBytes) return;
+        // A buffer shorter than the layout would leave the rest of the frame holding the previous one.
+        if (n < lights) std::memset(rgb_.data(), 0, frameBytes);
 
         const uint8_t* src   = sourceBuffer_->data();
         const uint8_t  srcCh = sourceBuffer_->channelsPerLight();
@@ -314,6 +343,8 @@ private:
     uint8_t    scale_ = 1;
     bool       open_ = false;
     bool       playing_ = false;
+    char       req_[1024] = {};     ///< the request being assembled, which TCP may split or pipeline
+    size_t     reqLen_ = 0;         ///< bytes of it held so far
     uint32_t   packetsSent_ = 0;
     uint8_t    peerIp_[4] = {};     ///< where RTP goes, read off the control socket at PLAY
     uint32_t   sendEpochMs_ = 0, nextSendMs_ = 0, frameIndex_ = 0;

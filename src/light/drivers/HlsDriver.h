@@ -33,6 +33,9 @@ namespace mm {
 /// @card HlsDriver.png
 class HlsDriver : public DriverBase {
 public:
+    /// A destroyed driver releases the encoder, since nothing else can: a claim outliving its owner would refuse every later driver, and the next one can even land on this address.
+    ~HlsDriver() override { platform::encoderRelease(this); }
+
     /// The catalog tag this driver carries.
     static constexpr const char* kTags = "🖥️";
     /// Where the encoder's segments are written, under the filesystem mount.
@@ -139,7 +142,7 @@ public:
     /// Stop the encoder and drop the segments it wrote.
     void release() override {
         if (open_) {
-            platform::encoderStop();
+            platform::encoderRelease(this);   // stops it, and only where this driver holds the claim
             open_ = false;
             if constexpr (platform::hasFsSegments) clearSegments();   // transient; nothing to keep
         }
@@ -318,7 +321,13 @@ private:
         cfg.bitrateKbit = autoBitrateKbit();
         cfg.encoderName = kEncoderOptions[encoderSel_ < kEncoderOptionCount ? encoderSel_ : 0];
         cfg.outDir      = outDir;
+        // One encoder, one claimant: a second driver is refused rather than silently reconfiguring this one's stream.
+        if (!platform::encoderClaim(this)) {
+            setStatus("the video encoder is in use by another driver", Severity::Warning);
+            return false;
+        }
         if (!platform::encoderStart(cfg)) {
+            platform::encoderRelease(this);
             // Why it failed differs per platform, and a wrong reason sends the user hunting.
             if constexpr (platform::hasEncoderChoice) {
                 setStatus("ffmpeg not found - see the docs", Severity::Warning);

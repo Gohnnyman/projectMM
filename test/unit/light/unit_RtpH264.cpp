@@ -127,7 +127,7 @@ TEST_CASE("RtpH264 advances the sequence per packet across access units") {
     CHECK(cap.packets[2].seq() == 0);                // wraps, as a 16-bit counter does
 }
 
-// A refused sink abandons the whole frame: a torn access unit costs a decoder more than a missing one, which it simply skips.
+// A refused sink abandons the whole frame: a torn access unit costs a decoder more than a missing one, which it skips.
 TEST_CASE("RtpH264 abandons an access unit whose sink refuses") {
     std::vector<uint8_t> big(4000, 0x11);
     big[0] = 0x65;

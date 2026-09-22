@@ -1641,7 +1641,8 @@ void mdnsShutdown() {}
 // No update partition here, and the route guards on the capability, so this stub exists for compile coverage only.
 bool http_fetch_to_ota(const char* /*url*/,
                        char* statusBuf, size_t statusBufLen,
-                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut) {
+                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut,
+                       const char* /*fallbackUrl*/) {
     if (statusBuf && statusBufLen > 0) {
         std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
     }
@@ -2665,9 +2666,10 @@ static void stopEncoderProcess() {
 #ifdef _WIN32
     if (encProcess_) TerminateProcess(encProcess_, 0);
     if (encWriter_.joinable()) encWriter_.join();
-    // The reader parks in ReadFile, which returns once the child is gone and the handle closes.
-    if (encStdout_) { CloseHandle(encStdout_); encStdout_ = nullptr; }
+    // CancelIoEx, never a close, while the reader is parked in ReadFile: closing a handle under a blocked read is undefined, and the value can be recycled onto another object.
+    if (encStdout_ && esReader_.joinable()) CancelIoEx(encStdout_, nullptr);
     if (esReader_.joinable()) esReader_.join();
+    if (encStdout_) { CloseHandle(encStdout_); encStdout_ = nullptr; }
     if (encStdin_) { CloseHandle(encStdin_); encStdin_ = nullptr; }
     if (encProcess_) { WaitForSingleObject(encProcess_, 500); CloseHandle(encProcess_); encProcess_ = nullptr; }
 #else
@@ -2734,10 +2736,20 @@ static bool spawnEncoderProcess(const char* const argv[], bool captureStdout = f
         }
         SetHandleInformation(outRead, HANDLE_FLAG_INHERIT, 0);
     }
+    // Quoted only where it needs to be: a bare `-` names ffmpeg's stdin and stdout, and quoting it hands the child a literal `"-"` it rejects. POSIX passes an array and never sees this.
     std::string cmd;
     for (const char* const* a = argv; *a; a++) {
         if (!cmd.empty()) cmd += ' ';
-        cmd += '"'; cmd += *a; cmd += '"';
+        const std::string arg(*a);
+        const bool needsQuotes = arg.empty() ||
+                                 arg.find_first_of(" \t\"") != std::string::npos;
+        if (!needsQuotes) { cmd += arg; continue; }
+        cmd += '"';
+        for (const char c : arg) {
+            if (c == '"') cmd += '\\';
+            cmd += c;
+        }
+        cmd += '"';
     }
     STARTUPINFOA si{};
     si.cb = sizeof(si);
@@ -2859,29 +2871,31 @@ static bool spawnEncoderProcess(const char* const argv[], bool captureStdout = f
             esTakenSeq_ = 0;
             esPts90_ = 0;
         }
-        esReader_ = std::thread([] {
+        // Captured BY VALUE: the stop path clears the globals while this thread runs, and reading them here would race that write.
+        esReader_ = std::thread([out = encStdout_] {
             std::vector<uint8_t> pending;     // bytes read but not yet a whole access unit
             uint8_t buf[16384];
             uint32_t frames = 0;
             for (;;) {
 #ifdef _WIN32
                 DWORD got = 0;
-                if (!encStdout_ ||
-                    !ReadFile(encStdout_, buf, static_cast<DWORD>(sizeof(buf)), &got, nullptr) ||
+                // A cancelled read reports ERROR_OPERATION_ABORTED, which is the stop path asking.
+                if (!out || !ReadFile(out, buf, static_cast<DWORD>(sizeof(buf)), &got, nullptr) ||
                     got == 0) return;
                 const size_t n = got;
 #else
                 // Both descriptors, so a stop is noticed even while the encoder sends nothing.
+                if (out < 0) return;
                 fd_set rd;
                 FD_ZERO(&rd);
-                FD_SET(encStdout_, &rd);
+                FD_SET(out, &rd);
                 if (esWake_[0] >= 0) FD_SET(esWake_[0], &rd);
-                const int maxFd = (esWake_[0] > encStdout_ ? esWake_[0] : encStdout_) + 1;
+                const int maxFd = (esWake_[0] > out ? esWake_[0] : out) + 1;
                 const int ready = ::select(maxFd, &rd, nullptr, nullptr, nullptr);
                 if (ready < 0 && errno == EINTR) continue;
                 if (ready < 0) return;
                 if (esWake_[0] >= 0 && FD_ISSET(esWake_[0], &rd)) return;   // asked to stop
-                const ssize_t r = ::read(encStdout_, buf, sizeof(buf));
+                const ssize_t r = ::read(out, buf, sizeof(buf));
                 if (r < 0 && errno == EINTR) continue;
                 if (r <= 0) return;           // the child closed its stdout: the encoder is gone
                 const size_t n = static_cast<size_t>(r);

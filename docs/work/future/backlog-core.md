@@ -138,7 +138,7 @@ declared rather than for a buffer to fill, and to time out on stall rather than 
 - **Live RMII Ethernet reconfigure** — runtime PHY/pin config shipped (`ethType` + pin controls in NetworkModule, per-board defaults in `deviceModels.json`, `platform::setEthConfig`/`ethInit` dispatch). W5500 (SPI) on S3 applies **live** — `ethStop()` tears down the SPI bus and `ethInit()` re-runs on the next `loop1s()` with no reboot. RMII (classic/P4 internal EMAC) still saves config and asks for a restart to apply, because the EMAC bring-up is fiddlier to hot-cycle cleanly. Make RMII live too: a hot `esp_eth_stop` + EMAC/netif teardown + re-init on config change, matching the W5500 path, so every interface honours the no-reboot principle.
 - **GCC below 16 needs four warnings demoted, and nothing exercises those versions** - `-Wnull-dereference`, `-Wrestrict`, `-Wstringop-overflow` and `-Wformat-truncation` fire on provably correct code from GCC 12 through 15 (five of the twelve inside libstdc++ and glibc headers, unreachable from our source), so CMakeLists demotes them to non-fatal there and keeps them fatal on 16+. That unblocks CI and from-source builds on Debian and Raspberry Pi OS alike, but it is a suppression, not an understanding: nobody routinely compiles with 12-15, so a REAL instance of one of these on those versions is now a warning nobody reads. Revisit when the runner's default GCC reaches 16, at which point the whole block can be deleted.
 - **Installer UX polish** — clear "Pre-release (beta)" warning on RC/latest picks, yank-by-asset-tag instead of yank-by-release-deletion.
-- **Offer projectMM/MoonLight as a library** — a downstream sketch where another firmware/app consumes the light pipeline (or a subset) as an embeddable dependency rather than running the whole binary. `library.json` is already a PlatformIO *library* manifest, so the seed exists. When this is designed, give it a small public **identity surface**: one runtime constant the consumer reads (a `kProjectName`, likely a `ProjectInfo` bundle of name + version + url) that the network wire-strings (ArtNet/E1.31 source-name + CID), the UI banner, and any "About" string all *derive from* — the one place a consumer queries "what am I embedding." This is the genuine home for the name-centralisation that the rename ([rename-to-moonlight.md § Phase 1.3](rename-to-moonlight.md)) deliberately *didn't* do: the rename is a one-time sweep (a constant would just split it), but a library consumer references the identity ongoing and widely, which is the test a constant must pass. Build it *then*, against the real library API, not speculatively now.
+- **Offer projectMM/MoonLight as a library** — a downstream sketch where another firmware/app consumes the light pipeline (or a subset) as an embeddable dependency rather than running the whole binary. `library.json` is already a PlatformIO *library* manifest, so the seed exists. When this is designed, give it a small public **identity surface**: one runtime constant the consumer reads (a `kProjectName`, likely a `ProjectInfo` bundle of name + version + url) that the network wire-strings (ArtNet/E1.31 source-name + CID), the UI banner, and any "About" string all *derive from* — the one place a consumer queries "what am I embedding." This is the genuine home for the name-centralisation that the rename ([the MoonLight plan](../present/Plan-20260922%20-%20MoonLight,%20from%20v5.0.0%20to%20the%20rename.md)) deliberately *didn't* do: the rename is a one-time sweep (a constant would just split it), but a library consumer references the identity ongoing and widely, which is the test a constant must pass. Build it *then*, against the real library API, not speculatively now.
 - **HTTP: a request whose headers or body arrive a few ms late is dropped, intermittently
   (2026-08-20).** `handleConnection` runs SYNCHRONOUSLY inside `tick20ms`, so its waits are kept
   short to protect the render loop: a freshly accepted connection gets **~5 ms** for its request
@@ -1415,11 +1415,75 @@ Art-Net gains the same way (4800 lights 3/6 → 6/6; 1350 pkt/s 2/6 → 4/6) —
 
 Related: WLED is smooth on the same stream because it receives via `AsyncUDP` — packets are consumed in a callback from the lwIP task the instant they arrive, rather than polled once per render tick. Moving to that model is the structural fix, and it needs `staging_` synchronized against the render thread.
 
+## MIDI as a control surface, and the OpenLamp convention (2026-09-22)
+
+[ControlSurface](../../../src/core/util/ControlSurface.h) was written for MIDI hardware and has no MIDI transport. Its own documentation cites the APC40 mk2's ring-style CCs at 0x18/0x38, the X-Touch MINI's CC 1-8, and per-vendor SysEx for RGB pads, and its four verbs (`sendValue`, `sendRing`, `sendColor`, `sendLabel`) exist because MIDI hardware needs exactly those. OSC is the only transport that implements it. A MIDI transport is therefore a gap the architecture already anticipated rather than a new concept, and it is the obvious second implementation that proves the abstraction holds.
+
+**What OpenLamp offers.** [openlamp-spec-midi](https://github.com/openlamp/openlamp-spec-midi) is an MIT-licensed convention for driving WLED over MIDI: notes 59-68 for hues plus black and white, notes 48-56 for off, on, toggle and blackout, CC 1 for brightness, CC 3-4 for hue and saturation, CC 5-8 for effect, speed, intensity and palette, Program Change for presets, MIDI channel for targeting, and MIDI clock for beat sync. The [organisation](https://github.com/openlamp) also has an Ableton Link and MIDI-clock tempo library, and a CC0 asset set of 72 palette illustrations and 216 effect previews in eight languages.
+
+**Why the convention matters more than the code.** Its engine is Python and cloud-free by design, so nothing there ports to a device. The value is in agreeing what a note and a CC *mean*, since a MIDI transport has to answer that whatever we do, and answering it the same way as a project already aimed at WLED costs nothing and buys a user their existing mappings. The palette and effect artwork is CC0 and separately interesting for the catalog, which today has one screenshot per module and no palette illustrations at all.
+
+**Judge it against principle 2** before adopting: the standard construct beats a bespoke one, and this is a candidate standard. The caution is that the spec says plainly it is a draft, "likely to change, and early on to change quickly", and the organisation has low single-digit stars. So the sequence is a MIDI transport shaped by our own `ControlSurface` first, with the OpenLamp note and CC numbers as the default mapping where they fit, rather than a port of their model. Their beat-sync library is worth reading against [the audio work](backlog-light.md), since MIDI clock is a tempo source we do not have.
+
+**What it is not.** Not a replacement for OSC, which carries labels and arbitrary addresses that MIDI cannot. Not a lighting-control protocol in the DMX or Art-Net sense. This is about a musician's controller driving the show.
+
+Build trigger: someone with a MIDI controller who wants it to drive a device, or the DMX work reaching a point where a tempo source is the missing piece.
+
+### Notes as an effect input, which is the other half
+
+Routing a keyboard through a device so **each note triggers something inside an effect** is a different feature from the surface above, and the difference is worth stating before either is built. A control surface *sets controls*: a fader moves `brightness`, a pad selects a preset, and the effect never knows a surface exists. Notes are **performance data**: an effect reads them the way it reads audio, so what a note does is the effect's decision rather than a mapping table's.
+
+The architecture already has the shape this needs, which is why it belongs here rather than as a new concept. [AudioService](../../../src/core/services/AudioService.h) publishes an [AudioFrame](../../../src/core/util/AudioFrame.h) each block, effects read it through `latestFrame()`, and MoonLive scripts reach the same values through builtins such as `level` and `bands`. `AudioFrame::onset` is already "a hit happened this block", which is exactly a note-on without a pitch. A `MidiService` publishing a `MidiFrame` alongside it would need no new plumbing: the same publish-and-read rule, one more producer.
+
+What a `MidiFrame` plausibly carries: which notes are held and how hard, which arrived this tick and which left, the pitch bend and modulation positions, and the clock's beat phase. Held notes are the interesting part, because that is what audio cannot give an effect. An effect can then light a pixel per key, place a particle at a pitch, colour by velocity, or hold a shape while a chord is held and release it on note-off, none of which is expressible as "a control moved".
+
+The open design questions, all cheap to answer badly and expensive to redo: whether a note is a level that decays or an event that fires once, how polyphony maps onto a grid without the effect hardcoding a keyboard's range, whether an effect opts in (as audio effects do, where `hasAudio` gates them) or every effect sees the frame, and what happens on a device with no MIDI attached. The audio path answered all four already, so the honest first step is to read how it did and follow it rather than invent a parallel set of answers.
+
+**The relationship to OpenLamp:** their spec maps notes to *fixed meanings* (note 59 is a hue, note 48 is off), which is the control-surface half. Notes as performance data is the opposite: the note has no meaning until an effect gives it one. Both can share one MIDI transport, and they want different things from it, so the transport should deliver raw messages and let each consumer interpret, rather than translating to lamp actions on the way in.
+
+Build trigger: the same MIDI transport as above, since both halves need it and neither is worth building it alone.
+
+### The rest of the band: drums, guitar, voice
+
+A keyboard is the easy instrument, because MIDI hands us the notes already decided. Every other instrument in a live setting arrives as **audio**, and the work is deciding what happened in it. That splits into three paths with very different costs, and conflating them is how this becomes a project with no end.
+
+**Path one: the instrument already speaks MIDI, or can.** Electronic drums are MIDI over a cable, so each pad is a note and the work is zero beyond the transport above. A guitar reaches MIDI through a hex pickup or a converter pedal, a voice through a pitch-to-MIDI box. In every case the hard problem sits in a device the musician already owns and has already paid for accuracy on. **This is the path that reaches the most instruments for the least code**, and it argues for building the MIDI transport before anything else here.
+
+**Path two: one instrument on its own channel.** A live rig already splits the band across a mixer's channels, so a direct out or an aux send gives one input carrying one instrument. That is a source-seam question, and [the audio roadmap](audio-dsp-roadmap.md) already covers widening the seam with line-in, codecs and multi-channel front-ends. What it does not cover is the analysis, which is the real work:
+
+- **Drums**: our single `onset` fires on any hit anywhere in the spectrum, so a kick and a snare are indistinguishable. Per-band onsets separate them cheaply, since a kick lives in the low bands and a snare in the mids and highs, and the bands are already computed. This is the smallest useful step and it needs no new hardware.
+- **Guitar and bass**: `peakHz` gives a dominant frequency, which tracks a single note and falls apart on a chord. Real polyphonic transcription is a research problem and out of scope; monophonic pitch tracking on a bass or a lead line is not, and the existing peak is most of it.
+- **Voice**: a pitch track plus a loudness envelope is achievable and genuinely useful for lighting a vocal line. Recognising words is not, and nothing in a live show needs it.
+
+**Path three: the whole mix through one microphone.** What the device does today. Source separation to pull a drummer out of a mixed stereo field is a machine-learning problem that does not fit a microcontroller, and pretending otherwise would be the kind of speculative build principle 1 rejects. The honest ceiling here is what the band structure already gives: bass energy, spectral flux, a tempo estimate.
+
+**The one unifying idea worth keeping.** Whatever the source, the useful output is the same shape: *this instrument did this thing, this hard, just now*. A MIDI note-on is that. A per-band onset is that. A pitch track is that with a pitch attached. So the frames stay separate at the source (`AudioFrame` and a `MidiFrame`) and an effect reads whichever it wants, rather than one merged everything-frame that forces every producer to pretend it is the others. That keeps each producer honest about what it actually knows.
+
+**The order this argues for**, cheapest and most certain first: the MIDI transport (which reaches electronic drums, MIDI guitars and pitch-to-MIDI voice with no analysis at all), then per-band onsets (drums from a channel, and a better beat for everything), then monophonic pitch (bass and vocal lines), and only then anything about separating a mixed signal.
+
+Build trigger: a live rig to test against. Every step is measurable in an evening with an instrument in the room, and none of it is worth guessing at without one.
+
+### Everything as MIDI, and where the conversion should live
+
+The appealing shape is one where every instrument on stage arrives as MIDI: the drums, the guitar and the voice each converted, so the device reads one kind of event and an effect never asks where a hit came from. It is the right instinct, and the question it turns into is **where the conversion runs**, because that decides whether this is a weekend or a research project.
+
+**Converted off the device, it is available today.** Drum triggers, hex pickups and pitch-to-MIDI pedals all exist, are well made, and put the hard analysis in hardware the musician already trusts. A mixer's direct outs feed those boxes, their MIDI merges onto one cable, and the device reads notes. **Nothing here needs writing beyond the MIDI transport.** That is the version worth having first, and it is genuinely what a working stage rig already looks like.
+
+**Converted on the device, each instrument is a different problem.** Calling them all "X to MIDI" hides that the three have nothing in common technically. A drum channel is an onset detector, which we nearly have. A bass line is monophonic pitch tracking, which is a known algorithm and real work. A voice is pitch plus envelope, doable. A strummed guitar chord is polyphonic transcription, which is a research problem that does not fit a microcontroller and should be named as out of scope rather than left as an implied maybe.
+
+**The cost that bounds it.** One mono audio input measures about **8 ms per tick on a P4**, already the second-largest consumer on the board after the effect itself. Four instruments analysed on-device is four FFTs and four detectors, which is most of a frame budget before a single light is drawn. So the ceiling is not the algorithms, it is the arithmetic: **one or two analysed channels on a device, not a band.** A mixer feeding eight direct outs into one ESP32 is not a design this hardware supports, and saying so early is cheaper than discovering it late.
+
+**Where a mixer does fit.** A direct out or aux send giving **one clean instrument** is exactly the input that makes path two work, and it is worth more than any algorithm: a kick drum alone on a channel needs a threshold rather than a separator. So the mixer plug-in is valuable for a *small* number of channels, which is also the number the frame budget allows. The seam for that is the multi-channel front-end [the audio roadmap](audio-dsp-roadmap.md) already anticipates.
+
+**The architectural conclusion.** Rather than converting everything to MIDI on the way in, keep the frames separate and let an effect read what each producer honestly knows: a `MidiFrame` for what arrived as notes, an `AudioFrame` per analysed channel for what arrived as sound. Forcing a per-band onset to pretend it is a note-on adds a fake pitch and a fake velocity, and an effect that reads them cannot tell which are real. Same rule as above, applied to the tempting case.
+
+Build trigger: a stage with more than one instrument to point at it. The first honest experiment is one drum channel through a direct out, because it answers the cost question and the usefulness question at the same time.
+
 ## OSC pads and the Open Stage Control session's labels (2026-08-30)
 
 Two gaps found wiring a real control surface to the [OSC module](../../moonmodules/core/services.md).
 
-**`/mm/pad/N` has no handler.** The [OSC plan](../present/Plan-20260829%20-%20OSC%20control%20ingest.md)
+**`/mm/pad/N` has no handler.** The [OSC plan](../past/plans/Plan-20260829%20-%20OSC%20control%20ingest%20(shipped).md)
 lists it (`i 1 -> apply preset in slot 12`), and `OscModule::handle` routes `/mm/fader/`,
 `/mm/encoder/`, `/mm/switch/` and `/mm/control/` but not pads. So a surface can drive every
 continuous control and every switch, but cannot fire a preset, which is the one thing a pad grid
@@ -1638,7 +1702,7 @@ Lower risk than the RGMII case (six pins rather than twelve, and nothing of ours
 
 ## Input transports: foot pedals, USB game controllers, and MoonLive at the pins (2026-09-01)
 
-`ButtonService` shipped with the [GPIO seam](../present/Plan-20260901%20-%20Input%20mapping%20and%20scripted%20sensors.md)
+`ButtonService` shipped with the [GPIO seam](../present/Plan-20260901%20-%20Input%20mapping%20and%20scripted%20sensors%20(partial).md)
 (`gpioInputBegin` / `gpioRead` / `gpioWrite`). It names a target as `Module.control` and writes it
 through `Scheduler::setControl`, so a press and an OSC message are indistinguishable downstream.
 Three follow-ups build on that seam rather than beside it.

@@ -32,6 +32,24 @@
 /// The margin is what a player has left to fetch what it was promised, and the rest of the ring is its buffering budget.
 /// On the bench, listing the true oldest failed immediately and listing only the newest few failed within about five seconds, and both spin forever.
 ///
+/// ## The encoder task's core and stack
+///
+/// The second core, since the first runs the network stack and starving it stalls the very server that serves these segments.
+/// The stack is twice what this started with, the encoder call chain plus our muxer having overflowed the smaller one.
+/// It jumped into the maths library with a corrupted pointer and panicked in a loop.
+/// The vendor's own example runs its encode from a comparable stack, and the muxer's frame loop sits on top of that.
+/// The generation flag is cleared before the task starts rather than inside it.
+/// A worker's first instruction runs only once the scheduler reaches it, so a stop landing in that window would free buffers it is about to encode from.
+///
+/// ## The QP window lets the bitrate govern
+///
+/// A near-fixed window pins quality, so the encoder spends whatever that costs and ignores the configured bitrate entirely.
+/// Opening the window lets the bitrate actually govern what a frame may cost.
+///
+/// ## A segment claims the duration it holds
+///
+/// Claiming a flat second while delivering fewer frames makes a player run ahead of the stream until it stalls to re-buffer, which shows as segments arriving every 0.7 seconds.
+///
 /// ## The target check lives here, not in Kconfig
 ///
 /// `depends on IDF_TARGET_ESP32P4` would hide MM_HLS from the component solver.
@@ -132,6 +150,8 @@ uint8_t*  nal_    = nullptr;      // one encoded frame, the encoder's output
 uint8_t*  take_   = nullptr;      // the copy a reader packetises, safe from the next encode
 size_t    takeLen_ = 0;
 uint32_t  takeSeq_ = 0;           // which encode the copy holds
+uint32_t  takePts_ = 0;           // ITS timestamp, not the encoder's latest
+bool      takeKey_ = false;       // and its frame type
 bool      takeBusy_ = false;      // a reader is packetising it, so the encoder leaves it alone
 uint16_t  width_  = 0, height_ = 0;
 uint8_t   fps_    = 30;
@@ -179,7 +199,7 @@ void rotateSegment() {
     const uint32_t busy = serving_.load();
     for (size_t tried = 0; tried < kSegments; tried++) {
         segWrite_ = (segWrite_ + 1) % kSegments;
-        // Only a slot actually being served is off limits. An empty slot carries seq 0, which is also kNoSeg, so comparing without the busy check skips every free slot and the ring never advances (bench: 12 rotations, all eight slots still seq 0).
+        // Only a slot being SERVED is off limits: an empty slot carries seq 0, which is also kNoSeg, so skipping the busy check stalls the ring.
         if (busy == kNoSeg || segments_[segWrite_].seq != busy) break;
     }
     segments_[segWrite_].len    = 0;
@@ -227,6 +247,9 @@ void encodeOne(const uint8_t* rgb, size_t rgbLen) {
         std::memcpy(take_, nal_, out.length);
         takeLen_ = out.length;
         takeSeq_ = lastFrameSeq_;
+        // The metadata travels WITH the bytes, since lastFramePts_ moves on while a reader still ships this frame.
+        takePts_ = pts90;
+        takeKey_ = keyframe;
     }
     Segment& seg = segments_[segWrite_];
     // A segment must START on a keyframe (a player seeking to it has nothing to reference otherwise), so a keyframe closes the previous one. GOP == fps, so this lands once a second.
@@ -294,7 +317,7 @@ void* psram(size_t bytes) {
 }  // namespace
 
 bool encoderStart(const EncoderConfig& cfg) {
-    // If the previous stop had to detach a wedged worker, encoderStop left its buffers alive on purpose (see there) and the pointers below are overwritten rather than freed: a bounded one-time leak, deliberately preferred to freeing memory a live task is still writing.
+    // A detached worker's buffers are overwritten rather than freed: a bounded one-time leak beats freeing memory a live task still writes.
     encoderStop();
     if (!mutex_) mutex_ = xSemaphoreCreateMutex();
     if (!mutex_) return false;
@@ -316,7 +339,7 @@ bool encoderStart(const EncoderConfig& cfg) {
     hw.res.width  = width_;
     hw.res.height = height_;
     hw.rc.bitrate = static_cast<uint32_t>(cfg.bitrateKbit) * 1000u;
-    // The QP window the rate controller may use. A near-fixed window (the 25/26 this started with) overrides the bitrate entirely: quality is pinned, so the encoder spends whatever that costs and ignores rc.bitrate. Opening the window lets the configured bitrate actually govern, which is what the driver's control promises.
+    // The QP window the rate controller may use: @xref{the-qp-window-lets-the-bitrate-govern|why it is opened}.
     hw.rc.qp_min  = 10;
     hw.rc.qp_max  = 40;
 
@@ -346,12 +369,9 @@ bool encoderStart(const EncoderConfig& cfg) {
     running_  = true;
     // A new generation retires any orphan the previous stop had to detach.
     const uint32_t myGen = generation_.fetch_add(1) + 1;
-    // Clear HERE, not in the worker: the worker's first instruction runs only once the scheduler reaches it, and a stop landing in that window would read the previous stop's `true` and free the buffers the worker is about to encode from.
+    // Cleared HERE, never in the worker: @xref{the-encoder-tasks-core-and-stack|what a stop in that window would free}.
     workerExited_ = false;
-    // The second core, since the first runs the network stack and starving it stalls the very server that serves these segments.
-    // The stack is twice what this started with: the encoder call chain plus our muxer overflowed the smaller one.
-    // It jumped into the maths library with a corrupted pointer, panicking in a loop.
-    // The vendor's own example runs its encode from a comparable stack, and the muxer's frame loop sits on top of that.
+    // The second core and a doubled stack: @xref{the-encoder-tasks-core-and-stack|why both}.
     if (!spawnPinnedTask(task_, "mmH264", workerFn,
                          reinterpret_cast<void*>(static_cast<uintptr_t>(myGen)),
                          16 * 1024, 5, 1)) {
@@ -416,7 +436,7 @@ bool hlsSegment(const char* name, const uint8_t** data, size_t* len) {
             const Segment* seg = nullptr;
             for (const auto& s : segments_) if (s.seq == q) seg = &s;
             if (!seg) continue;
-            // The segment's REAL duration, from the frames actually in it. Claiming a flat 1.0 s while delivering fewer makes the player run ahead of the stream until it stalls to re-buffer -- the periodic hiccup, visible as segments arriving every ~0.7 s.
+            // The segment's REAL duration: @xref{a-segment-claims-the-duration-it-holds|what a flat second costs a player}.
             const uint32_t milli = fps_ ? (static_cast<uint32_t>(seg->frames) * 1000u) / fps_ : 1000u;
             // snprintf returns the length it WOULD have written, so an unchecked accumulate can push n past the buffer and report more bytes than exist. Not reachable at this sizing, but the clamp costs nothing and the failure would be served garbage.
             if (n < 0 || n >= static_cast<int>(sizeof(playlist))) break;
@@ -457,8 +477,8 @@ bool rtspTakeFrame(EncodedFrame* out) {
     takeBusy_     = true;
     out->nal      = take_;
     out->len      = takeLen_;
-    out->pts90    = lastFramePts_;
-    out->keyframe = lastFrameKey_;
+    out->pts90    = takePts_;
+    out->keyframe = takeKey_;
     return true;
 }
 
@@ -475,7 +495,7 @@ bool rtspParameterSets(EncodedFrame*, EncodedFrame*) { return false; }
 
 #else   // !CONFIG_MM_HLS
 
-// The HTTP server calls the RAM-segment seam on every /hls/ request whatever the platform, so a build without the encoder still has to answer it: no segments in RAM, fall through to the filesystem path (where there is nothing either, and the request 404s as it should).
+// Called on every /hls/ request whatever the platform, so a build without the encoder answers too: nothing in RAM, and the filesystem path 404s.
 namespace mm::platform {
 bool hlsSegment(const char*, const uint8_t**, size_t*) { return false; }
 void hlsSegmentRelease() {}

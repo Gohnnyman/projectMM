@@ -60,7 +60,8 @@ public:
     /// Packetise one access unit, whose NALs are Annex B framed. Returns the packets written, or 0 where the sink refused: a refused packet abandons the frame rather than sending it torn.
     size_t writeAccessUnit(const uint8_t* annexB, size_t len, uint32_t pts90,
                            uint8_t* scratch, size_t scratchLen, Sink sink, void* ctx) {
-        if (!annexB || !scratch || scratchLen < kHeaderBytes + 2 || !sink) return 0;
+        // +3, never +2: an FU-A fragment spends two bytes on its header, so room for exactly those carries no payload and the loop never advances.
+        if (!annexB || !scratch || scratchLen < kHeaderBytes + 3 || !sink) return 0;
         // The LAST NAL carries the marker, so the walk finds the end before emitting anything.
         size_t at = 0, nalLen = 0, lastEnd = 0;
         while (nextNal(annexB, len, &at, &nalLen)) lastEnd = at;

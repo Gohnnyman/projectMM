@@ -24,6 +24,8 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+<!-- At the v5.0.0 tag this heading becomes `## v5.0.0`, and a fresh `## Unreleased` opens above it. The entries below are what that release asks of a user; the release notes summarise them and link here. -->
+
 ### System: `expertMode` became `mode`, with three levels
 
 **Action: re-set a control, and only if you had expert mode on.**

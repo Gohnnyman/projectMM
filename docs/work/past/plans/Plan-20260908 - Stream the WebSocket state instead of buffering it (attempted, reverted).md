@@ -12,7 +12,7 @@
 > over WebSocket**. `GET /api/state` already streams through a 1 KB socket-mode sink with no document
 > in RAM, and the value patches already exist; what is missing is the UI fetching the snapshot on WS
 > open and a small `{"resync":true}` on a structural change. That deletes the full-state-over-WS path
-> rather than shrinking it. Tracked in [backlog-core.md](../future/backlog-core.md).
+> rather than shrinking it. Tracked in [backlog-core.md](../../future/backlog-core.md).
 >
 > Kept from this work: `JsonSink` now FLAGS a refused heap grow instead of truncating silently
 > (`unit_JsonSink_overflow`), which is the bug that made a cut document indistinguishable from a

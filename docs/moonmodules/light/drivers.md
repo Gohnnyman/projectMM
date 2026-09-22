@@ -207,7 +207,7 @@ Detail: [technical](moxygen/HlsDriver.md) · [the transport-stream muxer](moxyge
 
 <img src="../../assets/light/drivers/RtspDriver.png" width="300" alt="RTSP driver controls">
 
-Streams the layer as **H.264 over RTSP**, which a player pulls rather than fetching segments. Point VLC or `ffplay` at the `url` the card shows. It reaches a viewer about **five times sooner than HLS**, so it is the remote view to reach for; [Preview](#preview) stays the one that keeps pace with the lights, sending raw pixels and no codec at all.
+Streams the layer as **H.264 over RTSP**, which a player pulls rather than fetching segments. Point VLC or `ffplay` at the `url` the card shows. It reaches a viewer **much sooner than HLS**, which buffers whole segments before it plays one, so this is the remote view to reach for. [Preview](#preview) stays the one that keeps pace with the lights, sending raw pixels and no codec at all.
 
 Runs on the **ESP32-P4**, whose hardware encoder it shares with HLS, and on the desktop through ffmpeg: a device serving both encodes one frame and each reader takes it. See [the details below](#rtsp-details).
 
@@ -332,7 +332,7 @@ vlc rtsp://<device>:554/
 
 `-fflags nobuffer -flags low_delay` is what makes ffplay show the stream as it arrives rather than filling a buffer first, which is the whole point of reaching for RTSP. VLC buffers about a second by default, so `--network-caching=100` brings it closer.
 
-**Watching LEDs on a monitor.** A grid is small in pixels and large in meaning, so scale it up with nearest-neighbour and each light stays a crisp square instead of a blurred blob:
+**Watching LEDs on a monitor.** A grid is small in pixels and large in meaning, so scale it up with nearest-neighbor and each light stays a crisp square instead of a blurred blob:
 
 ```sh
 ffplay -fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0 \
@@ -341,11 +341,11 @@ ffplay -fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0 \
 
 `-probesize 32 -analyzeduration 0` skips the startup probing, so the picture appears at once. `format=yuv420p` silences ffplay's `No accelerated colorspace conversion` notice, which reports a missing SIMD path in the player's own window conversion and says nothing about the stream.
 
-**The newest viewer is the viewer.** One session plays at a time, since each viewer costs another send on a device that is also driving lights. A new connection takes the session over, because a player that vanishes without `TEARDOWN` leaves a socket open and silent: TCP reports a peer's absence only to a write it stops acknowledging, so waiting on that would strand the stream for minutes. The displaced viewer sees its connection close, which every player reports.
+**The newest viewer is the viewer.** One session plays at a time, since each viewer costs another send on a device that is also driving lights. A new connection takes the session over rather than being refused. The reason is that a player which vanishes without `TEARDOWN` leaves a socket open and silent, and TCP reports a peer's absence only to a write it stops acknowledging, so waiting on that would strand the stream for minutes. The displaced viewer sees its connection close, which every player reports.
 
-**UDP carries the video.** The control conversation runs over TCP on port 554, and the frames go to the port the viewer names in `SETUP`. A network that blocks that port pair leaves the stream silent while the session looks connected. Where the path drops packets, `-rtsp_transport tcp` carries the video over the control connection instead, trading a little latency for delivery.
+**UDP carries the video.** The control conversation runs over TCP on port 554, and the frames go to the UDP port the viewer names in `SETUP`. A network that blocks that port pair leaves the stream silent while the session looks connected. A player asking for interleaved TCP instead is told so by code, since this server speaks UDP.
 
-**The rate is what the device renders.** `targetFps` is a ceiling rather than a promise: a heavy effect that ticks at 8 fps is streamed at 8 fps, since a frame that was never rendered cannot be sent. A stream slower than expected is a question about the render loop rather than the transport, and the module's own tick time in the UI says which effect is spending the time.
+**The rate is what the device renders.** `targetFps` is a ceiling rather than a promise: a heavy effect that ticks at 8 fps is streamed at 8 fps, since a frame that was never rendered cannot be sent. A stream slower than expected is therefore a question about the render loop rather than the transport. Each module's own tick time in the UI says which effect is spending the time.
 
 **The delay that remains is the codec's.** H.264 emits a frame once it has the whole frame, and a decoder holds one more, so tens of milliseconds stay whatever the transport does. What RTSP removes is HLS's segment buffering, which is the seconds.
 

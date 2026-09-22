@@ -17,8 +17,32 @@
 /// The status and the byte counters are inline globals rather than module state.
 /// The flash route and the platform's own task both write them, and both must see one instance.
 /// A module reading them reports the same install a socket handler started.
+///
+/// ## Two addresses, because a rename has to survive in the field
+///
+/// A device flashed before a rename asks its old repository forever, and GitHub's rename redirect is normally what carries it across.
+/// That redirect is the only thing making an in-field update survive the move.
+/// This rename vacates a name and re-takes it in one session, which is worth a belt as well as braces.
+/// So the update path names both addresses and takes whichever answers.
+/// The successor comes first deliberately: once it exists every device reaches it directly, and the redirect stops mattering rather than being depended on forever.
+/// Before it exists that request costs one 404, since the predecessor occupying the name publishes no `firmware-*` asset.
+/// Fetching another project's firmware is prevented separately.
+/// The OTA compares an incoming image's own ESP-IDF descriptor against `kProjectImageName` before a byte is written, so an address answering with a stranger's release is refused rather than flashed.
 
 namespace mm {
+
+/// Where this project's releases will live, tried FIRST so a renamed repository needs no redirect.
+constexpr const char* kReleaseRepo = "MoonModules/MoonLight";
+
+/// Where they live today, tried where the address above does not answer.
+constexpr const char* kFallbackRepo = "MoonModules/projectMM";
+
+/// The release-asset URL a device updates itself from: repository, version, firmware variant, version.
+constexpr const char* kReleaseAssetUrlFormat =
+    "https://github.com/%s/releases/download/v%s/firmware-%s-v%s.bin";
+
+/// The name this project's app image carries in its ESP-IDF descriptor, which is the CMake `project()` name.
+constexpr const char* kProjectImageName = "projectMM";
 
 inline char     g_otaStatus[64]     = "idle";   ///< the phase the install is in, shared by every unit
 inline uint32_t g_otaBytesRead      = 0;        ///< how much has been written
