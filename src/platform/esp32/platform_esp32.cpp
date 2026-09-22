@@ -1744,6 +1744,21 @@ int TcpConnection::read(uint8_t* buf, size_t maxLen) {
     return 0;
 }
 
+// getpeername rather than a field captured at accept: a copy taken earlier outlives a reconnect on the same slot.
+bool TcpConnection::peerIPv4(uint8_t out[4]) const {
+    if (fd_ < 0 || !out) return false;
+    sockaddr_in addr{};
+    socklen_t len = sizeof(addr);
+    if (::getpeername(fd_, reinterpret_cast<sockaddr*>(&addr), &len) != 0) return false;
+    if (addr.sin_family != AF_INET) return false;
+    const uint32_t ip = ntohl(addr.sin_addr.s_addr);
+    out[0] = static_cast<uint8_t>(ip >> 24);
+    out[1] = static_cast<uint8_t>(ip >> 16);
+    out[2] = static_cast<uint8_t>(ip >> 8);
+    out[3] = static_cast<uint8_t>(ip);
+    return true;
+}
+
 bool TcpConnection::write(const uint8_t* data, size_t len) {
     if (fd_ < 0) return false;
     // Send every byte, retrying on a full buffer, since a response must arrive complete and a healthy interface drains in microseconds.

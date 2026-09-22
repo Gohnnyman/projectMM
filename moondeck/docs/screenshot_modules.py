@@ -142,6 +142,7 @@ MODULES = [
     ("Hub75Driver",         "Drivers",  {}, False),
     ("NdiDriver",           "Drivers",  {}, False),
     ("HlsDriver",           "Drivers",  {}, False),
+    ("RtspDriver",          "Drivers",  {}, False),
 ]
 
 # A modifier reshapes what an effect draws, so it has nothing to show on an empty Layer: it

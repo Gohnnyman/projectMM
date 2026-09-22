@@ -392,6 +392,25 @@ bool hlsSegment(const char* name, const uint8_t** data, size_t* len);
 /// Release what hlsSegment handed out, required after every call that answered true.
 void hlsSegmentRelease();
 
+// --- RTSP output, gated by `hasRtsp`: the encoded frame itself, before any muxing ---------------
+
+/// One encoded frame as the encoder produced it, valid until the encoder writes the next.
+struct EncodedFrame {
+    const uint8_t* nal;       ///< the frame's NAL units, Annex B, start codes included
+    size_t         len;       ///< bytes at `nal`
+    uint32_t       pts90;     ///< presentation time in the RTP clock's 90 kHz units
+    bool           keyframe;  ///< an IDR, which a joining client decodes from
+};
+
+/// The frame the encoder produced since the last take, valid until the next `encoderWrite`.
+bool rtspTakeFrame(EncodedFrame* out);
+
+/// Release what `rtspTakeFrame` handed out, required after every call that answered true: the frame stays valid until then, and the encoder reuses the buffer after.
+void rtspReleaseFrame();
+
+/// The encoder's parameter sets where it emits them separately, false where each keyframe carries its own.
+bool rtspParameterSets(EncodedFrame* sps, EncodedFrame* pps);
+
 #ifndef ESP_PLATFORM
 /// Record instead of encoding, or force the not-installed path, since CI has no ffmpeg.
 enum class EncoderTestMode : uint8_t { Off, Record, ForceMissing };
@@ -625,6 +644,9 @@ public:
     bool valid() const { return fd_ >= 0; }
     /// Read without blocking: bytes copied, 0 when the peer closed, -1 when nothing is pending.
     int read(uint8_t* buf, size_t maxLen);
+
+    /// The connected peer's IPv4 address, which a second channel back to it is addressed by.
+    bool peerIPv4(uint8_t out[4]) const;
     /// Write every byte, blocking until it is sent, which an HTTP response needs.
     bool write(const uint8_t* data, size_t len);
     // The caller advances its own offset and calls again, streaming across ticks without blocking.

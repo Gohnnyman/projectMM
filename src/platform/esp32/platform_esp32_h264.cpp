@@ -31,13 +31,30 @@
 /// Never the oldest itself, since that slot is the next one rotation overwrites and a player fetching it races the encoder and gets nothing.
 /// The margin is what a player has left to fetch what it was promised, and the rest of the ring is its buffering budget.
 /// On the bench, listing the true oldest failed immediately and listing only the newest few failed within about five seconds, and both spin forever.
+///
+/// ## The target check lives here, not in Kconfig
+///
+/// `depends on IDF_TARGET_ESP32P4` would hide MM_HLS from the component solver.
+/// The solver reads that symbol to gate the esp_h264 dependency, so every non-P4 build then fails at cmake.
+/// Catching it in the source instead names the cause, where the Kconfig route surfaces as a link error against a missing hardware encoder.
+///
+/// ## The ring's depth is a lifetime, not a cache
+///
+/// A segment survives its kept-seconds after it closes.
+/// That is the whole budget a player has to parse the playlist, fetch, and buffer before what it asked for is recycled.
+/// Browsers want several seconds of that.
+///
+/// ## A served segment is reserved
+///
+/// `hlsSegment` hands out a pointer the caller reads AFTER the lock drops, so the encoder must not recycle that slot underneath it.
+/// Serving is far shorter than the time the ring takes to lap, but "usually in time" is not a lifetime guarantee.
 
 #include "platform/platform.h"
 #include "sdkconfig.h"
 
 #if defined(CONFIG_MM_HLS)
 
-// The Kconfig symbol cannot enforce this itself: `depends on IDF_TARGET_ESP32P4` would hide MM_HLS from the component solver, which reads it to gate the esp_h264 dependency, and every non-P4 build then fails at cmake. Catch it here instead, where the message names the cause rather than surfacing as a link error against a missing hardware encoder.
+// Checked here rather than in Kconfig: @xref{the-target-check-lives-here-not-in-kconfig|why the symbol cannot gate itself}.
 #include "soc/soc_caps.h"
 #if !defined(SOC_H264_ENCODER_SUPPORTED) || !SOC_H264_ENCODER_SUPPORTED
 #error "CONFIG_MM_HLS is set on a chip with no hardware H.264 encoder (P4 only)."
@@ -60,7 +77,7 @@ namespace {
 // Frame slots between the render tick and the encode task. Three is the desktop's number and the same reasoning: enough to absorb a burst, few enough that a backlog is dropped rather than queued into latency.
 constexpr size_t kSlots = 3;
 
-// Segments kept in the ring, and so also the playlist's depth: a segment survives this many seconds after it closes, which is the whole budget a player has to parse the playlist, fetch and buffer before what it asked for is recycled. Browsers want several seconds of that, so the ring is the lifetime, not a cache.
+// Segments kept in the ring, and so the playlist's depth: @xref{the-rings-depth-is-a-lifetime-not-a-cache|what the number buys a player}.
 constexpr size_t kSegments = 12;
 // Segments held back from the playlist: the slots rotation is about to reuse. Without this margin a player is handed a segment that is overwritten while it fetches it.
 constexpr uint32_t kReserved = 3;
@@ -86,14 +103,14 @@ size_t   head_ = 0, count_ = 0;
 Segment  segments_[kSegments];
 size_t   segWrite_ = 0;          // segment currently being filled
 uint32_t nextSeq_  = 1;
-// The segment a socket is currently reading, if any. hlsSegment hands out a pointer that the caller reads AFTER the lock drops, so the encoder must not recycle that slot underneath it; serving is far shorter than the eight seconds the ring takes to lap, but "usually in time" is not a lifetime guarantee. kNoSeg = nothing being served.
+// The segment a socket is currently reading, kNoSeg for none: @xref{a-served-segment-is-reserved|why it is reserved}.
 constexpr uint32_t kNoSeg = 0;
 std::atomic<uint32_t> serving_{kNoSeg};
 
 WorkerTask       task_;
 std::atomic<bool> running_{false};
 std::atomic<bool> dead_{false};   // the encoder failed: writes are refused until a restart
-// Set by the worker as its LAST act. stopPinnedTask detaches rather than joins if the worker overruns its deadline (platform_esp32_worker.cpp), so its return does not prove the worker is gone; freeing the buffers on that path would pull them out from under a live encode.
+// Set by the worker as its LAST act, since a detached one outlives stopPinnedTask: @xref{an-orphaned-worker-must-not-become-a-second-producer|why its return proves nothing}.
 std::atomic<bool> workerExited_{false};
 
 // Which worker generation is the live one: @xref{an-orphaned-worker-must-not-become-a-second-producer|why a running flag alone cannot gate it}.
@@ -102,9 +119,20 @@ std::atomic<uint32_t> generation_{0};
 // Set when a segment was closed early (a frame that did not fit), so the fresh one is still waiting for its first keyframe. Without it the next P-frame would open the segment and a player seeking there would have no reference frame to decode against.
 bool needKeyframe_ = false;
 
+// The frame the encoder produced most recently, which RTSP ships without muxing: a sequence rather than a flag, so a reader that misses one sees that it did.
+size_t   lastFrameLen_ = 0;
+uint32_t lastFramePts_ = 0;
+bool     lastFrameKey_ = false;
+uint32_t lastFrameSeq_ = 0;    // bumped per encode
+uint32_t lastTakenSeq_ = 0;    // the sequence a reader last took
+
 esp_h264_enc_handle_t enc_ = nullptr;
 uint8_t*  yuv_    = nullptr;      // one converted frame, the encoder's input
 uint8_t*  nal_    = nullptr;      // one encoded frame, the encoder's output
+uint8_t*  take_   = nullptr;      // the copy a reader packetises, safe from the next encode
+size_t    takeLen_ = 0;
+uint32_t  takeSeq_ = 0;           // which encode the copy holds
+bool      takeBusy_ = false;      // a reader is packetising it, so the encoder leaves it alone
 uint16_t  width_  = 0, height_ = 0;
 uint8_t   fps_    = 30;
 uint32_t  frameNo_ = 0;
@@ -183,11 +211,23 @@ void encodeOne(const uint8_t* rgb, size_t rgbLen) {
 
     const bool keyframe = out.frame_type == ESP_H264_FRAME_TYPE_IDR ||
                           out.frame_type == ESP_H264_FRAME_TYPE_I;
+
+    // The encoded frame ITSELF, for a reader that ships NALs rather than segments: recorded before the mux so both read one encode.
+    lastFrameLen_  = out.length;
+    lastFrameKey_  = keyframe;
+    lastFrameSeq_++;
     const uint32_t pts90 = static_cast<uint32_t>(
         static_cast<uint64_t>(frameNo_) * mm::ts::kClockHz / (fps_ ? fps_ : 30));
     frameNo_++;
+    lastFramePts_ = pts90;
 
     Lock lk;
+    // COPIED for the reader, and only between its frames: the render thread packetises long after taking one, so sharing nal_ splices two frames into one.
+    if (take_ && !takeBusy_ && out.length <= kSegmentBytes / 4) {
+        std::memcpy(take_, nal_, out.length);
+        takeLen_ = out.length;
+        takeSeq_ = lastFrameSeq_;
+    }
     Segment& seg = segments_[segWrite_];
     // A segment must START on a keyframe (a player seeking to it has nothing to reference otherwise), so a keyframe closes the previous one. GOP == fps, so this lands once a second.
     if (keyframe && seg.len > 0) {
@@ -244,6 +284,7 @@ void freeAll() {
     for (auto& s : segments_) { heap_caps_free(s.data); s.data = nullptr; s.len = 0; s.seq = 0; s.frames = 0; }
     heap_caps_free(yuv_); yuv_ = nullptr;
     heap_caps_free(nal_); nal_ = nullptr;
+    heap_caps_free(take_); take_ = nullptr; takeLen_ = 0;
 }
 
 void* psram(size_t bytes) {
@@ -289,9 +330,10 @@ bool encoderStart(const EncoderConfig& cfg) {
     const size_t rgbBytes = static_cast<size_t>(width_) * height_ * 3;
     yuv_ = static_cast<uint8_t*>(psram(rgbBytes / 2));
     nal_ = static_cast<uint8_t*>(psram(kSegmentBytes / 4));
+    take_ = static_cast<uint8_t*>(psram(kSegmentBytes / 4));
     for (auto& s : slots_) s.data = static_cast<uint8_t*>(psram(rgbBytes));
     for (auto& s : segments_) { s.data = static_cast<uint8_t*>(psram(kSegmentBytes)); s.len = 0; s.seq = 0; s.frames = 0; }
-    if (!yuv_ || !nal_) { freeAll(); return false; }
+    if (!yuv_ || !nal_ || !take_) { freeAll(); return false; }
     for (const auto& s : slots_)    if (!s.data) { freeAll(); return false; }
     for (const auto& s : segments_) if (!s.data) { freeAll(); return false; }
 
@@ -407,6 +449,28 @@ bool hlsSegment(const char* name, const uint8_t** data, size_t* len) {
 
 void hlsSegmentRelease() { serving_ = kNoSeg; }
 
+// The encoded frame itself, for RTSP: the COPY, since the encoder task overwrites nal_ while a reader is still packetising. Marks the copy busy until rtspReleaseFrame, so the next encode leaves it alone.
+bool rtspTakeFrame(EncodedFrame* out) {
+    Lock lk;
+    if (!out || !take_ || takeLen_ == 0 || takeSeq_ == lastTakenSeq_) return false;
+    lastTakenSeq_ = takeSeq_;
+    takeBusy_     = true;
+    out->nal      = take_;
+    out->len      = takeLen_;
+    out->pts90    = lastFramePts_;
+    out->keyframe = lastFrameKey_;
+    return true;
+}
+
+// The reader is done with the copy, so the next encode may fill it again.
+void rtspReleaseFrame() {
+    Lock lk;
+    takeBusy_ = false;
+}
+
+// The parameter sets ride inside every keyframe this encoder emits, so a client joining at one decodes from it.
+bool rtspParameterSets(EncodedFrame*, EncodedFrame*) { return false; }
+
 }  // namespace mm::platform
 
 #else   // !CONFIG_MM_HLS
@@ -415,6 +479,9 @@ void hlsSegmentRelease() { serving_ = kNoSeg; }
 namespace mm::platform {
 bool hlsSegment(const char*, const uint8_t**, size_t*) { return false; }
 void hlsSegmentRelease() {}
+bool rtspTakeFrame(EncodedFrame*) { return false; }
+void rtspReleaseFrame() {}
+bool rtspParameterSets(EncodedFrame*, EncodedFrame*) { return false; }
 // The whole encoder seam, not just the segment half: platform.h declares these for every target, so a build that reaches them without CONFIG_MM_HLS must link rather than fail. Starting fails, which is what the driver reports; the rest are inert.
 bool encoderStart(const EncoderConfig&) { return false; }
 int  encoderWrite(const uint8_t*, size_t) { return -1; }

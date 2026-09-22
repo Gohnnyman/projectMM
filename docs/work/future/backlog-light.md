@@ -1009,6 +1009,8 @@ A HUB75 "panel" is a family, and the differences are not discoverable from its d
 
 Build trigger: a panel that misbehaves in one of these ways. Adding all three speculatively is three controls nobody can act on; adding the one whose symptom appears is a control with a reason.
 
+**The trigger has appeared: `latch_blanking` (2026-09-22).** A tester reports the final column dark on two panels, everything else correct. The encoder emits ONE blank word per row ([Hub75Slots.h](../../../src/light/drivers/Hub75Slots.h), the word carrying `oe | lat` after each row's data), where the reference library defaults to 2 and makes 1 to 4 configurable. A single pulse leaves the last column sitting in the shift register as LAT fires, which is the column that goes dark, and the loop already encodes every column so the data is present rather than missing. The fix is a `latchBlanking` control that repeats that blanking word, defaulting to 2 to match the prior art. A panel showing the symptom is the measurement, since the right count is visible in one flash.
+
 ### Panel brightness through the output-enable window
 
 Brightness works: `Correction::apply` writes every channel through `briLut`, so the slider dims a HUB75 panel exactly as it dims a strip. The question is HOW it dims, and on this driver it costs color resolution.

@@ -1,0 +1,203 @@
+#pragma once
+/// The RTSP control conversation, RFC 2326: one client's request becomes one response and a state move.
+
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>   // strtoul: parsing CSeq and the client's port out of a header
+#include <cstring>
+
+namespace mm::rtsp {
+
+/// The port RTSP is registered on, which every client tries first.
+static constexpr uint16_t kPort = 554;
+
+/// How far a session has progressed, which decides what the next request may ask for.
+enum class State : uint8_t {
+    Init,      ///< connected, and describing or setting up from here
+    Ready,     ///< SETUP agreed a transport, so PLAY may start the stream
+    Playing,   ///< packets are flowing to the client's RTP port
+};
+
+/// What one request asked for, parsed out of its first line and headers.
+struct Request {
+    enum class Verb : uint8_t { Unknown, Options, Describe, Setup, Play, Teardown };
+    Verb     verb   = Verb::Unknown;   ///< which verb, or Unknown where the line names none
+    uint32_t cseq   = 0;        ///< echoed in the response, which is how a client pairs the two
+    uint16_t rtpPort = 0;       ///< the client's RTP port, from SETUP's Transport header
+    bool     unicastUdp = false; ///< true where SETUP asked for RTP/AVP/UDP unicast
+};
+
+/// Compare `n` bytes without regard to case, which is how RFC 2326 reads a header name.
+inline bool ieq(const char* a, const char* b, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        const char x = (a[i] >= 'A' && a[i] <= 'Z') ? static_cast<char>(a[i] + 32) : a[i];
+        const char y = (b[i] >= 'A' && b[i] <= 'Z') ? static_cast<char>(b[i] + 32) : b[i];
+        if (x != y) return false;
+    }
+    return true;
+}
+
+/// Parse a request, false where the buffer holds no complete first line. A client orders its headers as it likes, so each is searched for by name rather than counted to.
+inline bool parseRequest(const char* buf, size_t len, Request* out) {
+    if (!buf || !out || len == 0) return false;
+    *out = Request{};
+
+    struct { const char* name; Request::Verb verb; } kVerbs[] = {
+        {"OPTIONS", Request::Verb::Options},   {"DESCRIBE", Request::Verb::Describe},
+        {"SETUP", Request::Verb::Setup},       {"PLAY", Request::Verb::Play},
+        {"TEARDOWN", Request::Verb::Teardown},
+    };
+    for (const auto& v : kVerbs) {
+        const size_t n = std::strlen(v.name);
+        if (len > n && std::strncmp(buf, v.name, n) == 0 && buf[n] == ' ') {
+            out->verb = v.verb;
+            break;
+        }
+    }
+    if (out->verb == Request::Verb::Unknown) return false;
+
+    // CSeq, matched a letter at a time: RFC 2326 headers are case-insensitive throughout, and a client that sends `cseq` is as correct as one that sends `CSeq`.
+    for (size_t i = 0; i + 5 < len; i++) {
+        if (ieq(buf + i, "CSeq:", 5)) {
+            out->cseq = static_cast<uint32_t>(std::strtoul(buf + i + 5, nullptr, 10));
+            break;
+        }
+    }
+    // Transport: a unicast UDP pair, whose first port is where RTP goes.
+    for (size_t i = 0; i + 10 < len; i++) {
+        if (std::strncmp(buf + i, "client_port=", 12) == 0) {
+            out->rtpPort = static_cast<uint16_t>(std::strtoul(buf + i + 12, nullptr, 10));
+            break;
+        }
+    }
+    for (size_t i = 0; i + 11 < len; i++) {
+        if (std::strncmp(buf + i, "RTP/AVP", 7) == 0) {
+            // "RTP/AVP" alone means UDP; "RTP/AVP/TCP" names the interleaved transport instead.
+            out->unicastUdp = std::strncmp(buf + i, "RTP/AVP/TCP", 11) != 0;
+            break;
+        }
+    }
+    return true;
+}
+
+/// One client's conversation: what it has agreed to, and what it is told next.
+class Session {
+public:
+    /// `sessionId` identifies this conversation in every response after SETUP.
+    explicit Session(uint32_t sessionId) : id_(sessionId) {}
+
+    /// Where the conversation has reached.
+    State state() const { return state_; }
+    /// The client's RTP port, once SETUP has named one.
+    uint16_t rtpPort() const { return rtpPort_; }
+    /// The session id a client echoes back.
+    uint32_t id() const { return id_; }
+
+    /// Answer one request into `out`, returning the bytes written; `sdp` and `url` serve DESCRIBE.
+    size_t respond(const Request& req, const char* sdp, const char* url,
+                   char* out, size_t outLen) {
+        switch (req.verb) {
+        case Request::Verb::Options:
+            return header(out, outLen, 200, "OK", req.cseq,
+                          "Public: OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN\r\n", nullptr);
+
+        case Request::Verb::Describe: {
+            if (!sdp) return simple(out, outLen, 500, "Internal Server Error", req.cseq);
+            char extra[160];
+            std::snprintf(extra, sizeof(extra),
+                          "Content-Type: application/sdp\r\nContent-Base: %s\r\nContent-Length: %u\r\n",
+                          url ? url : "", static_cast<unsigned>(std::strlen(sdp)));
+            return header(out, outLen, 200, "OK", req.cseq, extra, sdp);
+        }
+
+        case Request::Verb::Setup: {
+            // UDP is the transport this server speaks; anything else is told so plainly.
+            if (!req.unicastUdp || req.rtpPort == 0)
+                return simple(out, outLen, 461, "Unsupported Transport", req.cseq);
+            rtpPort_ = req.rtpPort;
+            state_ = State::Ready;
+            char extra[200];
+            std::snprintf(extra, sizeof(extra),
+                          "Transport: RTP/AVP;unicast;client_port=%u-%u;server_port=%u-%u\r\n"
+                          "Session: %u\r\n",
+                          static_cast<unsigned>(rtpPort_), static_cast<unsigned>(rtpPort_ + 1),
+                          static_cast<unsigned>(kServerRtpPort),
+                          static_cast<unsigned>(kServerRtpPort + 1),
+                          static_cast<unsigned>(id_));
+            return header(out, outLen, 200, "OK", req.cseq, extra, nullptr);
+        }
+
+        case Request::Verb::Play: {
+            // A transport is agreed at SETUP, so PLAY before it has nowhere to send.
+            if (state_ != State::Ready && state_ != State::Playing)
+                return simple(out, outLen, 455, "Method Not Valid In This State", req.cseq);
+            state_ = State::Playing;
+            char extra[120];
+            std::snprintf(extra, sizeof(extra), "Session: %u\r\nRange: npt=0.000-\r\n",
+                          static_cast<unsigned>(id_));
+            return header(out, outLen, 200, "OK", req.cseq, extra, nullptr);
+        }
+
+        case Request::Verb::Teardown: {
+            state_ = State::Init;
+            rtpPort_ = 0;
+            char extra[64];
+            std::snprintf(extra, sizeof(extra), "Session: %u\r\n", static_cast<unsigned>(id_));
+            return header(out, outLen, 200, "OK", req.cseq, extra, nullptr);
+        }
+
+        case Request::Verb::Unknown:
+        default:
+            return simple(out, outLen, 501, "Not Implemented", req.cseq);
+        }
+    }
+
+    /// The port this server sends RTP from, which SETUP advertises.
+    static constexpr uint16_t kServerRtpPort = 5004;
+
+private:
+    /// A response line, the always-present headers, optional extra headers and an optional body.
+    static size_t header(char* out, size_t outLen, int code, const char* reason, uint32_t cseq,
+                         const char* extra, const char* body) {
+        if (!out || outLen == 0) return 0;
+        const int n = std::snprintf(out, outLen,
+                                    "RTSP/1.0 %d %s\r\nCSeq: %u\r\n%s\r\n%s",
+                                    code, reason, static_cast<unsigned>(cseq),
+                                    extra ? extra : "", body ? body : "");
+        return (n > 0 && static_cast<size_t>(n) < outLen) ? static_cast<size_t>(n) : 0;
+    }
+
+    static size_t simple(char* out, size_t outLen, int code, const char* reason, uint32_t cseq) {
+        return header(out, outLen, code, reason, cseq, nullptr, nullptr);
+    }
+
+    uint32_t id_;
+    State    state_ = State::Init;
+    uint16_t rtpPort_ = 0;
+};
+
+/// The SDP a DESCRIBE answers with, one H.264 stream at the session's payload type: its length.
+inline size_t buildSdp(char* out, size_t outLen, const char* ip, uint16_t width, uint16_t height,
+                       uint8_t fps, uint8_t payloadType) {
+    if (!out || outLen == 0) return 0;
+    // a=framesize and a=framerate are advisory, and a player that ignores them reads the same geometry out of the stream's own SPS.
+    const int n = std::snprintf(out, outLen,
+        "v=0\r\n"
+        "o=- 0 0 IN IP4 %s\r\n"
+        "s=projectMM\r\n"
+        "c=IN IP4 0.0.0.0\r\n"
+        "t=0 0\r\n"
+        "m=video 0 RTP/AVP %u\r\n"
+        "a=rtpmap:%u H264/90000\r\n"
+        "a=framesize:%u %u-%u\r\n"
+        "a=framerate:%u\r\n"
+        "a=control:*\r\n",
+        ip ? ip : "0.0.0.0",
+        static_cast<unsigned>(payloadType), static_cast<unsigned>(payloadType),
+        static_cast<unsigned>(payloadType), static_cast<unsigned>(width),
+        static_cast<unsigned>(height), static_cast<unsigned>(fps));
+    return (n > 0 && static_cast<size_t>(n) < outLen) ? static_cast<size_t>(n) : 0;
+}
+
+}  // namespace mm::rtsp
