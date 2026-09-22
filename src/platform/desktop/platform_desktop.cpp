@@ -2875,8 +2875,13 @@ static bool spawnEncoderProcess(const char* const argv[], bool captureStdout = f
             esTakenSeq_ = 0;
             esPts90_ = 0;
         }
-        // Captured BY VALUE: the stop path clears the globals while this thread runs, and reading them here would race that write.
-        esReader_ = std::thread([out = encStdout_, wake = esWake_[0]] {
+        // Captured BY VALUE: the stop path clears the globals while this thread runs, and reading them here would race that write. Windows wakes the reader with CancelIoEx and so has no wake pipe to capture.
+#ifdef _WIN32
+        const int wakeFd = -1;
+#else
+        const int wakeFd = esWake_[0];
+#endif
+        esReader_ = std::thread([out = encStdout_, wake = wakeFd] {
             std::vector<uint8_t> pending;     // bytes read but not yet a whole access unit
             uint8_t buf[16384];
             uint32_t frames = 0;
