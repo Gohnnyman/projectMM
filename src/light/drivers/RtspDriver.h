@@ -14,15 +14,19 @@ namespace mm {
 
 /// Output driver: serves the rendered frame as an H.264 stream a player pulls over RTSP, which arrives with a fraction of the delay HLS carries.
 ///
-/// HLS ships whole segments and a player buffers several before it starts, so a viewer sees seconds ago. RTSP sends each frame as the encoder produces it, and the same wall measures about five times closer to live.
+/// HLS ships whole segments and a player buffers several before it starts, so a viewer sees seconds ago. RTSP sends each frame as the encoder produces it, which puts a viewer far closer to live.
 ///
 /// Prior art: RTSP is RFC 2326, its RTP payload format for H.264 is RFC 6184, and the hardware encoder is the one HLS already drives.
 ///
 /// @moreinfo
 ///
-/// ## One encode feeds both
+/// ## One encoder, one driver at a time
 ///
-/// The encoder runs once and two readers take its output: HLS muxes it into segments, RTSP packetises the same NALs into RTP. A device serving both encodes one frame, and the platform seam hands each reader the frame by pointer.
+/// HLS muxes the encoder's output into segments where this packetises the same NALs into RTP, so the two read the same shape of frame.
+/// They cannot run together: there is one encoder instance, and a second `encoderStart` would silently reconfigure the first driver's stream.
+/// So the encoder is claimed, and whichever driver starts second reports that it is in use.
+/// Sharing one encode between both readers is the better end state, filed in the backlog.
+/// It needs the two drivers to agree on geometry, rate and bitrate, which nothing makes them do today.
 ///
 /// ## The newest viewer is the viewer
 ///
@@ -140,6 +144,7 @@ public:
     /// Stop the encoder, drop the session and stop listening.
     void release() override {
         if (open_) {
+            platform::rtspReleaseFrame();     // a frame taken but never shipped, so the buffer is free
             platform::encoderRelease(this);   // stops it, and only where this driver holds the claim
             open_ = false;
         }

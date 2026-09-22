@@ -418,7 +418,7 @@ bool hlsSegment(const char* name, const uint8_t** data, size_t* len);
 void hlsSegmentRelease();
 
 // --- The encoder is claimed, never shared ------------------------------------------------------
-// One instance per target (one ffmpeg child, one hardware session), so a second encoderStart would silently reconfigure the first driver's stream: the claim below makes that conflict visible instead.
+// One instance per target, so a second encoderStart would silently reconfigure the first driver's stream, and the claim below makes that visible. Unsynchronised: both callers claim from prepare(), on the render thread.
 
 // --- RTSP output, gated by `hasRtsp`: the encoded frame itself, before any muxing ---------------
 

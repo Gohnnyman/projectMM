@@ -66,7 +66,7 @@
 /// That reports what it is executing, and this reports an image it is not.
 /// Both carry the same version string, which is what lets a caller compare them by equality.
 /// Its SIZE comes from the slot rather than the image.
-/// The metadata call reads through a mapping arranged for the running partition, and simply errored for this one, leaving the row absent.
+/// The metadata call reads through a mapping arranged for the running partition, and errored for this one, leaving the row absent.
 /// What a user wants from the row is whether the slot has room, and reading the descriptor already proves an image is there.
 /// The figure counts the segments only, so trailing padding, checksum and hash are excluded and it reads a few dozen bytes under the file on disk.
 /// That is deliberate: the figure answers how full the slot is, and reproducing the bootloader's padding rules would be a second copy to keep in step for no gain.
@@ -397,6 +397,12 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
                 esp_ota_abort(handle);
                 return false;
             }
+            // And whose firmware this is, the same question the URL path asks, before the first write rather than after the slot is spent.
+            if (!info.described || std::strcmp(info.project, mm::kProjectImageName) != 0) {
+                setStatus("error: that image is not this project");
+                esp_ota_abort(handle);
+                return false;
+            }
         }
         err = esp_ota_write(handle, buf, n);
         if (err != ESP_OK) {
@@ -524,7 +530,7 @@ bool otaWriteMoonBase(FsWriteSrc src, void* user, size_t contentLen,
         setStatus("error: MoonBase did not verify, retry before rebooting");
         return false;
     }
-    // No reboot and no boot-partition change: the app keeps running, and the new MoonBase is simply what the device falls back to from now on.
+    // No reboot and no boot-partition change: the app keeps running, and the new MoonBase is what the device falls back to from now on.
     setStatus("idle");
     return true;
     #undef setStatus

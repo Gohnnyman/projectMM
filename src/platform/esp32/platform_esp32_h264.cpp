@@ -23,7 +23,7 @@
 /// The orphan would then resume as a second producer on the one encoder handle and scratch buffer.
 /// So each worker captures the generation it was spawned for and exits as soon as it is no longer current.
 ///
-/// For the same reason the buffers are freed only once the worker has actually returned: a detached one is mid-encode holding raw pointers to them and to the encoder handle.
+/// For the same reason the buffers are freed only once the worker has returned: a detached one is mid-encode holding raw pointers to them and to the encoder handle.
 /// Freeing there would be a use-after-free plus a call into a deleted session, so leaking a few megabytes until the next start is the better trade.
 ///
 /// ## The playlist advertises from the oldest plus a margin
@@ -34,7 +34,7 @@
 ///
 /// ## The encoder task's core and stack
 ///
-/// The second core, since the first runs the network stack and starving it stalls the very server that serves these segments.
+/// The second core, since the first runs the network stack and starving it stalls the server that serves these segments.
 /// The stack is twice what this started with, the encoder call chain plus our muxer having overflowed the smaller one.
 /// It jumped into the maths library with a corrupted pointer and panicked in a loop.
 /// The vendor's own example runs its encode from a comparable stack, and the muxer's frame loop sits on top of that.
@@ -44,7 +44,7 @@
 /// ## The QP window lets the bitrate govern
 ///
 /// A near-fixed window pins quality, so the encoder spends whatever that costs and ignores the configured bitrate entirely.
-/// Opening the window lets the bitrate actually govern what a frame may cost.
+/// Opening the window lets the bitrate govern what a frame may cost.
 ///
 /// ## A segment claims the duration it holds
 ///
@@ -307,7 +307,9 @@ void freeAll() {
     for (auto& s : segments_) { heap_caps_free(s.data); s.data = nullptr; s.len = 0; s.seq = 0; s.frames = 0; }
     heap_caps_free(yuv_); yuv_ = nullptr;
     heap_caps_free(nal_); nal_ = nullptr;
-    heap_caps_free(take_); take_ = nullptr; takeLen_ = 0;
+    // The BUSY flag goes with the buffer it guards: a reader that never released would leave every later encode unable to fill a fresh take_.
+    heap_caps_free(take_); take_ = nullptr;
+    takeLen_ = 0; takeSeq_ = 0; takeBusy_ = false; lastTakenSeq_ = 0;
 }
 
 void* psram(size_t bytes) {
@@ -406,7 +408,7 @@ void encoderStop() {
         stopPinnedTask(task_);
     }
     Lock lk;
-    // Free only once the worker has actually returned: @xref{an-orphaned-worker-must-not-become-a-second-producer|why a detached one still holds these pointers}.
+    // Free only once the worker has returned: @xref{an-orphaned-worker-must-not-become-a-second-producer|why a detached one still holds these pointers}.
     if (workerExited_) {
         freeAll();
         head_ = count_ = 0;

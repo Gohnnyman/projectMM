@@ -2862,7 +2862,11 @@ static bool spawnEncoderProcess(const char* const argv[], bool captureStdout = f
 #ifndef _WIN32
         if (esWake_[0] >= 0) { ::close(esWake_[0]); esWake_[0] = -1; }
         if (esWake_[1] >= 0) { ::close(esWake_[1]); esWake_[1] = -1; }
-        if (::pipe(esWake_) != 0) { esWake_[0] = esWake_[1] = -1; }
+        // Without this pipe the stop path cannot reach a reader parked on a silent encoder, and the join would hold the render thread forever.
+        if (::pipe(esWake_) != 0) {
+            esWake_[0] = esWake_[1] = -1;
+            return true;   // the encoder runs; only the frames this thread would publish are absent
+        }
 #endif
         {
             std::lock_guard<std::mutex> lk(esMutex_);
@@ -2872,14 +2876,14 @@ static bool spawnEncoderProcess(const char* const argv[], bool captureStdout = f
             esPts90_ = 0;
         }
         // Captured BY VALUE: the stop path clears the globals while this thread runs, and reading them here would race that write.
-        esReader_ = std::thread([out = encStdout_] {
+        esReader_ = std::thread([out = encStdout_, wake = esWake_[0]] {
             std::vector<uint8_t> pending;     // bytes read but not yet a whole access unit
             uint8_t buf[16384];
             uint32_t frames = 0;
             for (;;) {
 #ifdef _WIN32
                 DWORD got = 0;
-                // A cancelled read reports ERROR_OPERATION_ABORTED, which is the stop path asking.
+                // A canceled read reports ERROR_OPERATION_ABORTED, which is the stop path asking.
                 if (!out || !ReadFile(out, buf, static_cast<DWORD>(sizeof(buf)), &got, nullptr) ||
                     got == 0) return;
                 const size_t n = got;
@@ -2889,12 +2893,12 @@ static bool spawnEncoderProcess(const char* const argv[], bool captureStdout = f
                 fd_set rd;
                 FD_ZERO(&rd);
                 FD_SET(out, &rd);
-                if (esWake_[0] >= 0) FD_SET(esWake_[0], &rd);
-                const int maxFd = (esWake_[0] > out ? esWake_[0] : out) + 1;
+                if (wake >= 0) FD_SET(wake, &rd);
+                const int maxFd = (wake > out ? wake : out) + 1;
                 const int ready = ::select(maxFd, &rd, nullptr, nullptr, nullptr);
                 if (ready < 0 && errno == EINTR) continue;
                 if (ready < 0) return;
-                if (esWake_[0] >= 0 && FD_ISSET(esWake_[0], &rd)) return;   // asked to stop
+                if (wake >= 0 && FD_ISSET(wake, &rd)) return;   // asked to stop
                 const ssize_t r = ::read(out, buf, sizeof(buf));
                 if (r < 0 && errno == EINTR) continue;
                 if (r <= 0) return;           // the child closed its stdout: the encoder is gone

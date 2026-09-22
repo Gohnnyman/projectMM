@@ -100,6 +100,45 @@ TEST_CASE("RtspSession walks OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN") {
     CHECK(s.rtpPort() == 0);          // the agreed transport is released with the session
 }
 
+// Judging a Transport header as one string accepts a combination nobody offered: one alternative's protocol paired with another's port.
+TEST_CASE("RtspSession judges each Transport alternative whole") {
+    mm::rtsp::Session s(1);
+
+    SUBCASE("the interleaved alternative's protocol never pairs with another's port") {
+        const auto r = answer(s, "SETUP rtsp://d/ RTSP/1.0\r\nCSeq: 3\r\n"
+                                 "Transport: RTP/AVP/TCP;interleaved=0-1,RTP/AVP;multicast;client_port=6000-6001\r\n\r\n");
+        CHECK(has(r, "461 Unsupported Transport"));   // TCP, then multicast: neither is usable
+        CHECK(s.state() == mm::rtsp::State::Init);
+    }
+
+    SUBCASE("multicast is refused, where a unicast server would send to one address") {
+        const auto r = answer(s, "SETUP rtsp://d/ RTSP/1.0\r\nCSeq: 3\r\n"
+                                 "Transport: RTP/AVP;multicast;client_port=6000-6001\r\n\r\n");
+        CHECK(has(r, "461 Unsupported Transport"));
+    }
+
+    SUBCASE("a usable alternative after an unusable one is taken") {
+        const auto r = answer(s, "SETUP rtsp://d/ RTSP/1.0\r\nCSeq: 3\r\n"
+                                 "Transport: RTP/AVP/TCP;interleaved=0-1,RTP/AVP;unicast;client_port=7000-7001\r\n\r\n");
+        CHECK(has(r, "RTSP/1.0 200 OK"));
+        CHECK(s.rtpPort() == 7000);                   // the second alternative's OWN port
+    }
+
+    SUBCASE("an alternative naming no port is refused rather than half-accepted") {
+        const auto r = answer(s, "SETUP rtsp://d/ RTSP/1.0\r\nCSeq: 3\r\n"
+                                 "Transport: RTP/AVP;unicast\r\n\r\n");
+        CHECK(has(r, "461 Unsupported Transport"));
+    }
+}
+
+// A number long enough to wrap the accumulator would land back under the limit and read as a small one.
+TEST_CASE("RtspSession refuses a number that would overflow rather than wrapping it") {
+    mm::rtsp::Request req;
+    const char* r = "OPTIONS rtsp://d/ RTSP/1.0\r\nCSeq: 4294967296\r\n\r\n";
+    REQUIRE(mm::rtsp::parseRequest(r, std::strlen(r), &req));
+    CHECK(req.cseq == 0);            // refused, so the field keeps its default rather than wrapping to 0
+}
+
 // A header's casing is the client's choice, so CSeq is matched without regard to it.
 TEST_CASE("RtspSession reads CSeq whatever its casing") {
     mm::rtsp::Session s(1);

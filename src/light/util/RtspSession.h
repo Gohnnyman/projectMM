@@ -1,5 +1,12 @@
 #pragma once
 /// The RTSP control conversation, RFC 2326: one client's request becomes one response and a state move.
+/// @moreinfo
+/// ## An alternative is judged whole
+/// RFC 2326 lets a client offer several transports in one Transport header, comma separated and in preference order.
+/// Each carries its own parameters, so a scan finding the protocol in one and the port in another accepts a combination the client never offered.
+/// `RTP/AVP/TCP;interleaved=0-1,RTP/AVP;multicast;client_port=6000` would read as unicast UDP on port 6000, which is neither thing asked for.
+/// So each alternative is judged as a unit and the first usable one wins.
+/// Usable means RTP/AVP, not the interleaved TCP profile, explicitly unicast, and carrying a port.
 
 #include <cstddef>
 #include <cstdint>
@@ -37,7 +44,7 @@ inline bool ieq(const char* a, const char* b, size_t n) {
     return true;
 }
 
-/// Compare `n` bytes at `at` against a literal, false where the buffer holds fewer: a plain strncmp would read past a client's unterminated bytes.
+/// Compare `n` bytes at `at` against a literal, false where the buffer holds fewer.
 inline bool matchAt(const char* buf, size_t len, size_t at, const char* lit, size_t n) {
     return at + n <= len && std::memcmp(buf + at, lit, n) == 0;
 }
@@ -47,10 +54,54 @@ inline uint32_t boundedDecimal(const char* buf, size_t len, size_t at, uint32_t 
     uint32_t v = 0;
     size_t digits = 0;
     for (; at < len && buf[at] >= '0' && buf[at] <= '9'; at++, digits++) {
-        v = v * 10 + static_cast<uint32_t>(buf[at] - '0');
-        if (v > limit) return limit + 1;          // refused rather than wrapped
+        const uint32_t d = static_cast<uint32_t>(buf[at] - '0');
+        // Tested BEFORE the multiply, since `v * 10 + d` wraps past the type's range and lands back under the limit.
+        if (v > (limit - d) / 10) return limit + 1;
+        v = v * 10 + d;
     }
     return digits ? v : limit + 1;
+}
+
+/// Read the Transport header, taking the first alternative this server can carry.
+inline void parseTransport(const char* buf, size_t len, Request* out) {
+    // The header's own span, since these tokens are common enough to appear elsewhere in a request.
+    size_t at = len, end = len;
+    for (size_t i = 0; i + 10 <= len; i++) {
+        if (ieq(buf + i, "Transport:", 10)) { at = i + 10; break; }
+    }
+    if (at >= len) return;
+    for (size_t i = at; i + 1 < len; i++) {
+        if (buf[i] == '\r' && buf[i + 1] == '\n') { end = i; break; }
+    }
+
+    while (at < end) {
+        size_t stop = at;
+        while (stop < end && buf[stop] != ',') stop++;      // one alternative, comma to comma
+        const size_t n = stop - at;
+        bool rtpAvp = false, tcpProfile = false, unicast = false, multicast = false;
+        uint16_t port = 0;
+        for (size_t j = at; j < stop; j++) {
+            const size_t left = stop - j;
+            if (!rtpAvp && left >= 7 && matchAt(buf, stop, j, "RTP/AVP", 7)) {
+                rtpAvp = true;
+                tcpProfile = left >= 11 && matchAt(buf, stop, j, "RTP/AVP/TCP", 11);
+            }
+            if (left >= 7 && matchAt(buf, stop, j, "unicast", 7)) unicast = true;
+            if (left >= 9 && matchAt(buf, stop, j, "multicast", 9)) multicast = true;
+            if (left >= 12 && matchAt(buf, stop, j, "client_port=", 12)) {
+                // 0 stays refused (SETUP reads it as "no port"), and 65535 has no pair for RTCP.
+                const uint32_t v = boundedDecimal(buf, stop, j + 12, 65534u);
+                if (v >= 1 && v <= 65534u) port = static_cast<uint16_t>(v);
+            }
+        }
+        (void)n;
+        if (rtpAvp && !tcpProfile && unicast && !multicast && port != 0) {
+            out->unicastUdp = true;
+            out->rtpPort = port;
+            return;                                          // the first usable alternative wins
+        }
+        at = stop + 1;
+    }
 }
 
 /// Parse a request, false where the buffer holds no complete first line. A client orders its headers as it likes, so each is searched for by name rather than counted to.
@@ -82,22 +133,7 @@ inline bool parseRequest(const char* buf, size_t len, Request* out) {
             break;
         }
     }
-    // Transport: a unicast UDP pair, whose first port is where RTP goes.
-    for (size_t i = 0; i + 12 <= len; i++) {
-        if (matchAt(buf, len, i, "client_port=", 12)) {
-            // 0 stays refused (SETUP reads it as "no port"), and 65535 has no pair for RTCP.
-            const uint32_t v = boundedDecimal(buf, len, i + 12, 65534u);
-            if (v >= 1 && v <= 65534u) out->rtpPort = static_cast<uint16_t>(v);
-            break;
-        }
-    }
-    for (size_t i = 0; i + 7 <= len; i++) {
-        if (matchAt(buf, len, i, "RTP/AVP", 7)) {
-            // "RTP/AVP" alone means UDP; "RTP/AVP/TCP" names the interleaved transport instead.
-            out->unicastUdp = !matchAt(buf, len, i, "RTP/AVP/TCP", 11);
-            break;
-        }
-    }
+    parseTransport(buf, len, out);
     return true;
 }
 

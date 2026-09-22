@@ -209,7 +209,7 @@ Detail: [technical](moxygen/HlsDriver.md) · [the transport-stream muxer](moxyge
 
 Streams the layer as **H.264 over RTSP**, which a player pulls rather than fetching segments. Point VLC or `ffplay` at the `url` the card shows. It reaches a viewer **much sooner than HLS**, which buffers whole segments before it plays one, so this is the remote view to reach for. [Preview](#preview) stays the one that keeps pace with the lights, sending raw pixels and no codec at all.
 
-Runs on the **ESP32-P4**, whose hardware encoder it shares with HLS, and on the desktop through ffmpeg: a device serving both encodes one frame and each reader takes it. See [the details below](#rtsp-details).
+Runs on the **ESP32-P4** and on the desktop. One encoder, so **RTSP and [HLS](#hls) run one at a time**. See [the details below](#rtsp-details).
 
 - `targetFps`: encode-rate ceiling (default 30, 1–60), which is also the keyframe interval.
 - `scale`: video pixels per light (0 = auto). Each light is a solid block, never a blur.
