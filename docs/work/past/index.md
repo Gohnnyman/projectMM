@@ -6,16 +6,13 @@ Shipped plans and dated records.
 
 `plans/` holds the plans that shipped before the current rule, when a plan was archived rather than folded into its PR. They map onto merged PRs, and the mapping is the next thing to write here. From now on a plan ends at its PR ([CLAUDE.md, Branch](../../../CLAUDE.md#branch)), so this folder stops growing.
 
-The dated records beside it (release notes, prior-version inventories) state what was true at a moment and stay unrewritten.
+The prior-version inventories beside it state what was true at a moment and stay unrewritten. Release notes live on [the GitHub release](https://github.com/MoonModules/projectMM/releases) itself, which is their one home: a copy here drifts from what shipped, and the links in one pinned to an older tag went stale exactly that way.
 
-## The records beside the plans
+## The record beside the plans
 
-One-time surveys of earlier projects, used to decide what to harvest into projectMM. Reference, not maintained.
-
-- [moonlight-inventory.md](moonlight-inventory.md): MoonLight, the closest prior art (CSR mapping, layer model, control mechanisms).
-- [v1-inventory.md](v1-inventory.md): projectMM v1 (release 1.4.0).
-- [v2-inventory.md](v2-inventory.md): projectMM v2.
 - [lessons.md](lessons.md): hard-won debugging lessons and gotchas, a bug, its cause and the fix, recorded with the code that proved them. A lesson that hardened into a *rule* lives in [CLAUDE.md](../../../CLAUDE.md) or [coding-standards.md](../../contributing/coding-standards.md) instead.
+
+The surveys of v1, v2 and MoonLight that once sat here are gone. They were written to decide what to harvest into v3, that decision shipped, and each described code that lives in its own repository and in git.
 
 The LED-driver and shift-register design analyses moved to [future](../future/index.md), where the other research documents sit: they were written to decide what to build, and that is what future holds.
 

@@ -1177,7 +1177,7 @@ Compile-time answer already ships: `--firmware esp32-eth` excludes the WiFi stac
 
 ## UI
 
-Forward-looking companion to the shipped UI spec, [moonmodules/core/services.md](../../moonmodules/core/services.md). The live spec describes the UI as shipped; this file holds what is **not** in it yet: deferred items, open design questions for 1.0, and the gap analysis against projectMM v1. The backward-looking half (how v1/v2 actually worked, patterns consciously rejected, recorded quirks) lives in [history/v1-inventory.md](../past/v1-inventory.md).
+Forward-looking companion to the shipped UI spec, [moonmodules/core/services.md](../../moonmodules/core/services.md). The live spec describes the UI as shipped; this file holds what is **not** in it yet: deferred items, open design questions for 1.0, and the gap analysis against projectMM v1.
 
 ### Deferred to 1.x
 

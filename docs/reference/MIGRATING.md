@@ -28,7 +28,7 @@ Nothing yet. Entries land here as breaking changes are made, and the heading tak
 
 ## v5.0.0
 
-The last release under the projectMM name; [the release notes](../work/past/release-notes-v5.0.0.md) summarise what these entries ask of you.
+The last release under the projectMM name. Its [release notes](https://github.com/MoonModules/projectMM/releases) summarise what these entries ask of you.
 
 ### System: `expertMode` became `mode`, with three levels
 
