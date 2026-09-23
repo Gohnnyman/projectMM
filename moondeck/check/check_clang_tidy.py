@@ -44,7 +44,7 @@ _DIAG = re.compile(r"^(?P<file>\S+?):(?P<line>\d+):(?P<col>\d+): "
 
 
 def _host_build_dir():
-    """The build dir holding the compile_commands.json to analyse against.
+    """The build dir holding the compile_commands.json to analyze against.
 
     Two can exist: build/ (a plain `cmake --build build`) and build/<host>/ (what the build
     script writes). Pick whichever database is NEWEST rather than assuming, because a database
@@ -107,7 +107,7 @@ def run(build_dir, check_filter=None, tu_regex=None):
         cmd += [f"-checks=-*,{check_filter}"]
 
     # run-clang-tidy shells out to `clang-tidy` BY NAME, so it must be on PATH even though we
-    # resolved the runner by absolute path. Without this it exits 0 having analysed nothing —
+    # resolved the runner by absolute path. Without this it exits 0 having analyzed nothing —
     # a silent empty report that reads exactly like a clean tree. Put the runner's own
     # directory first so the pair always comes from one toolchain (a clang-tidy from a
     # different LLVM than the runner is the other way this goes quietly wrong).
@@ -124,7 +124,7 @@ def run(build_dir, check_filter=None, tu_regex=None):
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, env=env)
     out = proc.stdout
 
-    # A run that analysed nothing prints no per-file progress and yields no findings, which
+    # A run that analyzed nothing prints no per-file progress and yields no findings, which
     # is indistinguishable from a clean tree in the report. Treat it as an error instead:
     # a silent "0 findings" is the worst possible output for a check like this.
     if "clang-tidy" in proc.stderr and "not found" in proc.stderr:
@@ -145,14 +145,14 @@ def run(build_dir, check_filter=None, tu_regex=None):
         # on and would never reach zero.
         if not d["file"].startswith(("src/", "test/")) or d["file"] in VENDORED:
             continue
-        # A header analysed via N translation units yields N identical diagnostics.
+        # A header analyzed via N translation units yields N identical diagnostics.
         key = (d["file"], d["line"], d["col"], d["check"])
         if key in seen:
             continue
         seen.add(key)
         rows.append(d)
 
-    # A file that fails to compile is never analysed, so widespread errors mean the report is
+    # A file that fails to compile is never analyzed, so widespread errors mean the report is
     # measuring nothing — the failure that hid a real bug here until it was chased down. Treat
     # "most files errored" as a broken run rather than a result, because the alternative is a
     # short, clean-looking report that is entirely fictional.
@@ -183,7 +183,7 @@ def render(rows, commit):
 
     if not rows:
         # Kept deliberately: this is not an explanation but the check on the result — a zero
-        # from a run that analysed nothing looks identical to a clean tree.
+        # from a run that analyzed nothing looks identical to a clean tree.
         L += ["", "No findings. ✓",
               "Verify with a check that must fire: "
               "--check readability-magic-numbers"]
@@ -232,7 +232,7 @@ def main():
             return 2
         print(f"Filtered to {args.module}: {', '.join(only)}")
         # Parse only the TUs that actually reach this module's files. A header-only module has
-        # no TU of its own, but it IS included by one or two — analysing those beats parsing all
+        # no TU of its own, but it IS included by one or two — analyzing those beats parsing all
         # 15 (measured: 18s vs 263s for a header included only by main.cpp).
         tus = check_clang_query.including_tus(only, build_dir)
         all_tus = check_clang_query._source_tus(build_dir)

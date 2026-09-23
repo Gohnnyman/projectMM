@@ -125,6 +125,9 @@ const clampDot = (v) => Math.min(DOT_MAX, Math.max(DOT_MIN, Number.isFinite(v) ?
 let dotScale_ = clampDot(parseFloat(localStorage.getItem("mm_preview_dot")));
 let resetLayout_ = null;     // set by setupLayout(): restores docked/PiP state to defaults
 let previewBox_ = null;      // {x,y,z} bounding-box extent for camera auto-fit
+let previewPos_ = null;      // the table's raw (x,y,z) bytes: what the stride test reads
+let previewTableStride_ = 1; // the stride the CACHED table was built at, the finest available
+let previewEpochKey_ = 0;    // the epoch the cached table belongs to, keying the upsample map
 let lineProgram = null;      // separate program for the wireframe bounding box
 let lineLocs = null;
 let lineBuffer = null;
@@ -631,11 +634,12 @@ function parsePreviewCoords(view, buf) {
         coords[i * 3 + 1] = (pos[i * 3 + 1] / maxDim) - 0.5 * by / maxDim;
         coords[i * 3 + 2] = (pos[i * 3 + 2] / maxDim) - 0.5 * bz / maxDim;
     }
-    // CACHE the table per (epoch, stride): a stride change back to a cached rung costs zero table
-    // traffic, the lean channel's core idea. Tables from dead epochs are dropped (the device
-    // renumbered the world); browser memory for one epoch's whole ladder is a few hundred KB.
+    // ONE table per epoch, the finest the device will serve. Every coarser stride is derived from
+    // it here rather than fetched, so a stride change costs no table traffic at any rung and the
+    // preview keeps the layout's full extent at every detail level. Positions are static for an
+    // epoch, so this is also less traffic than a table per rung: one fetch, not three or four.
     for (const k of tableCache_.keys()) if (!k.startsWith(epoch + ":")) tableCache_.delete(k);
-    tableCache_.set(epoch + ":" + stride, { coords, count, maxDim, bx, by, bz });
+    tableCache_.set(epoch + ":" + stride, { coords, count, maxDim, bx, by, bz, stride, pos: new Uint8Array(pos) });
     activateTable(epoch, stride);
     // Draw the geometry NOW, dark, so a fresh page shows the layout the instant the table arrives,
     // not only once the first color frame lands. Color frames then light it.
@@ -645,15 +649,65 @@ function parsePreviewCoords(view, buf) {
 // Make a cached table the rendering one. Returns false when the cache misses (the caller then
 // asks the device for it: the pull model).
 function activateTable(epoch, stride) {
-    const t = tableCache_.get(epoch + ":" + stride);
+    // Any cached table for this epoch serves every stride: the colors are mapped onto it below.
+    // The FINEST one when several are cached, since a coarser base cannot express a finer frame:
+    // insertion order would have handed back whichever arrived first.
+    const t = tableCache_.get(epoch + ":" + stride)
+           || [...tableCache_.keys()].filter(k => k.startsWith(epoch + ":"))
+                .map(k => tableCache_.get(k))
+                .sort((a, b) => (a.stride ?? 1) - (b.stride ?? 1))[0];
     if (!t) return false;
     previewCoords_ = t.coords;
     previewCoordCount_ = t.count;
     previewMaxDim_ = t.maxDim;
     previewBox_ = { x: t.bx, y: t.by, z: t.bz };
+    previewPos_ = t.pos;
+    previewTableStride_ = t.stride ?? 1;
+    previewEpochKey_ = epoch;
     previewStride_ = stride;
     updatePreviewStatus();
     return true;
+}
+
+// Which table point each color in a stride-`s` frame belongs to. The device keeps a light when
+// `x % s == 0 && y % s == 0 && z % s == 0` (PreviewDriver::buildCoordTable), walking z, then y,
+// then x, so running the same test over the table's own positions reproduces its order exactly.
+// Every point then takes the color of the kept light leading its block: the layout stays whole
+// and only the detail coarsens. Cached per (table, stride), since it changes only when one does.
+let upsampleCache_ = new Map();
+function upsampleMap(stride) {
+    const base = previewTableStride_ || 1;
+    const n = previewCoordCount_;
+    if (!previewPos_ || stride <= base) return null;   // already the finest the device serves
+    const key = previewEpochKey_ + ":" + base + ":" + stride;
+    const hit = upsampleCache_.get(key);
+    if (hit && hit.length === n) return hit;
+    // The kept lights, in the device's emit order.
+    const kept = [];
+    for (let i = 0; i < n; i++) {
+        const x = previewPos_[i * 3], y = previewPos_[i * 3 + 1], z = previewPos_[i * 3 + 2];
+        if (x % stride === 0 && y % stride === 0 && z % stride === 0) kept.push(i);
+    }
+    // Each point to the nearest kept light at or before it on each axis: its block's leader.
+    const map = new Uint32Array(n);
+    const slot = new Map();
+    for (let k = 0; k < kept.length; k++) {
+        const i = kept[k];
+        slot.set(previewPos_[i * 3] + "," + previewPos_[i * 3 + 1] + "," + previewPos_[i * 3 + 2], k);
+    }
+    // A block with no kept light is normal on a sparse layout: the lattice point its leader would
+    // occupy simply holds no light. Such a point draws DARK rather than borrowing colour 0, which
+    // is a real light elsewhere in the frame and would paint the wrong pixel.
+    const UNMAPPED = 0xffffffff;
+    for (let i = 0; i < n; i++) {
+        const bxq = previewPos_[i * 3] - (previewPos_[i * 3] % stride);
+        const byq = previewPos_[i * 3 + 1] - (previewPos_[i * 3 + 1] % stride);
+        const bzq = previewPos_[i * 3 + 2] - (previewPos_[i * 3 + 2] % stride);
+        const k = slot.get(bxq + "," + byq + "," + bzq);
+        map[i] = k === undefined ? UNMAPPED : k;
+    }
+    upsampleCache_ = new Map([[key, map]]);   // one epoch, one stride in flight: keep the last
+    return map;
 }
 
 // Ask the device for the coordinate table ([0x52][stride]), at most once per half second: the
@@ -682,16 +736,35 @@ function renderPreviewFrame(view, buf) {
     // table traffic); a miss asks the device for the positions and skips this frame, the pull
     // model's whole geometry story.
     if ((epoch !== lastEpoch_ || stride !== previewStride_) && !activateTable(epoch, stride)) {
-        requestTable(stride);
+        // The FINEST table, once per epoch: every coarser stride is derived from it here.
+        requestTable(1);
         return;
     }
-    if (count !== previewCoordCount_) return;   // mid-rebuild mismatch: the next table realigns
+    previewStride_ = stride;
+    const up = upsampleMap(stride);
+    // A frame carries one color per kept light; without a map the two counts must agree.
+    if (!up && count !== previewCoordCount_) return;   // mid-rebuild mismatch: the next table realigns
     const rgb = new Uint8Array(buf, 9);
     // Kept for drawBeams: a moving head's beam is the color the fixture is EMITTING, so the beam
     // pass needs the same frame the dots were drawn from. A COPY, because this outlives the
     // message: drawBeams reads it on every orbit redraw, and a view onto a recycled receive
     // buffer would color beams from whatever arrived next.
-    previewRgb_ = new Uint8Array(rgb);
+    // UPSAMPLE: one color per kept light becomes one per table point, each taking its block's.
+    // The layout keeps its full extent and every light stays on screen; only the detail coarsens.
+    if (up) {
+        const full = new Uint8Array(previewCoordCount_ * 3);
+        for (let i = 0; i < previewCoordCount_; i++) {
+            const k = up[i];
+            // Out of range means the frame and the map disagree (a mid-rebuild frame): draw dark
+            // rather than read past the body, which would repeat a stale colour.
+            if (k >= count) continue;
+            const src = k * 3;
+            full[i * 3] = rgb[src]; full[i * 3 + 1] = rgb[src + 1]; full[i * 3 + 2] = rgb[src + 2];
+        }
+        previewRgb_ = full;
+    } else {
+        previewRgb_ = new Uint8Array(rgb);
+    }
     // The first aim frame changes what the scene CONTAINS: beams extend well past the fixtures,
     // and a fit measured before they existed frames only the heads. Re-arm the auto-fit once so
     // the next one accounts for them; `sawAim_` keeps it to once, not once per aim frame.
@@ -702,7 +775,7 @@ function renderPreviewFrame(view, buf) {
     // showed beams on every light. The device alternates aim and color frames, so a couple of
     // color frames with no aim between them means the aim stream has ended.
     if (previewAim_ && ++framesSinceAim_ > kAimStaleFrames) { previewAim_ = null; sawAim_ = false; }
-    drawLights(rgb);
+    drawLights(previewRgb_);
     measureFrameRate();
 }
 
@@ -866,7 +939,7 @@ function drawVerts() {
     // panel (¾ light, ¼ gap) at any size — a big grid is spatially downsampled (the device
     // sends ~1800 lattice points), so sizing by the full dimension left each dot a fraction of
     // its cell with big gaps. The sampled points fill the bounding box uniformly, so the pitch
-    // between neighbours (in grid units) is (boxVolume / count)^(1/activeDims): the square root
+    // between neighbors (in grid units) is (boxVolume / count)^(1/activeDims): the square root
     // for a flat grid, the CUBE root for a 3D volume (a cube's points spread over depth, so a
     // flat √ undercounts the pitch and the dots come out too small — the 3D-gap bug). Convert
     // that grid pitch to on-screen pixels (canvas px per grid unit) and take 75% of it. The
@@ -885,22 +958,45 @@ function drawVerts() {
     // Fade them by base sprite size — full rings ≥8px, gone ≤4px — so the layout shows on
     // small/zoomed grids and the lit pattern reads cleanly when dense. Lit dots are never
     // faded (their alpha ignores uRingFade in the shader).
-    const ringFade = Math.max(0, Math.min(1, (pointSize - 4) / 4));
+    let ringFade = Math.max(0, Math.min(1, (pointSize - 4) / 4));
+    // A VOLUME needs the opposite of a flat grid. On a panel the placeholders sit in one plane and
+    // an opaque one costs nothing; in a cube every dark LED is in front of some other LED, so at a
+    // large dot size the placeholders stack into a solid grey wall and the lit pattern inside it
+    // cannot be seen at all. Fade them by the depth they have to be seen through, and further as
+    // the dots grow: the layout still reads, and the effect shows through it.
+    if (dims > 2) {
+        // A volume stacks its placeholders: seen through N slices they compose as 1-(1-a)^N, so
+        // the same alpha that is a light tint on a panel is a wall in a cube. Solve for the per-LED
+        // value that holds the TOTAL at a quarter whatever the depth, so the layout stays readable
+        // without hiding the effect inside it. (The occlusion itself is fixed above, by not writing
+        // depth; this is what keeps the remaining tint from adding up.)
+        const kVolumeHaze = 0.25;
+        const perLed = 1 - Math.pow(1 - kVolumeHaze, 1 / Math.max(1, bZ));
+        ringFade = Math.min(ringFade, perLed / 0.22);   // 0.22 is the shader's base alpha
+    }
     gl.uniform1f(glLocs.uRingFade, ringFade);
 
-    // Two passes so lit LEDs always sit ABOVE the grey placeholders (your "lights should layer
-    // above the circles"). On a flat grid all LEDs share a z-plane, so a single pass let draw
-    // order + z-fighting clip a lit dot behind a neighbour's placeholder. Pass 1 draws the
-    // off-LED placeholders and writes depth; pass 2 draws the lit LEDs with depthFunc LEQUAL
-    // and depth-WRITE off — so a lit dot beats a co-located placeholder (equal depth passes)
-    // yet lit dots still depth-sort against each other in a true 3D cube under any pan/tilt.
-    gl.uniform1f(glLocs.uLitPass, 0.0);                 // placeholders (write depth)
-    gl.drawArrays(gl.POINTS, 0, lastVertCount);
-    gl.depthFunc(gl.LEQUAL);
+    // Two passes so lit LEDs always sit ABOVE the grey placeholders. On a flat grid all LEDs share
+    // a z-plane, so a single pass let draw order + z-fighting clip a lit dot behind a neighbor's
+    // placeholder. Pass 1 draws the off-LED placeholders, pass 2 the lit ones with depthFunc LEQUAL
+    // so they land on top.
+    // Placeholders do NOT write depth. They are decoration, not geometry: an unlit LED that
+    // occupies the depth buffer HIDES every lit LED behind it, however transparent it looks, since
+    // the depth test rejects the later fragment before its alpha is ever considered. That is what
+    // made a cube a solid wall at large dot sizes: not the grey, the depth. With the write off, a
+    // dark LED tints what is behind it and nothing more, so a volume is seen through.
+    // Pass 1, placeholders: depth TEST on (they hide behind lit LEDs in front of them) but depth
+    // WRITE off, so an unlit LED never occupies the buffer.
     gl.depthMask(false);
-    gl.uniform1f(glLocs.uLitPass, 1.0);                 // lit LEDs, on top
+    gl.uniform1f(glLocs.uLitPass, 0.0);
     gl.drawArrays(gl.POINTS, 0, lastVertCount);
+    // Pass 2, lit LEDs: depth write back ON, so they depth-sort against EACH OTHER in a volume.
+    // Leaving it off here was the bug's other half: a lit LED at the back of a cube then drew over
+    // one at the front, because nothing recorded which was nearer.
     gl.depthMask(true);
+    gl.depthFunc(gl.LEQUAL);                            // beats a co-located placeholder
+    gl.uniform1f(glLocs.uLitPass, 1.0);
+    gl.drawArrays(gl.POINTS, 0, lastVertCount);
     gl.depthFunc(gl.LESS);
 
     drawBoundingBox(mvp);
@@ -930,7 +1026,7 @@ function drawVerts() {
 // A rest beam points along -Z, OUT of the layout toward the viewer. Z is the scene's depth axis
 // (architecture.md: 2D is the (x,y) face and 3D adds slices across Z), so X and Y are where the
 // fixtures are ARRANGED and Z is the only axis free to shine along. Aiming down -Y instead would
-// send each head along the axis its neighbours occupy, which is what a 1 x N chain of heads made
+// send each head along the axis its neighbors occupy, which is what a 1 x N chain of heads made
 // obvious: every beam ran through the next fixture.
 //
 // Pan then sweeps in the (x,z) plane and tilt lifts toward +Y, so a centered head points straight
@@ -948,7 +1044,10 @@ function drawBeams(mvp) {
     if (!previewAim_ || !previewCoords_ || !beamProgram) return;
     // Stale aim: gathered against a table that is no longer active, so its indices name other
     // fixtures now. Skip until the next aim frame rather than draw beams from the wrong heads.
-    if (previewAimEpoch_ !== lastEpoch_ || previewAimStride_ !== previewStride_) return;
+    // Against the TABLE's stride, which is what the aim frame is gathered at: the color frame's
+    // own stride is the link's and moves independently, so comparing it dropped every beam on a
+    // slow link.
+    if (previewAimEpoch_ !== lastEpoch_ || previewAimStride_ !== previewTableStride_) return;
     const n = Math.min(previewAim_.length >> 1, previewCoords_.length / 3);
     if (n === 0) return;
 
@@ -1137,7 +1236,7 @@ function drawBoundingBox(mvp) {
 // rendered onto a 2D canvas laid over #preview: project the light's position through the
 // SAME mvp the GL render uses (so labels track LEDs in 2D AND 3D layouts), to a screen
 // pixel, and draw its number. Legibility LOD: a number is drawn only if it FITS INSIDE its
-// light bulb (the on-screen sprite) — so it never overflows onto neighbours. The font is
+// light bulb (the on-screen sprite), so it never overflows onto neighbors. The font is
 // sized to the sprite, so as you zoom in (sprites grow, depth-corrected) more numbers fit
 // and appear; zoomed out on a dense grid they don't fit and stay hidden. Behind-camera
 // points (w ≤ 0) are skipped — essential for 3D.

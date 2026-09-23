@@ -725,12 +725,22 @@ body.cards-resizing {
     color: var(--fg-muted);
 }
 
-/* Expert-only controls (ctrl.advanced, shown only in expert mode): a small wrench glyph after the label
-   marks them as a distinct "tuning/dev" tier at a glance — semantically clearer than a bare accent stripe.
-   The same glyph sits on the expertMode toggle itself (see .control-label--expert), tying cause to effect. */
-.control-advanced > .control-label::after,
-.control-label--expert::after {
+/* A control above user mode carries a glyph naming the tier that reveals it, which reads at a glance
+   where an accent stripe would not. The SLIDER is expert, the tuning a working installation needs;
+   the WRENCH is developer, what diagnoses the firmware. The mode select itself carries both, tying
+   cause to effect (see .control-label--mode). */
+.control-expert > .control-label::after {
+    content: "🎚️";
+}
+.control-developer > .control-label::after {
     content: "🔧";
+}
+.control-label--mode::after {
+    content: "🎚️🔧";
+}
+.control-expert > .control-label::after,
+.control-developer > .control-label::after,
+.control-label--mode::after {
     font-size: 10px;
     margin-left: 4px;
     opacity: 0.7;
@@ -857,7 +867,11 @@ body.cards-resizing {
    rows. clamp() rather than a fixed width so the columns follow the card when the right pane is
    dragged narrower or wider, which is the behaviour the cards already have. The upper bound stops a
    wide pane from inflating 8 columns into something that pushes the surface off-screen. */
-.card { --surface-col: clamp(26px, 5.2vw, 52px); }
+/* A FIXED column, not a viewport-relative one. The surface scrolls horizontally now, so it does not
+   need to shrink to fit, and shrinking was doing damage: at 26px the three-digit readouts under the
+   encoders ran into each other, and the width tracked the WINDOW rather than the pane, so a narrow
+   pane in a wide window overflowed anyway. 44px fits a 3-digit readout with room around it. */
+.card { --surface-col: 44px; }
 
 /* The switch strip shares the encoder strip's geometry, so switch N lines up over encoder N and
    fader N. Only the ORDER differs: a switch has no separate readout, so it is control then name. */
@@ -911,7 +925,7 @@ body.cards-resizing {
 .control-fader   .control-label { flex: 0 0 auto; text-align: center; }
 .control-encoder .control-label      { order: 3; font-size: 10px; }
 .control-encoder .knob               { order: 1; }
-.control-encoder .seg7               { order: 2; }
+.control-encoder .seg-readout       { order: 2; }
 .control-encoder .control-value-input,
 .control-fader   .control-value-input { display: none; }   /* the readout replaces the number box */
 /* The range input still exists and still owns the value, keyboard access and the WS patch path — the
@@ -930,16 +944,45 @@ body.cards-resizing {
 .knob svg, .knob svg * { pointer-events: none; }
 .knob svg { display: block; width: 100%; height: 100%; }
 /* Both arcs are set from JS (dasharray + a rotate transform attribute), because the geometry
-   depends on the radius and the value. Only the colours live here. */
+   depends on the radius and the value. Only the colors live here. */
 .knob-track { fill: none; stroke: var(--border); stroke-width: 4; }
 .knob-fill  { fill: none; stroke: var(--accent); stroke-width: 4; stroke-linecap: round; }
 .knob-pointer { stroke: var(--fg); stroke-width: 2; stroke-linecap: round; }
 
-/* A seven-segment readout: lit segments over unlit ghosts, so it reads as a real LED module. */
-.seg7 { width: 42px; height: 20px; }
-.seg7 svg { display: block; width: 100%; height: 100%; }
-.seg7-on  { fill: #ff3b30; }
-.seg7-off { fill: #ff3b30; opacity: 0.12; }
+/* A segmented readout: lit segments over unlit ghosts, so it reads as a real LED module. Three
+   cells of the same sixteen-segment renderer the display strip uses, so both stay identical by
+   construction rather than by keeping two geometries in step. */
+/* Wins over the .seg16 sizing below, which is the full-width display strip's: a readout carries BOTH
+   classes, and at equal specificity the later rule would take it. */
+.seg16.seg-readout { width: 42px; height: 20px; }
+
+/* The surface's display strip: sixteen-segment cells spanning the card, the scribble strip above a
+   desk's channels. Same lit/unlit treatment as the seven-segment readouts so the two read as one
+   instrument. Diagonals are <line> (stroke) where the bars are <rect> (fill), so both properties
+   are set on each state. */
+.seg16 {
+    /* Exactly the eight surface columns the switches, knobs and faders occupy, so the strip is the
+       width of the surface rather than the width of the card: it reads as the display ABOVE those
+       channels, and stays aligned as the pane is dragged narrower or wider.
+       The seven inter-column gaps count: the strips are inline-flex, so a 4px word-space falls
+       between each pair, and eight bare columns land ~28px short of the bank they sit above. */
+    width: calc(8 * var(--surface-col) + 7 * 4px);
+    /* 20 units tall drawn into 20px, the same unit scale as the numeric readouts. The SVG below
+       must NOT preserve its aspect ratio: at 28 cells it is far wider than it is tall, so keeping
+       the ratio shrinks it to fit the height and it stops reaching the eighth column. */
+    height: 20px;
+}
+.seg16 svg { display: block; width: 100%; height: 100%; }
+.seg16-on  { fill: #ff3b30; stroke: #ff3b30; }
+.seg16-off { fill: #ff3b30; stroke: #ff3b30; opacity: 0.12; }
+
+/* No label, so the strip takes its own row rather than leaving the label column empty. */
+.control-row.control-display-strip {
+    display: block;
+    /* 14px, the seam a bank already has above the presets (an 8px .surface-break plus the row's own
+       6px margin). The strip is a bank of its own, so it gets the same. */
+    margin-bottom: 14px;
+}
 
 /* A floating popup anchored to a surface control: the place a pad or a fader is CONFIGURED, as
    opposed to triggered. Floating rather than inline so opening one does not reflow the surface
@@ -1200,6 +1243,37 @@ body.cards-resizing {
     font-size: 13px;
 }
 
+/* The OPEN menu, styled. A native <select> draws its popup in the OS compositor, so every
+   rule above stops at the closed control: a dark card opens a light system menu, and the
+   emoji and dimension a row carries cannot appear in it at all (which is why the script
+   field above is a button rather than a select). `appearance: base-select` renders the
+   picker in the page instead, where it inherits the card's own colors.
+   Chrome/Edge 135+; everywhere else this is ignored and the native menu is used, so it
+   costs nothing where it is not supported. */
+@supports (appearance: base-select) {
+    .control-row select {
+        appearance: base-select;
+    }
+    .control-row select::picker(select) {
+        background: var(--bg-0);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 2px;
+        font-size: 13px;
+        box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+    }
+    .control-row select option {
+        color: var(--fg);
+        padding: 4px 8px;
+        border-radius: 3px;
+    }
+    .control-row select option:hover,
+    .control-row select option:checked {
+        background: var(--accent, #a78bfa);
+        color: #fff;
+    }
+}
+
 /* A read-only url control: rendered as a link rather than a text box, since the reason to show
    one is to open or copy it. Sits on the same baseline as an input's text so a card mixing the
    two does not look ragged. */
@@ -1241,6 +1315,28 @@ body.cards-resizing {
     flex: 0 0 auto;
 }
 .palette-name { flex: 1; }
+/* The selected palette's emoji, between the swatch and the name on the closed control. */
+.palette-emoji { flex: 0 0 auto; font-size: 0.95em; letter-spacing: -0.05em; }
+/* A palette row's gradient in the SHARED picker. Only rows carrying `colors` build this element,
+   so every other list (module types, scripts) is unaffected. Sized to sit with the emoji column
+   rather than to match the control's own swatch, which is wider because it stands alone. */
+.type-picker-item-swatch {
+    width: 40px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    flex: 0 0 auto;
+}
+/* A scripted palette the device has not downloaded yet: it has no gradient to show, because a
+   script produces its colors only once it runs. A dashed empty slot says "there is a palette here,
+   its colors are not known yet" and keeps the name column aligned with the rows that do have one. */
+.type-picker-item-swatch-empty {
+    border-style: dashed;
+    background: repeating-linear-gradient(45deg,
+        var(--border) 0 4px, transparent 4px 8px);
+}
+/* A read-only file picker: it names what something else chose, so it must not look clickable. */
+.fileedit-pick.is-readonly { opacity: 0.6; cursor: default; }
 .palette-caret { color: var(--fg-muted); flex: 0 0 auto; }
 .palette-list {
     position: absolute;
@@ -1656,11 +1752,20 @@ body.cards-resizing {
 .fm-bar {
     display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px;
 }
-/* Install-from-file row under the Firmware card: the .bin picker button + its live status. */
+/* The URL and File rows under the Firmware card. They carry .control-row too, so their labels sit
+   in the same 100px column as the picker's Release and Firmware rows above them: one column
+   definition rather than two numbers kept in step by hand. */
 .fw-upload-row {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px;
+    flex-wrap: wrap; gap: 8px;
 }
-.fw-upload-status { color: var(--muted); font-size: 0.85em; }
+.fw-upload-status { color: var(--fg-muted); font-size: 0.85em; }
+/* The URL a device should fetch. Grows to fill the row so a long release URL stays readable. */
+.fw-url-field {
+    flex: 1 1 12em; min-width: 0; padding: 4px 8px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg-0); color: var(--fg); font: inherit; font-size: 0.85em;
+}
+
 .fm-crumb {
     background: none; border: none; color: var(--accent); cursor: pointer;
     padding: 2px 4px; border-radius: 4px; font: inherit;
@@ -1732,6 +1837,23 @@ body.cards-resizing {
 .fm-usage-name { flex: 0 0 auto; }
 .fm-usage progress { flex: 1 1 auto; height: 8px; }
 .fm-usage-label { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+
+/* Asking before a MoonBase install: the app's own chrome, not the browser's. A native confirm()
+   is the one box in this UI that cannot be styled, and it showed as a white system panel over a
+   dark card. Same <dialog> element the editor uses, so Esc and the backdrop work unaided. */
+.mb-ask {
+    width: min(420px, 92vw); padding: 16px 18px;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--card-bg-0); color: var(--fg);
+}
+.mb-ask::backdrop { background: rgba(0,0,0,0.5); }
+.mb-ask h3 { margin: 0 0 10px; font-size: 1rem; }
+.mb-ask p { margin: 0 0 10px; font-size: 0.9em; line-height: 1.45; }
+/* The reassurance reads quieter than the warning above it: the point is that a mistake is cheap,
+   which should not compete with the sentence saying what is at stake. */
+.mb-ask-calm { color: var(--fg-muted); }
+.mb-ask-row { display: flex; justify-content: flex-end; gap: 8px; }
+.mb-ask-go { background: var(--accent); color: var(--bg-0); }
 
 /* Inline editor — native <dialog>, sized to a comfortable text pane. */
 .fm-editor {
@@ -2006,3 +2128,119 @@ button.fileedit-pick:disabled { opacity: 0.6; cursor: default; }
 }
 .fw-overlay-box progress { width: 100%; }
 .fw-overlay-msg { color: var(--fg-muted); margin: 0; overflow-wrap: anywhere; }
+
+/* ASSIGN MODE: while it is on, a tap on a surface control opens its target picker rather than moving
+   it, so the controls have to LOOK different or the mode is invisible and a user wonders why their
+   fader stopped working. The outline says "clickable for something else"; the cursor confirms it. */
+.assign-toggle.active { background: var(--accent); color: var(--bg-0, #10162e); }
+body.assign-mode .control-fader,
+body.assign-mode .control-encoder,
+body.assign-mode .control-switch {
+    outline: 1px dashed var(--accent);
+    outline-offset: 2px;
+    cursor: pointer;
+}
+/* The knob and the range input underneath both claim the pointer, so the cursor has to be set on
+   them too or it reverts over the very part a user aims at. */
+body.assign-mode .control-encoder .knob,
+body.assign-mode .control-fader input,
+body.assign-mode .control-encoder input { cursor: pointer; }
+
+/* A surface label now carries the target's name, which is longer than "fad1" and must not widen the
+   column: the bank's alignment is the whole point of a surface. Ellipsis rather than wrap, so every
+   channel stays one line tall. */
+.control-switch .control-label,
+.control-encoder .control-label,
+.control-fader .control-label {
+    max-width: var(--surface-col);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The fader bank gets the same seam above it as the switch bank has below the display. The
+   surface-break the builder inserts sits BETWEEN two banks of strips, and the preset list is not a
+   bank, so the pad grid ended flush against the first fader.
+   
+   Every fader, not just the one after the list: the strips are siblings on one line, so a margin on
+   the first alone pushed it 8px below the other seven. */
+.control-row.control-fader { margin-top: 8px; }
+
+/* THE SURFACE SCROLLS AS ONE. A desk's banks line up in columns: switch N over knob N over pad N over
+   fader N. When the pane narrows, a bank that wraps to a second row destroys that alignment and the
+   surface stops reading as one instrument, which is exactly what it is.
+   
+   So the card scrolls horizontally instead of wrapping, and every bank keeps the same width, which
+   is what keeps the columns in line while it scrolls. The pads already worked this way; this puts
+   the strips and the pads on the same footing. */
+.card:has(.control-display-strip) { overflow-x: auto; }
+.card:has(.control-display-strip) .control-row.control-switch,
+.card:has(.control-display-strip) .control-row.control-encoder,
+.card:has(.control-display-strip) .control-row.control-fader { flex-shrink: 0; }
+/* The strips are INLINE-FLEX siblings in normal flow, so they wrap like words once eight of them do
+   not fit. `white-space: nowrap` on the card is what stops that: flex-shrink alone kept each strip
+   its own size while still letting the line break between them. */
+.card:has(.control-display-strip) { white-space: nowrap; }
+/* The rows inside a strip (a label under a knob) still wrap normally: only the LINE OF STRIPS must
+   not break. */
+.card:has(.control-display-strip) .control-row { white-space: normal; }
+/* One row per bank, whatever the width: without this the strips are inline-flex siblings that wrap
+   as soon as eight of them do not fit. */
+.card:has(.control-display-strip) .surface-break { break-after: always; }
+
+/* MoonCloud Stats: the aggregates, drawn as pie charts on the card that asked for consent. Plain
+   SVG arcs rather than a charting library: three pies do not earn a dependency, and the device
+   serves its own UI with no build step to tree-shake one. */
+.mooncloud-stats { margin-top: 12px; }
+.mooncloud-stats-head { display: flex; align-items: center; margin-bottom: 10px; }
+.mooncloud-stats-head .mooncloud-stats-title { margin-bottom: 0; }
+.mooncloud-stats-head .mooncloud-refresh { margin-left: auto; }
+.mooncloud-stats-title { font-size: 0.85em; opacity: 0.75; margin-bottom: 10px; }
+.mooncloud-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 16px; }
+/* Title, pie and legend are ONE centered column, so they cannot drift apart: centering each of them
+   separately let a long legend entry (a board name) center on a different width than the pie. */
+.mooncloud-chart { display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 0; }
+.mooncloud-chart-title { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.55; margin-bottom: 6px; }
+.mooncloud-pie { width: 8rem; max-width: 100%; height: auto; }
+.mooncloud-slice { stroke: var(--card-bg, #1b1b1b); stroke-width: 1.5; }
+/* A chart with no data yet: a muted disc, not a filled slice. */
+.mooncloud-pie-placeholder { fill: currentColor; opacity: 0.10; }
+/* Matches the pie's width rather than shrink-wrapping its own content, so the counts line up under
+   the pie instead of at the right edge of the longest name. */
+.mooncloud-legend { width: 8rem; max-width: 100%; text-align: left; margin-top: 6px; font-size: 0.75em; }
+.mooncloud-legend div { display: flex; align-items: center; gap: 5px; line-height: 1.6; }
+.mooncloud-swatch { width: 0.6rem; height: 0.6rem; border-radius: 2px; flex: 0 0 auto; }
+/* min-width:0 is what lets a flex item actually shrink: without it the name keeps its full
+   intrinsic width, overflows the legend, and drags the auto-margined count along with it. */
+.mooncloud-legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mooncloud-legend-count { margin-left: auto; opacity: 0.6; padding-left: 8px; font-variant-numeric: tabular-nums; }
+/* A slice or legend row that names a value can be clicked to narrow every chart to it. */
+.mooncloud-pickable { cursor: pointer; }
+.mooncloud-slice.mooncloud-pickable:hover { opacity: 0.75; }
+.mooncloud-legend div.mooncloud-pickable:hover .mooncloud-legend-name { text-decoration: underline; }
+.mooncloud-filter { display: flex; align-items: center; gap: 8px; font-size: 0.8em; margin-bottom: 10px; }
+.mooncloud-filter-clear { background: none; border: 1px solid currentColor; border-radius: 3px; color: inherit; cursor: pointer; font: inherit; opacity: 0.7; padding: 1px 7px; }
+.mooncloud-filter-clear:hover { opacity: 1; }
+
+/* MoonTalk: the public board on the card that posts to it. Rows rather than bubbles: this is a
+   device panel, not a phone, and a sender plus a line of text is the whole content. */
+.moontalk { margin-top: 12px; }
+.moontalk-header { display: flex; align-items: center; font-size: 0.85em; opacity: 0.75; margin-bottom: 6px; }
+.mooncloud-refresh { margin-left: auto; background: none; border: none; color: inherit; cursor: pointer; font-size: 1.1em; opacity: 0.6; padding: 0 4px; }
+.mooncloud-refresh:hover { opacity: 1; }
+.moontalk-list { max-height: 15rem; overflow-y: auto; }
+.moontalk-message { display: flex; align-items: baseline; gap: 6px; font-size: 0.8em; line-height: 1.8; }
+.moontalk-from { flex: 0 0 auto; font-weight: 600; opacity: 0.9; }
+/* An unnamed sender is an id, so it reads as one rather than as somebody's name. */
+.moontalk-from-id { font-family: ui-monospace, monospace; font-weight: 400; opacity: 0.55; }
+.moontalk-text { flex: 1 1 auto; overflow-wrap: anywhere; }
+.moontalk-when { flex: 0 0 auto; opacity: 0.45; font-variant-numeric: tabular-nums; }
+.moontalk-empty { opacity: 0.5; font-size: 0.8em; }
+/* An unreachable server is a different fact from an empty board, so it does not read as absence. */
+.moontalk-unreachable, .mooncloud-unreachable { color: var(--fg-muted); opacity: 0.9; }
+
+/* What the MoonCloud consent control is asking, one line above it. No buttons: the `consent`
+   dropdown already offers the same choices, and rendering them twice costs card space to say
+   nothing new. */
+/* One line on the Firmware card, only while stats consent is off. */
+.mooncloud-nudge { margin: 8px 0 0; font-size: 0.8em; line-height: 1.6; opacity: 0.7; }

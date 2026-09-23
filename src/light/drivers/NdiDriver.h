@@ -1,31 +1,6 @@
 #pragma once
-/// NdiDriver, projectMM as an NDI video source.
-///
-/// The rendered frame reaches OBS, Resolume, TouchDesigner or any other NDI receiver, on this
-/// machine or another.
-///
-/// **Why NDI and not Spout/Syphon.** One implementation covers Windows, macOS, Linux and ARM, it
-/// discovers by name, and it crosses machines. Spout (Windows) and Syphon (macOS) share a GPU texture
-/// zero-copy and are bit-exact, but they are same-machine only, are TWO platform-specific
-/// implementations, and leave Linux and the Pi with nothing. At LED-wall pixel counts the latency
-/// difference sits far below one frame of the render loop, so coverage decides, not latency.
-///
-/// **Desktop only** (`platform::hasNdi`): the NDI runtime is a closed binary built only for Intel
-/// and ARM (SSSE3 / NEON floor), so no ESP32 can load one and there is no source to port. An ESP32
-/// reaches the same receivers over Art-Net / sACN / DDP, which projectMM implements itself.
-///
-/// **The runtime is the user's.** projectMM is GPL-3.0 and the NDI runtime is proprietary, so it is
-/// never bundled or linked, the platform layer resolves it on demand, exactly as it does Npcap for
-/// the panel-card driver. A machine without it runs normally and this driver says so in its status.
-/// The whole NDI surface lives behind `platform::` (see platform.h § NDI); no NDI type appears here.
-///
-/// Prior art: the NDI protocol and SDK are NewTek/Vizrt's; this driver is our own code against the
-/// documented C API. The frame-pacing and status shape follow PreviewDriver, the other driver that
-/// turns the rendered buffer into frames for a remote consumer.
-/// Author: projectMM original
-
-#include "core/Control.h"
-#include "core/ScratchBuffer.h"
+#include "core/module/Control.h"
+#include "core/util/ScratchBuffer.h"
 #include "light/drivers/DriverBase.h"
 #include "platform/platform.h"
 
@@ -34,22 +9,41 @@
 
 namespace mm {
 
-/// Driver that publishes the layer as an NDI video source.
+/// Output driver: publishes the rendered frame as an NDI video source. It reaches OBS, Resolume, TouchDesigner or any other receiver, on this machine or another.
+///
+/// NDI rather than Spout or Syphon because one implementation covers every desktop platform, discovers by name, and crosses machines. At LED-wall pixel counts the latency difference sits far below one frame, so coverage decides.
+///
+/// Prior art: the NDI protocol and SDK are NewTek and Vizrt's. This is our own code against the documented C API.
+///
+/// @moreinfo
+///
+/// ## Desktop only
+///
+/// The NDI runtime is a closed binary built only for Intel and ARM. No ESP32 can load one, and there is no source to port. A board reaches the same receivers over the pixel protocols.
+///
+/// ## The runtime is the user's
+///
+/// projectMM is GPL-3.0 and the runtime is proprietary, so it is never bundled or linked. The platform layer resolves it on demand. A machine without it runs normally and says so in the status, and no NDI type appears in this header.
+///
+/// @card NdiDriver.png
 class NdiDriver : public DriverBase {
 public:
+    /// The catalog tag this driver carries.
     static constexpr const char* kTags = "🖥️";
 
-    // ScratchBuffer registers with its owning module, so it takes *this — that registration is what
-    // puts these buffers in the memory report rather than leaving them untracked.
+    // The registration is what puts these buffers in the memory report.
+    /// Bind the two scratch buffers to this module, so their memory is accounted for.
     NdiDriver() : rgb_(*this), corrScratch_(*this) {}
 
+    /// The catalog tags shown on this driver's card.
     const char* tags() const override { return kTags; }
 
+    /// Point the driver at the shared source buffer.
     void setSourceBuffer(Buffer* buf) override { sourceBuffer_ = buf; }
 
+    /// Bind the source name a receiver lists, and the frame-rate ceiling.
     void defineDriverControls() override {
-        // The name a receiver lists. Blank means the device's own name, which is what a user
-        // scanning OBS's source list expects to see.
+        // Blank means the device's own name, which is what a user scanning a source list expects.
         controls_.addText("sourceName", sourceName, sizeof(sourceName));
         controls_.addControl("fps", fps, 1, 120);
     }
@@ -59,6 +53,7 @@ public:
         return std::strcmp(name, "sourceName") == 0 || isCorrectionControl(name);
     }
 
+    /// Open the sender and size the staging buffers for the current geometry.
     void prepare() override {
         release();
         if (!layer_) return;
@@ -67,7 +62,7 @@ public:
         height_ = layer_->physicalHeight() > 0 ? layer_->physicalHeight() : 1;
 
         if (!platform::ndiAvailable()) {
-            // Not an error: the feature is simply not installed, and the fix is a user action.
+            // Not an error: the feature is not installed, and the fix is a user action.
             setStatus("NDI runtime not installed - see the docs", Severity::Warning);
             return;
         }
@@ -75,16 +70,13 @@ public:
             setStatus("could not create the NDI source", Severity::Error);
             return;
         }
-        // Set BEFORE the staging below, so release() owns the sender from the moment it exists: a
-        // later failure here would otherwise leave the source advertised on the network forever
-        // with nothing ever sent, since release() closes only what open_ claims.
+        // Set BEFORE the staging, so release owns the sender from the moment it exists.
         open_ = true;
 
-        // Size the staging off the hot path: one tight-RGB frame, plus a per-light correction
-        // scratch when the wiring emits more channels than the three NDI carries.
+        // Sized off the hot path: one tight frame, plus a scratch for a wider wiring.
         const size_t pixels = static_cast<size_t>(width_) * height_;
         if (!rgb_.resize(pixels * 3)) {
-            release();                       // closes the sender we just opened
+            release();                       // closes the sender we opened
             setStatus("out of memory for the NDI frame", Severity::Error);
             return;
         }
@@ -96,6 +88,7 @@ public:
         setStatus(statusBuf_, Severity::Status);
     }
 
+    /// Close the sender, so the source stops being advertised.
     void release() override {
         if (open_) { platform::ndiSenderClose(); open_ = false; }
     }
@@ -103,8 +96,7 @@ public:
     void tick() MM_NONBLOCKING override {
         if (!open_ || fps == 0 || !sourceBuffer_ || !sourceBuffer_->data()) return;
 
-        // fps is a CEILING, as in PreviewDriver: NDI's own clock_video paces the receiver, this
-        // stops us building frames faster than we declared.
+        // A CEILING: the protocol's own clock paces the receiver, this paces the build.
         const uint32_t now = platform::millis();
         if (now - lastSendMs_ < 1000u / fps) return;
         lastSendMs_ = now;
@@ -114,10 +106,7 @@ public:
         const nrOfLightsType n    = want < have ? want : have;
         if (n == 0) return;
 
-        // Pack to tight RGB for the seam. The correction (brightness, preset, white mode) is the
-        // per-driver output correction every driver applies, so an NDI receiver sees what the wall
-        // sees. Falls back to the raw channels when correction is not usable, matching
-        // NetworkSendDriver's guard rather than inventing a second policy.
+        // Corrected like every other driver, so a receiver sees what the wall sees.
         if (rgb_.count() < static_cast<size_t>(want) * 3) return;
         uint8_t* dst = &rgb_[0];
         const uint8_t* src   = sourceBuffer_->data();
@@ -125,8 +114,7 @@ public:
         const uint8_t  outCh = correction_.outChannels;
         if (srcCh < 3) return;   // a non-color buffer (DMX roles) has no frame to send
 
-        // outChannels == 3 corrects straight into the destination; a wider wiring (RGBW and up)
-        // corrects into a one-light scratch and takes the first three, since NDI carries RGB only.
+        // A wider wiring corrects into a one-light scratch, since the protocol carries RGB only.
         const bool wide = outCh > 3 && corrScratch_.count() >= outCh;
         for (nrOfLightsType i = 0; i < n; i++) {
             const uint8_t* s = src + static_cast<size_t>(i) * srcCh;
@@ -141,8 +129,7 @@ public:
                 d[0] = s[0]; d[1] = s[1]; d[2] = s[2];   // passthrough, same fallback as NetworkSend
             }
         }
-        // A layer smaller than the frame leaves the tail from the previous send; blank it so a
-        // shrunk layout cannot show stale pixels.
+        // Blanked, so a layout that shrank cannot show the previous frame's tail.
         if (n < want) std::memset(dst + static_cast<size_t>(n) * 3, 0,
                                   static_cast<size_t>(want - n) * 3);
 
@@ -150,12 +137,9 @@ public:
                                static_cast<uint16_t>(height_), fps);
     }
 
-    // Controls
-    /// The name a receiver lists this source under. Blank uses the device's own name, which is what
-    /// a user scanning OBS's source list expects to find.
+    /// The name a receiver lists this source under; blank uses the device's own.
     char    sourceName[32] = "";
-    /// Frame-rate ceiling. The driver sends no faster than this and declares the rate in each frame;
-    /// the link may deliver fewer.
+    /// The frame-rate ceiling, declared in each frame; the link may deliver fewer.
     uint8_t fps            = 30;
 
 private:

@@ -1,15 +1,11 @@
-// @module Services
+/// @module Services
 
-// Pins the Services container's one job: it accepts user-added `service`-role children
-// (the core-domain twin of Effects/Drivers), while System — now fixed infrastructure —
-// accepts none. Together these two checks are the device-side half of the System/Services
-// split: the UI's add/delete affordance follows acceptsChildRoles, so "Services is where you
-// add Audio/IR, System is fixed" reduces to these two strings.
+/// Pins the Services container's one job: it accepts user-added `service`-role children (the core-domain twin of Effects/Drivers), while System, now fixed infrastructure, accepts none. Together these two checks are the device-side half of the System/Services split: the UI's add/delete affordance follows acceptsChildRoles, so "Services is where you add Audio/IR, System is fixed" reduces to these two strings.
 
 #include "doctest.h"
-#include "core/Services.h"
-#include "core/SystemModule.h"
-#include "core/MoonModule.h"
+#include "core/services/Services.h"
+#include "core/system/SystemModule.h"
+#include "core/module/MoonModule.h"
 
 #include <cstring>
 
@@ -39,7 +35,7 @@ TEST_CASE("Services is a thin grouping node — a service child attaches and tic
     CHECK(services.child(0) == &audio);
     CHECK(services.child(0)->role() == ModuleRole::Service);
 
-    // The container has no controls of its own (like Effects) — it's pure structure.
+    // The container has no controls of its own (like Effects), it's pure structure.
     services.defineControls();
     CHECK(services.controls().count() == 0);
 }

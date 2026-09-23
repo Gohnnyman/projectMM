@@ -107,7 +107,7 @@ def test_a_good_file_on_disk_loads(tmp_path, monkeypatch):
     assert repo_health.load_working_tree() == {"flash": {"esp32": 1}}
 
 
-# ---- the git baseline (the behaviour this branch adds) ----
+# ---- the git baseline (the behavior this branch adds) ----
 
 def test_the_baseline_comes_from_the_commit_not_the_working_tree(tmp_path, monkeypatch):
     """Running the check twice must give the same delta.

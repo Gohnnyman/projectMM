@@ -1,13 +1,9 @@
-// @module SingleColumnLayout
-// @also GridLayout
+/// @module SingleColumnLayout
+/// @also GridLayout
 
-// Pins the vertical-column layout: index order, spatial offset, and reversed wiring.
-//
-// The cross-check against GridLayout is the load-bearing one. A 1-wide, N-high grid and an N-high
-// column describe the SAME strip, so the two must emit identical coordinates; anything else means
-// one of them is wrong, and only a direct comparison catches a layout that is self-consistently
-// wrong. GridLayout had a test and this had none, which is why the pair is asserted here rather
-// than each in isolation.
+/// Pins the vertical-column layout: index order, spatial offset, and reversed wiring.
+///
+/// The cross-check against GridLayout is the load-bearing one. A 1-wide, N-high grid and an N-high column describe the SAME strip, so the two must emit identical coordinates; anything else means one of them is wrong, and only a direct comparison catches a layout that is self-consistently wrong. GridLayout had a test and this had none, which is why the pair is asserted here rather than each in isolation.
 
 #include "doctest.h"
 #include "light/layouts/GridLayout.h"
@@ -34,8 +30,7 @@ std::vector<CoordEntry> coordsOf(const mm::LayoutBase& layout) {
 
 } // namespace
 
-// Indices are contiguous 0..N-1 and every light sits at the configured x — a gap or a repeat here
-// is a light the driver would never write, so the strip would have a permanently dark pixel.
+// Indices are contiguous 0..N-1 and every light sits at the configured x, a gap or a repeat here is a light the driver would never write, so the strip would have a permanently dark pixel.
 TEST_CASE("SingleColumnLayout of height 10 emits ten consecutively indexed lights") {
     mm::SingleColumnLayout column;
     column.height = 10;
@@ -53,8 +48,7 @@ TEST_CASE("SingleColumnLayout of height 10 emits ten consecutively indexed light
     }
 }
 
-// The two layouts must agree: a 1×10×1 grid and a 10-high column are the same physical strip, so
-// they produce identical coordinates in identical order or one of them is wrong.
+// The two layouts must agree: a 1×10×1 grid and a 10-high column are the same physical strip, so they produce identical coordinates in identical order or one of them is wrong.
 TEST_CASE("A 10-high column emits the same coordinates as a 1x10x1 grid") {
     mm::SingleColumnLayout column;
     column.height = 10;
@@ -77,9 +71,7 @@ TEST_CASE("A 10-high column emits the same coordinates as a 1x10x1 grid") {
     }
 }
 
-// `starting Y` offsets the coordinates but NOT the indices: the driver writes light 0 first
-// whatever the column's position in space, so an offset that shifted indices would leave the
-// first `start_y` lights of the strip unwritten.
+// `starting Y` offsets the coordinates but NOT the indices: the driver writes light 0 first whatever the column's position in space, so an offset that shifted indices would leave the first `start_y` lights of the strip unwritten.
 TEST_CASE("starting Y moves the column in space without renumbering its lights") {
     mm::SingleColumnLayout column;
     column.start_y = 5;
@@ -93,16 +85,14 @@ TEST_CASE("starting Y moves the column in space without renumbering its lights")
     CHECK(coords[3].y == 8);
 }
 
-// Reversed wiring flips which end of the strip is light 0 — the y values run high to low while
-// the indices still start at 0 and stay contiguous.
+// Reversed wiring flips which end of the strip is light 0, the y values run high to low while the indices still start at 0 and stay contiguous.
 TEST_CASE("reversed order walks the column from the far end while keeping indices contiguous") {
     mm::SingleColumnLayout column;
     column.start_y = 5;     // reversal must compose with the offset, not ignore it
     column.height = 4;
     column.reversed_order = true;
 
-    // Assert EVERY entry, not just the ends: an interior swap or a repeat leaves the first and
-    // last correct while the middle of the strip is wrong.
+    // Assert EVERY entry, not just the ends: an interior swap or a repeat leaves the first and last correct while the middle of the strip is wrong.
     const auto coords = coordsOf(column);
     REQUIRE(coords.size() == 4);
     const mm::lengthType expectY[4] = {8, 7, 6, 5};   // start_y + height - 1 down to start_y

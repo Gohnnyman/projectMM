@@ -12,7 +12,7 @@ For effects and modifiers also captures a 3-second GIF of the preview canvas.
 Also captures MoonDeck tab screenshots and the web installer page, and
 inserts them into the appropriate docs files.
 
-Saves to (by domain/type, mirroring src — see docs/backlog/folder-structure-proposal.md):
+Saves to (by domain/type, mirroring src):
   docs/assets/light/effects/<TypeName>.png/.gif   — effect card + preview
   docs/assets/light/{modifiers,layouts,drivers}/  — other light modules
   docs/assets/core/<TypeName>.png                 — core modules
@@ -74,7 +74,7 @@ ASSETS = ROOT / "docs" / "assets"
 UI_DIR = ASSETS / "ui"   # tooling / installer / full-page shots (not per-module)
 
 # Map a module to its asset subfolder (domain/type), mirroring src. Module screenshots live in
-# docs/assets/{core, light/{effects,modifiers,layouts,drivers}}/ — see folder-structure-proposal.
+# docs/assets/{core, light/{effects,modifiers,layouts,drivers}}/.
 def asset_dir_for(type_name: str) -> Path:
     if type_name.endswith("Effect"):
         return ASSETS / "light" / "effects"
@@ -97,10 +97,20 @@ def asset_dir_for(type_name: str) -> Path:
 # ---------------------------------------------------------------------------
 MODULES = [
     # Layouts
-    ("GridLayout",          "Layouts",  {}, False),
+    ("GridLayout",          "Layouts",  {}, True),
+    # The scripted layout, whose preview is the shape a script places rather than a control
+    # panel: it runs `rose.mll`, a rhodonea curve whose petals no compiled layout defines,
+    # so the capture shows what a script buys that a C++ class does not.
+    ("MoonLiveLayout",      "Layouts",  {"script": "rose.mll"}, True),
     # Effects
     ("RainbowEffect",       "Layer",    {}, True),
     ("NoiseEffect",         "Layer",    {}, True),
+    # The generative-fields showcases: each is Dim::D3, so the preview shows a volume.
+    ("AuroraEffect",        "Layer",    {}, True),
+    ("ColorTrailsEffect",   "Layer",    {}, True),
+    ("TrailsEffect",        "Layer",    {}, True),
+    ("NebulaEffect",        "Layer",    {}, True),
+    ("FluidEffect",         "Layer",    {}, True),
     ("FireEffect",          "Layer",    {}, True),
     ("PlasmaEffect",        "Layer",    {}, True),
     ("PlasmaPaletteEffect", "Layer",    {}, True),
@@ -120,7 +130,28 @@ MODULES = [
     # Drivers
     ("NetworkSendDriver",    "Drivers",  {}, False),
     ("PreviewDriver",       "Drivers",  {}, False),
+    # These three carry no card image yet. The desktop build links every driver
+    # (MM_LINKS_ALL_LED_DRIVERS), so each renders its controls here even where the
+    # silicon or the runtime is absent: HUB75 wants LCD_CAM or Parlio, NDI wants a
+    # runtime the user installs. The card and its controls are what a screenshot is
+    # for, and those are real on any host.
+    # The two LED drivers, each its own card: they share only `pins` and `ledsPerPin`, and a
+    # screenshot of one describes the other's controls wrongly.
+    ("RmtLedDriver",        "Drivers",  {}, False),
+    ("ParallelLedDriver",   "Drivers",  {}, False),
+    ("Hub75Driver",         "Drivers",  {}, False),
+    ("NdiDriver",           "Drivers",  {}, False),
+    ("HlsDriver",           "Drivers",  {}, False),
+    ("RtspDriver",          "Drivers",  {}, False),
 ]
+
+# A modifier reshapes what an effect draws, so it has nothing to show on an empty Layer: it
+# photographs as a dark panel. Every modifier capture therefore lays this effect down first and
+# removes it again afterwards. Rainbow is the bed because a modifier is only visible as a BREAK in
+# something regular: its smooth gradient fills every light, so a fold, a rotation or a transpose
+# shows as an obvious seam. A noise field fills the panel too but is already irregular, which hides
+# the very transform the card is meant to show.
+BED_EFFECT = "RainbowEffect"
 
 # Container types that exist in the pipeline but are not added via REST
 CONTAINERS = ["Layouts", "Effects", "Drivers"]
@@ -138,12 +169,20 @@ CORE_MODULES = [
     "MqttModule",
     "FileManagerModule",
     "DevicesModule",
+    "MoonCloudModule",
+    "MoonStatsModule",
+    "MoonTalkModule",
+    "TasksModule",
+    "PinsModule",
     # Present only in an ESP32 tree (services / provisioning) — skipped on desktop
     # (not in state); capture these against a board when needed.
     "ImprovProvisioningModule",
     "AudioService",
+    "AnalogService",
     "I2cScanModule",
-    "IrService",
+    "InfraredService",
+    "ButtonService",
+    "MoonLiveService",
 ]
 
 # Core modules that are CHILDREN of another module (so they have no top-level nav entry
@@ -151,14 +190,23 @@ CORE_MODULES = [
 # then screenshots the child's own card. Everything not listed here is a top-level card.
 CORE_NAV_ROOT = {
     "MqttModule": "NetworkModule",
+    # Tasks and Pins are fixed System children (wired-by-code), so they have no nav entry.
+    "TasksModule": "SystemModule",
+    "PinsModule": "SystemModule",
+    # Stats and Talk are MoonCloud children, each carrying its own consent.
+    "MoonStatsModule": "MoonCloudModule",
+    "MoonTalkModule": "MoonCloudModule",
     "DevicesModule": "NetworkModule",
     "ImprovProvisioningModule": "NetworkModule",
-    # Audio / IR are user-added Services (children of the Services container); I2cScan is a
+    # Audio / infrared are user-added Services (children of the Services container); I2cScan is a
     # fixed System child (wired-by-code). They're added/present per-board and never exist in
     # the desktop tree — so they're captured against an ESP32, where these entries route the
     # shot to the right nav root.
     "AudioService": "Services",
-    "IrService": "Services",
+    "AnalogService": "Services",
+    "InfraredService": "Services",
+    "ButtonService": "Services",
+    "MoonLiveService": "Services",
     "I2cScanModule": "SystemModule",
 }
 # FileManagerModule, FirmwareUpdateModule, SystemModule, NetworkModule are top-level
@@ -280,8 +328,8 @@ def add_module(host: str, id_: str, type_: str, parent_id: str | None,
     body: dict = {"id": id_, "type": type_}
     if parent_id:
         body["parent_id"] = parent_id
-    if props:
-        body["props"] = props
+    # `props` is deliberately NOT sent: the create endpoint ignores it (no handler reads it), so a
+    # caller that needs a control set gets it through /api/control after the module exists.
     r = _post(f"http://{host}/api/modules", json=body, timeout=5)
     if not r.ok:
         return None
@@ -313,6 +361,37 @@ def set_control(host: str, module: str, control: str, value) -> bool:
     """Set a control value via the same /api/control path the UI uses."""
     r = _post(f"http://{host}/api/control",
               json={"module": module, "control": control, "value": value}, timeout=5)
+    return r.ok
+
+
+# Where a script control's picker looks: kScriptDir in MoonLiveScriptFile.h. The USER
+# directory, not the factory one, because that is the directory the picker lists and the
+# name a `script` control resolves against.
+SCRIPT_DIR = "/moonlive"
+
+# Where each script extension lives in the repo, imported rather than restated: catalog_scripts.py
+# is the one home for the extension-to-role-to-folder mapping, and a second copy here would drift
+# the moment a role is added.
+sys.path.insert(0, str(ROOT / "src" / "light" / "moonlive"))
+from catalog_scripts import ROLE_BY_EXT, FOLDER_BY_ROLE   # noqa: E402
+SCRIPT_SRC = {ext: FOLDER_BY_ROLE[role] for ext, role in ROLE_BY_EXT.items()}
+
+
+def push_script(host: str, name: str) -> bool:
+    """Copy one script from the repo onto the device, so a capture needs no hand-copied file.
+
+    A scripted module captures an empty card reading "script not found" unless the script it
+    names is on the device, and the desktop build's filesystem is a build directory nothing
+    in the repo seeds. Pushing here keeps the run self-contained: check out, build, capture.
+
+    Byte-exact through /api/file, the same request the File Manager's upload makes.
+    """
+    src = ROOT / "moonlive" / SCRIPT_SRC.get(Path(name).suffix, "") / name
+    if not src.is_file():
+        return False
+    r = _post(f"http://{host}/api/file?path={SCRIPT_DIR}/{name}",
+              headers={"Content-Type": "application/octet-stream"},
+              data=src.read_bytes(), timeout=10)
     return r.ok
 
 
@@ -354,6 +433,58 @@ def prepare_pipeline(host: str, drop_modifiers: bool, grid: int | None) -> None:
             ok_h = set_control(host, name, "height", grid)
             if ok_w and ok_h:
                 print(f"  pipeline: grid {name!r} -> {grid}x{grid}")
+
+
+def displace_default_layout(host: str) -> dict | None:
+    """Take the existing layout out of the pipeline and return what it takes to put it back.
+
+    Two layouts in the pipeline share one set of lights, so the boot GridLayout would overlap
+    whichever layout is being photographed. It is removed for the shot and rebuilt afterwards
+    from this snapshot, controls and all, so a capture run leaves the pipeline as it found it.
+    Returns None when there is nothing to displace, which is also what a failure returns: the
+    capture is still worth taking, and the restore then has nothing to undo.
+    """
+    try:
+        sr = _get(f"http://{host}/api/state", timeout=5)
+        if not sr.ok:
+            return None
+
+        def find(ms):
+            for m in ms:
+                if m.get("role") == "layout":
+                    return m
+                hit = find(m.get("children", []))
+                if hit:
+                    return hit
+            return None
+
+        cur = find(sr.json().get("modules", []))
+        if not cur:
+            return None
+        # The NAME as well as the type: the boot pipeline calls its grid "Grid", and coming back
+        # as "GridLayout" would leave the pipeline subtly different from the one found.
+        snap = {"type": cur.get("type", ""), "name": cur.get("name", ""),
+                "controls": {c.get("name"): c.get("value") for c in cur.get("controls", [])}}
+        if not delete_module(host, cur.get("name", "")):
+            return None
+        return snap
+    except Exception as e:
+        print(f"  displace-layout failed: {e} ", end="", flush=True)
+        return None
+
+
+def restore_default_layout(host: str, snap: dict) -> None:
+    """Put back what displace_default_layout took, controls and all."""
+    try:
+        name = add_module(host, (snap.get("name") or snap["type"])[:16], snap["type"],
+                          "Layouts", {})
+        if not name:
+            print(f"  restore-layout: re-adding {snap['type']} failed ", end="", flush=True)
+            return
+        for ctrl, value in snap.get("controls", {}).items():
+            set_control(host, name, ctrl, value)
+    except Exception as e:
+        print(f"  restore-layout failed: {e} ", end="", flush=True)
 
 
 def get_types(host: str) -> set[str]:
@@ -529,11 +660,27 @@ def _screenshot_card(page: Page, module_id: str, out_path: Path) -> bool:
     return True
 
 
+def _click_child_tab(page: Page, module_id: str) -> None:
+    """Open the tab for `module_id`, if its parent shows its children behind a tab strip.
+
+    A TOP-LEVEL module renders one child at a time behind tabs (app.js renderChildTabs), so a
+    sibling's card is not merely scrolled out of view: it is not in the DOM at all. Without this the
+    capture only ever saw whichever child happened to be the active tab, and every other child of
+    Services / System failed with "screenshot failed". A no-op where there is no tab strip, so the
+    flat case is unchanged.
+    """
+    tab = page.query_selector(f'button.tab[data-tab-mid="{module_id}"]')
+    if tab:
+        tab.click()
+        page.wait_for_timeout(500)
+
+
 def screenshot_module(page: Page, host: str, module_id: str,
                       nav_root: str, out_path: Path) -> bool:
-    """Reload the UI, click nav, screenshot the module card."""
+    """Reload the UI, click nav, open the child's tab if there is one, screenshot the card."""
     _load_page(page, host)
     _click_nav(page, nav_root)
+    _click_child_tab(page, module_id)
     return _screenshot_card(page, module_id, out_path)
 
 
@@ -596,6 +743,9 @@ def capture_preview_gif(page: Page, host: str, module_id: str,
 
     _load_page(page, host)
     _click_nav(page, nav_root)
+    # The CHILD tab too, as the screenshot path does: the nav root alone leaves whichever child
+    # was last open selected, so the wait below can find a card the preview is not rendering.
+    _click_child_tab(page, module_id)
 
     # Wait for the card to be visible (confirms module is rendering).
     card_sel = f'.card[data-module="{module_id}"]'
@@ -664,6 +814,10 @@ def main() -> int:
     parser.add_argument("--grid", type=int, default=0, metavar="N",
                         help="Resize the GridLayout to NxN before capturing (e.g. 128) for "
                              "higher-resolution previews. Default: leave the boot grid (16).")
+    parser.add_argument("--all-registered", action="store_true",
+                        help="Also capture every registered effect/modifier that has no MODULES "
+                             "entry, on a Layer with default controls. Fixes the list going stale "
+                             "the moment a module is added.")
     parser.add_argument("--extras-only", action="store_true",
                         help="Skip projectMM module captures; only run the extra shots "
                              "(MoonDeck tabs, installer). Useful for recapturing the "
@@ -697,13 +851,31 @@ def main() -> int:
         # effect/modifier with no list entry is silently never captured (how
         # GameOfLife/MultiplyModifier/CheckerboardModifier went imageless).
         listed = {t for t, *_ in MODULES}
+        # Filtered against what the RUNNING server offers, not just what main.cpp registers: a type
+        # the server does not have (a capability-gated driver, a different firmware) would be handed
+        # to add_module and fail. That is what the three add_module failures in the first full sweep
+        # were.
+        offered = set(server_types) if server_types else None
         uncaptured = sorted(
             t for t in source_registered_types()
-            if ("Effect" in t or "Modifier" in t) and t not in listed)
-        if uncaptured:
-            print(f"  ⚠️  {len(uncaptured)} registered effect/modifier(s) are NOT in this "
+            if ("Effect" in t or "Modifier" in t or "Layout" in t) and t not in listed
+            # A container is not a capture subject: "Layouts" and "Effects" hold the modules
+            # rather than being one, and each has its own card shot by the CONTAINERS loop.
+            and t not in CONTAINERS
+            and (offered is None or t in offered))
+        if uncaptured and args.all_registered:
+            # Capture them anyway: an effect and a modifier go on the Layer, a layout goes under
+            # Layouts, and all three want a GIF. The hand-kept list stays for the ones that need
+            # special props; everything else needs no entry at all.
+            MODULES.extend((t, "Layouts" if "Layout" in t else "Layer", {}, True)
+                           for t in uncaptured)
+            print(f"  + {len(uncaptured)} registered effect/modifier/layout(s) added from the "
+                  f"types registered in src/main.cpp (--all-registered)")
+        elif uncaptured:
+            print(f"  ⚠️  {len(uncaptured)} registered effect/modifier/layout(s) are NOT in this "
                   f"script's MODULES list, so they get no screenshot: {', '.join(uncaptured)}")
-            print("      Add them to MODULES (near the top of this file) to capture them.")
+            print("      Run with --all-registered to capture them, or add an entry to MODULES "
+                  "if one needs special props.")
 
         # Optional pipeline tweaks for nicer effect previews (raw, higher-res).
         if args.no_modifier or args.grid:
@@ -763,6 +935,10 @@ def main() -> int:
         page = browser.new_page(viewport={"width": 1280, "height": 900})
 
         added_ids: list[str] = []
+        # The layout the capture pushed aside, restored once the orphan sweep below has run:
+        # the sweep deletes by TYPE PREFIX, and a restored GridLayout matches one, so putting
+        # it back any earlier only has it removed again as if it were an orphan.
+        displaced_layout: dict | None = None
 
         try:
             # --- Full-page UI overview screenshot --- (needs projectMM)
@@ -881,14 +1057,65 @@ def main() -> int:
                 req_id = type_name[:16]
                 print(f"  {type_name} …", end=" ", flush=True)
 
+                # The bed effect, removed again below, so the pipeline holds exactly one effect
+                # and one subject while the camera is open. A modifier reshapes what an effect
+                # draws and a layout says where its lights sit, so neither has anything to show
+                # on its own: both photograph as a dark panel without a lit effect under them.
+                bed_name = None
+                if need_gif and (type_name.endswith("Modifier") or type_name.endswith("Layout")):
+                    bed_name = add_module(args.host, BED_EFFECT[:16], BED_EFFECT,
+                                          parents.get("Layer"), {})
+                    if bed_name:
+                        added_ids.append(bed_name)
+                        time.sleep(0.5)
+                    else:
+                        print("bed-failed ", end="", flush=True)
+
+                # A second layout would fight the boot GridLayout for the same lights, so the
+                # default steps aside for the duration and is restored once the shot is taken.
+                if type_name.endswith("Layout") and displaced_layout is None:
+                    displaced_layout = displace_default_layout(args.host)
+
                 actual_name = add_module(args.host, req_id, type_name,
                                          parent_id, extra_props)
                 if not actual_name:
                     print("add failed")
                     failed.append((type_name, "add_module failed"))
+                    if bed_name:
+                        delete_module(args.host, bed_name)
+                        added_ids.remove(bed_name)
                     continue
 
                 added_ids.append(actual_name)
+
+                # Through /api/control, the path the UI uses: the create endpoint ignores a
+                # `props` body, so a module needing a control set (a scripted one needs its
+                # script, or it captures an empty card reading "no script") gets it here. The
+                # settle is the compile, which a scripted module does on the control change.
+                pushed = True
+                if extra_props:
+                    for ctrl, value in extra_props.items():
+                        # A script control names a file that has to BE there: push it first, or
+                        # the control is set to a name the device cannot resolve and the capture
+                        # records an empty card. A failed push abandons this module rather than
+                        # photographing that, so the asset on disk is never a lie.
+                        if ctrl == "script" and isinstance(value, str) \
+                                and not push_script(args.host, value):
+                            print(f"push-{value}-failed")
+                            failed.append((type_name, f"script upload failed: {value}"))
+                            delete_module(args.host, actual_name)
+                            added_ids.remove(actual_name)
+                            if bed_name:
+                                delete_module(args.host, bed_name)
+                                added_ids.remove(bed_name)
+                            pushed = False
+                            break
+                        if not set_control(args.host, actual_name, ctrl, value):
+                            print(f"control-{ctrl}-failed ", end="", flush=True)
+                    if not pushed:
+                        time.sleep(0.15)
+                        continue
+                    time.sleep(1.0)
 
                 if need_png:
                     ok = screenshot_module(page, args.host, actual_name,
@@ -913,6 +1140,9 @@ def main() -> int:
                 print(f"→ {asset_dir_for(type_name).relative_to(ROOT)}/")
                 delete_module(args.host, actual_name)
                 added_ids.remove(actual_name)
+                if bed_name:
+                    delete_module(args.host, bed_name)
+                    added_ids.remove(bed_name)
                 time.sleep(0.5)
 
         except _ExtrasOnlyDone:
@@ -947,6 +1177,10 @@ def main() -> int:
                         _sweep(sr.json().get("modules", []))
                 except Exception as e:
                     print(f"  final-sweep on {args.host} failed: {e}")
+                # Last, so the sweep above cannot take it straight back out.
+                if displaced_layout:
+                    restore_default_layout(args.host, displaced_layout)
+                    print(f"  pipeline: restored {displaced_layout['type']}")
             browser.close()
 
     print(f"\n{'─'*50}")
@@ -969,7 +1203,7 @@ def main() -> int:
         print("\nNext steps:")
         print("  Add module screenshots: uv run moondeck/docs/update_module_docs.py")
         if "ui_overview" in captured:
-            print("  Add UI overview to docs/architecture.md # Web UI section:")
+            print("  Add UI overview to docs/explanation/architecture/index.md # Web UI section:")
             print("  ![UI overview](assets/ui/ui_overview.png)")
 
     return 0 if not failed else 1

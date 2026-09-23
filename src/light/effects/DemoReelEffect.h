@@ -2,42 +2,50 @@
 
 #include "light/effects/EffectBase.h"
 
-#include "core/ModuleFactory.h"      // enumerate + create the effects to cycle through
-#include "light/fonts.h"             // fonts::kFont4x6 — the overlay font
+#include "core/util/ModuleFactory.h"      // enumerate + create the effects to cycle through
+#include "light/powerfunctions/fonts.h"             // fonts::kFont4x6: the overlay font
 
 namespace mm {
 
-// Demo reel: cycles through every OTHER registered effect, one at a time, auto-advancing every
-// `interval` seconds. It hosts a single live child effect — created from the ModuleFactory registry,
-// parented to this effect's own Layer so the child's layer()/buffer()/width()/elapsed() resolve to
-// the same render target — and delegates tick() to it each tick. On the interval it tears the child
-// down, deletes it, and instantiates the next effect in the registry (or a random one when
-// `shuffle`). This reuses the exact create → defineControls → setup → prepare → loop lifecycle
-// a Layer runs for a normal effect child (HttpServerModule::applyAddModule), so no new machinery:
-// the reel is just an effect that swaps which effect it *is* over time.
-//
-// It deliberately does NOT composite effects (that's what the Layer stack + blend modes already do);
-// it plays them in sequence — the FastLED DemoReel100 / WLED preset-cycle pattern. The child's own
-// controls aren't surfaced (they run at their defaults); the reel exposes only the cycle controls.
-//
-// Prior art: FastLED's DemoReel100 sketch (Mark Kriegsman) — the canonical "rotate through a list of
-// patterns on a timer" demo; the registry-driven, self-skipping variant is ours.
-// Author: projectMM original, on Mark Kriegsman's FastLED DemoReel100 pattern — https://github.com/FastLED/FastLED/blob/master/examples/DemoReel100/DemoReel100.ino
 /// Showcase effect: cycles through other effects with a name overlay.
+/// @card DemoReelEffect.gif
+/// Author: projectMM original, on Mark Kriegsman's FastLED DemoReel100 pattern, https://github.com/FastLED/FastLED/blob/master/examples/DemoReel100/DemoReel100.ino
+///
+/// Cycles through every other registered effect, advancing every `interval` seconds.
+/// It hosts one live child at a time, created from the registry and parented to this Layer.
+/// So the reel is an effect that swaps which effect it is over time.
+///
+/// Prior art: FastLED's DemoReel100 sketch, with the registry-driven, self-skipping variant ours.
+///
+/// @moreinfo
+///
+/// ## It sequences rather than composites
+///
+/// The Layer stack and its blend modes already composite, so the reel plays effects in turn.
+/// The child's own controls stay at their defaults, and the reel exposes only the cycle controls.
+///
+/// ## The child rides the normal lifecycle
+///
+/// A swap tears the child down, deletes it, and creates the next one.
+/// That child sees the Layer as its parent, so its buffer, extents and clock resolve to this target.
+/// It runs the same create, defineControls, setup, prepare and loop lifecycle a Layer gives any effect.
 class DemoReelEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫"; }   // demo reel
-    // D3: the reel produces a COMPLETE frame — it runs the child, extrudes the child's output itself,
-    // then draws the name overlay on top — so the Layer must not extrude again (that would fan the
-    // child's x=0 column across X and wipe the overlay). The child's own dimensionality is handled
-    // inside tick() via layer()->extrude(child dim) BEFORE the overlay, not by reporting it here.
+    /// Catalog tags: the demo reel.
+    const char* tags() const override { return "💫"; }
+    /// D3, since the reel produces a complete frame and extrudes the child itself before the overlay.
     Dim dimensions() const override { return Dim::D3; }
 
-    uint8_t interval      = 8;      // seconds each effect plays before advancing
-    bool    shuffle       = false;  // random next-effect pick instead of registry order
-    bool    randomPalette = true;   // pick a random palette on each cycle (showcases the palette set)
-    bool    showName      = true;   // overlay the playing effect's name (the reel as a showcase tool)
+    /// Seconds each effect plays before the reel advances.
+    uint8_t interval      = 8;
+    /// Pick the next effect at random rather than in registry order.
+    bool    shuffle       = false;
+    /// Pick a fresh palette on each cycle, which showcases the palette set.
+    bool    randomPalette = true;
+    /// Overlay the playing effect's name, which is what makes the reel a showcase tool.
+    bool    showName      = true;
 
+    /// Publish the cycle interval, the order, the palette and the overlay.
     void defineControls() override {
         controls_.addControl("interval", interval, 1, 120);
         controls_.addControl("shuffle", shuffle);
@@ -45,68 +53,63 @@ public:
         controls_.addControl("showName", showName);
     }
 
-    // Build the eligible-effect list (all Effect-role types except this one) and start the first.
+    /// List every eligible effect and stand the first one up.
     void prepare() override {
         buildEligibleList();
-        // Restart the reel from the top on any rebuild (grid resize, control change): tear down the
-        // current child (its buffers were sized to the old grid) and re-create against the new one.
+        // A rebuild re-creates the child, whose buffers were sized to the old grid.
         swapTo(cursor_ < eligibleCount_ ? cursor_ : 0);
     }
 
+    /// Advance on the interval, run the hosted child, extrude it, then draw the name.
     void tick() MM_NONBLOCKING override {
         if (eligibleCount_ == 0 || !current_) return;
 
-        // Advance on the interval. elapsed() is the Layer's monotonic ms clock (same source every
-        // effect uses), so the cadence is frame-rate-independent.
+        // elapsed() is the Layer's clock, so the cadence holds at any frame rate.
         const uint32_t now = elapsed();
         if (now - lastSwitchMs_ >= static_cast<uint32_t>(interval) * 1000u) {
             lastSwitchMs_ = now;
             advance();
         }
 
-        current_->tick();   // render the hosted effect into our Layer's buffer this tick
-        // Extrude the child's output NOW (the Layer skips it — the reel is D3). A hosted D1/D2 effect
-        // (NoiseMeter, FreqMatrix, GEQ…) writes only its x=0 column / z=0 slice; fan it across the
-        // unused axes here, BEFORE the name overlay, so the overlay isn't wiped by a later extrude.
-        // Use the dim cached at swapTo() — not a per-frame downcast of current_, which is a MoonModule*
-        // whose EffectBase subobject cast is only valid for a live effect child.
+        current_->tick();   // render the hosted effect into our Layer's buffer
+        // Extruded here, before the overlay, from the dim swapTo cached.
         layer()->extrude(currentDim_);
 
-        // Overlay the playing effect's name (the reel as a showcase tool). Drawn on top of the
-        // hosted output in the compact 4x6 font at the TOP-left — overwriting a few pixels is fine
-        // (the reel owns the whole frame). Uses metadata the reel already has (current_->name()), so
-        // no system/pipeline reach-in. draw::text clips to the grid, so a tiny grid just shows what
-        // fits (or nothing).
+        // On top of the hosted output, where draw::text clips to whatever the grid fits.
         if (showName && current_) {
             const draw::Canvas cv = canvas();
             draw::text(cv, fonts::kFont4x6, current_->name(), 0, 0, {255, 255, 255});
         }
     }
 
+    /// Tear the hosted child down, then chain so this effect's own state is freed.
     void release() override {
         destroyCurrent();
         EffectBase::release();
     }
 
+    /// Delete the hosted child with the reel.
     ~DemoReelEffect() override { destroyCurrent(); }
 
-    // Test seams.
+    /// Test seam: how many effects the reel found to cycle through.
     uint8_t eligibleCountForTest() const { return eligibleCount_; }
+    /// Test seam: the type name of the effect currently playing.
     const char* currentTypeForTest() const { return current_ ? current_->typeName() : nullptr; }
+    /// Test seam: advance the reel without waiting out the interval.
     void advanceForTest() { advance(); }
 
 private:
-    // The registry indices of every Effect-role type that isn't DemoReel itself. Bounded by the
-    // registry size; stored inline (a byte per effect, a few dozen at most — no heap needed).
+    /// The eligible list's ceiling: a byte per effect, so it stays inline.
     static constexpr uint8_t kMaxEligible = 64;
-    uint8_t eligible_[kMaxEligible] = {};
-    uint8_t eligibleCount_ = 0;
-    uint8_t cursor_ = 0;                 // index INTO eligible_ of the current effect
-    MoonModule* current_ = nullptr;      // the live hosted effect (owned; deleted on swap/release)
-    Dim currentDim_ = Dim::D3;           // cached dimensionality of current_ (set in swapTo, drives extrude)
-    uint32_t lastSwitchMs_ = 0;
-    Random8 rng_;
+    uint8_t eligible_[kMaxEligible] = {};   ///< registry indices of every Effect-role type but this one
+    uint8_t eligibleCount_ = 0;          ///< how many of those were found
+    uint8_t cursor_ = 0;                 ///< which entry of `eligible_` is playing
+    MoonModule* current_ = nullptr;      ///< the live hosted effect, owned and deleted on swap
+    Dim currentDim_ = Dim::D3;           ///< the child's dimensionality, cached to drive the extrude
+    uint32_t lastSwitchMs_ = 0;          ///< when the reel last advanced
+    Random8 rng_;                        ///< the shuffle and palette picks
 
+    /// Collect every Effect-role type in the registry except this one.
     void buildEligibleList() {
         eligibleCount_ = 0;
         const uint8_t n = ModuleFactory::typeCount();
@@ -118,7 +121,7 @@ private:
         }
     }
 
-    // Move to the next effect: the following registry entry, or a random one when shuffle.
+    /// Move to the next effect, in registry order or at random.
     void advance() {
         if (eligibleCount_ == 0) return;
         uint8_t next;
@@ -127,15 +130,12 @@ private:
         } else {
             next = static_cast<uint8_t>((cursor_ + 1) % eligibleCount_);
         }
-        // Showcase the palette set: pick a fresh random palette on each cycle. This overrides the
-        // global Drivers palette while the reel runs; the next Drivers rebuild restores the user's
-        // choice when the reel is removed (intended — the reel takes over the display). Only on a
-        // real cycle advance, not on rebuild (swapTo is also called from prepare).
+        // This overrides the global palette while the reel runs, which a later rebuild restores.
         if (randomPalette && palettes::kCount > 0) Palettes::setActive(rng_.below(palettes::kCount));
         swapTo(next);
     }
 
-    // Tear down the current child and stand up the effect at eligible_[which], wired to our Layer.
+    /// Tear the current child down and stand up the one at `which`, wired to our Layer.
     void swapTo(uint8_t which) {
         destroyCurrent();
         if (which >= eligibleCount_) return;
@@ -143,40 +143,30 @@ private:
         const char* typeName = ModuleFactory::typeName(eligible_[which]);
         MoonModule* mod = ModuleFactory::create(typeName);
         if (!mod) return;
-        // Parent to the LAYER, not to us: EffectBase::layer() is static_cast<Layer*>(parent()), so
-        // the child must see the Layer as its parent for buffer()/dims/elapsed() to resolve. We hold
-        // it privately and drive its tick() ourselves — we do NOT addChild() it (that would make the
-        // Layer tick it a second time). Same create→build lifecycle as a normal effect child.
+        // Parented to the Layer, or the child's buffer and extents fail to resolve.
         mod->setParent(layer());
         mod->defineControls();
         mod->setup();
         mod->applyState();   // build if effectively-enabled (walks to the Layer parent), else release
         current_ = mod;
-        // Cache the child's dimensionality from the FACTORY (which probed it at registration via
-        // if-constexpr), not by downcasting mod. An Effect-role type is not guaranteed to be an
-        // EffectBase — a bare MoonModule can register with Effect role — so static_cast<EffectBase*>
-        // then a virtual call is undefined behaviour (it crashed on such a type). typeDim returns 0
-        // ("N/A") for a non-EffectBase, treated as D3 (no extrude); 1/2/3 for a real effect. The
-        // extrude then runs through the same registry data the Layer uses. RTTI-free (-fno-rtti).
+        // From the factory, never a downcast: an Effect-role type need not be an EffectBase.
         const uint8_t d = ModuleFactory::typeDim(eligible_[which]);
         currentDim_ = (d == 1) ? Dim::D1 : (d == 2) ? Dim::D2 : Dim::D3;
         lastSwitchMs_ = elapsed();
-        // No clear on switch: the buffer persists, so the incoming effect settles over the outgoing
-        // one — a full-grid effect overwrites in a frame, a trail effect fades the old content away.
-        // Letting them blend for a moment is the intended behaviour, not a defect (the Layer never
-        // clears; effects own their background).
+        // No clear on a switch, so the incoming effect settles over the outgoing one.
         refreshStatus();
     }
 
+    /// Release and delete the hosted child, the Scheduler's ownership pattern.
     void destroyCurrent() {
         if (!current_) return;
         current_->release();
-        delete current_;              // release-then-delete, the Scheduler's ownership pattern
+        delete current_;
         current_ = nullptr;
     }
 
+    /// Show which effect is playing, and where it sits in the reel.
     void refreshStatus() {
-        // Show which effect is playing (its display name), e.g. "playing: Plasma (3/19)".
         if (current_) {
             std::snprintf(statusBuf_, sizeof(statusBuf_), "playing: %s (%u/%u)",
                           current_->name(), static_cast<unsigned>(cursor_ + 1),
@@ -185,7 +175,7 @@ private:
         }
     }
 
-    char statusBuf_[48] = {};
+    char statusBuf_[48] = {};   ///< setStatus holds the pointer, so this outlives the call
 };
 
 }  // namespace mm

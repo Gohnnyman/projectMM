@@ -58,7 +58,7 @@ dropdown pick. Board images are a Pages-only asset (staged from
 
 The picker is a collapsed row consistent with the other fields; clicking it
 expands the searchable card grid, and picking a board collapses it back to a
-labelled summary with a thumbnail:
+labeled summary with a thumbnail:
 
 | Collapsed | Expanded |
 |---|---|
@@ -174,11 +174,11 @@ pins, board-fixed Ethernet pins). A bare board whose LED or mic pins the *user*
 wires omits them; the user adds the module and sets the pins manually later.
 Inject nothing you don't know. (This is the
 MCU/Board/Device provenance rule from
-[architecture.md § Config provenance](../architecture.md#config-provenance-mcu--board--device):
+[MoonInstaller, config provenance](../docs/explanation/architecture/mooninstaller.md#config-provenance-mcu-devicemodel):
 default a pin only at the level that fixes it.) The `MM testbench S3`
 entry above adds an `AudioService` with the real, verified INMP441 mic pins
 (WS=4/SD=5/SCK=6, matching the bench wiring in
-[`AudioService.h`](../../src/core/AudioService.h)) plus an `RmtLedDriver`
+[`AudioService.h`](../../src/core/services/AudioService.h)) plus an `RmtLedDriver`
 (LEDs on `pins`=18, loopback jumper tx=13→rx=12) — a known-hardware Device on the
 maintainer's desk, so the inject is testable end-to-end. The `ESP32-16MB` sibling
 adds `RmtLedDriver` (LEDs=18, loopback tx=4/rx=5); the `P4` sibling adds
@@ -195,7 +195,7 @@ unit (with the `deviceModel` control) plus the default LED driver** until spec'n
 Dig-2-Go's *onboard* mic is even supported is an open spec'n'test question, so its
 entry adds no `AudioService`. The per-board capability loop that drives this — read
 capabilities off the image/link, wire what we support, propose+test what we don't —
-is recorded in [decisions.md § catalog-driven installer branch](../history/decisions.md).
+is recorded in [lessons.md § catalog-driven installer branch](../docs/work/past/lessons.md#lessons-from-the-catalog-driven-installer-branch-3-layer-device-model).
 
 ### Board images & links
 

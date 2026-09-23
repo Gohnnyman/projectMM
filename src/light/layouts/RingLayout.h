@@ -4,34 +4,37 @@
 
 namespace mm {
 
-// A ring of lights: nrOfLEDs placed evenly around a circle, optionally a partial
-// arc (rotation < 360, clockwise or counter-clockwise from angleFirst) and scaled
-// out from the centre. Every light sits at an integer (x, y, 0); the circle centre
-// is placed at ~1.1× the ring radius on both axes so the whole ring lands in the
-// positive quadrant.
-//
-// Prior art: MoonLight's RingLayout (MoonModules/MoonLight, src light layout nodes).
-// Geometry (getRadius = n / 2π, the PI + 2πi/n + 2π·angleFirst/360 placement angle,
-// the 1.1× centre offset, the clockwise/counter-clockwise partial-arc filter, and
-// the integer truncation of every coordinate) is reproduced exactly. MoonLight's
-// pin/wiring plumbing (doNextPin/nextPin) is dropped — a projectMM layout emits
-// coordinates only; the driver owns pins.
-//
-// Float trig runs on the cold build path (placeLights / lightCount, called from a
-// rebuild), never the hot render loop, so it's allowed here.
-// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 /// Layout of a single ring of evenly-spaced LEDs.
+/// Author: MoonLight, https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+///
+/// @moreinfo
+///
+/// A ring of lights: nrOfLEDs placed evenly around a circle, optionally a partial arc (rotation < 360, clockwise or counter-clockwise from angleFirst) and scaled out from the center.
+/// Every light sits at an integer (x, y, 0).
+/// The circle center is placed at ~1.1× the ring radius on both axes so the whole ring lands in the positive quadrant.
+///
+/// Prior art: MoonLight's RingLayout (MoonModules/MoonLight, src light layout nodes).
+/// The geometry is reproduced exactly: the radius, the placement angle, the center offset, the partial-arc filter and the integer truncation of every coordinate.
+/// MoonLight's pin/wiring plumbing (doNextPin/nextPin) is dropped, a projectMM layout emits coordinates only; the driver owns pins.
+///
+/// Float trig runs on the cold build path (placeLights / lightCount, called from a rebuild), never the hot render loop, so it's allowed here.
 class RingLayout : public LayoutBase {
 public:
+    /// The catalog tags this layout carries.
     const char* tags() const override { return "💫"; }
+    /// How many axes this layout places lights on.
     Dim dimensions() const override { return Dim::D2; }
-    // MoonLight defaults and ranges, preserved verbatim.
+    /// MoonLight defaults and ranges, preserved verbatim.
     uint8_t  nrOfLEDs   = 24;    // 1..255
     uint16_t angleFirst = 0;     // 0..359 — angle of the first LED (0 = top)
-    uint16_t rotation   = 360;   // 0..360 — arc span; <360 emits a partial ring
+    /// The arc span in degrees, under 360 emitting a partial ring.
+    uint16_t rotation   = 360;
+    /// Which way the arc is walked.
     bool     clockwise  = true;
-    uint8_t  scale      = 1;     // 1..10 — spacing multiplier out from the centre
+    /// The spacing multiplier out from the center, 1 to 10.
+    uint8_t  scale      = 1;
 
+    /// The controls a user sets on the card.
     void defineControls() override {
         controls_.addControl("nrOfLEDs",    nrOfLEDs,   1, 255);
         controls_.addControl("angleFirst", angleFirst, 0, 359);
@@ -40,14 +43,15 @@ public:
         controls_.addControl("scale",       scale,      1, 10);
     }
 
+    /// How many lights the current settings place.
     nrOfLightsType lightCount() const override {
-        // Reuse the exact inclusion predicate as placeLights so count and emit
-        // never disagree (a partial arc emits fewer than nrOfLEDs lights).
+        /// The same predicate as the emit, so a partial arc's count cannot disagree.
         nrOfLightsType n = 0;
         walk([](void*, nrOfLightsType, lengthType, lengthType, lengthType) {}, nullptr, &n);
         return n;
     }
 
+    /// Emit every light's coordinate, in wiring order.
     void placeLights(const CoordSink& sink) const override {
         walk(sink.cb, sink.ctx, nullptr);
     }
@@ -58,27 +62,18 @@ private:
         return static_cast<float>(n) / (2.0f * std::numbers::pi_v<float>);
     }
 
-    // Single source of truth for the ring geometry: walks the nrOfLEDs candidate
-    // positions, applies MoonLight's partial-arc filter, and for each INCLUDED LED
-    // invokes cb with a sequential index and/or tallies it into *count.
+    // The one home for the ring geometry, walking every candidate and filtering the arc.
     void walk(CoordCallback cb, void* ctx, nrOfLightsType* count) const {
         const float PI_F     = std::numbers::pi_v<float>;
         const float TWO_PI_F = 2.0f * PI_F;
 
-        // nrOfLEDs is a uint8_t control (1..255) but can be 0 if set directly; the
-        // loop below never runs then and every division by nrOfLEDs is guarded by
-        // it, so a degenerate ring emits zero lights without dividing by zero.
+        // A zero count, reachable by writing the control directly, emits nothing and divides by nothing.
         if (nrOfLEDs == 0) {
             if (count) *count = 0;
             return;
         }
 
-        // RECONSTRUCTED: MoonLight computes ringCenter in onControlChanged() (on the
-        // nrOfLEDs control change), storing it as an integer Coord3D — the float
-        // 1.1 * getRadius(nrOfLEDs) is truncated to int on assignment. projectMM
-        // rebuilds fresh each build, so ringCenter is derived inline here from
-        // nrOfLEDs. Behaviourally identical; the int truncation is preserved so
-        // the emitted coordinates match MoonLight exactly. z is always 0.
+        // Derived inline rather than cached, the integer truncation preserved deliberately.
         const lengthType ringCenterX = static_cast<lengthType>(1.1f * getRadius(nrOfLEDs));
         const lengthType ringCenterY = static_cast<lengthType>(1.1f * getRadius(nrOfLEDs));
 
@@ -102,8 +97,7 @@ private:
                 y += scale * cosf(angleRad) * radius;
             }
 
-            // Partial-circle inclusion test (MoonLight, verbatim logic). rotation
-            // is a uint16_t, so the full-circle test is integer, not float.
+            /// The partial-arc test, integer throughout because the span is an integer.
             bool includeLED = false;
             if (rotation < 1 || rotation >= 360) {
                 includeLED = true;  // full circle

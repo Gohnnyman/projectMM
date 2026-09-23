@@ -10,7 +10,7 @@
     "Drivers",
     "NetworkSendDriver"
   ],
-  "description": "Tree mutation on the Layouts container while the pipeline runs: add a second layout (multiple layouts under one Layouts), replace a layout with a different type, and remove a layout. The check is that each mutation leaves the pipeline RENDERING — Layer + Drivers re-wire via prepareTree and the buffer stays non-null and non-zero. Mirrors the HTTP add/replace/delete handlers; exercises the runner's add_module / replace_module / remove_module ops. NOTE: the Layer renders a dense bounding-box buffer sized by the layouts' coordinate EXTENT, not the summed light count — layouts that overlap in coordinate space share voxels (two 64x64 grids both occupy x,y in 0..63). There are no per-layout coordinate offsets, so multiple layouts share the same coordinate box; these steps assert liveness, not buffer-size arithmetic. Grids are 64x64 so the tick stays above the host's microsecond clock at every step.",
+  "description": "Tree mutation on the Layouts container while the pipeline runs: add a second layout (multiple layouts under one Layouts), replace a layout with a different type, and remove a layout. The check is that each mutation leaves the pipeline RENDERING, Layer + Drivers re-wire via prepareTree and the buffer stays non-null and non-zero. Mirrors the HTTP add/replace/delete handlers; exercises the runner's add_module / replace_module / remove_module ops. NOTE: the Layer renders a dense bounding-box buffer sized by the layouts' coordinate EXTENT, not the summed light count, layouts that overlap in coordinate space share voxels (two 64x64 grids both occupy x,y in 0..63). There are no per-layout coordinate offsets, so multiple layouts share the same coordinate box; these steps assert liveness, not buffer-size arithmetic. Grids are 64x64 so the tick stays above the host's microsecond clock at every step.",
   "fixture": [
     {
       "name": "fix-layouts",
@@ -78,14 +78,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 21,
-            "p95": 608,
+            "p50": 16,
+            "p95": 37,
             "min": 16,
-            "max": 750,
+            "max": 45,
             "n": 32,
-            "samples": [17, 17, 22, 21, 16, 16, 17, 16, 43, 19, 16, 29, 17, 17, 16, 17, 16, 20, 608, 750, 54, 437, 17, 22, 37, 354, 44, 36, 48, 36, 79, 38]
+            "samples": [16, 16, 16, 17, 19, 17, 16, 45, 37, 16, 16, 17, 20, 16, 17, 16, 18, 16, 16, 17, 16, 16, 17, 16, 16, 16, 16, 16, 18, 22, 16, 20]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-22"
         },
         "desktop-windows": {
           "tick_us": {
@@ -127,30 +127,30 @@
         },
         "esp32": {
           "tick_us": {
-            "p50": 31,
-            "p95": 31,
+            "p50": 11141,
+            "p95": 13036,
             "min": 31,
-            "max": 31,
-            "n": 1,
-            "samples": [31]
+            "max": 13036,
+            "n": 4,
+            "samples": [31, 13036, 11141, 11568]
           },
           "free_heap": {
-            "p50": 97492,
+            "p50": 42764,
             "p95": 97492,
-            "min": 97492,
+            "min": 40028,
             "max": 97492,
-            "n": 1,
-            "samples": [97492]
+            "n": 4,
+            "samples": [97492, 49428, 42764, 40028]
           },
           "max_alloc_block": {
-            "p50": 94208,
+            "p50": 26624,
             "p95": 94208,
-            "min": 94208,
+            "min": 26624,
             "max": 94208,
-            "n": 1,
-            "samples": [94208]
+            "n": 4,
+            "samples": [94208, 38912, 26624, 26624]
           },
-          "last_updated": "2026-07-24"
+          "last_updated": "2026-09-01"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -183,7 +183,7 @@
     },
     {
       "name": "add-second-layout",
-      "description": "Add a SECOND layout (a 64x64 grid) under Layouts — two layouts now live under one container. prepareTree re-runs; the pipeline must still render. (Both grids share the 0..63 coordinate box, so the Layer buffer stays 64x64 — see the scenario NOTE.)",
+      "description": "Add a SECOND layout (a 64x64 grid) under Layouts, two layouts now live under one container. prepareTree re-runs; the pipeline must still render. (Both grids share the 0..63 coordinate box, so the Layer buffer stays 64x64, see the scenario NOTE.)",
       "op": "add_module",
       "id": "GridB",
       "type": "GridLayout",
@@ -206,14 +206,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 51,
-            "p95": 1353,
-            "min": 43,
-            "max": 1367,
+            "p50": 49,
+            "p95": 69,
+            "min": 44,
+            "max": 77,
             "n": 32,
-            "samples": [54, 48, 46, 48, 44, 49, 50, 48, 96, 50, 43, 73, 46, 51, 45, 47, 46, 52, 1353, 1367, 236, 714, 46, 51, 93, 633, 140, 100, 126, 85, 180, 105]
+            "samples": [49, 47, 48, 49, 53, 56, 49, 69, 52, 49, 47, 51, 77, 50, 49, 50, 50, 47, 50, 51, 49, 50, 44, 49, 46, 49, 46, 49, 53, 56, 50, 52]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-22"
         },
         "desktop-windows": {
           "tick_us": {
@@ -255,30 +255,30 @@
         },
         "esp32": {
           "tick_us": {
-            "p50": 36,
-            "p95": 36,
+            "p50": 13692,
+            "p95": 16311,
             "min": 36,
-            "max": 36,
-            "n": 1,
-            "samples": [36]
+            "max": 16311,
+            "n": 4,
+            "samples": [36, 13746, 13692, 16311]
           },
           "free_heap": {
-            "p50": 79104,
+            "p50": 33716,
             "p95": 79104,
-            "min": 79104,
+            "min": 31296,
             "max": 79104,
-            "n": 1,
-            "samples": [79104]
+            "n": 4,
+            "samples": [79104, 46220, 33716, 31296]
           },
           "max_alloc_block": {
-            "p50": 61440,
+            "p50": 26624,
             "p95": 61440,
-            "min": 61440,
+            "min": 24576,
             "max": 61440,
-            "n": 1,
-            "samples": [61440]
+            "n": 4,
+            "samples": [61440, 38912, 26624, 24576]
           },
-          "last_updated": "2026-07-24"
+          "last_updated": "2026-09-01"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -318,7 +318,7 @@
     },
     {
       "name": "measure-after-replace",
-      "description": "Pipeline still renders after replacing a grid with a sphere (different layout type, same slot) — buffer re-wires without crashing.",
+      "description": "Pipeline still renders after replacing a grid with a sphere (different layout type, same slot), buffer re-wires without crashing.",
       "op": "measure",
       "measure": true,
       "bounds": {
@@ -329,14 +329,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 100,
-            "p95": 2190,
-            "min": 89,
-            "max": 2305,
+            "p50": 93,
+            "p95": 104,
+            "min": 90,
+            "max": 118,
             "n": 32,
-            "samples": [100, 94, 92, 97, 93, 100, 93, 93, 93, 136, 93, 147, 93, 96, 93, 94, 93, 105, 2190, 2305, 1486, 1211, 89, 93, 207, 554, 381, 202, 258, 187, 294, 200]
+            "samples": [91, 93, 92, 93, 95, 99, 93, 104, 99, 92, 92, 90, 90, 93, 100, 93, 93, 92, 93, 96, 93, 93, 91, 92, 93, 92, 93, 94, 96, 118, 94, 94]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-22"
         },
         "desktop-windows": {
           "tick_us": {
@@ -378,30 +378,30 @@
         },
         "esp32": {
           "tick_us": {
-            "p50": 34,
-            "p95": 34,
+            "p50": 13531,
+            "p95": 14072,
             "min": 34,
-            "max": 34,
-            "n": 1,
-            "samples": [34]
+            "max": 14072,
+            "n": 4,
+            "samples": [34, 13618, 13531, 14072]
           },
           "free_heap": {
-            "p50": 97288,
+            "p50": 29804,
             "p95": 97288,
-            "min": 97288,
+            "min": 29664,
             "max": 97288,
-            "n": 1,
-            "samples": [97288]
+            "n": 4,
+            "samples": [97288, 35052, 29804, 29664]
           },
           "max_alloc_block": {
-            "p50": 81920,
+            "p50": 16384,
             "p95": 81920,
-            "min": 81920,
+            "min": 16384,
             "max": 81920,
-            "n": 1,
-            "samples": [81920]
+            "n": 4,
+            "samples": [81920, 19456, 16384, 16384]
           },
-          "last_updated": "2026-07-24"
+          "last_updated": "2026-09-01"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -434,7 +434,7 @@
     },
     {
       "name": "remove-second-layout",
-      "description": "Remove the sphere — back to a single grid layout. Layer/Drivers shrink their buffers via prepareTree.",
+      "description": "Remove the sphere, back to a single grid layout. Layer/Drivers shrink their buffers via prepareTree.",
       "op": "remove_module",
       "id": "GridB"
     },
@@ -451,14 +451,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 21,
-            "p95": 595,
-            "min": 17,
-            "max": 719,
+            "p50": 20,
+            "p95": 22,
+            "min": 16,
+            "max": 23,
             "n": 32,
-            "samples": [17, 21, 17, 20, 19, 20, 20, 20, 37, 21, 20, 33, 20, 21, 20, 20, 20, 20, 595, 719, 126, 409, 20, 21, 61, 64, 293, 42, 55, 32, 68, 38]
+            "samples": [20, 20, 19, 20, 20, 17, 20, 17, 20, 19, 20, 23, 16, 19, 17, 20, 16, 21, 20, 20, 20, 20, 17, 16, 18, 19, 20, 20, 21, 22, 20, 20]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-22"
         },
         "desktop-windows": {
           "tick_us": {
@@ -500,30 +500,30 @@
         },
         "esp32": {
           "tick_us": {
-            "p50": 33,
-            "p95": 33,
+            "p50": 11880,
+            "p95": 13847,
             "min": 33,
-            "max": 33,
-            "n": 1,
-            "samples": [33]
+            "max": 13847,
+            "n": 4,
+            "samples": [33, 13847, 11880, 12105]
           },
           "free_heap": {
-            "p50": 98528,
+            "p50": 36968,
             "p95": 98528,
-            "min": 98528,
+            "min": 35972,
             "max": 98528,
-            "n": 1,
-            "samples": [98528]
+            "n": 4,
+            "samples": [98528, 47672, 36968, 35972]
           },
           "max_alloc_block": {
-            "p50": 94208,
+            "p50": 26624,
             "p95": 94208,
-            "min": 94208,
+            "min": 26624,
             "max": 94208,
-            "n": 1,
-            "samples": [94208]
+            "n": 4,
+            "samples": [94208, 38912, 26624, 26624]
           },
-          "last_updated": "2026-07-24"
+          "last_updated": "2026-09-01"
         },
         "esp32s3-n16r8": {
           "tick_us": {

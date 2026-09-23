@@ -1,13 +1,9 @@
-// @module JsonSink
+/// @module JsonSink
 
-// Pins JsonSink::detach() — the move-out that hands the built heap buffer to a caller who keeps it
-// (the resumable WS state-frame send). The ownership contract: after detach the sink's destructor
-// frees nothing (no double-free), the returned block is NUL-terminated and owned by the caller (free
-// with platform::free), and detach is a no-op in socket/fixed mode. Run under ASAN, a leak or
-// double-free here fails the build.
+/// Pins JsonSink::detach(), the move-out that hands the built heap buffer to a caller who keeps it (the resumable WS state-frame send). The ownership contract: after detach the sink's destructor frees nothing (no double-free), the returned block is NUL-terminated and owned by the caller (free with platform::free), and detach is a no-op in socket/fixed mode. Run under ASAN, a leak or double-free here fails the build.
 
 #include "doctest.h"
-#include "core/JsonSink.h"
+#include "core/util/JsonSink.h"
 #include "platform/platform.h"
 
 #include <cstring>

@@ -1,6 +1,6 @@
 # MoonDeck Script Reference
 
-MoonDeck is projectMM's browser-based developer console: one page that builds, flashes, runs, tests, monitors, and checks the project across every target, and discovers and drives devices on the network. Every action it offers is a thin wrapper around a script under `moondeck/`, so the CLI (`uv run moondeck/<group>/<name>.py`) and MoonDeck run exactly the same code — agents typically use the CLI, humans use MoonDeck. For what MoonDeck *is* and where it sits in the workflow see [docs/building.md § MoonDeck](../docs/building.md#moondeck--the-dev-console); this page is the per-script reference.
+MoonDeck is projectMM's browser-based developer console: one page that builds, flashes, runs, tests, monitors, and checks the project across every target, and discovers and drives devices on the network. Every action it offers is a thin wrapper around a script under `moondeck/`, so the CLI (`uv run moondeck/<group>/<name>.py`) and MoonDeck run exactly the same code: agents typically use the CLI, humans use MoonDeck. For what MoonDeck *is* and where it sits in the workflow see [docs/how-to/building.md § MoonDeck](../docs/how-to/building.md#moondeck--the-dev-console). What follows is the per-script reference.
 
 Launch it with `uv run moondeck/moondeck.py` and open <http://localhost:8420>. The console has three tabs — **Desktop** (build build / run / test), **ESP32** (chip + port, build / flash / monitor), and **Live** (discovery and live runs against networked devices) — above a network bar and per-device deviceModel pickers. Script definitions live in `moondeck/moondeck_config.json` (committed); runtime state (selected network, devices, ports) persists in `moondeck/moondeck.json` (gitignored).
 
@@ -56,12 +56,13 @@ Runs `./build/<host>/test/mm_tests -s` (doctest with all test cases shown) — s
 
 ### test_host
 
-Run the host test suites: the Python ones and the JS ones.
+Run the host test suites: the Python ones, the JS ones, and the UI ones.
 
 ```bash
-uv run moondeck/test/test_host.py            # both
+uv run moondeck/test/test_host.py            # Python and JS
 uv run moondeck/test/test_host.py --python   # just Python
 uv run moondeck/test/test_host.py --js       # just JS
+uv run moondeck/test/test_host.py --ui       # only the UI runs (needs a running device)
 ```
 
 The tests the C++ binary cannot reach: the cross-language contracts (the Improv frame's wire format,
@@ -69,6 +70,14 @@ WLED's `/json` shape), the MoonDeck scripts themselves, the browser code under `
 claim that every shipped MoonLive script is valid C++ (`test_scripts_are_cpp.py` hands each one to a
 real compiler). The commit gate and CI run the same two commands; this is the card in front of them.
 JS reports SKIP rather than failing when node is absent, since a Python-only bench is a normal setup.
+
+`--ui` is the odd one and is OPT-IN, which is why a bare run leaves it out. It drives a real browser
+against a running projectMM with [pytest-playwright](https://playwright.dev/python/docs/test-runners),
+performing a [run file](uiscenario/RUNS.md) from `test/uiscenarios/clips/` through the interface and checking each step against the
+device over REST. The run files are the same ones `moondeck/uiscenario/uivideo.py` records the videos from, so a
+failure means the UI no longer does what the video shows. It skips rather than fails when nothing
+answers on `localhost:8080` (override with `PROJECTMM_HOST`), for the same reason the JS lane skips
+without node.
 
 ### run_desktop
 
@@ -122,7 +131,7 @@ uv run moondeck/run/preview_installer.py
 Long-running — MoonDeck shows **Stop** while the server is up. Two modes, picked automatically:
 
 - **Render-only.** When no `build/esp32-*/projectMM.bin` is present, the picker populates against the real GitHub Releases API and dropdowns work, but clicking **Install** fails because the local server has no `releases/` tree. Useful for iterating on HTML / CSS / JS without burning a build. Equivalent to "Recipe A" in [mooninstaller/README.md](../mooninstaller/README.md).
-- **Flash-ready.** When at least one ESP32 build exists, the script additionally stages every `build/esp32-*/projectMM.bin` it finds into `releases/local-dev/` and generates matching Pages-relative manifests via the same `generate_manifest.py` the release workflow uses. The picker shows `local-dev` as the newest tag; clicking **Install** flashes a USB-connected ESP32 and hands off to the repository's custom orchestrator UI (Improv-Serial provisioning + SET_DEVICE_MODEL + control fan-out, all in `install-orchestrator.js` — not ESP Web Tools). End-to-end, same code paths as the public installer. This is the developer's test ground for the install flow before deploying to GitHub Pages: Web Serial works on `http://localhost` without the secure-origin requirement that gates the public site.
+- **Flash-ready.** When at least one ESP32 build exists, the script additionally stages every `build/esp32-*/projectMM.bin` it finds into `releases/local-dev/` and generates matching Pages-relative manifests via the same `generate_manifest.py` the release workflow uses. The picker shows `local-dev` as the newest tag; clicking **Install** flashes a USB-connected ESP32 and hands off to the repository's custom orchestrator UI (Improv-Serial provisioning + the APPLY_OP config push of the device model's modules and controls, all in `install-orchestrator.js`, not ESP Web Tools). End-to-end, same code paths as the public installer. This is the developer's test ground for the install flow before deploying to GitHub Pages: Web Serial works on `http://localhost` without the secure-origin requirement that gates the public site.
 
 Add `?nocache=1` to the URL to bypass the picker's 5-minute sessionStorage cache while editing.
 
@@ -147,6 +156,41 @@ uv run moondeck/check/check_prose.py
 Reads the added lines of the branch diff and the working tree, so pre-existing prose a rename
 merely touched is out of scope. Run by hand: the tree still holds instances that predate the
 check, so it is not in the gate table until those are swept.
+
+### check_docgen
+
+Report every place the generated documentation breaks the shape the standards define, and refuse a new one. Two surfaces, one check: the catalog pages that render as card tables, and the `///` comments that become the technical pages beside them.
+
+```bash
+uv run moondeck/check/check_docgen.py
+```
+
+Reads the pages the docs build renders as card tables and reports, per card:
+
+- the sizes: 600 characters of description and 100 for any one control, 400 and 80 on the visual catalogs
+- a missing image, or the wrong format for its page
+- a details section placed above a card, or named for a card that does not exist
+- a details table past 4 columns, or a cell past 300 characters
+- any link in the second column that is not Tests, API or Details
+
+And per file, over every `.h` and `.cpp` under `src/`, `test/`, `esp32/main`, `moonbase/main` and `moondeck/moonlive`, excluding the two vendored trees and the bundled test framework:
+
+- a class comment past 10 lines, or any `## ` section of its `@moreinfo` appendix past 10
+- a member comment past one line: a deep dive goes after `@moreinfo`
+- one sentence in a comment past 30 words
+- a public function or variable with no `///` at all
+
+**A finding in a file that generates a page is an error; one in an implementation file is a warning.** A header and a catalog page are published, so a defect there ships and fails the gate. A `.cpp` publishes nothing: its comments are a note to the next reader, worth fixing without stopping a commit. Both are counted and both are reported. The split stages the sweep rather than ranking the two kinds of comment, so it goes and everything blocks once the warning column reaches zero.
+
+Every run writes [docs/reference/metrics/docgen.md](../docs/reference/metrics/docgen.md), the tracked state of the sweep: errors and warnings per rule and per page, then the files ranked within each area. Current state only, so its git history is the trend, the same shape repo-health.md uses. Every erroring file also carries its own findings in full, since an error blocks a commit and its reader needs to know what to fix; warnings stay counted rather than listed, which keeps the page a report rather than a log. The file is the artifact to read, because stdout scrolls away and truncates.
+
+**A ratchet, not a snapshot.** The committed `docs/reference/metrics/docgen.md` is the baseline: the run rewrites the file, then compares what it found against the copy in `HEAD`. An error fails the run, and so does any rule whose warning count ROSE, the total included. Warnings are staged work, and staged work that grows is not a sweep.
+
+The comparison is per rule as well as on the total, because each hides a different move. A total alone hides one rule paying for another: splitting an over-wide line lowers the width count and raises the block count, which is the trade the block cap exists to refuse. Per rule alone misses a rule sitting under its own baseline while the total climbs. A rule whose limit itself changed is the one case where a rise is right, and the commit message is where that is said.
+
+**There is no tolerated list.** The limits are the limits, and the check is red until the tree meets them. A grandfather list was tried and removed: while one exists, the cheapest way to make the check green is to add to it, which is how the comment budget eroded in the first place.
+
+The rules are in [documentation-standards.md](../docs/contributing/documentation-standards.md#the-card), and the check itself is pinned by `test/python/test_check_docgen.py`: every rule is tested firing on a page built to break it, because a regex that silently stopped matching would report a clean run.
 
 ### check_platform_boundary
 
@@ -203,6 +247,17 @@ Captures a live tick from a connected ESP32 (and the desktop scenario ticks) plu
 The ESP32 half reads `esp32/monitor.log`, and refreshes it by opening the serial port for 15 s when that log is older than 5 minutes — accurate, but ~80 s and only possible with a bench board attached. `--no-live-capture` skips that refresh and uses whatever log exists (a few seconds, no board needed); the ESP32 tick line is then absent rather than stale when no recent log is around. The gate lists pass the flag so their cost stays predictable; omit it when composing a commit message, where the fresh reading is the point.
 
 In `--commit` mode it also writes the repo-health snapshot (below), reusing the tick/FPS it just measured.
+
+### bench_kernels
+
+Kernel micro-bench: nanoseconds per call for the power-function kernels (noise, fBm, warp, and every kernel added since), on this host.
+
+```bash
+uv run moondeck/check/bench_kernels.py            # build (Release) and run
+uv run moondeck/check/bench_kernels.py --no-build # run the binary already built
+```
+
+A report, not a check: the Markdown table it prints is pasted into performance.md, and a kernel swap is accepted against the previous rows (the gradient-noise swap's bound is 1.3x per sample). Host timings; the S3 is 20-40x slower per core, so the ratio between rows is what transfers, and `collect_kpi.py` on a board gives the absolute cost. Builds only the `mm_bench` target, so it does not drag the test suite through the compiler.
 
 ### repo_health
 
@@ -308,7 +363,7 @@ finding grouped by file. No report file to open: a run this slow should answer o
 and the old `build/clang-tidy-report.md` was gitignored anyway, so it existed only to be read
 once.
 
-**Verify a zero before believing it** ([testing.md](../docs/testing.md#verify-a-zero-before-believing-it)
+**Verify a zero before believing it** ([testing.md](../docs/reference/testing.md#verify-a-zero-before-believing-it)
 covers why and lists the known silent-failure modes). This script's own guard: it refuses to
 report when more than ten files fail to compile.
 
@@ -418,7 +473,7 @@ Then every declaration, ranked by how far it sits from the ideal:
 
 ```
   DOC DEVIATION  DOC WORDS  DEV WORDS  VIS   DECL       NAME               FILE:LINE
-         +1135%       1606          0  pub   class      MoonI80Peripheral  MoonLedDriver.h:10
+         +1135%       1606          0  pub   class      MoonI80Peripheral  MoonI80Peripheral.h:10
           +797%       1166          0  pub   class      HttpServerModule   HttpServerModule.h:17
           -100%          0         61  priv  method     driversOn          Scheduler.h:138
 ```
@@ -504,7 +559,7 @@ uv run moondeck/check/check_nonblocking.py --module AudioService
 
 `MoonModule::tick/tick20ms/tick1s` carry `MM_NONBLOCKING` ([platform.h](../src/platform/platform.h)),
 and Clang 20+ verifies under `-Wfunction-effects` that nothing they reach allocates or blocks —
-**transitively**, through the whole call graph ([coding-standards.md § Static checks](../docs/coding-standards.md#static-checks) owns the rule).
+**transitively**, through the whole call graph ([coding-standards.md § Static checks](../docs/contributing/coding-standards.md#static-checks) owns the rule).
 
 The attribute is inherited by overrides, so three annotations cover every module's tick. It also
 sits in `tickChildren`'s **member-pointer type** — without that, the indirect call through `fn`
@@ -694,7 +749,7 @@ point: no build, no compile database, no toolchain, so it runs anywhere in about
 **What it does for us.** It owns ONE number — how complex a function is — and it is the only tool
 here that produces a per-commit trend rather than a verdict. clang-tidy can tell you a function is
 complex today; only a series tells you the codebase is drifting, which is what
-[repo-health](../docs/metrics/repo-health.json) and `collect_kpi` plot. Its own
+[repo-health](../docs/reference/metrics/repo-health.json) and `collect_kpi` plot. Its own
 `readability-function-*` checks stay off in clang-tidy for exactly that reason (one rule, one
 owner). The tokenizer's cost is real: on template- and macro-dense C++ it reports a mangled
 function name (`SolidEffect::static_cast<lengthType>` for a method called `tick`), and since the
@@ -723,7 +778,7 @@ different fixes: `HttpServerModule::handleConnection` is `93* 178*` (both — sp
 split. TOKEN, PARAM and LINES are context for *why* a function is heavy; nothing gates on them.
 
 A raw run reports 162 functions over threshold (CCN > 10 or NLOC > 60), and a metric that can
-never reach zero is a poor gate — people stop reading it. So [`docs/metrics/whitelizard.txt`](../docs/metrics/whitelizard.txt)
+never reach zero is a poor gate: people stop reading it. So [`docs/reference/metrics/whitelizard.txt`](../docs/reference/metrics/whitelizard.txt)
 freezes today's set and the check fails only on something new. The baseline is lizard's own
 `--whitelist` format, matched on **file + function name** rather than line numbers, so it
 survives edits above a function.
@@ -746,7 +801,7 @@ uv run moondeck/scenario/run_scenario.py --name scenario_Layer_base_pipeline   #
 
 Scenarios are JSON files in `test/scenarios/`. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
 
-For a full description of each scenario, see the [scenario inventory](/api/docs/tests/scenario-tests.md) — auto-generated from the JSON files.
+For a full description of each scenario, see the [scenario inventory](/api/docs/reference/tests/scenario-tests.md), auto-generated from the JSON files.
 
 ### history_report
 
@@ -775,7 +830,14 @@ uv run moondeck/docs/screenshot_modules.py    # requires projectMM running on lo
 uv run moondeck/docs/screenshot_modules.py --host 192.168.1.210:8080
 uv run moondeck/docs/screenshot_modules.py --gif    # also record 3-second GIF previews
 uv run moondeck/docs/screenshot_modules.py --force  # re-capture and overwrite existing screenshots
+uv run moondeck/docs/screenshot_modules.py --all-registered  # every registered module, not just the listed ones
 ```
+
+`--all-registered` is what keeps the set complete. The script carries a hand-written MODULES list
+for the few modules that need particular props or a parent that is not a Layer; every other
+registered effect and modifier is captured on a Layer with its defaults. Without it a module added
+today is silently skipped until someone remembers to edit the list, which is how 42 effects came to
+have no preview.
 
 The **GIF** and **Force** checkboxes in MoonDeck toggle these flags.
 
@@ -839,7 +901,29 @@ uv run moondeck/scenario/run_live_scenario.py --compare-baseline                
 
 Executes scenario steps (add_module, set_control, delete_module) via REST API. Collects per-step FPS and heap measurements. Compares against stored baselines to detect performance regressions. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
 
-For a full description of each scenario, see the [scenario inventory](/api/docs/tests/scenario-tests.md) — auto-generated from the JSON files.
+For a full description of each scenario, see the [scenario inventory](/api/docs/reference/tests/scenario-tests.md), auto-generated from the JSON files.
+
+### ui_clip
+
+Record one UI clip: perform a run file against the interface while Playwright records, then publish a compressed clip for the docs.
+
+```bash
+uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/add-a-layer.json
+```
+
+The dropdown lists every run under `test/uiscenarios/clips/`. A run drives the interface and nothing else: the `+` tab, the type picker, the card's own buttons, the real inputs. REST is read-only, and is what each step's `expect` block checks against, which lets the same file be a UI test (`test_host.py --ui`) as well as a video source. The raw take lands in `media/video/` (ignored). The published clip lands in `docs/assets/uiscenarios/` (tracked, embed this one) only when the run was clean: a take whose steps failed, or that left modules behind, is refused so it cannot overwrite a good clip. Format and actions: [RUNS.md](uiscenario/RUNS.md).
+
+A run names its own `host` when it drives something other than the desktop UI, so the installer clip records against the installer preview and the audio clip against a board with a microphone. Start what a run needs before recording it.
+
+### ui_project
+
+Cut published clips into one video, on the beat, with a music track.
+
+```bash
+uv run moondeck/uiscenario/uicompose.py --project test/uiscenarios/projects/getting-started.json
+```
+
+The dropdown lists every project under `test/uiscenarios/projects/`. A project is the edit: which clips, in what order, how many BARS each gets, and the audio underneath. Bars rather than seconds, because a cut lands on the music or it does not, and changing the track re-times the whole edit from one number. The finished cut lands in `media/video/<project>.mp4`; the per-segment intermediates are deleted once it exists, and kept only when a cut fails.
 
 ### run_network_live
 
@@ -917,7 +1001,7 @@ Removes one ESP32 per-firmware build dir (`--firmware <name>`) or every `build/e
 
 ### build_esp32
 
-Build one of the shipping ESP32 firmware variants. The MoonDeck **Build** button reads the **Firmware** dropdown and forwards `--firmware <selected>` to `build_esp32.py`. The dropdown is populated from the `FIRMWARES` dict, the single source of truth. ("Firmware" is the compiled binary; the physical product (deviceModel) is a separate concept — see [architecture.md § Firmware vs deviceModel vs board](../docs/architecture.md#firmware-vs-devicemodel-vs-board).)
+Build one of the shipping ESP32 firmware variants. The MoonDeck **Build** button reads the **Firmware** dropdown and forwards `--firmware <selected>` to `build_esp32.py`. The dropdown is populated from the `FIRMWARES` dict, the single source of truth. ("Firmware" is the compiled binary; the physical product (deviceModel) is a separate concept: see [MoonInstaller, firmware vs deviceModel vs board](../docs/explanation/architecture/mooninstaller.md#the-three-words).)
 
 | Firmware key | Chip | What's in the image |
 |---|---|---|
@@ -977,6 +1061,25 @@ uv run moondeck/build/erase_flash_esp32.py --port /dev/tty.usbserial-0001
 
 Typical use: forcing a fresh-first-boot after firmware experiments leave the LittleFS partition in a state the new firmware can't migrate from, or before testing the post-flash Improv provisioning flow as if the device just came out of the factory. After erase, re-run **Build** then **Flash** — the device boots with empty persistence and goes straight to AP-fallback / Improv-awaiting-credentials.
 
+### serve_firmware
+
+Serve a built firmware over HTTP so a board can install it by URL. Long-running.
+
+```bash
+uv run moondeck/run/serve_firmware.py esp32 --port 8099
+uv run moondeck/run/serve_firmware.py build/moonbase-esp32/projectMM-moonbase.bin --port 8098
+```
+
+Takes a firmware name (resolved to `build/esp32-<name>/projectMM.bin`) or a path to any `.bin`, and
+prints the LAN URL to paste into the Firmware card or MoonBase's own page. The file is re-read per
+request, so a rebuild needs no restart.
+
+**It exists because `python -m http.server` speaks HTTP/1.0**, whose default is no keep-alive and a
+body that ends at connection close rather than at Content-Length. `esp_https_ota` asks for
+keep-alive and a 32 KB receive buffer, and against a 1.0 server the transfer crawls and then fails
+with `0xffffffff` partway through. That cost two failed OTA attempts on a bench board before the
+`HTTP/1.0` in the response line was spotted, while the same URL from GitHub worked first time.
+
 ### monitor_esp32
 
 Monitor serial output. Long-running — shows Stop button.
@@ -1025,7 +1128,7 @@ uv run moondeck/qemu/run_qemu.py --gdb            # freeze at reset, wait for a 
 
 Uses [Espressif's QEMU fork](https://github.com/espressif/qemu) ([docs](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/tools/qemu.html)), which emulates the ESP32's CPU, memory and enough peripherals to boot a real firmware image. Install it with `python3 $IDF_PATH/tools/idf_tools.py install qemu-xtensa`.
 
-**Why it earns its place: it EXECUTES the code.** Every other check compares emitted bytes against a model of what they should be, so none can catch a mistake the model shares. The emulator runs the instructions the way silicon does, including Xtensa's register window, `entry`/`retw` and the exception path, so a JIT defect faults here, on this machine, in seconds, instead of on a bench with only a crash dump to read. That is what it was built for ([the register-window frame bug](../docs/history/lessons.md#lessons-from-the-moonlive-on-xtensa-branch-the-register-window-frame-bug)).
+**Why it earns its place: it EXECUTES the code.** Every other check compares emitted bytes against a model of what they should be, so none can catch a mistake the model shares. The emulator runs the instructions the way silicon does, including Xtensa's register window, `entry`/`retw` and the exception path, so a JIT defect faults here, on this machine, in seconds, instead of on a bench with only a crash dump to read. That is what it was built for ([the register-window frame bug](../docs/work/past/lessons.md#lessons-from-the-moonlive-on-xtensa-branch-the-register-window-frame-bug)).
 
 The emulated board is a full device, not a console toy: the `qemu` firmware variant swaps WiFi (no radio exists) for QEMU's emulated OpenCores MAC, so the guest gets a DHCP address and the REST API and web UI work exactly as on hardware. The same scripts, tests and browser drive it. Host port 8410 forwards to the guest's HTTP server, deliberately not 8080 so a desktop build can run alongside.
 
@@ -1039,7 +1142,7 @@ Push WiFi credentials to a running projectMM device over USB-serial. Uses the [I
 
 **One-click flow**: pick the device's port in MoonDeck, hit **Improv WiFi**. The script reads SSID + password from the **active network's WiFi block in `moondeck/moondeck.json`** (the one shown in the network bar at the top of the sidebar). If that block is empty, it falls back to detecting the host machine's currently-joined WiFi (macOS Keychain / Linux NetworkManager / Windows `netsh`). The device replies with its new URL when STA comes up — typically 5-10 s end to end.
 
-**Device-model dropdown (pre-association injection)**: pick your device model next to the Firmware dropdown and the flow forwards `--device-model` — the script then resolves the deviceModel's `deviceModels.json` settings and pushes the TX-power cap over the `SET_TX_POWER` vendor RPC **before** the credentials, plus `SET_DEVICE_MODEL` after success. This matters for brown-out-prone weak-powered device models (cap 8 dBm): at full TX power they fail their very first WiFi association, so the cap can't wait for the post-online HTTP injection. Leave the dropdown on "(any model)" for device models without special settings.
+**Device-model dropdown (pre-association injection)**: pick your device model next to the Firmware dropdown and the flow forwards `--device-model`: the script then resolves the deviceModel's `deviceModels.json` settings and pushes the TX-power cap over the `SET_TX_POWER` vendor RPC **before** the credentials, then applies the entry's modules and controls over serial as `APPLY_OP` ops (the same push the web installer does; the model name is one of those controls, `System.deviceModel`). One-way on boards whose LED pins include GPIO 1/3: once the driver claims the UART pins the board can no longer receive over serial, so a provisioned QuinLED board is reconfigured from its web UI, not by re-running this. This matters for brown-out-prone weak-powered device models (cap 8 dBm): at full TX power they fail their very first WiFi association, so the cap can't wait for the post-online HTTP injection. Leave the dropdown on "(any model)" for device models without special settings.
 
 ```bash
 # Equivalent CLI for a weak-powered board (cap resolved from deviceModels.json):
@@ -1123,7 +1226,7 @@ Exit codes: `0` = all checks passed, `1` = device-side failure (probe or provisi
 
 **Why this exists.** The browser-side Improv flow (ESP Web Tools' modal) is awkward to automate and harder to reproduce on demand: needs Chrome, Web Serial, and a click-through. This script exercises the **device-side** Improv implementation — which is the part we own and the part most likely to break across firmware changes. ESP Web Tools' Improv handling is upstream-maintained and stable. Recommended pre-commit test for any change to:
 
-- [src/core/ImprovFrame.h](../src/core/ImprovFrame.h) — the on-device parser
+- [src/core/util/ImprovFrame.h](../src/core/util/ImprovFrame.h) — the on-device parser
 - [src/platform/esp32/platform_esp32_improv.cpp](../src/platform/esp32/platform_esp32_improv.cpp) — the UART listener task
 - [mooninstaller/index.html](../mooninstaller/index.html) — the web installer page
 - [src/ui/install-picker.js](../src/ui/install-picker.js) — the picker driving the install flow

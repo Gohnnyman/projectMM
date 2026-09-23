@@ -1,4 +1,4 @@
-// @module SphereMoveEffect
+/// @module SphereMoveEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -19,8 +19,7 @@ static void buildSphere(mm::Layouts& layouts, mm::GridLayout& grid, mm::Layer& l
     layer.applyState();
 }
 
-// The effect fully clears the buffer each frame, so a thin shell leaves the vast majority of a large
-// volume black (it is a hollow surface, not a solid fill).
+// The effect fully clears the buffer each frame, so a thin shell leaves the vast majority of a large volume black (it is a hollow surface, not a solid fill).
 TEST_CASE("SphereMoveEffect leaves most of a large volume dark (thin shell, full clear)") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -28,8 +27,7 @@ TEST_CASE("SphereMoveEffect leaves most of a large volume dark (thin shell, full
     mm::SphereMoveEffect sphere;
     buildSphere(layouts, grid, layer, sphere, 12, 12, 12);
 
-    // Pre-paint every channel white so we can observe the per-frame full clear: any pixel the shell
-    // does not touch must return to black.
+    // Pre-paint every channel white so we can observe the per-frame full clear: any pixel the shell does not touch must return to black.
     auto& buf = layer.buffer();
     for (size_t i = 0; i < buf.bytes(); i++) buf.data()[i] = 255;
 
@@ -40,13 +38,11 @@ TEST_CASE("SphereMoveEffect leaves most of a large volume dark (thin shell, full
         const uint8_t* px = buf.data() + p * 3;
         if (px[0] || px[1] || px[2]) lit++;
     }
-    // The one-unit-thick shell of a diameter ~2..3 sphere is a small fraction of a 12³ = 1728 voxel
-    // volume — far below half. This pins "thin surface + full clear", not "renders something".
+    // The one-unit-thick shell of a diameter ~2..3 sphere is a small fraction of a 12³ = 1728 voxel volume, far below half. This pins "thin surface + full clear", not "renders something".
     CHECK(lit < buf.count() / 2);
 }
 
-// Every voxel the effect lights is a real palette color (non-black) — the shell is drawn, not
-// left as leftover noise.
+// Every voxel the effect lights is a real palette color (non-black), the shell is drawn, not left as leftover noise.
 TEST_CASE("SphereMoveEffect only writes non-black palette colors") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -54,21 +50,18 @@ TEST_CASE("SphereMoveEffect only writes non-black palette colors") {
     mm::SphereMoveEffect sphere;
     buildSphere(layouts, grid, layer, sphere, 16, 16, 16);
 
-    // Rainbow palette (index 0) is generated at full saturation/value, so no entry is black — a lit
-    // shell voxel is therefore always non-black. Palettes::active() is a process-wide static, so pin it.
+    // Rainbow palette (index 0) is generated at full saturation/value, so no entry is black, a lit shell voxel is therefore always non-black. Palettes::active() is a process-wide static, so pin it.
     mm::Palettes::setActive(0);
     layer.tick();
 
-    // Any pixel that is set has all-black or a genuine color; because the buffer was zero-initialised
-    // and cleared, every non-zero pixel here is a shell voxel. Assert the shell exists and is colored.
+    // Any pixel that is set has all-black or a genuine color; because the buffer was zero-initialized and cleared, every non-zero pixel here is a shell voxel. Assert the shell exists and is colored.
     auto& buf = layer.buffer();
     bool anyLit = false;
     for (size_t p = 0; p < buf.count(); p++) {
         const uint8_t* px = buf.data() + p * 3;
         if (px[0] || px[1] || px[2]) { anyLit = true; break; }
     }
-    // A diameter ~2..3 shell on a 16³ grid with an origin inside the volume lights some voxels; the
-    // color comes from the palette so it is never a stray single-channel artifact.
+    // A diameter ~2..3 shell on a 16³ grid with an origin inside the volume lights some voxels; the color comes from the palette so it is never a stray single-channel artifact.
     CHECK(anyLit);
 }
 
@@ -78,8 +71,7 @@ TEST_CASE("SphereMoveEffect reports 3D dimensions") {
     CHECK(sphere.dimensions() == mm::Dim::D3);
 }
 
-// Hard rule: the effect must run at any grid size without crashing, including a 0×0×0 volume and a
-// 1×1×1 volume (the loop guards w/h/d <= 0 and clamps speed so 100-speed is never zero).
+// Hard rule: the effect must run at any grid size without crashing, including a 0×0×0 volume and a 1×1×1 volume (the loop guards w/h/d <= 0 and clamps speed so 100-speed is never zero).
 TEST_CASE("SphereMoveEffect survives degenerate grids") {
     {
         mm::Layouts layouts;

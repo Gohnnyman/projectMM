@@ -1,4 +1,4 @@
-// @module TetrixEffect
+/// @module TetrixEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -6,12 +6,7 @@
 #include "light/layouts/GridLayout.h"
 #include "platform/platform.h"   // setTestNowMs — deterministic virtual time
 
-// TetrixEffect runs one falling-brick state machine per X column. Every column is seeded with a 2 s
-// start delay (step = millis()+2000) in prepare(), so nothing renders until that delay elapses;
-// once it does the column spawns a brick that falls and stacks. The per-effect Random8 has a fixed
-// default seed, so with the clock frozen via setTestNowMs the whole effect is deterministic — the
-// cases below freeze/advance virtual time so the state machine crosses its delays predictably. Each
-// case restores the real clock through the guard so a frozen clock never leaks into another test file.
+// TetrixEffect runs one falling-brick state machine per X column. Every column is seeded with a 2 s start delay (step = millis()+2000) in prepare(), so nothing renders until that delay elapses; once it does the column spawns a brick that falls and stacks. The per-effect Random8 has a fixed default seed, so with the clock frozen via setTestNowMs the whole effect is deterministic, the cases below freeze/advance virtual time so the state machine crosses its delays predictably. Each case restores the real clock through the guard so a frozen clock never leaks into another test file.
 
 namespace {
 
@@ -42,8 +37,7 @@ bool anyLit(mm::Layer& layer) {
 
 } // namespace
 
-// During the initial 2 s start delay every column is idle-waiting, so the very first frame renders
-// nothing: the buffer is entirely black even though the effect is enabled and built.
+// During the initial 2 s start delay every column is idle-waiting, so the very first frame renders nothing: the buffer is entirely black even though the effect is enabled and built.
 TEST_CASE("TetrixEffect renders black during the start delay") {
     ClockGuard guard;
     mm::platform::setTestNowMs(1000);   // freeze; prepare seeds step = 1000+2000
@@ -58,9 +52,7 @@ TEST_CASE("TetrixEffect renders black during the start delay") {
     CHECK_FALSE(anyLit(rig.layer));
 }
 
-// Once virtual time advances past the start delay, columns spawn bricks that fall and render: after a
-// span of frames at least one light is lit, and every lit light carries a real (non-black) RGB color
-// pulled from the palette rather than partial/garbage channels.
+// Once virtual time advances past the start delay, columns spawn bricks that fall and render: after a span of frames at least one light is lit, and every lit light carries a real (non-black) RGB color pulled from the palette rather than partial/garbage channels.
 TEST_CASE("TetrixEffect lights up with palette color after the start delay") {
     ClockGuard guard;
     mm::platform::setTestNowMs(0);
@@ -68,8 +60,7 @@ TEST_CASE("TetrixEffect lights up with palette color after the start delay") {
     TetrixRig rig(8, 8);
     rig.layer.applyState();   // step = 2000 for every column
 
-    // Advance well past the 2 s start delay, then run many frames so the start-roll (step 1→2) fires
-    // and bricks descend into the visible region. Step time forward each frame like a real tick loop.
+    // Advance well past the 2 s start delay, then run many frames so the start-roll (step 1→2) fires and bricks descend into the visible region. Step time forward each frame like a real tick loop.
     bool lit = false;
     for (uint32_t t = 3000; t <= 8000 && !lit; t += 25) {
         mm::platform::setTestNowMs(t);
@@ -78,9 +69,7 @@ TEST_CASE("TetrixEffect lights up with palette color after the start delay") {
     }
     REQUIRE(lit);
 
-    // Every non-black light is a full RGB triple from colorFromPalette — assert no lit light is a
-    // single stray channel (a lit light means at least one channel > 0; the brick color is a palette
-    // entry written across all three channels, so a lit pixel is a genuine color, not noise).
+    // Every non-black light is a full RGB triple from colorFromPalette, assert no lit light is a single stray channel (a lit light means at least one channel > 0; the brick color is a palette entry written across all three channels, so a lit pixel is a genuine color, not noise).
     auto& buf = rig.layer.buffer();
     bool foundColored = false;
     for (size_t p = 0; p + 2 < buf.bytes(); p += 3) {
@@ -90,8 +79,7 @@ TEST_CASE("TetrixEffect lights up with palette color after the start delay") {
     CHECK(foundColored);
 }
 
-// Effects must run at every grid size: a degenerate 0×0×0 grid and a 1×1 grid both survive a build +
-// several frames across advancing time without crashing (no allocation, no out-of-range write).
+// Effects must run at every grid size: a degenerate 0×0×0 grid and a 1×1 grid both survive a build + several frames across advancing time without crashing (no allocation, no out-of-range write).
 TEST_CASE("TetrixEffect survives degenerate and minimal grids") {
     ClockGuard guard;
 
@@ -108,7 +96,7 @@ TEST_CASE("TetrixEffect survives degenerate and minimal grids") {
         CHECK(rig.layer.buffer().count() == 0);
     }
 
-    // 1×1: a single column, one row — the brick fills and clears the lone light without crashing.
+    // 1×1: a single column, one row, the brick fills and clears the lone light without crashing.
     {
         TetrixRig rig(1, 1);
         mm::platform::setTestNowMs(0);

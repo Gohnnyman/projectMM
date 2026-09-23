@@ -9,12 +9,12 @@ consumer reads instead:
 
   * release.yml — the build matrix + both manifest loops select `.ships`,
   * MoonDeck — its firmware picker,
-  * docs/building.md — points here instead of restating the list.
+  * docs/how-to/building.md — points here instead of restating the list.
 
 check_firmwares.py guards the committed file against drift from FIRMWARES.
 
 "Firmware" here is the compiled binary variant — separate from "board" (the
-physical hardware). See docs/architecture.md § Firmware vs board.
+physical hardware). See docs/explanation/architecture/index.md § Firmware vs board.
 
 Inputs:
   --out <path>   — firmwares.json destination (mooninstaller/firmwares.json).

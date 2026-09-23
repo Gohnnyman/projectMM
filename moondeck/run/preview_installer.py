@@ -331,7 +331,7 @@ def main() -> int:
     print()
     sys.stdout.flush()
 
-    # Mirror GitHub Pages' default static-asset CORS behaviour
+    # Mirror GitHub Pages' default static-asset CORS behavior
     # (`Access-Control-Allow-Origin: *`). The device-UI's
     # `consumePendingBoardParam` fetches deviceModels.json cross-origin
     # (http://<device>/ → https://moonmodules.org/…). In dev we point that

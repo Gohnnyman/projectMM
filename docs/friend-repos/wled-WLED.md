@@ -1,8 +1,39 @@
-# WLED (upstream) — monthly activity digest
+# WLED (upstream): monthly activity digest
 
-What landed on [wled/WLED](https://github.com/wled/WLED)'s `main` branch, month by month. External-context reference — a factual log of a friend repo's releases, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](README.md).
+What landed on [wled/WLED](https://github.com/wled/WLED)'s `main` branch, month by month. External-context reference, a factual log of a friend repo's releases, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](index.md).
 
-Months are **not** split at release dates: upstream WLED cuts releases from separate release branches (`0_15`, `16_x`), so the version tags aren't on `main` — `main` is the development trunk that feeds future releases. Each month notes which release shipped, as context.
+Months are **not** split at release dates: upstream WLED cuts releases from separate release branches (`0_15`, `16_x`), so the version tags aren't on `main`, `main` is the development trunk that feeds future releases. Each month notes which release shipped, as context.
+
+## August 2026
+
+A quieter, consolidation month on `main` after July's V5 platform switch: the toolchain moved forward again, drawing and segment bugs got fixed, and a set of long-open field reports were finally closed. No versioned release was published in August, so the month is not split.
+
+**New**
+- Trunk builds move to ESP-IDF 5.5.4, and the ESP32-C5 target now builds on the same platform as the rest (its NTP workaround is gone, so time settings behave normally there).
+- The Waveshare ESP32-S3 HUB75 build gains the SHTC3 v2 temperature and humidity sensor usermod.
+- Effects can now load palettes from their own code, so an effect can pick or cycle palettes itself.
+
+**Fixed**
+- Circle drawing is more accurate: outlines no longer come out slightly flat, and filled circles are rounder.
+- Renaming a segment while effects are running no longer risks a crash on dual-core ESP32.
+- If the device runs out of memory at startup, it now creates a small default segment instead of showing "no segments" with most controls disabled.
+- Pac-Man is hardened against drawing outside the strip, and ESP8266 gets a smaller DDP send packet so streaming does not fail, plus about 2.5 KB of flash back by dropping unusable GIF code.
+- ESP32 chip revision is reported correctly again on the V5 platform.
+
+**Fixed (reported by users)**
+- FW1906 strips no longer light the cool-white and warm-white channels on certain solid colors (#5812).
+- The effects list no longer loads incomplete or broken over a slow connection (#5813).
+- Waveshare ESP32-S3-RGB-Matrix HUB75 boards: boot failures (#5776) and swapped green and blue channels (#5815) both resolved.
+- Long-running strip flicker and strobe reports from the 0.15 line were closed out, including the LEDs-flashing-every-10-30-seconds thread (#4805), DRGB realtime strobing (#5512), and the effect jumping to "Copy Segment" (#5506). Also closed: white flash at full brightness before the boot preset loads (#5468), a permanently locked OTA on QuinLED Dig-Uno (#5158), and Gledopto Ethernet dropouts (#5431).
+
+**Watching**
+- Adding a second LED output crashes on 17.0.0-dev; confirmed and marked major (#5770).
+- Two proposals are gauging community interest: PPP-over-serial as a network transport, turning the USB cable into a full network link (#5811), and a DDP compression extension for low-bandwidth links (#5810), the busiest thread of the month.
+- An RFC proposes rewriting the settings web UI to be schema-driven, generated from the code rather than hand-written HTML (#5792).
+- A WLED-MM backport is proposed upstream: switching DDP, E1.31 and Art-Net output to AsyncUDP for better streaming performance (#5816).
+- A BSSID typed with colons or dashes is silently parsed wrong, so access-point pinning never matches (#5797).
+
+_Auditability: 52 commits on `main` with author-date 2026-08-01..2026-08-31 (range aa98fe4 ... c472e41), via `gh api repos/wled/WLED/commits?sha=main&since=2026-08-01T00:00:00Z&until=2026-09-01T00:00:00Z`. Issues via `search/issues` for `repo:wled/WLED+is:issue+created:2026-08-01..2026-08-31` (19 opened) and `repo:wled/WLED+is:issue+closed:2026-08-01..2026-08-31` (14 closed); only user-facing ones surfaced. No versioned release published in August 2026 (`repos/wled/WLED/releases`), so no month split. Internal refactors (the `netmindz` global-state encapsulation series, ~15 commits), CI changes, docs and dependency bumps are omitted._
 
 ## July 2026
 
@@ -10,7 +41,7 @@ The month `main` switched to the **V5** platform: WLED's trunk moved from the ES
 
 **New**
 - Trunk builds move to ESP-IDF 5.3 / arduino-esp32 v3, opening the door to the newer chips (ESP32-C5, C6 and P4 build targets ride along).
-- ESP-NOW now uses WLED's own code instead of the QuickESPNow library — faster, and roughly 10 KB more free memory on ESP32 (1.5 KB on ESP8266).
+- ESP-NOW now uses WLED's own code instead of the QuickESPNow library, faster, and roughly 10 KB more free memory on ESP32 (1.5 KB on ESP8266).
 - New `esp32_eth_V4` build for Ethernet boards; ESP32-C6 boards get 4 MB and 8 MB builds.
 - Nightly builds renamed, and the web UI warns when you're running a development build.
 - Audio-reactive now compiles on all the newer chips.
@@ -50,7 +81,7 @@ Post-16.0 stabilisation month: no new version tag (v16.0.0 shipped 2026-05-03 of
 - Better brownout detection and extended error codes aligned with WLED-MM.
 
 **Watching**
-- Discussion opened on switching from plain gamma to an sRGB transfer function for better low-brightness accuracy (#5707), and on improving the Nodes/Instances page (#5711) — no shipped outcome yet.
+- Discussion opened on switching from plain gamma to an sRGB transfer function for better low-brightness accuracy (#5707), and on improving the Nodes/Instances page (#5711), no shipped outcome yet.
 - Several v16.0 field reports still open: multi-controller sync losing color (#5705), UDP sync failing in AP mode (#5709), and OTA-update trouble on some boards (#5682, #5702).
 
 _Auditability: 43 commits on `main` with author-date 2026-06-01..2026-06-30 (`repos/wled/WLED/commits?sha=main`, first-line view; a few older-dated cherry-picks appear in-range and were excluded as non-June). Issues via `search/issues` for repo:wled/WLED created:2026-06-01..2026-06-30 (18 opened) and closed:2026-06-01..2026-06-30 (25 closed); only user-facing ones surfaced. No versioned release published in June (v16.0.0 was 2026-05-03), so no month split._
@@ -90,7 +121,7 @@ _Auditability: 43 commits on `main` with author-date 2026-06-01..2026-06-30 (`re
 
 **New / effects**
 
-- **Full FastLED replacement** merged (#4615) — WLED's own color/math instead of the FastLED dependency.
+- **Full FastLED replacement** merged (#4615), WLED's own color/math instead of the FastLED dependency.
 - Many new user_fx effects: Spinning Wheel, Color Clouds, Lava Lamp, Magma, Ants, Morse Code, Comet (fire particle system), a slow >4-hour transition FX, Tetris line-clear flash.
 - Scrolling-text FX gains custom fonts + international UTF-8; stencil blending mode; ESP32-C3 audio-reactive (DSP FFT + integer math); more macro/timer slots; longer max playlist duration.
 - OTA update page restyled (auto-sets download URL from `info.repo`); clearer UI tool icons.
@@ -107,7 +138,7 @@ _Auditability: 43 commits on `main` with author-date 2026-06-01..2026-06-30 (`re
 
 - **Version scheme changed to Major.minor** (dropped the leading "0."), heading toward v16; bumped to 16.0.0-alpha.
 - New **Pin Info** page (used/available pins overview); UI settings readability improvements.
-- Improved bus handling — free choice of bus driver in any order, better memory calculations; gamma lower-limit removed (enables inverse gamma correction, applied to segment brightness too).
+- Improved bus handling, free choice of bus driver in any order, better memory calculations; gamma lower-limit removed (enables inverse gamma correction, applied to segment brightness too).
 - Extended CCT blending (exclusive blend, color-jump fix); full WiFi scan with BSSID apply; new ESP32-S3 8MB QSPI build; experimental ESP32-C5/C6 in the node list.
 
 **Fixed**

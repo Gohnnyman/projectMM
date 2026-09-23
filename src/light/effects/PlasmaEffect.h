@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/math16.h"            // BeatPhase — the shared BPM accumulator
+#include "core/util/math16.h"            // BeatPhase: the shared BPM accumulator
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -8,19 +8,26 @@ namespace mm {
 // Author: classic plasma, FastLED / WLED lineage
 /// Plasma effect: summed sine waves forming rolling blobs.
 /// @card PlasmaEffect.gif
+///
+/// Four sines summed per pixel, or five in a volume, with their average picking the palette index.
+/// A larger scale means a smaller per-pixel step, so the blobs grow bigger and calmer.
 class PlasmaEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step
+    /// Catalog tags: MoonLight origin, David Jupijn and Rising Step.
+    const char* tags() const override { return "💫🦅"; }
+    /// Volumetric: a fifth sine varies the field along the depth axis.
     Dim dimensions() const override { return Dim::D3; }
 
+    /// How fast the field rolls.
     uint8_t bpm = 30;
-    // Larger scale = smaller per-pixel step (256/scale) = lower spatial frequency = bigger, calmer
-    // rolling blobs. The default is high so plasma reads as large blobs, not fine noise; lower it
-    // in the UI for a busier field.
+    /// The blobs' size along x, where larger is calmer.
     uint8_t scale_x = 48;
+    /// Their size along y, which the depth axis reuses.
     uint8_t scale_y = 48;
+    /// Walks the whole field around the palette.
     uint8_t hue_shift = 0;
 
+    /// Publish the roll speed, both scales and the palette shift.
     void defineControls() override {
         controls_.addControl("bpm", bpm, 1, 255);
         controls_.addControl("scale_x", scale_x, 1, 255);
@@ -28,6 +35,7 @@ public:
         controls_.addControl("hue_shift", hue_shift, 0, 255);
     }
 
+    /// Sum the sines per pixel and read the palette at their average.
     void tick() MM_NONBLOCKING override {
         uint8_t* buf = buffer();
         lengthType w = width();
@@ -35,25 +43,19 @@ public:
         lengthType d = depth();
         uint8_t cpl = channelsPerLight();
 
-        // Phase advances purely with time and bpm — NOT with grid width, so the speed is the same on
-        // every fixture. The x256 that used to sit in the accumulate is the read scale here: same
-        // product, and BeatPhase keeps the numerator in 64 bits so a short dt cannot truncate the
-        // sub-unit progress to zero and stall the animation. 256 phase units = one beat's wrap.
-        phase_.advance(elapsed(), bpm);
+        // The phase advances with time alone, not with the grid, so speed holds on any fixture.
+        phase_.advanceTo(elapsed(), bpm);
         const uint32_t phase = phase_.phase(256);
 
         uint8_t step_x = static_cast<uint8_t>(256 / scale_x);
         uint8_t step_y = static_cast<uint8_t>(256 / scale_y);
-        // z reuses scale_y for spatial frequency — keeps the control surface
-        // simple while still varying the field along the third axis.
+        // Depth reuses the y scale, which keeps the control surface simple.
         uint8_t step_z = step_y;
         uint8_t t1 = static_cast<uint8_t>(phase);
         uint8_t t2 = static_cast<uint8_t>(phase * 2);
         uint8_t t3 = static_cast<uint8_t>(phase * 3);
 
-        // For d == 1 take the original 4-sine path unchanged — bit-for-bit
-        // identical to the previous 2D-only output. For d > 1 add a 5th sine
-        // driven by z so the field varies along the depth axis.
+        // A flat layer keeps the four-sine path, and a volume adds a fifth driven by depth.
         const bool is3d = (d > 1);
         for (lengthType z = 0; z < d; z++) {
             uint8_t s5_z = is3d
@@ -73,10 +75,7 @@ public:
                     uint8_t s3 = sin8(static_cast<uint8_t>(xs + yx_off));
                     uint8_t s4 = sin8(static_cast<uint8_t>(
                         static_cast<uint8_t>(static_cast<uint8_t>(x) * step_y) + yx_neg));
-                    // The 5-term path uses /5 (the 2D path's /4 is the >>2 below); both
-                    // average the sines. /5 is kept literal — -O3 lowers it to magic
-                    // multiply + shift automatically, so hand-rolling the reciprocal
-                    // would produce identical assembly with worse readability.
+                    // The divide stays literal, since the compiler already lowers it to a multiply.
                     uint8_t hue = is3d
                         ? static_cast<uint8_t>(
                               (static_cast<uint16_t>(s1 + s2_y + s3 + s4 + s5_z) / 5) + hue_shift)
@@ -93,7 +92,7 @@ public:
     }
 
 private:
-    BeatPhase phase_;
+    BeatPhase phase_;   ///< the roll clock
 };
 
 } // namespace mm

@@ -1,15 +1,10 @@
-// @module FileManagerModule
+/// @module FileManagerModule
 
-// Drives the file-manager create/delete ops against the real platform::fs* seam, isolated to a temp
-// dir via fsSetRoot (the FilesystemModule-test pattern). The mkdir/delete ops are HTTP endpoints
-// (POST/DELETE /api/dir?path=) whose handlers do parseFilePath(query) → fsMkdir/fsRemove; the HTTP
-// framing needs a socket fixture (backlogged), so here we exercise the same seam contract the
-// handler runs on — the create/delete behaviour + robustness (non-empty-dir / '..' traversal) — plus
-// HttpServerModule::parseFilePath directly (it's pure string→string, so it needs no socket).
+/// Drives the file-manager create/delete ops against the real platform::fs* seam, isolated to a temp dir via fsSetRoot (the FilesystemModule-test pattern). The mkdir/delete ops are HTTP endpoints (POST/DELETE /api/dir?path=) whose handlers do parseFilePath(query) → fsMkdir/fsRemove; the HTTP framing needs a socket fixture (backlogged), so here we exercise the same seam contract the handler runs on, the create/delete behavior + robustness (non-empty-dir / '..' traversal), plus HttpServerModule::parseFilePath directly (it's pure string→string, so it needs no socket).
 
 #include "doctest.h"
-#include "core/FileManagerModule.h"
-#include "core/HttpServerModule.h"   // parseFilePath — the shared filesystem-path guard
+#include "core/system/FileManagerModule.h"
+#include "core/system/HttpServerModule.h"   // parseFilePath — the shared filesystem-path guard
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -21,8 +16,7 @@ using namespace mm;
 
 namespace {
 
-// Write a seed file, failing the test cleanly if the handle can't be opened (never fputs/fclose a
-// null FILE*, which would crash the whole binary).
+// Write a seed file, failing the test cleanly if the handle can't be opened (never fputs/fclose a null FILE*, which would crash the whole binary).
 void writeFile(const std::string& path, const char* contents) {
     FILE* f = std::fopen(path.c_str(), "w");
     REQUIRE(f != nullptr);
@@ -35,11 +29,9 @@ struct Rig {
     char root[256];
     FileManagerModule fm;
     Rig() {
-        // A monotonic per-process counter, not millis() — several Rigs construct within the same
-        // millisecond in one test run, so a time-based name could collide.
+        // A monotonic per-process counter, not millis(), several Rigs construct within the same millisecond in one test run, so a time-based name could collide.
         static unsigned counter = 0;
-        // temp_directory_path() is the portable temp root (/tmp on POSIX, %TEMP% on Windows), not a
-        // hardcoded "/tmp"; the counter keeps each Rig's dir unique within the run.
+        // temp_directory_path() is the portable temp root (/tmp on POSIX, %TEMP% on Windows), not a hardcoded "/tmp"; the counter keeps each Rig's dir unique within the run.
         std::snprintf(root, sizeof(root), "%s/mm_fm_test_%u",
                       std::filesystem::temp_directory_path().string().c_str(), counter++);
         std::filesystem::remove_all(root);
@@ -51,15 +43,10 @@ struct Rig {
         fm.defineControls();
         fm.setup();
     }
-    // Restore the DEFAULT root (whatever platform.h's fsSetRoot contract resolves "" to; under
-    // ctest that is the pinned MM_DATA_DIR), not ".", so a later test in the same
-    // binary starts from the same baseline this Rig assumed, never a leaked "." repo-root.
-    // Teardown must never propagate: this Rig is destroyed while the stack unwinds from a failed
-    // CHECK, and a throw there terminates the process, losing the very failure being reported.
+    // Restore the DEFAULT root (whatever platform.h's fsSetRoot contract resolves "" to; under ctest that is the pinned MM_DATA_DIR), not ".", so a later test in the same binary starts from the same baseline this Rig assumed, never a leaked "." repo-root.
+    // Teardown must never propagate: this Rig is destroyed while the stack unwinds from a failed CHECK, and a throw there terminates the process, losing the very failure being reported.
     // Hence both the error_code overload of remove_all (which cannot throw) and noexcept.
-    // The only residual throw path is fsSetRoot's std::filesystem::path assignment (a
-    // theoretical bad_alloc on a short literal). noexcept turning that into terminate is the
-    // right trade here: a test rig that cannot reset the fs root must not limp on.
+    // The only residual throw path is fsSetRoot's std::filesystem::path assignment (a theoretical bad_alloc on a short literal). noexcept turning that into terminate is the right trade here: a test rig that cannot reset the fs root must not limp on.
     // NOLINTNEXTLINE(bugprone-exception-escape)
     ~Rig() noexcept { platform::fsSetRoot(""); std::error_code ec; std::filesystem::remove_all(root, ec); }
 
@@ -68,8 +55,7 @@ struct Rig {
     }
 };
 
-// The mkdir op (POST /api/dir?path=), sans HTTP: the handler is fsMkdir on the guarded path.
-// Returns the seam result. fsSetRoot has already rooted the temp dir, so a plain rel path maps in.
+// The mkdir op (POST /api/dir?path=), sans HTTP: the handler is fsMkdir on the guarded path. Returns the seam result. fsSetRoot has already rooted the temp dir, so a plain rel path maps in.
 bool mkdirOp(const char* rel) { return platform::fsMkdir(rel); }
 // The delete op (DELETE /api/dir?path=): fsRemove a file or EMPTY dir.
 bool deleteOp(const char* rel) { return platform::fsRemove(rel); }
@@ -104,16 +90,12 @@ TEST_CASE("FileManager: delete removes a file too") {
 
 TEST_CASE("FileManager: a '..' traversal never escapes root (the seam's confinement)") {
     Rig r;
-    // fsSetRoot confines the seam to the temp root; even a raw '..' can't create outside it. The HTTP
-    // handler additionally rejects '..' up front in parseFilePath before reaching the seam (below).
+    // fsSetRoot confines the seam to the temp root; even a raw '..' can't create outside it. The HTTP handler additionally rejects '..' up front in parseFilePath before reaching the seam (below).
     (void)mkdirOp("/../escape");
     CHECK(!std::filesystem::exists(std::string(r.root) + "/../escape"));   // nothing outside root
 }
 
-// parseFilePath is the single path guard every filesystem HTTP entry (read/write/dir/mkdir/delete)
-// runs on — pure string→string, so it's tested directly here without a socket. It decodes the
-// `path=` query value (%XX + '+'), roots a relative path at the mount, and rejects a missing/empty
-// path, a `..` traversal (raw OR percent-encoded), and an overlong (buffer-filling) value.
+// parseFilePath is the single path guard every filesystem HTTP entry (read/write/dir/mkdir/delete) runs on, pure string→string, so it's tested directly here without a socket. It decodes the `path=` query value (%XX + '+'), roots a relative path at the mount, and rejects a missing/empty path, a `..` traversal (raw OR percent-encoded), and an overlong (buffer-filling) value.
 TEST_CASE("HttpServer::parseFilePath accepts a valid path and roots a relative one") {
     char out[64];
     // Absolute path passes through as-is.
@@ -146,17 +128,12 @@ TEST_CASE("HttpServer::parseFilePath rejects traversal, empty, missing, and over
     CHECK_FALSE(HttpServerModule::parseFilePath("path=/this/is/way/too/long", small, sizeof(small)));
 }
 
-// The /api/file upload streams the body to fsWriteStream (any size, binary-safe) and downloads via
-// fsReadAt (positional, chunked). These pin the seam primitives that path relies on. (The HTTP
-// framing itself needs a socket fixture — backlogged; here we exercise the platform contracts.)
+// The /api/file upload streams the body to fsWriteStream (any size, binary-safe) and downloads via fsReadAt (positional, chunked). These pin the seam primitives that path relies on. (The HTTP framing itself needs a socket fixture, backlogged; here we exercise the platform contracts.)
 
-// A multi-chunk source (larger than the src callback's cap) with a NUL writes in full and reads back
-// byte-for-byte — the streamed-upload contract.
+// A multi-chunk source (larger than the src callback's cap) with a NUL writes in full and reads back byte-for-byte, the streamed-upload contract.
 namespace {
 struct SpanSrc { const char* p; size_t left; };
-// The signature must match the FsWriteSrc typedef, where `abort` is an out-parameter a source
-// sets to stop the stream early — so it cannot become a pointer-to-const.
-// NOLINTNEXTLINE(readability-non-const-parameter)
+// The signature must match the FsWriteSrc typedef, where `abort` is an out-parameter a source sets to stop the stream early, so it cannot become a pointer-to-const. NOLINTNEXTLINE(readability-non-const-parameter)
 size_t spanPull(char* out, size_t cap, void* user, bool* abort) {
     (void)abort;   // this source always ends cleanly (no early close / timeout to signal)
     auto* s = static_cast<SpanSrc*>(user);
@@ -177,7 +154,7 @@ TEST_CASE("FileManager: fsWriteStream writes a multi-chunk NUL-containing payloa
     REQUIRE(platform::fsWriteStream("/blob.bin", &spanPull, &src));
     CHECK(platform::fsSize("/blob.bin") == static_cast<long>(payload.size()));
 
-    // Read it back positionally across a chunk boundary — the streamed-download contract.
+    // Read it back positionally across a chunk boundary, the streamed-download contract.
     char win[64] = {};
     const int got = platform::fsReadAt("/blob.bin", 1480, win, 40);   // straddles the NUL at 1500
     CHECK(got == 40);
@@ -185,8 +162,7 @@ TEST_CASE("FileManager: fsWriteStream writes a multi-chunk NUL-containing payloa
     CHECK(std::memcmp(win, payload.data() + 1480, 40) == 0);
 }
 
-// A source that reports a short read (mid-stream failure) still commits atomically — here a clean
-// end just yields the bytes delivered; there's no partial/torn file (temp → rename).
+// A source that reports a short read (mid-stream failure) still commits atomically, here a clean end just yields the bytes delivered; there's no partial/torn file (temp → rename).
 TEST_CASE("FileManager: fsWriteStream commits atomically (no torn file)") {
     Rig r;
     const char data[] = {'a', 'b', '\0', 'c', 'd'};
@@ -200,8 +176,7 @@ TEST_CASE("FileManager: fsWriteStream commits atomically (no torn file)") {
     CHECK(!std::filesystem::exists(std::string(r.root) + "/atomic.bin.tmp"));
 }
 
-// A source that aborts mid-stream (an incomplete/timed-out upload) must NOT commit — fsWriteStream
-// discards the temp and returns false, so a truncated body never lands as a real file.
+// A source that aborts mid-stream (an incomplete/timed-out upload) must NOT commit, fsWriteStream discards the temp and returns false, so a truncated body never lands as a real file.
 TEST_CASE("FileManager: fsWriteStream discards on abort (incomplete upload)") {
     Rig r;
     struct AbortSrc { int calls = 0; };
@@ -217,9 +192,7 @@ TEST_CASE("FileManager: fsWriteStream discards on abort (incomplete upload)") {
 }
 
 TEST_CASE("HTTP header names match case-insensitively, so any client's Content-Length counts") {
-    // The bench-found wipe: node's undici sends `content-length:` lowercase; the case-sensitive
-    // strstr read "no length declared", and an upload committed an EMPTY file with a 200, a
-    // silent config wipe. RFC 9112 makes field names case-insensitive; the finder must too.
+    // The bench-found wipe: node's undici sends `content-length:` lowercase; the case-sensitive strstr read "no length declared", and an upload committed an EMPTY file with a 200, a silent config wipe. RFC 9112 makes field names case-insensitive; the finder must too.
     const char* req = "POST /api/file?path=/x HTTP/1.1\r\ncontent-length: 831\r\n\r\nbody";
     const char* hit = mm::HttpServerModule::findHeaderCI(req, "Content-Length:");
     REQUIRE(hit != nullptr);
@@ -239,9 +212,7 @@ TEST_CASE("HTTP header names match case-insensitively, so any client's Content-L
 
 // removeRecursive: the DELETE /api/dir path, exercised directly rather than through a socket.
 //
-// It is public for exactly this, and until now nothing called it: the header claimed the tests
-// exercised the real recursion while none referenced it. These are the behaviors a user reaches
-// by deleting a folder from the File Manager.
+// It is public for exactly this, and until now nothing called it: the header claimed the tests exercised the real recursion while none referenced it. These are the behaviors a user reaches by deleting a folder from the File Manager.
 TEST_CASE("removeRecursive deletes a folder and everything under it") {
     Rig r;
     std::filesystem::create_directories(std::string(r.root) + "/tree/a/b");
@@ -253,9 +224,7 @@ TEST_CASE("removeRecursive deletes a folder and everything under it") {
     CHECK_FALSE(r.onDisk("/tree"));
 }
 
-// The depth bound is what keeps a user-shaped tree from running the stack out. A tree deeper than
-// the bound is REFUSED rather than half-deleted: reporting failure lets the caller delete again and
-// take the next batch, which is the same contract the width cap (DirLevel::kMax) has.
+// The depth bound is what keeps a user-shaped tree from running the stack out. A tree deeper than the bound is REFUSED rather than half-deleted: reporting failure lets the caller delete again and take the next batch, which is the same contract the width cap (DirLevel::kMax) has.
 TEST_CASE("removeRecursive refuses a tree deeper than its bound") {
     Rig r;
     std::string deep = std::string(r.root) + "/deep";

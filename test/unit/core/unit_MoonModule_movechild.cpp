@@ -1,7 +1,7 @@
-// @module MoonModule
+/// @module MoonModule
 
 #include "doctest.h"
-#include "core/MoonModule.h"
+#include "core/module/MoonModule.h"
 
 #include <string>  // MSVC STL doesn't pull this in via doctest.h
 
@@ -9,8 +9,7 @@ namespace {
 
 class StubModule : public mm::MoonModule {};
 
-// Helper: collect child names in order into a vector-like string for easy CHECK comparisons.
-// Using setName() each child gets a tag we can read back.
+// Helper: collect child names in order into a vector-like string for easy CHECK comparisons. Using setName() each child gets a tag we can read back.
 struct Fixture {
     mm::MoonModule parent;
     StubModule a, b, c, d;

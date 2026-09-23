@@ -21,8 +21,8 @@ on:
     paths: &test-paths
       - 'moondeck/**'
       - 'mooninstaller/**'
-      - 'src/core/ImprovFrame.h'
-      - 'src/core/ImprovOpReassembler.h'
+      - 'src/core/util/ImprovFrame.h'
+      - 'src/core/util/ImprovOpReassembler.h'
       - 'src/platform/esp32/platform_esp32_improv.cpp'
       - 'test/python/**'
       - 'test/js/**'
@@ -139,7 +139,7 @@ jobs:
           # third-party static init; keep the signal on what we're actually looking for.
           #
           # RTSan does NOT halt: the render path's known blocking calls are frozen in
-          # docs/metrics/hotpath-baseline.txt and backlogged as architecture work, so halting would
+          # docs/reference/metrics/hotpath-baseline.txt and backlogged as architecture work, so halting would
           # fail this lane on every run. It reports; the log is the signal.
           ASAN_OPTIONS=detect_leaks=0 TSAN_OPTIONS=halt_on_error=1 \
             RTSAN_OPTIONS=halt_on_error=0 ./build/san/test/mm_tests

@@ -1,5 +1,5 @@
-// @module Effects
-// @also Layer
+/// @module Effects
+/// @also Layer
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -14,30 +14,18 @@
 
 #include <cstring>
 
-// RAII guard that restores the platform test clock on scope exit even if a
-// REQUIRE/CHECK throws — without this, a mid-test failure would leave the
-// global setTestNowMs override in place and pollute later test cases.
+// RAII guard that restores the platform test clock on scope exit even if a REQUIRE/CHECK throws, without this, a mid-test failure would leave the global setTestNowMs override in place and pollute later test cases.
 struct ClockGuard {
     ~ClockGuard() { mm::platform::setTestNowMs(0); }
 };
 
-// The Effects container is a thin pass-through with one child Layer: behaviour
-// must match what a bare Layer produced before the shape change. These tests
-// pin that — anyone changing Effects::tick() will know immediately if the
-// single-child path stops being a no-op.
+// The Effects container is a thin pass-through with one child Layer: behavior must match what a bare Layer produced before the shape change. These tests pin that, anyone changing Effects::tick() will know immediately if the single-child path stops being a no-op.
 //
-// Composition (alpha-blend across multiple Effects) is not yet wired — the
-// second test exercises the multi-Layer path enough to confirm each child
-// Layer's loop runs and writes a populated buffer. Once composition lands,
-// add a third test asserting the composed output blends as documented.
+// Composition (alpha-blend across multiple Effects) is not yet wired, the second test exercises the multi-Layer path enough to confirm each child Layer's loop runs and writes a populated buffer. Once composition lands, add a third test asserting the composed output blends as documented.
 
 // A Effects container with one child Layer must produce the same output as that Layer used directly (no-op container).
 TEST_CASE("Effects with one Layer produces the same output as a bare Layer") {
-    // Pin virtual time so both Layer paths read the same elapsed value from
-    // RainbowEffect's platform::millis() phase. Without this, the two tick()
-    // calls land microseconds apart on the real clock and Rainbow's hue rotates
-    // between them — making byte-exact comparison impossible (the structural
-    // compare this test used to do hid the actual contract).
+    // Pin virtual time so both Layer paths read the same elapsed value from RainbowEffect's platform::millis() phase. Without this, the two tick() calls land microseconds apart on the real clock and Rainbow's hue rotates between them, making byte-exact comparison impossible (the structural compare this test used to do hid the actual contract).
     mm::platform::setTestNowMs(1000);
     ClockGuard clockGuard;  // restores setTestNowMs(0) even if a REQUIRE below fails
 
@@ -74,8 +62,7 @@ TEST_CASE("Effects with one Layer produces the same output as a bare Layer") {
     childLayer.addChild(&childEffect);
 
     effectsContainer.applyState();
-    // Effects::tick runs each child Layer in order; for the single-child case
-    // that's exactly one bareLayer.tick() equivalent.
+    // Effects::tick runs each child Layer in order; for the single-child case that's exactly one bareLayer.tick() equivalent.
     effectsContainer.tick();
 
     // --- Both buffers must be byte-identical at the same elapsed time ---
@@ -114,10 +101,7 @@ TEST_CASE("Effects with two Effects: each child Layer's tick runs and writes its
     effectsContainer.applyState();
     effectsContainer.tick();
 
-    // Both child Layer buffers must be populated — each Layer renders its own
-    // buffer here; the Drivers composite of those buffers is pinned by the
-    // "Drivers composites two enabled Layers" case below. (Checkerboard with
-    // default controls writes a checker pattern; Rainbow writes a hue gradient.)
+    // Both child Layer buffers must be populated, each Layer renders its own buffer here; the Drivers composite of those buffers is pinned by the "Drivers composites two enabled Layers" case below. (Checkerboard with default controls writes a checker pattern; Rainbow writes a hue gradient.)
     auto& bufA = layerA.buffer();
     auto& bufB = layerB.buffer();
     REQUIRE(bufA.bytes() == static_cast<size_t>(8 * 8 * 3));
@@ -130,18 +114,14 @@ TEST_CASE("Effects with two Effects: each child Layer's tick runs and writes its
     CHECK_MESSAGE(bHasNonZero, "Layer B (Checkerboard) wrote no pixels");
 }
 
-// A minimal driver that just records the source buffer it's handed each tick,
-// so a test can inspect the composited output without a real network/LED sink.
+// A minimal driver that just records the source buffer it's handed each tick, so a test can inspect the composited output without a real network/LED sink.
 class CaptureDriver : public mm::DriverBase {
 public:
     void setSourceBuffer(mm::Buffer* buf) override { src_ = buf; }
     mm::Buffer* src_ = nullptr;
 };
 
-// Multi-layer composition: Drivers blends ≥2 enabled Layers into its own output
-// buffer and hands THAT to drivers (not a single Layer's buffer). Bottom layer
-// overwrites; top layer blends per its blendMode/opacity. This is the end-to-end
-// pin for the composite loop in Drivers::tick.
+// Multi-layer composition: Drivers blends ≥2 enabled Layers into its own output buffer and hands THAT to drivers (not a single Layer's buffer). Bottom layer overwrites; top layer blends per its blendMode/opacity. This is the end-to-end pin for the composite loop in Drivers::tick.
 TEST_CASE("Drivers composites two enabled Layers into one output buffer") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -162,11 +142,7 @@ TEST_CASE("Drivers composites two enabled Layers into one output buffer") {
     effectsContainer.addChild(&top);
     effectsContainer.setLayouts(&layouts);
 
-    // The driver is declared BEFORE its container ON PURPOSE: stack objects destruct in reverse
-    // declaration order, so this puts ~Drivers() (which stops the core-1 encode worker) ahead of
-    // ~CaptureDriver(). The other way round, the worker can still be inside the driver's tick() when
-    // its vtable is torn down — a vptr race TSan flags. Production is safe by a different route
-    // (release()/removeChild() quiesce before any delete); a stack test has only declaration order.
+    // The driver is declared BEFORE its container ON PURPOSE: stack objects destruct in reverse declaration order, so this puts ~Drivers() (which stops the core-1 encode worker) ahead of ~CaptureDriver(). The other way round, the worker can still be inside the driver's tick() when its vtable is torn down, a vptr race TSan flags. Production is safe by a different route (release()/removeChild() quiesce before any delete); a stack test has only declaration order.
     CaptureDriver cap;
     mm::Drivers drivers;
     drivers.addChild(&cap);
@@ -182,8 +158,7 @@ TEST_CASE("Drivers composites two enabled Layers into one output buffer") {
     REQUIRE(cap.src_ != nullptr);
     REQUIRE(cap.src_->bytes() == static_cast<size_t>(4 * 3));
 
-    // The composite must equal additive(bottom, top) per channel, clamped — i.e.
-    // for every byte, output >= bottom (top only adds) and output >= top's contribution.
+    // The composite must equal additive(bottom, top) per channel, clamped, i.e. for every byte, output >= bottom (top only adds) and output >= top's contribution.
     auto& outBuf = *cap.src_;
     auto& botBuf = bottom.buffer();
     auto& topBuf = top.buffer();
@@ -199,8 +174,7 @@ TEST_CASE("Drivers composites two enabled Layers into one output buffer") {
     CHECK_MESSAGE(sawSum, "expected at least one light where both Layers contribute (proves real compositing)");
 }
 
-// Disabling the top layer drops cleanly to the single (bottom) layer — no crash,
-// the driver now sees the bottom layer's content. Pins the robustness path.
+// Disabling the top layer drops cleanly to the single (bottom) layer, no crash, the driver now sees the bottom layer's content. Pins the robustness path.
 TEST_CASE("Drivers composition drops to single layer when one is disabled") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -216,11 +190,7 @@ TEST_CASE("Drivers composition drops to single layer when one is disabled") {
     effectsContainer.addChild(&top);
     effectsContainer.setLayouts(&layouts);
 
-    // The driver is declared BEFORE its container ON PURPOSE: stack objects destruct in reverse
-    // declaration order, so this puts ~Drivers() (which stops the core-1 encode worker) ahead of
-    // ~CaptureDriver(). The other way round, the worker can still be inside the driver's tick() when
-    // its vtable is torn down — a vptr race TSan flags. Production is safe by a different route
-    // (release()/removeChild() quiesce before any delete); a stack test has only declaration order.
+    // The driver is declared BEFORE its container ON PURPOSE: stack objects destruct in reverse declaration order, so this puts ~Drivers() (which stops the core-1 encode worker) ahead of ~CaptureDriver(). The other way round, the worker can still be inside the driver's tick() when its vtable is torn down, a vptr race TSan flags. Production is safe by a different route (release()/removeChild() quiesce before any delete); a stack test has only declaration order.
     CaptureDriver cap;
     mm::Drivers drivers;
     drivers.addChild(&cap);
@@ -237,18 +207,7 @@ TEST_CASE("Drivers composition drops to single layer when one is disabled") {
     REQUIRE(cap.src_->bytes() == static_cast<size_t>(4 * 3));
 }
 
-// Drivers' composition/output-buffer allocation contract (architecture.md §
-// Adaptive allocation). The driver output buffer exists ONLY when the pipeline
-// must blend into physical space; otherwise the lone layer's buffer is handed to
-// drivers directly (zero-copy). dynamicBytes() reflects outputBuffer_.bytes(), so
-// it's 0 ⇔ no buffer. Pins all three cases in one place:
-//   1. one identity (no-LUT) layer  → NO output buffer (zero-copy) — WITH multicore off
-//   2. two enabled Layers           → output buffer (must composite)
-//   3. one layer WITH a LUT         → output buffer (must map logical→physical)
-// The multicore render↔encode split adds a fourth reason to own a buffer: it is the frame core 1
-// reads while core 0 renders the next one, so with the split ON the identity case DOES allocate one
-// (case 1b). That is the documented cost of multicore; turning it off (or failing to allocate)
-// restores the zero-copy profile exactly.
+// Drivers' composition/output-buffer allocation contract (architecture.md § Adaptive allocation). The driver output buffer exists ONLY when the pipeline must blend into physical space; otherwise the lone layer's buffer is handed to drivers directly (zero-copy). dynamicBytes() reflects outputBuffer_.bytes(), so it's 0 ⇔ no buffer. Pins all three cases in one place: 1. one identity (no-LUT) layer  → NO output buffer (zero-copy), WITH multicore off 2. two enabled Layers           → output buffer (must composite) 3. one layer WITH a LUT         → output buffer (must map logical→physical) The multicore render↔encode split adds a fourth reason to own a buffer: it is the frame core 1 reads while core 0 renders the next one, so with the split ON the identity case DOES allocate one (case 1b). That is the documented cost of multicore; turning it off (or failing to allocate) restores the zero-copy profile exactly.
 TEST_CASE("Drivers allocates the output buffer only when compositing or mapping is needed") {
     // --- Case 1: a single identity (dense-grid, no-LUT) layer, multicore OFF → no output buffer ---
     {
@@ -337,11 +296,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
     }
 
     // --- Case 4: a live layer is DISABLED → drivers transition to idle, no stale buffer ---
-    // The real-world sequence: a frame is published with the layer enabled, then the
-    // user disables it and the pipeline rebuilds. activeLayer() still surfaces the
-    // (now disabled) layer so geometry stays queryable, but output selection must use
-    // the *enabled* source — with none, the driver's source buffer goes null so it
-    // emits nothing instead of re-sending the last frame off the disabled layer.
+    // The real-world sequence: a frame is published with the layer enabled, then the user disables it and the pipeline rebuilds. activeLayer() still surfaces the (now disabled) layer so geometry stays queryable, but output selection must use the *enabled* source, with none, the driver's source buffer goes null so it emits nothing instead of re-sending the last frame off the disabled layer.
     {
         mm::Layouts layouts; mm::GridLayout grid;
         grid.width = 8; grid.height = 8; grid.depth = 1;
@@ -349,8 +304,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         mm::Effects effects;
         mm::Layer only; only.setChannelsPerLight(3);
         mm::SpiralEffect eff; only.addChild(&eff);
-        // A LUT modifier so the pre-fix bug would route through the output path —
-        // proves the disabled gate, not just the no-LUT zero-copy branch.
+        // A LUT modifier so the pre-fix bug would route through the output path, proves the disabled gate, not just the no-LUT zero-copy branch.
         mm::MultiplyModifier mirror; mirror.mirrorX = true; only.addChild(&mirror);
         effects.addChild(&only);
         effects.setLayouts(&layouts);
@@ -363,7 +317,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         CHECK(effects.enabledLayerCount() == 1);
         REQUIRE(cap.src_ != nullptr);                // a frame is being published
 
-        // Now disable the only layer and rebuild — the driver must drop to idle.
+        // Now disable the only layer and rebuild, the driver must drop to idle.
         only.setEnabled(false);
         effects.applyState(); drivers.applyState();
         CHECK(effects.activeLayer() == &only);        // fallback for geometry
@@ -384,9 +338,7 @@ TEST_CASE("Effects::activeLayer returns first enabled child, or nullptr when emp
     oneChild.addChild(&onlyLayer);
     CHECK(oneChild.activeLayer() == &onlyLayer);
 
-    // Disabling the only child still surfaces it as the fallback (so dimensions
-    // can still be queried for buffer allocation — important during boot or a
-    // toggle-everything-off state).
+    // Disabling the only child still surfaces it as the fallback (so dimensions can still be queried for buffer allocation, important during boot or a toggle-everything-off state).
     onlyLayer.setEnabled(false);
     CHECK(oneChild.activeLayer() == &onlyLayer);
 
@@ -399,8 +351,7 @@ TEST_CASE("Effects::activeLayer returns first enabled child, or nullptr when emp
     CHECK(twoChildren.activeLayer() == &second);
 }
 
-// firstEnabledLayer() is the output-selection counterpart to activeLayer(): it never
-// falls back to a disabled layer, so it returns nullptr exactly when nothing renders.
+// firstEnabledLayer() is the output-selection counterpart to activeLayer(): it never falls back to a disabled layer, so it returns nullptr exactly when nothing renders.
 TEST_CASE("Effects::firstEnabledLayer returns first enabled child, nullptr when all disabled") {
     mm::Effects empty;
     CHECK(empty.firstEnabledLayer() == nullptr);
@@ -422,12 +373,7 @@ TEST_CASE("Effects::firstEnabledLayer returns first enabled child, nullptr when 
 
 // If the container holds only non-Layer children, activeLayer() returns nullptr (the role-guard skips, never miscasts).
 TEST_CASE("Effects::activeLayer returns nullptr when no child has role Layer") {
-    // The role-guard in activeLayer (and setLayouts) skips non-Layer children
-    // rather than miscasting. Today the UI's acceptsChildren mapping keeps
-    // non-Layer children out, but the engine doesn't enforce it — so the
-    // engine must degrade gracefully. Pin the contract: a Effects container
-    // populated only with non-Layer children returns nullptr from
-    // activeLayer(), not a miscast pointer.
+    // The role-guard in activeLayer (and setLayouts) skips non-Layer children rather than miscasting. Today the UI's acceptsChildren mapping keeps non-Layer children out, but the engine doesn't enforce it, so the engine must degrade gracefully. Pin the contract: a Effects container populated only with non-Layer children returns nullptr from activeLayer(), not a miscast pointer.
     struct GenericChild : public mm::MoonModule {};
 
     mm::Effects effects;
@@ -437,11 +383,7 @@ TEST_CASE("Effects::activeLayer returns nullptr when no child has role Layer") {
     CHECK(effects.activeLayer() == nullptr);             // skipped, not miscast
 }
 
-// The disable cascade: disabling a PARENT releases every descendant's resources, because
-// applyState() routes each node by its own effectivelyEnabled() — which is false for a child
-// whose ancestor is disabled. This is the core guarantee of the unified lifecycle: a disabled
-// subtree holds nothing (memory or hardware). FireEffect is the probe — its heat buffer's
-// dynamicBytes() is host-observable, standing in for any per-module resource.
+// The disable cascade: disabling a PARENT releases every descendant's resources, because applyState() routes each node by its own effectivelyEnabled(), which is false for a child whose ancestor is disabled. This is the core guarantee of the unified lifecycle: a disabled subtree holds nothing (memory or hardware). FireEffect is the probe, its heat buffer's dynamicBytes() is host-observable, standing in for any per-module resource.
 TEST_CASE("Disabling a parent Layer cascades release to its effects (effectivelyEnabled)") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -461,9 +403,7 @@ TEST_CASE("Disabling a parent Layer cascades release to its effects (effectively
     REQUIRE(fire.effectivelyEnabled());     // and no ancestor disabled
     CHECK(fire.dynamicBytes() > 0);         // heat buffer allocated
 
-    // Disable the PARENT layer (the effect's own flag stays true) and re-sweep, as the Scheduler
-    // does after an enabled-toggle. The effect is now effectively-disabled (ancestor off) → its
-    // applyState routes to release → heap freed, even though fire.enabled() is still true.
+    // Disable the PARENT layer (the effect's own flag stays true) and re-sweep, as the Scheduler does after an enabled-toggle. The effect is now effectively-disabled (ancestor off) → its applyState routes to release → heap freed, even though fire.enabled() is still true.
     layer.setEnabled(false);
     effects.applyState();
     CHECK(fire.enabled());                  // the effect's OWN flag is untouched
@@ -476,10 +416,7 @@ TEST_CASE("Disabling a parent Layer cascades release to its effects (effectively
     CHECK(fire.effectivelyEnabled());
     CHECK(fire.dynamicBytes() > 0);         // re-acquired
 
-    // Effects-specific: an effect builds against the LAYER's LUT/buffer, so the router must run the
-    // Layer's prepare() (rebuild the LUT) BEFORE recursing into the effect (applyState visits the
-    // parent, then children). Prove the re-enabled effect actually RENDERS — a stale/zero-size buffer
-    // would leave the frame black. A tick after re-enable must write non-zero pixels.
+    // Effects-specific: an effect builds against the LAYER's LUT/buffer, so the router must run the Layer's prepare() (rebuild the LUT) BEFORE recursing into the effect (applyState visits the parent, then children). Prove the re-enabled effect actually RENDERS, a stale/zero-size buffer would leave the frame black. A tick after re-enable must write non-zero pixels.
     layer.tick();                           // ticks the effect through the Layer
     const uint8_t* buf = layer.buffer().data();
     bool anyLit = false;

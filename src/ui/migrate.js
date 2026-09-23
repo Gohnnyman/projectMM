@@ -27,6 +27,17 @@ export const FILE_RENAMES = {
 // merge made explicit when its value is deterministic; `review` flags what a map cannot decide.
 export const TYPE_RENAMES = {
     "Layers": { type: "Effects", date: "2026-08-08" },
+    // Noise2D folded into Noise, which is Dim::D3 and renders the same field on a panel. `scale`
+    // carries; Noise2D's `speed` (a 0..15 divisor) has no equivalent, because Noise takes its rate
+    // from `bpm` on the shared beat clock rather than a per-effect divisor.
+    "Noise2DEffect": { type: "NoiseEffect", date: "2026-09-05",
+                       review: "set bpm: Noise2D's speed (0..15) has no equivalent on the beat clock" },
+    // Infrared was rebuilt around learned-code ROWS, so the single-target controls it used to
+    // carry (`code on/off`, `code brightness up`, ...) have no equivalent: the codes themselves
+    // are gone and the remote has to be re-learned. The module carries over, which is what stops
+    // it vanishing from the tree on boot.
+    "IrService": { type: "InfraredService", date: "2026-09-02",
+                   review: "re-learn the remote: the old per-action code controls became rows" },
     // The three parallel drivers merge into ParallelLedDriver + a `peripheral` Select (values
     // per the peripheral-option rename in CONTROL_VALUE_RENAMES). Parlio and the MoonI80
     // backend map deterministically; the esp_lcd backend's name depends on the chip, review,
@@ -50,6 +61,14 @@ export const TYPE_RENAMES = {
 // the bench: a blanket fps → targetFps corrupted NetworkSendDriver's own `fps`). `review` marks
 // a value-semantics change: the name maps, the value needs the user's eye.
 export const CONTROL_RENAMES = {
+    // One name for one thing: the service is AudioService, the frame is AudioFrame, so the control
+    // that makes a sprite effect follow the music is audioReactive. Scoped to the seven effects that
+    // declare it, per the rule above.
+    "soundReactive": {
+        name: "audioReactive", date: "2026-09-05",
+        onTypes: ["FishTankEffect", "FlyingToastersEffect", "PacmanEffect", "PongEffect",
+                  "SpaceInvadersEffect", "SpriteFountainEffect", "MovingHeadEffect"],
+    },
     // ControlModule's encoders spell the word out: the interface uses the industry term, the UI
     // abbreviates it to `enc` for the strip. Scoped, because `enc1` is a plausible name anywhere.
     "enc1": { name: "encoder1", date: "2026-08-30", onTypes: ["ControlModule"] },

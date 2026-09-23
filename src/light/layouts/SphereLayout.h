@@ -4,55 +4,50 @@
 
 namespace mm {
 
-// A hollow sphere: lights sit on the surface only (a one-light-thick shell),
-// not the interior. Lattice layout — every light is at an integer (x,y,z) in a
-// (2r+1)^3 bounding box, centred at (r,r,r). A lattice point is on the shell
-// when its distance from the centre rounds to `radius`, i.e. it falls in the
-// half-open band [radius-0.5, radius+0.5). The same band predicate drives both
-// lightCount() (count) and placeLights() (emit), so they never disagree.
-//
-// Distances are compared squared (integer math, no sqrt/float per light) — the
-// hot-path discipline (integer math, no float per light) applies here even
-// though layout iteration is a cold path, because the same pattern reads
-// uniformly across the codebase.
-// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 /// Layout mapping LEDs onto a sphere surface.
+/// Author: MoonLight, https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
+///
+/// @moreinfo
+///
+/// A hollow sphere: lights sit on the surface only (a one-light-thick shell), not the interior.
+/// Lattice layout, every light is at an integer (x,y,z) in a (2r+1)^3 bounding box, centerd at (r,r,r).
+/// A lattice point is on the shell when its distance from the center rounds to `radius`, i.e. it falls in the half-open band [radius-0.5, radius+0.5).
+/// The same band predicate drives both lightCount() (count) and placeLights() (emit), so they never disagree.
+///
+/// Distances are compared squared, so there is no square root or float per light.
+/// The hot-path discipline applies here even though layout iteration is cold, because the same pattern then reads uniformly across the codebase.
 class SphereLayout : public LayoutBase {
 public:
+    /// The catalog tags this layout carries.
     const char* tags() const override { return "💫"; }
+    /// How many axes this layout places lights on.
     Dim dimensions() const override { return Dim::D3; }
-    // Surface radius in light-units. Min 1 (the smallest hollow sphere: 18
-    // lights — the 6 axis-neighbours at d^2=1 plus the 12 edge-neighbours at
-    // d^2=2, all rounding to distance 1 under the band predicate below).
-    // Max 64 keeps the (2*64+1)^3 bounding-box scan bounded.
+    /// The shell's radius in light-units, its maximum keeping the lattice scan bounded.
     lengthType radius = 4;
 
+    /// The controls a user sets on the card.
     void defineControls() override {
         controls_.addControl("radius", radius, 1, 64);
     }
 
+    /// How many lights the current settings place.
     nrOfLightsType lightCount() const override {
-        // Count the shell points. Cheap relative to rendering, recomputed only
-        // on a radius change (affectsPrepare → rebuild).
+        /// Recomputed only on a radius change, and cheap beside rendering.
         nrOfLightsType n = 0;
         forEachShellPoint([](void*, nrOfLightsType, lengthType, lengthType, lengthType) {}, nullptr, &n);
         return n;
     }
 
+    /// Emit every light's coordinate, in wiring order.
     void placeLights(const CoordSink& sink) const override {
         forEachShellPoint(sink.cb, sink.ctx, nullptr);
     }
 
 private:
-    // Walk the (2r+1)^3 lattice, invoking cb for each shell point with a
-    // sequential index. When `count` is non-null, also tally the points (so
-    // lightCount() reuses the exact same predicate as the iterator). Either cb
-    // or count (or both) may be active; cb is a no-op lambda in the count path.
+    // Walk the bounding lattice once, so the count and the emit share one predicate.
     void forEachShellPoint(CoordCallback cb, void* ctx, nrOfLightsType* count) const {
         const int32_t r = radius;
-        // Half-open band [r-0.5, r+0.5) compared in squared integer space:
-        //   lo = (2r-1)^2 / 4 ... but keep it integer by comparing 4*d^2 to
-        //   (2r-1)^2 and (2r+1)^2 — multiply the whole inequality by 4.
+        // A half-open band, compared in squared integer space by scaling the whole inequality.
         const int32_t lo = (2 * r - 1) * (2 * r - 1);   // 4*(r-0.5)^2
         const int32_t hi = (2 * r + 1) * (2 * r + 1);   // 4*(r+0.5)^2
         nrOfLightsType idx = 0;

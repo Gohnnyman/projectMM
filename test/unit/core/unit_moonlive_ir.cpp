@@ -1,4 +1,4 @@
-// @module MoonLive
+/// @module MoonLive
 
 #include "doctest.h"
 #include "moonlive_script_wrap.h"
@@ -14,25 +14,17 @@
 #include <vector>
 #include <algorithm>
 
-// MoonLive IR + assembler, exercised through the front-end + the light builtin table (the IR
-// builders are no longer hand-written — the parser builds the IR from source). The headline
-// check is the BEHAVIORAL GOLDEN: a compiled `fill(...)` and the hand-encoded emitFill, run
-// over the same buffer, produce identical output (the assembler keeps its own register
-// convention, so this is behavioural equivalence, not byte-equality).
+// MoonLive IR + assembler, exercised through the front-end + the light builtin table (the IR builders are no longer hand-written, the parser builds the IR from source). The headline check is the BEHAVIORAL GOLDEN: a compiled `fill(...)` and the hand-encoded emitFill, run over the same buffer, produce identical output (the assembler keeps its own register convention, so this is behavioral equivalence, not byte-equality).
 
 using namespace mm;
 
 static moonlive::BuiltinTable kT = moonlive::lightBuiltins();
 static moonlive::SysVarTable kSys = moonlive::modifierSysVars();
 
-// Every compile-through-run test in this file needs a working host JIT. The tiny-buffer
-// degrade test lower down (which asserts !ok) is left unguarded — it passes for the right
-// reason on arm64 (bytes exceed cap) and a compatible reason on x86_64 (no codegen).
+// Every compile-through-run test in this file needs a working host JIT. The tiny-buffer degrade test lower down (which asserts !ok) is left unguarded, it passes for the right reason on arm64 (bytes exceed cap) and a compatible reason on x86_64 (no codegen).
 #if MM_MOONLIVE_HAS_HOST_JIT
 
-// Inside the guard because its only callers are: without a host JIT (CI's x86_64 Linux) the tests
-// below vanish and `place` becomes unused — which GCC treats as an error under -Werror, while clang
-// stays quiet. Defining a helper outside the guard that only guarded code uses is the bug.
+// Inside the guard because its only callers are: without a host JIT (CI's x86_64 Linux) the tests below vanish and `place` becomes unused, which GCC treats as an error under -Werror, while clang stays quiet. Defining a helper outside the guard that only guarded code uses is the bug.
 namespace {
 using FillFn = void (*)(uint8_t*, uint32_t, uint8_t);
 FillFn place(const uint8_t* code, size_t n, void*& blkOut, size_t cap = 256) {
@@ -120,10 +112,7 @@ TEST_CASE("MoonLive compiled setRGB writes one pixel; out-of-range is bounds-rej
     platform::freeExec(blk2, 256);
 }
 
-// STAGE 1 CONTROLS — codegen + live-read contract. A script control compiles to a LoadCtrl that
-// reads the run-time controls arena (the 5th arg); mutating the arena changes the output with NO
-// recompile — the live-edit guarantee, pinned at the codegen level. The `control + random16` case
-// pins the call() save-set interaction (kArg4 must survive a host call).
+// STAGE 1 CONTROLS, codegen + live-read contract. A script control compiles to a LoadCtrl that reads the run-time controls arena (the 5th arg); mutating the arena changes the output with NO recompile, the live-edit guarantee, pinned at the codegen level. The `control + random16` case pins the call() save-set interaction (kArg4 must survive a host call).
 namespace {
 using CtrlFn = void (*)(uint8_t*, uint32_t, uint8_t, uint32_t, const uint8_t*);
 int firstLit(const std::vector<uint8_t>& b) {
@@ -144,22 +133,20 @@ TEST_CASE("MoonLive control: a declared control reads the arena live (no recompi
     auto fn = reinterpret_cast<CtrlFn>(blk);
 
     std::vector<uint8_t> buf(16 * 3, 0);
-    // A member occupies a whole 4-byte SLOT and is read with a 32-bit load, so the arena has to
-    // hold all four bytes: a one-byte array would have the load reading three bytes past its end.
+    // A member occupies a whole 4-byte SLOT and is read with a 32-bit load, so the arena has to hold all four bytes: a one-byte array would have the load reading three bytes past its end.
     uint8_t arena[4] = {0, 0, 0, 0};
 
     arena[0] = 5;  std::fill(buf.begin(), buf.end(), 0); fn(buf.data(), 16, 3, 0, arena);
     CHECK(firstLit(buf) == 5);                       // control value selects the pixel
     arena[0] = 9;  std::fill(buf.begin(), buf.end(), 0); fn(buf.data(), 16, 3, 0, arena);
-    CHECK(firstLit(buf) == 9);                       // changed the arena slot only — NO recompile
+    CHECK(firstLit(buf) == 9);                       // changed the arena slot only, NO recompile
     arena[0] = 0;  std::fill(buf.begin(), buf.end(), 0); fn(buf.data(), 16, 3, 0, arena);
     CHECK(firstLit(buf) == 0);
     platform::freeExec(blk, r.len);
 }
 
 TEST_CASE("MoonLive control survives a host call (kArg4 live across random16)") {
-    // The control's index (arena[0]) must still be readable AFTER a random16 call clobbers the
-    // scratch pool — pins that the call() save-set protects kArg4 (the arena pointer).
+    // The control's index (arena[0]) must still be readable AFTER a random16 call clobbers the scratch pool, pins that the call() save-set protects kArg4 (the arena pointer).
     uint8_t code[768];
     auto r = moonlive::compileSource(
         mmScript("byte idx = 0;\nsetRGB(idx, random16(256), 0, 255);"), kT, kSys, code, sizeof(code));
@@ -169,9 +156,7 @@ TEST_CASE("MoonLive control survives a host call (kArg4 live across random16)") 
     platform::writeExec(blk, code, r.len);
     auto fn = reinterpret_cast<CtrlFn>(blk);
 
-    // A member occupies a whole 4-byte SLOT and is read with a 32-bit load, so the arena has to
-    // hold all four bytes: a one-byte array would have the load reading past its end, and the
-    // index would come back as whatever followed it on the stack.
+    // A member occupies a whole 4-byte SLOT and is read with a 32-bit load, so the arena has to hold all four bytes: a one-byte array would have the load reading past its end, and the index would come back as whatever followed it on the stack.
     uint8_t arena[4] = {7, 0, 0, 0};
     std::vector<uint8_t> buf(16 * 3, 0);
     fn(buf.data(), 16, 3, 0, arena);

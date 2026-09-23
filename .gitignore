@@ -82,7 +82,7 @@ moondeck/.last_flash.json
 # Generated files. These change on every build (a git hash, a build date, a minified blob), so
 # tracking them would put a diff of their own volatility in every commit.
 src/ui/ui_embedded.h
-src/core/build_info.h
+src/core/util/build_info.h
 
 # script_catalog.h is generated too, but it is TRACKED on purpose: it changes only when a script
 # is added, removed, or edits its dimensions()/tags(), which is exactly the change worth reviewing.
@@ -134,14 +134,30 @@ __pycache__/
 
 # Generated test inventory pages — built into the site by moondeck/docs/mkdocs_hooks.py
 # (the CLI generate_test_docs.py can still write them locally, but they are not committed).
-/docs/tests/*.md
+/docs/reference/tests/*.md
 
 # Generated per-module technical pages — Doxygen+moxygen from each `.h`, built into
 # the site by moondeck/docs/mkdocs_hooks.py (via gen_api.py). Regenerated every build.
 /docs/moonmodules/core/moxygen/
 /docs/moonmodules/light/moxygen/
+/docs/moonmodules/platform/moxygen/
 
 # Read-only hardware snapshots (flash/NVS dumps pulled off reverse-engineered boards).
 # Root-anchored + dir-scoped, like /build/ above: a bare `.snapshots` would also swallow any
 # nested path of that name anywhere in the tree.
 /.snapshots/
+
+# Knowledge-graph output (the /graphify skill)
+graphify-out/
+
+# Video-production OUTPUT: the music a cut is scored against, the raw takes, the
+# finished videos, and the intermediates between them. Nothing here is redistributable
+# (licensed music, large binaries), and a repository is not a media library: what ships
+# to a viewer lives on the video platform.
+#
+# The whole folder, because /media/ is output ONLY. The sources live elsewhere by
+# design: the run files under test/uiscenarios/, the published doc clips under
+# docs/assets/uiscenarios/, the tooling under moondeck/uiscenario/. An earlier version
+# listed media types one by one, to protect run files that used to live here; they no
+# longer do, so the rule can say what it means.
+/media/

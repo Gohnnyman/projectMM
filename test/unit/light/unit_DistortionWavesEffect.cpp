@@ -1,4 +1,4 @@
-// @module DistortionWavesEffect
+/// @module DistortionWavesEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -6,8 +6,7 @@
 #include "light/layouts/GridLayout.h"
 #include "platform/platform.h"  // setTestNowMs: freeze millis() for a deterministic phase
 
-// Restore the real clock after any test that froze it, so a frozen value can't leak into
-// order-dependent neighbours.
+// Restore the real clock after any test that froze it, so a frozen value can't leak into order-dependent neighbors.
 namespace { struct ClockGuard { ~ClockGuard() { mm::platform::setTestNowMs(0); } }; }
 
 static void buildLayer(mm::Layouts& layouts, mm::GridLayout& grid, mm::Layer& layer,
@@ -33,11 +32,7 @@ TEST_CASE("DistortionWavesEffect writes non-zero RGB data") {
 }
 
 TEST_CASE("DistortionWavesEffect produces spatial variation") {
-    // The clock is FROZEN because the pattern moves with time: a light's hue is the average of a
-    // horizontal and a vertical sine, both advanced by the elapsed-time phase. Layer::tick() reads
-    // platform::millis(), so a single-tick test starts at whatever the process uptime happens to
-    // be, and at ~2.3% of phases the two sampled lights land on the same hue and this assertion
-    // fails. It flaked in CI on exactly that. Freezing makes the phase (and so the property) fixed.
+    // The clock is FROZEN because the pattern moves with time: a light's hue is the average of a horizontal and a vertical sine, both advanced by the elapsed-time phase. Layer::tick() reads platform::millis(), so a single-tick test starts at whatever the process uptime happens to be, and at ~2.3% of phases the two sampled lights land on the same hue and this assertion fails. It flaked in CI on exactly that. Freezing makes the phase (and so the property) fixed.
     ClockGuard guard;
     mm::platform::setTestNowMs(1);
 

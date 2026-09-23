@@ -256,7 +256,7 @@ def collect_esp32():
     esp32_build = candidates[0]
     # Record which firmware variant the numbers came from so a developer
     # with multiple build dirs can see whether the KPI reflects what they
-    # think it does. See docs/architecture.md § Firmware vs board.
+    # think it does. See docs/explanation/architecture/index.md § Firmware vs board.
     kpi["firmware"] = esp32_build.name[len("esp32-"):]
 
     try:

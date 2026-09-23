@@ -1,11 +1,11 @@
-// @module DemoReelEffect
+/// @module DemoReelEffect
 
 #include "doctest.h"
 #include "light/effects/DemoReelEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "light/draw.h"                // draw::fill — clear the buffer between hosted renders
+#include "light/powerfunctions/draw.h"                // draw::fill — clear the buffer between hosted renders
 
 #include <cstring>
 
@@ -31,9 +31,7 @@ struct Scene {
 };
 }  // namespace
 
-// The reel enumerates the effect registry, hosts one effect at a time, renders it, and advances
-// through the whole list without crashing — the create/release/delete churn every tick is the
-// robustness path this pins. Registering two real effects + the reel gives it something to cycle.
+// The reel enumerates the effect registry, hosts one effect at a time, renders it, and advances through the whole list without crashing, the create/release/delete churn every tick is the robustness path this pins. Registering two real effects + the reel gives it something to cycle.
 TEST_CASE("DemoReelEffect cycles registered effects and renders each") {
     REQUIRE(ModuleFactory::registerType<RainbowEffect>("RainbowEffect"));
     REQUIRE(ModuleFactory::registerType<NoiseEffect>("NoiseEffect"));
@@ -55,11 +53,7 @@ TEST_CASE("DemoReelEffect cycles registered effects and renders each") {
     s.layer.tick();
     CHECK(s.anyNonZero());
 
-    // Advance through a full lap plus extra — every swap is a create → build → release → delete of
-    // a real effect against the live grid. None of it may crash. The buffer is cleared before each
-    // render so a per-host render check measures THIS host's output (not pixels left by the prior
-    // one); effects that legitimately draw nothing in a single frame (e.g. an audio effect with no
-    // audio, a still-fading start) are counted over the run rather than asserted every frame.
+    // Advance through a full lap plus extra, every swap is a create → build → release → delete of a real effect against the live grid. None of it may crash. The buffer is cleared before each render so a per-host render check measures THIS host's output (not pixels left by the prior one); effects that legitimately draw nothing in a single frame (e.g. an audio effect with no audio, a still-fading start) are counted over the run rather than asserted every frame.
     const uint8_t n = reel.eligibleCountForTest();
     int rendered = 0;
     for (int step = 0; step < n * 2 + 3; step++) {

@@ -61,6 +61,10 @@ RUNNER = _resolve_runner()
 # test/ made every unit-test edit report the runner stale, and rebuilding did not clear it
 # because CMake correctly relinks nothing: a false alarm that trains people to ignore the guard.
 _RUNNER_SOURCE_DIRS = ("src",)
+# src/platform/esp32 is in the tree but NOT in this target: the desktop runner links mm_platform's
+# desktop half, so an ESP32 edit relinks nothing and rebuilding can never clear the warning. Left in
+# scope it wedges the gate permanently, which is the same false alarm the note above is about.
+_RUNNER_SKIP_DIRS = ("src/platform/esp32",)
 _RUNNER_SOURCE_FILES = ("test/scenario_runner.cpp",)
 _RUNNER_SOURCE_SUFFIXES = {".c", ".cpp", ".h", ".hpp"}
 _RUNNER_SKIP_PARTS = {"build", "__pycache__", ".git"}
@@ -74,7 +78,7 @@ _RUNNER_SKIP_PARTS = {"build", "__pycache__", ".git"}
 # run writes scenario baselines and repo-health metrics, which dirties the tree, which flips the
 # suffix, which makes every binary look stale on the NEXT run. A build id is not code, so it cannot
 # make the runner "report on code that is no longer there", which is what this guard is for.
-_RUNNER_GENERATED = {"src/ui/ui_embedded.h", "src/core/build_info.h"}
+_RUNNER_GENERATED = {"src/ui/ui_embedded.h", "src/core/util/build_info.h"}
 
 
 def _stale_runner_reason() -> str:
@@ -105,6 +109,7 @@ def _stale_runner_reason() -> str:
         candidates.extend(f for f in (ROOT / d).rglob("*")
                           if f.is_file() and f.suffix in _RUNNER_SOURCE_SUFFIXES
                           and not (_RUNNER_SKIP_PARTS & set(f.relative_to(ROOT).parts))
+                          and not f.relative_to(ROOT).as_posix().startswith(_RUNNER_SKIP_DIRS)
                           and f.relative_to(ROOT).as_posix() not in _RUNNER_GENERATED)
     candidates.extend(ROOT / f for f in _RUNNER_SOURCE_FILES if (ROOT / f).is_file())
     for f in candidates:
@@ -273,12 +278,7 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None,
         return 0
 
     if touched_observed or touched_contract:
-        # Serialize, then put each sample window back on one line: a 32-element array
-        # spread over 32 lines hides the statistics it belongs to (_observed.py).
-        text = _observed.compact_samples(
-            json.dumps(scenario, indent=2, ensure_ascii=False))
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text + "\n")
+        _observed.save_scenario(path, scenario)
         what = []
         if touched_observed:
             what.append(f"observed[{target}] × {touched_observed}")
@@ -312,7 +312,7 @@ def main():
 
     if args.update_contract and not args.reason:
         parser.error("--update-contract requires --reason "
-                     "(e.g. --reason 'tightened after Layer optimisation')")
+                     "(e.g. --reason 'tightened after Layer optimization')")
 
     # Missing OR stale: both mean the results would not describe the code on disk.
     _require_fresh_runner()

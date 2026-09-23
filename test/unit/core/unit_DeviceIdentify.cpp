@@ -1,14 +1,11 @@
-// @module DevicePlugin
-// @also DevicesModule
+/// @module DevicePlugin
+/// @also DevicesModule
 
-// Pins the device-interop plugin classification: each plugin claims the UDP presence port
-// and turns a received datagram into a Device kind. Pure host logic — feed a synthetic
-// presence packet (the 44-byte WLED-compatible header), assert the classification, no
-// network. The plugins are the "second caller" that makes the seam testable.
+/// Pins the device-interop plugin classification: each plugin claims the UDP presence port and turns a received datagram into a Device kind. Pure host logic, feed a synthetic presence packet (the 44-byte WLED-compatible header), assert the classification, no network. The plugins are the "second caller" that makes the seam testable.
 
 #include "doctest.h"
-#include "core/DevicePlugin.h"
-#include "core/WledPacket.h"
+#include "core/system/DevicePlugin.h"
+#include "core/system/WledPacket.h"
 
 #include <cstdint>
 #include <cstring>
@@ -58,8 +55,7 @@ TEST_CASE("WledPlugin claims a plain WLED packet as WLED") {
 }
 
 TEST_CASE("WledPlugin declines a projectMM-marked packet (that's a peer, not a WLED)") {
-    // A projectMM peer broadcasts a WLED-VALID packet, so without the marker check WledPlugin
-    // would mis-claim it. The marker keeps the projectMM/WLED kinds distinct.
+    // A projectMM peer broadcasts a WLED-VALID packet, so without the marker check WledPlugin would mis-claim it. The marker keeps the projectMM/WLED kinds distinct.
     WledPlugin p;
     uint8_t pkt[WledPacket::kSize];
     packet(pkt, "Bench-P4", /*mm=*/true);

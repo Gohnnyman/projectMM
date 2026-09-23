@@ -1,5 +1,5 @@
-// @module Layer
-// @also RotateModifier, ModifierBase
+/// @module Layer
+/// @also RotateModifier, ModifierBase
 
 #include "doctest.h"
 #include "light/layers/Effects.h"
@@ -15,18 +15,11 @@
 #include <utility>
 #include <cstring>
 
-// The live (per-frame) modifier seam: Layer::tick() applies a live modifier's
-// modifyLive remap to the rendered buffer every frame WITHOUT a mapping rebuild,
-// and runs that pass ONLY when an enabled modifier reports hasModifyLive() — a
-// static-only Layer pays nothing (the pay-for-what-you-use guarantee). These pin
-// both: the pass runs and remaps when a Rotate is present, and is skipped otherwise.
+// The live (per-frame) modifier seam: Layer::tick() applies a live modifier's modifyLive remap to the rendered buffer every frame WITHOUT a mapping rebuild, and runs that pass ONLY when an enabled modifier reports hasModifyLive(), a static-only Layer pays nothing (the pay-for-what-you-use guarantee). These pin both: the pass runs and remaps when a Rotate is present, and is skipped otherwise.
 
 namespace {
 
-// A tiny effect that writes a fixed position-dependent gradient into the buffer
-// (R = x, G = y), so a coordinate remap (rotation) visibly rearranges the bytes.
-// Deterministic per frame — no time dependence — so any frame-to-frame change is
-// the live pass, not the effect animating itself.
+// A tiny effect that writes a fixed position-dependent gradient into the buffer (R = x, G = y), so a coordinate remap (rotation) visibly rearranges the bytes. Deterministic per frame, no time dependence, so any frame-to-frame change is the live pass, not the effect animating itself.
 class GradientEffect : public mm::EffectBase {
 public:
     void tick() MM_NONBLOCKING override {
@@ -56,9 +49,7 @@ std::vector<uint8_t> frameAt(mm::Layer& layer, uint32_t t) {
 
 } // namespace
 
-// With a Rotate present, the live pass rotates the gradient each frame as the angle
-// advances — so two frames at different times differ. A static GradientEffect alone
-// would produce identical frames, so any difference is the live remap.
+// With a Rotate present, the live pass rotates the gradient each frame as the angle advances, so two frames at different times differ. A static GradientEffect alone would produce identical frames, so any difference is the live remap.
 TEST_CASE("Layer live pass: Rotate remaps the buffer per frame") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -82,8 +73,7 @@ TEST_CASE("Layer live pass: Rotate remaps the buffer per frame") {
     mm::platform::setTestNowMs(0);
 }
 
-// PAY-FOR-WHAT-YOU-USE: a Layer with no live modifier must NOT run the live pass —
-// the static gradient is byte-identical across frames regardless of the clock.
+// PAY-FOR-WHAT-YOU-USE: a Layer with no live modifier must NOT run the live pass, the static gradient is byte-identical across frames regardless of the clock.
 TEST_CASE("Layer live pass: skipped when no modifier is live") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -102,8 +92,7 @@ TEST_CASE("Layer live pass: skipped when no modifier is live") {
     mm::platform::setTestNowMs(0);
 }
 
-// A DISABLED Rotate must not run the live pass either (the gate keys off ENABLED
-// live modifiers). Same static gradient → identical frames.
+// A DISABLED Rotate must not run the live pass either (the gate keys off ENABLED live modifiers). Same static gradient → identical frames.
 TEST_CASE("Layer live pass: a disabled live modifier does not run") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -124,9 +113,7 @@ TEST_CASE("Layer live pass: a disabled live modifier does not run") {
     mm::platform::setTestNowMs(0);
 }
 
-// COALESCED REBUILD: two beat-driven modifiers (RandomMap) on one Layer both ask for
-// a rebuild on a beat; Layer::tick() must rebuild ONCE (not re-enter prepare per
-// modifier) and the Layer must stay valid — the composed mapping changes, no crash.
+// COALESCED REBUILD: two beat-driven modifiers (RandomMap) on one Layer both ask for a rebuild on a beat; Layer::tick() must rebuild ONCE (not re-enter prepare per modifier) and the Layer must stay valid, the composed mapping changes, no crash.
 TEST_CASE("Layer coalesces rebuilds from two dynamic modifiers") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -145,9 +132,7 @@ TEST_CASE("Layer coalesces rebuilds from two dynamic modifiers") {
 
     REQUIRE(layer.lut().logicalCount() == 64);
 
-    // Snapshot the full mapping: each logical cell's single destination (a permutation,
-    // so exactly one each). Asserts the composition is a bijection AND lets us compare
-    // before vs after to prove a beat actually changed it.
+    // Snapshot the full mapping: each logical cell's single destination (a permutation, so exactly one each). Asserts the composition is a bijection AND lets us compare before vs after to prove a beat actually changed it.
     auto mapping = [&]() {
         std::vector<mm::nrOfLightsType> dst(64, static_cast<mm::nrOfLightsType>(-1));
         std::size_t total = 0;

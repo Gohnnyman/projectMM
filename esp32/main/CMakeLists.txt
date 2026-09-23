@@ -2,14 +2,15 @@ idf_component_register(
     SRCS
         "main.cpp"
         "../../src/main.cpp"
-        "../../src/core/Control.cpp"
-        "../../src/core/JsonUtil.cpp"
-        "../../src/core/ScratchBuffer.cpp"
-        "../../src/core/HttpServerModule.cpp"
-        "../../src/core/FilesystemModule.cpp"
-        "../../src/core/FileManagerModule.cpp"
-        "../../src/core/MqttModule.cpp"
-        "../../src/core/Scheduler.cpp"
+        "../../src/core/module/Control.cpp"
+        "../../src/core/util/JsonUtil.cpp"
+        "../../src/core/util/ScratchBuffer.cpp"
+        "../../src/core/system/HttpServerModule.cpp"
+        "../../src/core/system/FilesystemModule.cpp"
+        "../../src/core/system/FileManagerModule.cpp"
+        "../../src/core/system/MqttModule.cpp"
+        "../../src/core/module/Scheduler.cpp"
+        "../../src/core/util/sha256.cpp"
         "../../src/core/moonlive/MoonLive.cpp"
         "../../src/core/moonlive/MoonLiveCompiler.cpp"
         "../../src/core/moonlive/MoonLiveSpill.cpp"
@@ -23,13 +24,16 @@ idf_component_register(
         "../../src/platform/esp32/platform_esp32_ota.cpp"
         "../../src/platform/esp32/platform_esp32_improv.cpp"
         "../../src/platform/esp32/platform_esp32_rmt.cpp"
+        "../../src/platform/esp32/rmt_hi_vector.S"
         "../../src/platform/esp32/platform_esp32_tasks.cpp"
         "../../src/platform/esp32/platform_esp32_worker.cpp"
         "../../src/platform/esp32/platform_esp32_gpio.cpp"
         "../../src/platform/esp32/platform_esp32_i80.cpp"
+        "../../src/platform/esp32/platform_esp32_hub75.cpp"
         "../../src/platform/esp32/platform_esp32_moon_i80.cpp"
         "../../src/platform/esp32/platform_esp32_parlio.cpp"
         "../../src/platform/esp32/platform_esp32_i2s.cpp"
+        "../../src/platform/esp32/platform_esp32_usbvideo.cpp"
         "../../src/platform/esp32/platform_esp32_i2c.cpp"
         "../../src/platform/esp32/platform_esp32_ir.cpp"
         "../../src/platform/esp32/platform_esp32_es8311.cpp"
@@ -55,8 +59,14 @@ if(CONFIG_IDF_TARGET_ARCH_XTENSA)
     target_compile_options(${COMPONENT_LIB} PRIVATE -mauto-litpools)
 endif()
 
+# Classic ESP32 only: the level-5 RMT refill vector (rmt_hi_vector.S) overrides a WEAK default, so
+# nothing references its object and the linker would drop it. -u forces the symbol in.
+if(CONFIG_IDF_TARGET_ESP32)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-u ld_include_rmt_hi_vector")
+endif()
+
 # Firmware-variant defines, set by moondeck/build/build_esp32.py via firmware_cmake_args().
-# See docs/architecture.md § Firmware vs board — "firmware" is the compiled
+# See docs/explanation/architecture/mooninstaller.md § Firmware vs board — "firmware" is the compiled
 # binary variant; the physical "board" is a separate concept the device
 # cannot identify on its own.
 #

@@ -4,45 +4,43 @@
 
 namespace mm {
 
-// Tiles the logical image across the physical box `multiply` times per axis,
-// optionally mirroring alternate tiles. The logical box is the physical box
-// divided by the per-axis multiplier. Under the fold build the fan-out is free:
-// every physical light folds (`pos % logicalSize`) onto its logical cell, so the
-// N physical lights of N tiles all land on the same logical light — N:1 emerges,
-// no fan-out list. With multiply 2 + mirror on, an axis folds in half — the
-// classic kaleidoscope mirror (this subsumes a standalone Mirror: it's just
-// multiply 2 + mirror true).
-//
-// Prior art: MoonLight's Multiply modifier (M_MoonLight.h) — same tile+mirror
-// fold (`position % modifierSize`, odd tiles reflected). We expose per-axis
-// mirror bools (3) instead of MoonLight's single mirror flag, and per-axis
-// multipliers, so X/Y/Z can fold and tile independently.
-// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
 /// Modifier tiling the image across the box, optionally mirrored.
 /// @card MultiplyModifier.png
+///
+/// @moreinfo
+///
+/// Tiles the logical image across the physical box `multiply` times per axis, optionally mirroring alternate tiles.
+/// The logical box is the physical box divided by the per-axis multiplier.
+/// Under the fold build the fan-out is free: every physical light folds (`pos % logicalSize`) onto its logical cell.
+/// The N physical lights of N tiles all land on the same logical light, N:1 emerges, no fan-out list.
+/// With multiply 2 + mirror on, an axis folds in half, the classic kaleidoscope mirror (this subsumes a standalone Mirror: it's just multiply 2 + mirror true).
+///
+/// Prior art: MoonLight's Multiply modifier (M_MoonLight.h), same tile+mirror fold (`position % modifierSize`, odd tiles reflected).
+/// We expose per-axis mirror bools (3) instead of MoonLight's single mirror flag, and per-axis multipliers, so X/Y/Z can fold and tile independently.
+/// Author: MoonLight, https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
 class MultiplyModifier : public ModifierBase {
 public:
+    /// The catalog tags this modifier carries.
     const char* tags() const override { return "💫"; }  // MoonLight origin
-    /// Advisory UI chip: what this modifier can work on (tiles on all three axes; on a 2D grid the z factor is simply 1).
-    /// Nothing branches on it, since extrude reads the EFFECT's dimensions.
+    /// Tiles on all three axes; on a 2D grid the z factor is simply 1.
     Dim dimensions() const override { return Dim::D3; }
 
-    // Tiles per axis. 1 = no multiplication on that axis. All default to 2 (tile on every
-    // axis the layout has); on a 2D grid multiplyZ clamps to 1 (a no-op), so it only tiles
-    // Z on an actual 3D volume — consistent with X/Y rather than a silent exception.
+    /// How many times the box repeats on this axis, one meaning no multiplication.
     uint8_t multiplyX = 2;
+    /// Along y.
     uint8_t multiplyY = 2;
+    /// Along z.
     uint8_t multiplyZ = 2;
-    // Reflect alternate (odd-numbered) tiles on this axis. All default on — a
-    // mirror on an axis the layout doesn't use (e.g. Z on a 2D grid) is a no-op,
-    // so defaulting them true gives a kaleidoscope on whatever axes exist.
+    /// Whether alternate tiles reflect on this axis, giving a kaleidoscope.
     bool mirrorX = true;
+    /// Along y.
     bool mirrorY = true;
+    /// Along z.
     bool mirrorZ = true;
 
+    /// The controls a user sets on the card.
     void defineControls() override {
-        // 1–64 tiles per axis. More tiles than the grid has pixels just yields
-        // 1-pixel tiles (the effective multiplier clamps to the axis extent).
+        // More tiles than the axis has pixels simply yields single-pixel tiles.
         controls_.addControl("multiplyX", multiplyX, 1, 64);
         controls_.addControl("multiplyY", multiplyY, 1, 64);
         controls_.addControl("multiplyZ", multiplyZ, 1, 64);
@@ -51,14 +49,9 @@ public:
         controls_.addControl("mirrorZ", mirrorZ);
     }
 
+    /// Resize the logical box this modifier presents to the effect.
     void modifyLogicalSize(Coord3D& size) override {
-        // Logical box is the incoming box divided by the EFFECTIVE multiplier
-        // (clamped to the axis extent — see eff()). On a 2D grid (size.z=1) any
-        // multiplyZ clamps to 1, so depth stays 1 and Z multiplication is a no-op
-        // — you can't tile an axis more times than it has pixels. When the extent
-        // isn't divisible by the multiplier (e.g. 5 / 2 = 2), the tiles cover only
-        // `tile * mult` pixels; the leftover strip at the high edge is unmapped
-        // (covered_ records the covered extent so the fold can reject it).
+        // The box divided by the effective multiplier, the uncovered high edge recorded.
         const lengthType mX = eff(multiplyX, size.x), mY = eff(multiplyY, size.y), mZ = eff(multiplyZ, size.z);
         size.x /= mX; size.y /= mY; size.z /= mZ;
         tile_ = size;
@@ -66,14 +59,13 @@ public:
                     static_cast<lengthType>(size.z * mZ)};
     }
 
+    /// Transform one light's logical position, false dropping it from the mapping.
     bool modifyLogical(Coord3D& pos) const override {
-        // A coord in the leftover edge strip (extent not divisible by the multiplier)
-        // has no tile — drop it, rather than wrap it and duplicate the edge.
+        // A coordinate in the leftover edge strip has no tile, so drop rather than wrap it.
         if ((covered_.x > 0 && pos.x >= covered_.x) ||
             (covered_.y > 0 && pos.y >= covered_.y) ||
             (covered_.z > 0 && pos.z >= covered_.z)) return false;
-        // Fold a coord into its tile: the tile index decides whether to reflect
-        // (odd tile, mirror on), then wrap into the tile. Reads the stashed tile size.
+        // The tile index decides whether to reflect, then the coordinate wraps into it.
         pos.x = foldAxis(pos.x, tile_.x, mirrorX);
         pos.y = foldAxis(pos.y, tile_.y, mirrorY);
         pos.z = foldAxis(pos.z, tile_.z, mirrorZ);
@@ -81,21 +73,19 @@ public:
     }
 
 private:
-    Coord3D tile_;      // output tile size, stashed in modifyLogicalSize for the fold
-    Coord3D covered_;   // pixels the tiles actually cover (tile*mult); the leftover edge is dropped
+    /// Output tile size, stashed in modifyLogicalSize for the fold.
+    Coord3D tile_;
+    /// Pixels the tiles actually cover (tile*mult); the leftover edge is dropped.
+    Coord3D covered_;
 
-    // Effective multiplier for an axis: the control value clamped to [1, extent].
-    // ≥1 avoids divide-by-zero; ≤extent because tiling more times than the axis
-    // has pixels is meaningless (and would blank the layer). So a multiplyZ on a
-    // depth-1 (2D) layout clamps to 1 — no effect, as expected.
+    // The control clamped to the axis extent, so it never divides by zero or blanks a layer.
     static lengthType eff(uint8_t mult, lengthType extent) {
         lengthType m = mult ? mult : 1;
         if (extent > 0 && m > extent) m = extent;
         return m;
     }
 
-    // Fold a physical coordinate `p` into a `logical`-sized tile, reflecting odd
-    // tiles when mirroring. logical==0 (degenerate axis) passes through unchanged.
+    // Fold a coordinate into one tile, reflecting the odd ones when mirroring.
     static lengthType foldAxis(lengthType p, lengthType logical, bool mirror) {
         if (logical <= 0) return p;
         const lengthType tile   = static_cast<lengthType>(p / logical);

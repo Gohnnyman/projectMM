@@ -114,17 +114,22 @@ for (const fn of ["updateValues", "updateModuleControls", "updateStatusBar", "ap
 // nobody adds here is exactly how this bug came back twice. Pin that every function updateValues
 // calls into (our own, not DOM builtins) is one this file checks.
 test("every function on the patch path is covered by this file", () => {
+    // renderCards is the ESCAPE from the patch path, not a step on it: a mode change adds or
+    // removes control rows, which patching values cannot express, so the card is rebuilt and
+    // updateValues returns. It collapses a selection by design, which is why it runs only on a
+    // real change rather than every second.
     const checked = ["updateValues", "updateModuleControls", "updateStatusBar", "applyTabDot",
-                     "updateTabDot", "setText", "setUrlDisplay", "setStatusText"];
+                     "updateTabDot", "setText", "setUrlDisplay", "setStatusText", "renderCards"];
     const keywords = ["if", "for", "while", "switch", "catch", "return", "typeof"];
-    const dom = ["querySelector", "querySelectorAll", "createElement", "appendChild",
+    const dom = ["querySelector", "querySelectorAll", "queryByName", "createElement", "appendChild",
                  "insertBefore", "toggle", "setAttribute", "getAttribute", "remove", "closest",
                  "matches", "getSelection", "String", "Number", "Array", "Math", "JSON"];
     const body = functionBody("updateValues");
     const called = [...new Set(Array.from(body.matchAll(/\b([a-zA-Z_][\w]*)\s*\(/g), m => m[1]))]
         .filter(n => !dom.includes(n) && !keywords.includes(n))
         // Formatters return strings and touch no DOM, so they cannot break a selection.
-        .filter(n => !/^(fmt|format|css|now|allModules|previewTargetFps)/.test(n));
+        // uiMode reads one control's value and returns a number: no DOM, like the formatters.
+        .filter(n => !/^(fmt|format|css|now|allModules|previewTargetFps|uiMode)/.test(n));
     const missing = called.filter(n => !checked.includes(n));
     assert.deepEqual(missing, [],
         `these run on every state patch but are not audited here: add them to the lists above ` +

@@ -4,42 +4,47 @@
 
 namespace mm {
 
-// Praxis: a flowing, palette-colored field whose hue at each pixel is driven by two
-// independently-oscillating "mutators". A slow macro mutator and a faster micro mutator
-// (each a beatsin16 sweeping a tight high range) combine with the pixel's (x, y) position
-// and a steadily-advancing hue base, so the color pattern continually stretches, shears,
-// and rolls across the grid. The micro mutator divides the spatial term (so it sets the
-// pattern's spatial "frequency"), while the macro mutator multiplies the y·x cross term
-// (so it warps the field), and huebase = elapsed/40 scrolls the whole thing through the
-// palette over time.
-//
-// Prior art: MoonLight's Praxis effect (E_MoonModules / MoonModules). The two-mutator
-// oscillator model (macro = beatsin16 in [min<<8, max<<8], micro = beatsin16 in [min, max])
-// and the per-pixel hue = huebase + (x + y·macro·x)/(micro+1) are reproduced exactly here,
-// written fresh on EffectBase + the shared draw / palette / math8 primitives. Our beatsin16
-// takes the current time (elapsed()) as its second argument, matching the lib8tion shape
-// (bpm, timebase) with the time source threaded in at the domain edge.
-// Author: MONSOONO / @Flavourdynamics (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Algorithmic palette-pattern effect driven by two beat oscillators.
+/// @card PraxisEffect.gif
+/// Author: MONSOONO / @Flavourdynamics (MoonLight), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+///
+/// Each pixel's hue comes from two oscillating mutators combined with its own position.
+/// So the pattern continually stretches, shears and rolls across the grid.
+///
+/// Prior art: MoonLight's Praxis, whose two-mutator model this reproduces.
+///
+/// @moreinfo
+///
+/// ## What each mutator does
+///
+/// The micro mutator divides the spatial term, so it sets the pattern's spatial frequency.
+/// The macro mutator multiplies the cross term instead, which is what warps the field.
+/// A steadily advancing hue base then scrolls the whole thing through the palette.
 class PraxisEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫"; }  // MoonLight origin
-    Dim dimensions() const override { return Dim::D2; }  // writes only the z=0 slice; extrude fills depth
+    /// Catalog tags: MoonLight origin.
+    const char* tags() const override { return "💫"; }
+    /// Writes the z=0 slice, which extrude fills through a volume.
+    Dim dimensions() const override { return Dim::D2; }
 
-    // Hue-scroll speed lever (projectMM addition — MoonLight has no speed control on Praxis; its
-    // scroll rate is fixed at elapsed/40). speed scales the temporal hue scroll only, leaving the
-    // MoonLight mutator defaults untouched. Default 8 reproduces MoonLight's elapsed/40 rate
-    // (huebase = now*speed/320 = now/40 at speed 8); lower it for a calmer drift, raise it for faster.
-    uint8_t speed = 4;               // 1..64; 8 == MoonLight's fixed rate, default 4 = half (calmer)
+    /// How fast the hue scrolls, which is this port's own addition to the source.
+    uint8_t speed = 4;
 
-    // Controls — MoonLight's exact defaults and ranges.
-    uint8_t macroMutatorFreq = 3;    // macro mutator beat frequency (0..15)
-    uint8_t macroMutatorMin  = 250;  // macro mutator low end (0..255), scaled <<8 into the 16-bit sweep
-    uint8_t macroMutatorMax  = 255;  // macro mutator high end (0..255), scaled <<8
-    uint8_t microMutatorFreq = 4;    // micro mutator beat frequency (0..15)
-    uint8_t microMutatorMin  = 200;  // micro mutator low end (0..255)
-    uint8_t microMutatorMax  = 255;  // micro mutator high end (0..255)
+    // Defaults and ranges match MoonLight's own Praxis.
+    /// The macro mutator's beat frequency.
+    uint8_t macroMutatorFreq = 3;
+    /// Its low end, scaled into the wide sweep.
+    uint8_t macroMutatorMin  = 250;
+    /// And its high end.
+    uint8_t macroMutatorMax  = 255;
+    /// The micro mutator's beat frequency.
+    uint8_t microMutatorFreq = 4;
+    /// Its low end.
+    uint8_t microMutatorMin  = 200;
+    /// And its high end.
+    uint8_t microMutatorMax  = 255;
 
+    /// Publish the hue scroll and both mutators.
     void defineControls() override {
         controls_.addControl("speed", speed, 1, 64);
         controls_.addControl("macroMutatorFreq", macroMutatorFreq, 0, 15);
@@ -50,6 +55,7 @@ public:
         controls_.addControl("microMutatorMax", microMutatorMax, 0, 255);
     }
 
+    /// Sweep both mutators, then color each pixel from them and its own position.
     void tick() MM_NONBLOCKING override {
         const int w = width();
         const int h = height();
@@ -58,25 +64,18 @@ public:
 
         const uint32_t now = elapsed();
 
-        // The two oscillating mutators. macro sweeps the high 16-bit range (min<<8 .. max<<8);
-        // micro sweeps the raw 0..255 range. beatsin16(bpm, ms, low, high) — our time helper takes
-        // elapsed() as the 2nd argument.
+        // The macro mutator sweeps a wide range, where the micro one sweeps a byte.
         const uint16_t macro = beatsin16(macroMutatorFreq, now,
                                          static_cast<uint16_t>(macroMutatorMin << 8),
                                          static_cast<uint16_t>(macroMutatorMax << 8));
         const uint16_t micro = beatsin16(microMutatorFreq, now,
                                          microMutatorMin, microMutatorMax);
 
-        // 64-bit before the multiply: now (millis) · speed overflows uint32 after a few hours' uptime,
-        // which would make the hue jump. speed 8 == MoonLight's now/40; lower = calmer.
+        // Widened before the multiply, since the product overflows after a few hours of uptime.
         const uint32_t huebase = static_cast<uint32_t>(static_cast<uint64_t>(now) * speed / 320);
-        const int64_t  microDiv = static_cast<int64_t>(micro) + 1;  // micro+1, guards a divide-by-zero
+        const int64_t  microDiv = static_cast<int64_t>(micro) + 1;  // guards a divide by zero
 
-        // hue = huebase + (x + y·macro·x) / (micro+1), truncated to the 0..255 palette wheel index.
-        // The y·macro·x cross term can reach ~grid · 65280 · grid, so the accumulation runs in 64-bit
-        // before the divide and the implicit wrap to a uint8 palette index (MoonLight uses 32-bit int;
-        // identical up to ~128² grids, where the product still fits — fidelity-preserving on real grids,
-        // overflow-safe on extreme ones).
+        // The cross term grows with the square of the grid, so it accumulates wide before the divide.
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 const int64_t spatial = static_cast<int64_t>(x)
@@ -88,8 +87,6 @@ public:
         }
     }
 
-private:
-    // depth() is the grid's z extent; guard a zero so dims stays valid on a 2D layer.
 };
 
 } // namespace mm

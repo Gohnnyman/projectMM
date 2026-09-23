@@ -5,10 +5,12 @@ add_executable(mm_tests
     # core/
     unit/core/unit_PartitionTables.cpp
     unit/core/unit_SpscRing.cpp
+    unit/core/unit_AnalogService.cpp
     unit/core/unit_AudioCapture.cpp
     unit/core/unit_platform_audiofft.cpp
     unit/core/unit_Buffer.cpp
     unit/core/unit_ScratchBuffer.cpp
+    unit/core/unit_Oscillators.cpp
     unit/core/unit_ActiveInstance.cpp
     unit/core/unit_Color.cpp
     unit/core/unit_math8.cpp
@@ -17,7 +19,10 @@ add_executable(mm_tests
     unit/core/unit_fields.cpp
     unit/core/unit_crc.cpp
     unit/core/unit_AudioService_sync.cpp
-    unit/core/unit_IrService.cpp
+    unit/core/unit_VideoService.cpp
+    unit/core/unit_ButtonService.cpp
+    unit/core/unit_MoonLiveService.cpp
+    unit/core/unit_InfraredService.cpp
     unit/core/unit_TcpConnect.cpp
     unit/core/unit_MqttPacket.cpp
     unit/core/unit_MqttModule.cpp
@@ -37,12 +42,17 @@ add_executable(mm_tests
     unit/core/unit_ControlModule.cpp
     unit/core/unit_FilesystemModule_subtree.cpp
     unit/core/unit_FirmwareUpdateModule.cpp
+    unit/core/unit_FirmwareImage.cpp
+    unit/core/unit_H264Bitstream.cpp
+    unit/core/unit_AllocTracking.cpp
     unit/core/unit_HttpServerModule_apply.cpp
     unit/core/unit_ImprovFrame.cpp
     unit/core/unit_ImprovOpReassembler.cpp
     unit/core/unit_JsonUtil_parse.cpp
     unit/core/unit_JsonUtil_parseint.cpp
     unit/core/unit_JsonSink_detach.cpp
+    unit/core/unit_JsonSink_number.cpp
+    unit/core/unit_JsonSink_overflow.cpp
     unit/core/unit_MappingLUT.cpp
     unit/core/unit_ModuleFactory.cpp
     unit/core/unit_moonlive_fill.cpp
@@ -67,6 +77,11 @@ add_executable(mm_tests
     unit/core/unit_platform_worker.cpp
     unit/core/unit_IpList.cpp
     unit/core/unit_Scheduler_unique_names.cpp
+    unit/core/unit_MoonStatsModule.cpp
+    unit/core/unit_MoonTalkModule.cpp
+    unit/core/unit_InstallationId.cpp
+    unit/core/unit_sha256.cpp
+    unit/core/unit_MoonStatsReport.cpp
     unit/core/unit_SystemModule.cpp
     unit/core/unit_Services.cpp
 
@@ -79,11 +94,17 @@ add_executable(mm_tests
     unit/light/unit_NdiDriver.cpp
     unit/light/unit_HlsDriver.cpp
     unit/light/unit_MpegTs.cpp
+    unit/light/unit_RtpH264.cpp
+    unit/light/unit_RtspSession.cpp
     unit/light/unit_PanelCardDriver.cpp
     unit/light/unit_PanelCardDriver_packet.cpp
     unit/light/unit_WledAudioSyncPacket.cpp
     unit/light/unit_BlendMap.cpp
+    unit/light/unit_BeatRipples.cpp
+    unit/light/unit_ColorTrailsEffect.cpp
+    unit/light/unit_fluid.cpp
     unit/light/unit_draw.cpp
+    unit/light/unit_AmbilightEffect.cpp
     unit/light/unit_GameOfLifeEffect.cpp
     unit/light/unit_DemoReelEffect.cpp
     unit/light/unit_TextEffect.cpp
@@ -101,12 +122,18 @@ add_executable(mm_tests
     unit/light/unit_Circle.cpp
     unit/light/unit_Particles.cpp
     unit/light/unit_Shader.cpp
+    unit/light/unit_PolarLut.cpp
+    unit/light/unit_PolarLut_equivalence.cpp
+    unit/light/unit_AuroraEffect.cpp
+    unit/light/unit_NoiseEffect.cpp
     unit/light/unit_Effects_framerate.cpp
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
     unit/light/unit_MovingHeadEffect.cpp
+    unit/light/unit_FixedPointEffect.cpp
     unit/light/unit_Drivers_container.cpp
+    unit/light/unit_Drivers_livePalettes.cpp
     unit/light/unit_Drivers_rendersplit.cpp
     unit/light/unit_LightPresetsModule.cpp
     unit/light/unit_Drivers_firstOutputRgb.cpp
@@ -115,6 +142,8 @@ add_executable(mm_tests
     unit/light/unit_WaveEffect.cpp
     unit/light/unit_FireEffect.cpp
     unit/light/unit_GridLayout.cpp
+    unit/light/unit_RectangleLayout.cpp
+    unit/light/unit_Rings241Layout.cpp
     unit/light/unit_SingleColumnLayout.cpp
     unit/light/unit_SphereLayout.cpp
     unit/light/unit_WheelLayout.cpp
@@ -126,6 +155,7 @@ add_executable(mm_tests
     unit/light/unit_Layer_phase_animation.cpp
     unit/light/unit_Layer_zero_grid.cpp
     unit/light/unit_Effects_container.cpp
+    unit/light/unit_MoonLivePalette.cpp
     unit/light/unit_MoonLiveModifier.cpp
     unit/light/unit_MoonLiveParticles.cpp
     unit/light/unit_MoonLiveLayout.cpp
@@ -142,17 +172,18 @@ add_executable(mm_tests
     unit/light/unit_RotateModifier.cpp
     unit/light/unit_RegionModifier.cpp
     unit/light/unit_PinwheelModifier.cpp
-    unit/light/unit_NoiseEffect.cpp
     unit/light/unit_ParticlesEffect.cpp
     unit/light/unit_PlasmaEffect.cpp
     unit/light/unit_PreviewDriver.cpp
     unit/light/unit_RainbowEffect.cpp
     unit/light/unit_NetworkReceiveEffect.cpp
     unit/light/unit_NetworkReceiveEffect_protocols.cpp
-    unit/light/unit_MultiPinLedDriver.cpp
-    unit/light/unit_MoonLedDriver.cpp
+    unit/light/unit_I80Peripheral.cpp
+    unit/light/unit_MoonI80Peripheral.cpp
+    unit/light/unit_Hub75Driver_pins.cpp
+    unit/light/unit_Hub75Slots.cpp
     unit/light/unit_ParallelSlots.cpp
-    unit/light/unit_ParlioLedDriver.cpp
+    unit/light/unit_ParlioPeripheral.cpp
     unit/light/unit_ParallelLedDriver_doublebuffer.cpp
     unit/light/unit_ParallelLedDriver_pinexpander.cpp
     unit/light/unit_ParallelLedDriver_ring.cpp
@@ -198,3 +229,8 @@ set_tests_properties(unit_tests PROPERTIES
 # Scenario runner (replays scenario JSON files in-process)
 add_executable(mm_scenarios scenario_runner.cpp)
 target_link_libraries(mm_scenarios PRIVATE mm_core mm_platform)
+
+# Kernel micro-bench: ns per call for the power-function kernels, on the host. A report, not a
+# test (no ctest registration): the numbers go into performance.md and gate a kernel swap.
+add_executable(mm_bench bench/bench_kernels.cpp)
+target_link_libraries(mm_bench PRIVATE mm_core mm_platform)

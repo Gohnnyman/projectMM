@@ -1,11 +1,6 @@
-// @module platform
+/// @module platform
 
-// Pins platform::TcpConnection::connectStart/connectPoll — the NON-BLOCKING outbound TCP client
-// primitive MqttModule uses to reach a broker without stalling Scheduler::tick. connectStart resolves
-// a host (name or dotted-quad via getaddrinfo) and kicks off a non-blocking connect; connectPoll
-// reports Pending/Connected/Failed without blocking. Driven over loopback against a real TcpServer
-// (deterministic on desktop): a listening port connects + the server accepts; a dead port / bad host
-// fails cleanly (no hang, no crash).
+/// Pins platform::TcpConnection::connectStart/connectPoll, the NON-BLOCKING outbound TCP client primitive MqttModule uses to reach a broker without stalling Scheduler::tick. connectStart resolves a host (name or dotted-quad via getaddrinfo) and kicks off a non-blocking connect; connectPoll reports Pending/Connected/Failed without blocking. Driven over loopback against a real TcpServer (deterministic on desktop): a listening port connects + the server accepts; a dead port / bad host fails cleanly (no hang, no crash).
 
 #include "doctest.h"
 #include "platform/platform.h"
@@ -14,9 +9,7 @@
 
 using namespace mm;
 
-// connectStart/connectPoll — the NON-BLOCKING outbound connect MqttModule uses so it never stalls
-// Scheduler::tick (reviewer #2). connectStart returns immediately; connectPoll reports
-// Pending/Connected/Failed without blocking. Over loopback the connect completes within a few polls.
+// connectStart/connectPoll, the NON-BLOCKING outbound connect MqttModule uses so it never stalls Scheduler::tick (reviewer #2). connectStart returns immediately; connectPoll reports Pending/Connected/Failed without blocking. Over loopback the connect completes within a few polls.
 TEST_CASE("platform::TcpConnection::connectStart/connectPoll is non-blocking") {
     using CR = platform::TcpConnection::ConnectResult;
     platform::TcpServer server;
@@ -26,9 +19,7 @@ TEST_CASE("platform::TcpConnection::connectStart/connectPoll is non-blocking") {
 
     platform::TcpConnection client;
     REQUIRE(client.connectStart("127.0.0.1", port));   // returns immediately, connect in flight
-    // Poll until connected, accepting on the server side and yielding a little between polls so the
-    // loopback TCP handshake can complete (connectPoll never blocks, so a tight spin would just burn
-    // 200 microseconds before the kernel finishes the handshake).
+    // Poll until connected, accepting on the server side and yielding a little between polls so the loopback TCP handshake can complete (connectPoll never blocks, so a tight spin would just burn 200 microseconds before the kernel finishes the handshake).
     platform::TcpConnection accepted;
     CR r = CR::Pending;
     for (int i = 0; i < 200 && r == CR::Pending; i++) {
@@ -46,8 +37,7 @@ TEST_CASE("platform::TcpConnection::connectStart/connectPoll is non-blocking") {
     server.close();
 }
 
-// connectStart on a bad/empty host fails immediately (no hang); connectPoll on an unstarted
-// connection reports Failed rather than blocking.
+// connectStart on a bad/empty host fails immediately (no hang); connectPoll on an unstarted connection reports Failed rather than blocking.
 TEST_CASE("platform::TcpConnection::connectStart rejects a bad host; poll on no-fd is Failed") {
     platform::TcpConnection client;
     CHECK_FALSE(client.connectStart("", 1883));

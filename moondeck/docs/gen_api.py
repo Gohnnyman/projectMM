@@ -28,6 +28,7 @@ in CI, where both are provisioned); a contributor without doxygen still gets the
 import os
 import re
 import shutil
+from functools import lru_cache
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
@@ -40,7 +41,9 @@ TEMPLATES = Path(__file__).resolve().parent / "moxygen-templates" / "cpp"
 # (doxygen parsed nothing, moxygen emitted nothing, the class→header map is empty) —
 # raise rather than write a near-empty API set. Set well under the real count (~114
 # today) so it only trips on genuine breakage, not on adding/removing a few headers.
-_MIN_EXPECTED_PAGES = 50
+# The tree holds ~190 headers; 150 is a floor that catches a generator regression (a filter
+# that drops real pages, an empty XML) while leaving room for headers to come and go.
+_MIN_EXPECTED_PAGES = 150
 
 
 class GenApiError(RuntimeError):
@@ -48,23 +51,50 @@ class GenApiError(RuntimeError):
     Distinct from the toolchain being *absent* (which is a graceful {} skip): this is a
     real failure the caller should surface, so CI doesn't ship a degraded docs site."""
 
-# The two domains whose headers are offered to Doxygen. The output URI nests under
-# the matching domain dir (moonmodules/core/moxygen/, moonmodules/light/moxygen/),
-# mirroring src/. Discovery walks these; no per-header list to maintain.
-DOMAINS = ("core", "light")
+# The domains whose headers are offered to Doxygen. The output URI nests under the matching
+# domain dir (moonmodules/<domain>/moxygen/), mirroring src/. Discovery walks these; no
+# per-header list to maintain.
+#
+# `platform` is the interface every module reaches hardware through, so a reader following a
+# call out of core hit a dead end while it generated no pages. Its rationale stays in
+# explanation/architecture/mooncore.md; this is the reference half.
+DOMAINS = ("core", "light", "platform")
 
 
 def domain_of(header_rel: str) -> str | None:
-    """The doc domain ('core'/'light') for a repo-relative header path, or None if
-    the header isn't under src/core or src/light (so it gets no generated page)."""
+    """The doc domain for a repo-relative header path, or None when it is under no domain
+    directory and so gets no generated page."""
     parts = Path(header_rel).parts
     if len(parts) >= 2 and parts[0] == "src" and parts[1] in DOMAINS:
         return parts[1]
     return None
 
 
+def _page_stem(header_rel: str) -> str:
+    """The generated page's filename stem for a header.
+
+    The bare filename wherever it is unique, which every page has always been. Two headers
+    sharing a name (`desktop/platform_config.h` and `esp32/platform_config.h`) would otherwise
+    write the same path, and the second silently replaced the first: the larger ESP32 config,
+    453 lines of per-chip capability, generated no reachable page at all. A colliding header
+    takes its parent directory as a prefix, so both survive and each keeps a stable name."""
+    path = Path(header_rel)
+    if _stem_counts().get(path.stem, 0) > 1:
+        return f"{path.parent.name}_{path.stem}"
+    return path.stem
+
+
+@lru_cache(maxsize=1)
+def _stem_counts() -> dict[str, int]:
+    """How many discovered headers carry each filename stem."""
+    counts: dict[str, int] = {}
+    for h in _discover_headers():
+        counts[Path(h).stem] = counts.get(Path(h).stem, 0) + 1
+    return counts
+
+
 def _discover_headers() -> list[str]:
-    """Every `.h` under src/core and src/light, repo-relative, sorted. Every header
+    """Every `.h` under the domain directories, repo-relative, sorted. Every header
     gets a generated technical page — exhaustive, no gating. Curation (which modules
     appear in the end-user summary tables) is the summary pages' job, not the
     generator's: only MoonModule subclasses are tabled, but every header is reachable
@@ -98,6 +128,12 @@ def _doxyfile(headers: list[str], xml_out: str) -> str:
         "JAVADOC_AUTOBRIEF = YES\n"          # a leading `///`/`//` line is the brief
         f"STRIP_FROM_PATH = {ROOT}\n"        # relative "Defined in src/…", never an abs path
         "QUIET = YES\nWARN_IF_UNDOCUMENTED = NO\n"
+        # A capability macro the compiler sets per target, which Doxygen never sees: left
+        # undefined it preprocesses the guarded code away, and a header that is entirely
+        # inside one documents nothing at all. Defined here so the page exists on every
+        # build, the same way the widest target compiles it.
+        "ENABLE_PREPROCESSING = YES\nMACRO_EXPANSION = YES\n"
+        "PREDEFINED = MM_HEAVY_COMPUTE=1\n"
     )
 
 
@@ -150,6 +186,14 @@ _CLS_LINK_RE = re.compile(r'\]\(cls_(?P<key>mm(?:-[\w-]+)?)\.md(?P<frag>#[\w-]+)
 # `grp_undefined.md#classmm_1_1_rmt_led_driver` — the filename is a dead end, but the anchor is
 # Doxygen's class refid and still says which class it meant. Recover the class from the anchor.
 _GRP_CLS_LINK_RE = re.compile(r'\]\(grp_undefined\.md#class(?P<refid>[\w_]+)\)')
+
+# Every OTHER `grp_*.md#anchor` moxygen emits: an enum it rendered into a group page
+# (`grp_light_types.md#dim`), or a prose mention Doxygen auto-linked to a group it knows
+# (`grp_undefined.md#tasksmodule`). Neither carries a class refid, so the rewrite above cannot
+# resolve them, and the `grp_*.md` files are moxygen's own per-group scratch output that never
+# ships. Keep the label, drop the target: the same trade _rewrite_cls_links makes for a class
+# with no page, and what keeps `--strict` clean.
+_GRP_DEAD_LINK_RE = re.compile(r'\]\(grp_[a-z0-9_]*\.md#[\w-]+\)')
 
 
 def _rewrite_cls_links(md: str, from_domain: str, cls_to_page: dict) -> str:
@@ -257,9 +301,15 @@ _ASSETS = ROOT / "docs" / "assets"
 # Doxygen has no "trailing section" slot, so we relocate it here on the rendered markdown, the same
 # post-process layer `@card` uses. Like `@card`, the plain-text marker survives Doxygen → moxygen as-is.
 _MOREINFO_RE = re.compile(r'^[ \t]*@moreinfo[ \t]*$', re.MULTILINE)
-# The first member-section heading moxygen emits (### Public Attributes / Public Methods / …). The
-# detailed-description ends where the first such heading begins.
-_FIRST_SECTION_RE = re.compile(r'^### (?:Public|Protected|Private|Static) ', re.MULTILINE)
+# The first member-section heading moxygen emits. A CLASS page lists `### Public Attributes`,
+# `### Public Methods` and friends; a GROUP page lists `### Functions`, `### Variables`,
+# `### Enumerations` or `### Classes`. Both shapes are matched, because the detailed description
+# ends where the first such heading begins and a group page must not have its members swallowed
+# into a relocated tail.
+_FIRST_SECTION_RE = re.compile(
+    r'^### (?:(?:Public|Protected|Private|Static) |'
+    r'(?:Functions|Variables|Enumerations|Classes|Structs|Typedefs|Defines)\s*$)',
+    re.MULTILINE)
 
 
 # An in-`///` cross-reference: `@xref{<anchor>|<label>}` (or `@xref{<anchor>}` — the anchor doubles as the
@@ -296,23 +346,37 @@ def _relocate_moreinfo(md: str) -> str:
     sect = _FIRST_SECTION_RE.search(md, marker.end())
     tail_end = sect.start() if sect else len(md)
     tail = md[marker.end():tail_end].strip()
-    # Excise the marker + its tail from the description, then append it (relabelled) after everything else.
+    # Excise the marker + its tail from the description, then append it (relabeled) after everything else.
     body = (md[:marker.start()] + md[tail_end:]).rstrip()
     return f"{body}\n\n## More info\n\n{tail}\n"
 
 
 def _render_card_directives(md: str, domain: str, stem: str) -> str:
     """Replace each `@card <file>` directive with an <img> pointing at the resolved asset.
-    A file that doesn't exist on disk drops the directive (no broken image) — the same
-    fail-soft as a missing generated page."""
+
+    A moving preview names a `.gif`, and the module's own card screenshot sits beside it under the
+    same stem: both are emitted, the animation first and the controls that produced it second, so a
+    reader sees what it looks like and what it is made of. A file absent from disk drops silently,
+    the same fail-soft as a missing generated page."""
     def repl(m: re.Match) -> str:
         fname = m.group("file")
         # Search under docs/assets/<domain>/ for the file (handles the light/{drivers,effects,…} subdir).
         hits = list((_ASSETS / domain).rglob(fname))
         if not hits:
             return ""   # asset absent → emit nothing rather than a broken link
-        rel = os.path.relpath(hits[0], DOCS_MOONMODULES / domain / "moxygen")
-        return f'\n\n<img src="{rel}" alt="{stem} card" width="300">\n'
+        shots = [hits[0]]
+        # The controls screenshot pairs with a moving preview, and only there: a card that already
+        # IS the screenshot has no second image to add.
+        if hits[0].suffix == ".gif":
+            shot = hits[0].with_suffix(".png")
+            if shot.exists():
+                shots.append(shot)
+        out = ""
+        for i, sh in enumerate(shots):
+            rel = os.path.relpath(sh, DOCS_MOONMODULES / domain / "moxygen")
+            alt = f"{stem} card" if i == 0 else f"{stem} controls"
+            out += f'<img src="{rel}" alt="{alt}" width="300">\n'
+        return f"\n\n{out}"
     return _CARD_RE.sub(repl, md)
 
 
@@ -364,6 +428,22 @@ def _class_to_header(xml_dir: Path) -> dict[str, str]:
     the Doxygen XML `<location file=...>` of every class/struct compound. The key is
     moxygen's `--classes` filename stem: the fully-qualified name with `::` → `-`
     (e.g. `mm::ControlList` → `mm-ControlList`), matching moxygen's `%s` substitution."""
+    # Every compound declared INSIDE a class or struct, by qualified name. Doxygen lists them
+    # as <innerclass> children of the enclosing compound, which is the only reliable way to
+    # tell `mm::Hub75Driver::BoardPins` (nested in a class) from `mm::json::JsonDoc` (in a
+    # namespace): the qualified names are the same shape.
+    class_nested: set[str] = set()
+    for cx in list(xml_dir.glob("class*.xml")) + list(xml_dir.glob("struct*.xml")):
+        try:
+            cd = ET.parse(cx).getroot().find("compounddef")
+        except ET.ParseError:
+            continue
+        if cd is None or cd.get("kind") not in ("class", "struct"):
+            continue
+        for inner in cd.findall("innerclass"):
+            if inner.text:
+                class_nested.add(inner.text.strip())
+
     mapping: dict[str, str] = {}
     for cx in list(xml_dir.glob("class*.xml")) + list(xml_dir.glob("struct*.xml")):
         try:
@@ -377,7 +457,21 @@ def _class_to_header(xml_dir: Path) -> dict[str, str]:
         loc = cd.find("location")
         if not name or loc is None:
             continue
-        header = loc.get("file")                      # e.g. "src/core/Control.h"
+        # An undocumented CLASS-NESTED compound never reaches a page. Doxygen emits a
+        # struct*.xml for every compound it parses, and HIDE_UNDOC_CLASSES only keeps those
+        # out of lists and inheritance graphs, so a private helper struct
+        # (Hub75Driver::BoardPins, ParallelLedDriver::PeripheralEntry) rendered as a
+        # top-level section above the class it belongs to, listing its fields as public API.
+        #
+        # Nested in a CLASS, read from the enclosing compound's <innerclass>, not guessed from
+        # the `::` count: `mm::json::JsonDoc` has just as many and is a real page. A top-level
+        # type documented with a file-level `//` block has no brief either, so filtering on the
+        # brief alone dropped 22 real pages (AudioFrame, raymarch, crc...).
+        if name in class_nested:
+            brief = cd.find("briefdescription")
+            if brief is None or not "".join(brief.itertext()).strip():
+                continue
+        header = loc.get("file")                      # e.g. "src/core/module/Control.h"
         if header:
             mapping[name.replace("::", "-")] = header
     return mapping
@@ -500,27 +594,67 @@ def generate() -> dict[str, str]:
         # maps to nothing → strip the link to plain text so it can't dangle.
         # cls-key ("mm-Layer") → (domain, header-stem) of the page it ends up in.
         cls_to_page = {
-            key: (domain_of(h), Path(h).stem)
+            key: (domain_of(h), _page_stem(h))
             for key, h in cls_to_header.items() if domain_of(h)
         }
 
         # Group the per-class markdown by owning header (in header order, so a page's
         # classes appear top-down as declared).
-        by_header: dict[str, list[str]] = {}
-        for prefix in ("cls_", "grp_"):                  # classes, then free-function groups
+        # A `@defgroup` header emits BOTH per-class files and a group file, and the group file
+        # already renders those same classes in full (attributes, methods, statics) under its own
+        # lead. Appending both printed every class twice: platform.h came out 18 sections as 36,
+        # and Hub75Slots.md had the same fault before any of this. So the group file, where one
+        # exists, IS the page; the per-class files are used only for a header without a group.
+        grp_headers: dict[str, str] = {}
+        cls_blocks: dict[str, list[str]] = {}
+        for prefix in ("cls_", "grp_"):
             for part_md in sorted(tdp.glob(f"{prefix}*.md")):
                 key = part_md.name[len(prefix):-len(".md")]   # "mm-ControlList" / "parallelslots"
                 header = cls_to_header.get(key)
                 if header is None or domain_of(header) is None:
                     continue
-                by_header.setdefault(header, []).append(part_md.read_text(encoding="utf-8"))
+                text = part_md.read_text(encoding="utf-8")
+                if prefix == "grp_":
+                    grp_headers[header] = text
+                else:
+                    cls_blocks.setdefault(header, []).append(text)
+
+        # A class DECLARED OUTSIDE the group is absent from the group file, so appending its
+        # per-class block adds it rather than duplicating it. Keyed on the rendered heading: a
+        # class the group already covers is skipped, one it never saw is kept. Without this a
+        # mixed header, free functions in a group plus a class beside it, published the functions
+        # and silently dropped the class, and the card linking it arrived at a page without it.
+        by_header: dict[str, list[str]] = {h: [md] for h, md in grp_headers.items()}
+        for header, blocks in cls_blocks.items():
+            if header not in by_header:
+                by_header[header] = blocks
+                continue
+            grp = by_header[header][0]
+            # The group file's OWN lead is its title, which for a `@defgroup JsonSink` is the class
+            # name itself: matching against it would read every such class as already rendered.
+            # So compare against the headings BELOW that lead, which are what the group really
+            # contains, and keep a class the group never rendered.
+            # The group's own `# Title` line is dropped before the comparison: for a
+            # `@defgroup JsonSink` it carries the class's name and would read as the class
+            # already being rendered. What follows it is what the group really contains.
+            lines = grp.split("\n")
+            for i, ln in enumerate(lines):
+                if ln.startswith("# "):
+                    lines = lines[i + 1:]
+                    break
+            grp_members = set(re.findall(r'^#+ (\S+)', "\n".join(lines), re.M))
+            for b in blocks:
+                m = re.search(r'^#+ (\S+)', b, re.M)
+                if m and m.group(1) not in grp_members:
+                    by_header[header].append(b)
 
         pages: dict[str, str] = {}
         for header, blocks in by_header.items():
             domain = domain_of(header)
-            stem = Path(header).stem
+            stem = _page_stem(header)
             body = _rewrite_cls_links("".join(blocks), domain, cls_to_page)
             body = _rewrite_grp_cls_links(body, domain, cls_to_page, refid_to_key)
+            body = _GRP_DEAD_LINK_RE.sub("]", body)   # enum / prose group links: keep the label
             body = _strip_bad_anchor_links(body)
             # After the link rewrites (so it catches their output too): a link inside a
             # code span can't render — keep the label, drop the target.
@@ -554,4 +688,17 @@ def generate() -> dict[str, str]:
             raise GenApiError(
                 f"only {len(pages)} API pages generated (expected ≥ {_MIN_EXPECTED_PAGES}) "
                 f"— doxygen/moxygen ran but produced almost nothing")
+
+        # Remove a page whose header is gone. The output directory is gitignored and never
+        # cleaned, so a renamed header left its old page behind: reachable by URL, linked by
+        # nothing, and reporting as an orphan that no source explains. AFTER the count guard,
+        # so a broken toolchain cannot empty the tree.
+        # Keyed by (DOMAIN, name), not by name alone: core/ and light/ each have their own
+        # moxygen tree, so a page sharing a filename across the two would mask the other and
+        # a delete could take the wrong one.
+        keep = {(uri.split("/")[-3], uri.rsplit("/", 1)[-1]) for uri in pages}
+        for domain in DOMAINS:
+            for stale in (DOCS_MOONMODULES / domain / "moxygen").glob("*.md"):
+                if (domain, stale.name) not in keep:
+                    stale.unlink()
         return pages
