@@ -417,3 +417,26 @@ TEST_CASE("HlsDriver resyncs after a stall without sending a duplicate frame") {
     for (size_t i = 1; i < sentAt.size(); i++)
         CHECK(sentAt[i] - sentAt[i - 1] >= 100u);
 }
+
+// One encoder instance, so a second claimant is refused rather than silently taking the first driver's stream.
+TEST_CASE("platform encoder is claimed by one module at a time") {
+    const int driverA = 1, driverB = 2;      // stand-ins for two modules' addresses
+    REQUIRE(mm::platform::encoderOwner() == nullptr);
+
+    CHECK(mm::platform::encoderClaim(&driverA));
+    CHECK(mm::platform::encoderOwner() == &driverA);
+    CHECK_FALSE(mm::platform::encoderClaim(&driverB));      // refused while A holds it
+    CHECK(mm::platform::encoderOwner() == &driverA);        // and A keeps it
+
+    // A re-claims what it already owns, which is what a rebuild does.
+    CHECK(mm::platform::encoderClaim(&driverA));
+
+    // A non-holder's release is ignored, so B cannot free A's encoder.
+    mm::platform::encoderRelease(&driverB);
+    CHECK(mm::platform::encoderOwner() == &driverA);
+
+    mm::platform::encoderRelease(&driverA);
+    CHECK(mm::platform::encoderOwner() == nullptr);
+    CHECK(mm::platform::encoderClaim(&driverB));            // now B may have it
+    mm::platform::encoderRelease(&driverB);
+}

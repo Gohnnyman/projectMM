@@ -22,7 +22,13 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ---
 
-## Unreleased (`next-iteration`)
+## Unreleased
+
+Nothing yet. Entries land here as breaking changes are made, and the heading takes the version at its release.
+
+## v5.0.0
+
+The last release under the projectMM name. Its [release notes](https://github.com/MoonModules/projectMM/releases) summarise what these entries ask of you.
 
 ### System: `expertMode` became `mode`, with three levels
 

@@ -1,5 +1,7 @@
 # MoonLight migration — fidelity tensions
 
+> **Superseded on 2026-09-22** by [Plan-20260922 - MoonLight, from v5.0.0 to the rename](../../present/Plan-20260922%20-%20MoonLight,%20from%20v5.0.0%20to%20the%20rename.md), which consolidates the five MoonLight files into one. Kept for the reasoning behind decisions already taken.
+
 A running log of places where **strict fidelity to MoonLight's behaviour** (the migration mandate:
 end users must see the same effect they always have) collides with a **projectMM principle**
 (robustness / no-crash-at-any-grid-size, correctness, hot-path discipline, *common patterns first*).
@@ -16,7 +18,7 @@ Status legend: 🟡 open (needs PO decision) · 🟢 resolved (decision recorded
 Resolved per the "same UX, improvements allowed" rule: **clamp the drawn band count to the column
 count** so bars spread instead of piling at x=0 on a narrow grid. Invisible on normal grids
 (cols ≥ numBands → no-op), so no fidelity loss where it matters. See
-[moonlight-improvements.md](moonlight-improvements.md). (GEQ — the flat 2D one — was *not* affected:
+[moonlight-improvements.md](moonlight-improvements (superseded).md). (GEQ — the flat 2D one — was *not* affected:
 it maps each column to a band, so it never had the collapse.)
 
 ## 2. 🟢 GEQ3D — frame-counter sweep → time-based — RESOLVED (2026-07-01)
@@ -24,7 +26,7 @@ it maps each column to a band, so it never had the collapse.)
 Resolved: converted the projector sweep to a **time-based triangle wave** (`triwave8(beat8(...))`),
 so `speed` means the same on every device (frame-rate-independent). Not throttled — a fast board
 renders the same sweep more smoothly, a slow one choppier. Once-per-frame, no per-pixel cost. See
-[moonlight-improvements.md](moonlight-improvements.md).
+[moonlight-improvements.md](moonlight-improvements (superseded).md).
 
 ---
 
@@ -74,7 +76,7 @@ effects that want WLED's calm `volume`/`volumeSmth` can read it, and doing an **
 to point each effect at the value matching its behaviour: NoiseMeter → raw `level` (unchanged, VU
 snaps to beats); FreqMatrix, AudioSpectrum's VU bar, AudioVolume → `levelSmoothed` (breathing/flowing
 look). Bands-driven effects (GEQ, GEQ3D, PaintBrush, FreqSaws, Blurz) read per-band magnitudes,
-unaffected. See [moonlight-improvements.md](moonlight-improvements.md).
+unaffected. See [moonlight-improvements.md](moonlight-improvements (superseded).md).
 
 ## 6. 🟡 Reconstructed logic — effects whose MoonLight source was incomplete (cross-check on bench)
 

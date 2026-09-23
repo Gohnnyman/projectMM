@@ -228,6 +228,8 @@ constexpr bool hasHls = true;
 #else
 constexpr bool hasHls = false;
 #endif
+/// True with the same encoder HLS uses: RTSP ships that encoder's frames without muxing them.
+constexpr bool hasRtsp = hasHls;
 /// False: one hardware encoder, so there is nothing to choose and the control stays hidden.
 constexpr bool hasEncoderChoice = false;
 /// False: segments live in a PSRAM ring, flash wear buying nothing for a file stale within seconds.

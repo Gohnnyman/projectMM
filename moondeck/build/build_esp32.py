@@ -542,10 +542,10 @@ def firmware_cmake_args(firmware: str, release: str = "", version: str = "",
     if version:
         args.append(f'-DMM_VERSION="{version}"')
     # And into the IMAGE's app descriptor, the struct IDF puts in every binary. Without it the
-    # descriptor keeps IDF's `git describe` fallback, which drifts from what the device reports
-    # (a stale tag read "container-test-1-g73e52cb9-dirt" long after that tag was gone). MoonBase
-    # carries the same string, so the app can compare the two images by equality and say when its
-    # recovery image was built apart from it.
+    # descriptor keeps IDF's `git describe` fallback, which drifts from what the device reports:
+    # describe names the nearest tag, so a one-off tag left in the repo kept surfacing in built
+    # images long after it stopped meaning anything. MoonBase carries the same string, so the app
+    # can compare the two images by equality and say when its recovery image was built apart.
     args.append(f"-DPROJECT_VER={version or compute_version.compute('local', '')}")
     if spec["eth_only"]:
         # Drop the WiFi components from the link, and tell our code to compile

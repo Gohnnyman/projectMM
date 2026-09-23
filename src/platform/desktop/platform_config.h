@@ -108,6 +108,9 @@ constexpr bool hasNdi = true;
 
 /// True: the host streams H.264 by piping frames to the ffmpeg on PATH, a dependency of the user's.
 constexpr bool hasHls = true;
+
+/// True: ffmpeg encodes the elementary stream and projectMM's own RTSP server ships it.
+constexpr bool hasRtsp = true;
 /// True: ffmpeg offers several encoders, so the pick is the user's.
 constexpr bool hasEncoderChoice = true;
 /// True: ffmpeg writes the playlist to disk, so the server serves segments as files.

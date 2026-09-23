@@ -33,6 +33,69 @@
 /// The padding then reaches flash, the offset advances by the unpadded count, and the next write lands back over it, corrupting the image at every short read.
 /// The verification catches the result, but only after the slot is erased, which is the failure this design exists to avoid.
 /// At the end the remainder is the image's last bytes, so it is padded to a word with what erased flash reads as; only there is padding correct.
+///
+/// ## The redirect response needs a bigger header buffer
+///
+/// The default is far too small for the host's redirect, whose policy header overflows it and fails the update before the download starts.
+/// Raising both directions covers the longest headers with room to spare, at a few kilobytes of heap freed when the task exits.
+///
+/// ## Progress rides the status string
+///
+/// Both writers report the counts in the same shape, so the interface reads progress identically whichever image is installed.
+/// They used to reach a control that no longer exists, which showed an indeterminate sweep that never resolved on a device working perfectly.
+/// The padded tail is excluded: it is flash the image does not occupy, and counting it would report more written than was sent.
+///
+/// ## Why the install runs on its own task
+///
+/// The HTTP request answers 202 at once, exactly as the application's URL install does.
+/// While a request is open the browser cannot poll for progress, so a synchronous install would leave it blind for the whole write.
+///
+/// ## The application answers before it reboots
+///
+/// The image is committed and the boot pointer flipped, so the caller returns and sends its HTTP 200 BEFORE the restart, the same sequence /api/reboot follows.
+/// That is what lets a browser see a clean result rather than a dropped socket.
+///
+/// ## Reading a header straight out of a partition
+///
+/// The image's length sits in its header, a plain partition read needing no flash mapping.
+///
+/// ## Reporting on the recovery image
+///
+/// Which recovery image a device carries is read from its descriptor at a fixed offset, costing one flash read and no reboot.
+/// The recovery image answers the same question about itself elsewhere, which is a different question rather than a second copy.
+/// That reports what it is executing, and this reports an image it is not.
+/// Both carry the same version string, which is what lets a caller compare them by equality.
+/// Its SIZE comes from the slot rather than the image.
+/// The metadata call reads through a mapping arranged for the running partition, and errored for this one, leaving the row absent.
+/// What a user wants from the row is whether the slot has room, and reading the descriptor already proves an image is there.
+/// The figure counts the segments only, so trailing padding, checksum and hash are excluded and it reads a few dozen bytes under the file on disk.
+/// That is deliberate: the figure answers how full the slot is, and reproducing the bootloader's padding rules would be a second copy to keep in step for no gain.
+///
+/// ## Pointing the bootloader at the recovery image
+///
+/// Setting the boot partition to it erases the selection data rather than writing a sequence number.
+/// Which is what makes a power cut land back in recovery rather than in a half-written application.
+///
+/// ## A URL pull reuses the upload writer
+///
+/// The update interface cannot serve a recovery image from a URL, targeting only its own subtypes and picking the partition itself.
+/// So the download is driven by hand through the same producer callback: one writer, one set of checks, two sources.
+///
+/// ## The single-slot guard
+///
+/// The next-partition call falls back to the first slot it finds, so on a one-slot table it hands back the partition being executed, and erasing that bricks the device mid-write.
+/// The interface refuses it too, but failing early says why and names the fix.
+///
+/// ## The update buffer is heap and owned
+///
+/// Heap rather than static or stack: too large for a task frame, and a static one held internal memory from boot for nothing.
+/// An update is the one moment when spare memory is least scarce, so allocating here gives it back to the network stack for the rest of uptime.
+/// Owned rather than raw, since six exit paths would each leak it.
+///
+/// ## One bounded status writer
+///
+/// Three identical local copies each put the format behind a template, which defeats the compiler's format check.
+/// A plain variadic function takes the format attribute instead, so a non-literal format is a build error rather than a scanner note.
 
 #include "platform/platform.h"
 
@@ -59,6 +122,8 @@
 #include <memory>        // unique_ptr — frees the upload buffer on every exit path
 #include <new>           // std::nothrow for the OtaTaskParams alloc below
 
+#include "core/system/FirmwareUpdateModule.h"   // kProjectImageName: whose firmware arrived
+
 namespace mm::platform {
 
 // One upload chunk. 4 KB matches the flash page granularity esp_ota_write prefers and is the size the HTTP path already streams in.
@@ -75,13 +140,14 @@ namespace {
 // Heap-allocated task parameters. Task owns this and frees it on exit.
 struct OtaTaskParams {
     char url[512];
+    char fallbackUrl[512] = {};   // empty where the caller named none
     char* statusBuf;
     size_t statusBufLen;
     uint32_t* bytesReadOut;   // current bytes downloaded
     uint32_t* bytesTotalOut;  // image size; 0 until esp_https_ota reports it
 };
 
-// One bounded status writer for the file, replacing three identical local copies that each put the format behind a template. A plain variadic function takes the format attribute, so the compiler checks each format against its arguments and a non-literal one is a build error rather than a scanner note.
+// One bounded status writer for the file: @xref{one-bounded-status-writer|why a plain variadic beats a template}.
 __attribute__((format(printf, 3, 4)))
 void statusf(char* buf, size_t len, const char* fmt, ...) {
     if (!buf || len == 0) return;
@@ -108,7 +174,7 @@ void otaTask(void* arg) {
     *p->bytesReadOut = 0;
     *p->bytesTotalOut = 0;   // unknown until esp_https_ota reports it
 
-    // The bundled trust anchors, the same mechanism a browser uses, with no certificate baked in. Attached unconditionally: a secure URL verifies the server, and on a plain local one it goes unused while still satisfying the begin call's verification check.
+    // The bundled trust anchors, the same mechanism a browser uses, with no certificate baked in. Attached unconditionally: a plain local URL leaves them unused while still satisfying the begin call.
     esp_http_client_config_t http_config = {};
     http_config.url = p->url;
     http_config.crt_bundle_attach = esp_crt_bundle_attach;
@@ -116,7 +182,7 @@ void otaTask(void* arg) {
     // GitHub release-asset URLs 302-redirect to objects.githubusercontent.com. Default redirect handling is off in esp_http_client; force-follow.
     http_config.disable_auto_redirect = false;
     http_config.max_redirection_count = 10;
-    // The default header buffer is far too small for the host's redirect response, whose policy header overflows it and fails the update before the download even starts. Raising both directions covers the longest headers with room to spare, at a few kilobytes of heap freed when the task exits.
+    // A bigger header buffer: @xref{the-redirect-response-needs-a-bigger-header-buffer|what overflows the default}.
     http_config.buffer_size = 4096;
     http_config.buffer_size_tx = 4096;
 
@@ -126,6 +192,13 @@ void otaTask(void* arg) {
 
     esp_https_ota_handle_t handle = nullptr;
     esp_err_t err = esp_https_ota_begin(&ota_config, &handle);
+    // On a failed BEGIN only: once bytes flow the partition holds them, and a second address would restart that.
+    if (err != ESP_OK && p->fallbackUrl[0]) {
+        otaSetStatus(p, "retrying the other address");
+        http_config.url = p->fallbackUrl;
+        handle = nullptr;
+        err = esp_https_ota_begin(&ota_config, &handle);
+    }
     if (err != ESP_OK) {
         // esp_https_ota_begin collapses ~6 distinct failures (DNS, TLS, HTTP, partition init, header-buffer overflow) into one ESP_FAIL, so the only useful detail is in the IDF log on the serial console. We surface the IDF error name plus a pointer to the log.
         otaSetStatus(p, "error: ota begin %s (see serial log)",
@@ -137,10 +210,20 @@ void otaTask(void* arg) {
 
     // Refuse a recovery image here: @xref{writing-the-wrong-image-is-the-unrecoverable-direction|why this direction is the worse one}.
     esp_app_desc_t incoming = {};
-    if (esp_https_ota_get_img_desc(handle, &incoming) == ESP_OK &&
-        std::strncmp(incoming.project_name, "projectMM-moonbase",
-                     sizeof(incoming.project_name)) == 0) {
+    const bool haveDesc = esp_https_ota_get_img_desc(handle, &incoming) == ESP_OK;
+    if (haveDesc && std::strncmp(incoming.project_name, "projectMM-moonbase",
+                                 sizeof(incoming.project_name)) == 0) {
         otaSetStatus(p, "error: that is a MoonBase image, not an app");
+        esp_https_ota_abort(handle);
+        delete p;
+        vTaskDelete(nullptr);
+        return;
+    }
+    // And refuse an image that is not this project: a URL can name another repository's release, and the descriptor is what says whose firmware arrived.
+    if (haveDesc && std::strncmp(incoming.project_name, mm::kProjectImageName,
+                                 sizeof(incoming.project_name)) != 0) {
+        otaSetStatus(p, "error: that image is %.*s, not this project",
+                     static_cast<int>(sizeof(incoming.project_name)), incoming.project_name);
         esp_https_ota_abort(handle);
         delete p;
         vTaskDelete(nullptr);
@@ -157,7 +240,7 @@ void otaTask(void* arg) {
     while ((err = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
         int got = esp_https_ota_get_image_len_read(handle);
         if (got >= 0) *p->bytesReadOut = static_cast<uint32_t>(got);
-        // The counts ride the status in the same shape both writers report, so the interface reads progress identically whichever image is installed. They used to reach a control that no longer exists, which showed an indeterminate sweep that never resolved on a device working perfectly.
+        // The counts ride the status: @xref{progress-rides-the-status-string|why, and what the padding is excluded from}.
         if (total > 0) {
             otaSetStatus(p, "flashing: %u of %u bytes",
                          static_cast<unsigned>(got > 0 ? got : 0), static_cast<unsigned>(total));
@@ -201,7 +284,8 @@ void otaTask(void* arg) {
 
 bool http_fetch_to_ota(const char* url,
                        char* statusBuf, size_t statusBufLen,
-                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut) {
+                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut,
+                       const char* fallbackUrl) {
     if (!url || !statusBuf || statusBufLen == 0 || !bytesReadOut || !bytesTotalOut) {
         return false;
     }
@@ -222,6 +306,11 @@ bool http_fetch_to_ota(const char* url,
         return false;
     }
     std::memcpy(p->url, url, urlLen + 1);   // includes NUL; size already verified
+    // An over-long fallback is dropped rather than refused: the primary URL is still worth trying.
+    if (fallbackUrl && fallbackUrl[0]) {
+        const size_t fLen = std::strlen(fallbackUrl);
+        if (fLen <= sizeof(p->fallbackUrl) - 1) std::memcpy(p->fallbackUrl, fallbackUrl, fLen + 1);
+    }
     p->statusBuf = statusBuf;
     p->statusBufLen = statusBufLen;
     p->bytesReadOut = bytesReadOut;
@@ -247,9 +336,7 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
     const esp_partition_t* part = esp_ota_get_next_update_partition(nullptr);
     if (!part) { setStatus("error: no OTA partition"); return false; }
 
-    // The single-slot guard: the next-partition call falls back to the first slot it finds.
-    // So on a one-slot table it hands back the partition being executed, and erasing that bricks the device mid-write.
-    // The interface refuses it too, but failing here says why and names the fix; on a two-slot table this never fires.
+    // The single-slot guard: @xref{the-single-slot-guard|what the fallback would erase}.
     if (part == esp_ota_get_running_partition()) {
         setStatus("error: one app slot, reboot to MoonBase first");
         return false;
@@ -267,10 +354,7 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
     esp_err_t err = esp_ota_begin(part, OTA_SIZE_UNKNOWN, &handle);
     if (err != ESP_OK) { setStatus("error: ota begin %s", esp_err_to_name(err)); return false; }
 
-    // Pull the body chunk by chunk through the same producer callback the file writer drives; an aborted upload fails the update and discards the partial.
-    // The buffer is heap rather than static or stack: too large for a task frame, and a static one held internal memory from boot for nothing.
-    // An update is the one moment when spare memory is least scarce, so allocating here gives it back to the network stack for the rest of uptime.
-    // Owned rather than raw, since six exit paths below would each leak it.
+    // The body, chunk by chunk through the writer's own producer callback: @xref{the-update-buffer-is-heap-and-owned|why heap, and why owned}.
     const std::unique_ptr<uint8_t, decltype(&heap_caps_free)> owned(
         static_cast<uint8_t*>(heap_caps_malloc(kOtaChunkBytes, MALLOC_CAP_8BIT)), &heap_caps_free);
     uint8_t* const buf = owned.get();
@@ -293,7 +377,7 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
         // Refuse a recovery image, decided on enough bytes rather than on the first chunk: @xref{writing-the-wrong-image-is-the-unrecoverable-direction|why a short prefix would let it through}.
         if (!vetted) {
             if (written + n < firmware::kIdentifyBytes) {
-                // Not enough yet, and nothing written: keep accumulating in the OTA partition is not an option (a rejected image must leave no bytes), so refuse a body that ends before it can be identified. Any real image is far larger.
+                // A rejected image must leave no bytes, so a body ending before it can be identified is refused rather than kept.
                 if (contentLen && contentLen < firmware::kIdentifyBytes) {
                     setStatus("error: too short to be a firmware image");
                     esp_ota_abort(handle);
@@ -310,6 +394,12 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
             if (info.described &&
                 std::strcmp(info.project, "projectMM-moonbase") == 0) {
                 setStatus("error: that is a MoonBase image, not an app");
+                esp_ota_abort(handle);
+                return false;
+            }
+            // And whose firmware this is, the same question the URL path asks, before the first write rather than after the slot is spent.
+            if (!info.described || std::strcmp(info.project, mm::kProjectImageName) != 0) {
+                setStatus("error: that image is not this project");
                 esp_ota_abort(handle);
                 return false;
             }
@@ -337,14 +427,14 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
     if (err != ESP_OK) { setStatus("error: set boot %s", esp_err_to_name(err)); return false; }
 
     setStatus("rebooting");
-    // Image committed + boot pointer flipped. Return to the caller so it can send its HTTP 200 BEFORE the reboot (the caller closes the socket + reboots, same sequence as /api/reboot), that's what lets the browser see a clean "flashed" response instead of an aborted socket.
+    // Committed and flipped: @xref{the-application-answers-before-it-reboots|why the caller returns first}.
     return true;
     #undef setStatus
 }
 
-// Updating the recovery image itself: @xref{updating-the-recovery-image-itself|why only the application can, and why the checks come first}. Point this at an error page, the wrong chip's image or an application build, and the device still has its recovery image.
+// Updating the recovery image itself: @xref{updating-the-recovery-image-itself|why only the application can}.
 
-// Does this first chunk begin a MoonBase image for THIS chip? The parsing and the rules live in core/FirmwareImage.h so a host test can drive them: this code erases a device's only recovery image, and "the check was never exercised" is not a risk worth carrying for a header parse.
+// Does this first chunk begin a MoonBase image for THIS chip? The rules live in core/FirmwareImage.h so a host test can drive them.
 bool moonBaseImageRejected(const uint8_t* buf, size_t n, char* why, size_t whyLen) {
     const auto info = firmware::identify(buf, n);
     const char* reason = firmware::moonBaseRejection(
@@ -385,7 +475,7 @@ bool otaWriteMoonBase(FsWriteSrc src, void* user, size_t contentLen,
     if (abort || first == 0) { setStatus("error: no image received"); return false; }
     if (moonBaseImageRejected(buf, first, statusBuf, statusBufLen)) return false;
 
-    // PAST THIS LINE THE DEVICE HAS NO RECOVERY IMAGE until the write completes. Erase and write in one pass: on a 4 MB board there is nowhere to stage 743 KB first (the app slot has ~520 KB free, the filesystem 548), so a second copy is not an option the hardware offers.
+    // PAST THIS LINE THE DEVICE HAS NO RECOVERY IMAGE until the write completes: @xref{updating-the-recovery-image-itself|why one pass}.
     setStatus("erasing");
     esp_err_t err = esp_partition_erase_range(part, 0, part->size);
     if (err != ESP_OK) { setStatus("error: erase %s", esp_err_to_name(err)); return false; }
@@ -399,17 +489,17 @@ bool otaWriteMoonBase(FsWriteSrc src, void* user, size_t contentLen,
         const size_t whole = eof ? ((held + 3u) & ~size_t{3}) : (held & ~size_t{3});
         if (whole) {
             if (eof && whole > held) std::memset(buf + held, 0xFF, whole - held);
-            // Compared on the IMAGE bytes, not the padded write: at EOF `whole` rounds up past the image's end, and rejecting a slot-filling image for its own padding would be refusing something that fits. Unreachable at today's sizes; correct anyway.
+            // Compared on the IMAGE bytes: at EOF `whole` rounds past the end, and refusing a slot-filling image for its own padding would refuse something that fits.
             if (written + (eof ? held : whole) > part->size) {
                 setStatus("error: image overruns the slot");
                 return false;
             }
             err = esp_partition_write(part, written, buf, whole);
             if (err != ESP_OK) { setStatus("error: write %s", esp_err_to_name(err)); return false; }
-            // The IMAGE grew by what it held, not by the padding: a padded tail is flash the image does not occupy, and counting it would report more written than was sent.
+            // The IMAGE grew by what it held, never by the padding.
             written += static_cast<uint32_t>(eof ? held : whole);
             *bytesReadOut = written;
-            // The counts ride the STATUS, the way MoonBase's own page reports them: one channel for the UI to read, and the overlay draws its bar from a string it already polls.
+            // The counts ride the STATUS, the way MoonBase's own page reports them.
             if (contentLen) {
                 setStatus("writing MoonBase: %u of %u bytes",
                           static_cast<unsigned>(written), static_cast<unsigned>(contentLen));
@@ -440,15 +530,13 @@ bool otaWriteMoonBase(FsWriteSrc src, void* user, size_t contentLen,
         setStatus("error: MoonBase did not verify, retry before rebooting");
         return false;
     }
-    // No reboot and no boot-partition change: the app keeps running, and the new MoonBase is simply what the device falls back to from now on.
+    // No reboot and no boot-partition change: the app keeps running, and the new MoonBase is what the device falls back to from now on.
     setStatus("idle");
     return true;
     #undef setStatus
 }
 
-// Pull a recovery image from a URL into the same writer the upload path uses.
-// The update interface cannot serve it, targeting only its own subtypes and picking the partition itself.
-// So the download is driven by hand through the same producer callback: one writer, one set of checks, two sources.
+// Pull a recovery image from a URL into the same writer the upload path uses: @xref{a-url-pull-reuses-the-upload-writer|why by hand}.
 struct UrlPull {
     esp_http_client_handle_t client;
     bool failed;
@@ -504,7 +592,7 @@ bool moonBaseFetchUrlSync(const char* url, char* statusBuf, size_t statusBufLen,
     #undef setStatus
 }
 
-// The install runs on its own task so the HTTP request can answer 202 immediately, exactly as the app's URL install does. That is not a detail: while the request is open the browser cannot poll for progress, so a synchronous install can only ever report "installing" and then "installed". Same task shape, same status buffer, same byte counters, so ONE progress display serves both.
+// Its own task, so the HTTP request answers 202 at once: @xref{why-the-install-runs-on-its-own-task|what a synchronous install costs}.
 void moonBaseUrlTask(void* arg) {
     auto* p = static_cast<OtaTaskParams*>(arg);
     moonBaseFetchUrlSync(p->url, p->statusBuf, p->statusBufLen, p->bytesReadOut, p->bytesTotalOut);
@@ -550,10 +638,7 @@ bool otaHasMoonBase() {
     return moonBasePartition() != nullptr;
 }
 
-// Which recovery image this device carries, read from its descriptor at a fixed offset in every image, so it costs one flash read and no reboot.
-// The recovery image answers the same question about itself elsewhere, which is a different question rather than a second copy.
-// That reports what it is executing and this reports an image it is not.
-// Both carry the same version string, which is what lets a caller compare them by equality.
+// Which recovery image this device carries: @xref{reporting-on-the-recovery-image|why it is read here rather than asked of it}.
 bool otaMoonBaseVersion(char* out, size_t len) {
     if (!out || len == 0) return false;
     out[0] = 0;
@@ -579,15 +664,13 @@ bool otaMoonBaseBuild(char* out, size_t len) {
     return out[0] != 0;
 }
 
-// The recovery slot's size, for the interface to show beside the application's figure.
-// The slot rather than the image, since the metadata call reads through a mapping arranged for the running partition and simply errored for this one, leaving the row absent.
-// What a user wants from the row is whether the slot has room, and the read above already proves an image is there.
+// The recovery SLOT's size, for the interface to show beside the application's figure.
 bool otaMoonBaseSize(uint32_t* used, uint32_t* total) {
     const esp_partition_t* part = moonBasePartition();
     if (!part) return false;
     if (total) *total = part->size;
     if (used) {
-        // Read the image length straight out of the header, which is a plain partition read and needs no flash mapping: the first bytes of a valid image are its header, and its segments follow. esp_partition_read is the same call the vetting path uses.
+        // The length comes straight out of the header: @xref{reading-a-header-straight-out-of-a-partition|why no mapping is needed}.
         esp_image_header_t hdr = {};
         *used = 0;
         if (esp_partition_read(part, 0, &hdr, sizeof(hdr)) == ESP_OK &&
@@ -600,18 +683,14 @@ bool otaMoonBaseSize(uint32_t* used, uint32_t* total) {
                 if (seg.data_len > part->size) { off = 0; break; }   // a corrupt length
                 off += sizeof(seg) + seg.data_len;
             }
-            // The segments only, so the trailing padding, checksum and hash are not counted and this reads a few dozen bytes under the file on disk.
-            // Deliberate: the figure answers how full the slot is, where that is invisible.
-            // And reproducing the bootloader's padding rules would be a second copy to keep in step for no gain.
+            // The segments only: @xref{reporting-on-the-recovery-image|why padding is excluded}.
             if (off) *used = off < part->size ? off : part->size;
         }
     }
     return true;
 }
 
-// Point the bootloader at the recovery image and report whether it took; false means the table has no such partition and the device updates in place.
-// Setting it to that partition erases the selection data rather than writing a sequence number.
-// Which is what makes a power cut land back in recovery rather than in a half-written application.
+// Point the bootloader at the recovery image, false where the table has no such partition: @xref{pointing-the-bootloader-at-the-recovery-image|what a power cut then does}.
 bool otaBootMoonBase() {
     const esp_partition_t* part = moonBasePartition();
     if (!part) return false;
