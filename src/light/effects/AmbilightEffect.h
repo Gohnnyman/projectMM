@@ -4,6 +4,7 @@
 #include "light/effects/EffectBase.h"
 
 #include <algorithm> // std::max / std::min
+#include <array>
 #include <cstring>
 
 namespace mm {
@@ -67,6 +68,7 @@ public:
         const size_t positions = (w > 0 && h > 0) ? static_cast<size_t>(w) * static_cast<size_t>(h) : 0;
 
         state_.resize(smoothing != 0 ? positions * 3u : 0); // 8.8 per channel, only while smoothing
+        encodeTable();                                        // built here, off the tick
         primed_ = false;
         buildLitList(positions);
     }
@@ -301,8 +303,24 @@ private:
         return {begin, end};
     }
 
-    /// Mean of one light position's pixels: the box filter Hyperion uses. uint32 accumulators
-    /// because 640x480 onto 32x18 is ~520 pixels each, and 520 x 255 overflows 16 bits several times.
+    /// Linear light back to a display byte (sRGB OETF). Built on first use, which prepare() makes
+    /// a cold path: 4096 pow() calls have no place in a tick.
+    static const uint8_t* encodeTable() {
+        static const auto table = [] {
+            std::array<uint8_t, VideoFrame::kLinearMax + 1> t{};
+            for (size_t i = 0; i < t.size(); i++) {
+                const float lin = static_cast<float>(i) / VideoFrame::kLinearMax;
+                const float v = lin <= 0.0031308f ? 12.92f * lin : 1.055f * std::pow(lin, 1.0f / 2.4f) - 0.055f;
+                t[i] = static_cast<uint8_t>(v * 255.0f + 0.5f);
+            }
+            return t;
+        }();
+        return table.data();
+    }
+
+    /// Mean of one light position's pixels: the box filter Hyperion uses, taken in linear light and
+    /// encoded once per LIGHT. uint32 accumulators: 640x480 onto 32x18 is ~520 pixels each, and
+    /// 520 x 4095 overflows 16 bits many times over.
     static RGB meanOf(const VideoFrame& frame, Span cols, Span rows) {
         uint32_t sr = 0, sg = 0, sb = 0;
         for (int py = rows.begin; py < rows.end; py++) {
@@ -315,8 +333,10 @@ private:
         }
         const uint32_t pixels =
             static_cast<uint32_t>(rows.end - rows.begin) * static_cast<uint32_t>(cols.end - cols.begin);
-        return {static_cast<uint8_t>(sr / pixels), static_cast<uint8_t>(sg / pixels),
-                static_cast<uint8_t>(sb / pixels)};
+        const uint32_t mr = sr / pixels, mg = sg / pixels, mb = sb / pixels;
+        if (!frame.tone) return {static_cast<uint8_t>(mr), static_cast<uint8_t>(mg), static_cast<uint8_t>(mb)};
+        const uint8_t* enc = encodeTable();
+        return {enc[mr], enc[mg], enc[mb]};
     }
 
     /// Move one channel `saturation` percent of the way out from `luma`, clamped to a byte.

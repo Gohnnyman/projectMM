@@ -17,14 +17,19 @@ struct VideoFrame {
     // Bumped per PUBLISHED frame; compare for INEQUALITY, never ordering. A still PPM bumps it
     // every tick, the way a camera aimed at a still object sends one every period.
     uint32_t seq = 0;
-    // 256-entry per-channel curve to display encoding; null = the bytes already are. Same one-tick
-    // lifetime as `rgb`. Read pixels through channel(): a consumer that indexes `rgb` directly
-    // averages an HDR source on its own curve and gets a hue shift.
-    const uint8_t* tone = nullptr;
+    // 256-entry curve from the source's encoding to LINEAR light, 0..kLinearMax; SDR is sRGB, a
+    // curve like any other, so a published frame always carries one. Same one-tick lifetime as
+    // `rgb`. Read pixels through channel(): a consumer averaging the encoded bytes averages a
+    // quantity that is not proportional to light.
+    const uint16_t* tone = nullptr;
 
-    /// One channel byte of the pixel at `px`, display-encoded. One cached lookup when `tone` is set:
-    /// applied on the read a consumer already makes, so no extra pass over the frame.
-    uint8_t channel(const uint8_t* px, int c) const { return tone ? tone[px[c]] : px[c]; }
+    // 12 bits, not 8: linear has no headroom at the dark end, which is what encodings exist for.
+    // Small enough that a zone of ~1M pixels still sums inside a uint32.
+    static constexpr uint16_t kLinearMax = 4095;
+
+    /// One channel of the pixel at `px` as linear light: one lookup on a read the caller already
+    /// makes. The encoded byte as is when no curve is published (a test frame).
+    uint16_t channel(const uint8_t* px, int c) const { return tone ? tone[px[c]] : px[c]; }
 };
 
 // The "no source" frame consumers fall back to.

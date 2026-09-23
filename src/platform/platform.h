@@ -442,7 +442,9 @@ void wifiStaGetIPv4(uint8_t out[4]);
 /// Tear the station down.
 void wifiStaStop();
 
-/// Station RSSI in dBm, a negative number; 0 when the station is not associated.
+/// Station RSSI in dBm, a negative number; 0 when the station is not associated. A cached reading,
+/// refreshed off the render task every few seconds: on a co-processor radio the query is a blocking
+/// RPC, so no caller pays for it, and every reading below shares that contract.
 int wifiStaRssi();
 
 /// The associated access point's BSSID, zeroed when the station is not associated.
@@ -474,7 +476,7 @@ uint32_t wifiApClientCount();
 /// True when a socket is safe to open: the stack is initialized and an interface holds an IP.
 bool networkReady();
 
-/// Current WiFi transmit power in dBm, 0 when WiFi is not initialized.
+/// Current WiFi transmit power in dBm, 0 when WiFi is not initialized. Cached like wifiStaRssi.
 int wifiTxPower();
 
 /// Cap the WiFi transmit power in quarter-dBm units, 8 to 84; 0 keeps the stack default.
@@ -1034,6 +1036,18 @@ bool videoCaptureInit(VideoCaptureHandle& h, uint16_t width, uint16_t height, ui
 const uint8_t* videoCaptureFrame(VideoCaptureHandle& h, uint16_t& width, uint16_t& height) MM_NONBLOCKING;
 
 void videoCaptureDeinit(VideoCaptureHandle& h);
+
+// Why frames did not reach the renderer, cumulative since boot. A drop in ones is normal; a
+// climbing count is a fault worth naming, since in the picture it is only a stutter.
+struct VideoCaptureStats {
+    uint32_t decoded = 0;    // frames that reached a slot
+    uint32_t busy = 0;       // arrived while the previous frame was still waiting to be decoded
+    uint32_t noSlot = 0;     // every decode buffer still held by the renderer
+    uint32_t infoFail = 0;   // not a readable JPEG: a mis-detected payload stride lands here
+    uint32_t oversize = 0;   // larger than the buffers sized at open
+    uint32_t decodeFail = 0; // the decoder refused a bitstream whose header it had accepted
+};
+VideoCaptureStats videoCaptureStats();
 
 // I2C bus diagnostics: the standard i2cdetect operation, domain-neutral rather than audio-specific.
 

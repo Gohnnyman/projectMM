@@ -80,6 +80,7 @@ public:
         correction_.balRed = balRed_;
         correction_.balGreen = balGreen_;
         correction_.balBlue = balBlue_;
+        correction_.whiteLevel = whiteLevel_;
         correction_.budgetMa = budgetMa_;
         correction_.mAColor = mAColor_;
         correction_.mAWhite = mAWhite_;
@@ -170,6 +171,8 @@ protected:
     uint8_t localBrightness_ = 255;  // per-driver dim, multiplied with the global brightness
     /// Per-channel white balance; trims the stronger dies DOWN to match the weakest.
     uint8_t balRed_ = 255, balGreen_ = 255, balBlue_ = 255;
+    /// The white die's own trim; the RGB trims do not reach it.
+    uint8_t whiteLevel_ = 255;
     /// The current budget and the per-channel draw it is priced with.
     uint16_t budgetMa_ = 0;   // 0 = no current limiting
     uint8_t mAColor_ = 8;     // measured on SK6812 RGBW: R 7.98, G 8.11, B 7.98
@@ -206,6 +209,12 @@ protected:
         controls_.addControl("balanceRed", balRed_, 0, 255);
         controls_.addControl("balanceGreen", balGreen_, 0, 255);
         controls_.addControl("balanceBlue", balBlue_, 0, 255);
+        // Narrower than whiteMode's gate, which also counts amber and UV: this trims the white
+        // dies alone, so on a fixture with only those the slider would reach nothing.
+        const bool hasWhite = lib && (lib->presetHasRole(presetId_, ChannelRole::White) ||
+                                      lib->presetHasRole(presetId_, ChannelRole::WarmWhite));
+        controls_.addControl("whiteLevel", whiteLevel_, 0, 255);
+        controls_.setHidden(controls_.count() - 1, !hasWhite);
         // Only offered by the drivers that measure: a network sender feeds another board's supply.
         const bool limits = limitsCurrent();
         controls_.addControl("maxCurrentMa", budgetMa_, 0, 60000);
@@ -231,12 +240,13 @@ protected:
 
     /// Whether `name` is one of the correction controls, for a driver's own prepare test.
     static bool isCorrectionControl(const char* name) {
-        return std::strcmp(name, "lightPreset") == 0 || std::strcmp(name, "localBrightness") == 0
-            || std::strcmp(name, "whiteMode") == 0 || std::strcmp(name, "curve") == 0
-            || std::strcmp(name, "balanceRed") == 0 || std::strcmp(name, "balanceGreen") == 0
-            || std::strcmp(name, "balanceBlue") == 0 || std::strcmp(name, "maxCurrentMa") == 0
-            || std::strcmp(name, "mAPerColorChannel") == 0 || std::strcmp(name, "mAPerWhiteChannel") == 0
-            || std::strcmp(name, "mAPerYellowChannel") == 0 || std::strcmp(name, "mAPerUvChannel") == 0;
+        return std::strcmp(name, "lightPreset") == 0 || std::strcmp(name, "localBrightness") == 0 ||
+               std::strcmp(name, "whiteMode") == 0 || std::strcmp(name, "curve") == 0 ||
+               std::strcmp(name, "balanceRed") == 0 || std::strcmp(name, "balanceGreen") == 0 ||
+               std::strcmp(name, "balanceBlue") == 0 || std::strcmp(name, "whiteLevel") == 0 ||
+               std::strcmp(name, "maxCurrentMa") == 0 || std::strcmp(name, "mAPerColorChannel") == 0 ||
+               std::strcmp(name, "mAPerWhiteChannel") == 0 || std::strcmp(name, "mAPerYellowChannel") == 0 ||
+               std::strcmp(name, "mAPerUvChannel") == 0;
     }
 
 private:

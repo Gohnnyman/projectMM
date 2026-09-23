@@ -577,3 +577,16 @@ TEST_CASE("AmbilightEffect: detection can be turned off and on again") {
     for (int i = 0; i < 60; i++) rig.tickOnly(src.svc);
     CHECK(rig.px(4, 0)[1] > 100);                // and adopted again rather than stuck
 }
+
+// Averaging happens in LINEAR light, not in the encoding: half black and half white is half the
+// light, which sRGB writes as 188, where the mean of the bytes is 128 and renders a lit scene as
+// a dim mush. One light over the whole pattern sees red on about a third of its pixels (the top
+// band and the yellow one) and black elsewhere: byte-averaged that is ~82, in light ~150.
+TEST_CASE("AmbilightEffect: a part-lit zone averages as light, not as bytes") {
+    PatternSource src;
+    Rig rig(1, 1);
+    rig.fx.saturation = 100; // identity, so the zone mean is what we read
+    rig.render();
+    CHECK(rig.px(0, 0)[0] > 120);
+    CHECK(rig.px(0, 0)[0] < 180);
+}

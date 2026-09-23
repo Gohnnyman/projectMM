@@ -83,7 +83,7 @@ public:
     }
 
     /// Test seam: the curve as built.
-    const uint8_t* toneForTest() const { return tone_; }
+    const uint16_t* toneForTest() const { return tone_; }
 
     VideoService() { seat_.claim(); }
 
@@ -130,7 +130,8 @@ public:
     void onControlChanged(const char* name) override {
         if (std::strcmp(name, "reload") == 0) loadFile();
         if (std::strcmp(name, "offered") == 0) applyFormat();
-        if (std::strcmp(name, "hdr") == 0 || std::strcmp(name, "hdrNits") == 0) rebuildTone();
+        if (std::strcmp(name, "hdr") == 0 || std::strcmp(name, "hdrNits") == 0 || std::strcmp(name, "source") == 0)
+            rebuildTone();
         MoonModule::onControlChanged(name);
     }
 
@@ -139,13 +140,13 @@ public:
     void prepare() override {
         seat_.claim();  // re-take after a disable/enable cycle: release() vacated it
         if (source >= kSourceCount) source = kSourcePattern; // a config restored from a capture-capable board
+        rebuildTone(); // every source has a curve, and a restored `hdr` lands as a VALUE, not an edit
         if (source == kSourceUsb) {
             // Resolve the selected row FIRST: usbWidth/Height are what captureCurrent() compares
             // against, and they only ever moved inside openCapture(). A restored usbFormat that
             // arrives after the first prepare would otherwise never reach them, so the check would
             // keep reporting the stale request as current and never reopen.
             applyFormat();
-            rebuildTone(); // a restored `hdr` lands as a VALUE, never through onControlChanged
             // Every tree-wide rebuild lands here too (a layout resized, a module added), and the
             // device stays open through those: a reopen drops the published frame and blocks on
             // negotiation. It happens only for what actually changed the request.
@@ -185,6 +186,19 @@ public:
     void tick1s() MM_NONBLOCKING override {
         if (source == kSourceUsb && (platform::videoCaptureFormatGeneration() != formatGen_ || selectionStale()))
             if (Scheduler* s = Scheduler::instance()) s->requestPrepareTree();
+        // A dropped frame is invisible in the picture: it just stutters. Name it, so the count is
+        // somewhere to look rather than something to guess at. Silent while nothing is dropping.
+        // Shown as faulty/noSlot/busy: the last two are the newest-wins policy at work, not a fault.
+        if (source == kSourceUsb && capture_.impl) {
+            const platform::VideoCaptureStats st = platform::videoCaptureStats();
+            const uint32_t bad = st.infoFail + st.oversize + st.decodeFail;
+            if (bad || st.noSlot || st.busy) {
+                std::snprintf(status_, sizeof(status_), "%ux%u drop %u/%u/%u", shownW_, shownH_,
+                              static_cast<unsigned>(bad), static_cast<unsigned>(st.noSlot),
+                              static_cast<unsigned>(st.busy));
+                setStatus(status_, bad ? Severity::Warning : Severity::Status);
+            }
+        }
         MoonModule::tick1s();
     }
 
@@ -343,12 +357,12 @@ private:
     ScratchBuffer<uint8_t> buf_{*this}; // width*height*3, accounted in dynamicBytes()
     VideoFrame frame_;
     uint32_t seq_ = 0;
-    uint8_t tone_[256] = {}; // the published curve; only read while hdr != off
+    uint16_t tone_[256] = {}; // the published curve: source encoding -> linear light
     // Sweep position in 1/1000 px and the millis() it was last advanced at. Milli-pixels because a
     // per-second rate sampled per tick rounds to zero motion in whole pixels at 1 px/s.
     uint32_t sweepMilliPx_ = 0;
     uint32_t sweepAtMs_ = 0;
-    char status_[24] = {};
+    char status_[40] = {};
 
     /// Drop the published frame and say why. Returns false so every failing path reads as one line,
     /// `return fail("...")`, and none can forget to un-publish the stale frame.
@@ -376,24 +390,23 @@ private:
     /// Publish the buffer as a NEW frame: the sequence bump is what tells a consumer the pixels
     /// changed, so every producer path ends here (see VideoFrame::seq).
     void publish() {
-        // Per frame, so a curve change lands on the next one with nothing to remember.
-        frame_.tone = (source == kSourceUsb && hdr != kHdrOff) ? tone_ : nullptr;
+        frame_.tone = tone_; // per frame, so a curve change lands on the next one with nothing to remember
         frame_.seq = ++seq_;
     }
 
-    /// Fill `tone_`: transfer curve -> linear, scale to the reference white, re-encode sRGB. Cold
-    /// path: 256 float evaluations per edit or prepare, never per frame.
+    /// Fill `tone_`: the source's transfer curve undone to linear light, where a consumer averages
+    /// (the mean of encoded bytes is not the mean of the picture). Cold path: 256 float evaluations
+    /// per edit or prepare, never per frame.
     void rebuildTone() {
-        if (hdr == kHdrOff) return;
         for (int i = 0; i < 256; i++) {
             const float e = static_cast<float>(i) / 255.0f;
             float lin;
-            if (hdr == kHdrHlg) {
+            if (source == kSourceUsb && hdr == kHdrHlg) {
                 // ARIB STD-B67 inverse OETF. Relative, so hdrNits does not apply. No OOTF: a
                 // second-order tilt that border averages do not need.
                 constexpr float a = 0.17883277f, b = 0.28466892f, c = 0.55991073f;
                 lin = e <= 0.5f ? (e * e) / 3.0f : (std::exp((e - c) / a) + b) / 12.0f;
-            } else {
+            } else if (source == kSourceUsb && hdr == kHdrPq) {
                 // SMPTE ST 2084 (PQ) EOTF: absolute nits, referred to hdrNits.
                 constexpr float m1 = 2610.0f / 16384.0f;
                 constexpr float m2 = 2523.0f / 4096.0f * 128.0f;
@@ -405,11 +418,13 @@ private:
                 const float den = c2 - c3 * p; // > 0 across the whole domain
                 const float nits = 10000.0f * std::pow(num / den, 1.0f / m1);
                 lin = nits / static_cast<float>(hdrNits ? hdrNits : 1);
+            } else {
+                // sRGB EOTF (IEC 61966-2-1). The default, and what a file or the pattern carries.
+                lin = e <= 0.04045f ? e / 12.92f : std::pow((e + 0.055f) / 1.055f, 2.4f);
             }
             if (lin < 0.0f) lin = 0.0f;
             if (lin > 1.0f) lin = 1.0f;
-            const float v = lin <= 0.0031308f ? 12.92f * lin : 1.055f * std::pow(lin, 1.0f / 2.4f) - 0.055f;
-            tone_[i] = static_cast<uint8_t>(v * 255.0f + 0.5f);
+            tone_[i] = static_cast<uint16_t>(lin * VideoFrame::kLinearMax + 0.5f);
         }
     }
 

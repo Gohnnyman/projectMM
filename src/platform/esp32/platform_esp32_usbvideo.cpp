@@ -142,6 +142,10 @@ bool ensureUsbHost() {
     return true;
 }
 
+// Counted on the UVC and decode tasks, read from the render tick: relaxed is enough for a diagnostic.
+std::atomic<uint32_t> statDecoded{0}, statBusy{0}, statInfoFail{0}, statOversize{0}, statNoSlot{0},
+    statDecodeFail{0};
+
 // Runs on the UVC driver task (uvc_client_task -> usb_host_client_handle_events -> here), so the
 // ordinary FreeRTOS API is safe. It still only hands the frame over: decoding here would stall the
 // task that collects isochronous packets, and a missed packet is gone for good.
@@ -150,7 +154,10 @@ bool onFrame(const uvc_host_frame_t* frame, void* ctx) {
     uvc_host_frame_t* expected = nullptr;
     // Take the slot only if it is free. Returning false keeps the frame, so the loser of this
     // race must return true to hand it straight back or the driver runs out of buffers.
-    if (!cap->pending.compare_exchange_strong(expected, const_cast<uvc_host_frame_t*>(frame))) return true;
+    if (!cap->pending.compare_exchange_strong(expected, const_cast<uvc_host_frame_t*>(frame))) {
+        statBusy.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
     xSemaphoreGive(cap->wake);
     return false;
 }
@@ -301,18 +308,37 @@ size_t stripPayloadHeaders(uint8_t* d, size_t len) {
     return w + (len - r);
 }
 
+// Warn on the FIRST of each kind only. A drop repeats at frame rate, so logging every one buries
+// the log and costs more than the fault; the counters carry the rate.
+void warnOnce(bool& said, const char* what) {
+    if (said) return;
+    said = true;
+    ESP_LOGW(kTag, "%s - first occurrence; see the Video status for the running count", what);
+}
+
 void decode(Capture& cap, uvc_host_frame_t* frame) {
+    static bool saidInfo = false, saidOversize = false, saidNoSlot = false, saidDecode = false;
     const size_t len = stripPayloadHeaders(frame->data, frame->data_len);
     // Dimensions from the bitstream, not from the request: a device may negotiate something else.
     jpeg_decode_picture_info_t info = {};
-    if (jpeg_decoder_get_info(frame->data, len, &info) != ESP_OK) return;
+    if (jpeg_decoder_get_info(frame->data, len, &info) != ESP_OK) {
+        statInfoFail.fetch_add(1, std::memory_order_relaxed);
+        warnOnce(saidInfo, "frame is not readable JPEG (payload stride mis-detected?)");
+        return;
+    }
     if (decodedBytes(static_cast<uint16_t>(info.width), static_cast<uint16_t>(info.height)) > cap.rgbCap) {
+        statOversize.fetch_add(1, std::memory_order_relaxed);
+        warnOnce(saidOversize, "frame exceeds the buffers sized at open");
         ESP_LOGW(kTag, "frame %ux%u exceeds the buffers sized at open", info.width, info.height);
         return;
     }
 
     const int slot = freeSlot(cap);
-    if (slot < 0) return; // drop the frame rather than write over one being read
+    if (slot < 0) { // drop the frame rather than write over one being read
+        statNoSlot.fetch_add(1, std::memory_order_relaxed);
+        warnOnce(saidNoSlot, "renderer holds every slot, dropping the newest frame");
+        return;
+    }
 
     jpeg_decode_cfg_t decodeCfg = {};
     decodeCfg.output_format = JPEG_DECODE_OUT_FORMAT_RGB888;
@@ -320,8 +346,12 @@ void decode(Capture& cap, uvc_host_frame_t* frame) {
     decodeCfg.conv_std = JPEG_YUV_RGB_CONV_STD_BT601;
     uint32_t outSize = 0;
     if (jpeg_decoder_process(cap.jpeg, &decodeCfg, frame->data, len, cap.rgb[slot], cap.rgbCap, &outSize) !=
-        ESP_OK)
+        ESP_OK) {
+        statDecodeFail.fetch_add(1, std::memory_order_relaxed);
+        warnOnce(saidDecode, "the decoder refused a bitstream whose header it accepted");
         return;
+    }
+    statDecoded.fetch_add(1, std::memory_order_relaxed);
 
     cap.width[slot] = static_cast<uint16_t>(info.width);
     cap.height[slot] = static_cast<uint16_t>(info.height);
@@ -542,6 +572,17 @@ void videoCaptureDeinit(VideoCaptureHandle& handle) {
     handle.impl = nullptr;
 }
 
+VideoCaptureStats videoCaptureStats() {
+    VideoCaptureStats s;
+    s.decoded = statDecoded.load(std::memory_order_relaxed);
+    s.busy = statBusy.load(std::memory_order_relaxed);
+    s.infoFail = statInfoFail.load(std::memory_order_relaxed);
+    s.oversize = statOversize.load(std::memory_order_relaxed);
+    s.noSlot = statNoSlot.load(std::memory_order_relaxed);
+    s.decodeFail = statDecodeFail.load(std::memory_order_relaxed);
+    return s;
+}
+
 } // namespace mm::platform
 
 #else // every other target: no High-Speed USB host, no JPEG decoder
@@ -553,6 +594,7 @@ size_t videoCaptureFormats(VideoCaptureFormat*, size_t) { return 0; }
 uint32_t videoCaptureFormatGeneration() { return 0; }
 const uint8_t* videoCaptureFrame(VideoCaptureHandle&, uint16_t&, uint16_t&) MM_NONBLOCKING { return nullptr; }
 void videoCaptureDeinit(VideoCaptureHandle&) {}
+VideoCaptureStats videoCaptureStats() { return {}; }
 
 } // namespace mm::platform
 

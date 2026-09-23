@@ -725,3 +725,49 @@ TEST_CASE("RGBW white is derived in linear light, then curved once") {
     CHECK(out[1] == ref.briLut[0][50]);
     CHECK(out[2] == ref.briLut[0][0]);
 }
+
+// The W die is separate hardware the RGB trims say nothing about, so it has a trim of its own that
+// pre-scales like theirs: the white channel moves through the curve, RGB does not move at all.
+TEST_CASE("Correction whiteLevel: trims the white die without touching RGB") {
+    const uint8_t src[3] = {200, 160, 120}; // white component = min = 120
+
+    Correction full;
+    mm::test::rebuildFromPreset(full, 255, mm::test::PresetOrder::RGBW);
+    uint8_t a[4] = {};
+    full.apply(src, a, 3);
+
+    Correction half;
+    half.whiteLevel = 128;
+    mm::test::rebuildFromPreset(half, 255, mm::test::PresetOrder::RGBW);
+    uint8_t b[4] = {};
+    half.apply(src, b, 3);
+
+    CHECK(b[3] < a[3]);                                   // white trimmed
+    CHECK(b[3] == half.briLut[Correction::kWhite][120]); // through its own LUT row, curve last
+    CHECK(b[0] == a[0]);                                  // and RGB untouched
+    CHECK(b[1] == a[1]);
+    CHECK(b[2] == a[2]);
+}
+
+// The limiter prices what is EMITTED, so a trimmed white must cost less: otherwise the budget is
+// spent on current the strip never draws, squeezing the colors for nothing.
+TEST_CASE("Correction whiteLevel: a trimmed white is priced at what it draws") {
+    uint8_t frame[10 * 3];
+    std::memset(frame, 255, sizeof(frame)); // 10 white lights
+
+    // White everywhere costs 400 mA at these defaults (10 x (3x255x8 + 255x16) / 255); with no
+    // white emitted it is 240. A budget between the two is what makes the difference visible.
+    Correction full;
+    full.budgetMa = 300;
+    mm::test::rebuildFromPreset(full, 255, mm::test::PresetOrder::RGBW);
+    full.measure(frame, 3, 10);
+
+    Correction dim;
+    dim.budgetMa = 300;
+    dim.whiteLevel = 0; // no white emitted at all
+    mm::test::rebuildFromPreset(dim, 255, mm::test::PresetOrder::RGBW);
+    dim.measure(frame, 3, 10);
+
+    CHECK(full.limit < 256); // over budget with the white die lit
+    CHECK(dim.limit == 256); // and inside it with the white die off
+}

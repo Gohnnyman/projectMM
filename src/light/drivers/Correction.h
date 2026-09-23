@@ -44,12 +44,16 @@ struct Correction {
     }
 
 
-    // White, amber and UV are their own dies, so an RGB trim must not reach them.
-    static constexpr uint8_t kNeutral = 3;
-    uint8_t briLut[4][256] = {};    // briLut[ch][v] = curve(v * brightness * balance[ch]); ch 0=R 1=G 2=B, 3=untrimmed
+    // White, amber and UV are their own dies, so an RGB trim must not reach them; the white dies
+    // carry a trim of their own.
+    static constexpr uint8_t kNeutral = 3, kWhite = 4;
+    uint8_t briLut[5][256] = {};    // briLut[ch][v] = curve(v * brightness * balance[ch]); ch 0=R 1=G 2=B, 3=untrimmed, 4=white
     /// Per-channel white balance, 255 = untouched. Trim DOWN only: there is no headroom above 255,
     /// so raising clips instead of balancing.
     uint8_t balRed = 255, balGreen = 255, balBlue = 255;
+    /// The white die's trim, 255 = untouched: a separate emitter, often brighter than the RGB trio,
+    /// that the three trims above cannot reach. Pre-scales like them, so the curve still lands last.
+    uint8_t whiteLevel = 255;
     /// Which curve the brightness rebuild fills through; a driver's setting, not a global one.
     Curve curve = Curve::Cie;
     // The output-byte position of each color role, recomputed from the role array.
@@ -98,8 +102,8 @@ struct Correction {
     /// Refresh the brightness LUT alone, leaving the channel offsets untouched.
     void rebuildBrightness(uint8_t brightness) {
         // The trim pre-scales like brightness, so the curve still lands last.
-        const uint8_t balance[4] = {balRed, balGreen, balBlue, 255};
-        for (int ch = 0; ch < 4; ch++) {
+        const uint8_t balance[5] = {balRed, balGreen, balBlue, 255, whiteLevel};
+        for (int ch = 0; ch < 5; ch++) {
             const float scale = static_cast<float>(brightness) * balance[ch] / 255.0f;
             for (int v = 0; v < 256; v++) {
                 const float linear = static_cast<float>(v) * scale / 255.0f;   // scale first
@@ -112,7 +116,7 @@ struct Correction {
                 }
                 int q = static_cast<int>(out + 0.5f);
                 // A non-zero input never lands on black, or a fade-out snaps off partway down.
-                if (q <= 0 && v > 0 && brightness > 0) q = 1;
+                if (q <= 0 && v > 0 && scale > 0.0f) q = 1;
                 briLut[ch][v] = static_cast<uint8_t>(q > 255 ? 255 : q);
             }
         }
@@ -189,7 +193,7 @@ struct Correction {
                 b -= w;
             }
             sum += (static_cast<uint64_t>(briLut[0][r]) + briLut[1][g] + briLut[2][b]) * mAColor
-                   + static_cast<uint64_t>(briLut[kNeutral][w]) * whiteMa;
+                   + static_cast<uint64_t>(briLut[kWhite][w]) * whiteMa;
         }
         // Rounded UP: a cap that understates is not a cap.
         const uint64_t scalableMa = (sum + 254) / 255;
@@ -225,7 +229,7 @@ struct Correction {
         } else {
             const uint8_t w = whiteOf(r, g, b);
             // Computed off the PRE-subtraction values, which only rebalance the RGB emitters.
-            if (offWarmWhite != kAbsent) out[offWarmWhite] = lim(briLut[kNeutral][w]);
+            if (offWarmWhite != kAbsent) out[offWarmWhite] = lim(briLut[kWhite][w]);
             // yellow ≈ min(R,G) (the shared red+green component).
             if (offYellow != kAbsent)    out[offYellow] = lim(briLut[kNeutral][r < g ? r : g]);
             // Driven from the blue with no red or green to pair with, so it stays dark on warm colors.
@@ -236,7 +240,7 @@ struct Correction {
             // White last: it is the only emitter that rebalances RGB.
             if (offWhite != kAbsent) {
                 if (whiteMode == WhiteMode::Accurate) { r -= w; g -= w; b -= w; }  // pull white out of RGB
-                out[offWhite] = lim(briLut[kNeutral][w]);
+                out[offWhite] = lim(briLut[kWhite][w]);
             }
         }
         // The curve, applied ONCE: everything above this line is linear light.

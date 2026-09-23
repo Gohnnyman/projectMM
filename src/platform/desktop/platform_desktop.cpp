@@ -2308,6 +2308,7 @@ const uint8_t* videoCaptureFrame(VideoCaptureHandle& /*h*/, uint16_t& /*width*/,
     return nullptr;
 }
 void videoCaptureDeinit(VideoCaptureHandle& /*h*/) {}
+VideoCaptureStats videoCaptureStats() { return {}; }
 
 // The textbook in-place radix-2 transform, the production kernel now that live capture runs blocks dozens of times a second on the render tick. The contract is unchanged and it is numerically equivalent to the direct form, pinned against one by a test.
 void audioFft(const float* windowed, size_t n, float* outMag) {

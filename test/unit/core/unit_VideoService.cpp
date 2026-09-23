@@ -183,42 +183,49 @@ TEST_CASE("VideoService: the test pattern sweeps at patternSpeed pixels per seco
     CHECK(sweepX() == (start + 5) % VideoService::kPatternW); // parked, however long passes
 }
 
-// Pinned to a measured case: a source showing (255,127,0) captured under PQ as (206,171,0), green
-// 35% high against red. Checked as a RATIO - hdrNits sets the level, hue is what this fixes.
-TEST_CASE("VideoService: the PQ tone table corrects an HDR capture's green lift") {
+// Pinned to a measured case: a source showing (255,127,0) captured under PQ as (206,171,0). The
+// curve has to land that pair on the LINEAR ratio the original color has, sRGB(127)/sRGB(255) =
+// 0.212, which is the quantity an average is then taken of.
+TEST_CASE("VideoService: the PQ tone table recovers the source's linear ratio") {
     VideoService v;
     v.source = VideoService::kSourceUsb;
     v.hdr = VideoService::kHdrPq;
     v.hdrNits = 2000;
     v.onControlChanged("hdr"); // the path a UI edit takes
-    const uint8_t* t = v.toneForTest();
+    const uint16_t* t = v.toneForTest();
     REQUIRE(t != nullptr);
 
-    const double rawRatio = 171.0 / 206.0; // as captured
-    const double fixed = static_cast<double>(t[171]) / t[206];
-    CHECK(rawRatio > 0.80); // the defect
-    CHECK(fixed < 0.62);    // corrected toward 0.50
-    CHECK(fixed > 0.40);    // not overshot
+    CHECK(171.0 / 206.0 > 0.80); // the defect, as the bytes arrive
+    const double linear = static_cast<double>(t[171]) / t[206];
+    CHECK(linear > 0.15); // recovered toward 0.212
+    CHECK(linear < 0.30);
 
     // Monotonic: a curve that reorders levels would posterize.
     CHECK(t[0] == 0);
     for (int i = 1; i < 256; i++) CHECK(t[i] >= t[i - 1]);
 }
 
-// Off must publish nothing: a stale table would silently re-map an SDR source.
-TEST_CASE("VideoService: no tone table is published unless an HDR curve is selected") {
+// Every source publishes one, SDR included: sRGB is a curve like any other, and a consumer
+// averaging raw bytes averages a quantity that is not proportional to light.
+TEST_CASE("VideoService: an SDR source publishes the sRGB curve, not nothing") {
     VideoService v;
     v.source = VideoService::kSourcePattern;
     v.applyState();
-    CHECK(VideoService::latestFrame()->tone == nullptr);
+    const uint16_t* t = VideoService::latestFrame()->tone;
+    REQUIRE(t != nullptr);
+    CHECK(t[0] == 0);
+    CHECK(t[255] == mm::VideoFrame::kLinearMax);
+    // sRGB's midpoint is about 21% of full light: the whole reason averaging bytes is wrong.
+    CHECK(t[128] < mm::VideoFrame::kLinearMax / 3);
+    CHECK(t[128] > mm::VideoFrame::kLinearMax / 8);
 }
 
 // The frame carries its curve and consumers read through channel(), so every reader corrects the
 // same way and none has to know which curve it is. Null means the bytes are taken as they are.
 TEST_CASE("VideoFrame: channel() reads through the tone curve when one is published") {
     uint8_t px[3] = {10, 20, 30};
-    uint8_t tone[256];
-    for (int i = 0; i < 256; i++) tone[i] = static_cast<uint8_t>(255 - i);
+    uint16_t tone[256];
+    for (int i = 0; i < 256; i++) tone[i] = static_cast<uint16_t>(255 - i);
     mm::VideoFrame f;
     f.rgb = px;
     CHECK(f.channel(px, 0) == 10);
