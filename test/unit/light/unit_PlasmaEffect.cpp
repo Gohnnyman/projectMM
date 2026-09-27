@@ -1,5 +1,5 @@
-// @module PlasmaEffect
-// @also NoiseEffect
+/// @module PlasmaEffect
+/// @also NoiseEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"

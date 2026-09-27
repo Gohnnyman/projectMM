@@ -1,7 +1,7 @@
-// @module MoonModule
+/// @module MoonModule
 
 #include "doctest.h"
-#include "core/MoonModule.h"
+#include "core/module/MoonModule.h"
 
 #include <cstring>   // std::strcpy — the in-place option-rename schemaSignature tests
 
@@ -26,8 +26,7 @@ public:
     }
 };
 
-// A module that hides from the UI (the FilesystemModule / HttpServerModule pattern): the state
-// serializer skips any module whose appearsInUi() is false.
+// A module that hides from the UI (the FilesystemModule / HttpServerModule pattern): the state serializer skips any module whose appearsInUi() is false.
 class HiddenModule : public mm::MoonModule {
 public:
     bool appearsInUi() const override { return false; }
@@ -121,11 +120,9 @@ TEST_CASE("ControlList clear and rebuild") {
     CHECK(mod.controls().count() == 3);
 }
 
-// schemaSignature() drives the WS full-resync gate: it must change when the schema changes and hold
-// steady on a value-only change. These pin the two subtle cases a naive node-only-pointer hash misses.
+// schemaSignature() drives the WS full-resync gate: it must change when the schema changes and hold steady on a value-only change. These pin the two subtle cases a naive node-only-pointer hash misses.
 namespace {
-// A module with a Select whose option STRINGS live in a member array that can be rewritten in place
-// (the stable-address bind pattern DriverBase/HueDriver use for preset/room dropdowns).
+// A module with a Select whose option STRINGS live in a member array that can be rewritten in place (the stable-address bind pattern DriverBase/HueDriver use for preset/room dropdowns).
 class SelectModule : public mm::MoonModule {
 public:
     uint8_t value = 5;
@@ -143,11 +140,10 @@ public:
 TEST_CASE("schemaSignature: value change is invisible, schema change is not") {
     SelectModule m; m.defineControls();
     const uint32_t base = m.schemaSignature();
-    // A bound-value change (the slider-drag path) must NOT move the signature — it rides the value patch.
+    // A bound-value change (the slider-drag path) must NOT move the signature, it rides the value patch.
     m.value = 200;
     CHECK(m.schemaSignature() == base);
-    // An in-place option RENAME (same array pointer, same count, changed string) MUST move it — the
-    // signature hashes the option strings, not the array pointer (F2: the stable-address bind pattern).
+    // An in-place option RENAME (same array pointer, same count, changed string) MUST move it, the signature hashes the option strings, not the array pointer (F2: the stable-address bind pattern).
     std::strcpy(m.opt0, "gamma");
     CHECK(m.schemaSignature() != base);
 }
@@ -158,8 +154,7 @@ TEST_CASE("schemaSignature: recurses into children (a child schema change is cau
     parent->addChild(child);
     child->defineControls();
     const uint32_t base = parent->schemaSignature();
-    // The parent's own controls are unchanged; only the CHILD's Select is renamed. The parent's
-    // signature must still change (F1: rebuildControls rebuilds the subtree, so the signature recurses).
+    // The parent's own controls are unchanged; only the CHILD's Select is renamed. The parent's signature must still change (F1: rebuildControls rebuilds the subtree, so the signature recurses).
     std::strcpy(child->opt1, "delta");
     CHECK(parent->schemaSignature() != base);
     delete parent;   // deletes the child too (owns the subtree)
@@ -177,12 +172,12 @@ TEST_CASE("ReadOnly control binding") {
     CHECK(ctrl.type == mm::ControlType::ReadOnly);
     CHECK(std::strcmp(static_cast<char*>(ctrl.ptr), "idle") == 0);
 
-    // Update the buffer — control reflects it
+    // Update the buffer, control reflects it
     std::strcpy(statusBuf, "running");
     CHECK(std::strcmp(static_cast<char*>(ctrl.ptr), "running") == 0);
 }
 
-// addSelect binds a uint8 + an options array (stored in aux) — control.max carries the option count.
+// addSelect binds a uint8 + an options array (stored in aux), control.max carries the option count.
 TEST_CASE("Select control binding") {
     mm::MoonModule mod;
     uint8_t mode = 0;
@@ -207,7 +202,7 @@ TEST_CASE("Select control binding") {
     CHECK(*static_cast<uint8_t*>(ctrl.ptr) == 2);
 }
 
-// addProgress binds a uint32 plus a "total" value (in aux) — the UI renders value/total as a progress bar.
+// addProgress binds a uint32 plus a "total" value (in aux), the UI renders value/total as a progress bar.
 TEST_CASE("Progress control binding") {
     mm::MoonModule mod;
     uint32_t used = 1000;
@@ -235,7 +230,7 @@ TEST_CASE("Module enabled property") {
     CHECK(mod.enabled() == true);
 }
 
-// a bool addControl binds a bool field — toggling the field updates control.ptr's view.
+// a bool addControl binds a bool field, toggling the field updates control.ptr's view.
 TEST_CASE("Bool control binding") {
     TestModule mod;
     mod.defineControls();
@@ -249,10 +244,7 @@ TEST_CASE("Bool control binding") {
     CHECK(*static_cast<bool*>(ctrl.ptr) == false);
 }
 
-// appearsInUi() defaults to true (every ordinary module shows in the UI) and is overridable to
-// false so infrastructure modules (FilesystemModule, HttpServerModule) can hide — the flag the
-// state serializer reads to skip a module. A base MoonModule and a control-bearing one both
-// appear; only a module that overrides to false hides.
+// appearsInUi() defaults to true (every ordinary module shows in the UI) and is overridable to false so infrastructure modules (FilesystemModule, HttpServerModule) can hide, the flag the state serializer reads to skip a module. A base MoonModule and a control-bearing one both appear; only a module that overrides to false hides.
 TEST_CASE("MoonModule appearsInUi defaults true, overridable false") {
     TestModule visible;
     CHECK(visible.appearsInUi());       // ordinary module: shown
@@ -260,15 +252,12 @@ TEST_CASE("MoonModule appearsInUi defaults true, overridable false") {
     HiddenModule hidden;
     CHECK_FALSE(hidden.appearsInUi());  // infrastructure module: skipped by the serializer
 
-    // Through the base-class pointer the virtual still dispatches to the override — the path the
-    // serializer actually takes (it holds MoonModule*).
+    // Through the base-class pointer the virtual still dispatches to the override, the path the serializer actually takes (it holds MoonModule*).
     mm::MoonModule* asBase = &hidden;
     CHECK_FALSE(asBase->appearsInUi());
 }
 
-// readBool/readUint8 — the shared generic control reader (reviewer #8): one implementation so the
-// absent-control default can't disagree between callers (HttpServerModule + MqttModule both read
-// Drivers.on through this). Returns the bound value; returns the caller's default when absent/wrong-type.
+// readBool/readUint8, the shared generic control reader (reviewer #8): one implementation so the absent-control default can't disagree between callers (HttpServerModule + MqttModule both read Drivers.on through this). Returns the bound value; returns the caller's default when absent/wrong-type.
 TEST_CASE("MoonModule readBool/readUint8 return the value, or the default when absent") {
     TestModule mod;
     mod.defineControls();   // binds brightness(Uint8), speed(Uint8), enabled(Bool)

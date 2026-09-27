@@ -1,4 +1,4 @@
-// @module MetaballsEffect
+/// @module MetaballsEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"

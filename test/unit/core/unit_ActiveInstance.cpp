@@ -1,14 +1,13 @@
-// @module ActiveInstance
+/// @module ActiveInstance
 
 #include "doctest.h"
-#include "core/ActiveInstance.h"
+#include "core/util/ActiveInstance.h"
 
 using namespace mm;
 
 namespace {
 
-// A minimal participant type. ActiveInstance<Widget> gives it a per-type static seat; each Widget
-// holds its own ActiveInstance member tied to itself.
+// A minimal participant type. ActiveInstance<Widget> gives it a per-type static seat; each Widget holds its own ActiveInstance member tied to itself.
 struct Widget {
     ActiveInstance<Widget> seat{*this};
     int id;
@@ -37,7 +36,7 @@ TEST_CASE("ActiveInstance: first claim wins, a second does not displace") {
     CHECK_FALSE(b.seat.seated());
 }
 
-// vacate() only releases if this instance holds the seat — it never yanks another's.
+// vacate() only releases if this instance holds the seat, it never yanks another's.
 TEST_CASE("ActiveInstance: vacate releases only the holder's seat") {
     Widget a{1}, b{2};
     a.seat.claim();
@@ -47,8 +46,7 @@ TEST_CASE("ActiveInstance: vacate releases only the holder's seat") {
     CHECK(ActiveInstance<Widget>::active() == nullptr);
 }
 
-// After the holder vacates, a surviving instance reclaims the empty seat with the SAME claim() call
-// (the idempotent-claim = survivor-reclaim contract that AudioService's tick relies on).
+// After the holder vacates, a surviving instance reclaims the empty seat with the SAME claim() call (the idempotent-claim = survivor-reclaim contract that AudioService's tick relies on).
 TEST_CASE("ActiveInstance: a survivor reclaims an emptied seat via claim()") {
     Widget a{1}, b{2};
     a.seat.claim();   // a wins
@@ -63,8 +61,7 @@ TEST_CASE("ActiveInstance: a survivor reclaims an emptied seat via claim()") {
     b.seat.vacate();
 }
 
-// The destructor vacates a held seat — the dangling-static guard. Without it, active() would point
-// at freed memory after the holder is destroyed.
+// The destructor vacates a held seat, the dangling-static guard. Without it, active() would point at freed memory after the holder is destroyed.
 TEST_CASE("ActiveInstance: destructor vacates the seat (no dangling static)") {
     {
         Widget a{1};

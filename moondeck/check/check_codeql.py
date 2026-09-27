@@ -12,7 +12,7 @@ across runs) is the part worth having — that is baselining we would otherwise 
 The trade is honest and stated in the output: this shows the last ANALYZED commit, so local edits
 and unpushed commits are not in it.
 
-Not a gate, like the rest of the stack (docs/testing.md § Static analysis): it reports, the human
+Not a gate, like the rest of the stack (docs/reference/testing.md § Static analysis): it reports, the human
 judges. Exit is 0 whenever the fetch succeeded, whatever the findings — and non-zero only when the
 answer is unknown (no `gh`, not authenticated, no network), because "I could not look" must never
 render as "nothing found".

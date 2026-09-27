@@ -4,30 +4,38 @@
 
 namespace mm {
 
-// A dense 3D grid with mid-strand DARK COLUMNS: the columns [blackStart, blackStart+blackCount) are
-// held black in every row. A dark column is a GAP — a physical wire slot the driver still clocks (so
-// WS2812 data flows THROUGH the unlit LEDs to reach the lit columns beyond) that maps to no logical
-// light, so it stays black. This is for a sealed/continuous panel with a dark spacer strip, or a slat
-// wall, where the strip cannot be cut and the effect must map across the gap unshifted (the picture is
-// HOLED at its true coordinates, not squeezed). It is the plain [Grid](GridLayout.md) with one added
-// capability; a grid without dark columns is just a Grid, so pick that.
-//
-// The gap decision is made once, at the emit site (sink.blackPixel vs sink.pixel), on the TRUE column
-// x — so a dark column stays dark whichever way a serpentine strip snakes into the row. hasBlackPixels
-// tells the Layer to build the folded LUT (which drops the gap slots) instead of the dense identity map
-// (which would light them). See CoordSink for the two-kinds-of-pixel model.
 /// Layout of a dense 3D grid with mid-strand dark columns (a spacer).
+///
+/// @moreinfo
+///
+/// A dense 3D grid with mid-strand DARK COLUMNS: the columns [blackStart, blackStart+blackCount) are held black in every row.
+/// A dark column is a gap: a physical wire slot the driver still clocks, so data flows through the unlit lights to reach the lit columns beyond.
+/// It maps to no logical light, so it stays black.
+/// This is for a sealed panel with a dark spacer strip, or a slat wall, where the strip cannot be cut.
+/// The effect maps across the gap unshifted, so the picture is holed at its true coordinates rather than squeezed.
+/// It is the plain [Grid](GridLayout.md) with one added capability; a grid without dark columns is just a Grid, so pick that.
+///
+/// The gap decision is made once at the emit site, on the true column, so a dark column stays dark whichever way a serpentine strip snakes into the row.
+/// A non-empty run tells the Layer to build the folded mapping, which drops the gap slots, rather than the dense identity map, which would light them.
+/// See CoordSink for the two-kinds-of-pixel model.
 class GridBlacksLayout : public LayoutBase {
 public:
+    /// The catalog tags this layout carries.
     const char* tags() const override { return "💫"; }
+    /// How many axes this layout places lights on.
     Dim dimensions() const override { return Dim::D3; }
+    /// The grid's extent on x.
     lengthType width = 16;
+    /// Its extent on y.
     lengthType height = 16;
+    /// Its extent on z.
     lengthType depth = 1;
     bool serpentine = false;   // odd rows wired in reverse (boustrophedon) — the snaked-strip matrix.
-    lengthType blackStart = 0; // first dark column
+    /// The first dark column.
+    lengthType blackStart = 0;
     lengthType blackCount = 0; // number of dark columns; 0 = no gap (renders like a plain Grid)
 
+    /// The controls a user sets on the card.
     void defineControls() override {
         controls_.addControl("width",  width,  1, 512);
         controls_.addControl("height", height, 1, 512);
@@ -38,33 +46,30 @@ public:
         controls_.setHidden(controls_.count() - 1, blackCount == 0);   // blackStart matters only with a run
     }
 
+    /// How many lights the current settings place.
     nrOfLightsType lightCount() const override {
-        // Multiply in uint32_t to detect overflow before casting. A gap is a PHYSICAL pixel (a wire slot
-        // the driver clocks), so it counts here — dark and lit cells alike fill the box.
+        /// A gap is a physical wire slot the driver clocks, so it counts toward the box.
         uint32_t n = static_cast<uint32_t>(width) * height * depth;
         constexpr uint32_t kMax = std::numeric_limits<nrOfLightsType>::max();
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
-    // A non-empty run means dark columns exist, so the Layer must fold the LUT (dropping the gap slots)
-    // rather than take the identity fast path (which would light them). No run → renders like a Grid.
+    /// Whether dark columns exist, which is what makes the Layer fold the mapping.
     bool hasBlackPixels() const override { return blackCount != 0; }
 
+    /// Emit every light's coordinate, in wiring order.
     void placeLights(const CoordSink& sink) const override {
-        // uint32_t idx so it never wraps on uint16_t nrOfLightsType (no-PSRAM 512×512 > 65535); stop at
-        // the clamped lightCount() so emitted indices stay within the allocated buffer.
+        // A wide index, and the clamped count as the bound, so no emit leaves the buffer.
         const uint32_t limit = lightCount();
         const lengthType blackEnd = static_cast<lengthType>(blackStart + blackCount);   // exclusive
         uint32_t idx = 0;
         for (lengthType z = 0; z < depth && idx < limit; z++) {
             for (lengthType y = 0; y < height && idx < limit; y++) {
-                // Serpentine reverses the wire order on odd rows; the emitted COORDINATE is still the
-                // true (x,y,z) — only the index→position order changes.
+                // Serpentine changes only the index-to-position order, never the coordinate.
                 const bool reverse = serpentine && (y & 1);
                 for (lengthType i = 0; i < width && idx < limit; i++) {
                     const lengthType x = reverse ? static_cast<lengthType>(width - 1 - i) : i;
-                    // Gap test on the true x (the physical column), decided HERE at the emit site so it
-                    // is never re-derived from the index elsewhere.
+                    // Decided here at the emit site, so it is never re-derived from an index.
                     if (blackCount != 0 && x >= blackStart && x < blackEnd)
                         sink.blackPixel(static_cast<nrOfLightsType>(idx++), x, y, z);
                     else

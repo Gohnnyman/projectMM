@@ -1,13 +1,10 @@
-// @module shader
-// @also draw, math16
+/// @module shader
+/// @also draw, math16
 
-// The shader vocabulary: the GLSL built-ins every per-pixel shader is written out of, in fixed
-// point. These pin the CONTRACT each one has to satisfy — the endpoints, the monotonicity, the
-// symmetry — because a shader composes them and a wrong edge case shows up as a visible seam
-// rather than as a crash.
+/// The shader vocabulary: the GLSL built-ins every per-pixel shader is written out of, in fixed point. These pin the CONTRACT each one has to satisfy, the endpoints, the monotonicity, the symmetry, because a shader composes them and a wrong edge case shows up as a visible seam rather than as a crash.
 
 #include "doctest.h"
-#include "light/shader.h"
+#include "light/powerfunctions/shader.h"
 
 #include <cmath>
 
@@ -27,8 +24,7 @@ TEST_CASE("mix interpolates between its endpoints") {
     CHECK(mix(100, 0, 32768) == 50);         // and symmetric the other way
 }
 
-// fract is what makes a pattern repeat: scaling then taking the fraction tiles a design with no
-// branch and no modulo, so the same shader draws one shape or a thousand.
+// fract is what makes a pattern repeat: scaling then taking the fraction tiles a design with no branch and no modulo, so the same shader draws one shape or a thousand.
 TEST_CASE("fract keeps only the fractional part, and wraps") {
     CHECK(fract(0) == 0);
     CHECK(fract(32768) == 32768);            // half
@@ -36,10 +32,7 @@ TEST_CASE("fract keeps only the fractional part, and wraps") {
     CHECK(fract(65536 + 32768) == 32768);    // one and a half
     CHECK(fract(65536 * 5) == 0);            // any whole number
 
-    // Negatives matter because shader space is centred: uv() puts the origin in the middle, so half
-    // of every tiled pattern is at a negative coordinate. This is the UNSIGNED wrap (a mask of the
-    // low bits), not a signed remainder — -1 is just below zero, so its fraction is just below one,
-    // which is what keeps a tiling continuous across the origin instead of mirroring there.
+    // Negatives matter because shader space is centered: uv() puts the origin in the middle, so half of every tiled pattern is at a negative coordinate. This is the UNSIGNED wrap (a mask of the low bits), not a signed remainder, -1 is just below zero, so its fraction is just below one, which is what keeps a tiling continuous across the origin instead of mirroring there.
     CHECK(fract(-1) == 65535);
     CHECK(fract(-65536) == 0);               // a whole negative number wraps to zero
     CHECK(fract(-32768) == 32768);           // half below zero is half of the previous tile
@@ -52,8 +45,7 @@ TEST_CASE("step is a hard threshold at the edge") {
     CHECK(step(100, 101) == 65535);
 }
 
-// smoothstep is the anti-aliasing workhorse: a hard edge run through it becomes a soft one of
-// controllable width, which is how a shader avoids jaggies without supersampling.
+// smoothstep is the anti-aliasing workhorse: a hard edge run through it becomes a soft one of controllable width, which is how a shader avoids jaggies without supersampling.
 TEST_CASE("smoothstep ramps smoothly between its edges") {
     CHECK(smoothstep(0, 65536, 0) == 0);
     CHECK(smoothstep(0, 65536, 65536) == 65535);
@@ -63,8 +55,7 @@ TEST_CASE("smoothstep ramps smoothly between its edges") {
 }
 
 TEST_CASE("smoothstep is flat at both ends, steep in the middle") {
-    // The defining property: zero derivative at the edges, which is what removes the visible crease
-    // a linear ramp leaves.
+    // The defining property: zero derivative at the edges, which is what removes the visible crease a linear ramp leaves.
     const int nearStart = smoothstep(0, 65536, 6553) - smoothstep(0, 65536, 0);
     const int nearMid   = smoothstep(0, 65536, 36044) - smoothstep(0, 65536, 29491);
     CHECK(nearMid > nearStart * 2);
@@ -97,8 +88,7 @@ TEST_CASE("a full turn returns a point to where it started") {
     CHECK(std::abs(y - draw::toSub(3)) < 40);
 }
 
-// uv is the mapping every shader starts from; getting it wrong is why a design stretches on a
-// non-square panel. The SHORT side spans -1..1 so a circle stays a circle.
+// uv is the mapping every shader starts from; getting it wrong is why a design stretches on a non-square panel. The SHORT side spans -1..1 so a circle stays a circle.
 TEST_CASE("uv centres the grid and scales by the short side") {
     int32_t x, y;
     uv(8, 8, 16, 16, x, y);                  // centre of a square grid
@@ -121,8 +111,7 @@ TEST_CASE("uv keeps a circle circular on a wide panel") {
     CHECK(std::abs(y1 + y2) < 8000);         // symmetric about the centre
 }
 
-// repeat is the operator that makes one shape into a lattice — the space folds, the objects do not
-// multiply, so a thousand of them cost the same as one.
+// repeat is the operator that makes one shape into a lattice, the space folds, the objects do not multiply, so a thousand of them cost the same as one.
 TEST_CASE("repeat tiles space into cells") {
     CHECK(repeat(0, 100) == -50);            // cell-relative, centred on zero
     CHECK(repeat(50, 100) == 0);
@@ -140,14 +129,12 @@ TEST_CASE("mirror folds space about the origin") {
     CHECK(mirror(42) == 42);
 }
 
-// The SDF operators: given two shapes as distances, produce a third. This is why an SDF scene is
-// composed rather than drawn.
+// The SDF operators: given two shapes as distances, produce a third. This is why an SDF scene is composed rather than drawn.
 TEST_CASE("the SDF operators combine shapes") {
     // Two overlapping shapes: a is inside by 10, b is outside by 5.
     CHECK(opUnion(-10, 5) == -10);           // inside either: the nearer surface wins
     CHECK(opIntersect(-10, 5) == 5);         // inside both: only where they overlap
-    // Quilez's order: opSubtract(d1, d2) cuts d1 OUT OF d2. Following his order matters because the
-    // op* names are borrowed from his catalog — reversing it silently inverts a transcribed scene.
+    // Quilez's order: opSubtract(d1, d2) cuts d1 OUT OF d2. Following his order matters because the op* names are borrowed from his catalog, reversing it silently inverts a transcribed scene.
     CHECK(opSubtract(-5, -10) == 5);         // cut the shallow shape out of the deeper one
 }
 
@@ -163,8 +150,7 @@ TEST_CASE("opRound grows a shape outward") {
 
 TEST_CASE("rounding a box pulls its corner in") {
     const draw::pos_t c = draw::toSub(8), b = draw::toSub(4), r = draw::toSub(2);
-    // AT the sharp box's corner (8+4, 8+4) the sharp form reads exactly 0. The rounded form's
-    // surface has been pulled inward there, so the same point is now OUTSIDE it.
+    // AT the sharp box's corner (8+4, 8+4) the sharp form reads exactly 0. The rounded form's surface has been pulled inward there, so the same point is now OUTSIDE it.
     const int32_t sharp   = draw::sdBox(draw::toSub(12), draw::toSub(12), c, c, b, b);
     const int32_t rounded = sdRoundBox(draw::toSub(12), draw::toSub(12), c, c, b, b, r);
     CHECK(sharp == 0);
@@ -188,22 +174,21 @@ TEST_CASE("a polygon with too few sides falls back to a circle") {
           draw::sdCircle(draw::toSub(14), c, c, c, r));
 }
 
-// The cosine palette carries a whole colour ramp as twelve numbers rather than a table.
-TEST_CASE("a cosine palette produces varied colours around its ramp") {
+// The cosine palette carries a whole color ramp as twelve numbers rather than a table.
+TEST_CASE("a cosine palette produces varied colors around its ramp") {
     const RGB a = cosPalette(0, 128, 128, 128, 127, 127, 127, 1, 1, 1, 0, 85, 170);
     const RGB b = cosPalette(32768, 128, 128, 128, 127, 127, 127, 1, 1, 1, 0, 85, 170);
     CHECK((a.r != b.r || a.g != b.g || a.b != b.b));
 }
 
-TEST_CASE("mixing colours interpolates each channel") {
+TEST_CASE("mixing colors interpolates each channel") {
     const RGB a{0, 0, 0}, b{200, 100, 50};
     CHECK(mixColor(a, b, 0).r == 0);
     const RGB mid = mixColor(a, b, 32768);
     CHECK(mid.r > 90); CHECK(mid.r < 110);
 }
 
-// The runner is what makes an effect a SHADER: one function of position and time, and the framework
-// does the loop, the mapping and the write.
+// The runner is what makes an effect a SHADER: one function of position and time, and the framework does the loop, the mapping and the write.
 TEST_CASE("the shader runner visits every pixel") {
     Buffer buf;
     buf.allocate(8 * 8, 3);
@@ -233,11 +218,9 @@ TEST_CASE("the shader runner gives each pixel a different coordinate") {
 
 // --- Projection ---------------------------------------------------------------------------
 
-// The whole of perspective is one divide: distance shrinks things in exact proportion. Three effects
-// hand-rolled this before it was shared.
+// The whole of perspective is one divide: distance shrinks things in exact proportion. Three effects hand-rolled this before it was shared.
 TEST_CASE("projection shrinks a point in proportion to its depth") {
-    // Seeded: project leaves its out-params untouched when it returns false, and a stack value
-    // read back would be undefined (MSVC rejects it outright).
+    // Seeded: project leaves its out-params untouched when it returns false, and a stack value read back would be undefined (MSVC rejects it outright).
     int32_t nx = 0, ny = 0, fx = 0, fy = 0;
     REQUIRE(project(65536, 0, 65536, 65536, nx, ny) == true);      // one unit out, one unit deep
     REQUIRE(project(65536, 0, 131072, 65536, fx, fy) == true);   // same point, twice as far
@@ -251,8 +234,7 @@ TEST_CASE("a point on the view axis projects to the centre") {
     CHECK(y == 0);
 }
 
-// A point at or behind the viewer has no projection. Dividing anyway wraps it round to the front —
-// the classic artifact of a missing near-plane check.
+// A point at or behind the viewer has no projection. Dividing anyway wraps it round to the front, the classic artifact of a missing near-plane check.
 TEST_CASE("a point at or behind the viewer does not project") {
     int32_t x = 999, y = 999;
     CHECK(project(65536, 65536, 0, 65536, x, y) == false);
@@ -275,9 +257,7 @@ TEST_CASE("depth fade dims with distance and stops at the far plane") {
     CHECK(near > far);                       // monotone
 }
 
-// A point near the near plane projects arbitrarily far out. The divide is exact in 64 bits, but the
-// result need not fit the int32 the caller gets back — and truncating it wraps a point off one edge
-// of the screen to the other, which reads as geometry tearing across the panel.
+// A point near the near plane projects arbitrarily far out. The divide is exact in 64 bits, but the result need not fit the int32 the caller gets back, and truncating it wraps a point off one edge of the screen to the other, which reads as geometry tearing across the panel.
 TEST_CASE("projecting a point that lands outside the coordinate range is rejected") {
     int32_t x = 0, y = 0;
     CHECK(project(2000000000, 2000000000, 1, 65536, x, y) == false);

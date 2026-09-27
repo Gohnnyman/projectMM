@@ -1,4 +1,4 @@
-// @module LissajousEffect
+/// @module LissajousEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -22,8 +22,7 @@ TEST_CASE("LissajousEffect traces a lit curve on the grid") {
     layer.addChild(&lissajous);
 
     layer.applyState();
-    // Pin a colorful palette (Rainbow=0) so painted pixels are non-black regardless of prior tests
-    // mutating the process-wide active palette.
+    // Pin a colorful palette (Rainbow=0) so painted pixels are non-black regardless of prior tests mutating the process-wide active palette.
     mm::Palettes::setActive(0);
     layer.tick();
 
@@ -62,8 +61,7 @@ TEST_CASE("LissajousEffect leaves untouched pixels black") {
     auto& buf = layer.buffer();
     REQUIRE(buf.count() == 1024);
 
-    // A single 256-sample sweep cannot cover 1024 lights, so at least one pixel stays black —
-    // this distinguishes a traced curve from a full-buffer fill.
+    // A single 256-sample sweep cannot cover 1024 lights, so at least one pixel stays black, this distinguishes a traced curve from a full-buffer fill.
     bool hasBlack = false;
     for (mm::nrOfLightsType px = 0; px < buf.count(); px++) {
         size_t idx = static_cast<size_t>(px) * 3;

@@ -1,0 +1,3 @@
+# Proper nouns and product names a spelling rule would otherwise "correct".
+# Artistic Licence is the company that authored Art-Net; the spelling is theirs.
+Licence

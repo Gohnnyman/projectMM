@@ -6,6 +6,7 @@ Runs under CI on macOS, Windows and Linux runners. The output lands in `dist/`:
   macOS arm64:  dist/projectMM-macos-arm64-vX.Y.Z.tar.gz + .dmg
   Windows x64:  dist/projectMM-windows-x64-vX.Y.Z.zip
   Linux x64:    dist/projectMM-linux-x64-vX.Y.Z.tar.gz + dist/projectmm_X.Y.Z_amd64.deb
+  Linux arm64:  dist/projectMM-linux-arm64-vX.Y.Z.tar.gz + dist/projectmm_X.Y.Z_arm64.deb
 
 Each archive carries the executable + a short README.txt with run instructions.
 
@@ -74,8 +75,21 @@ def configure_and_build_macos(version: str = "") -> Path:
     return binary
 
 
+def linux_arch() -> tuple[str, str, str]:
+    """(Debian arch, tarball label, README label) for the host.
+
+    Three names for one fact, so they cannot drift apart: `dpkg` insists on `amd64`/`arm64` in a
+    control file, the tarballs have always read `x64`, and the README is prose. A release builds
+    on a runner of each arch and this is what tells the packages apart.
+    """
+    machine = platform.machine().lower()
+    if machine in ("x86_64", "amd64"):
+        return "amd64", "x64", "Linux x64"
+    return "arm64", "arm64", "Linux arm64"
+
+
 def configure_and_build_linux(version: str = "") -> Path:
-    """Configure + build for Linux x86-64. Returns the built binary path."""
+    """Configure + build for Linux. Returns the built binary path."""
     bdir = str(BUILD_DIR_LINUX.relative_to(ROOT))
     run(["cmake", "-B", bdir, "-DCMAKE_BUILD_TYPE=Release"] + version_args(version))
     run(["cmake", "--build", bdir, "--config", "Release", "-j", "--target", "projectMM"])
@@ -97,9 +111,10 @@ def package_linux(binary: Path, version: str) -> Path:
     release job depend on a third-party host. Worth adding once someone asks.
     """
     DIST_DIR.mkdir(exist_ok=True)
-    out = DIST_DIR / f"projectMM-linux-x64-v{version}.tar.gz"
+    _, tar_label, readme_label = linux_arch()
+    out = DIST_DIR / f"projectMM-linux-{tar_label}-v{version}.tar.gz"
     readme = DIST_DIR / "_README.txt"
-    readme.write_text(readme_text(version, "Linux x64"), encoding="utf-8")
+    readme.write_text(readme_text(version, readme_label), encoding="utf-8")
     try:
         with tarfile.open(out, "w:gz") as tar:
             tar.add(binary, arcname="projectMM")
@@ -132,6 +147,7 @@ def package_deb(binary: Path, version: str) -> Path | None:
     # 3.0.0~dev.N here. Deliberately a tilde: dpkg sorts ~ BEFORE the bare version, so a dev build
     # upgrades to the 3.0.0 release exactly as semver intends the prerelease to.
     version = version.replace("-", "~")
+    deb_arch, _, _ = linux_arch()
     stage = DIST_DIR / f"deb-{version}"
     shutil.rmtree(stage, ignore_errors=True)
     (stage / "DEBIAN").mkdir(parents=True)
@@ -161,13 +177,19 @@ def package_deb(binary: Path, version: str) -> Path | None:
         f"Version: {version}\n"
         "Section: misc\n"
         "Priority: optional\n"
-        "Architecture: amd64\n"
+        f"Architecture: {deb_arch}\n"
+        # The binary links libcurl for the one outbound HTTPS call. Every Debian-family system
+        # ships it, but naming it here is what makes apt GUARANTEE it rather than leaving a
+        # missing-library failure at startup. Two names for one library: bookworm and Raspberry Pi
+        # OS call it libcurl4, trixie renamed it libcurl4t64 in the 64-bit-time_t transition, and
+        # the alternation satisfies whichever the target has.
+        "Depends: libcurl4 | libcurl4t64\n"
         "Maintainer: MoonModules <https://github.com/MoonModules/projectMM>\n"
         "Description: Drive large LED installations and DMX fixtures\n"
         " projectMM renders effects to LED fixtures and DMX, controlled from a\n"
         " browser. This is the desktop build; run projectMM and open\n"
         " http://localhost:8080/.\n", encoding="utf-8")
-    out = DIST_DIR / f"projectmm_{version}_amd64.deb"
+    out = DIST_DIR / f"projectmm_{version}_{deb_arch}.deb"
     run(["dpkg-deb", "--build", "--root-owner-group", str(stage), str(out)])
     shutil.rmtree(stage, ignore_errors=True)
     print(f"package_desktop: wrote {out}")
@@ -587,6 +609,13 @@ def main() -> int:
     system = platform.system()
     machine = platform.machine().lower()
 
+    # Everything below produces a PUBLISHED artifact, which is the one case where a missing
+    # libcurl must fail the build rather than silently compile the MoonCloud client out: a binary
+    # that asks for consent it cannot honor is worse than one that never asks. CMakeLists reads
+    # this; nothing else sets it, so a contributor's build and the sanitizer lanes (which
+    # configure CMake directly and legitimately have no libcurl) keep the optional path.
+    os.environ["MM_PACKAGING"] = "1"
+
     # Clean only THIS host's build dir so a configure-flag change picked
     # up by this run gets a fresh CMakeCache. We don't touch the other
     # host's dir; on CI each runner only ever sees its own anyway.
@@ -609,16 +638,16 @@ def main() -> int:
         return 0
 
     if system == "Linux":
-        if machine not in ("x86_64", "amd64"):
+        if machine not in ("x86_64", "amd64", "aarch64", "arm64"):
             print(f"package_desktop: unsupported Linux arch '{machine}'. "
-                  f"Only x86-64 is packaged; other arches build from source.")
+                  f"x86-64 and arm64 are packaged; other arches build from source.")
             return 2
         binary = configure_and_build_linux(args.version)
         package_linux(binary, version)
         return 0
 
     print(f"package_desktop: host '{system}' not supported. "
-          f"projectMM ships macOS arm64, Windows x64 and Linux x64.")
+          f"projectMM ships macOS arm64, Windows x64 and Linux x64/arm64.")
     return 2
 
 

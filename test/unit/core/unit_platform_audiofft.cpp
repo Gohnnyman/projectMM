@@ -1,9 +1,6 @@
-// @module AudioService
+/// @module AudioService
 
-// The desktop audioFft kernel (radix-2 Cooley-Tukey, platform_desktop.cpp) pinned against an
-// independent naive-DFT reference: same unnormalized magnitude contract the band math
-// (AudioBands) consumes, so a kernel change that shifts scale or bin order fails HERE, not as
-// a subtle band-shape drift on hardware.
+/// The desktop audioFft kernel (radix-2 Cooley-Tukey, platform_desktop.cpp) pinned against an independent naive-DFT reference: same unnormalized magnitude contract the band math (AudioBands) consumes, so a kernel change that shifts scale or bin order fails HERE, not as a subtle band-shape drift on hardware.
 
 #include "doctest.h"
 #include "platform/platform.h"

@@ -1,4 +1,4 @@
-// @module Layouts
+/// @module Layouts
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -7,14 +7,9 @@
 
 #include <vector>
 
-// Tree mutation on the Layouts container: add one, add more than one, replace a
-// layout with a different type, and remove a layout. These exercise the same
-// addChild / replaceChildAt / removeChild primitives the HTTP handlers
-// (handleAddModule / handleReplaceModule / handleDeleteModule) drive, but at the
-// container level so the light-count / coordinate stitching is verified too.
+// Tree mutation on the Layouts container: add one, add more than one, replace a layout with a different type, and remove a layout. These exercise the same addChild / replaceChildAt / removeChild primitives the HTTP handlers (handleAddModule / handleReplaceModule / handleDeleteModule) drive, but at the container level so the light-count / coordinate stitching is verified too.
 //
-// Stack-allocated layouts here own themselves — removeChild / replaceChildAt do
-// NOT delete (the caller owns), so no leak and no double-free on scope exit.
+// Stack-allocated layouts here own themselves, removeChild / replaceChildAt do NOT delete (the caller owns), so no leak and no double-free on scope exit.
 
 namespace {
 
@@ -46,9 +41,7 @@ TEST_CASE("Layouts add multiple layouts of different types") {
     mm::GridLayout g;
     g.width = 4; g.height = 1; g.depth = 1;   // 4 lights, indices 0..3
     mm::SphereLayout s;
-    // SphereLayout radius=1: the shell band [r-0.5, r+0.5) holds the 6 axis
-    // neighbours (d^2=1) plus the 12 edge points (d^2=2) of the centre = 18
-    // lights; stitched after the grid's 4, indices 4..21.
+    // SphereLayout radius=1: the shell band [r-0.5, r+0.5) holds the 6 axis neighbors (d^2=1) plus the 12 edge points (d^2=2) of the center = 18 lights; stitched after the grid's 4, indices 4..21.
     s.radius = 1;
 
     REQUIRE(layouts.addChild(&g));
@@ -59,8 +52,7 @@ TEST_CASE("Layouts add multiple layouts of different types") {
     CHECK(layouts.totalLightCount() == expected);
     CHECK(countCoords(layouts) == expected);
 
-    // Indices stitch: the sphere's lights start where the grid's end (no holes,
-    // no overlap). Collect indices and verify a contiguous 0..expected-1 range.
+    // Indices stitch: the sphere's lights start where the grid's end (no holes, no overlap). Collect indices and verify a contiguous 0..expected-1 range.
     std::vector<mm::nrOfLightsType> idxs;
     layouts.placeLights(mm::CoordSink{[](void* ctx, mm::nrOfLightsType idx, mm::lengthType, mm::lengthType, mm::lengthType) {
         static_cast<std::vector<mm::nrOfLightsType>*>(ctx)->push_back(idx);
@@ -69,8 +61,7 @@ TEST_CASE("Layouts add multiple layouts of different types") {
     for (mm::nrOfLightsType i = 0; i < expected; i++) CHECK(idxs[i] == i);
 }
 
-// Replace a layout with a different type at the same slot: the other layouts and
-// their order are preserved; only the replaced slot's contribution changes.
+// Replace a layout with a different type at the same slot: the other layouts and their order are preserved; only the replaced slot's contribution changes.
 TEST_CASE("Layouts replace a layout with another type") {
     mm::Layouts layouts;
     mm::GridLayout a;
@@ -81,8 +72,7 @@ TEST_CASE("Layouts replace a layout with another type") {
     layouts.addChild(&b);
     CHECK(layouts.totalLightCount() == 7);
 
-    // Replace slot 1 (the 5-light grid) with a sphere. replaceChildAt returns
-    // the old child (caller owns it; we don't delete — it's stack-allocated).
+    // Replace slot 1 (the 5-light grid) with a sphere. replaceChildAt returns the old child (caller owns it; we don't delete, it's stack-allocated).
     mm::SphereLayout s;
     s.radius = 2;
     mm::MoonModule* old = layouts.replaceChildAt(1, &s);
@@ -97,8 +87,7 @@ TEST_CASE("Layouts replace a layout with another type") {
     CHECK(countCoords(layouts) == expected);
 }
 
-// Remove a layout: it leaves the tree, the remaining layouts shift to close the
-// gap, and the total drops by exactly the removed layout's light count.
+// Remove a layout: it leaves the tree, the remaining layouts shift to close the gap, and the total drops by exactly the removed layout's light count.
 TEST_CASE("Layouts remove a layout") {
     mm::Layouts layouts;
     mm::GridLayout a;

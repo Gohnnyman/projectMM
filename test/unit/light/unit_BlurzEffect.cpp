@@ -1,17 +1,13 @@
-// @module BlurzEffect
-// @also AudioService
+/// @module BlurzEffect
+/// @also AudioService
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/BlurzEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioService.h"
+#include "core/services/AudioService.h"
 
-// Blurz is an audio-reactive effect: its dot is colored by the current band's magnitude and only
-// appears when there is a signal. The frame comes from AudioService::latestFrame() (a process-wide
-// static). To feed a signal on the host (no I2S mic) we run a live AudioService with `simulate` set to
-// an "always" mode — synthesizeFrame() then fills the bands each tick(). Every case brackets its own
-// AudioService setup()/release() so it never leaks the active-mic pointer into another test file.
+// Blurz is an audio-reactive effect: its dot is colored by the current band's magnitude and only appears when there is a signal. The frame comes from AudioService::latestFrame() (a process-wide static). To feed a signal on the host (no I2S mic) we run a live AudioService with `simulate` set to an "always" mode, synthesizeFrame() then fills the bands each tick(). Every case brackets its own AudioService setup()/release() so it never leaks the active-mic pointer into another test file.
 
 // With no live audio source the buffer stays black: the dot is audio-gated, so silence renders nothing.
 TEST_CASE("BlurzEffect stays black without an audio frame") {
@@ -30,8 +26,7 @@ TEST_CASE("BlurzEffect stays black without an audio frame") {
     layer.addChild(&blurz);
 
     layer.applyState();
-    // No AudioService is active → latestFrame() is the static all-silence frame (bands all 0). tick()
-    // does the first-frame clear + fade, then reads silence and returns before drawing any dot.
+    // No AudioService is active → latestFrame() is the static all-silence frame (bands all 0). tick() does the first-frame clear + fade, then reads silence and returns before drawing any dot.
     for (int i = 0; i < 8; i++) layer.tick();
 
     auto& buf = layer.buffer();
@@ -43,8 +38,7 @@ TEST_CASE("BlurzEffect stays black without an audio frame") {
     CHECK_FALSE(anyLit);
 }
 
-// With a synthesized audio frame the effect lights the buffer: the colored dot appears and the blur
-// smears it into a soft blob, so at least some lights become non-zero.
+// With a synthesized audio frame the effect lights the buffer: the colored dot appears and the blur smears it into a soft blob, so at least some lights become non-zero.
 TEST_CASE("BlurzEffect lights the buffer when fed a signal") {
     mm::AudioService audio;
     audio.defineControls();
@@ -67,8 +61,7 @@ TEST_CASE("BlurzEffect lights the buffer when fed a signal") {
 
     layer.applyState();
 
-    // Advance the audio and the effect together a few frames: the band cursor wraps 0..15, so over
-    // several ticks the dot lands a non-zero magnitude and paints.
+    // Advance the audio and the effect together a few frames: the band cursor wraps 0..15, so over several ticks the dot lands a non-zero magnitude and paints.
     bool anyLit = false;
     for (int i = 0; i < 32 && !anyLit; i++) {
         audio.tick();
@@ -83,8 +76,7 @@ TEST_CASE("BlurzEffect lights the buffer when fed a signal") {
     audio.release();   // release the active-mic seat; leave no residue for other tests
 }
 
-// geqScanner sweeps the dot steadily across the strip: one pixel per frame, so consecutive frames land
-// the lit dot at different linear positions rather than the same spot.
+// geqScanner sweeps the dot steadily across the strip: one pixel per frame, so consecutive frames land the lit dot at different linear positions rather than the same spot.
 TEST_CASE("BlurzEffect geqScanner sweeps the dot to a new position each frame") {
     mm::AudioService audio;
     audio.defineControls();

@@ -1,11 +1,9 @@
-// @module AudioService
-// @also AudioVolumeEffect
+/// @module AudioService
 
 #include "doctest.h"
-#include "core/AudioLevel.h"
-#include "core/AudioService.h"
-#include "core/ModuleFactory.h"
-#include "light/effects/AudioVolumeEffect.h"
+#include "core/services/AudioLevel.h"
+#include "core/services/AudioService.h"
+#include "core/util/ModuleFactory.h"
 #include "light/effects/AudioSpectrumEffect.h"
 
 #include <cmath>
@@ -13,23 +11,17 @@
 #include <numbers>
 #include <vector>
 
-// The success spec for the level path, written RED before AudioService's reader
-// exists: the two I2S-mic facts that AudioLevel.h handles must hold on
-// synthesized blocks — DC offset is removed (a biased-but-silent block reads 0),
-// the noise floor gates quiet hiss, gain scales what survives — and the whole
-// thing is crash-safe on empty/degenerate input.
+// The success spec for the level path, written RED before AudioService's reader exists: the two I2S-mic facts that AudioLevel.h handles must hold on synthesized blocks, DC offset is removed (a biased-but-silent block reads 0), the noise floor gates quiet hiss, gain scales what survives, and the whole thing is crash-safe on empty/degenerate input.
 
 namespace {
 
-// A pure sine of `cycles` periods across `n` samples at 24-bit-ish amplitude,
-// left-justified into the int32 slot (<<8) the INMP441 produces, plus an
-// optional DC bias to prove the bias is stripped.
+// A pure sine of `cycles` periods across `n` samples at 24-bit-ish amplitude, left-justified into the int32 slot (<<8) the INMP441 produces, plus an optional DC bias to prove the bias is stripped.
 std::vector<int32_t> sine(size_t n, double cycles, double amp24, double dc24 = 0.0) {
     constexpr double kPi = std::numbers::pi_v<double>;
     std::vector<int32_t> v(n);
     for (size_t i = 0; i < n; i++) {
         const double s = amp24 * std::sin(2.0 * kPi * cycles * static_cast<double>(i) / n) + dc24;
-        // <<8 on a wider signed type — left-shifting a negative int32 is UB.
+        // <<8 on a wider signed type, left-shifting a negative int32 is UB.
         const int64_t sample = static_cast<int64_t>(s) << 8;   // 24-bit into the high bits
         v[i] = static_cast<int32_t>(sample);
     }
@@ -54,7 +46,7 @@ TEST_CASE("DcBlocker: a constant DC offset is filtered out") {
 
 TEST_CASE("DcBlocker: an audio tone passes through (DC removed, AC kept)") {
     mm::DcBlocker dc;
-    // A mid-frequency sine on a big DC pedestal — the DC must go, the swing stay.
+    // A mid-frequency sine on a big DC pedestal, the DC must go, the swing stay.
     const int32_t amp = 1 << 18;
     auto biased = sine(1024, 40, amp, 1 << 21);   // amp on a much larger DC pedestal
     dc.process(biased.data(), biased.size());
@@ -64,7 +56,7 @@ TEST_CASE("DcBlocker: an audio tone passes through (DC removed, AC kept)") {
         if (biased[i] > hi) hi = biased[i];
     }
     const int32_t swing = hi - lo;
-    // Centred near zero (DC removed): the midpoint is tiny vs the swing.
+    // Centerd near zero (DC removed): the midpoint is tiny vs the swing.
     CHECK(std::abs(lo + hi) < swing / 4);
     // The tone survived: the swing is on the order of the AC amplitude (<<8 slot).
     CHECK(swing > amp);
@@ -89,7 +81,7 @@ TEST_CASE("AudioLevel: silence reads zero") {
 }
 
 TEST_CASE("AudioLevel: pure DC reads zero (DC offset stripped)") {
-    // A big constant bias, no AC — the DC must be stripped: RMS ~0, not huge.
+    // A big constant bias, no AC, the DC must be stripped: RMS ~0, not huge.
     std::vector<int32_t> s(512, (1 << 22) << 8);
     mm::AudioFrame f;
     mm::computeLevel(s.data(), s.size(), 0, 16, f);
@@ -127,6 +119,7 @@ TEST_CASE("AudioLevel: a high noiseFloor (dB floor) gates a modest signal to zer
     CHECK(hi.level == 0);
 }
 
+// `gain` reads the same way on both paths (higher = narrower window = hotter), but scales the level's OWN base span rather than being used raw: a block RMS covers far more dB than a single bin's peak, and sharing the raw number left the VU in the bottom third of the meter at the settings that made the spectrum look right (measured on a Dig-Next-2: RMS 39-83 of 255).
 TEST_CASE("AudioLevel: higher gain (narrower dB window) reads a higher level") {
     auto s = sine(512, 8, 1 << 14);
     mm::AudioFrame lo, hi;
@@ -154,29 +147,19 @@ TEST_CASE("AudioLevel: isqrt64 matches floor(sqrt) on a spread of values") {
     }
 }
 
-// Regression: the boot wiring in main.cpp does
-//   create("AudioService")->markWiredByCode()
-// and create() returns nullptr for an UNREGISTERED type — so a missing
-// registerType<AudioService> made the deref crash and the device boot-looped (found
-// on the S3 bench). These pin that AudioService and the two audio effects are all
-// registered + createable through the factory, and that latestFrame() is never
-// null even with no mic (so a consumer added before the mic can't deref null).
+// Regression: the boot wiring in main.cpp does create("AudioService")->markWiredByCode() and create() returns nullptr for an UNREGISTERED type, so a missing registerType<AudioService> made the deref crash and the device boot-looped (found on the S3 bench). These pin that AudioService and the two audio effects are all registered + createable through the factory, and that latestFrame() is never null even with no mic (so a consumer added before the mic can't deref null).
 TEST_CASE("AudioService + audio effects are registered and createable (boot-loop guard)") {
     mm::ModuleFactory::registerType<mm::AudioService>("AudioService");
-    mm::ModuleFactory::registerType<mm::AudioVolumeEffect>("AudioVolumeEffect");
     mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect");
 
     auto* mic = mm::ModuleFactory::create("AudioService");
     REQUIRE(mic != nullptr);
     CHECK(mic->role() == mm::ModuleRole::Service);
 
-    auto* vol = mm::ModuleFactory::create("AudioVolumeEffect");
     auto* spec = mm::ModuleFactory::create("AudioSpectrumEffect");
-    REQUIRE(vol != nullptr);
     REQUIRE(spec != nullptr);
 
     delete mic;
-    delete vol;
     delete spec;
 }
 

@@ -15,24 +15,24 @@
   width: 100%;
 }
 
-/* The preview GIF/PNG fills its (now properly-sized) column; auto height keeps
-   the aspect ratio. No max-width — let it use the full column so previews are big. */
+/* The preview leads its cell, above the name. Capped rather than full-bleed: it
+   shares the cell with the prose now, so a tall GIF would push the name out of
+   sight. The cap keeps the picture legible and the title on the first screenful. */
 .md-typeset .mm-catalog-wrap table td img.mm-preview {
   width: 100%;
+  max-width: 320px;
   height: auto;
   display: block;
+  margin-bottom: 0.4rem;
 }
 
-/* Column proportions: name+description and parameters get the room; preview and
-   links are narrower. nth-child targets the 4 columns of the catalog table. */
+/* Two columns. Each added column divides the page again, and the links column at 18%
+   made a three-link card taller than its own controls; merged under them it costs no
+   width at all. Two also degrades best on a phone, where the browser stacks cells. */
 .md-typeset .mm-catalog-wrap table th:nth-child(1),
-.md-typeset .mm-catalog-wrap table td:nth-child(1) { width: 26%; }   /* Name + description */
+.md-typeset .mm-catalog-wrap table td:nth-child(1) { width: 48%; }   /* Preview + name + description */
 .md-typeset .mm-catalog-wrap table th:nth-child(2),
-.md-typeset .mm-catalog-wrap table td:nth-child(2) { width: 26%; }   /* Preview */
-.md-typeset .mm-catalog-wrap table th:nth-child(3),
-.md-typeset .mm-catalog-wrap table td:nth-child(3) { width: 30%; }   /* Parameters */
-.md-typeset .mm-catalog-wrap table th:nth-child(4),
-.md-typeset .mm-catalog-wrap table td:nth-child(4) { width: 18%; }   /* Links */
+.md-typeset .mm-catalog-wrap table td:nth-child(2) { width: 52%; }   /* Controls, then the links */
 
 /* fixed layout clips overflow by default — allow long param/description text to wrap. */
 .md-typeset .mm-catalog-wrap table td { word-wrap: break-word; overflow-wrap: anywhere; vertical-align: top; }
@@ -83,8 +83,22 @@
 /* Links column: grey the plain attribution prose (author, project, year). The
    actual links (Tests, source .h, MoonLight) keep their accent color — Material's
    `a` rule is more specific than this, so only the surrounding text greys. */
+/* A link that has no target yet: shown, not hidden. The label stays in place so the two
+   rows sit identically on every card, and the gap is visible rather than silent. */
+.md-typeset .mm-catalog-wrap .mm-missing {
+  color: var(--md-default-fg-color--lighter);
+  font-style: italic;
+}
+
 .md-typeset .mm-catalog-wrap .mm-links {
   color: var(--md-default-fg-color--light);
+  display: block;
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  /* A rule rather than a gap: sharing a cell with the controls, the links need a visible
+     boundary or the two read as one list. */
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+  font-size: 0.85em;
 }
 
 /* ---------------------------------------------------------------------------

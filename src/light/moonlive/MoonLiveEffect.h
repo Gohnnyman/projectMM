@@ -8,158 +8,200 @@
 #include <cstring>
 #include <cstdio>
 
-// MoonLiveEffect — a scripted effect rendered by the MoonLive engine (§3.3 of
-// livescripts-analysis-top-down.md). The thin binding side of the engine/binding seam: it
-// IS a first-class EffectBase (role, controls, lifecycle, generic UI), and its tick()
-// delegates to a compiled MoonLive over this effect's own buffer.
-//
-// The effect holds a `source` text control; prepare compiles it through the engine and
-// tick() runs the emitted native code over the buffer (emit → allocExec → call → write). A
-// source edit recompiles live; a parse error shows in the module status and the layer goes
-// dark — robust, no reboot.
-
 namespace mm {
 
-/// Effect whose render is a live-authored MoonLive script.
+/// The thin binding between the MoonLive engine and a first-class `EffectBase`.
+///
+/// @moreinfo
+///
+/// The effect names a script file, `prepare` compiles it, and `tick` runs the emitted native code over this effect's own buffer.
+/// A source edit recompiles live, and a parse error shows in the module status while the layer renders dark.
 class MoonLiveEffect : public EffectBase {
 public:
-    /// Both answered by the SCRIPT when it says, and by the binding when it stays silent.
-    ///
-    /// 📝 marks a script that declared no tags of its own: the notepad says "this is scripted",
-    /// which is all a module can say about a program it has not been told about. A script that
-    /// declares `string tags()` replaces it, so its row reads like any other effect's.
+    // 📝 marks a script declaring none of its own, which is all a module can say about one.
+    /// The tags the script declares, or the scripted-module mark when it declares none.
     const char* tags() const override {
         const char* t = script_.tags();
         return t ? t : "📝";
     }
 
-    /// The layer EXTRUDES on this (Layer::tick), so a script declaring 1 paints one column and the
-    /// framework fills the rest, exactly as a compiled D1 effect does. A script that declares
-    /// nothing stays D2, which is what every script rendered as before it could say.
+    // The layer extrudes on this, so a script declaring 1 paints a column and the framework fills.
+    /// The axes this script paints, which a silent script leaves at two.
     Dim dimensions() const override { return script_.dimensions(); }
 
-    // The effect carries its script's NAME as an editable, persisted text control, plus a control
-    // for every control the script declared (`addControl("speed", speed, 0, 99)`). The
-    // engine exposes the declared list after a compile; each becomes a real uint8 control bound by
-    // reference to the engine's live control-arena slot, so a slider write lands in the slot the
-    // next render tick reads, with no recompile (the live-edit guarantee). Naming a different
-    // script recompiles (the script-editor loop), which re-derives the control set.
+    // Each control binds by reference to its arena slot, so a slider write needs no recompile.
+    /// Publish the script name, and every control the script declares.
     void defineControls() override {
-        // The script NAME, not the script. The text lives in a file the UI loads, edits and
-        // saves through /api/file — so a module costs ~32 bytes here instead of a resident
-        // kilobyte, and a script is bounded by the filesystem rather than by this array.
+        // The script name rather than its text, so a module costs bytes instead of a kilobyte.
         controls_.addFilePath("script", script_.buffer(), script_.bufferSize(),
                               moonlive::kEffectPick);
-        // Every control the script declared. System variables (`width`, `height`, `depth`, `t`)
-        // are not controls and never appear here, so there is nothing to filter out.
+        // Every control the script declared: a system variable is not one, so none appear here.
         script_.publishDeclaredControls(controls_);
     }
 
-    // Naming a different script must recompile: route it through the prepare rebuild sweep so the
-    // new one swaps in live (the script-editor loop). A SCRIPTED CONTROL's value change must NOT
-    // recompile: it just updates an arena byte the running native code reads next tick. So only
-    // "script" triggers a rebuild; every scripted control returns false (the live-edit path).
+    // Only the script name rebuilds: a scripted control updates an arena byte the next tick reads.
+    /// Whether a control change needs the prepare sweep.
     bool affectsPrepare(const char* controlName) const override {
         return std::strcmp(controlName, "script") == 0;
     }
 
-    // Compile the source on the cold rebuild path. A failed compile (parse error or no exec
-    // memory) surfaces in the module status and leaves tick() a no-op — the effect renders
-    // dark, the device keeps running (robustness + no-reboot). A *source* edit re-enters here and
-    // recompiles, so a new script swaps in live; a broken edit just shows its diagnostic.
-    // Compile the script if the file changed, then surface whatever it declares.
-    //
-    // sync() answers "is what is compiled still what the file says" from a 4-byte hash, so an
-    // unchanged script costs a read rather than a re-JIT. It reports the status and the dynamic
-    // bytes itself, which is why nothing here repeats that.
+    // A failed compile leaves tick a no-op, so the effect renders dark and the device keeps running.
+    /// Compile the script if the file changed, then surface whatever it declares.
     void prepare() override {
+        // The next tick is the first, so the idle interval is not handed to the flow and the decay.
+        tickStarted_ = false;
         // The script sizes its own pool from defineControls(), which sync() runs after a compile.
         script_.setPoolSizer([](void* ctx, uint16_t n) -> uint16_t {
             return static_cast<MoonLiveEffect*>(ctx)->particles_.resize(n);
         }, this);
+        // Two 16-bit planes are 96 KB on a 20-cube, so only a script that advects pays for them.
+        script_.setTrailSizer([](void* ctx, bool want) -> bool {
+            return static_cast<MoonLiveEffect*>(ctx)->resizeTrail(want);
+        }, this);
         script_.sync(moonlive::effectSysVars(), *this);
-        // The compile re-derives the declared-control set, so rebuild the control list to surface
-        // it (the same rebuildControls() pattern NetworkModule uses when a state change reshapes
-        // its controls). Each scripted control re-binds to its (stable-address) arena slot.
-        // Unconditional: a control list is also rebuilt for a script that did NOT change, which
-        // costs a walk and keeps the card correct after any other reason to prepare.
+        // The planes follow the fixture, so a resize re-sizes them though the script did not.
+        if (trailWanted_) resizeTrail(true);
+        // Unconditional, since a walk costs little and keeps the card correct after any prepare.
         rebuildControls();
     }
 
     void tick() MM_NONBLOCKING override {
-        // The native emitter stores R,G,B at offsets +0/+1/+2 with channelsPerLight() only as the
-        // stride (moonlive_lower_*: addr = index * cpl, then 3 writes). A 0/1/2-channel layer would
-        // let the last light's +1/+2 write run past the buffer, so a sub-RGB layout renders dark.
+        // The emitter writes three channels at a stride, so a sub-RGB layout renders dark instead.
         const auto cpl = channelsPerLight();
         if (cpl < 3) return;
         if (!script_.ok()) return;
-        // Refresh the system variables before the script runs: a layer can be resized live, and a
-        // script holding last frame's width would draw to the old geometry.
+        // Refreshed before the run, since a layer resizes live and stale width draws the old box.
         writeSysVar(moonlive::kSysWidth,  width());
         writeSysVar(moonlive::kSysHeight, height());
         writeSysVar(moonlive::kSysDepth,  depth());
-        // The draw builtins (line) render through the same canvas every native effect uses,
-        // installed for exactly one run and detached after, so a script can only ever draw into
-        // the layer it is ticking in.
+        // Installed for one run and detached after, so a script draws only into its own layer.
         moonlive::setDrawCanvas(canvas());
-        // fade(amt) asks the LAYER, which collects the request and applies it once per frame.
-        // Installed in the same bracket as the canvas so it detaches on the same path.
+        // fade(amt) asks the layer, which collects the request and applies it once per frame.
         moonlive::setFadeSink([](void* ctx, uint8_t amt) {
             if (Layer* l = static_cast<MoonLiveEffect*>(ctx)->layer()) l->fadeToBlackBy(amt);
         }, this);
-        // setPan/setTilt reach the fixture's motion channels, whose offsets live in the layer's
-        // channel map. Routed through EffectBase's own setters, so a script aims a head by exactly
-        // the path a compiled effect does, including the no-op on a light that has no such channel.
+        // Routed through EffectBase's own setters, so a script aims a head as a compiled effect does.
         moonlive::setMotionSink([](void* ctx, moonlive::MotionAxis axis, uint32_t index,
                                    uint8_t value) {
             auto* self = static_cast<MoonLiveEffect*>(ctx);
             const auto i = static_cast<nrOfLightsType>(index);
-            if (axis == moonlive::MotionAxis::Pan) self->setPan(i, value);
-            else                                   self->setTilt(i, value);
+            switch (axis) {
+                case moonlive::MotionAxis::Pan:    self->setPan(i, value);    break;
+                case moonlive::MotionAxis::Tilt:   self->setTilt(i, value);   break;
+                case moonlive::MotionAxis::Zoom:   self->setZoom(i, value);   break;
+                case moonlive::MotionAxis::Rotate: self->setRotate(i, value); break;
+                case moonlive::MotionAxis::Gobo:   self->setGobo(i, value);   break;
+            }
         }, this);
-        // The particle builtins reach this effect's own pool, with the frame scale the binding
-        // computed: framerate independence is the system's property, not the script author's.
+        // Framerate independence is the system's property rather than the script author's.
         if (particles_.count() > 0)
             moonlive::setPoolSink(&particles_.pool(), particles_.advance(elapsed()));
-        // The frame moment: run `tick` if the script defined one. A script that defines only
-        // `modifyLogical` renders nothing here and folds coordinates instead, which is the author's
-        // choice rather than an error.
+        // The binding owns the geometry, the ping-pong and the delta, none of which is the author's.
+        const uint32_t nowMs = elapsed();
+        // A zero delta on the first tick, since the whole uptime would teleport the trail.
+        const uint32_t dt = tickStarted_ ? nowMs - lastTickMs_ : 0u;
+        lastTickMs_ = nowMs;
+        tickStarted_ = true;
+        if (trailA_) {
+            moonlive::FlowSink f{};
+            f.a = trailA_.data();
+            f.b = trailB_.data();
+            f.front = &trailFront_;
+            f.frame = &frameCount_;
+            f.w = width(); f.h = height(); f.d = depth();
+            f.dtMs = dt;
+            moonlive::setFlowSink(f);
+        }
+        // Run `tick` when the script defined one: a script defining only a fold renders nothing.
         if (script_.engine().hasEntry(moonlive::kEntryTick))
             script_.engine().run(buffer(), nrOfLights(), cpl, elapsed(), moonlive::kEntryTick);
+        // The one narrowing step a script cannot do itself, without which the plane is never read.
+        if (trailA_) {
+            moonlive::setFlowSink({});
+            blitTrail();
+        }
+        // Outside the trail branch, since `fieldRate(n)` is a rate limiter any script may use.
+        frameCount_++;
         moonlive::setPoolSink(nullptr, 0);
         moonlive::setMotionSink(nullptr, nullptr);
         moonlive::setFadeSink(nullptr, nullptr);
         moonlive::setDrawCanvas({});
     }
 
+    /// Drop the compiled program, the trail planes and the particle pool.
     void release() override {
         particles_.release();      // zero the pool BEFORE the base frees its buffers, or it would
                                    // be left naming freed memory
         script_.engine().free();   // release the exec block: the destructor role
         script_.invalidate();     // and forget what was compiled, so re-enabling rebuilds it
         script_.releaseReporting(*this);
+        // Forget the shape as well as the memory, or the next prepare compares against a dead one.
+        releaseTrail();
         EffectBase::release();
     }
 
-    /// Replace the script. The next prepare() compiles it — the same path a UI edit takes, so a
-    /// test and a user exercise identical code.
-    /// Point the module at a script in the shared script directory. The file itself is written by
-    /// the UI (or the File Manager); this only says WHICH one, and the next prepare() compiles it.
+    /// Replace the script, which the next prepare compiles by the path a UI edit takes.
     void setScript(const char* name) { script_.setName(name); }
 
 private:
-    // Publish one system variable into its arena slot, FULL WIDTH. It used to saturate to a byte,
-    // which is what made a 768-wide wall report 255 and every 2D script paint a corner.
+    // Full width: saturating to a byte made a 768-wide wall report 255.
     void writeSysVar(uint8_t offset, uint32_t value) {
         moonlive::writeSysVarSlot(script_.engine().controlSlot(offset), value);
     }
 
 
-    // The script this effect renders: its file name, the compiled program, and the content hash
-    // that decides whether a prepare has anything to do. A fresh card starts with NO script and
-    // renders nothing until one is named, rather than every new module compiling the same effect.
+    // A fresh card starts with no script and renders nothing until one is named.
     moonlive::MoonLiveScript script_;
     moonlive::MoonLiveParticles particles_{*this};
+    // Two, because advection reads one and writes the other rather than sampling moved pixels.
+    ScratchBuffer<uint16_t> trailA_{*this};
+    ScratchBuffer<uint16_t> trailB_{*this};
+    ScratchBuffer<uint8_t>  trailCarry_{*this};   ///< the dither's per-channel error
+    bool                    trailFront_ = true;
+    uint32_t                frameCount_ = 0;   ///< the counter fieldRate reads
+    bool                    trailWanted_ = false;
+    uint32_t                lastTickMs_ = 0;
+    bool                    tickStarted_ = false;   ///< has a frame been timed yet
+    lengthType              trailW_ = 0, trailH_ = 0, trailD_ = 0;  ///< the shape the planes hold
+
+    // Through draw::blit16 like the compiled effects, which is the divergence blit16 exists to end.
+    /// Blit the trail plane onto the layer.
+    void blitTrail() {
+        const lengthType w = width(), h = height(), d = depth();
+        if (!trailA_ || !trailB_) return;
+        const uint16_t* live = trailFront_ ? trailA_.data() : trailB_.data();
+        draw::blit16(canvas(), live, w, h, d, trailCarry_ ? trailCarry_.data() : nullptr);
+    }
+
+    /// Size or free the trail planes, returning whether one is available for the script to use.
+    bool resizeTrail(bool want) {
+        trailWanted_ = want;
+        // Every exit frees all three together, since the carry is as much the trail as the planes.
+        if (!want) { releaseTrail(); return false; }
+        const lengthType w = width(), h = height(), d = depth();
+        const size_t n = static_cast<size_t>(w) * h * d * 3;
+        if (n == 0) { releaseTrail(); return false; }
+        const size_t had = trailA_.count();
+        if (!trailA_.resize(n) || !trailB_.resize(n) || !trailCarry_.resize(n)) {
+            releaseTrail();                             // a half-allocated set is worse than none
+            return false;
+        }
+        // A same-count reshape keeps samples laid out for the old geometry, so both planes clear.
+        if (n == had && (w != trailW_ || h != trailH_ || d != trailD_)) {
+            std::memset(trailA_.data(), 0, trailA_.bytes());
+            std::memset(trailB_.data(), 0, trailB_.bytes());
+            std::memset(trailCarry_.data(), 0, trailCarry_.bytes());   // per light, so it reshapes too
+        }
+        trailW_ = w; trailH_ = h; trailD_ = d;
+        return true;
+    }
+
+    /// Free the trail set. One place, so a new buffer cannot be forgotten on one exit path.
+    void releaseTrail() {
+        trailA_.resize(0); trailB_.resize(0); trailCarry_.resize(0);
+        trailW_ = trailH_ = trailD_ = 0;
+    }
 };
 
 }  // namespace mm
+

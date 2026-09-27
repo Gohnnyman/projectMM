@@ -7,6 +7,8 @@ and collects per-step performance measurements.
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 import time
 import urllib.request
@@ -70,6 +72,13 @@ class Client:
         return self._send(urllib.request.Request(
             f"{self.base}{path}", data=body,
             headers={"Content-Type": "application/json"}))
+
+    def get_text(self, path: str) -> str:
+        """GET a raw body. /api/file returns the file's CONTENTS, not JSON, so it cannot go
+        through get() which parses what it reads."""
+        req = urllib.request.Request(f"{self.base}{path}")
+        with urllib.request.urlopen(req, timeout=self.TIMEOUT_S) as resp:
+            return resp.read().decode("utf-8", "replace")
 
     def post_text(self, path: str, text: str):
         """POST a raw text body. /api/file takes the file's CONTENTS, not JSON — the body IS
@@ -145,7 +154,7 @@ def _detect_target(state: dict) -> str:
     exposed through the `firmware` control. Desktop: same key but reports
     `unknown`, so we substitute desktop-<host-os> using the runtime os name (still
     distinguishes macOS vs Linux vs Windows builds, which can differ in tick
-    noticeably). See docs/architecture.md § Firmware vs board.
+    noticeably). See docs/explanation/architecture/index.md § Firmware vs board.
     """
     import platform
     firmware = None
@@ -162,6 +171,91 @@ def _detect_target(state: dict) -> str:
     # Desktop fallback
     osmap = {"Darwin": "desktop-macos", "Linux": "desktop-linux", "Windows": "desktop-windows"}
     return osmap.get(platform.system(), "desktop-unknown")
+
+
+def _uptime_seconds(client):
+    """The System card's uptime as seconds, or None when it cannot be read.
+
+    The value is `H:MM:SS`, and its only use here is comparing two readings across a restart.
+    """
+    try:
+        mod = client.get(_mod_path("System"))
+    except Exception:
+        return None
+    for c in (mod.get("controls") or []):
+        if c.get("name") == "uptime":
+            parts = str(c.get("value") or "").split(":")
+            if len(parts) != 3:
+                return None
+            try:
+                h, m, sec = (int(x) for x in parts)
+            except ValueError:
+                return None
+            return h * 3600 + m * 60 + sec
+    return None
+
+
+def _reboot_and_wait(client, target: str, timeout_s: float = 60.0) -> str:
+    """Restart the device and wait for it to answer again, so a scenario can prove what survives.
+
+    On a board this is the reboot the endpoint performs. On a desktop the same endpoint EXITS the
+    process and nothing restarts it, so the runner relaunches the binary itself, with the data
+    directory the exiting instance was using: a restart that came back on different files would
+    prove nothing about persistence. Returns "" on success, or the reason it did not come back.
+    """
+    data_dir = os.environ.get("MM_DATA_DIR")
+    is_desktop = target.startswith("desktop-")
+
+    # Uptime before the restart, so the recovered instance can be told from the one still running.
+    # Without it the first answering /api/state is accepted, which on a board is routinely the OLD
+    # instance replying before it goes down: every persistence assertion after that proves nothing.
+    before = _uptime_seconds(client)
+
+    try:
+        client.post("/api/reboot", {})
+    except urllib.error.HTTPError as re_:
+        # A refused reboot is a failed step: the device is up, so the poll below would pass at once.
+        return f"/api/reboot returned HTTP {re_.code}"
+    except Exception:
+        pass                  # the device goes away mid-response, which is the expected shape
+
+    if is_desktop:
+        # The same resolver run_desktop.py uses, which picks the NEWEST candidate rather than the
+        # first that exists: picking by existence served a stale build whose changes read as no-ops,
+        # and it names the per-host directory, so this works on Linux and Windows too.
+        sys.path.insert(0, str(ROOT / "moondeck" / "run"))
+        from run_desktop import _resolve_executable            # noqa: E402
+        binary = _resolve_executable()
+        if not binary.exists():
+            return f"no desktop binary to relaunch (looked for {binary})"
+        time.sleep(1.0)       # let the old process release the port before the new one binds it
+        env = dict(os.environ)
+        if data_dir:
+            env["MM_DATA_DIR"] = data_dir
+        subprocess.Popen([str(binary)], cwd=str(ROOT), env=env,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Evidence of a restart, not merely of an answer: either the device went away and came back, or
+    # it answers with an uptime lower than before. One of the two must hold before this reports success.
+    deadline = time.time() + timeout_s
+    went_away = False
+    while time.time() < deadline:
+        try:
+            client.get("/api/state")
+        except Exception:
+            went_away = True          # the old instance is gone, so the next answer is the new one
+            time.sleep(1.0)
+            continue
+        if went_away:
+            return ""
+        now = _uptime_seconds(client)
+        if before is not None and now is not None and now < before:
+            return ""                 # the clock restarted, which only a reboot does
+        time.sleep(1.0)
+    if not went_away:
+        return (f"still answering after {timeout_s:.0f}s with no uptime reset: "
+                "the reboot did not take effect")
+    return f"did not answer within {timeout_s:.0f}s"
 
 
 def _sum_dynamic_bytes(state: dict) -> int:
@@ -290,7 +384,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                  update_reason: str | None = None) -> dict:
     """Run a scenario against a live device and return results.
 
-    Mode handling (see docs/testing.md § Scenario modes):
+    Mode handling (see docs/reference/testing.md § Scenario modes):
       construct  — scenario builds the pipeline from scratch. Live device's
                    main.cpp owns the top-level shape, so construct scenarios
                    only run in-process. Skip here with a clear note.
@@ -460,6 +554,38 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                         else:
                             print(f"  +     {step.get('id', '?')} ({step['type']})")
                             created_modules.append(step.get("id", ""))
+                        # The step's declared PROPS, applied whether the module was just created or
+                        # already existed. /api/modules takes the shape but not the values, so a
+                        # scenario saying `{"width": 32}` measured a module at its defaults; and an
+                        # existing module measured whatever the last run left on it.
+                        for key, value in (step.get("props") or {}).items():
+                            ok = False
+                            try:
+                                pr = client.post("/api/control",
+                                                 {"module": step.get("id", ""), "control": key,
+                                                  "value": value})
+                                ok = bool(pr.get("ok"))
+                            except urllib.error.HTTPError as pe:
+                                if not step.get("optional"):
+                                    raise
+                                print(f"  SET   {step.get('id','?')}.{key}: skipped "
+                                      f"(optional, not offered on {target}: {pe.code})")
+                                continue
+                            # A 200 with ok:false is a REJECTION, the same as a 400: the device
+                            # refused the value. Silently accepting it measured a configuration the
+                            # scenario never got.
+                            if not ok:
+                                if not step.get("optional"):
+                                    raise RuntimeError(
+                                        f"{step.get('id','?')}.{key} = {value!r} was rejected")
+                                print(f"  SET   {step.get('id','?')}.{key}: skipped "
+                                      f"(optional, rejected on {target})")
+                        # The step's declared PROPS, applied after creation. /api/modules takes the
+                        # shape but not the values, so a scenario saying `{"width": 32}` created a
+                        # module at its defaults and every later measurement was of a pipeline the
+                        # scenario never asked for. The desktop runner applies them; without this
+                        # the same scenario measured two different things on the two runners.
+
                     elif step.get("optional"):
                         step_result["status"] = "ok"
                         skipped_ids.add(step.get("id", ""))
@@ -508,6 +634,88 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                         print(f"  WRITE {path_} — FAILED: {we}")
                         results["passed"] = False
 
+            elif op == "reboot":
+                # Restart and wait, so a later expect_control proves what SURVIVED rather than what
+                # is merely still in memory. The one op that can tell a written setting from a kept one.
+                why = _reboot_and_wait(client, target, float(step.get("timeout", 60)))
+                if why:
+                    step_result["status"] = "error"
+                    print(f"  REBOOT — {why}")
+                    results["passed"] = False
+                else:
+                    step_result["status"] = "ok"
+                    print("  REBOOT — back up")
+
+            elif op == "expect_file":
+                # Read a file back, which is the only way to prove a write reached the filesystem
+                # rather than a cache: the card that owns the filesystem is proven by its contents.
+                path_ = step["path"]
+                # `contains` matches a substring, `equals` the whole file: the two tiers agree, and
+                # neither accepts a step that names neither, which would pass on any file at all.
+                exact = "equals" in step
+                if not exact and "contains" not in step:
+                    step_result["status"] = "error"
+                    print(f"  EXPECT {path_} — needs `contains` or `equals`")
+                    results["passed"] = False
+                    continue
+                want = str(step["equals"] if exact else step["contains"])
+                try:
+                    raw = client.get_text(f"/api/file?path={urllib.parse.quote(path_, safe='/')}")
+                except Exception as fe:
+                    step_result["status"] = "error"
+                    print(f"  EXPECT {path_} — could not read ({fe})")
+                    results["passed"] = False
+                else:
+                    holds = (raw == want) if exact else (bool(want) and want in raw)
+                    step_result["status"] = "ok" if holds else "error"
+                    verb = "is" if exact else "holds"
+                    print(f"  EXPECT {path_} {verb if holds else 'does not ' + verb} {want!r}")
+                    if not holds:
+                        results["passed"] = False
+
+            elif op == "expect_control":
+                # Assert a control reads what the scenario says it must, the only op that fails a
+                # scenario on a VALUE rather than on a timing contract. It exists for the strings a
+                # rename would change silently, where nothing else can see the break.
+                # Read through /api/modules/<id>, the same view a client gets, so an assertion can
+                # never pass against a value the device would report differently.
+                mod_id, key = step["id"], step["key"]
+                # JSON spells a boolean `true`, Python spells it `True`, and the in-process runner
+                # renders the JSON form: comparing str() of either would make one tier disagree
+                # with the other about the same scenario.
+                def _as_written(v):
+                    return {True: "true", False: "false"}.get(v, str(v)) if isinstance(v, bool) else str(v)
+                # `not_equals` pins a value that moves per release, where the only stable claim is
+                # that it is not the empty string a missing source would render. Both tiers agree.
+                negated = "equals" not in step and "not_equals" in step
+                if "equals" not in step and not negated:
+                    step_result["status"] = "error"
+                    print(f"  EXPECT {mod_id}.{key} — needs `equals` or `not_equals`")
+                    results["passed"] = False
+                    continue
+                want = _as_written(step["not_equals" if negated else "equals"])
+                try:
+                    mod = client.get(_mod_path(mod_id))
+                    got = next((c.get("value") for c in (mod.get("controls") or [])
+                                if c.get("name") == key), None)
+                except Exception as ce:
+                    step_result["status"] = "error"
+                    print(f"  EXPECT {mod_id}.{key} — could not read ({ce})")
+                    results["passed"] = False
+                    continue
+                if got is None:
+                    step_result["status"] = "error"
+                    print(f"  EXPECT {mod_id}.{key} — no such control")
+                    results["passed"] = False
+                elif (_as_written(got) != want) if negated else (_as_written(got) == want):
+                    step_result["status"] = "ok"
+                    print(f"  EXPECT {mod_id}.{key} {'!=' if negated else '=='} {want}")
+                else:
+                    step_result["status"] = "error"
+                    print(f'  EXPECT {mod_id}.{key} is "{_as_written(got)}", '
+                          f'expected {"not " if negated else ""}"{want}"')
+                    results["passed"] = False
+
             elif op == "set_control":
                 data = {"module": step["id"], "control": step["key"],
                         "value": step["value"]}
@@ -529,7 +737,13 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                         # is the board-filtered option count, so the value is out of range
                         # and returns 400. A REQUIRED set_control that 400s still fails.
                         step_result["status"] = "skipped"
-                        print(f"  SET   {step.get('id','?')}.{step.get('key','?')} = {step.get('value','?')} — skipped (optional, value not offered on this target)")
+                        # And the MODULE is unavailable from here on. Marking only the step left
+                        # every later measure running against a module configured for a peripheral
+                        # this chip does not have: the numbers came out, looked like data, and
+                        # described a configuration that never applied. skipped_ids is the same set
+                        # an optional add uses, so the measures already know to skip it.
+                        skipped_ids.add(step.get("id", ""))
+                        print(f"  SET   {step.get('id','?')}.{step.get('key','?')} = {step.get('value','?')}: skipped (optional, value not offered on this target; later steps on it skip too)")
                     elif ce.code == 404:
                         # Transient: a set_control issued right after a structural
                         # change (replace/add) can race the device's prepareTree and
@@ -680,7 +894,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
             # Per-step contract: { "contract": { "<target>": { "tick_us": N,
             #   "free_heap": M, "tick_tolerance_pct": P, "heap_tolerance_pct": Q,
             #   "set_by": "YYYY-MM-DD", "reason": "..." } } }
-            # Contracts are hand-set promises — see docs/testing.md § Performance
+            # Contracts are hand-set promises — see docs/reference/testing.md § Performance
             # contracts. `--update-contract --reason "..."` rewrites them.
             contract_block = step.get("contract", {}).get(target) if step.get("contract") else None
             if contract_block:
@@ -740,7 +954,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 if exp_block is not None and exp_block > 0:
                     # max_block of 0 always fails when a positive floor is
                     # asserted: maxBlock is always served by current firmware
-                    # (src/core/HttpServerModule.cpp), so 0 means the device
+                    # (src/core/system/HttpServerModule.cpp), so 0 means the device
                     # reports zero contiguous heap — a real failure, not a
                     # missing field. (Contrast with free_heap on desktop where 0
                     # is the "unlimited" sentinel — that's a desktop-only
@@ -901,9 +1115,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
         print(f"  contract[{target}] NOT written (run failed; observed still saved)")
 
     if wrote_observations[0] or contract_safe_to_write:
-        with open(scenario_path, "w") as f:
-            json.dump(scenario, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+        _observed.save_scenario(scenario_path, scenario)
         what = []
         if wrote_observations[0]:
             what.append(f"observed[{target}]")
@@ -999,7 +1211,7 @@ def main():
 
     if args.update_contract and not args.reason:
         parser.error("--update-contract requires --reason "
-                     "(e.g. --reason 'tightened after Layer optimisation')")
+                     "(e.g. --reason 'tightened after Layer optimization')")
 
     client = Client(args.host)
 

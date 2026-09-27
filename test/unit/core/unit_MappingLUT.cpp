@@ -1,4 +1,4 @@
-// @module MappingLUT
+/// @module MappingLUT
 
 #include "doctest.h"
 #include "light/layers/MappingLUT.h"
@@ -6,8 +6,7 @@
 
 #include <vector>
 
-// Restores the maxAllocBlock cap to 0 (unlimited) on scope exit so a forced-
-// paging case can't leak the cap into later tests.
+// Restores the maxAllocBlock cap to 0 (unlimited) on scope exit so a forced-paging case can't leak the cap into later tests.
 struct BlockCapGuard {
     ~BlockCapGuard() { mm::platform::setTestMaxAllocBlock(0); }
 };
@@ -91,22 +90,17 @@ TEST_CASE("MappingLUT 1:N mapping") {
     CHECK(dests[2] == 9);
 }
 
-// When no single contiguous block fits (forced via the test cap) but total heap
-// allows it, build() pages the destinations array. The mapping must read back
-// identically to a single-alloc build — paging is an allocation detail, not a
-// behaviour change. isPaged() confirms the fallback actually engaged.
+// When no single contiguous block fits (forced via the test cap) but total heap allows it, build() pages the destinations array. The mapping must read back identically to a single-alloc build, paging is an allocation detail, not a behavior change. isPaged() confirms the fallback actually engaged.
 TEST_CASE("MappingLUT paged destinations read back identically") {
     BlockCapGuard guard;
-    // Cap the largest block well below a 5000-destination array
-    // (5000 × sizeof(nrOfLightsType)) so tier-1 fails and tier-2 pages.
+    // Cap the largest block well below a 5000-destination array (5000 × sizeof(nrOfLightsType)) so tier-1 fails and tier-2 pages.
     mm::platform::setTestMaxAllocBlock(4096);
 
     mm::MappingLUT lut;
     REQUIRE(lut.build(3, 5000));
     CHECK(lut.isPaged());  // the fallback engaged
 
-    // Logical 1's run spans well past one 4096-entry page → exercises the
-    // page-boundary walk in forEachDestination. Build runs of known values.
+    // Logical 1's run spans well past one 4096-entry page → exercises the page-boundary walk in forEachDestination. Build runs of known values.
     std::vector<mm::nrOfLightsType> run0, run1, run2;
     for (mm::nrOfLightsType i = 0; i < 100; i++) run0.push_back(i);
     for (mm::nrOfLightsType i = 0; i < 4000; i++) run1.push_back(static_cast<mm::nrOfLightsType>(1000 + i)); // crosses the 4096 page boundary
@@ -128,11 +122,7 @@ TEST_CASE("MappingLUT paged destinations read back identically") {
     CHECK(lut.destinationCount() == run0.size() + run1.size() + run2.size());
 }
 
-// build() returns false on genuine exhaustion — total free heap (minus the
-// reserve) can't hold the destinations — so the caller degrades to 1:1. Forced
-// here via a non-zero freeHeap is desktop-only-unavailable, so this case pins
-// the paged path's success and the boundary; the tier-3 false path is covered
-// by the Layer sparse-mapping degrade test on real heap limits.
+// build() returns false on genuine exhaustion, total free heap (minus the reserve) can't hold the destinations, so the caller degrades to 1:1. Forced here via a non-zero freeHeap is desktop-only-unavailable, so this case pins the paged path's success and the boundary; the tier-3 false path is covered by the Layer sparse-mapping degrade test on real heap limits.
 TEST_CASE("MappingLUT single-block path when a block fits (not paged)") {
     BlockCapGuard guard;
     mm::platform::setTestMaxAllocBlock(1 << 20);  // 1 MB block — fits any small LUT

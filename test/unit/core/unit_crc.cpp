@@ -1,15 +1,13 @@
-// @module crc
+/// @module crc
 
 #include "doctest.h"
-#include "core/crc.h"
+#include "core/util/crc.h"
 
 #include <cstring>
 
 using namespace mm;
 
-// CRC-16/CCITT-FALSE has a well-known check value: "123456789" → 0x29B1. Pinning it proves the
-// polynomial/init/reflection match the standard variant (so a fingerprint computed here matches
-// any other CCITT-FALSE implementation).
+// CRC-16/CCITT-FALSE has a well-known check value: "123456789" → 0x29B1. Pinning it proves the polynomial/init/reflection match the standard variant (so a fingerprint computed here matches any other CCITT-FALSE implementation).
 TEST_CASE("crc: CCITT-FALSE check vector") {
     const char* s = "123456789";
     CHECK(crc16(reinterpret_cast<const uint8_t*>(s), std::strlen(s)) == 0x29B1u);

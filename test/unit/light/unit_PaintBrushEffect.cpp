@@ -1,27 +1,18 @@
-// @module PaintBrushEffect
-// @also AudioService
+/// @module PaintBrushEffect
+/// @also AudioService
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/PaintBrushEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioService.h"
+#include "core/services/AudioService.h"
 #include "platform/platform.h"   // setTestNowMs — deterministic virtual time
 
-// PaintBrushEffect is audio-driven: it draws a set of oscillating lines whose length is scaled by an
-// audio band's magnitude (bands from AudioService::latestFrame(), a process-wide static), fading the
-// field a little each frame so the moving strokes leave trails. A line only draws when it is longer
-// than minLength, and a band of 0 yields length 0, so silence draws nothing and fades to dark. To feed
-// a signal on the host (no I2S mic) a live AudioService runs in a simulate "always" mode — synthesizeFrame()
-// fills the bands each tick() off platform::millis(). The clock is frozen with setTestNowMs so the frame
-// (and the effect's own oscillators, which read elapsed()==millis()) are deterministic. Each case that
-// needs audio brackets its own AudioService setup()/release() via the guard so it never leaks the
-// active-mic pointer or the frozen clock into another test file.
+// PaintBrushEffect is audio-driven: it draws a set of oscillating lines whose length is scaled by an audio band's magnitude (bands from AudioService::latestFrame(), a process-wide static), fading the field a little each frame so the moving strokes leave trails. A line only draws when it is longer than minLength, and a band of 0 yields length 0, so silence draws nothing and fades to dark. To feed a signal on the host (no I2S mic) a live AudioService runs in a simulate "always" mode, synthesizeFrame() fills the bands each tick() off platform::millis(). The clock is frozen with setTestNowMs so the frame (and the effect's own oscillators, which read elapsed()==millis()) are deterministic. Each case that needs audio brackets its own AudioService setup()/release() via the guard so it never leaks the active-mic pointer or the frozen clock into another test file.
 
 namespace {
 
-// Restores real-clock behaviour and vacates the process-wide active-mic seat so each case is
-// independent (both are global state a prior case could leave set).
+// Restores real-clock behavior and vacates the process-wide active-mic seat so each case is independent (both are global state a prior case could leave set).
 struct AudioGuard {
     mm::AudioService& mic;
     ~AudioGuard() {
@@ -30,8 +21,7 @@ struct AudioGuard {
     }
 };
 
-// Bring the mic up in "music (always)" at a frozen time so every band carries a magnitude and the
-// synthesized frame is deterministic; several loops let the levelSmoothed EMA settle.
+// Bring the mic up in "music (always)" at a frozen time so every band carries a magnitude and the synthesized frame is deterministic; several loops let the levelSmoothed EMA settle.
 void driveMusic(mm::AudioService& mic, uint32_t ms) {
     mic.defineControls();
     mic.simulate = 3;   // music, always — keeps every band non-zero (loud, broadband)
@@ -80,8 +70,7 @@ TEST_CASE("PaintBrushEffect draws lit strokes from a live audio frame") {
     CHECK(anyLit);
 }
 
-// Silence draws nothing: with no active mic the frame is all-zero bands, so every line's length maps to
-// 0 (below the minLength gate) and the buffer stays fully black.
+// Silence draws nothing: with no active mic the frame is all-zero bands, so every line's length maps to 0 (below the minLength gate) and the buffer stays fully black.
 TEST_CASE("PaintBrushEffect stays black on silence") {
     // Ensure no mic holds the active seat, so latestFrame() is the static all-zero frame.
     { mm::AudioService idle; idle.release(); }
@@ -103,8 +92,7 @@ TEST_CASE("PaintBrushEffect stays black on silence") {
     layer.addChild(&fx);
     layer.applyState();
 
-    // Run several frames: the per-frame fade only decays what's there, and silence never adds a stroke,
-    // so the field never lights.
+    // Run several frames: the per-frame fade only decays what's there, and silence never adds a stroke, so the field never lights.
     for (int i = 0; i < 8; i++) layer.tick();
 
     auto& buf = layer.buffer();
@@ -116,8 +104,7 @@ TEST_CASE("PaintBrushEffect stays black on silence") {
     CHECK_FALSE(anyLit);
 }
 
-// The minLength gate suppresses strokes: raised to its maximum, no line is ever long enough to draw, so
-// even a loud broadband frame leaves the buffer black — the gate, not the audio, decides.
+// The minLength gate suppresses strokes: raised to its maximum, no line is ever long enough to draw, so even a loud broadband frame leaves the buffer black, the gate, not the audio, decides.
 TEST_CASE("PaintBrushEffect minLength gate suppresses all strokes") {
     mm::AudioService mic;
     AudioGuard guard{mic};

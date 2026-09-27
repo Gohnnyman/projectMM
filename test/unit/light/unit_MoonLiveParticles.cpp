@@ -1,14 +1,9 @@
-// @module MoonLiveParticles
-// @also MoonLiveEffect, MoonLive, particles
+/// @module MoonLiveParticles
+/// @also MoonLiveEffect, MoonLive, particles
 
-// A scripted particle pool: the particles live in ScratchBuffers the binding owns, OUTSIDE the
-// script's 64-byte arena, because a Pool is eight parallel arrays and an arena-resident pool would
-// hold about five particles. The script never names a particle; it calls whole-pool operations and
-// the binding supplies the buffers and the frame clock.
-//
-// These pin the seam rather than the physics (unit_Particles.cpp owns the kernel's own contract):
-// that a script can size its pool, that sizing happens ONLY on the cold path, that a failure
-// degrades visibly, and that one script's particles cannot reach another's.
+/// A scripted particle pool: the particles live in ScratchBuffers the binding owns, OUTSIDE the script's 64-byte arena, because a Pool is eight parallel arrays and an arena-resident pool would hold about five particles. The script never names a particle; it calls whole-pool operations and the binding supplies the buffers and the frame clock.
+///
+/// These pin the seam rather than the physics (unit_Particles.cpp owns the kernel's own contract): that a script can size its pool, that sizing happens ONLY on the cold path, that a failure degrades visibly, and that one script's particles cannot reach another's.
 
 #include "doctest.h"
 #include "MoonLiveScriptFixture.h"
@@ -53,27 +48,22 @@ struct Scene {
 }  // namespace
 
 TEST_CASE("a script sizes its own particle pool and is told what it got") {
-    // The SAME script with and without the pool call, so the difference is the buffers alone and
-    // not the compiled program, which varies with the source text.
+    // The SAME script with and without the pool call, so the difference is the buffers alone and not the compiled program, which varies with the source text.
     Scene without, with_;
     without.run("class T { void defineControls() { addControl(\"n\", n, 0, 9); } byte n = 0; void tick() { } }");
     with_.run("class T { void defineControls() { pool(64); } void tick() { } }");
     CHECK(with_.effect.dynamicBytes() > without.effect.dynamicBytes() + 1000);   // ~1216 of buffers
 }
 
-// The pay-for-what-you-use rule, on the memory that matters most: a shader script must not carry
-// particle buffers it never asked for, so there is no default pool.
+// The pay-for-what-you-use rule, on the memory that matters most: a shader script must not carry particle buffers it never asked for, so there is no default pool.
 TEST_CASE("a script that never asks for particles allocates none") {
     Scene shader;
     shader.run("class T { void tick() { fill(1, 2, 3); } }");
-    // A shader script holds its compiled program and nothing else. The smallest pool a script
-    // could ask for is 23 bytes; anything under that is program alone.
+    // A shader script holds its compiled program and nothing else. The smallest pool a script could ask for is 23 bytes; anything under that is program alone.
     CHECK(shader.effect.dynamicBytes() < 1000);
 }
 
-// THE guarantee that keeps a malloc off the render path: sizing is reachable only from
-// defineControls(), where the sink is installed. A script asking from tick() is told the live
-// count and nothing is allocated, every frame, forever.
+// THE guarantee that keeps a malloc off the render path: sizing is reachable only from defineControls(), where the sink is installed. A script asking from tick() is told the live count and nothing is allocated, every frame, forever.
 TEST_CASE("asking for a pool while the frame is running allocates nothing") {
     Scene s;
     s.run("class T { void defineControls() { pool(32); } void tick() { setRGB(0, pool(4000), 0, 0); } }");
@@ -83,8 +73,7 @@ TEST_CASE("asking for a pool while the frame is running allocates nothing") {
     CHECK(s.effect.dynamicBytes() == sized);     // five frames of asking changed nothing
 }
 
-// The live-edit rule applied to memory: editing the script's text recompiles, which re-runs
-// defineControls, which resizes.
+// The live-edit rule applied to memory: editing the script's text recompiles, which re-runs defineControls, which resizes.
 TEST_CASE("editing a script to a different pool size resizes it") {
     Scene s;
     s.run("class T { void defineControls() { pool(16); } void tick() { } }");
@@ -94,8 +83,7 @@ TEST_CASE("editing a script to a different pool size resizes it") {
     CHECK(s.effect.dynamicBytes() >= small + 112 * (4 * 4 + 2 + 1));
 }
 
-// Disabling a scripted effect must hand the memory back AND leave the pool invalid rather than
-// pointing at freed buffers, which is the trap ParticlesEffect documents at its own prepare().
+// Disabling a scripted effect must hand the memory back AND leave the pool invalid rather than pointing at freed buffers, which is the trap ParticlesEffect documents at its own prepare().
 TEST_CASE("disabling a scripted effect frees its particles") {
     Scene s;
     s.run("class T { void defineControls() { pool(64); } void tick() { } }");
@@ -104,8 +92,7 @@ TEST_CASE("disabling a scripted effect frees its particles") {
     CHECK(s.effect.dynamicBytes() == 0);
 }
 
-// A script reaching the particle vocabulary from a layout or a modifier finds no pool installed,
-// so the calls do nothing rather than writing through another module's buffers.
+// A script reaching the particle vocabulary from a layout or a modifier finds no pool installed, so the calls do nothing rather than writing through another module's buffers.
 TEST_CASE("a particle call from a script with no pool does nothing") {
     Scene s;
     s.run("class T { void tick() { setRGB(0, pool(0) + 7, 0, 0); } }");
@@ -113,13 +100,10 @@ TEST_CASE("a particle call from a script with no pool does nothing") {
     CHECK(s.layer.buffer().data()[0] == 7);      // ran to completion, pool() reported 0
 }
 
-// The test that says why the feature exists: a script writes physics, not positions. Nothing here
-// tells a spark where to go; it leaves at an angle, gravity pulls on it, and where it turns over is
-// wherever the physics puts it.
+// The test that says why the feature exists: a script writes physics, not positions. Nothing here tells a spark where to go; it leaves at an angle, gravity pulls on it, and where it turns over is wherever the physics puts it.
 TEST_CASE("a spark thrown upward comes back down") {
     Scene s(16, 16);
-    // Straight up (angle16 49152 = three quarter turn = -y), fast, long-lived, no drag.
-    // A member counter, so the spark is thrown once and then only physics runs.
+    // Straight up (angle16 49152 = three quarter turn = -y), fast, long-lived, no drag. A member counter, so the spark is thrown once and then only physics runs.
     s.run("class T {"
           "  byte fired = 0;"
           "  void defineControls() { pool(8); }"
@@ -146,8 +130,7 @@ TEST_CASE("a spark thrown upward comes back down") {
     CHECK(roseThenFell);        // and gravity brought it back
 }
 
-// A pool is a fixed set of slots. Emitting into a full one stops rather than overwriting a living
-// particle, so a script that over-emits degrades to "no new sparks" instead of corrupting motion.
+// A pool is a fixed set of slots. Emitting into a full one stops rather than overwriting a living particle, so a script that over-emits degrades to "no new sparks" instead of corrupting motion.
 TEST_CASE("emitting into a full pool stops rather than overwriting") {
     Scene s(16, 16);
     s.run("class T {"
@@ -162,8 +145,7 @@ TEST_CASE("emitting into a full pool stops rather than overwriting") {
     CHECK(lit <= 4 * 4);        // never more than the four slots can carry (a splat covers a few)
 }
 
-// Without aging, a long-running fountain silently stops emitting once every slot is taken. That is
-// a bug which only shows up after a minute on the bench, so it is pinned here instead.
+// Without aging, a long-running fountain silently stops emitting once every slot is taken. That is a bug which only shows up after a minute on the bench, so it is pinned here instead.
 TEST_CASE("a script's particles die and free their slots for new ones") {
     Scene s(16, 16);
     // Life 2 with a fast age: every spark is gone within a few frames, so emit always succeeds.
@@ -178,8 +160,7 @@ TEST_CASE("a script's particles die and free their slots for new ones") {
     CHECK(lit > 0);             // still emitting 40 frames in: slots were recycled
 }
 
-// Two scripted effects each own their own buffers, so one script's particles can never appear in
-// another's layer. This is the "what does a second script asking for a pool get" question.
+// Two scripted effects each own their own buffers, so one script's particles can never appear in another's layer. This is the "what does a second script asking for a pool get" question.
 TEST_CASE("two scripted effects each get their own particles") {
     Scene a(16, 16), b(16, 16);
     a.run("class T { void defineControls() { pool(8); }"
@@ -195,11 +176,9 @@ TEST_CASE("two scripted effects each get their own particles") {
     CHECK(litB == 0);           // the other stayed empty
 }
 
-// The shipped example, driven through the real binding: a fountain reaches a steady state where
-// sparks are emitted, fly, and die at the same rate, rather than filling the pool once and stopping.
+// The shipped example, driven through the real binding: a fountain reaches a steady state where sparks are emitted, fly, and die at the same rate, rather than filling the pool once and stopping.
 TEST_CASE("the fountain example keeps emitting once its pool has cycled") {
-    // The SHIPPED file, staged into the test filesystem: this drives the real example rather than
-    // a copy that could drift from it.
+    // The SHIPPED file, staged into the test filesystem: this drives the real example rather than a copy that could drift from it.
     const std::filesystem::path src = std::filesystem::path(__FILE__).parent_path()
         .parent_path().parent_path().parent_path() / "moonlive" / "effects" / "fountain.mle";
     std::ifstream in(src);
@@ -222,10 +201,7 @@ TEST_CASE("the fountain example keeps emitting once its pool has cycled") {
     CHECK(litLate > 5);                           // still drawing 120 frames in
 }
 
-// A spray has to look like a spray. angleEmit hashes (index, seed) into an angle and a speed, so
-// a seed that does not move makes every frame throw the IDENTICAL set of sparks: they stack into a
-// few fixed streams and the plume pulses instead of flowing. Emitting the same arguments twice must
-// therefore produce different trajectories.
+// A spray has to look like a spray. angleEmit hashes (index, seed) into an angle and a speed, so a seed that does not move makes every frame throw the IDENTICAL set of sparks: they stack into a few fixed streams and the plume pulses instead of flowing. Emitting the same arguments twice must therefore produce different trajectories.
 TEST_CASE("emitting twice from the same point does not repeat the same trajectories") {
     Scene s(24, 24);
     s.run("class T {"
@@ -248,9 +224,7 @@ TEST_CASE("emitting twice from the same point does not repeat the same trajector
     CHECK(firstCols != secondCols);       // a frozen seed would make these identical
 }
 
-// collide() makes particles notice each other. Dropped down the SAME column, balls without it
-// fall straight through one another and stay in that one column; with it they shove sideways and
-// spread. That difference is the whole feature, and it is what turns a shower into a pit.
+// collide() makes particles notice each other. Dropped down the SAME column, balls without it fall straight through one another and stay in that one column; with it they shove sideways and spread. That difference is the whole feature, and it is what turns a shower into a pit.
 TEST_CASE("colliding balls spread sideways instead of falling through each other") {
     auto pileHeight = [](const char* collideCall) {
         Scene s(16, 16);
@@ -266,8 +240,7 @@ TEST_CASE("colliding balls spread sideways instead of falling through each other
             s.layer.tick();
         }
         mm::platform::setTestNowMs(0);
-        // The HIGHEST occupied row. Balls that pass through one another all sink to the floor;
-        // balls that collide rest on the ones below and the pile reaches further up.
+        // The HIGHEST occupied row. Balls that pass through one another all sink to the floor; balls that collide rest on the ones below and the pile reaches further up.
         for (int y = 0; y < 16; y++)
             for (int x = 0; x < 16; x++) {
                 const uint8_t* px = &s.layer.buffer().data()[(y * 16 + x) * 3];

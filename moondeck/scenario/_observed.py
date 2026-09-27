@@ -46,7 +46,7 @@ contended sample eventually ages out, which the widen-only shape could never do.
 
 The "what to watch" mapping is a property of the contract direction (tick contract =
 ceiling, so p95 is the failure indicator; heap/block contract = floor, so min is).
-See docs/testing.md § Persistent observations.
+See docs/reference/testing.md § Persistent observations.
 
 A target that cannot be run here (another OS) is reformatted into this shape with n=0
 and an empty window, so the file is uniform and the absence of data is explicit rather
@@ -200,3 +200,19 @@ def compact_samples(text: str) -> str:
         return f'{m.group(1)}"samples": [{", ".join(nums)}]'
 
     return re.sub(r'( *)"samples": \[([^\]]*)\]', one_line, text)
+
+
+def save_scenario(path, scenario) -> None:
+    """Write a scenario JSON the one way scenarios are written.
+
+    THE writer: every runner goes through this rather than calling json.dump itself, because the
+    sample-window compaction below is not optional formatting. It was missing from the live runner
+    while the host runner had it, so the same file's shape depended on which one last touched it and
+    every switch between them produced a whole-file diff that buried the numbers that actually moved.
+    A shared writer is the reason that cannot come back: there is nowhere left to forget it.
+    """
+    import json
+
+    text = compact_samples(json.dumps(scenario, indent=2, ensure_ascii=False))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text + "\n")

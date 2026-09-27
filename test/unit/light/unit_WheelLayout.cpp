@@ -1,14 +1,11 @@
-// @module WheelLayout
+/// @module WheelLayout
 
 #include "doctest.h"
 #include "light/layouts/WheelLayout.h"
 
 #include <vector>
 
-// WheelLayout places lights along straight spokes radiating from a centre hub.
-// These tests pin: lightCount() == spokes*ledsPerSpoke and matches the iterator,
-// every coordinate is non-negative (the wheel is centre-shifted into the address
-// space), and the index sequence is dense [0, count).
+// WheelLayout places lights along straight spokes radiating from a center hub. These tests pin: lightCount() == spokes*ledsPerSpoke and matches the iterator, every coordinate is non-negative (the wheel is center-shifted into the address space), and the index sequence is dense [0, count).
 
 namespace {
 

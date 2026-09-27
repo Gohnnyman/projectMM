@@ -1,12 +1,9 @@
-// @module TransposeModifier
+/// @module TransposeModifier
 
 #include "doctest.h"
 #include "light/modifiers/TransposeModifier.h"
 
-// TransposeModifier swaps a pair of axes of the logical box and every coordinate
-// folded through it (a matrix transpose: rows become columns), then optionally
-// flips each axis back-to-front. modifyLogicalSize swaps the size fields;
-// modifyLogical swaps the matching coordinate fields. It never rejects a coord.
+// TransposeModifier swaps a pair of axes of the logical box and every coordinate folded through it (a matrix transpose: rows become columns), then optionally flips each axis back-to-front. modifyLogicalSize swaps the size fields; modifyLogical swaps the matching coordinate fields. It never rejects a coord.
 
 // The transposed box for a given box.
 static mm::Coord3D transposedSize(mm::TransposeModifier& t, mm::Coord3D box) {
@@ -14,8 +11,7 @@ static mm::Coord3D transposedSize(mm::TransposeModifier& t, mm::Coord3D box) {
     return box;
 }
 
-// Fold a coord through the modifier (modifyLogicalSize must run first to stash the
-// transposed box for the inverse). Returns the folded pos; transpose never rejects.
+// Fold a coord through the modifier (modifyLogicalSize must run first to stash the transposed box for the inverse). Returns the folded pos; transpose never rejects.
 static mm::Coord3D fold(mm::TransposeModifier& t, mm::lengthType x, mm::lengthType y,
                         mm::lengthType z, mm::Coord3D box) {
     t.modifyLogicalSize(box);   // stashes the transposed box
@@ -49,14 +45,11 @@ TEST_CASE("TransposeModifier swaps the selected axis pair") {
     CHECK(fold(yz, 1, 2, 3, {8, 4, 2}) == mm::Coord3D{1, 3, 2});    // y<->z, x kept
 }
 
-// inverse flips an axis back-to-front within the TRANSPOSED box: x -> size.x-1-x.
-// With the default XY swap, inverse X flips the (post-swap) x axis, whose span is the
-// original box height. On a {128,64,z} box the transposed x span is 64.
+// inverse flips an axis back-to-front within the TRANSPOSED box: x -> size.x-1-x. With the default XY swap, inverse X flips the (post-swap) x axis, whose span is the original box height. On a {128,64,z} box the transposed x span is 64.
 TEST_CASE("TransposeModifier inverse flips within the transposed box") {
     mm::TransposeModifier t;   // XY swap on by default
     t.inverseX = true;
-    // Transposed box is {64, 128, ...}; x span is 64. Coord (5,7) swaps to (7,5),
-    // then x flips against the transposed span: 64 - 7 - 1 = 56.
+    // Transposed box is {64, 128, ...}; x span is 64. Coord (5,7) swaps to (7,5), then x flips against the transposed span: 64 - 7 - 1 = 56.
     CHECK(fold(t, 5, 7, 0, {128, 64, 1}) == mm::Coord3D{56, 5, 0});
     // The transposed-box axis lengths are unchanged by the inverse.
     CHECK(transposedSize(t, {128, 64, 1}) == mm::Coord3D{64, 128, 1});

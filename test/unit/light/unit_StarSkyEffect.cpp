@@ -1,4 +1,4 @@
-// @module StarSkyEffect
+/// @module StarSkyEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"

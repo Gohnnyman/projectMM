@@ -1,5 +1,5 @@
-// @module Layer
-// @also RainbowEffect, NoiseEffect, PlasmaEffect, SpiralEffect, FireEffect, ParticlesEffect
+/// @module Layer
+/// @also RainbowEffect, NoiseEffect, PlasmaEffect, SpiralEffect, FireEffect, ParticlesEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -12,20 +12,11 @@
 #include "light/effects/FireEffect.h"
 #include "light/effects/ParticlesEffect.h"
 
-// Layer::extrude lets a low-dimensional effect "just work" on a higher-dimensional
-// grid: the effect writes only its own slice (D2 → z=0 plane; D1 → column at x=0,z=0)
-// and Layer copies that slice across the unused axes. These tests pin the
-// behaviour so a D2 effect on a 3D grid produces identical z-slices, and a
-// hypothetical D1 effect (1D runs along Y) produces identical columns and slices.
+// Layer::extrude lets a low-dimensional effect "just work" on a higher-dimensional grid: the effect writes only its own slice (D2 → z=0 plane; D1 → column at x=0,z=0) and Layer copies that slice across the unused axes. These tests pin the behavior so a D2 effect on a 3D grid produces identical z-slices, and a hypothetical D1 effect (1D runs along Y) produces identical columns and slices.
 //
-// A separate group of tests covers the other direction: a D3 effect run on a
-// 2D or 1D layer. EffectBase's contract says the effect must honour the layer's
-// actual dimensions (width/height/depth) at frame time, regardless of the D it
-// declared. We pin that here for the two production D3 effects (Noise, Plasma)
-// — if a future D3 effect hardcodes z bounds and overruns the buffer, the same
-// test pattern applied to it will catch it (size check + no-zero-pixels).
+// A separate group of tests covers the other direction: a D3 effect run on a 2D or 1D layer. EffectBase's contract says the effect must honour the layer's actual dimensions (width/height/depth) at frame time, regardless of the D it declared. We pin that here for the two production D3 effects (Noise, Plasma), if a future D3 effect hardcodes z bounds and overruns the buffer, the same test pattern applied to it will catch it (size check + no-zero-pixels).
 
-// A D2 effect (Rainbow) on a 3D layer writes z=0 once; Layer::extrude copies that slice across every z>0 — slices are byte-identical.
+// A D2 effect (Rainbow) on a 3D layer writes z=0 once; Layer::extrude copies that slice across every z>0, slices are byte-identical.
 TEST_CASE("D2 effect on 3D grid: z-slices are identical (Layer::extrude)") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -38,8 +29,7 @@ TEST_CASE("D2 effect on 3D grid: z-slices are identical (Layer::extrude)") {
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
-    // Rainbow opts into D2 — it writes only z=0 and trusts extrude to fill z.
-    // (The framework default is D3; D2 is the opt-in promise.)
+    // Rainbow opts into D2, it writes only z=0 and trusts extrude to fill z. (The framework default is D3; D2 is the opt-in promise.)
     mm::RainbowEffect rainbow;
     layer.addChild(&rainbow);
 
@@ -50,7 +40,7 @@ TEST_CASE("D2 effect on 3D grid: z-slices are identical (Layer::extrude)") {
     const size_t sliceBytes = static_cast<size_t>(grid.width) * grid.height * 3;
     REQUIRE(layer.buffer().bytes() == sliceBytes * grid.depth);
 
-    // Every z>0 slice must byte-equal z=0 — proves extrude copied the plane.
+    // Every z>0 slice must byte-equal z=0, proves extrude copied the plane.
     for (mm::lengthType z = 1; z < grid.depth; z++) {
         const uint8_t* z0 = data;
         const uint8_t* zn = data + z * sliceBytes;
@@ -60,10 +50,7 @@ TEST_CASE("D2 effect on 3D grid: z-slices are identical (Layer::extrude)") {
     }
 }
 
-// A D1 stub: 1D runs along Y, so it writes a gradient down the (x=0) column and
-// nothing else. The effect doesn't iterate x/z — extrude is expected to spread the
-// column across x (then across z). Keeps the test independent of any specific D1
-// production effect (none exist today; this pins the framework contract).
+// A D1 stub: 1D runs along Y, so it writes a gradient down the (x=0) column and nothing else. The effect doesn't iterate x/z, extrude is expected to spread the column across x (then across z). Keeps the test independent of any specific D1 production effect (none exist today; this pins the framework contract).
 class D1StubEffect : public mm::EffectBase {
 public:
     mm::Dim dimensions() const override { return mm::Dim::D1; }
@@ -125,11 +112,7 @@ TEST_CASE("D1 effect on 3D grid: columns and z-slices are identical (Layer::extr
 }
 
 // --- D3 effects on lower-dimensional layers ---------------------------------
-// Contract pinned in EffectBase.h: a D3-declared effect must honour the layer's
-// runtime dimensions (depth=1 means iterate only z=0; height=1 means iterate
-// only y=0). Tests below verify the two shipped D3 effects (Noise, Plasma)
-// produce a fully-written buffer of the expected size on 2D and 1D layers —
-// catches a future D3 effect that hardcodes a fixed-depth loop.
+// Contract pinned in EffectBase.h: a D3-declared effect must honour the layer's runtime dimensions (depth=1 means iterate only z=0; height=1 means iterate only y=0). Tests below verify the two shipped D3 effects (Noise, Plasma) produce a fully-written buffer of the expected size on 2D and 1D layers, catches a future D3 effect that hardcodes a fixed-depth loop.
 
 template<typename EffectT>
 static void check_d3_on_2d(const char* tag) {
@@ -154,8 +137,7 @@ static void check_d3_on_2d(const char* tag) {
     const size_t expectedBytes = static_cast<size_t>(grid.width) * grid.height * 3;
     REQUIRE_MESSAGE(layer.buffer().bytes() == expectedBytes, tag);
 
-    // Some pixel must be non-zero — confirms the effect actually iterated and
-    // wrote (a buffer of all zeros would mean the loop skipped everything).
+    // Some pixel must be non-zero, confirms the effect actually iterated and wrote (a buffer of all zeros would mean the loop skipped everything).
     bool anyNonZero = false;
     for (size_t i = 0; i < expectedBytes; i++) {
         if (data[i] != 0) { anyNonZero = true; break; }
@@ -214,12 +196,7 @@ TEST_CASE("D3 effect on 1D layer: PlasmaEffect produces a valid 1D strip") {
 }
 
 // --- D2 effects on 3D layers: extrude must fill z ---------------------------
-// Pins the contract that a D2-declared effect's z>0 slices come from extrude,
-// not from the effect itself. Catches a regression where a D2 effect either
-// fails to write z=0 (everything black) or where extrude no longer fills z
-// (z>0 stays black). Covers one stateless (Checkerboard) and two stateful
-// (Fire, Particles) effects so changes to prepare don't silently
-// break the contract.
+// Pins the contract that a D2-declared effect's z>0 slices come from extrude, not from the effect itself. Catches a regression where a D2 effect either fails to write z=0 (everything black) or where extrude no longer fills z (z>0 stays black). Covers one stateless (Checkerboard) and two stateful (Fire, Particles) effects so changes to prepare don't silently break the contract.
 
 template<typename EffectT>
 static void check_d2_on_3d(const char* tag) {
@@ -238,9 +215,7 @@ static void check_d2_on_3d(const char* tag) {
     layer.addChild(&effect);
 
     layer.applyState();
-    // Some effects (Fire, particles with random sparks) need a few frames
-    // before they reliably produce visible output; one frame is enough for
-    // the deterministic effects we test here.
+    // Some effects (Fire, particles with random sparks) need a few frames before they reliably produce visible output; one frame is enough for the deterministic effects we test here.
     layer.tick();
 
     auto* data = layer.buffer().data();
@@ -262,12 +237,12 @@ TEST_CASE("D2 effect on 3D layer: Spiral extruded across z") {
     check_d2_on_3d<mm::SpiralEffect>("SpiralEffect on 3D layer");
 }
 
-// FireEffect (D2, stateful — heat buffer sized to w×h) extrudes cleanly across z on a 3D layer.
+// FireEffect (D2, stateful, heat buffer sized to w×h) extrudes cleanly across z on a 3D layer.
 TEST_CASE("D2 effect on 3D layer: Fire extruded across z (heat sized to w*h)") {
     check_d2_on_3d<mm::FireEffect>("FireEffect on 3D layer");
 }
 
-// ParticlesEffect (D2, stateful — trail sized to w×h×cpl) extrudes cleanly across z on a 3D layer.
+// ParticlesEffect (D2, stateful, trail sized to w×h×cpl) extrudes cleanly across z on a 3D layer.
 TEST_CASE("D2 effect on 3D layer: Particles extruded across z (trail sized to w*h*cpl)") {
     check_d2_on_3d<mm::ParticlesEffect>("ParticlesEffect on 3D layer");
 }

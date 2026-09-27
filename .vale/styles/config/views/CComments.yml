@@ -1,0 +1,12 @@
+# Prose lives in the COMMENTS of a header, not in its code. Vale has no native parser for C, so
+# this View hands it the file's tree-sitter syntax tree and pulls out every comment node; the code
+# around them is never linted, so an identifier like `colour_t` could not be flagged as prose.
+#
+# `type: md` is load-bearing, and Vale's own Python view carries it: without it the extracted text
+# is never parsed, so the run reports zero files, which reads identically to a clean one. That is
+# how 1592 em-dashes in src/**/*.h stayed invisible to the gate.
+engine: tree-sitter
+scopes:
+  - expr: (comment)+ @comment
+    name: c
+    type: md

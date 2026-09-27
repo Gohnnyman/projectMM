@@ -1,4 +1,4 @@
-// @module FireEffect
+/// @module FireEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -75,9 +75,7 @@ TEST_CASE("FireEffect frees heat buffer when disabled") {
     layer.applyState();
     CHECK(fire.dynamicBytes() > 0);
 
-    // Disable + rebuild via the parent's lifecycle — same path the
-    // production scheduler uses, not a direct child call which would
-    // bypass the propagation tested elsewhere.
+    // Disable + rebuild via the parent's lifecycle, same path the production scheduler uses, not a direct child call which would bypass the propagation tested elsewhere.
     fire.setEnabled(false);
     layer.applyState();
     CHECK(fire.dynamicBytes() == 0);

@@ -1,11 +1,9 @@
-// @module CheckerboardModifier
+/// @module CheckerboardModifier
 
 #include "doctest.h"
 #include "light/modifiers/CheckerboardModifier.h"
 
-// CheckerboardModifier masks the layer: lights in "off" squares are dropped
-// (modifyLogical returns false), lights in "on" squares pass through unchanged
-// (returns true, pos untouched). A mask leaves the logical box unchanged.
+// CheckerboardModifier masks the layer: lights in "off" squares are dropped (modifyLogical returns false), lights in "on" squares pass through unchanged (returns true, pos untouched). A mask leaves the logical box unchanged.
 
 // Run the fold on one coord; returns whether it passes (true) and leaves pos in p.
 static bool keep(mm::CheckerboardModifier& c, mm::lengthType x, mm::lengthType y, mm::lengthType z,
@@ -24,8 +22,7 @@ TEST_CASE("CheckerboardModifier does not resize the logical box") {
     CHECK(size == mm::Coord3D{64, 32, 4});
 }
 
-// size=1: every cell is its own square; parity = (x+y+z)&1. Default (invert
-// false) keeps even-parity cells, drops odd-parity. Passing cells keep their coord.
+// size=1: every cell is its own square; parity = (x+y+z)&1. Default (invert false) keeps even-parity cells, drops odd-parity. Passing cells keep their coord.
 TEST_CASE("CheckerboardModifier size 1 keeps even-parity, drops odd") {
     mm::CheckerboardModifier c;
     c.size = 1;
@@ -51,8 +48,7 @@ TEST_CASE("CheckerboardModifier invert flips the kept squares") {
     CHECK(keep(c, 1, 0, 0, box, p));            // parity 1, inverted → on
 }
 
-// size>1 groups cells into squares: with size=2, the 2×2 block at the origin is
-// all one square (parity 0), so all four pass; the next block over drops.
+// size>1 groups cells into squares: with size=2, the 2×2 block at the origin is all one square (parity 0), so all four pass; the next block over drops.
 TEST_CASE("CheckerboardModifier size 2 groups into squares") {
     mm::CheckerboardModifier c;
     c.size = 2;

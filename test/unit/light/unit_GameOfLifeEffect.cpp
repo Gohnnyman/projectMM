@@ -1,11 +1,11 @@
-// @module GameOfLifeEffect
+/// @module GameOfLifeEffect
 
 #include "doctest.h"
 #include "light/effects/GameOfLifeEffect.h"
 
 using namespace mm;
 
-// The B#/S# parser turns a rule string into birth/survive neighbour sets. Conway = B3/S23.
+// The B#/S# parser turns a rule string into birth/survive neighbor sets. Conway = B3/S23.
 TEST_CASE("GameOfLife: ruleset parser reads B/S sets") {
     GameOfLifeEffect gol;
     gol.ruleset = 1;                       // "Conway B3/S23"
@@ -23,8 +23,7 @@ TEST_CASE("GameOfLife: ruleset parser reads B/S sets") {
     CHECK_FALSE(gol.birthForTest(5));
 }
 
-// A 2×2 block is a Conway still life: every live cell has 3 neighbours (survives), and the
-// surrounding dead cells never have exactly 3 (no births). It must be identical after a step.
+// A 2×2 block is a Conway still life: every live cell has 3 neighbors (survives), and the surrounding dead cells never have exactly 3 (no births). It must be identical after a step.
 TEST_CASE("GameOfLife: a 2x2 block is a stable still life") {
     GameOfLifeEffect gol;
     gol.ruleset = 1;
@@ -46,13 +45,8 @@ TEST_CASE("GameOfLife: a 2x2 block is a stable still life") {
     CHECK_FALSE(gol.isAliveForTest(4, 4, 0));
 }
 
-// Regression: a 3D grid gives a cell up to 26 neighbours (3×3×3 minus self), but the B/S rule
-// tables are sized 9 (single-digit Conway notation, 0..8). A dense 3D neighbourhood must not read
-// those tables out of bounds — a count ≥9 is in no single-digit ruleset, so the cell dies / stays
-// dead. This fills a 3×3×3 cube (the centre has all 26 neighbours alive) and just steps: the test
-// passing under ASan/bounds-checking is the OOB-read pin; behaviourally the over-crowded centre
-// dies (26 ∉ S) and the dense interior doesn't survive.
-TEST_CASE("GameOfLife: a dense 3D neighbourhood never indexes the B/S tables out of bounds") {
+// Regression: a 3D grid gives a cell up to 26 neighbors (3×3×3 minus self), but the B/S rule tables are sized 9 (single-digit Conway notation, 0..8). A dense 3D neighborhood must not read those tables out of bounds, a count ≥9 is in no single-digit ruleset, so the cell dies / stays dead. This fills a 3×3×3 cube (the center has all 26 neighbors alive) and just steps: the test passing under ASan/bounds-checking is the OOB-read pin; behaviorally the over-crowded center dies (26 ∉ S) and the dense interior doesn't survive.
+TEST_CASE("GameOfLife: a dense 3D neighborhood never indexes the B/S tables out of bounds") {
     GameOfLifeEffect gol;
     gol.ruleset = 1;                                  // Conway B3/S23
     REQUIRE(gol.allocateForTest(5, 5, 5));            // a real 3D grid (depth>1 enables the z axis)
@@ -63,13 +57,11 @@ TEST_CASE("GameOfLife: a dense 3D neighbourhood never indexes the B/S tables out
 
     gol.stepForTest();                                // must not OOB-read birth/surviveNumbers_[9..26]
 
-    // The centre (26 live neighbours) is wildly overcrowded → dies. No single-digit ruleset survives
-    // 26, so the over-dense interior clears rather than persisting.
+    // The center (26 live neighbors) is wildly overcrowded → dies. No single-digit ruleset survives 26, so the over-dense interior clears rather than persisting.
     CHECK_FALSE(gol.isAliveForTest(2, 2, 2));
 }
 
-// A horizontal 3-cell blinker oscillates to vertical after one step (period-2 oscillator). This is
-// the canonical "the rules actually run" check: birth on 3, death of the ends (1 neighbour each).
+// A horizontal 3-cell blinker oscillates to vertical after one step (period-2 oscillator). This is the canonical "the rules actually run" check: birth on 3, death of the ends (1 neighbor each).
 TEST_CASE("GameOfLife: a 3-cell blinker flips orientation each step") {
     GameOfLifeEffect gol;
     gol.ruleset = 1;
@@ -81,8 +73,7 @@ TEST_CASE("GameOfLife: a 3-cell blinker flips orientation each step") {
 
     gol.stepForTest();
 
-    // Now vertical: (3,2) (3,3) (3,4); the horizontal ends died (1 neighbour), the centre survives,
-    // and the cells above/below the centre were born (3 neighbours).
+    // Now vertical: (3,2) (3,3) (3,4); the horizontal ends died (1 neighbor), the center survives, and the cells above/below the center were born (3 neighbors).
     CHECK(gol.isAliveForTest(3, 2, 0));
     CHECK(gol.isAliveForTest(3, 3, 0));
     CHECK(gol.isAliveForTest(3, 4, 0));
@@ -95,8 +86,7 @@ TEST_CASE("GameOfLife: a 3-cell blinker flips orientation each step") {
     CHECK_FALSE(gol.isAliveForTest(3, 2, 0));
 }
 
-// A lone cell (0 neighbours) dies — the dead-by-isolation rule, and a sanity check that an empty
-// grid stays empty (no spontaneous births at count 0 under Conway).
+// A lone cell (0 neighbors) dies, the dead-by-isolation rule, and a sanity check that an empty grid stays empty (no spontaneous births at count 0 under Conway).
 TEST_CASE("GameOfLife: a lone cell dies and an empty grid stays empty") {
     GameOfLifeEffect gol;
     gol.ruleset = 1;

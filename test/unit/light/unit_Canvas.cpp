@@ -1,13 +1,10 @@
-// @module draw
-// @also EffectBase, Layer
+/// @module draw
+/// @also EffectBase, Layer
 
-// draw::Canvas binds a buffer to the dimensions that address it. What matters is not that it holds
-// three fields, but the two failure modes it removes: a caller cannot pair a buffer with extents
-// that do not belong to it, and a 2D layer's zero depth cannot zero the z stride — the bug the
-// private `depthDim()` helper guards against in sixteen effects, each with its own copy.
+/// draw::Canvas binds a buffer to the dimensions that address it. What matters is not that it holds three fields, but the two failure modes it removes: a caller cannot pair a buffer with extents that do not belong to it, and a 2D layer's zero depth cannot zero the z stride, the bug the private `depthDim()` helper guards against in sixteen effects, each with its own copy.
 
 #include "doctest.h"
-#include "light/draw.h"
+#include "light/powerfunctions/draw.h"
 #include "light/effects/SolidEffect.h"
 #include "light/layers/Layer.h"
 #include "light/layers/Effects.h"
@@ -29,8 +26,7 @@ struct Surface {
 };
 }  // namespace
 
-// The depth guard, which is the whole reason sixteen effects carry a private helper: a 2D layer
-// reports depth 0, and an unguarded z stride of 0 collapses every z onto the same plane.
+// The depth guard, which is the whole reason sixteen effects carry a private helper: a 2D layer reports depth 0, and an unguarded z stride of 0 collapses every z onto the same plane.
 TEST_CASE("Canvas gives a 2D layer a depth of one, not zero") {
     Surface s(8, 4, 0);                       // depth 0 — what a 2D layer reports
     CHECK(s.cv.dims.z == 1);
@@ -46,8 +42,7 @@ TEST_CASE("Canvas addresses x fastest, then y, then z") {
     CHECK(s.cv.offsetOf({0, 0, 1}) == 4u * 3u * 3u);    // one plane
 }
 
-// Out-of-grid coordinates report the buffer size, which every draw call treats as "skip" — the
-// clipping contract, expressed once instead of at each call site.
+// Out-of-grid coordinates report the buffer size, which every draw call treats as "skip", the clipping contract, expressed once instead of at each call site.
 TEST_CASE("Canvas reports out-of-grid coordinates as unwritable") {
     Surface s(4, 4, 1);
     CHECK(s.cv.offsetOf({-1, 0, 0}) == s.cv.bytes);
@@ -65,8 +60,7 @@ TEST_CASE("Canvas pixel writes land where get reads them, and clip outside") {
     CHECK(c.g == 20);
     CHECK(c.b == 30);
 
-    // A write outside the grid is silently dropped, and reading there is black — never a crash and
-    // never a stray byte in a neighbouring light (the robustness rule).
+    // A write outside the grid is silently dropped, and reading there is black, never a crash and never a stray byte in a neighboring light (the robustness rule).
     draw::pixel(s.cv, {99, 99, 0}, RGB{255, 255, 255});
     const RGB out = draw::get(s.cv, {99, 99, 0});
     CHECK(out.r == 0);
@@ -76,8 +70,7 @@ TEST_CASE("Canvas pixel writes land where get reads them, and clip outside") {
     CHECK(last.r == 0);
 }
 
-// A 4-channel (RGBW) surface: the W channel belongs to the driver, so a pixel write leaves it
-// alone — the same contract the (Buffer&, dims) form already has, preserved through Canvas.
+// A 4-channel (RGBW) surface: the W channel belongs to the driver, so a pixel write leaves it alone, the same contract the (Buffer&, dims) form already has, preserved through Canvas.
 TEST_CASE("Canvas leaves the white channel of an RGBW light untouched") {
     Surface s(4, 4, 1, 4);
     s.buf.data()[0 * 4 + 3] = 200;                      // a W the driver set
@@ -86,8 +79,7 @@ TEST_CASE("Canvas leaves the white channel of an RGBW light untouched") {
     CHECK(s.buf.data()[0 * 4 + 3] == 200);              // W survives
 }
 
-// The Canvas and (Buffer&, dims) forms must address identically, or the migration would silently
-// move pixels. This is the property the golden-frame tests depend on.
+// The Canvas and (Buffer&, dims) forms must address identically, or the migration would silently move pixels. This is the property the golden-frame tests depend on.
 TEST_CASE("Canvas and the buffer+dims form write the same bytes") {
     Surface a(7, 5, 1), b(7, 5, 1);
     const Coord3D dims{7, 5, 1};
@@ -100,8 +92,7 @@ TEST_CASE("Canvas and the buffer+dims form write the same bytes") {
     CHECK(std::memcmp(a.buf.data(), b.buf.data(), a.buf.bytes()) == 0);
 }
 
-// EffectBase::canvas() is what removes the per-effect preamble, so it must report the layer's live
-// extents — including the depth guard — rather than anything cached.
+// EffectBase::canvas() is what removes the per-effect preamble, so it must report the layer's live extents, including the depth guard, rather than anything cached.
 TEST_CASE("EffectBase canvas reflects the layer it is attached to") {
     Layouts layouts; GridLayout grid; Layer layer; SolidEffect solid;
     grid.width = 9; grid.height = 5; grid.depth = 1;

@@ -1,4 +1,4 @@
-// @module Layouts
+/// @module Layouts
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -6,10 +6,7 @@
 
 #include <vector>
 
-// Pins the contract that Layouts skips disabled children both in totalLightCount
-// and in placeLights, and that subsequent enabled children's physical indices
-// shift down to close the gap (no holes). Matches the universal-gate behaviour
-// applied by Layer / Effects / Drivers to their own children.
+// Pins the contract that Layouts skips disabled children both in totalLightCount and in placeLights, and that subsequent enabled children's physical indices shift down to close the gap (no holes). Matches the universal-gate behavior applied by Layer / Effects / Drivers to their own children.
 
 namespace {
 
@@ -76,9 +73,7 @@ TEST_CASE("Layouts skips disabled children and shifts indices") {
 
 // Disabling the Layouts container itself zeroes totalLightCount and yields no coordinates.
 TEST_CASE("Disabling the Layouts container reports zero lights and an empty iteration") {
-    // The Scheduler can't gate Layouts (no tick() to skip) so totalLightCount /
-    // placeLights apply the gate themselves. Same universal-enable intent as
-    // every other container: disabled means no contribution.
+    // The Scheduler can't gate Layouts (no tick() to skip) so totalLightCount / placeLights apply the gate themselves. Same universal-enable intent as every other container: disabled means no contribution.
     mm::Layouts layouts;
     mm::GridLayout g;
     g.width = 3; g.height = 1; g.depth = 1;

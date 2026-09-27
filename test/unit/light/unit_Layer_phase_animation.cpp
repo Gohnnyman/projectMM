@@ -1,5 +1,5 @@
-// @module Layer
-// @also MetaballsEffect, SpiralEffect, LavaLampEffect, SpiralEffect
+/// @module Layer
+/// @also MetaballsEffect, SpiralEffect, LavaLampEffect, SpiralEffect
 
 #include "doctest.h"
 #include "light/layers/Effects.h"
@@ -14,28 +14,21 @@
 
 #include <vector>
 
-// Regression: per-tick phase accumulators computed `dt * bpm * 256 / 60000`,
-// which truncates to 0 on desktop where dt ≈ 0..1 ms — the animations froze.
+// Regression: per-tick phase accumulators computed `dt * bpm * 256 / 60000`, which truncates to 0 on desktop where dt ≈ 0..1 ms, the animations froze.
 // Fix accumulates the raw (dt*bpm) numerator and only divides at the read site.
 // These tests pin animation across a short time gap for every affected effect.
 
 namespace {
 
-// Run the effect through a sequence of short ticks totalling `total_ms`, take
-// snapshots along the way, and return true if at least two snapshots differ.
-// The robustness matters because some effects' visible state can land on a
-// near-identical frame at two sampled instants by accident — a single
-// before/after pair can miss the motion. Multiple samples across a longer
-// interval can't.
+// Run the effect through a sequence of short ticks totalling `total_ms`, take snapshots along the way, and return true if at least two snapshots differ.
+// The robustness matters because some effects' visible state can land on a near-identical frame at two sampled instants by accident, a single before/after pair can miss the motion. Multiple samples across a longer interval can't.
 //
-// Time advances through the platform test-clock seam — no wall-clock sleeps,
-// so the test is deterministic and instant regardless of CI load.
+// Time advances through the platform test-clock seam, no wall-clock sleeps, so the test is deterministic and instant regardless of CI load.
 template <typename Effect>
 bool animates_over_ms(int total_ms) {
     mm::Layouts layouts;
     mm::GridLayout grid;
-    // 32×32 is large enough to show the effect's spatial motion and small
-    // enough to keep the test fast.
+    // 32×32 is large enough to show the effect's spatial motion and small enough to keep the test fast.
     grid.width = 32; grid.height = 32; grid.depth = 1;
     layouts.addChild(&grid);
     mm::Layer layer;
@@ -80,9 +73,7 @@ TEST_CASE("LavaLampEffect animates over a 100ms gap") {
     CHECK(animates_over_ms<mm::LavaLampEffect>(100));
 }
 
-// Replace path: swap one effect for another mid-flight (same shape as
-// HttpServerModule::handleReplaceModule) and confirm the new effect animates.
-// Replacing one effect with another mid-tick (HttpServerModule's swap path) leaves the new effect animating, not frozen.
+// Replace path: swap one effect for another mid-flight (same shape as HttpServerModule::handleReplaceModule) and confirm the new effect animates. Replacing one effect with another mid-tick (HttpServerModule's swap path) leaves the new effect animating, not frozen.
 TEST_CASE("Replacing an effect at runtime: new effect still animates") {
     mm::Layouts layouts;
     mm::GridLayout grid;

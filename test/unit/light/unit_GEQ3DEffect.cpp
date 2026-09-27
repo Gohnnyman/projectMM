@@ -1,28 +1,23 @@
-// @module GEQ3DEffect
-// @also AudioService
+/// @module GEQ3DEffect
+/// @also AudioService
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/GEQ3DEffect.h"
 #include "light/layouts/GridLayout.h"
-#include "core/AudioService.h"
+#include "core/services/AudioService.h"
 #include "platform/platform.h"
 
-// GEQ3D is audio-driven: it renders 16 bars from AudioService::latestFrame()->bands.
-// These cases pin its behaviour deterministically by freezing the clock
-// (platform::setTestNowMs) and driving a synthesized frame through an active
-// AudioService in "sweep (always)" simulate mode. Restore the real clock and vacate
-// the process-wide active mic on release so cases stay order-independent.
+// GEQ3D is audio-driven: it renders 16 bars from AudioService::latestFrame()->bands. These cases pin its behavior deterministically by freezing the clock (platform::setTestNowMs) and driving a synthesized frame through an active AudioService in "sweep (always)" simulate mode. Restore the real clock and vacate the process-wide active mic on release so cases stay order-independent.
 struct ClockGuard { ~ClockGuard() { platform::setTestNowMs(0); } };
 
-// Vacates the process-wide active-mic seat on scope exit (even if an assertion aborts
-// the case), so a failed REQUIRE can't leak AudioService::active_ into a later test.
+// Vacates the process-wide active-mic seat on scope exit (even if an assertion aborts the case), so a failed REQUIRE can't leak AudioService::active_ into a later test.
 struct AudioGuard {
     mm::AudioService& mic;
     ~AudioGuard() { mic.release(); }  // clears AudioService::active_ if it is this mic
 };
 
-// Silence (no active mic) leaves the buffer all-black — every band magnitude is 0, so no bar rises.
+// Silence (no active mic) leaves the buffer all-black, every band magnitude is 0, so no bar rises.
 TEST_CASE("GEQ3DEffect renders black on silence") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -51,8 +46,7 @@ TEST_CASE("GEQ3DEffect renders black on silence") {
 // A synthesized sweep frame with only the lowest band lit paints the LEFT of the grid and leaves the far RIGHT dark.
 TEST_CASE("GEQ3DEffect draws a bar where the audio band is energised") {
     ClockGuard guard;
-    // Sweep mode: pos = (t/250)%16, env = triwave8((t%250)*255/250). At t=125 → pos 0, env ≈ 254,
-    // so only bands[0] is high — the leftmost bar rises, the rest stay flat.
+    // Sweep mode: pos = (t/250)%16, env = triwave8((t%250)*255/250). At t=125 → pos 0, env ≈ 254, so only bands[0] is high, the leftmost bar rises, the rest stay flat.
     platform::setTestNowMs(125);
 
     mm::AudioService mic;

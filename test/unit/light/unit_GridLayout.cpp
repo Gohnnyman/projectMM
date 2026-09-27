@@ -1,5 +1,5 @@
-// @module GridLayout
-// @also Layouts
+/// @module GridLayout
+/// @also Layouts
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -60,10 +60,7 @@ TEST_CASE("GridLayout 4x4x1 produces 16 coords in row-major order") {
     CHECK(coords[15].z == 0);
 }
 
-// Serpentine reverses x on odd rows (boustrophedon), so the strip snakes back and forth: driver
-// index advances linearly while the emitted x zigzags. Even rows L→R, odd rows R→L. The COORDINATE
-// is always the true (x,y) — only the index→position order changes, which is what makes the
-// mapping non-identity.
+// Serpentine reverses x on odd rows (boustrophedon), so the strip snakes back and forth: driver index advances linearly while the emitted x zigzags. Even rows L→R, odd rows R→L. The COORDINATE is always the true (x,y), only the index→position order changes, which is what makes the mapping non-identity.
 TEST_CASE("GridLayout serpentine reverses x on odd rows") {
     mm::GridLayout grid;
     grid.width = 4;
@@ -78,7 +75,7 @@ TEST_CASE("GridLayout serpentine reverses x on odd rows") {
     // Row 0 (even): left→right, x = 0,1,2,3 at idx 0..3
     CHECK(coords[0].x == 0); CHECK(coords[0].y == 0);
     CHECK(coords[3].x == 3); CHECK(coords[3].y == 0);
-    // Row 1 (odd): right→left, x = 3,2,1,0 at idx 4..7 — the serpentine turn
+    // Row 1 (odd): right→left, x = 3,2,1,0 at idx 4..7, the serpentine turn
     CHECK(coords[4].idx == 4); CHECK(coords[4].x == 3); CHECK(coords[4].y == 1);
     CHECK(coords[5].x == 2); CHECK(coords[5].y == 1);
     CHECK(coords[7].x == 0); CHECK(coords[7].y == 1);

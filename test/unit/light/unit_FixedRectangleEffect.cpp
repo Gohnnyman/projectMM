@@ -1,4 +1,4 @@
-// @module FixedRectangleEffect
+/// @module FixedRectangleEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"

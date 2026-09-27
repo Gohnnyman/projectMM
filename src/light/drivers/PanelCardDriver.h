@@ -2,197 +2,78 @@
 
 #include "light/drivers/DriverBase.h"
 
-#include "light/ColorLight5A75Packet.h"   // the first wire format (byte layout lives there)
+#include "light/drivers/ColorLight5A75Packet.h"   // the first wire format (byte layout lives there)
 #include "platform/platform.h"
 
 namespace mm {
 
-/// Output driver: streams the buffer to LED panel cards over **raw Ethernet frames**, below IP.
-/// These cards take a sender-card feed rather than a pixel protocol — row-addressed data plus a
-/// sync frame that latches — so they need an L2 seam (`platform::ethSendRaw`) rather than a socket.
-/// The wire format lives in ColorLight5A75Packet.h; this driver owns the window, the correction and
-/// the chunking, exactly as NetworkSendDriver does for ArtNet/E1.31/DDP.
+/// Output driver: streams the buffer to LED panel cards over raw Ethernet frames, below IP. These cards take a sender-card feed, so they need an L2 seam rather than a socket. The wire format lives in ColorLight5A75Packet.h, and this driver owns the window, the correction and the chunking. The board renders and sends, making the device a complete panel controller.
 ///
-/// **The board renders and sends.** Effects, layers and MoonLive run here, so a device with this
-/// driver is a complete panel controller. Taking ArtNet in and forwarding it is one application of
-/// the same driver (add a NetworkReceiveEffect), not a prerequisite.
-///
-/// **The vendor vocabulary**, since the datasheets and LEDVision use it: an LED wall is driven by a
-/// *sending card* (a PC's PCI-E board, or a standalone box) that feeds *receiving cards*, one in each
-/// cabinet, which decode the signal and drive the panels. This driver puts the board in the sending
-/// card's place, and the cards it talks to are receiving cards. "Panel card" is the plainer name for
-/// the same hardware, and the one that keeps reading correctly when a second vendor's format lands.
-///
-/// **No geometry controls.** The panel arrangement belongs to the Layout — `PanelsLayout` states
-/// how many panels there are, their size, their wiring order and snaking, and maps every light to
-/// an (x, y). This driver reads the finished picture and cuts it into card rows, so a wall is
-/// described in exactly one place.
-///
-/// **No IP involved.** No address, no port, no DHCP lease: the frames carry their own destination
-/// MAC and EtherType. A board whose DHCP never completes still drives panels, which is also why the
-/// driver reports the link state itself rather than trusting `ethConnected()`.
-///
-/// The deep dives are under *More info*, below the attribute/method lists:
-/// @xref{why-a-gigabit-link|why these cards need a gigabit link},
-/// @xref{running-this-on-a-host|running this on a desktop or a Pi},
-/// @xref{other-card-vendors|other card vendors, and how to add one}.
-/// @card PanelCardDriver.png
+/// Prior art: FPP (Falcon Player), which drives these cards from a Raspberry Pi, and the ColorLight 5A-75 documented byte layout. The wiring, the vendors and the host setup are on the panel cards page.
 ///
 /// @moreinfo
 ///
 /// ## Why a gigabit link
 ///
-/// The cards require a **1000 Mbps** link, and the reason is wire time rather than bandwidth. Even a
-/// 256×256 panel at 40 fps is only ~65 Mbit/s of payload, which 100 Mbit would seem to carry. But
-/// the cards are dumb receivers with no buffering and no flow control: they latch on the sync frame,
-/// so an entire frame must arrive inside the inter-frame window. At 100 Mbit the same bytes take ten
-/// times as long on the wire — a 256×256 frame is ~16 ms of transmission against ~1.6 ms at gigabit
-/// — which overruns the frame budget and breaks the timing the sync depends on.
+/// The cards require a 1000 Mbps link, for wire time rather than bandwidth. They latch on the sync frame with no buffering, so a whole frame must arrive inside the inter-frame window. At 100 Mbit the same bytes overrun the frame budget and break the timing the sync depends on.
 ///
-/// The failure mode is the confusing part: nothing errors. Frames go out, the link is up, and the
-/// panels tear, show wrong rows, or never latch. That is why this driver reads the NEGOTIATED speed
-/// (`platform::ethLinkSpeedMbps`) and says so in its status rather than letting a slow link look
-/// like a format bug. It still SENDS at 100 Mbit — a small panel may be fine, and the measurement
-/// is more useful than a refusal.
+/// A slow link is silent: frames go out, the link is up, and the panels tear or never latch. The driver reads the negotiated speed and says so, then sends anyway, since a small panel may be fine.
 ///
-/// ## Running this on a host
+/// ## No geometry controls
 ///
-/// The desktop build sends real frames too, via `platform::ethBindRawInterface` — so a Raspberry
-/// Pi, a Mac or a Windows PC running projectMM is a panel controller, which is the deployment this
-/// replaces. Linux uses AF_PACKET and macOS BPF, both needing root or CAP_NET_RAW; Windows has no
-/// kernel path for raw L2 at all and goes through Npcap, resolved at run time so the binary still
-/// builds and runs without it. Without the privilege or the driver, or with `interface` left blank,
-/// the host records frames instead of sending them, which is what lets the unit tests pin the wire
-/// format with no hardware and no privileges.
+/// The panel arrangement belongs to the Layout. It states the count, size, wiring order and snaking, and maps every light to an (x, y). This driver reads the finished picture and cuts it into card rows. So a wall is described in exactly one place.
 ///
-/// `interface` names the NIC: the kernel name on Linux and macOS (`eth0`, `en0`), and on Windows any
-/// distinctive part of the adapter description (`Realtek`), because a capture device there is spelled
-/// `\Device\NPF_{GUID}` and does not fit a control a human types into.
-///
-/// On ESP32 `interface` is ignored: the chip has one MAC.
-///
-/// ## Other card vendors
-///
-/// ColorLight is one of several receiver-card makers, which is why this driver is named for the
-/// category and carries a `format` selector rather than being a ColorLight driver:
-///
-/// | vendor | position in the market |
-/// |---|---|
-/// | **[NovaStar](https://www.novastar.tech)** | the global leader; large-scale displays and stage events |
-/// | **[ColorLight](https://www.colorlightinside.com)** | cost-effective, strong outdoor and fine-pitch support (the format implemented here) |
-/// | **[Linsn](https://www.linsnled.com)** | affordable and stable, common on budget installations |
-/// | **[Mooncell](https://www.mooncell.com.cn)** | full-color high-refresh niche |
-/// | **[Huidu](https://www.huidu.cn)** | small and mid projects, storefront signage, mostly ASYNCHRONOUS |
-/// | **DBstar**, **Xixun** | also in the field |
-///
-/// **Contributions welcome.** Adding one is a `*Packet.h` beside ColorLight5A75Packet.h plus an
-/// entry in `kFormatOptions`: the window, the correction, the chunking and the platform seam are
-/// already shared, and the desktop capture path lets the byte layout be pinned by unit tests with no
-/// hardware. What it actually costs is the research, not the code.
-///
-/// Two things to know before starting. Each vendor speaks its **own proprietary L2 protocol**, so a
-/// ColorLight frame will not drive a NovaStar card and the byte layout has to be obtained per
-/// vendor. And whether another format fits this driver's row-plus-sync model is **unverified**: the
-/// shape is an invitation, not a promise, and a format that addresses panels differently may need
-/// the driver to grow rather than just gain a packet file.
-///
-/// Huidu is the one to approach with care: its controllers are largely asynchronous, playing from
-/// onboard storage rather than being fed live, which is a different product category from a
-/// real-time sender.
-// Prior art: FPP (Falcon Player), the show player that drives these receiving cards from a
-// Raspberry Pi. Seeing an FPP rig feed a wall of panels is what prompted this driver: a board
-// already rendering those frames can send them itself, which removes the host from the
-// installation. The wire format is the ColorLight 5A-75 documented byte layout, not FPP's code.
+/// @card PanelCardDriver.png
 class PanelCardDriver : public DriverBase {
 public:
-    /// Panel cards are RGB, so this references the "RGB" preset rather than the strips' "GRB" —
-    /// same per-driver default the network sinks use. The user can still pick any preset.
+    /// Default to the RGB preset, as the network sinks do, rather than the strips' GRB.
     PanelCardDriver() { setDefaultPresetName("RGB"); }
 
-    /// The card's own gain, held at full. Our Correction has already applied brightness to the pixel
-    /// bytes, so scaling again on the card would compound the two. Named once because both the
-    /// brightness frame and the sync frame carry it.
+    /// The card's own gain, held at full so it does not compound our own brightness.
     static constexpr uint8_t kCardGain = 0xFF;
 
-    /// Wire formats. One entry today; the control exists because the category is panel cards rather
-    /// than one vendor, and a second format is a packet file plus an entry here.
+    /// Wire formats; the control exists because the category is panel cards, not one vendor.
     static constexpr const char* kFormatOptions[] = {"ColorLight 5A-75"};
+    /// How many wire formats the selector offers.
     static constexpr uint8_t kFormatCount = 1;
 
     /// Wire format (index into kFormatOptions).
     uint8_t format = 0;
 
-    /// Card firmware generation. v13 and newer act on the SECOND copy of the brightness and sync
-    /// frames, so both go out twice; v12 and older act on the FIRST and take the second sync as
-    /// another latch, aborting a refresh already in progress. Measured on a 5A-75 v8.0 downgraded
-    /// to 11.09: the panel updated once every few seconds until the duplicate was dropped.
-    ///
-    /// A control rather than a probe because THIS DRIVER is send-only, not because the protocol is.
-    /// The cards do answer: a discovery reply carries the major version in `data[2]`, which is how
-    /// FPP auto-detects it and how ColorLight's own LEDUpgrade reports a card as "5A 13.17". Probing
-    /// needs a receive seam beside platform::ethSendRaw, which does not exist yet. FPP keeps the
-    /// manual setting regardless, as its FIRST source, falling back to discovery only when unset.
-    /// v12-and-older FIRST, and the default. A stock card ships on v13, but v13 on v8.x hardware
-    /// has a flicker defect with no sending-side workaround, so the documented path is to downgrade
-    /// the card (tutorials/panel-cards.md). Defaulting to the generation the guide leaves you on
-    /// means the setting is already right when you finish, rather than being the last unexplained
-    /// step between a downgraded card and a wall that updates once every few seconds.
+    // A control rather than a probe because this driver is send-only, having no receive seam.
+    /// Card firmware generation, which decides whether the sync frame goes out once or twice.
     static constexpr const char* kFirmwareOptions[] = {"v12 and older", "v13 and newer"};
+    /// How many card firmware generations the selector offers.
     static constexpr uint8_t kFirmwareCount = 2;
 
     /// Card firmware generation (index into kFirmwareOptions): 0 is v12-and-older, 1 is v13+.
     uint8_t firmware = 0;
-    /// Host NIC to send from: a Select over the DETECTED interfaces (platform::rawInterfaces),
-    /// row 0 = capture-only. Persisted by LABEL, not index: a NIC keeps its identity across
-    /// reboots and Npcap reinstalls (the index-mismatch trap a Windows tester reported). Old
-    /// configs that stored a typed name load unchanged: the Select apply path matches labels.
-    /// Not built on ESP32, which has one MAC and nothing to pick.
+    // Persisted by LABEL, not index, so a NIC keeps its identity across a re-enumeration.
+    /// Host NIC to send from, row 0 being capture-only. Not built on ESP32.
     uint8_t interfaceSel_ = 0;
-    /// The LABEL behind interfaceSel_, so a re-enumeration that reorders the list can restore the
-    /// same NIC rather than whatever now sits at that index. Sized to the enumeration's own cap.
+    /// The label behind the selected row, so a reordered list restores the same NIC.
     char chosenIf_[64] = {};
-    /// The row the last rebuild settled on. Its only job is to distinguish a user's pick (the
-    /// index moved) from an OS re-enumeration (the index did not), which decides whether the
-    /// label above may overrule the index. Starts equal to interfaceSel_, so the first rebuild
-    /// reads as "nothing picked yet".
+    /// The row the last rebuild settled on, which tells a user's pick from a re-enumeration.
     uint8_t lastResolvedSel_ = 0;
     /// Send-rate ceiling (Hz); tick() rate-limits so a fast render tick doesn't saturate the link.
     uint8_t fps = 40;
 
-    /// This driver's controls, after the correction block DriverBase places at the top of every
-    /// driver card: format, panel geometry, the host interface, the shared window, then the cap.
+    /// Bind the format, the host interface and the shared window, after the correction block.
     void defineDriverControls() override {
         controls_.addSelect("format", format, kFormatOptions, kFormatCount);
         controls_.addSelect("firmware", firmware, kFirmwareOptions, kFirmwareCount);
-        // Desktop/Raspberry-Pi only: which host NIC to open a raw socket on, re-enumerated on
-        // every rebuild so a hot-plugged NIC appears (the audio device Select's pattern).
+        // Re-enumerated on every rebuild, so a hot-plugged NIC appears.
         if constexpr (platform::hasNamedNetInterfaces) {
             const char* const* ifOptions = nullptr;
             const size_t n = platform::rawInterfaces(&ifOptions);
-            // The list is re-enumerated on every rebuild, and the OS does not promise a stable
-            // order: a hot-plugged NIC can shift the rest. So the remembered LABEL re-points the
-            // index before the Select binds to it. Persisting by label (below) covers reboots;
-            // this covers the same list changing under a running session, which would otherwise
-            // silently send panel data out of a different adapter.
-            //
-            // But only ONE of those two things can have moved, and restoring in the wrong case is
-            // destructive rather than merely useless. Which moved is knowable: the index changing
-            // since we last resolved one means the USER picked a row, while the index standing
-            // still means the list did. Without this test the restore reverted every pick to the
-            // previously remembered adapter, prepare() then rewrote the label from that, and the
-            // wrong value became self-sustaining. Measured on a Windows bench: no selection could
-            // be made at all, the field springing back to "none (capture only)" every time.
+            // The index moving means the USER picked; the index standing still means the list did.
             const bool userPicked = (interfaceSel_ != lastResolvedSel_);
             if (!userPicked && chosenIf_[0] && ifOptions) {
-                // Compare the STABLE HEAD, the part before ", ": a label may carry the adapter's
-                // live link speed after it ("Realtek PCIe GbE, 1 Gb"), and a renegotiated link
-                // would otherwise read as a different NIC and drop the selection to row 0.
+                // Compare the stable head: a label carries a live link speed that can change.
                 const char* mySep = std::strstr(chosenIf_, ", ");
                 const size_t mine = mySep ? static_cast<size_t>(mySep - chosenIf_)
                                           : std::strlen(chosenIf_);
-                // Back to capture-only FIRST: if the remembered adapter is gone, the old index
-                // now points at whatever took its place, and the driver would send panel data
-                // out of a NIC the user never chose. No match means no NIC, explicitly.
+                // No match means no NIC, explicitly: the old index now points at a stranger.
                 interfaceSel_ = 0;
                 for (size_t i = 0; i < n && i < 255; i++) {
                     if (!ifOptions[i]) continue;
@@ -205,10 +86,7 @@ public:
                     }
                 }
             }
-            // Record what this rebuild settled on, so the next one can tell a pick from a
-            // re-enumeration, and keep the remembered label in step with it. prepare() writes the
-            // same label; doing it here too means a rebuild that never reaches prepare (a pick on
-            // a disabled driver) still leaves the two agreeing.
+            // Written here too, so a rebuild that never reaches prepare still leaves the pair agreeing.
             lastResolvedSel_ = interfaceSel_;
             if (ifOptions && interfaceSel_ < n && ifOptions[interfaceSel_])
                 std::snprintf(chosenIf_, sizeof(chosenIf_), "%s", ifOptions[interfaceSel_]);
@@ -216,12 +94,11 @@ public:
                                 static_cast<uint8_t>(n < 255 ? n : 255));
             controls_.setPersistLabel(controls_.count() - 1);
         }
-        addWindowControls();   // start / count — which slice of the shared buffer this sink sends
+        addWindowControls();   // start / count: which slice of the shared buffer this sink sends
         controls_.addControl("fps", fps, 1, 120);
     }
 
-    /// Geometry and the window change how much of the buffer is corrected, so both re-run the
-    /// prepare sweep; `interface` re-binds the raw socket, which also happens off the hot path.
+    /// Which controls re-run the prepare sweep: the geometry, the window and the interface.
     bool affectsPrepare(const char* name) const override {
         return std::strcmp(name, "interface") == 0
                || isWindowControl(name) || isCorrectionControl(name);
@@ -240,43 +117,27 @@ public:
         resizeCorrected();
     }
 
-    /// Pure build: bind the raw interface (host only), size corrected_, and publish the status the
-    /// card shows. All the checks that would otherwise be guesses in tick() happen here.
+    /// Bind the raw interface, size the corrected buffer, and publish the link status.
     void prepare() override {
         resizeCorrected();
 
-        // Tell the network layer this interface is ours: we drive it below IP, so its DHCP cascade
-        // should not report a leaseless link as a fault. Claimed HERE rather than on first send —
-        // stating it before any frame goes out cannot race the cascade's own timeout. Idempotent
-        // across re-prepares via claimed_.
+        // Claimed before any frame goes out, so it cannot race the DHCP cascade's own timeout.
         if (!claimed_) { platform::ethClaimRawL2(true); claimed_ = true; }
 
-        // A host needs a named NIC to reach the wire; ESP32 accepts and ignores it. Every prepare
-        // re-syncs the binding, INCLUDING the blank case — clearing the field must return the host
-        // to capture-only rather than leaving the last interface bound until release(). A bind
-        // failure is a Warning rather than an Error: the driver still runs and still records frames,
-        // which is what a test or a dry run wants — it just is not driving panels.
+        // Re-synced every prepare INCLUDING the blank case, so clearing returns to capture-only.
         const char* ifName = nullptr;
         if constexpr (platform::hasNamedNetInterfaces) {
-            // Remember the adapter behind the current row, so a later rebuild that re-enumerates
-            // in a different order can find this same NIC again rather than trusting the index.
+            // Remember the adapter behind this row, so a reordered list can find it again.
             const char* const* ifOptions = nullptr;
             const size_t n = platform::rawInterfaces(&ifOptions);
-            // chosenIf_ and lastResolvedSel_ are a PAIR: together they say "this row, by this
-            // name, is what we last settled on". Writing one without the other is what makes a
-            // later rebuild misread a re-enumeration as a fresh pick, or the reverse. A pick
-            // re-prepares (affectsPrepare) without necessarily rebuilding the controls, so this
-            // is a place the pair has to be kept in step, not only defineDriverControls().
+            // A PAIR: writing one without the other makes a later rebuild misread what happened.
             lastResolvedSel_ = interfaceSel_;
             if (ifOptions && interfaceSel_ < n && ifOptions[interfaceSel_])
                 std::snprintf(chosenIf_, sizeof(chosenIf_), "%s", ifOptions[interfaceSel_]);
             ifName = platform::rawInterfaceName(interfaceSel_);
         }
         if (!platform::ethBindRawInterface(ifName)) {
-            // Two very different causes reach here and the fixes are opposite: a name that matches
-            // no adapter (a typo, or an OS naming the NIC differently) versus the privilege raw L2
-            // needs. Blaming root for a typo sends the reader to sudo, which cannot help. Name the
-            // string we failed to match so the likelier cause is the one they read first.
+            // Name the string we failed to match: blaming root for a typo sends the reader to sudo.
             if (ifName) {
                 std::snprintf(statusBuf_, sizeof(statusBuf_),
                               "cannot open '%s' - no adapter matches, or needs root", ifName);
@@ -290,8 +151,7 @@ public:
         writeLinkStatus();
     }
 
-    /// Refresh the link status once a second: a cable plugged in after prepare() ran would
-    /// otherwise leave the card reporting "no ethernet link" on a link that is up.
+    /// Refresh the link status once a second, so a cable plugged in later is picked up.
     void tick1s() MM_NONBLOCKING override {
         writeLinkStatus();
         MoonModule::tick1s();
@@ -300,8 +160,7 @@ public:
     /// A preset toggle changes correction_.outChannels without a structural rebuild.
     void onCorrectionChanged() override { resizeCorrected(); }
 
-    /// Rate-limit, apply this driver's correction, then emit the window row by row and latch it
-    /// with one sync frame. One packet buffer, reused; no allocation on this path.
+    /// Correct the window, emit it row by row, and latch it with one sync frame.
     void tick() MM_NONBLOCKING override {
         if (!sourceBuffer_ || !sourceBuffer_->data()) return;
         if (fps == 0) return;
@@ -311,19 +170,13 @@ public:
         if (now - lastSendTime_ < interval) return;
         lastSendTime_ = now;
 
-        // The wall comes from the Layout — a PanelsLayout already states how many panels there are,
-        // how big each one is, and how they are wired, and it has mapped every light to an (x, y).
-        // So this driver needs no panel geometry of its own: it reads the finished picture and cuts
-        // it into card rows. Restating the panel arrangement here would be a second place to get it
-        // wrong, and the layout's version is richer (wiring order, snaking, per-panel offsets).
+        // The wall comes from the Layout, so this driver needs no panel geometry of its own.
         if (!layer()) return;                       // no dimensions to send against
         const lengthType wallW = layer()->physicalWidth();
         const lengthType wallH = layer()->physicalHeight();
         if (wallW == 0 || wallH == 0) return;
 
-        // The window slice this sink owns, then correction into corrected_ (sized off the hot path).
-        // Same three guards and the same passthrough fallback as the other sinks: a stale or
-        // unwired correction must degrade to raw bytes, never overrun the allocation.
+        // A stale or unwired correction degrades to raw bytes, never overruns the allocation.
         nrOfLightsType winStart, nLights;
         windowSlice(sourceBuffer_->count(), winStart, nLights);
         if (nLights == 0) return;
@@ -349,34 +202,23 @@ public:
             stride = srcCh;
         }
 
-        // Nothing to send if the buffer covers no row at all — bail before putting the brightness
-        // pair on the wire, so a misconfigured window is silent rather than emitting frames per tick.
+        // Bail before the brightness pair, so a misconfigured window is silent.
         if (nLights < static_cast<nrOfLightsType>(wallW)) return;
 
-        // How many copies of the brightness and sync frames this card wants: see `firmware`. Sending
-        // two to a card that acts on the first is not harmless, which is why this is a choice and
-        // not a constant.
-        // Index 1 is v13-and-newer, which acts on the SECOND copy, so it needs both sent.
+        // Sending two to a card that acts on the first is not harmless, hence a choice.
         const int frameCopies = (firmware == 1) ? 2 : 1;
 
-        // Brightness first, ahead of the rows — the order the cards expect. Advisory: older card
-        // firmware ignores it, and the driver never depends on it having landed (our own Correction
-        // has already applied brightness to the pixel data, so this only sets the card's own gain).
+        // Brightness first, the order the cards expect; advisory, and older firmware ignores it.
         {
             const size_t len = buildColorLightBrightnessPacket(packet_, kCardGain);
-            // Once or twice, per `firmware` (frameCopies above).
-            //
-            // Counted like the rows: `dropped` and the platform's per-cause totals must describe the
-            // SAME set of frames, or comparing them tells you nothing.
+            // Counted like the rows, so the totals describe the same set of frames.
             for (int i = 0; i < frameCopies; i++) {
                 if (platform::ethSendRaw(packet_, len)) framesSent_++;
                 else framesDroppedTotal_++;
             }
         }
 
-        // One card row per wall row, in order. The card's own row numbering runs across its outputs
-        // (a stack of panels is several outputs), and that matches wall rows top to bottom — which is
-        // what the vendor tool configured the card to expect.
+        // One card row per wall row: the card numbers rows across its outputs, top to bottom.
         bool anyRowSent = false;
         for (lengthType row = 0; row < wallH; row++) {
             if (static_cast<size_t>(row) * wallW >= nLights) break;   // buffer ran out before the wall
@@ -391,76 +233,45 @@ public:
 
                 const size_t len = packRow(static_cast<uint16_t>(row), static_cast<uint16_t>(off),
                                            static_cast<uint16_t>(n), data + first * stride, stride);
-                // A failed frame is dropped, not retried: the cards have no acknowledgement to wait
-                // for, and stalling the render tick to retry would cost the next frame too.
-                // Set on a frame that actually reached the wire, not on reaching the row: a link
-                // that drops mid-frame fails every send, and latching then would blank the panels
-                // — which is the case the sync guard below exists to prevent.
+                // Set on a frame that reached the WIRE: latching after a mid-frame drop blanks the wall.
                 if (platform::ethSendRaw(packet_, len)) { framesSent_++; anyRowSent = true; }
                 else framesDroppedTotal_++;
             }
         }
 
-        // The sync frame latches everything above, so it goes LAST and only if something was sent —
-        // latching an empty frame would blank the panels on a misconfigured window.
+        // The sync latches everything above, so it goes last and only if something was sent.
         if (anyRowSent) {
             const size_t len = buildColorLightSyncPacket(packet_, kCardGain);
-            // Same copy count as the brightness frame above, and this is the one that matters: a
-            // second sync is a second LATCH, not a harmless repeat.
+            // This is the one that matters: a second sync is a second LATCH, not a repeat.
             for (int i = 0; i < frameCopies; i++) {
                 if (platform::ethSendRaw(packet_, len)) framesSent_++;
                 else framesDroppedTotal_++;
             }
         }
-        // One wall frame is complete: hand the whole burst to the wire. Where a platform batches
-        // (a Windows host, via the pcap send queue) this is the single call that transmits it,
-        // and the cards need the burst inside one inter-frame window rather than trickled. A
-        // no-op where each frame already went out as it was handed over.
+        // The cards need the burst inside one inter-frame window rather than trickled.
         platform::ethFlushRaw();
     }
 
-    /// Report what the wire is doing: no link, a link too slow for the cards, or the packet rate
-    /// reaching it. A user debugging a dark panel needs to tell those apart. Sends regardless — the
-    /// class note says why a slow link is reported rather than refused. Runs on the 1 Hz path, so
-    /// the snprintf here is the same accepted trade SystemModule makes.
+    /// Report what the wire is doing: no link, a link too slow, or the packet rate reaching it.
     void writeLinkStatus() MM_NONBLOCKING {
-        // A failed restart outranks everything below: it is the one state a user cannot resolve by
-        // plugging a cable back in. Cleared only when frames flow again (see the re-arm below).
+        // A failed restart outranks everything: it is the one state a cable cannot resolve.
         if (restartFailed_) {
             setStatus("ethernet restart failed - restart the device", Severity::Error);
             framesReported_ = framesSent_;
             return;
         }
 
-        // The WEDGE is checked before the link, because a wedged transmit path is defined by sends
-        // failing, which is knowable whatever the link claims. Checking the link first hid this
-        // branch entirely on any platform reporting no link (the desktop stub among them), which is
-        // how the recovery path shipped unreachable by its own tests.
-        //
-        // A short streak is ordinary back-pressure: the DMA ring fills while we push a whole frame
-        // in one tick, the frame is dropped, the next one goes. Measured on a 128x128 wall at ~1900
-        // packets/s, streaks of 1-4 come and go and always clear themselves — reporting those as an
-        // error cries wolf and would bury the case below.
-        //
-        // A LONG streak is the wedge worth naming: esp_eth_transmit refuses every frame while the IDF
-        // driver's own link flag reads down, which can outlive the PHY event that set it, and then
-        // nothing recovers without a restart. The threshold sits above one frame's worth of packets,
-        // so it can only be reached by failures spanning frames rather than one burst.
+        // Checked BEFORE the link: a wedge is defined by sends failing, whatever the link claims.
         static constexpr uint32_t kWedgedStreak = 500;
         const uint32_t failStreak = platform::ethSendFailStreak();
         if (failStreak >= kWedgedStreak) {
             if (!restartTried_) {
                 restartTried_ = true;
-                // A failed restart leaves the driver STOPPED: no CONNECTED event can follow, so the
-                // link reads down forever and nothing else here can tell that apart from an unplugged
-                // cable. Report it as its own error rather than letting it masquerade as one.
+                // A failed restart leaves the driver stopped, which must not read as a loose cable.
                 if (platform::ethRestartTx()) {
                     setStatus("transmit wedged - restarting ethernet", Severity::Warning);
                 } else {
-                    // LATCHED: after a failed restart the driver is stopped, so no frame is sent, the
-                    // streak stops growing, and the next tick would otherwise fall through to the
-                    // link branch and report a plain "no ethernet link", indistinguishable from an
-                    // unplugged cable, for a board that needs a power cycle.
+                    // Latched, or the next tick reports a loose cable for a board needing a power cycle.
                     restartFailed_ = true;
                     setStatus("ethernet restart failed - restart the device", Severity::Error);
                 }
@@ -476,10 +287,7 @@ public:
         }
 
         if (!platform::ethLinkUp()) {
-            // On a host the same "link down" reads back for an unplugged cable AND for an `interface`
-            // that matches no adapter, which is the far more common mistake and is invisible from the
-            // status alone. Name the field in that case so the message carries its own fix; an ESP32
-            // has one MAC and no such ambiguity, so it keeps the plain wording.
+            // On a host, link-down also means a name matching no adapter, so name the field.
             if constexpr (platform::hasNamedNetInterfaces) {
                 const char* boundName = platform::rawInterfaceName(interfaceSel_);
                 if (!boundName) {
@@ -496,13 +304,9 @@ public:
             return;
         }
         const uint16_t mbps = platform::ethLinkSpeedMbps();
-        // Total frames the MAC refused since boot. A dropped frame is tolerated (the cards have no
-        // acknowledgement, so a retry would cost the next frame instead), but it is NOT invisible:
-        // a rising total says the sender is outrunning the wire, which is a real thing to know when
-        // a wall looks like it is stuttering. Shown only once something has actually dropped.
+        // A rising total says the sender is outrunning the wire, which explains a stuttering wall.
         const uint32_t dropped = framesDroppedTotal_;
-        // Frames actually handed to the MAC since the last report — the one number that separates
-        // "the driver is not sending" from "the driver sends and the card ignores it".
+        // The one number separating "not sending" from "sending and the card ignores it".
         const uint32_t sent = framesSent_ - framesReported_;
         framesReported_ = framesSent_;
         if (mbps && mbps < 1000) {
@@ -512,15 +316,11 @@ public:
             setStatus(statusBuf_, Severity::Warning);
             return;
         }
-        // Re-arm the one-shot only on evidence of FLOW: frames sent this second and no failure
-        // streak at all. Re-arming merely because the link reads healthy would fire again while a
-        // wedge is still rebuilding its streak, bouncing the interface every ~20 s: the loop the
-        // one-shot exists to prevent.
+        // Re-armed only on evidence of FLOW, or a rebuilding wedge bounces the interface in a loop.
         if (sent > 0 && failStreak == 0) { restartTried_ = false; restartFailed_ = false; }
 
         if (dropped) {
-            // Split by cause: a flapping link and a full TX ring are different faults with
-            // different fixes, and one total cannot tell them apart.
+            // Split by cause: a flapping link and a full TX ring need different fixes.
             uint32_t linkDown = 0, ringFull = 0;
             platform::ethSendFailCounts(linkDown, ringFull);
             std::snprintf(statusBuf_, sizeof(statusBuf_),
@@ -535,14 +335,12 @@ public:
         setStatus(statusBuf_, Severity::Status);
     }
 
-    /// Test-only accessor for the correction-applied buffer, pinning the no-allocation-in-loop
-    /// contract (same public-for-tests convention as NetworkSendDriver::correctedBuffer).
+    /// Test-only accessor for the corrected buffer, pinning the no-allocation contract.
     const Buffer& correctedBuffer() const { return corrected_; }
 
 private:
-    /// Build one row packet into packet_. Pixels are copied one at a time because the source stride
-    /// (3 for RGB, 4 for RGBW) need not match the wire's 3 bytes — the card takes RGB, so a 4-channel
-    /// correction contributes its first three channels and the white channel has nowhere to go.
+    // The source stride need not match the wire's 3 bytes, so a white channel has nowhere to go.
+    /// Build one row packet into the reused frame buffer.
     size_t packRow(uint16_t row, uint16_t pixelOffset, uint16_t pixelCount,
                    const uint8_t* src, uint8_t stride) MM_NONBLOCKING {
         if (stride == COLORLIGHT_BYTES_PER_PIXEL) {
@@ -560,8 +358,7 @@ private:
         return COLORLIGHT_ROW_PREFIX + static_cast<size_t>(pixelCount) * COLORLIGHT_BYTES_PER_PIXEL;
     }
 
-    /// Size corrected_ for the current source and correction. Called only off the hot path — that
-    /// placement IS the no-allocation-in-the-send-loop contract.
+    /// Size the corrected buffer, off the hot path, which is the no-allocation contract.
     void resizeCorrected() {
         if (!sourceBuffer_) return;
         nrOfLightsType winStart, n;
@@ -576,32 +373,23 @@ private:
     Buffer* sourceBuffer_ = nullptr;
     /// Owned: source bytes after brightness/order/white. Sized off the hot path.
     Buffer corrected_;
-    /// One reused frame buffer, sized for the largest packet the format builds. Static per driver
-    /// rather than per send, which is what keeps tick() allocation-free.
+    /// One reused frame buffer, sized for the largest packet the format builds.
     uint8_t packet_[COLORLIGHT_MAX_FRAME] = {};
-    /// millis() of the last frame sent — the `fps` limiter's reference.
+    /// millis() of the last frame sent: the `fps` limiter's reference.
     uint32_t lastSendTime_ = 0;
-    /// Frames the MAC accepted since boot, and the value at the last status write — their
-    /// difference is the per-second rate the card shows.
+    /// Frames the MAC accepted since boot; the difference per second is the rate shown.
     uint32_t framesSent_ = 0;
-    /// framesSent_ at the last status write — subtracting gives the rate without a timer.
+    /// framesSent_ at the last status write: subtracting gives the rate without a timer.
     uint32_t framesReported_ = 0;
-    /// Frames the MAC refused since boot. Cumulative on purpose: the per-second rate hides a slow
-    /// trickle of drops, and a rising total is the signal that the sender is outrunning the wire.
+    /// Frames the MAC refused since boot, cumulative, since a rate hides a slow trickle.
     uint32_t framesDroppedTotal_ = 0;
-    /// Backing store for the status line (setStatus does not copy). Sized for the longest one: the
-    /// split-drop report, which carries three cumulative counters and reaches ~63 chars at millions
-    /// of drops. Truncation would cut the RING count, the number the line exists to show.
+    /// Backing store for the status line, sized for the longest one, the split-drop report.
     char statusBuf_[96] = {};
-    /// Whether a restart has already been attempted for the CURRENT wedge. One attempt per wedge:
-    /// a restart cannot fix an unplugged cable, and retrying every second would bounce the interface
-    /// under the user. Cleared as soon as frames flow again.
+    /// Whether a restart was already attempted for the current wedge; one attempt per wedge.
     bool restartTried_ = false;
-    /// Set when a recovery attempt itself failed, which leaves the interface stopped. Latched so the
-    /// error cannot be overwritten by the softer link warning on the next tick.
+    /// Set when a recovery attempt itself failed, latched so the softer warning cannot hide it.
     bool restartFailed_ = false;
-    /// Whether this driver currently holds the raw-L2 claim, so prepare/release stay balanced
-    /// however often the framework calls them.
+    /// Whether this driver holds the raw-L2 claim, keeping prepare and release balanced.
     bool claimed_ = false;
 };
 

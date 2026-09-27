@@ -1,17 +1,11 @@
-// @module ImprovFrame
+/// @module ImprovFrame
 
-// Unit tests for src/core/ImprovFrame.h — the byte-at-a-time framing layer
-// for Improv-WiFi serial. The parser drives the ESP32 UART task at
-// src/platform/esp32/platform_esp32.cpp::improvTask; isolating it here lets
-// us cover the framing without an MCU + serial cable in the loop.
-//
-// The Improv RPC payload semantics (the GET_DEVICE_INFO / WIFI_SETTINGS /
-// etc. command shapes) live in the upstream improv-wifi/sdk-cpp library and
-// are not re-tested here — the boundary between framing and RPC is the
-// whole reason for the split.
+/// Unit tests for src/core/ImprovFrame.h, the byte-at-a-time framing layer for Improv-WiFi serial. The parser drives the ESP32 UART task at src/platform/esp32/platform_esp32.cpp::improvTask; isolating it here lets us cover the framing without an MCU + serial cable in the loop.
+///
+/// The Improv RPC payload semantics (the GET_DEVICE_INFO / WIFI_SETTINGS / etc. command shapes) live in the upstream improv-wifi/sdk-cpp library and are not re-tested here, the boundary between framing and RPC is the whole reason for the split.
 
 #include "doctest.h"
-#include "core/ImprovFrame.h"
+#include "core/util/ImprovFrame.h"
 
 #include <cstdint>
 #include <cstring>
@@ -19,9 +13,7 @@
 
 using namespace mm;
 
-// Drive a full byte sequence through the parser. Returns the result of the
-// final feed() — earlier bytes are asserted to be NeedMore so a regression
-// surfaces immediately.
+// Drive a full byte sequence through the parser. Returns the result of the final feed(), earlier bytes are asserted to be NeedMore so a regression surfaces immediately.
 static ImprovFeedResult feedAll(ImprovFrameParser& p, const uint8_t* data, size_t len) {
     REQUIRE(len > 0);
     for (size_t i = 0; i + 1 < len; i++) {
@@ -127,7 +119,7 @@ TEST_CASE("ImprovFrameParser rejects oversize length byte") {
     uint8_t frame[] = {'I','M','P','R','O','V', kImprovSerialVersion,
                        static_cast<uint8_t>(ImprovFrameType::Rpc), 200};
     ImprovFrameParser p;
-    // The length byte itself triggers OversizePayload — earlier bytes are NeedMore.
+    // The length byte itself triggers OversizePayload, earlier bytes are NeedMore.
     for (size_t i = 0; i < sizeof(frame) - 1; i++) {
         CHECK(p.feed(frame[i]) == ImprovFeedResult::NeedMore);
     }
@@ -151,10 +143,9 @@ TEST_CASE("ImprovFrameParser resyncs after garbage bytes") {
     CHECK(p.lastPayload()[0] == 0x55);
 }
 
-// "I" followed by another "I" treats the second byte as a fresh magic-start (not discarded) — the parser doesn't lose a real frame that begins mid-aborted-magic.
+// "I" followed by another "I" treats the second byte as a fresh magic-start (not discarded), the parser doesn't lose a real frame that begins mid-aborted-magic.
 TEST_CASE("ImprovFrameParser resyncs on aborted magic — stray 'I' restarts the search") {
-    // "I" then non-'M' — should reset to Magic0 *and* re-test if that byte is 'I'.
-    // Sequence: I, I, M, P, R, O, V, version, type, len=0, checksum.
+    // "I" then non-'M', should reset to Magic0 *and* re-test if that byte is 'I'. Sequence: I, I, M, P, R, O, V, version, type, len=0, checksum.
     ImprovFrameParser p;
     CHECK(p.feed('I') == ImprovFeedResult::NeedMore);   // Magic0 → Magic1
     CHECK(p.feed('I') == ImprovFeedResult::NeedMore);   // not 'M' → reset, but the byte is 'I' so → Magic1
@@ -166,24 +157,17 @@ TEST_CASE("ImprovFrameParser resyncs on aborted magic — stray 'I' restarts the
     CHECK(p.feed(kImprovSerialVersion) == ImprovFeedResult::NeedMore);
     CHECK(p.feed(static_cast<uint8_t>(ImprovFrameType::CurrentState)) == ImprovFeedResult::NeedMore);
     CHECK(p.feed(0) == ImprovFeedResult::NeedMore);   // length = 0
-    // Checksum of the header so far. Reconstruct: I+I+M+P+R+O+V+version+type+len,
-    // but the parser only summed the *accepted* header bytes after the resync (i.e.
-    // the second 'I' onwards). Build that sum here to assert correctness.
+    // Checksum of the header so far. Reconstruct: I+I+M+P+R+O+V+version+type+len, but the parser only summed the *accepted* header bytes after the resync (i.e. the second 'I' onwards). Build that sum here to assert correctness.
     const uint8_t accepted[] = {'I','M','P','R','O','V', kImprovSerialVersion,
                                 static_cast<uint8_t>(ImprovFrameType::CurrentState), 0};
     CHECK(p.feed(improvChecksum(accepted, sizeof(accepted))) == ImprovFeedResult::FrameReady);
 }
 
-// When the byte after MagicV isn't the version but happens to be 'I', the parser re-enters magic search at Magic1 — recovers a new frame that arrives right after a corrupted header.
+// When the byte after MagicV isn't the version but happens to be 'I', the parser re-enters magic search at Magic1, recovers a new frame that arrives right after a corrupted header.
 TEST_CASE("ImprovFrameParser resyncs on bad version when bad byte is 'I'") {
-    // Specific regression for the State::Version resync branch added in the
-    // fix-pack: when the byte after MagicV isn't kImprovSerialVersion but
-    // happens to be the magic-start 'I', the parser should re-enter the
-    // magic search at Magic1 rather than discarding the 'I' and losing the
-    // start of a new frame that arrives right after a corrupted header.
+    // Specific regression for the State::Version resync branch added in the fix-pack: when the byte after MagicV isn't kImprovSerialVersion but happens to be the magic-start 'I', the parser should re-enter the magic search at Magic1 rather than discarding the 'I' and losing the start of a new frame that arrives right after a corrupted header.
     ImprovFrameParser p;
-    // Feed a half-frame followed by a bad version byte that happens to be 'I',
-    // then the rest of a fresh well-formed frame starting at that 'I'.
+    // Feed a half-frame followed by a bad version byte that happens to be 'I', then the rest of a fresh well-formed frame starting at that 'I'.
     CHECK(p.feed('I') == ImprovFeedResult::NeedMore);    // Magic0 → Magic1
     CHECK(p.feed('M') == ImprovFeedResult::NeedMore);
     CHECK(p.feed('P') == ImprovFeedResult::NeedMore);

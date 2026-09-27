@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate docs/tests/unit-tests.md and docs/tests/scenario-tests.md from the source of truth.
+"""Generate docs/reference/tests/unit-tests.md and docs/reference/tests/scenario-tests.md from the source of truth.
 
 Unit tests: walks test/unit/ recursively for unit_*.cpp, extracts `// @module <Name>`, optional
 `// @also A, B`, and a single `//` description line above each `TEST_CASE("...")`.
@@ -8,7 +8,7 @@ Scenarios: walks test/scenarios/scenario_*.json, reads top-level `module`,
 `also`, `name`, `description`, and per-step `description`.
 
 Both outputs are grouped by primary `@module` / `module`. The script is the
-single owner of the generated files — running it idempotently produces the
+single owner of the generated files, running it idempotently produces the
 same bytes (verified by --check).
 
 Usage:
@@ -29,7 +29,7 @@ from _test_metadata import (
     collect_unit_files,
 )
 
-OUT_DIR = ROOT / "docs" / "tests"
+OUT_DIR = ROOT / "docs" / "reference" / "tests"
 UNIT_OUT = OUT_DIR / "unit-tests.md"
 SCENARIO_OUT = OUT_DIR / "scenario-tests.md"
 
@@ -46,7 +46,7 @@ def render_unit_tests(files: list[dict]) -> str:
     lines.append("")
     lines.append(
         "Auto-generated from `test/unit/{core,light}/unit_*.cpp` by `moondeck/docs/generate_test_docs.py`. "
-        "**Do not edit by hand** — update the source file's `@module` / `@also` "
+        "**Do not edit by hand**: update the source file's `@module` / `@also` "
         "and per-TEST_CASE `//` descriptions instead, then regenerate."
     )
     lines.append("")
@@ -63,7 +63,7 @@ def render_unit_tests(files: list[dict]) -> str:
         for f in by_module[module]:
             rel = f["path"].relative_to(ROOT).as_posix()
             if f["file_description"]:
-                lines.append(f"`{rel}` — {f['file_description']}")
+                lines.append(f"`{rel}`: {f['file_description']}")
             else:
                 lines.append(f"`{rel}`")
             if f["also"]:
@@ -213,7 +213,7 @@ def _format_perf_table(step: dict) -> list[str]:
         return []
 
     lines: list[str] = []
-    lines.append("**Performance** (contract / observed) — tick stored, FPS shown:")
+    lines.append("**Performance** (contract / observed), tick stored, FPS shown:")
     lines.append("")
     lines.append("| Board | FPS | heap | block |")
     lines.append("|---|---|---|---|")
@@ -250,7 +250,7 @@ def _format_perf_table(step: dict) -> list[str]:
 def _fmt_us_range(v) -> str:
     """Pretty-print a [min, max] tick range. Collapses when the *formatted*
     endpoints would render identically (e.g. 84,500µs and 84,520µs both round
-    to "85µs" at our resolution — showing them as a range adds noise)."""
+    to "85µs" at our resolution, showing them as a range adds noise)."""
     if isinstance(v, list) and len(v) == 2:
         lo, hi = int(v[0]), int(v[1])
         lo_s, hi_s = _fmt_us(lo), _fmt_us(hi)
@@ -311,7 +311,7 @@ def render_scenarios(files: list[dict]) -> str:
     lines.append("")
     lines.append(
         "Auto-generated from `test/scenarios/{core,light}/scenario_*.json` by "
-        "`moondeck/docs/generate_test_docs.py`. **Do not edit by hand** — "
+        "`moondeck/docs/generate_test_docs.py`. **Do not edit by hand**: "
         "update the JSON file's top-level fields and per-step `description` "
         "/ `bounds` / `contract` / `observed` instead, then regenerate."
     )
@@ -334,7 +334,7 @@ def render_scenarios(files: list[dict]) -> str:
             rel = f["path"].relative_to(ROOT).as_posix()
             lines.append(f"### {f['name']}")
             lines.append("")
-            lines.append(f"`{rel}` — {f['description']}")
+            lines.append(f"`{rel}`: {f['description']}")
             lines.append("")
             # Top-level scenario flags worth surfacing.
             meta_bits: list[str] = [f"**Mode**: `{f['mode']}`"]
@@ -368,7 +368,7 @@ def render_scenarios(files: list[dict]) -> str:
                         bits = [f"`{p['name']}` ({p['op']})"]
                         if p["description"]:
                             bits.append(p["description"])
-                        lines.append(f"- {' — '.join(bits)}")
+                        lines.append(f"- {': '.join(bits)}")
                     lines.append("")
                     prep_buffer = []
                 bounds = _format_bounds(step["bounds"])
@@ -387,7 +387,7 @@ def render_scenarios(files: list[dict]) -> str:
                     bits = [f"`{p['name']}` ({p['op']})"]
                     if p["description"]:
                         bits.append(p["description"])
-                    lines.append(f"- {' — '.join(bits)}")
+                    lines.append(f"- {': '.join(bits)}")
                 lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"

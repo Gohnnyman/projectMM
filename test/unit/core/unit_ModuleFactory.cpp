@@ -1,13 +1,12 @@
-// @module ModuleFactory
+/// @module ModuleFactory
 
 #include "doctest.h"
-#include "core/ModuleFactory.h"
-#include "core/MoonModule.h"
+#include "core/util/ModuleFactory.h"
+#include "core/module/MoonModule.h"
 
 namespace {
 
-// Minimal per-role probes to exercise role discovery via the templated registerType<T>.
-// Real domain types are excluded so this test stays a unit test of the factory itself.
+// Minimal per-role probes to exercise role discovery via the templated registerType<T>. Real domain types are excluded so this test stays a unit test of the factory itself.
 class EffectStub : public mm::MoonModule {
 public:
     mm::ModuleRole role() const MM_NONBLOCKING override { return mm::ModuleRole::Effect; }
@@ -25,15 +24,12 @@ public:
     mm::ModuleRole role() const MM_NONBLOCKING override { return mm::ModuleRole::Layout; }
 };
 class GenericStub : public mm::MoonModule {
-    // No override — inherits ModuleRole::Generic.
+    // No override, inherits ModuleRole::Generic.
 };
 
 } // namespace
 
-// NOTE: ModuleFactory is a global singleton (static inline state). The doctest harness
-// runs all tests in one process, so once registered, types persist across tests. To
-// avoid cross-test contamination we use unique-name registrations per test case and
-// check role/count properties rather than asserting an empty initial state.
+// NOTE: ModuleFactory is a global singleton (static inline state). The doctest harness runs all tests in one process, so once registered, types persist across tests. To avoid cross-test contamination we use unique-name registrations per test case and check role/count properties rather than asserting an empty initial state.
 
 // registerType<T>(name) instantiates a probe of T to read its role(), then stores name+role+constructor for later create() calls.
 TEST_CASE("ModuleFactory: registerType captures role via probe instance") {
@@ -93,16 +89,11 @@ TEST_CASE("ModuleFactory: typeName / typeRole bounds-check") {
     CHECK(mm::ModuleFactory::typeRole(count) == mm::ModuleRole::Generic);
 }
 
-// The factory grows its registry capacity dynamically — registering 10+ extra types past the initial size still works and every name stays discoverable.
+// The factory grows its registry capacity dynamically, registering 10+ extra types past the initial size still works and every name stays discoverable.
 TEST_CASE("ModuleFactory: dynamic capacity grows past initial size") {
-    // Register enough types to force at least one capacity-doubling step beyond the
-    // initial 4 → 8 → 16 progression. We register 10 throwaway names with the
-    // Generic role to confirm they all land and remain accessible.
+    // Register enough types to force at least one capacity-doubling step beyond the initial 4 → 8 → 16 progression. We register 10 throwaway names with the Generic role to confirm they all land and remain accessible.
     //
-    // The factory stores name pointers without copying, so the name buffer MUST have
-    // process lifetime — `static` makes the storage outlive the test. Stack-local
-    // names would dangle the moment this TEST_CASE returned, and subsequent tests
-    // walking typeName(i) would read freed memory.
+    // The factory stores name pointers without copying, so the name buffer MUST have process lifetime, `static` makes the storage outlive the test. Stack-local names would dangle the moment this TEST_CASE returned, and subsequent tests walking typeName(i) would read freed memory.
     static char nameBuf[10][16];
     const uint8_t before = mm::ModuleFactory::typeCount();
     for (int i = 0; i < 10; i++) {

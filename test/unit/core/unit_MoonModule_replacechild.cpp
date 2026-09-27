@@ -1,15 +1,14 @@
-// @module MoonModule
+/// @module MoonModule
 
 #include "doctest.h"
-#include "core/MoonModule.h"
+#include "core/module/MoonModule.h"
 
 #include <string>
 #include <vector>
 
 namespace {
 
-// Records lifecycle calls in order, so a replace can be checked for the
-// defineControls → setup → prepare sequence the HTTP handler runs.
+// Records lifecycle calls in order, so a replace can be checked for the defineControls → setup → prepare sequence the HTTP handler runs.
 struct Trace {
     std::vector<std::string> calls;
 };
@@ -90,8 +89,7 @@ TEST_CASE("replaceChildAt: null replacement returns nullptr") {
 
 // After replace, the caller follows the lifecycle order: defineControls → setup → prepare on the fresh module, then release on the old.
 TEST_CASE("replace lifecycle: fresh module is built, set up, allocated in order") {
-    // Mirrors what HttpServerModule::handleReplaceModule does to the replacement:
-    // defineControls → setup → prepare, then release on the old module.
+    // Mirrors what HttpServerModule::handleReplaceModule does to the replacement: defineControls → setup → prepare, then release on the old module.
     Fixture f;
     Trace trace;
     f.b.trace = &trace;

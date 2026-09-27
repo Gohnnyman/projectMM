@@ -1,13 +1,10 @@
-// @module draw
-// @also Canvas
+/// @module draw
+/// @also Canvas
 
-// `circle`/`fillCircle` (Bresenham midpoint) and `lineAA` (Wu). These sit beside the SDF forms
-// rather than replacing them: Bresenham is exact on integer coordinates and costs no multiply, the
-// SDF is sub-pixel and anti-aliased. The tests pin the properties a caller relies on — the rim is
-// symmetric and hollow, the disc is solid, and the AA line spreads its light without inventing any.
+/// `circle`/`fillCircle` (Bresenham midpoint) and `lineAA` (Wu). These sit beside the SDF forms rather than replacing them: Bresenham is exact on integer coordinates and costs no multiply, the SDF is sub-pixel and anti-aliased. The tests pin the properties a caller relies on, the rim is symmetric and hollow, the disc is solid, and the AA line spreads its light without inventing any.
 
 #include "doctest.h"
-#include "light/draw.h"
+#include "light/powerfunctions/draw.h"
 
 using namespace mm;
 
@@ -41,7 +38,7 @@ const RGB kRed{200, 0, 0};
 TEST_CASE("a circle outline is symmetric about its center") {
     Surface s(11, 11);
     draw::circle(s.cv, 5, 5, 3, kRed);
-    // Every lit cell has a lit mirror in all four reflections — the eight-way symmetry.
+    // Every lit cell has a lit mirror in all four reflections, the eight-way symmetry.
     for (lengthType y = 0; y < 11; y++)
         for (lengthType x = 0; x < 11; x++)
             if (s.at(x, y)) {
@@ -77,8 +74,7 @@ TEST_CASE("a filled circle is solid from center to rim") {
     CHECK(s.at(9, 5) == 0);          // and not exceeded
 }
 
-// A disc must cover strictly more than its outline — the check that catches a fill that only
-// painted the rim.
+// A disc must cover strictly more than its outline, the check that catches a fill that only painted the rim.
 TEST_CASE("a filled circle covers more cells than its outline") {
     Surface outline(11, 11), disc(11, 11);
     draw::circle(outline.cv, 5, 5, 3, kRed);
@@ -115,12 +111,11 @@ TEST_CASE("a negative radius draws nothing") {
     CHECK(s.litCount() == 0);
 }
 
-// The reason lineAA exists: a diagonal that is not at 45 degrees lands between cells, and Wu
-// splits it rather than snapping. A perfectly diagonal line has nothing to split.
-TEST_CASE("an anti-aliased line spreads a shallow diagonal over neighbouring cells") {
+// The reason lineAA exists: a diagonal that is not at 45 degrees lands between cells, and Wu splits it rather than snapping. A perfectly diagonal line has nothing to split.
+TEST_CASE("an anti-aliased line spreads a shallow diagonal over neighboring cells") {
     Surface s(8, 8);
     draw::lineAA(s.cv, {0, 0, 0}, {7, 3, 0}, RGB{255, 0, 0});
-    // Somewhere along the run, two vertically-adjacent cells are both partly lit — the AA signature.
+    // Somewhere along the run, two vertically-adjacent cells are both partly lit, the AA signature.
     bool foundPair = false;
     for (lengthType x = 1; x < 7 && !foundPair; x++)
         for (lengthType y = 0; y < 7; y++) {
@@ -137,8 +132,7 @@ TEST_CASE("an anti-aliased line reaches both endpoints") {
     CHECK(s.at(7, 3) > 0);
 }
 
-// Conservation: splitting light between two cells must not create any. Each step contributes one
-// pixel's worth, so the total tracks the line's length rather than its slope.
+// Conservation: splitting light between two cells must not create any. Each step contributes one pixel's worth, so the total tracks the line's length rather than its slope.
 TEST_CASE("an anti-aliased line splits light without inventing it") {
     Surface s(16, 16);
     draw::lineAA(s.cv, {0, 0, 0}, {15, 5, 0}, RGB{255, 0, 0});

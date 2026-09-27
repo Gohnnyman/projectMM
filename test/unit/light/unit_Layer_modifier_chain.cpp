@@ -1,5 +1,5 @@
-// @module Layer
-// @also ModifierBase
+/// @module Layer
+/// @also ModifierBase
 
 #include "doctest.h"
 #include "light/layers/Layer.h"
@@ -12,10 +12,7 @@
 #include <vector>
 #include <initializer_list>
 
-// Composable modifiers: a Layer folds ALL its enabled static modifiers in child order
-// into one mapping (M₁∘M₂∘…). These pin that the chain composes (the logical box is the
-// product of the folds), that order matters (A∘B ≠ B∘A), and that a disabled middle
-// modifier is skipped. The single-modifier and sphere cases live in unit_Layer_sparse_mapping.
+// Composable modifiers: a Layer folds ALL its enabled static modifiers in child order into one mapping (M₁∘M₂∘…). These pin that the chain composes (the logical box is the product of the folds), that order matters (A∘B ≠ B∘A), and that a disabled middle modifier is skipped. The single-modifier and sphere cases live in unit_Layer_sparse_mapping.
 
 namespace {
 // Build a dense w×h grid Layer with the given modifiers added in order, run applyState.
@@ -37,9 +34,7 @@ struct ChainRig {
 };
 } // namespace
 
-// Region (left half) THEN Multiply (2× mirror): the logical box folds twice. On a
-// 16-wide axis: Region 0..50 → 8, then Multiply 2 → 4. Both modifiers apply — the
-// second is no longer dead weight.
+// Region (left half) THEN Multiply (2× mirror): the logical box folds twice. On a 16-wide axis: Region 0..50 → 8, then Multiply 2 → 4. Both modifiers apply, the second is no longer dead weight.
 TEST_CASE("Layer chains Region then Multiply (both fold)") {
     mm::RegionModifier region; region.startX = 0; region.endX = 50; region.endY = 100;
     mm::MultiplyModifier mult;  mult.multiplyX = 2; mult.multiplyY = 1; mult.multiplyZ = 1;
@@ -49,13 +44,7 @@ TEST_CASE("Layer chains Region then Multiply (both fold)") {
     CHECK(rig.layer.height() == 4);   // y untouched by either
     CHECK(rig.layer.lut().hasLUT());  // a real mapping, not the identity fast path
 
-    // REGRESSION: each modifier must fold in ITS OWN stage's box, not the final
-    // composed box. A bug where Region tested its region-local coord against the
-    // FINAL (post-Multiply) box truncated the region to a strip — only the first
-    // tile's worth of physical lights mapped, the rest were wrongly rejected.
-    // Assert the FULL left region (x 0..7) is covered: 8 region cols × 4 rows = 32
-    // physical lights all reach the 4×4 logical box (16 cells), so every logical
-    // cell gets ≥1 destination and the total is the whole region (32), not a strip.
+    // REGRESSION: each modifier must fold in ITS OWN stage's box, not the final composed box. A bug where Region tested its region-local coord against the FINAL (post-Multiply) box truncated the region to a strip, only the first tile's worth of physical lights mapped, the rest were wrongly rejected. Assert the FULL left region (x 0..7) is covered: 8 region cols × 4 rows = 32 physical lights all reach the 4×4 logical box (16 cells), so every logical cell gets ≥1 destination and the total is the whole region (32), not a strip.
     std::size_t total = 0;
     std::size_t cellsHit = 0;
     for (mm::nrOfLightsType li = 0; li < rig.layer.lut().logicalCount(); li++) {
@@ -68,21 +57,16 @@ TEST_CASE("Layer chains Region then Multiply (both fold)") {
     CHECK(cellsHit == rig.layer.lut().logicalCount());   // every logical cell is fed
 }
 
-// Order matters: Region-then-Multiply differs from Multiply-then-Region. Region's
-// percentage applies to whatever box it sees, so the composed logical size differs.
+// Order matters: Region-then-Multiply differs from Multiply-then-Region. Region's percentage applies to whatever box it sees, so the composed logical size differs.
 TEST_CASE("Layer modifier order matters (A∘B ≠ B∘A)") {
     // A: Region(0..50) then Multiply(2×) on a 16-wide axis → 16→8→4.
     mm::RegionModifier rA; rA.startX = 0; rA.endX = 50;
     mm::MultiplyModifier mA; mA.multiplyX = 2; mA.multiplyY = 1;
     ChainRig a(16, 4, {&rA, &mA});
 
-    // B: Multiply(2×) then Region(0..50) → 16→8→4 as well by size, but the cells the
-    // region keeps differ. Use a region that makes the SIZE differ to pin order cheaply:
-    // Multiply(4×) then Region(0..50): 16→4→2.  Region(0..50) then Multiply(4×): 16→8→2.
-    // Sizes match (2) but let's pin via a size-distinguishing case instead:
-    // Region(0..25) then Multiply(2×): 16→4→2.  Multiply(2×) then Region(0..25): 16→8→2.
-    // Equal again — so assert on the MAPPING, not just size: different composition order
-    // sends a given physical light to a different logical cell.
+    // B: Multiply(2×) then Region(0..50) → 16→8→4 as well by size, but the cells the region keeps differ. Use a region that makes the SIZE differ to pin order cheaply: Multiply(4×) then Region(0..50): 16→4→2.  Region(0..50) then Multiply(4×): 16→8→2.
+    // Sizes match (2) but let's pin via a size-distinguishing case instead: Region(0..25) then Multiply(2×): 16→4→2.  Multiply(2×) then Region(0..25): 16→8→2.
+    // Equal again, so assert on the MAPPING, not just size: different composition order sends a given physical light to a different logical cell.
     mm::MultiplyModifier mB; mB.multiplyX = 2; mB.multiplyY = 1;
     mm::RegionModifier rB; rB.startX = 0; rB.endX = 50;
     ChainRig b(16, 4, {&mB, &rB});
@@ -91,9 +75,7 @@ TEST_CASE("Layer modifier order matters (A∘B ≠ B∘A)") {
     CHECK(a.layer.width() == 4);
     CHECK(b.layer.width() == 4);
 
-    // The mappings differ: fingerprint each LUT preserving the per-logical-cell
-    // grouping (a cell-boundary marker between cells), so two mappings that flatten to
-    // the same destination sequence but group differently still compare unequal.
+    // The mappings differ: fingerprint each LUT preserving the per-logical-cell grouping (a cell-boundary marker between cells), so two mappings that flatten to the same destination sequence but group differently still compare unequal.
     auto fingerprint = [](mm::Layer& L) {
         std::vector<mm::nrOfLightsType> fp;
         const mm::nrOfLightsType kCellBoundary = static_cast<mm::nrOfLightsType>(-1);
@@ -106,18 +88,17 @@ TEST_CASE("Layer modifier order matters (A∘B ≠ B∘A)") {
     CHECK(fingerprint(a.layer) != fingerprint(b.layer));
 }
 
-// A DISABLED middle modifier is skipped — the chain folds only the enabled ones.
+// A DISABLED middle modifier is skipped, the chain folds only the enabled ones.
 TEST_CASE("Layer skips a disabled modifier in the chain") {
     mm::RegionModifier region; region.startX = 0; region.endX = 50;
     mm::CheckerboardModifier mask; mask.setEnabled(false);   // disabled — must be skipped
     mm::MultiplyModifier mult; mult.multiplyX = 2; mult.multiplyY = 1;
     ChainRig rig(16, 4, {&region, &mask, &mult});
 
-    // Region(8) then Multiply(4) — the disabled mask between them contributes nothing.
+    // Region(8) then Multiply(4), the disabled mask between them contributes nothing.
     CHECK(rig.layer.width() == 4);
 
-    // Enabling the mask drops cells (it rejects half), so the destination COUNT shrinks
-    // vs the disabled run — proof the enable flag is honoured per modifier.
+    // Enabling the mask drops cells (it rejects half), so the destination COUNT shrinks vs the disabled run, proof the enable flag is honoured per modifier.
     std::size_t withoutMask = 0;
     for (mm::nrOfLightsType li = 0; li < rig.layer.lut().logicalCount(); li++)
         rig.layer.lut().forEachDestination(li, [&](mm::nrOfLightsType) { withoutMask++; });

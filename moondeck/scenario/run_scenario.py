@@ -61,6 +61,10 @@ RUNNER = _resolve_runner()
 # test/ made every unit-test edit report the runner stale, and rebuilding did not clear it
 # because CMake correctly relinks nothing: a false alarm that trains people to ignore the guard.
 _RUNNER_SOURCE_DIRS = ("src",)
+# src/platform/esp32 is in the tree but NOT in this target: the desktop runner links mm_platform's
+# desktop half, so an ESP32 edit relinks nothing and rebuilding can never clear the warning. Left in
+# scope it wedges the gate permanently, which is the same false alarm the note above is about.
+_RUNNER_SKIP_DIRS = ("src/platform/esp32",)
 _RUNNER_SOURCE_FILES = ("test/scenario_runner.cpp",)
 _RUNNER_SOURCE_SUFFIXES = {".c", ".cpp", ".h", ".hpp"}
 _RUNNER_SKIP_PARTS = {"build", "__pycache__", ".git"}
@@ -74,7 +78,7 @@ _RUNNER_SKIP_PARTS = {"build", "__pycache__", ".git"}
 # run writes scenario baselines and repo-health metrics, which dirties the tree, which flips the
 # suffix, which makes every binary look stale on the NEXT run. A build id is not code, so it cannot
 # make the runner "report on code that is no longer there", which is what this guard is for.
-_RUNNER_GENERATED = {"src/ui/ui_embedded.h", "src/core/build_info.h"}
+_RUNNER_GENERATED = {"src/ui/ui_embedded.h", "src/core/util/build_info.h"}
 
 
 def _stale_runner_reason() -> str:
@@ -105,6 +109,7 @@ def _stale_runner_reason() -> str:
         candidates.extend(f for f in (ROOT / d).rglob("*")
                           if f.is_file() and f.suffix in _RUNNER_SOURCE_SUFFIXES
                           and not (_RUNNER_SKIP_PARTS & set(f.relative_to(ROOT).parts))
+                          and not f.relative_to(ROOT).as_posix().startswith(_RUNNER_SKIP_DIRS)
                           and f.relative_to(ROOT).as_posix() not in _RUNNER_GENERATED)
     candidates.extend(ROOT / f for f in _RUNNER_SOURCE_FILES if (ROOT / f).is_file())
     for f in candidates:
@@ -152,6 +157,12 @@ def _host_target() -> str:
     )
 
 
+# What mm_scenarios returns for a scenario that did not run: test/scenario_runner.cpp's kSkipped.
+# A skip is neither a pass nor a failure, and counting it as either is how a suite that stopped
+# testing reads as green.
+SKIPPED = 2
+
+
 def _run_one(path: Path, update_contract: bool, update_reason: str | None,
              no_write: bool = False) -> int:
     """Run one scenario. Always parses MEASURE lines and writes
@@ -160,27 +171,14 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None,
 
     Symmetric with the live runner's behaviour — observations persist always,
     contracts only when renegotiated."""
-    # Honour a scenario-level `skip_on` allowlist of host targets that lack a
-    # capability the scenario exercises (today: MoonLive scenarios opt out on
-    # desktop-windows / desktop-linux — the desktop JIT backend is arm64-only, so an
-    # x86_64 host renders dark and the "buffer non-zero" check would fail for
-    # a platform-capability reason the scenario isn't the right vehicle to
-    # assert. The C++ ctest suite gates the same tests on MM_MOONLIVE_HAS_HOST_JIT.
-    # An absent or empty `skip_on` runs everywhere, the existing default.
-    try:
-        with open(path, encoding="utf-8") as f:
-            scenario_meta = json.load(f)
-    except Exception:
-        scenario_meta = {}
-    target = _host_target()
-    if target in scenario_meta.get("skip_on", []):
-        print(f"  SKIP  {path.name} (skip_on {target})")
-        return 0
+    # `skip_on` is the runner's rule, not this wrapper's: mm_scenarios reads the same field and
+    # returns SKIPPED for it. A copy here returned 0 instead, so a skipped scenario was counted as a
+    # pass and the binary's own skip path was never reached.
     # Capture + tee: stream to stdout while collecting MEASURE lines.
     # Pin the runner's filesystem root into the build tree. The runner performs real writes, and
     # its default root is the OS per-user data directory unless the working directory happens to be
     # a checkout. Relying on cwd for that would put a test one wrong directory away from
-    # overwriting a developer's own installed-projectMM settings.
+    # overwriting a developer's own installed-MoonLight settings.
     env = {**os.environ, "MM_DATA_DIR": str(ROOT / "build" / "scenario-fs")}
     proc = subprocess.Popen([str(RUNNER), str(path)], cwd=ROOT, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -201,8 +199,8 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None,
             }
     proc.wait()
     if proc.returncode != 0:
-        # Scenario failed — don't persist observations from a failing run
-        # (would record garbage as the latest reading).
+        # Scenario failed or skipped — don't persist observations either way: a failing run would
+        # record garbage as the latest reading, and a skipped one produced no measurement at all.
         return proc.returncode
 
     if not observations:
@@ -273,12 +271,7 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None,
         return 0
 
     if touched_observed or touched_contract:
-        # Serialize, then put each sample window back on one line: a 32-element array
-        # spread over 32 lines hides the statistics it belongs to (_observed.py).
-        text = _observed.compact_samples(
-            json.dumps(scenario, indent=2, ensure_ascii=False))
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text + "\n")
+        _observed.save_scenario(path, scenario)
         what = []
         if touched_observed:
             what.append(f"observed[{target}] × {touched_observed}")
@@ -286,6 +279,16 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None,
             what.append(f"contract[{target}] × {touched_contract}")
         print(f"  WROTE  {path.name} ({', '.join(what)})")
     return 0
+
+
+def _run_many(paths, args) -> int:
+    """Run every scenario and print the same pass/fail/skip summary mm_scenarios prints."""
+    codes = [_run_one(p, args.update_contract, args.reason, args.no_write) for p in paths]
+    skipped = sum(1 for c in codes if c == SKIPPED)
+    failed = sum(1 for c in codes if c not in (0, SKIPPED))
+    print(f"=== {len(codes)} scenario(s), {len(codes) - failed - skipped} passed, "
+          f"{failed} failed, {skipped} skipped ===")
+    return 1 if failed else 0
 
 
 def main():
@@ -312,7 +315,7 @@ def main():
 
     if args.update_contract and not args.reason:
         parser.error("--update-contract requires --reason "
-                     "(e.g. --reason 'tightened after Layer optimisation')")
+                     "(e.g. --reason 'tightened after Layer optimization')")
 
     # Missing OR stale: both mean the results would not describe the code on disk.
     _require_fresh_runner()
@@ -336,17 +339,13 @@ def main():
             print(f"No scenarios found for module: {module_filter}")
             sys.exit(1)
         print(f"Module filter: {module_filter} ({len(paths)} scenario(s))")
-        failed = sum(1 for p in paths if _run_one(p, args.update_contract, args.reason,
-                                          args.no_write) != 0)
-        sys.exit(1 if failed else 0)
+        sys.exit(_run_many(paths, args))
 
     # Run all scenarios. We iterate per-file (instead of letting the C++ runner
     # auto-discover) because _run_one captures MEASURE lines and writes
     # observed.<target> blocks back into each scenario JSON on every run.
     paths = sorted((ROOT / "test" / "scenarios").rglob("scenario_*.json"))
-    failed = sum(1 for p in paths if _run_one(p, args.update_contract, args.reason,
-                                          args.no_write) != 0)
-    sys.exit(1 if failed else 0)
+    sys.exit(_run_many(paths, args))
 
 
 if __name__ == "__main__":

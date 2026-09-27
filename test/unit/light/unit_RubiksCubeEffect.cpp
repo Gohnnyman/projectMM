@@ -1,4 +1,4 @@
-// @module RubiksCubeEffect
+/// @module RubiksCubeEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -8,12 +8,10 @@
 
 #include <vector>
 
-// Restore the real clock after any test that froze it, so a frozen value can't leak into
-// order-dependent neighbours.
+// Restore the real clock after any test that froze it, so a frozen value can't leak into order-dependent neighbors.
 namespace { struct ClockGuard { ~ClockGuard() { mm::platform::setTestNowMs(0); } }; }
 
-// The six sticker colors drawCube() paints from (Red, DarkOrange, Blue, Green, Yellow, White) —
-// the only colors a lit voxel may carry.
+// The six sticker colors drawCube() paints from (Red, DarkOrange, Blue, Green, Yellow, White), the only colors a lit voxel may carry.
 static bool isRubiksFaceColor(uint8_t r, uint8_t g, uint8_t b) {
     static const mm::RGB kMap[6] = {
         {255, 0, 0}, {255, 140, 0}, {0, 0, 255}, {0, 128, 0}, {255, 255, 0}, {255, 255, 255}};
@@ -22,8 +20,7 @@ static bool isRubiksFaceColor(uint8_t r, uint8_t g, uint8_t b) {
     return false;
 }
 
-// The first frame scrambles a fresh cube and projects it onto the volume: with millis() past t=0 the
-// init() path fires (doInit_ is set at construction), so the buffer holds a drawn cube, not black.
+// The first frame scrambles a fresh cube and projects it onto the volume: with millis() past t=0 the init() path fires (doInit_ is set at construction), so the buffer holds a drawn cube, not black.
 TEST_CASE("RubiksCubeEffect paints the cube on the first frame") {
     ClockGuard guard;
     mm::platform::setTestNowMs(1);  // non-zero millis() so `now > step_` (step_ starts at 0) triggers init
@@ -55,8 +52,7 @@ TEST_CASE("RubiksCubeEffect paints the cube on the first frame") {
     CHECK(anyLit);
 }
 
-// Every lit voxel carries exactly one of the six Rubik's face colors — the projection only ever
-// writes COLOR_MAP entries, never a blended or arbitrary RGB.
+// Every lit voxel carries exactly one of the six Rubik's face colors, the projection only ever writes COLOR_MAP entries, never a blended or arbitrary RGB.
 TEST_CASE("RubiksCubeEffect only paints the six face colors") {
     ClockGuard guard;
     mm::platform::setTestNowMs(1);
@@ -86,8 +82,7 @@ TEST_CASE("RubiksCubeEffect only paints the six face colors") {
     }
 }
 
-// turnsPerSecond=0 disables the turn pacing (tick() returns before rotating), but the cube is still
-// drawn on the first frame — init() runs and paints before the turn gate is reached.
+// turnsPerSecond=0 disables the turn pacing (tick() returns before rotating), but the cube is still drawn on the first frame, init() runs and paints before the turn gate is reached.
 TEST_CASE("RubiksCubeEffect with turnsPerSecond=0 still draws but never turns") {
     ClockGuard guard;
     mm::platform::setTestNowMs(1);
@@ -117,8 +112,7 @@ TEST_CASE("RubiksCubeEffect with turnsPerSecond=0 still draws but never turns") 
     }
     CHECK(anyLit);
 
-    // Advancing time far past any turn interval must not change the drawn frame: no turn ever fires,
-    // so a full second later the buffer is byte-for-byte identical.
+    // Advancing time far past any turn interval must not change the drawn frame: no turn ever fires, so a full second later the buffer is byte-for-byte identical.
     std::vector<uint8_t> before(buf.data(), buf.data() + buf.bytes());
     mm::platform::setTestNowMs(2000);
     layer.tick();
@@ -126,8 +120,7 @@ TEST_CASE("RubiksCubeEffect with turnsPerSecond=0 still draws but never turns") 
     CHECK(before == after);
 }
 
-// The effect runs at a degenerate grid size without crashing (the "every grid size" hard rule):
-// tick() bails on a zero extent and the buffer stays empty.
+// The effect runs at a degenerate grid size without crashing (the "every grid size" hard rule): tick() bails on a zero extent and the buffer stays empty.
 TEST_CASE("RubiksCubeEffect survives a 0x0x0 grid") {
     ClockGuard guard;
     mm::platform::setTestNowMs(1);

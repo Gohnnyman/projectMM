@@ -1,12 +1,10 @@
-// @module Control
+/// @module Control
 
-// Int32 is the control type for a value that genuinely exceeds 16 bits. It exists because a
-// MoonLive script scalar occupies a uniform 4-byte slot, so an `int` member has no narrower
-// type that can hold it without wrapping — the failure Uint16/Int16 would produce silently.
+/// Int32 is the control type for a value that genuinely exceeds 16 bits. It exists because a MoonLive script scalar occupies a uniform 4-byte slot, so an `int` member has no narrower type that can hold it without wrapping, the failure Uint16/Int16 would produce silently.
 
 #include "doctest.h"
-#include "core/Control.h"
-#include "core/JsonSink.h"
+#include "core/module/Control.h"
+#include "core/util/JsonSink.h"
 
 #include <cstdint>
 #include <cstring>
@@ -76,9 +74,7 @@ TEST_CASE("an int32 control publishes its range to the UI") {
 
 // --- addControl: one name, the widget from the type ---------------------------------------------
 
-// A compiled module and a MoonLive script now spell a control the same way. The widget follows the
-// VARIABLE'S TYPE, which the compiler already knows — so a call cannot disagree with the
-// declaration, and there is one vocabulary to learn rather than five names carrying a width.
+// A compiled module and a MoonLive script now spell a control the same way. The widget follows the VARIABLE'S TYPE, which the compiler already knows, so a call cannot disagree with the declaration, and there is one vocabulary to learn rather than five names carrying a width.
 TEST_CASE("addControl binds the widget its member's type calls for") {
     mm::ControlList controls;
     uint8_t  u8  = 1;
@@ -105,9 +101,7 @@ TEST_CASE("addControl binds the widget its member's type calls for") {
     CHECK(std::strcmp(mm::controlTypeName(controls[4].type), "bool")   == 0);
 }
 
-// A call that omits min/max means "no UI constraint", and what that means DIFFERS per type: each
-// overload defaults to its own type's full range. Unifying them would silently move the bounds of
-// every control that relies on the default, which is why the overloads keep separate signatures.
+// A call that omits min/max means "no UI constraint", and what that means DIFFERS per type: each overload defaults to its own type's full range. Unifying them would silently move the bounds of every control that relies on the default, which is why the overloads keep separate signatures.
 TEST_CASE("addControl without a range gets its own type's full range") {
     mm::ControlList controls;
     uint8_t  u8  = 0;
@@ -140,8 +134,4 @@ TEST_CASE("addControl carries an explicit range to the descriptor") {
     CHECK(controls[1].min == -70000);  CHECK(controls[1].max == 70000);
 }
 
-// NOT TESTABLE AT RUN TIME, stated here so the intent survives: `addControl(name, int8_t&)` is
-// `= delete`d in Control.h. An int8_t is either a GPIO (addPin — PinsModule scans for
-// ControlType::Pin to collect claimed pins) or telemetry (addReadOnlyInt, which needs a unit), and
-// deducing one from the type would make any future small signed control register as a claimed
-// GPIO. A compile failure cannot be a doctest case; the deleted overload IS the test.
+// NOT TESTABLE AT RUN TIME, stated here so the intent survives: `addControl(name, int8_t&)` is `= delete`d in Control.h. An int8_t is either a GPIO (addPin, PinsModule scans for ControlType::Pin to collect claimed pins) or telemetry (addReadOnlyInt, which needs a unit), and deducing one from the type would make any future small signed control register as a claimed GPIO. A compile failure cannot be a doctest case; the deleted overload IS the test.

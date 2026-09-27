@@ -1,12 +1,9 @@
-// @module IpList
+/// @module IpList
 
-// Pins parseIpList — the destination-list parser a NetworkSendDriver uses to fan one buffer out to N
-// receivers (Art-Net 4 requires ArtDmx to be unicast to the node owning each universe, so driving a
-// row of tubes means a list of destinations, not one). Two syntaxes, both typed by hand, so the
-// parser is where a typo must be caught rather than turned into packets aimed at the wrong host.
+/// Pins parseIpList, the destination-list parser a NetworkSendDriver uses to fan one buffer out to N receivers (Art-Net 4 requires ArtDmx to be unicast to the node owning each universe, so driving a row of tubes means a list of destinations, not one). Two syntaxes, both typed by hand, so the parser is where a typo must be caught rather than turned into packets aimed at the wrong host.
 
 #include "doctest.h"
-#include "core/IpList.h"
+#include "core/util/IpList.h"
 
 namespace {
 // Compact assertion helper: "is destination i equal to a.b.c.d?"
@@ -72,7 +69,6 @@ TEST_CASE("parseIpList: malformed input is rejected, never guessed at") {
 TEST_CASE("parseIpList: the destination cap is enforced, not silently truncated") {
     uint8_t ips[4][4];
     uint8_t n = 0;
-    // A range that would overflow the caller's array must ERROR — silently dropping tubes would
-    // leave a wall half-lit with no explanation.
+    // A range that would overflow the caller's array must ERROR, silently dropping tubes would leave a wall half-lit with no explanation.
     CHECK(mm::parseIpList("192.168.1.1-100", ips, 4, n) != nullptr);
 }

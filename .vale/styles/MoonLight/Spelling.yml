@@ -1,0 +1,33 @@
+# documentation-standards.md: "American English spelling, everywhere." Ported from check_prose.py,
+# which this replaces.
+#
+# The keys are REGEXES, because `substitution` matches a whole word: an entry of `recognis` fires
+# on that stem alone and passes `recognise`, `recognised` and `recognises`. Six entries were
+# written as stems and so could never fire, which let 14 British spellings through with the gate
+# green. `(\w*)` carries the inflection into the replacement, so one entry still covers them all.
+extends: substitution
+message: "American spelling: use '%s'."
+level: error
+ignorecase: true
+swap:
+  behaviour(\w*): behavior$1
+  colour(\w*): color$1
+  initialis(\w*): initializ$1
+  optimis(\w*): optimiz$1
+  recognis(\w*): recogniz$1
+  analys(e|ed|es|ing)(\w*): analyz$1$2
+  materialis(\w*): materializ$1
+  normalis(\w*): normaliz$1
+  serialis(\w*): serializ$1
+  organis(\w*): organiz$1
+  synchronis(\w*): synchroniz$1
+  utilis(\w*): utiliz$1
+  amortis(\w*): amortiz$1
+  neighbour(\w*): neighbor$1
+  cancelled: canceled
+  modelling: modeling
+  labelled: labeled
+  travelling: traveling
+  centre(\w*): center$1
+  licence: license
+  defence: defense

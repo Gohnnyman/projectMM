@@ -1,13 +1,9 @@
-// @module RippleXZModifier
+/// @module RippleXZModifier
 
 #include "doctest.h"
 #include "light/modifiers/RippleXZModifier.h"
 
-// RippleXZModifier collapses one axis of the logical box to a single plane, so a
-// lower-dimensional effect maps identically onto every slice of the physical box.
-// modifyLogicalSize sets the collapsed axis extent to 1; modifyLogical folds every
-// coordinate on that axis to 0 and never rejects. Defaults: shrink=true, towardsX=true,
-// towardsZ=false — X flattened, Z untouched. Y is never collapsed.
+// RippleXZModifier collapses one axis of the logical box to a single plane, so a lower-dimensional effect maps identically onto every slice of the physical box. modifyLogicalSize sets the collapsed axis extent to 1; modifyLogical folds every coordinate on that axis to 0 and never rejects. Defaults: shrink=true, towardsX=true, towardsZ=false, X flattened, Z untouched. Y is never collapsed.
 
 // Fold a coord through the modifier; the returned bool is modifyLogical's accept flag.
 static bool fold(const mm::RippleXZModifier& r, mm::Coord3D& p) {
@@ -62,8 +58,7 @@ TEST_CASE("RippleXZModifier with shrink off is the identity") {
     CHECK(p == mm::Coord3D{7, 3, 2});   // coord untouched
 }
 
-// Degenerate boxes don't crash: a 0x0x0 box collapses its X to 1, and folding at the
-// origin still accepts and folds x to 0.
+// Degenerate boxes don't crash: a 0x0x0 box collapses its X to 1, and folding at the origin still accepts and folds x to 0.
 TEST_CASE("RippleXZModifier handles a degenerate 0x0x0 box") {
     mm::RippleXZModifier r;
     CHECK(collapsedSize(r, {0, 0, 0}) == mm::Coord3D{1, 0, 0});   // x floored to the plane

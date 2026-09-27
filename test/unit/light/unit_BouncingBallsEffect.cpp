@@ -1,4 +1,4 @@
-// @module BouncingBallsEffect
+/// @module BouncingBallsEffect
 
 #include "doctest.h"
 #include "light/layouts/Layouts.h"
@@ -6,12 +6,10 @@
 #include "light/layouts/GridLayout.h"
 #include "platform/platform.h"  // setTestNowMs — freeze millis() for a deterministic first frame
 
-// Restore the real clock after any test that froze it, so a frozen value can't leak into
-// order-dependent neighbours.
+// Restore the real clock after any test that froze it, so a frozen value can't leak into order-dependent neighbors.
 namespace { struct ClockGuard { ~ClockGuard() { mm::platform::setTestNowMs(0); } }; }
 
-// On the first frame every ball is at rest (zero-init state) and bounces off the floor, so the
-// effect paints the bottom row of every column and leaves the rows above it black.
+// On the first frame every ball is at rest (zero-init state) and bounces off the floor, so the effect paints the bottom row of every column and leaves the rows above it black.
 TEST_CASE("BouncingBallsEffect lights the bottom row on the first frame") {
     ClockGuard guard;
     mm::platform::setTestNowMs(1);  // any non-zero value freezes millis() at t=1ms
@@ -110,8 +108,7 @@ TEST_CASE("BouncingBallsEffect survives a 0x0x0 grid") {
     CHECK(layer.buffer().count() == 0);
 }
 
-// A ball reaches its apex mid-flight: once time advances, at least one ball has risen off the
-// bottom row, so the lit column occupies a row above the floor.
+// A ball reaches its apex mid-flight: once time advances, at least one ball has risen off the bottom row, so the lit column occupies a row above the floor.
 TEST_CASE("BouncingBallsEffect balls rise above the floor as time advances") {
     ClockGuard guard;
 
@@ -136,8 +133,7 @@ TEST_CASE("BouncingBallsEffect balls rise above the floor as time advances") {
     mm::platform::setTestNowMs(1);
     layer.tick();
 
-    // A ball with the maximum kick (√19.62·1.0 ≈ 4.43) climbs for ~450ms before falling back; sample
-    // partway up its arc. Scan a spread of instants so the assertion doesn't hinge on one exact frame.
+    // A ball with the maximum kick (√19.62·1.0 ≈ 4.43) climbs for ~450ms before falling back; sample partway up its arc. Scan a spread of instants so the assertion doesn't hinge on one exact frame.
     const int w = 1, h = 16;
     bool roseAboveFloor = false;
     for (uint32_t t = 50; t <= 400 && !roseAboveFloor; t += 50) {

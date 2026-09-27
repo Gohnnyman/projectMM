@@ -1,4 +1,4 @@
-// @module TextEffect
+/// @module TextEffect
 
 #include "doctest.h"
 #include "light/effects/TextEffect.h"
@@ -33,8 +33,7 @@ struct Scene {
 };
 }  // namespace
 
-// Static text renders glyph pixels top-left. On a grid tall/wide enough for one line of the 6x8
-// font, a non-empty string lights some pixels; an empty string lights none.
+// Static text renders glyph pixels top-left. On a grid tall/wide enough for one line of the 6x8 font, a non-empty string lights some pixels; an empty string lights none.
 TEST_CASE("TextEffect: static text draws glyph pixels, empty draws nothing") {
     Scene s(48, 8);
     s.text.scroll = false;
@@ -50,16 +49,13 @@ TEST_CASE("TextEffect: static text draws glyph pixels, empty draws nothing") {
     CHECK(s.litPixels() == 0);
 }
 
-// The hue default is 128 (mid-palette), not 0: palette index 0 is BLACK in several
-// palettes, so a hue-0 default would render invisible text on those. Pinning the
-// default guards against a silent regression back to 0.
+// The hue default is 128 (mid-palette), not 0: palette index 0 is BLACK in several palettes, so a hue-0 default would render invisible text on those. Pinning the default guards against a silent regression back to 0.
 TEST_CASE("TextEffect: default hue is mid-palette (128), not black-at-0") {
     TextEffect text;
     CHECK(text.hue == 128);
 }
 
-// A multi-line string wraps: the second line renders on a lower row (font-height down), so a
-// two-line string lights pixels below the first font's height. Uses the 4x6 font (height 6).
+// A multi-line string wraps: the second line renders on a lower row (font-height down), so a two-line string lights pixels below the first font's height. Uses the 4x6 font (height 6).
 TEST_CASE("TextEffect: newline wraps to a second row") {
     Scene s(24, 16);
     s.text.scroll = false;
